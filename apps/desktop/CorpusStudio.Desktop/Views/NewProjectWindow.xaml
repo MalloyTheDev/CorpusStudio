@@ -27,6 +27,7 @@
         <StackPanel Grid.Row="1" Margin="0,0,0,12">
             <TextBlock Text="Project name" FontWeight="SemiBold" Margin="0,0,0,4" />
             <TextBox x:Name="ProjectNameTextBox"
+                     AutomationProperties.AutomationId="ProjectNameTextBox"
                      MinHeight="32"
                      TextChanged="ProjectNameTextBox_TextChanged" />
         </StackPanel>
@@ -34,6 +35,7 @@
         <StackPanel Grid.Row="2" Margin="0,0,0,12">
             <TextBlock Text="Project ID" FontWeight="SemiBold" Margin="0,0,0,4" />
             <TextBox x:Name="ProjectIdTextBox"
+                     AutomationProperties.AutomationId="ProjectIdTextBox"
                      MinHeight="32"
                      TextChanged="ProjectIdTextBox_TextChanged" />
         </StackPanel>
@@ -41,6 +43,7 @@
         <StackPanel Grid.Row="3">
             <TextBlock Text="Schema" FontWeight="SemiBold" Margin="0,0,0,4" />
             <ComboBox x:Name="SchemaComboBox"
+                      AutomationProperties.AutomationId="SchemaComboBox"
                       MinHeight="32"
                       DisplayMemberPath="Name"
                       SelectedValuePath="Id" />
