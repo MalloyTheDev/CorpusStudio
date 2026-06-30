@@ -116,6 +116,13 @@ public sealed class PythonEngineService
         return RunEngineCommandAsync("validate", datasetPath, schemaId);
     }
 
+    public async Task<ImportPreviewReport> PreviewImportAsync(string importPath, string schemaId)
+    {
+        var output = await RunEngineCommandAsync("import-preview", importPath, schemaId);
+        return JsonSerializer.Deserialize<ImportPreviewReport>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid import preview.");
+    }
+
     public async Task<QualityReport> BuildQualityReportAsync(string projectPath)
     {
         var examplesPath = Path.Combine(projectPath, "examples.jsonl");
@@ -169,6 +176,32 @@ public sealed class PythonEngineService
         Directory.CreateDirectory(projectPath);
         File.AppendAllText(examplesPath, jsonl, encoding: Utf8NoBom);
         return rowCount;
+    }
+
+    public int AppendJsonlFileToProjectExamples(string projectPath, string importPath)
+    {
+        var rows = new List<string>();
+        foreach (var rawLine in File.ReadLines(importPath, Encoding.UTF8))
+        {
+            if (string.IsNullOrWhiteSpace(rawLine))
+            {
+                continue;
+            }
+
+            using var document = JsonDocument.Parse(rawLine);
+            rows.Add(JsonSerializer.Serialize(document.RootElement));
+        }
+
+        if (rows.Count == 0)
+        {
+            return 0;
+        }
+
+        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+        Directory.CreateDirectory(projectPath);
+        var jsonl = string.Join(Environment.NewLine, rows) + Environment.NewLine;
+        File.AppendAllText(examplesPath, jsonl, encoding: Utf8NoBom);
+        return rows.Count;
     }
 
     public async Task<string> ExportProjectExamplesAsync(string projectPath, string schemaId)

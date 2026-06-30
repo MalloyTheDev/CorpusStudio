@@ -7,6 +7,7 @@ import typer
 
 from corpus_studio.exporters.jsonl_exporter import export_jsonl, write_jsonl
 from corpus_studio.importers.jsonl_importer import read_jsonl
+from corpus_studio.importers.jsonl_preview import preview_jsonl_import
 from corpus_studio.quality.basic_quality import build_basic_quality_report
 from corpus_studio.schemas.registry import list_builtin_schemas, load_builtin_schema, repository_root
 from corpus_studio.splitters.random_splitter import random_split
@@ -73,6 +74,19 @@ def quality(path: Path):
     """Build a basic quality report for a JSONL file."""
     rows = list(read_jsonl(path))
     report = build_basic_quality_report(rows)
+    typer.echo(report.model_dump_json(indent=2))
+
+
+@app.command("import-preview")
+def import_preview(path: Path, schema: str):
+    """Preview a JSONL import and report accepted/rejected rows."""
+    try:
+        load_builtin_schema(schema)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    report = preview_jsonl_import(path, schema)
     typer.echo(report.model_dump_json(indent=2))
 
 

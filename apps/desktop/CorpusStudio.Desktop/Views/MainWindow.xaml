@@ -27,7 +27,10 @@
                         Content="New Dataset Project"
                         Margin="0,0,0,8"
                         Click="NewDatasetProjectButton_Click" />
-                <Button Content="Import Dataset" Margin="0,0,0,8" />
+                <Button AutomationProperties.AutomationId="ImportDatasetButton"
+                        Content="Import Dataset"
+                        Margin="0,0,0,8"
+                        Click="ImportDatasetButton_Click" />
                 <Button Content="Export Center" Margin="0,0,0,24" />
 
                 <TextBlock Text="Projects" FontWeight="Bold" Margin="0,0,0,8" />
@@ -144,7 +147,8 @@
         <Border Grid.Column="2" BorderBrush="#DDD" BorderThickness="1,0,0,0" Padding="16">
             <StackPanel>
                 <TextBlock Text="Validation" FontSize="18" FontWeight="Bold" />
-                <TextBox Text="{Binding ValidationSummary, Mode=OneWay}"
+                <TextBox AutomationProperties.AutomationId="ValidationSummaryTextBox"
+                         Text="{Binding ValidationSummary, Mode=OneWay}"
                          Margin="0,8,0,24"
                          MinHeight="150"
                          IsReadOnly="True"

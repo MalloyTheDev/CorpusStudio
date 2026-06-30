@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using Microsoft.Win32;
 
 using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.Services;
@@ -86,6 +87,110 @@ public partial class MainWindow : Window
             request.Name,
             request.SchemaId
         )).Trim();
+    }
+
+    private async void ImportDatasetButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            MessageBox.Show(
+                this,
+                "Create or select a dataset project before importing.",
+                "Corpus Studio",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information
+            );
+            return;
+        }
+
+        var dialog = new OpenFileDialog
+        {
+            Title = "Import JSONL Dataset",
+            Filter = "JSONL files (*.jsonl)|*.jsonl|All files (*.*)|*.*",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        await PreviewAndImportJsonlAsync(dialog.FileName);
+    }
+
+    private async Task PreviewAndImportJsonlAsync(string importPath)
+    {
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetImportInProgress(importPath);
+            var report = await _engineService.PreviewImportAsync(importPath, ViewModel.ActiveSchemaId);
+            ViewModel.ApplyImportPreview(report);
+            Mouse.OverrideCursor = null;
+
+            if (report.RejectedRows > 0)
+            {
+                MessageBox.Show(
+                    this,
+                    "Import preview found rejected rows. Fix the failed rows before importing.",
+                    "Import Preview",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning
+                );
+                return;
+            }
+
+            if (report.AcceptedRows == 0)
+            {
+                MessageBox.Show(
+                    this,
+                    "No importable rows were found.",
+                    "Import Preview",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information
+                );
+                return;
+            }
+
+            var importChoice = MessageBox.Show(
+                this,
+                $"Import {report.AcceptedRows} row(s) into {ViewModel.ActiveProjectTitle}?",
+                "Import Preview",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question
+            );
+
+            if (importChoice != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            Mouse.OverrideCursor = Cursors.Wait;
+            var importedCount = _engineService.AppendJsonlFileToProjectExamples(
+                ViewModel.ActiveProjectPath!,
+                importPath
+            );
+            ViewModel.SetExamples(_engineService.LoadExamples(ViewModel.ActiveProjectPath!));
+            await RefreshQualityAsync();
+            Mouse.OverrideCursor = null;
+
+            MessageBox.Show(
+                this,
+                $"Imported {importedCount} row(s).",
+                "Import Complete",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information
+            );
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetImportError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
     }
 
     private async void ValidateButton_Click(object sender, RoutedEventArgs e)

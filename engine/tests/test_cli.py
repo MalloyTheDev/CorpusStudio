@@ -92,3 +92,23 @@ def test_quality_command_reports_duplicates(tmp_path: Path):
     report = json.loads(result.output)
     assert report["example_count"] == 2
     assert report["duplicate_exact_count"] == 1
+
+
+def test_import_preview_command_reports_failed_rows(tmp_path: Path):
+    input_path = tmp_path / "mixed.jsonl"
+    write_rows(
+        input_path,
+        [
+            {"instruction": "Explain variables.", "output": "A variable stores a value."},
+            {"instruction": "Missing output."},
+        ],
+    )
+
+    result = runner.invoke(app, ["import-preview", str(input_path), "instruction"])
+
+    assert result.exit_code == 0
+    report = json.loads(result.output)
+    assert report["valid"] is False
+    assert report["accepted_rows"] == 1
+    assert report["rejected_rows"] == 1
+    assert report["failed_rows"][0]["row_number"] == 2

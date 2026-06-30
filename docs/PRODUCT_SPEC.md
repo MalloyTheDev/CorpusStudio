@@ -88,20 +88,23 @@ The current app proves the smallest local dataset-authoring loop:
 4. Edit the generated JSON example in Writing Studio.
 5. Validate the draft through the Python engine.
 6. Save the example to the active project's `examples.jsonl`.
-7. Run basic quality checks against the active project's saved examples.
-8. Generate train/validation/test split files under `exports/<project_id>/splits`.
-9. Inspect saved example details from the Examples tab.
-10. Reopen an existing project from the project list.
-11. Export validated JSONL to `exports/<project_id>/export.jsonl`.
-12. Inspect local repository, engine, Python, project, and export paths from Settings.
+7. Preview a JSONL import against the active schema with failed-row reporting.
+8. Import fully valid JSONL rows into the active project's `examples.jsonl`.
+9. Run basic quality checks against the active project's saved examples.
+10. Generate train/validation/test split files under `exports/<project_id>/splits`.
+11. Inspect saved example details from the Examples tab.
+12. Reopen an existing project from the project list.
+13. Export validated JSONL to `exports/<project_id>/export.jsonl`.
+14. Inspect local repository, engine, Python, project, and export paths from Settings.
 
-The Python engine also exposes schema listing, validation, project creation, quality reporting, splitting, and export commands for developer workflows.
+The Python engine also exposes schema listing, validation, project creation, import preview, quality reporting, splitting, and export commands for developer workflows.
 
 ## v0.1 constraints
 
 - Project data is file-backed JSON and JSONL.
-- The desktop app writes one JSON object per saved example.
+- The desktop app writes one JSON object per saved or imported example.
 - Validation currently enforces JSON object rows, required non-empty fields, declared field types, and chat message structure.
+- JSONL import currently uses an all-or-nothing preview: rejected rows must be fixed before import.
 - Quality checks currently report example count, empty rows, and exact duplicates.
 - Split generation currently uses the engine default ratios and seed.
 - SQLite remains planned for durable project state beyond the v0.1 file-backed loop.
@@ -121,7 +124,7 @@ The Python engine also exposes schema listing, validation, project creation, qua
 
 The next product slices should continue turning saved examples into a stronger review loop:
 
-1. add import preview and failed-row reporting
-2. let users configure split ratios and seed from the desktop app
-3. make validation errors easier to jump to from the editor
-4. add richer quality checks for duplicate and low-information rows
+1. let users configure split ratios and seed from the desktop app
+2. make validation errors easier to jump to from the editor
+3. add richer quality checks for duplicate and low-information rows
+4. add partial-import recovery/quarantine controls for rejected rows

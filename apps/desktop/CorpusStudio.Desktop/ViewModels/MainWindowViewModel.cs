@@ -276,6 +276,48 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ValidationSummary = $"Validation could not run.{Environment.NewLine}{message}";
     }
 
+    public void SetImportInProgress(string path)
+    {
+        ValidationSummary = $"Previewing import:{Environment.NewLine}{path}";
+    }
+
+    public void ApplyImportPreview(ImportPreviewReport report)
+    {
+        var lines = new List<string>
+        {
+            $"Import preview: {System.IO.Path.GetFileName(report.Path)}",
+            $"Schema: {report.SchemaId}",
+            $"Total rows: {report.TotalRows}",
+            $"Accepted rows: {report.AcceptedRows}",
+            $"Rejected rows: {report.RejectedRows}",
+        };
+
+        if (report.FailedRows.Count > 0)
+        {
+            lines.Add("");
+            lines.Add("Failed rows:");
+            foreach (var failedRow in report.FailedRows.Take(10))
+            {
+                var errors = failedRow.Errors.Count == 0
+                    ? "Unknown error"
+                    : string.Join("; ", failedRow.Errors.Select(FormatIssue));
+                lines.Add($"- Row {failedRow.RowNumber}: {errors}");
+            }
+
+            if (report.FailedRows.Count > 10)
+            {
+                lines.Add($"...and {report.FailedRows.Count - 10} more failed row(s).");
+            }
+        }
+
+        ValidationSummary = string.Join(Environment.NewLine, lines);
+    }
+
+    public void SetImportError(string message)
+    {
+        ValidationSummary = $"Import preview could not run.{Environment.NewLine}{message}";
+    }
+
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
         if (EqualityComparer<T>.Default.Equals(field, value))

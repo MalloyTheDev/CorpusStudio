@@ -149,6 +149,17 @@ def validate_example_fields(
     return issues
 
 
+def validate_jsonl_row(
+    row: Any,
+    schema_id: str,
+    row_number: int | None = None,
+) -> list[ValidationIssue]:
+    if not isinstance(row, dict):
+        return [_issue("Row must be a JSON object.", row_number)]
+
+    return validate_example_fields(row, schema_id, row_number)
+
+
 def validate_jsonl_file(path: Path, schema_id: str) -> ValidationReport:
     report = ValidationReport(valid=True, schema_id=schema_id)
 
@@ -170,11 +181,7 @@ def validate_jsonl_file(path: Path, schema_id: str) -> ValidationReport:
                 )
                 continue
 
-            if not isinstance(row, dict):
-                report.errors.append(_issue("Row must be a JSON object.", row_number))
-                continue
-
-            report.errors.extend(validate_example_fields(row, schema_id, row_number))
+            report.errors.extend(validate_jsonl_row(row, schema_id, row_number))
 
     report.valid = len(report.errors) == 0
     return report

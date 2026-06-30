@@ -44,4 +44,4 @@
 - [x] Expose quality checks in the desktop app.
 - [x] Add split generation to the desktop app.
 - [x] Make validation stricter for schema field types.
-- [ ] Add import preview and failed-row reporting.
+- [x] Add import preview and failed-row reporting.

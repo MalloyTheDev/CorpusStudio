@@ -3,6 +3,7 @@
 Generated file list for the Corpus Studio MIT project skeleton.
 
 - `.editorconfig`
+- `.env.example`
 - `.github/ISSUE_TEMPLATE/bug_report.md`
 - `.github/ISSUE_TEMPLATE/feature_request.md`
 - `.github/workflows/engine-tests.yml`
@@ -21,13 +22,19 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/DatasetProject.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/DatasetProjectListItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/DatasetSchema.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/DesktopSettings.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/ImportPreviewReport.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/NewProjectRequest.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/QualityReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/SavedExampleItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/SplitReport.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/ValidationReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/PythonEngineService.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/MainWindowViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml.cs`
+- `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml`
+- `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml.cs`
 - `apps/desktop/CorpusStudio.Desktop.sln`
 - `apps/desktop/CorpusStudio.Desktop.sln.README.md`
 - `apps/desktop/README.md`
@@ -72,6 +79,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/exporters/jsonl_exporter.py`
 - `engine/corpus_studio/importers/__init__.py`
 - `engine/corpus_studio/importers/jsonl_importer.py`
+- `engine/corpus_studio/importers/jsonl_preview.py`
 - `engine/corpus_studio/importers/text_importer.py`
 - `engine/corpus_studio/quality/__init__.py`
 - `engine/corpus_studio/quality/basic_quality.py`
@@ -89,6 +97,8 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/validators/results.py`
 - `engine/pyproject.toml`
 - `engine/tests/test_basic_validator.py`
+- `engine/tests/test_cli.py`
+- `engine/tests/test_import_preview.py`
 - `examples/datasets/chat/train.jsonl`
 - `examples/datasets/code/train.jsonl`
 - `examples/datasets/evaluation/test.jsonl`

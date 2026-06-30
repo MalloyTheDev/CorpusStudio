@@ -25,6 +25,7 @@ Corpus Studio now has a working v0.1 local loop:
 - author a JSON example
 - validate it through the Python engine
 - save it to the local project
+- preview and import JSONL rows with failed-row reporting
 - run basic quality checks
 - generate train/validation/test split files
 - export validated JSONL
