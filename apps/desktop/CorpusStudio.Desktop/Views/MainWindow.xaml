@@ -78,7 +78,7 @@
                         <TextBlock Text="Train / validation / test split manager placeholder" Margin="16" />
                     </TabItem>
                     <TabItem Header="Settings">
-                        <TextBox Text="{Binding SettingsSummary}"
+                        <TextBox Text="{Binding SettingsSummary, Mode=OneWay}"
                                  Margin="8"
                                  IsReadOnly="True"
                                  TextWrapping="Wrap"
@@ -91,7 +91,7 @@
         <Border Grid.Column="2" BorderBrush="#DDD" BorderThickness="1,0,0,0" Padding="16">
             <StackPanel>
                 <TextBlock Text="Validation" FontSize="18" FontWeight="Bold" />
-                <TextBox Text="{Binding ValidationSummary}"
+                <TextBox Text="{Binding ValidationSummary, Mode=OneWay}"
                          Margin="0,8,0,24"
                          MinHeight="150"
                          IsReadOnly="True"
