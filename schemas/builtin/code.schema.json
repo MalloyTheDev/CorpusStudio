@@ -1,0 +1,37 @@
+{
+  "id": "code",
+  "name": "Code Dataset",
+  "version": "0.1.0",
+  "fields": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "language",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "instruction",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "input",
+      "type": "code",
+      "required": false
+    },
+    {
+      "name": "output",
+      "type": "code",
+      "required": true
+    },
+    {
+      "name": "tests",
+      "type": "list",
+      "required": false
+    }
+  ]
+}

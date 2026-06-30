@@ -1,0 +1,1 @@
+{"messages":[{"role":"system","content":"You are a helpful coding tutor."},{"role":"user","content":"What is a for loop?"},{"role":"assistant","content":"A for loop repeats a block of code for each item in a sequence."}],"tags":["programming","beginner"]}

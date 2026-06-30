@@ -1,0 +1,27 @@
+{
+  "id": "retrieval",
+  "name": "Retrieval Dataset",
+  "version": "0.1.0",
+  "fields": [
+    {
+      "name": "query",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "positive",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "negative",
+      "type": "text",
+      "required": false
+    },
+    {
+      "name": "source",
+      "type": "string",
+      "required": false
+    }
+  ]
+}

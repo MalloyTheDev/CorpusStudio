@@ -1,0 +1,17 @@
+{
+  "id": "chat",
+  "name": "Chat Messages Dataset",
+  "version": "0.1.0",
+  "fields": [
+    {
+      "name": "messages",
+      "type": "messages",
+      "required": true
+    },
+    {
+      "name": "tags",
+      "type": "list",
+      "required": false
+    }
+  ]
+}

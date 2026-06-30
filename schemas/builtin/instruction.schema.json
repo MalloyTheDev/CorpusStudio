@@ -1,0 +1,27 @@
+{
+  "id": "instruction",
+  "name": "Instruction Dataset",
+  "version": "0.1.0",
+  "fields": [
+    {
+      "name": "instruction",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "input",
+      "type": "text",
+      "required": false
+    },
+    {
+      "name": "output",
+      "type": "markdown",
+      "required": true
+    },
+    {
+      "name": "tags",
+      "type": "list",
+      "required": false
+    }
+  ]
+}

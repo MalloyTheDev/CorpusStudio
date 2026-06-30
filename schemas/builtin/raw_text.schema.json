@@ -1,0 +1,32 @@
+{
+  "id": "raw_text",
+  "name": "Raw Text Corpus",
+  "version": "0.1.0",
+  "fields": [
+    {
+      "name": "text",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "source",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "domain",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "license",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "language",
+      "type": "string",
+      "required": false
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# .NET
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+TestResults/
+
+# Local data
+data/*
+!data/.gitkeep
+exports/*
+!exports/.gitkeep
+
+# Dataset artifacts
+*.parquet
+*.arrow
+*.sqlite
+*.db
+*.jsonl.tmp
+*.bak
+
+# Logs
+logs/
+*.log

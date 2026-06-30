@@ -1,0 +1,27 @@
+{
+  "id": "preference",
+  "name": "Preference Dataset",
+  "version": "0.1.0",
+  "fields": [
+    {
+      "name": "prompt",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "chosen",
+      "type": "markdown",
+      "required": true
+    },
+    {
+      "name": "rejected",
+      "type": "markdown",
+      "required": true
+    },
+    {
+      "name": "reason",
+      "type": "markdown",
+      "required": false
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+[project]
+name = "corpus-studio-engine"
+version = "0.1.0"
+description = "Dataset engine for Corpus Studio"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "MalloyTheDev" }]
+dependencies = [
+    "pydantic>=2.0",
+    "typer>=0.12",
+    "orjson>=3.10"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5"
+]
+
+[project.scripts]
+corpus-studio = "corpus_studio.cli:app"
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,27 @@
+{
+  "id": "image_caption",
+  "name": "Image Caption Dataset",
+  "version": "0.1.0",
+  "fields": [
+    {
+      "name": "image",
+      "type": "image_path",
+      "required": true
+    },
+    {
+      "name": "caption",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "tags",
+      "type": "list",
+      "required": false
+    },
+    {
+      "name": "license",
+      "type": "string",
+      "required": false
+    }
+  ]
+}

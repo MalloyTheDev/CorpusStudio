@@ -1,0 +1,79 @@
+<Window x:Class="CorpusStudio.Desktop.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:CorpusStudio.Desktop.ViewModels"
+        Title="Corpus Studio"
+        Height="720"
+        Width="1180"
+        MinHeight="600"
+        MinWidth="960">
+    <Window.DataContext>
+        <vm:MainWindowViewModel />
+    </Window.DataContext>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="260" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="320" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" BorderBrush="#DDD" BorderThickness="0,0,1,0" Padding="16">
+            <StackPanel>
+                <TextBlock Text="Corpus Studio" FontSize="24" FontWeight="Bold" />
+                <TextBlock Text="Dataset Creation Studio" Margin="0,4,0,24" Opacity="0.7" />
+
+                <Button Content="New Dataset Project" Margin="0,0,0,8" />
+                <Button Content="Import Dataset" Margin="0,0,0,8" />
+                <Button Content="Export Center" Margin="0,0,0,24" />
+
+                <TextBlock Text="Projects" FontWeight="Bold" Margin="0,0,0,8" />
+                <ListBox ItemsSource="{Binding Projects}" />
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Column="1" Padding="20">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0" Margin="0,0,0,16">
+                    <TextBlock Text="{Binding ActiveProjectTitle}" FontSize="22" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding ActiveSchemaDescription}" Opacity="0.7" />
+                </StackPanel>
+
+                <TabControl Grid.Row="1">
+                    <TabItem Header="Writing Studio">
+                        <TextBox AcceptsReturn="True"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Text="{Binding DraftText}"
+                                 FontFamily="Consolas"
+                                 FontSize="14" />
+                    </TabItem>
+                    <TabItem Header="Examples">
+                        <TextBlock Text="Example grid placeholder" Margin="16" />
+                    </TabItem>
+                    <TabItem Header="Splits">
+                        <TextBlock Text="Train / validation / test split manager placeholder" Margin="16" />
+                    </TabItem>
+                </TabControl>
+            </Grid>
+        </Border>
+
+        <Border Grid.Column="2" BorderBrush="#DDD" BorderThickness="1,0,0,0" Padding="16">
+            <StackPanel>
+                <TextBlock Text="Validation" FontSize="18" FontWeight="Bold" />
+                <TextBlock Text="{Binding ValidationSummary}" Margin="0,8,0,24" TextWrapping="Wrap" />
+
+                <TextBlock Text="Quality" FontSize="18" FontWeight="Bold" />
+                <TextBlock Text="{Binding QualitySummary}" Margin="0,8,0,24" TextWrapping="Wrap" />
+
+                <TextBlock Text="Export" FontSize="18" FontWeight="Bold" />
+                <Button Content="Validate" Margin="0,8,0,8" />
+                <Button Content="Export JSONL" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

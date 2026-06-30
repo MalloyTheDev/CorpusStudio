@@ -1,0 +1,2 @@
+{"instruction":"Explain what a variable is in programming.","input":"","output":"A variable is a named storage location that holds a value a program can use or change.","tags":["programming","beginner"]}
+{"instruction":"Write a Python function that squares a number.","input":"","output":"def square(n):\n    return n * n","tags":["python","function"]}

@@ -1,0 +1,1 @@
+{"prompt":"Explain recursion simply.","chosen":"Recursion is when a function calls itself to solve a smaller version of the same problem.","rejected":"Recursion is when code does code things again.","reason":"The chosen answer is clearer and more precise."}

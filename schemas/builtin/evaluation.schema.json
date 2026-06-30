@@ -1,0 +1,32 @@
+{
+  "id": "evaluation",
+  "name": "Evaluation Dataset",
+  "version": "0.1.0",
+  "fields": [
+    {
+      "name": "id",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "prompt",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "expected_answer",
+      "type": "markdown",
+      "required": true
+    },
+    {
+      "name": "rubric",
+      "type": "markdown",
+      "required": false
+    },
+    {
+      "name": "category",
+      "type": "string",
+      "required": false
+    }
+  ]
+}

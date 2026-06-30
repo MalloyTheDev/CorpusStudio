@@ -1,0 +1,1 @@
+{"task":"bug_fix","language":"python","instruction":"Fix this divide function so it handles zero safely.","input":"def divide(a, b):\n    return a / b","output":"def divide(a, b):\n    if b == 0:\n        raise ValueError('Cannot divide by zero')\n    return a / b","tests":["assert divide(10, 2) == 5"]}
