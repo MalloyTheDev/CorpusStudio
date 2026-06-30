@@ -101,7 +101,7 @@ The Python engine also exposes schema listing, validation, project creation, qua
 
 - Project data is file-backed JSON and JSONL.
 - The desktop app writes one JSON object per saved example.
-- Validation currently enforces JSON validity plus required non-empty fields.
+- Validation currently enforces JSON object rows, required non-empty fields, declared field types, and chat message structure.
 - Quality checks currently report example count, empty rows, and exact duplicates.
 - Split generation currently uses the engine default ratios and seed.
 - SQLite remains planned for durable project state beyond the v0.1 file-backed loop.
@@ -117,12 +117,11 @@ The Python engine also exposes schema listing, validation, project creation, qua
 7. Export formats must be deterministic.
 8. Evaluation datasets are as important as training datasets.
 
-## v0.2 priority direction
+## v0.2 remaining priority direction
 
-The next product slice should turn saved examples into a stronger review loop:
+The next product slices should continue turning saved examples into a stronger review loop:
 
-1. show saved example details in the Examples tab
-2. expose quality checks in the desktop app
-3. add split generation to the desktop app
-4. make validation stricter for schema field types
-5. add import preview and failed-row reporting
+1. add import preview and failed-row reporting
+2. let users configure split ratios and seed from the desktop app
+3. make validation errors easier to jump to from the editor
+4. add richer quality checks for duplicate and low-information rows

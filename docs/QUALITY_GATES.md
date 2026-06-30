@@ -7,8 +7,11 @@ Quality gates prevent bad examples from silently entering training exports.
 Required:
 
 - valid JSON
+- row is a JSON object
 - required fields present
 - required fields non-empty
+- declared field types match schema definitions
+- chat messages include valid role/content structure
 - schema ID known
 - export format supported
 

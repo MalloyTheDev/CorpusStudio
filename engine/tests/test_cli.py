@@ -47,6 +47,21 @@ def test_export_command_rejects_invalid_rows(tmp_path: Path):
     assert not output_path.exists()
 
 
+def test_export_command_rejects_wrong_field_type(tmp_path: Path):
+    input_path = tmp_path / "invalid_type.jsonl"
+    output_path = tmp_path / "export.jsonl"
+    write_rows(
+        input_path,
+        [{"instruction": "Explain variables.", "output": "A value.", "tags": "bad"}],
+    )
+
+    result = runner.invoke(app, ["export", str(input_path), str(output_path), "instruction"])
+
+    assert result.exit_code == 1
+    assert "Expected list." in result.output
+    assert not output_path.exists()
+
+
 def test_split_command_writes_train_validation_and_test_files(tmp_path: Path):
     input_path = tmp_path / "instruction.jsonl"
     output_dir = tmp_path / "splits"

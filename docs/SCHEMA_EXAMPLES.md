@@ -2,7 +2,7 @@
 
 Corpus Studio v0.1 focuses on four authoring schemas in the desktop app: raw text, instruction, chat, and preference. Each line below is a single JSONL row.
 
-The current validator checks that each row is valid JSON and that required fields are present and non-empty. Type-specific validation will become stricter as the schema engine matures.
+The current validator checks that each row is a JSON object, required fields are present and non-empty, declared field types match, and chat messages include valid role/content structure.
 
 ## Raw text
 

@@ -68,6 +68,17 @@ Initial field types:
 3. quality validation
 4. export compatibility validation
 
+## Current structural checks
+
+The engine currently rejects:
+
+- non-object JSONL rows
+- missing required fields
+- empty required strings, lists, and objects
+- values that do not match the declared field type
+- chat messages without a valid `system`, `user`, `assistant`, or `tool` role
+- chat messages with missing or empty string content
+
 ## Example lifecycle
 
 ```text
