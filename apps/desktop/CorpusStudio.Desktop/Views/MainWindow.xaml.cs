@@ -211,6 +211,35 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void GenerateSplitsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetSplitError("Create a dataset project before generating splits.");
+            return;
+        }
+
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetSplitInProgress();
+            var report = await _engineService.GenerateProjectSplitsAsync(
+                ViewModel.ActiveProjectPath,
+                ViewModel.ActiveSchemaId
+            );
+
+            ViewModel.ApplySplitReport(report);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetSplitError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
+    }
+
     private async void ProjectsListBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
         if (ViewModel.SelectedProject is not null)

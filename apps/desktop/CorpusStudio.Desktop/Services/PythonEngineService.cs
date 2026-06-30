@@ -185,6 +185,21 @@ public sealed class PythonEngineService
         return outputPath;
     }
 
+    public async Task<SplitReport> GenerateProjectSplitsAsync(string projectPath, string schemaId)
+    {
+        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+        if (!File.Exists(examplesPath))
+        {
+            throw new FileNotFoundException("Project examples file was not found.", examplesPath);
+        }
+
+        var projectId = new DirectoryInfo(projectPath).Name;
+        var outputDirectory = Path.Combine(ResolveExportRoot(), projectId, "splits");
+        var output = await RunEngineCommandAsync("split", examplesPath, outputDirectory, schemaId);
+        return JsonSerializer.Deserialize<SplitReport>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid split report.");
+    }
+
     public async Task<string> ValidateAsync(string engineDirectory, string datasetPath, string schemaId)
     {
         return await RunEngineCommandInDirectoryAsync(engineDirectory, "validate", datasetPath, schemaId);

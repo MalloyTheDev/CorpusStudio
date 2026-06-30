@@ -23,6 +23,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/DatasetSchema.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/QualityReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/SavedExampleItem.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/SplitReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/PythonEngineService.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/MainWindowViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml`

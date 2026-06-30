@@ -78,7 +78,7 @@ Create project
 -> export
 ```
 
-## v0.1 working loop
+## Current working loop
 
 The current app proves the smallest local dataset-authoring loop:
 
@@ -89,10 +89,11 @@ The current app proves the smallest local dataset-authoring loop:
 5. Validate the draft through the Python engine.
 6. Save the example to the active project's `examples.jsonl`.
 7. Run basic quality checks against the active project's saved examples.
-8. Inspect saved example details from the Examples tab.
-9. Reopen an existing project from the project list.
-10. Export validated JSONL to `exports/<project_id>/export.jsonl`.
-11. Inspect local repository, engine, Python, project, and export paths from Settings.
+8. Generate train/validation/test split files under `exports/<project_id>/splits`.
+9. Inspect saved example details from the Examples tab.
+10. Reopen an existing project from the project list.
+11. Export validated JSONL to `exports/<project_id>/export.jsonl`.
+12. Inspect local repository, engine, Python, project, and export paths from Settings.
 
 The Python engine also exposes schema listing, validation, project creation, quality reporting, splitting, and export commands for developer workflows.
 
@@ -102,7 +103,7 @@ The Python engine also exposes schema listing, validation, project creation, qua
 - The desktop app writes one JSON object per saved example.
 - Validation currently enforces JSON validity plus required non-empty fields.
 - Quality checks currently report example count, empty rows, and exact duplicates.
-- The Splits desktop tab is a placeholder for a future richer workflow.
+- Split generation currently uses the engine default ratios and seed.
 - SQLite remains planned for durable project state beyond the v0.1 file-backed loop.
 
 ## Product principles

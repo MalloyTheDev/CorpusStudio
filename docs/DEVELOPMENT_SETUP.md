@@ -78,8 +78,10 @@ Use this checklist after a build:
 6. Click **Validate** and confirm the validation panel reports a valid row.
 7. Click **Save Example** and confirm the row is appended to the active project.
 8. Click **Run Quality** and confirm the quality panel reports the saved example count.
-9. Click **Export JSONL** and confirm an export appears under `exports/<project_id>/export.jsonl`.
-10. Open **Settings** and confirm the repository, engine, Python, project, and export paths point to this checkout.
+9. Open **Splits** and click **Generate Splits**.
+10. Confirm `train.jsonl`, `validation.jsonl`, and `test.jsonl` appear under `exports/<project_id>/splits`.
+11. Click **Export JSONL** and confirm an export appears under `exports/<project_id>/export.jsonl`.
+12. Open **Settings** and confirm the repository, engine, Python, project, and export paths point to this checkout.
 
 Or run the automated Windows desktop smoke test:
 

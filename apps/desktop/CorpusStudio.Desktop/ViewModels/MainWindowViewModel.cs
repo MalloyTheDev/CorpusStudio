@@ -15,6 +15,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         "Choose a schema, write examples, validate rows, and export model-ready JSONL.";
     private string _validationSummary = "Create a project to start validation.";
     private string _qualitySummary = "Create or select a project to run quality checks.";
+    private string _splitSummary = "Create or select a project to generate train, validation, and test splits.";
     private string _settingsSummary = "Settings load when the app starts.";
     private DatasetProjectListItem? _selectedProject;
     private SavedExampleItem? _selectedExample;
@@ -97,6 +98,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         private set => SetField(ref _qualitySummary, value);
     }
 
+    public string SplitSummary
+    {
+        get => _splitSummary;
+        private set => SetField(ref _splitSummary, value);
+    }
+
     public string SettingsSummary
     {
         get => _settingsSummary;
@@ -162,6 +169,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ActiveSchemaDescription = $"{schemaName ?? project.SchemaId} project. Ready for examples.";
         ValidationSummary = "No validation has run yet.";
         QualitySummary = "Quality checks will appear after examples are added.";
+        SplitSummary = "Generate splits after examples are saved.";
         Examples.Clear();
         SelectedExample = null;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasActiveProject)));
@@ -208,6 +216,29 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public void SetQualityError(string message)
     {
         QualitySummary = $"Quality checks could not run.{Environment.NewLine}{message}";
+    }
+
+    public void SetSplitInProgress()
+    {
+        SplitSummary = "Generating train, validation, and test splits...";
+    }
+
+    public void ApplySplitReport(SplitReport report)
+    {
+        SplitSummary = string.Join(
+            Environment.NewLine,
+            [
+                $"Train: {report.Train}",
+                $"Validation: {report.Validation}",
+                $"Test: {report.Test}",
+                $"Output: {report.OutputDirectory}",
+            ]
+        );
+    }
+
+    public void SetSplitError(string message)
+    {
+        SplitSummary = $"Splits could not be generated.{Environment.NewLine}{message}";
     }
 
     public void SetValidationInProgress()

@@ -13,6 +13,7 @@ The current v0.1 workflow supports:
 - basic quality checks
 - saved example inspection
 - project reopening from the project list
+- train/validation/test split generation
 - JSONL export
 - local settings inspection
 
@@ -23,4 +24,4 @@ dotnet build apps\desktop\CorpusStudio.Desktop.sln
 .\apps\desktop\CorpusStudio.Desktop\bin\Debug\net8.0-windows\CorpusStudio.Desktop.exe
 ```
 
-Split management is still represented as an early UI surface while the engine command matures into a full desktop workflow.
+Split generation uses the engine default ratios and writes files under the configured export directory.

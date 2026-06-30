@@ -105,7 +105,30 @@
                         </Grid>
                     </TabItem>
                     <TabItem Header="Splits">
-                        <TextBlock Text="Train / validation / test split manager placeholder" Margin="16" />
+                        <Grid Margin="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <StackPanel Grid.Row="0"
+                                        Orientation="Horizontal"
+                                        HorizontalAlignment="Right"
+                                        Margin="0,0,0,8">
+                                <Button AutomationProperties.AutomationId="GenerateSplitsButton"
+                                        Content="Generate Splits"
+                                        Width="124"
+                                        Click="GenerateSplitsButton_Click" />
+                            </StackPanel>
+
+                            <TextBox Grid.Row="1"
+                                     AutomationProperties.AutomationId="SplitSummaryTextBox"
+                                     Text="{Binding SplitSummary, Mode=OneWay}"
+                                     IsReadOnly="True"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto" />
+                        </Grid>
                     </TabItem>
                     <TabItem Header="Settings">
                         <TextBox Text="{Binding SettingsSummary, Mode=OneWay}"

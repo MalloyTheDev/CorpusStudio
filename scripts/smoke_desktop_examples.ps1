@@ -151,13 +151,23 @@ try {
     Invoke-Element (Find-Descendant $main "CreateProjectButton")
     Wait-And-ClickOk $process.Id
 
+    $rows = for ($index = 0; $index -lt 20; $index++) {
+        [ordered]@{
+            instruction = "Explain item $index."
+            input = ""
+            output = "Item $index explanation."
+        }
+    }
+    $draftJson = $rows | ConvertTo-Json -Depth 5
+    Set-ElementValue (Find-Descendant $main "DraftTextBox") $draftJson
+
     Invoke-Element (Find-Descendant $main "SaveExampleButton")
     Wait-And-ClickOk $process.Id
     Invoke-Element (Find-Descendant $main "RunQualityButton")
     $qualitySummary = Find-Descendant $main "QualitySummaryTextBox"
-    $firstQuality = Wait-Until -TimeoutSeconds 10 -Message "Quality summary did not report one example" -Block {
+    $firstQuality = Wait-Until -TimeoutSeconds 10 -Message "Quality summary did not report twenty examples" -Block {
         $value = Get-ElementValue $qualitySummary
-        if ($value -like "*Examples: 1*" -and $value -like "*Exact duplicates: 0*") {
+        if ($value -like "*Examples: 20*" -and $value -like "*Exact duplicates: 0*") {
             return $value
         }
 
@@ -168,7 +178,7 @@ try {
     $detail = Find-Descendant $main "SelectedExampleTextBox"
     $firstJson = Wait-Until -TimeoutSeconds 10 -Message "Saved example JSON did not populate" -Block {
         $value = Get-ElementValue $detail
-        if ($value -like "*`"instruction`"*" -and $value -like "*Explain what a variable is*") {
+        if ($value -like "*`"instruction`"*" -and $value -like "*Explain item 0*") {
             return $value
         }
 
@@ -180,14 +190,18 @@ try {
     if (-not (Test-Path $examplesPath)) {
         throw "examples.jsonl was not written at $examplesPath"
     }
+    $exampleCount = (Get-Content -Path $examplesPath).Count
+    if ($exampleCount -ne 20) {
+        throw "Expected 20 examples, found $exampleCount in $examplesPath"
+    }
 
     Stop-CorpusStudio $process
     $process = Start-CorpusStudio $dataDir $exportDir
     $main = Wait-Window $process.Id
     $qualitySummary = Find-Descendant $main "QualitySummaryTextBox"
-    $reloadedQuality = Wait-Until -TimeoutSeconds 10 -Message "Reloaded quality summary did not report one example" -Block {
+    $reloadedQuality = Wait-Until -TimeoutSeconds 10 -Message "Reloaded quality summary did not report twenty examples" -Block {
         $value = Get-ElementValue $qualitySummary
-        if ($value -like "*Examples: 1*" -and $value -like "*Exact duplicates: 0*") {
+        if ($value -like "*Examples: 20*" -and $value -like "*Exact duplicates: 0*") {
             return $value
         }
 
@@ -198,11 +212,40 @@ try {
     $detail = Find-Descendant $main "SelectedExampleTextBox"
     $reloadedJson = Wait-Until -TimeoutSeconds 10 -Message "Reloaded example JSON did not populate" -Block {
         $value = Get-ElementValue $detail
-        if ($value -like "*`"instruction`"*" -and $value -like "*Explain what a variable is*") {
+        if ($value -like "*`"instruction`"*" -and $value -like "*Explain item 0*") {
             return $value
         }
 
         return $null
+    }
+
+    Select-Tab $main "Splits"
+    Invoke-Element (Find-Descendant $main "GenerateSplitsButton")
+    $splitSummary = Find-Descendant $main "SplitSummaryTextBox"
+    $splitText = Wait-Until -TimeoutSeconds 10 -Message "Split summary did not report expected counts" -Block {
+        $value = Get-ElementValue $splitSummary
+        if ($value -like "*Train: 18*" -and $value -like "*Validation: 1*" -and $value -like "*Test: 1*") {
+            return $value
+        }
+
+        return $null
+    }
+    $splitDir = Join-Path (Join-Path $exportDir $projectId) "splits"
+    $expectedSplitCounts = @{
+        "train.jsonl" = 18
+        "validation.jsonl" = 1
+        "test.jsonl" = 1
+    }
+    foreach ($splitFile in $expectedSplitCounts.Keys) {
+        $path = Join-Path $splitDir $splitFile
+        if (-not (Test-Path $path)) {
+            throw "$splitFile was not written at $path"
+        }
+
+        $splitLineCount = @(Get-Content -Path $path).Count
+        if ($splitLineCount -ne $expectedSplitCounts[$splitFile]) {
+            throw "Expected $($expectedSplitCounts[$splitFile]) rows in $path, found $splitLineCount"
+        }
     }
 
     Invoke-Element (Find-Descendant $main "ExportJsonlButton")
@@ -220,6 +263,8 @@ try {
         ReloadedJsonLength = $reloadedJson.Length
         FirstQualityLength = $firstQuality.Length
         ReloadedQualityLength = $reloadedQuality.Length
+        SplitSummaryLength = $splitText.Length
+        SplitDirectory = $splitDir
     }
 }
 finally {

@@ -25,6 +25,8 @@ Corpus Studio now has a working v0.1 local loop:
 - author a JSON example
 - validate it through the Python engine
 - save it to the local project
+- run basic quality checks
+- generate train/validation/test split files
 - export validated JSONL
 
 ## License
@@ -69,9 +71,9 @@ Build a local desktop app that supports:
 3. raw text, instruction, chat, and preference datasets
 4. example authoring
 5. schema validation
-6. JSONL export
-
-The engine also exposes basic quality reporting and train/validation/test splitting from the CLI.
+6. basic quality checks
+7. train/validation/test split generation
+8. JSONL export
 
 ## Development notes
 
