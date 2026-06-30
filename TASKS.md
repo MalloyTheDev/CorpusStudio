@@ -23,13 +23,13 @@
 
 ## v0.1 desktop
 
-- [ ] Dashboard view.
-- [ ] New project dialog.
-- [ ] Schema picker.
-- [ ] Example editor.
-- [ ] Validation panel.
-- [ ] Export center.
-- [ ] Settings page.
+- [x] Dashboard view.
+- [x] New project dialog.
+- [x] Schema picker.
+- [x] Example editor.
+- [x] Validation panel.
+- [x] Export center.
+- [x] Settings page.
 
 ## Documentation
 

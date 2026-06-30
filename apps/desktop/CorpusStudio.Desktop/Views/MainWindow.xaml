@@ -23,7 +23,9 @@
                 <TextBlock Text="Corpus Studio" FontSize="24" FontWeight="Bold" />
                 <TextBlock Text="Dataset Creation Studio" Margin="0,4,0,24" Opacity="0.7" />
 
-                <Button Content="New Dataset Project" Margin="0,0,0,8" />
+                <Button Content="New Dataset Project"
+                        Margin="0,0,0,8"
+                        Click="NewDatasetProjectButton_Click" />
                 <Button Content="Import Dataset" Margin="0,0,0,8" />
                 <Button Content="Export Center" Margin="0,0,0,24" />
 
@@ -46,17 +48,41 @@
 
                 <TabControl Grid.Row="1">
                     <TabItem Header="Writing Studio">
-                        <TextBox AcceptsReturn="True"
-                                 VerticalScrollBarVisibility="Auto"
-                                 Text="{Binding DraftText}"
-                                 FontFamily="Consolas"
-                                 FontSize="14" />
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <StackPanel Grid.Row="0"
+                                        Orientation="Horizontal"
+                                        HorizontalAlignment="Right"
+                                        Margin="0,0,0,8">
+                                <Button Content="Save Example"
+                                        Width="112"
+                                        Click="SaveExampleButton_Click" />
+                            </StackPanel>
+
+                            <TextBox Grid.Row="1"
+                                     AcceptsReturn="True"
+                                     VerticalScrollBarVisibility="Auto"
+                                     Text="{Binding DraftText, UpdateSourceTrigger=PropertyChanged}"
+                                     FontFamily="Consolas"
+                                     FontSize="14" />
+                        </Grid>
                     </TabItem>
                     <TabItem Header="Examples">
-                        <TextBlock Text="Example grid placeholder" Margin="16" />
+                        <ListBox ItemsSource="{Binding Examples}" Margin="8" />
                     </TabItem>
                     <TabItem Header="Splits">
                         <TextBlock Text="Train / validation / test split manager placeholder" Margin="16" />
+                    </TabItem>
+                    <TabItem Header="Settings">
+                        <TextBox Text="{Binding SettingsSummary}"
+                                 Margin="8"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto" />
                     </TabItem>
                 </TabControl>
             </Grid>
@@ -65,14 +91,22 @@
         <Border Grid.Column="2" BorderBrush="#DDD" BorderThickness="1,0,0,0" Padding="16">
             <StackPanel>
                 <TextBlock Text="Validation" FontSize="18" FontWeight="Bold" />
-                <TextBlock Text="{Binding ValidationSummary}" Margin="0,8,0,24" TextWrapping="Wrap" />
+                <TextBox Text="{Binding ValidationSummary}"
+                         Margin="0,8,0,24"
+                         MinHeight="150"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto" />
 
                 <TextBlock Text="Quality" FontSize="18" FontWeight="Bold" />
                 <TextBlock Text="{Binding QualitySummary}" Margin="0,8,0,24" TextWrapping="Wrap" />
 
                 <TextBlock Text="Export" FontSize="18" FontWeight="Bold" />
-                <Button Content="Validate" Margin="0,8,0,8" />
-                <Button Content="Export JSONL" />
+                <Button Content="Validate"
+                        Margin="0,8,0,8"
+                        Click="ValidateButton_Click" />
+                <Button Content="Export JSONL"
+                        Click="ExportJsonlButton_Click" />
             </StackPanel>
         </Border>
     </Grid>
