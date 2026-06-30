@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 
 using CorpusStudio.Desktop.Models;
@@ -14,6 +15,8 @@ public sealed class PythonEngineService
     {
         PropertyNameCaseInsensitive = true
     };
+
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     private readonly string _repositoryRoot;
     private readonly string _engineDirectory;
@@ -124,7 +127,7 @@ public sealed class PythonEngineService
 
         var examplesPath = Path.Combine(projectPath, "examples.jsonl");
         Directory.CreateDirectory(projectPath);
-        File.AppendAllText(examplesPath, jsonl, encoding: System.Text.Encoding.UTF8);
+        File.AppendAllText(examplesPath, jsonl, encoding: Utf8NoBom);
         return rowCount;
     }
 
@@ -213,7 +216,7 @@ public sealed class PythonEngineService
         Directory.CreateDirectory(directory);
 
         var path = Path.Combine(directory, $"{Guid.NewGuid():N}.jsonl");
-        File.WriteAllText(path, NormalizeDraftToJsonl(draftText), encoding: System.Text.Encoding.UTF8);
+        File.WriteAllText(path, NormalizeDraftToJsonl(draftText), encoding: Utf8NoBom);
         return path;
     }
 
