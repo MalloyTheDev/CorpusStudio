@@ -13,6 +13,9 @@ class DatasetProject(BaseModel):
 
 def create_project(root: Path, project: DatasetProject) -> Path:
     project_dir = root / project.id
+    if project_dir.exists():
+        raise FileExistsError(f"Project already exists: {project_dir}")
+
     project_dir.mkdir(parents=True, exist_ok=True)
     (project_dir / "project.json").write_text(project.model_dump_json(indent=2), encoding="utf-8")
     (project_dir / "examples.jsonl").touch()

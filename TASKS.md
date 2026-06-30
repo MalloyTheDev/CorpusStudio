@@ -4,22 +4,22 @@
 
 - [x] Initialize Git repository.
 - [x] Confirm MIT license owner/year.
-- [ ] Create GitHub repository at `MalloyTheDev/CorpusStudio`.
-- [ ] Set `origin` to `https://github.com/MalloyTheDev/CorpusStudio.git`.
-- [ ] Push initial `main` branch after choosing public or private visibility.
-- [ ] Create Visual Studio solution.
-- [ ] Create Python virtual environment.
-- [ ] Run engine tests.
-- [ ] Decide WPF vs WinUI 3 final desktop target.
+- [x] Create GitHub repository at `MalloyTheDev/CorpusStudio`.
+- [x] Set `origin` to `https://github.com/MalloyTheDev/CorpusStudio.git`.
+- [x] Push initial `main` branch after choosing public or private visibility.
+- [x] Create Visual Studio solution.
+- [x] Create Python virtual environment.
+- [x] Run engine tests.
+- [x] Decide WPF vs WinUI 3 final desktop target.
 
 ## v0.1 engine
 
-- [ ] Load built-in schemas.
-- [ ] Validate JSONL against schema.
-- [ ] Add project creation command.
-- [ ] Add JSONL export command.
-- [ ] Add random train/validation/test split.
-- [ ] Add basic quality report.
+- [x] Load built-in schemas.
+- [x] Validate JSONL against schema.
+- [x] Add project creation command.
+- [x] Add JSONL export command.
+- [x] Add random train/validation/test split.
+- [x] Add basic quality report.
 
 ## v0.1 desktop
 

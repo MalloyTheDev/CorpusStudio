@@ -21,6 +21,7 @@ env/
 .env.*
 !.env.example
 .pytest_cache/
+.pytest-tmp/
 .mypy_cache/
 .ruff_cache/
 dist/

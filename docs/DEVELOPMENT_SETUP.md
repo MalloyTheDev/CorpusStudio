@@ -10,26 +10,27 @@
 ## GitHub setup
 
 This checkout is initialized as a local Git repository on the `main` branch.
-The intended upstream repository is:
+The upstream repository is:
 
 ```text
 https://github.com/MalloyTheDev/CorpusStudio.git
 ```
 
-Create the GitHub repository only after choosing whether it should be public or private:
+Clone or connect to the public repository with:
 
 ```powershell
-gh repo create MalloyTheDev/CorpusStudio --private --source . --remote origin
+git remote add origin https://github.com/MalloyTheDev/CorpusStudio.git
 ```
 
-Use `--public` instead of `--private` if this skeleton should be public from the first push.
-After the remote exists, create the initial commit and push:
+## Local environment file
+
+Copy the example environment file for local defaults:
 
 ```powershell
-git add .
-git commit -m "Initial Corpus Studio skeleton"
-git push -u origin main
+Copy-Item .env.example .env
 ```
+
+Do not put secrets or private dataset paths in committed files.
 
 ## Python engine setup
 
