@@ -19,7 +19,7 @@ public partial class MainWindow : Window
 
     private MainWindowViewModel ViewModel => (MainWindowViewModel)DataContext;
 
-    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         var projects = _engineService.LoadProjects();
         ViewModel.SetProjects(projects);
@@ -28,7 +28,7 @@ public partial class MainWindow : Window
         var firstProject = projects.FirstOrDefault();
         if (firstProject is not null)
         {
-            LoadProject(firstProject);
+            await LoadProjectAsync(firstProject);
         }
     }
 
@@ -62,6 +62,7 @@ public partial class MainWindow : Window
                 createdPath
             );
             ViewModel.SetExamples(_engineService.LoadExamples(createdPath));
+            await RefreshQualityAsync();
 
             MessageBox.Show(
                 this,
@@ -146,6 +147,7 @@ public partial class MainWindow : Window
             );
 
             ViewModel.SetExamples(_engineService.LoadExamples(ViewModel.ActiveProjectPath));
+            await RefreshQualityAsync();
             MessageBox.Show(
                 this,
                 $"Saved {savedCount} example(s).",
@@ -162,6 +164,11 @@ public partial class MainWindow : Window
         {
             Mouse.OverrideCursor = null;
         }
+    }
+
+    private async void RunQualityButton_Click(object sender, RoutedEventArgs e)
+    {
+        await RefreshQualityAsync();
     }
 
     private async void ExportJsonlButton_Click(object sender, RoutedEventArgs e)
@@ -204,17 +211,43 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ProjectsListBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    private async void ProjectsListBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
         if (ViewModel.SelectedProject is not null)
         {
-            LoadProject(ViewModel.SelectedProject);
+            await LoadProjectAsync(ViewModel.SelectedProject);
         }
     }
 
-    private void LoadProject(DatasetProjectListItem project)
+    private async Task LoadProjectAsync(DatasetProjectListItem project)
     {
         ViewModel.SelectProject(project);
         ViewModel.SetExamples(_engineService.LoadExamples(project.ProjectPath));
+        await RefreshQualityAsync();
+    }
+
+    private async Task RefreshQualityAsync()
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetQualityError("Create or select a dataset project before running quality checks.");
+            return;
+        }
+
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetQualityInProgress();
+            var report = await _engineService.BuildQualityReportAsync(ViewModel.ActiveProjectPath);
+            ViewModel.ApplyQualityReport(report);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetQualityError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
     }
 }

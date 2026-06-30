@@ -88,10 +88,11 @@ The current app proves the smallest local dataset-authoring loop:
 4. Edit the generated JSON example in Writing Studio.
 5. Validate the draft through the Python engine.
 6. Save the example to the active project's `examples.jsonl`.
-7. Inspect saved example details from the Examples tab.
-8. Reopen an existing project from the project list.
-9. Export validated JSONL to `exports/<project_id>/export.jsonl`.
-10. Inspect local repository, engine, Python, project, and export paths from Settings.
+7. Run basic quality checks against the active project's saved examples.
+8. Inspect saved example details from the Examples tab.
+9. Reopen an existing project from the project list.
+10. Export validated JSONL to `exports/<project_id>/export.jsonl`.
+11. Inspect local repository, engine, Python, project, and export paths from Settings.
 
 The Python engine also exposes schema listing, validation, project creation, quality reporting, splitting, and export commands for developer workflows.
 
@@ -100,7 +101,8 @@ The Python engine also exposes schema listing, validation, project creation, qua
 - Project data is file-backed JSON and JSONL.
 - The desktop app writes one JSON object per saved example.
 - Validation currently enforces JSON validity plus required non-empty fields.
-- The Quality and Splits desktop tabs are placeholders for future richer workflows.
+- Quality checks currently report example count, empty rows, and exact duplicates.
+- The Splits desktop tab is a placeholder for a future richer workflow.
 - SQLite remains planned for durable project state beyond the v0.1 file-backed loop.
 
 ## Product principles

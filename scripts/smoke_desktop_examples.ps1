@@ -153,6 +153,16 @@ try {
 
     Invoke-Element (Find-Descendant $main "SaveExampleButton")
     Wait-And-ClickOk $process.Id
+    Invoke-Element (Find-Descendant $main "RunQualityButton")
+    $qualitySummary = Find-Descendant $main "QualitySummaryTextBox"
+    $firstQuality = Wait-Until -TimeoutSeconds 10 -Message "Quality summary did not report one example" -Block {
+        $value = Get-ElementValue $qualitySummary
+        if ($value -like "*Examples: 1*" -and $value -like "*Exact duplicates: 0*") {
+            return $value
+        }
+
+        return $null
+    }
 
     Select-Tab $main "Examples"
     $detail = Find-Descendant $main "SelectedExampleTextBox"
@@ -174,6 +184,16 @@ try {
     Stop-CorpusStudio $process
     $process = Start-CorpusStudio $dataDir $exportDir
     $main = Wait-Window $process.Id
+    $qualitySummary = Find-Descendant $main "QualitySummaryTextBox"
+    $reloadedQuality = Wait-Until -TimeoutSeconds 10 -Message "Reloaded quality summary did not report one example" -Block {
+        $value = Get-ElementValue $qualitySummary
+        if ($value -like "*Examples: 1*" -and $value -like "*Exact duplicates: 0*") {
+            return $value
+        }
+
+        return $null
+    }
+
     Select-Tab $main "Examples"
     $detail = Find-Descendant $main "SelectedExampleTextBox"
     $reloadedJson = Wait-Until -TimeoutSeconds 10 -Message "Reloaded example JSON did not populate" -Block {
@@ -198,6 +218,8 @@ try {
         ExportPath = $exportPath
         FirstJsonLength = $firstJson.Length
         ReloadedJsonLength = $reloadedJson.Length
+        FirstQualityLength = $firstQuality.Length
+        ReloadedQualityLength = $reloadedQuality.Length
     }
 }
 finally {

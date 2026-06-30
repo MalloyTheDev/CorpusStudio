@@ -116,6 +116,19 @@ public sealed class PythonEngineService
         return RunEngineCommandAsync("validate", datasetPath, schemaId);
     }
 
+    public async Task<QualityReport> BuildQualityReportAsync(string projectPath)
+    {
+        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+        if (!File.Exists(examplesPath))
+        {
+            throw new FileNotFoundException("Project examples file was not found.", examplesPath);
+        }
+
+        var output = await RunEngineCommandAsync("quality", examplesPath);
+        return JsonSerializer.Deserialize<QualityReport>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid quality report.");
+    }
+
     public async Task<ValidationReport> ValidateDraftAsync(string draftText, string schemaId)
     {
         var tempPath = WriteDraftToTempJsonl(draftText);

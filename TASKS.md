@@ -41,7 +41,7 @@
 ## v0.2 desktop
 
 - [x] Show saved example details in the Examples tab.
-- [ ] Expose quality checks in the desktop app.
+- [x] Expose quality checks in the desktop app.
 - [ ] Add split generation to the desktop app.
 - [ ] Make validation stricter for schema field types.
 - [ ] Add import preview and failed-row reporting.

@@ -129,7 +129,17 @@
                          VerticalScrollBarVisibility="Auto" />
 
                 <TextBlock Text="Quality" FontSize="18" FontWeight="Bold" />
-                <TextBlock Text="{Binding QualitySummary}" Margin="0,8,0,24" TextWrapping="Wrap" />
+                <TextBox AutomationProperties.AutomationId="QualitySummaryTextBox"
+                         Text="{Binding QualitySummary, Mode=OneWay}"
+                         Margin="0,8,0,8"
+                         MinHeight="96"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto" />
+                <Button AutomationProperties.AutomationId="RunQualityButton"
+                        Content="Run Quality"
+                        Margin="0,0,0,24"
+                        Click="RunQualityButton_Click" />
 
                 <TextBlock Text="Export" FontSize="18" FontWeight="Bold" />
                 <Button AutomationProperties.AutomationId="ValidateButton"

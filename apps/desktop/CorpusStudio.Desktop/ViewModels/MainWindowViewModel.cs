@@ -14,8 +14,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _activeSchemaDescription =
         "Choose a schema, write examples, validate rows, and export model-ready JSONL.";
     private string _validationSummary = "Create a project to start validation.";
-    private string _qualitySummary =
-        "Quality dashboard placeholder: duplicates, token length, missing fields, and split leakage.";
+    private string _qualitySummary = "Create or select a project to run quality checks.";
     private string _settingsSummary = "Settings load when the app starts.";
     private DatasetProjectListItem? _selectedProject;
     private SavedExampleItem? _selectedExample;
@@ -180,8 +179,35 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         SelectedExampleJson = SelectedExample?.Json
             ?? "No saved examples yet. Save a valid draft from Writing Studio.";
         QualitySummary = Examples.Count == 0
-            ? "No saved examples yet. Quality checks will appear after examples are added."
-            : $"{Examples.Count} saved example(s). Quality checks will appear here next.";
+            ? "No saved examples yet. Quality checks will run after examples are added."
+            : $"{Examples.Count} saved example(s). Run quality checks to inspect duplicates and empty rows.";
+    }
+
+    public void SetQualityInProgress()
+    {
+        QualitySummary = "Running quality checks...";
+    }
+
+    public void ApplyQualityReport(QualityReport report)
+    {
+        var health = report.EmptyRowCount == 0 && report.DuplicateExactCount == 0
+            ? "No basic quality issues found."
+            : "Review the flagged rows before export.";
+
+        QualitySummary = string.Join(
+            Environment.NewLine,
+            [
+                $"Examples: {report.ExampleCount}",
+                $"Empty rows: {report.EmptyRowCount}",
+                $"Exact duplicates: {report.DuplicateExactCount}",
+                $"Status: {health}",
+            ]
+        );
+    }
+
+    public void SetQualityError(string message)
+    {
+        QualitySummary = $"Quality checks could not run.{Environment.NewLine}{message}";
     }
 
     public void SetValidationInProgress()
