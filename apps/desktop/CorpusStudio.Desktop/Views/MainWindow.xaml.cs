@@ -21,8 +21,15 @@ public partial class MainWindow : Window
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        ViewModel.SetProjects(_engineService.LoadProjects());
+        var projects = _engineService.LoadProjects();
+        ViewModel.SetProjects(projects);
         ViewModel.SetSettings(_engineService.GetSettings());
+
+        var firstProject = projects.FirstOrDefault();
+        if (firstProject is not null)
+        {
+            LoadProject(firstProject);
+        }
     }
 
     private async void NewDatasetProjectButton_Click(object sender, RoutedEventArgs e)
@@ -54,6 +61,7 @@ public partial class MainWindow : Window
                 dialog.ProjectRequest.SchemaName,
                 createdPath
             );
+            ViewModel.SetExamples(_engineService.LoadExamples(createdPath));
 
             MessageBox.Show(
                 this,
@@ -137,7 +145,7 @@ public partial class MainWindow : Window
                 ViewModel.DraftText
             );
 
-            ViewModel.AddSavedExamples(savedCount);
+            ViewModel.SetExamples(_engineService.LoadExamples(ViewModel.ActiveProjectPath));
             MessageBox.Show(
                 this,
                 $"Saved {savedCount} example(s).",
@@ -194,5 +202,19 @@ public partial class MainWindow : Window
         {
             Mouse.OverrideCursor = null;
         }
+    }
+
+    private void ProjectsListBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (ViewModel.SelectedProject is not null)
+        {
+            LoadProject(ViewModel.SelectedProject);
+        }
+    }
+
+    private void LoadProject(DatasetProjectListItem project)
+    {
+        ViewModel.SelectProject(project);
+        ViewModel.SetExamples(_engineService.LoadExamples(project.ProjectPath));
     }
 }

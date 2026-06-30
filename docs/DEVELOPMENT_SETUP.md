@@ -80,6 +80,12 @@ Use this checklist after a build:
 8. Click **Export JSONL** and confirm an export appears under `exports/<project_id>/export.jsonl`.
 9. Open **Settings** and confirm the repository, engine, Python, project, and export paths point to this checkout.
 
+Or run the automated Windows desktop smoke test:
+
+```powershell
+.\scripts\smoke_desktop_examples.ps1
+```
+
 ## Validate example datasets
 
 ```powershell

@@ -61,7 +61,8 @@
                     Width="92"
                     Margin="0,0,8,0"
                     IsCancel="True" />
-            <Button Content="Create"
+            <Button AutomationProperties.AutomationId="CreateProjectButton"
+                    Content="Create"
                     Width="92"
                     IsDefault="True"
                     Click="CreateButton_Click" />

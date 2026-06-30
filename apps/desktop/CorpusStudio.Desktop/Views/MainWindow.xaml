@@ -23,14 +23,19 @@
                 <TextBlock Text="Corpus Studio" FontSize="24" FontWeight="Bold" />
                 <TextBlock Text="Dataset Creation Studio" Margin="0,4,0,24" Opacity="0.7" />
 
-                <Button Content="New Dataset Project"
+                <Button AutomationProperties.AutomationId="NewDatasetProjectButton"
+                        Content="New Dataset Project"
                         Margin="0,0,0,8"
                         Click="NewDatasetProjectButton_Click" />
                 <Button Content="Import Dataset" Margin="0,0,0,8" />
                 <Button Content="Export Center" Margin="0,0,0,24" />
 
                 <TextBlock Text="Projects" FontWeight="Bold" Margin="0,0,0,8" />
-                <ListBox ItemsSource="{Binding Projects}" />
+                <ListBox AutomationProperties.AutomationId="ProjectsListBox"
+                         ItemsSource="{Binding Projects}"
+                         SelectedItem="{Binding SelectedProject, Mode=TwoWay}"
+                         DisplayMemberPath="DisplayName"
+                         SelectionChanged="ProjectsListBox_SelectionChanged" />
             </StackPanel>
         </Border>
 
@@ -58,12 +63,14 @@
                                         Orientation="Horizontal"
                                         HorizontalAlignment="Right"
                                         Margin="0,0,0,8">
-                                <Button Content="Save Example"
+                                <Button AutomationProperties.AutomationId="SaveExampleButton"
+                                        Content="Save Example"
                                         Width="112"
                                         Click="SaveExampleButton_Click" />
                             </StackPanel>
 
                             <TextBox Grid.Row="1"
+                                     AutomationProperties.AutomationId="DraftTextBox"
                                      AcceptsReturn="True"
                                      VerticalScrollBarVisibility="Auto"
                                      Text="{Binding DraftText, UpdateSourceTrigger=PropertyChanged}"
@@ -72,7 +79,30 @@
                         </Grid>
                     </TabItem>
                     <TabItem Header="Examples">
-                        <ListBox ItemsSource="{Binding Examples}" Margin="8" />
+                        <Grid Margin="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="260" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <ListBox Grid.Column="0"
+                                     AutomationProperties.AutomationId="ExamplesListBox"
+                                     ItemsSource="{Binding Examples}"
+                                     SelectedItem="{Binding SelectedExample, Mode=TwoWay}"
+                                     DisplayMemberPath="DisplayName" />
+
+                            <TextBox Grid.Column="1"
+                                     AutomationProperties.AutomationId="SelectedExampleTextBox"
+                                     Text="{Binding SelectedExampleJson, Mode=OneWay}"
+                                     Margin="12,0,0,0"
+                                     IsReadOnly="True"
+                                     AcceptsReturn="True"
+                                     FontFamily="Consolas"
+                                     FontSize="13"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     HorizontalScrollBarVisibility="Auto" />
+                        </Grid>
                     </TabItem>
                     <TabItem Header="Splits">
                         <TextBlock Text="Train / validation / test split manager placeholder" Margin="16" />
@@ -102,10 +132,12 @@
                 <TextBlock Text="{Binding QualitySummary}" Margin="0,8,0,24" TextWrapping="Wrap" />
 
                 <TextBlock Text="Export" FontSize="18" FontWeight="Bold" />
-                <Button Content="Validate"
+                <Button AutomationProperties.AutomationId="ValidateButton"
+                        Content="Validate"
                         Margin="0,8,0,8"
                         Click="ValidateButton_Click" />
-                <Button Content="Export JSONL"
+                <Button AutomationProperties.AutomationId="ExportJsonlButton"
+                        Content="Export JSONL"
                         Click="ExportJsonlButton_Click" />
             </StackPanel>
         </Border>

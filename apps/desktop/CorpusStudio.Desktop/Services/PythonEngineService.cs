@@ -42,7 +42,7 @@ public sealed class PythonEngineService
         return RunEngineCommandAsync("new-project", projectId, name, schemaId);
     }
 
-    public IReadOnlyList<DatasetProject> LoadProjects()
+    public IReadOnlyList<DatasetProjectListItem> LoadProjects()
     {
         var projectRoot = ResolveProjectRoot();
         if (!Directory.Exists(projectRoot))
@@ -50,7 +50,7 @@ public sealed class PythonEngineService
             return [];
         }
 
-        var projects = new List<DatasetProject>();
+        var projects = new List<DatasetProjectListItem>();
         foreach (var projectFile in Directory.EnumerateFiles(projectRoot, "project.json", SearchOption.AllDirectories))
         {
             try
@@ -59,7 +59,10 @@ public sealed class PythonEngineService
                 var project = JsonSerializer.Deserialize<DatasetProject>(json, JsonOptions);
                 if (project is not null)
                 {
-                    projects.Add(project);
+                    projects.Add(new DatasetProjectListItem(
+                        project,
+                        Path.GetDirectoryName(projectFile) ?? projectRoot
+                    ));
                 }
             }
             catch (JsonException)
@@ -71,6 +74,30 @@ public sealed class PythonEngineService
         return projects
             .OrderBy(project => project.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    public IReadOnlyList<SavedExampleItem> LoadExamples(string projectPath)
+    {
+        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+        if (!File.Exists(examplesPath))
+        {
+            return [];
+        }
+
+        var examples = new List<SavedExampleItem>();
+        var rowNumber = 0;
+        foreach (var rawLine in File.ReadLines(examplesPath, Encoding.UTF8))
+        {
+            if (string.IsNullOrWhiteSpace(rawLine))
+            {
+                continue;
+            }
+
+            rowNumber++;
+            examples.Add(BuildSavedExampleItem(rowNumber, rawLine));
+        }
+
+        return examples;
     }
 
     public DesktopSettings GetSettings()
@@ -197,7 +224,11 @@ public sealed class PythonEngineService
 
         foreach (var (key, value) in _localEnvironment)
         {
-            startInfo.Environment[key] = value;
+            if (!startInfo.Environment.TryGetValue(key, out var existingValue)
+                || string.IsNullOrWhiteSpace(existingValue))
+            {
+                startInfo.Environment[key] = value;
+            }
         }
 
         using var process = Process.Start(startInfo)
@@ -246,6 +277,62 @@ public sealed class PythonEngineService
                 ? draftText
                 : draftText + Environment.NewLine;
         }
+    }
+
+    private static SavedExampleItem BuildSavedExampleItem(int rowNumber, string rawLine)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(rawLine);
+            var json = JsonSerializer.Serialize(document.RootElement, new JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+
+            return new SavedExampleItem(rowNumber, BuildPreview(document.RootElement), json);
+        }
+        catch (JsonException)
+        {
+            return new SavedExampleItem(rowNumber, "Invalid JSON row", rawLine);
+        }
+    }
+
+    private static string BuildPreview(JsonElement row)
+    {
+        if (row.ValueKind != JsonValueKind.Object)
+        {
+            return Truncate(row.ToString());
+        }
+
+        foreach (var fieldName in new[] { "instruction", "text", "prompt", "output", "chosen" })
+        {
+            if (row.TryGetProperty(fieldName, out var value) && value.ValueKind == JsonValueKind.String)
+            {
+                return Truncate(value.GetString() ?? string.Empty);
+            }
+        }
+
+        if (row.TryGetProperty("messages", out var messages) && messages.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var message in messages.EnumerateArray())
+            {
+                if (message.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.String)
+                {
+                    return Truncate(content.GetString() ?? string.Empty);
+                }
+            }
+        }
+
+        return "JSON example";
+    }
+
+    private static string Truncate(string value)
+    {
+        const int maxLength = 80;
+        var normalized = string.Join(" ", value.Split(default(string[]), StringSplitOptions.RemoveEmptyEntries));
+        return normalized.Length <= maxLength
+            ? normalized
+            : normalized[..(maxLength - 3)] + "...";
     }
 
     private static string FindRepositoryRoot()

@@ -88,8 +88,10 @@ The current app proves the smallest local dataset-authoring loop:
 4. Edit the generated JSON example in Writing Studio.
 5. Validate the draft through the Python engine.
 6. Save the example to the active project's `examples.jsonl`.
-7. Export validated JSONL to `exports/<project_id>/export.jsonl`.
-8. Inspect local repository, engine, Python, project, and export paths from Settings.
+7. Inspect saved example details from the Examples tab.
+8. Reopen an existing project from the project list.
+9. Export validated JSONL to `exports/<project_id>/export.jsonl`.
+10. Inspect local repository, engine, Python, project, and export paths from Settings.
 
 The Python engine also exposes schema listing, validation, project creation, quality reporting, splitting, and export commands for developer workflows.
 

@@ -103,4 +103,5 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `schemas/builtin/raw_text.schema.json`
 - `schemas/builtin/retrieval.schema.json`
 - `scripts/new_project_stub.py`
+- `scripts/smoke_desktop_examples.ps1`
 - `scripts/validate_examples.py`

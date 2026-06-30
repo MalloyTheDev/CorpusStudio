@@ -10,6 +10,8 @@ The current v0.1 workflow supports:
 - JSON example authoring
 - Python-engine validation
 - saving examples to the active project
+- saved example inspection
+- project reopening from the project list
 - JSONL export
 - local settings inspection
 

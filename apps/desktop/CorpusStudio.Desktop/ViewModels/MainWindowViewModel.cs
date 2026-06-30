@@ -17,12 +17,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _qualitySummary =
         "Quality dashboard placeholder: duplicates, token length, missing fields, and split leakage.";
     private string _settingsSummary = "Settings load when the app starts.";
+    private DatasetProjectListItem? _selectedProject;
+    private SavedExampleItem? _selectedExample;
+    private string _selectedExampleJson = "Saved examples appear here after a project is selected.";
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public ObservableCollection<string> Projects { get; } = [];
+    public ObservableCollection<DatasetProjectListItem> Projects { get; } = [];
 
-    public ObservableCollection<string> Examples { get; } = [];
+    public ObservableCollection<SavedExampleItem> Examples { get; } = [];
 
     public string ActiveProjectTitle
     {
@@ -49,6 +52,30 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
     public bool HasActiveProject => !string.IsNullOrWhiteSpace(ActiveProjectPath);
+
+    public DatasetProjectListItem? SelectedProject
+    {
+        get => _selectedProject;
+        set => SetField(ref _selectedProject, value);
+    }
+
+    public SavedExampleItem? SelectedExample
+    {
+        get => _selectedExample;
+        set
+        {
+            if (SetField(ref _selectedExample, value))
+            {
+                SelectedExampleJson = value?.Json ?? "Select a saved example to inspect its JSON.";
+            }
+        }
+    }
+
+    public string SelectedExampleJson
+    {
+        get => _selectedExampleJson;
+        private set => SetField(ref _selectedExampleJson, value);
+    }
 
     private string _draftText =
         "{\n  \"instruction\": \"Explain what a variable is.\",\n  \"input\": \"\",\n  \"output\": \"A variable stores a value.\"\n}";
@@ -82,12 +109,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         AddProject(projectId, name, "instruction", schemaName, null);
     }
 
-    public void SetProjects(IEnumerable<DatasetProject> projects)
+    public void SetProjects(IEnumerable<DatasetProjectListItem> projects)
     {
         Projects.Clear();
         foreach (var project in projects)
         {
-            Projects.Add($"{project.Name} ({project.Id})");
+            Projects.Add(project);
         }
     }
 
@@ -113,26 +140,48 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         string? projectPath
     )
     {
-        Projects.Add($"{name} ({projectId})");
-        ActiveProjectTitle = name;
-        ActiveProjectPath = projectPath;
-        ActiveSchemaId = schemaId;
-        ActiveSchemaDescription = $"{schemaName} project. Ready for examples.";
+        var project = new DatasetProject(
+            projectId,
+            name,
+            schemaId,
+            DateTime.Now,
+            DateTime.Now
+        );
+        var projectItem = new DatasetProjectListItem(project, projectPath ?? string.Empty);
+
+        Projects.Add(projectItem);
+        SelectProject(projectItem, schemaName);
+        DraftText = BuildDraftTemplate(schemaId);
+    }
+
+    public void SelectProject(DatasetProjectListItem project, string? schemaName = null)
+    {
+        SelectedProject = project;
+        ActiveProjectTitle = project.Name;
+        ActiveProjectPath = project.ProjectPath;
+        ActiveSchemaId = project.SchemaId;
+        ActiveSchemaDescription = $"{schemaName ?? project.SchemaId} project. Ready for examples.";
         ValidationSummary = "No validation has run yet.";
         QualitySummary = "Quality checks will appear after examples are added.";
-        DraftText = BuildDraftTemplate(schemaId);
         Examples.Clear();
+        SelectedExample = null;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasActiveProject)));
     }
 
-    public void AddSavedExamples(int count)
+    public void SetExamples(IEnumerable<SavedExampleItem> examples)
     {
-        for (var index = 0; index < count; index++)
+        Examples.Clear();
+        foreach (var example in examples)
         {
-            Examples.Add($"Example {Examples.Count + 1}");
+            Examples.Add(example);
         }
 
-        QualitySummary = $"{Examples.Count} saved example(s). Quality checks will appear here next.";
+        SelectedExample = Examples.FirstOrDefault();
+        SelectedExampleJson = SelectedExample?.Json
+            ?? "No saved examples yet. Save a valid draft from Writing Studio.";
+        QualitySummary = Examples.Count == 0
+            ? "No saved examples yet. Quality checks will appear after examples are added."
+            : $"{Examples.Count} saved example(s). Quality checks will appear here next.";
     }
 
     public void SetValidationInProgress()
