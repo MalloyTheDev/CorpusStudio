@@ -30,13 +30,13 @@ public sealed class PythonEngineService
 
     public async Task<IReadOnlyList<DatasetSchema>> GetSchemasAsync()
     {
-        var output = await RunEngineAsync("schemas");
+        var output = await RunEngineCommandAsync("schemas");
         return JsonSerializer.Deserialize<List<DatasetSchema>>(output, JsonOptions) ?? [];
     }
 
     public Task<string> CreateProjectAsync(string projectId, string name, string schemaId)
     {
-        return RunEngineAsync("new-project", projectId, name, schemaId);
+        return RunEngineCommandAsync("new-project", projectId, name, schemaId);
     }
 
     public IReadOnlyList<DatasetProject> LoadProjects()
@@ -83,7 +83,7 @@ public sealed class PythonEngineService
 
     public Task<string> ValidateAsync(string datasetPath, string schemaId)
     {
-        return RunEngineAsync("validate", datasetPath, schemaId);
+        return RunEngineCommandAsync("validate", datasetPath, schemaId);
     }
 
     public async Task<ValidationReport> ValidateDraftAsync(string draftText, string schemaId)
@@ -138,21 +138,24 @@ public sealed class PythonEngineService
 
         var projectId = new DirectoryInfo(projectPath).Name;
         var outputPath = Path.Combine(ResolveExportRoot(), projectId, "export.jsonl");
-        await RunEngineAsync("export", examplesPath, outputPath, schemaId);
+        await RunEngineCommandAsync("export", examplesPath, outputPath, schemaId);
         return outputPath;
     }
 
     public async Task<string> ValidateAsync(string engineDirectory, string datasetPath, string schemaId)
     {
-        return await RunEngineAsync(engineDirectory, "validate", datasetPath, schemaId);
+        return await RunEngineCommandInDirectoryAsync(engineDirectory, "validate", datasetPath, schemaId);
     }
 
-    private Task<string> RunEngineAsync(params string[] arguments)
+    private Task<string> RunEngineCommandAsync(params string[] arguments)
     {
-        return RunEngineAsync(_engineDirectory, arguments);
+        return RunEngineCommandInDirectoryAsync(_engineDirectory, arguments);
     }
 
-    private async Task<string> RunEngineAsync(string engineDirectory, params string[] arguments)
+    private async Task<string> RunEngineCommandInDirectoryAsync(
+        string engineDirectory,
+        params string[] arguments
+    )
     {
         var result = await RunEngineProcessAsync(engineDirectory, arguments);
 
