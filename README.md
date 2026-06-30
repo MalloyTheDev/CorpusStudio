@@ -18,7 +18,14 @@ Corpus Studio is not just a JSONL editor. It is a writing-first dataset IDE.
 
 ## Status
 
-This repository is a starter skeleton. The architecture, documentation, schema system, and first implementation surfaces are laid out so development can begin cleanly.
+Corpus Studio now has a working v0.1 local loop:
+
+- create a dataset project from the WPF desktop app
+- choose a built-in schema
+- author a JSON example
+- validate it through the Python engine
+- save it to the local project
+- export validated JSONL
 
 ## License
 
@@ -39,7 +46,7 @@ Every dataset example should be:
 ```text
 CorpusStudio
 ├── apps/
-│   └── desktop/             # C# desktop app skeleton
+│   └── desktop/             # C# WPF desktop app
 ├── engine/                  # Python dataset engine
 ├── schemas/                 # Built-in schema definitions
 ├── docs/                    # Product, architecture, roadmap, workflows
@@ -48,6 +55,10 @@ CorpusStudio
 ├── data/                    # Local project data, ignored by git
 └── exports/                 # Exported datasets, ignored by git
 ```
+
+## Desktop preview
+
+![Corpus Studio desktop v0.1](docs/screenshots/desktop-v0.1.png)
 
 ## v0.1 goal
 
@@ -58,9 +69,9 @@ Build a local desktop app that supports:
 3. raw text, instruction, chat, and preference datasets
 4. example authoring
 5. schema validation
-6. basic quality checks
-7. train/validation/test split
-8. JSONL export
+6. JSONL export
+
+The engine also exposes basic quality reporting and train/validation/test splitting from the CLI.
 
 ## Development notes
 
@@ -74,3 +85,6 @@ The recommended stack is:
 - Polars / DuckDB later for large datasets
 
 See [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+For hands-on setup, see [`docs/DEVELOPMENT_SETUP.md`](docs/DEVELOPMENT_SETUP.md).
+For copyable row formats, see [`docs/SCHEMA_EXAMPLES.md`](docs/SCHEMA_EXAMPLES.md).

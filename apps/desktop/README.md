@@ -1,13 +1,23 @@
 # Corpus Studio Desktop
 
-C# desktop shell for Corpus Studio.
+C# WPF desktop app for Corpus Studio.
 
-This is currently a WPF skeleton with placeholder screens for:
+The current v0.1 workflow supports:
 
 - dashboard
-- writing studio
-- validation panel
-- quality panel
-- export center
+- local dataset project creation
+- built-in schema selection
+- JSON example authoring
+- Python-engine validation
+- saving examples to the active project
+- JSONL export
+- local settings inspection
 
-The desktop app will call the Python dataset engine for validation, quality checks, splitting, and export.
+Build and launch from the repository root:
+
+```powershell
+dotnet build apps\desktop\CorpusStudio.Desktop.sln
+.\apps\desktop\CorpusStudio.Desktop\bin\Debug\net8.0-windows\CorpusStudio.Desktop.exe
+```
+
+Quality and split management are still represented as early UI surfaces while the engine commands mature into full desktop workflows.

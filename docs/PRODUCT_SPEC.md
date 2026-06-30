@@ -58,6 +58,8 @@ Corpus Studio lets a user move from idea to model-ready dataset inside one local
 3. chat/messages
 4. preference pairs
 
+These are available in the desktop project creation flow and in the Python engine CLI.
+
 ## Future dataset types
 
 5. code
@@ -71,12 +73,33 @@ Corpus Studio lets a user move from idea to model-ready dataset inside one local
 ```text
 Create project
 -> choose schema
--> author/import examples
+-> author examples
 -> validate
--> inspect quality
--> split
 -> export
 ```
+
+## v0.1 working loop
+
+The current app proves the smallest local dataset-authoring loop:
+
+1. Launch the WPF desktop app.
+2. Create a local project under `data/projects`.
+3. Choose a built-in schema from the engine.
+4. Edit the generated JSON example in Writing Studio.
+5. Validate the draft through the Python engine.
+6. Save the example to the active project's `examples.jsonl`.
+7. Export validated JSONL to `exports/<project_id>/export.jsonl`.
+8. Inspect local repository, engine, Python, project, and export paths from Settings.
+
+The Python engine also exposes schema listing, validation, project creation, quality reporting, splitting, and export commands for developer workflows.
+
+## v0.1 constraints
+
+- Project data is file-backed JSON and JSONL.
+- The desktop app writes one JSON object per saved example.
+- Validation currently enforces JSON validity plus required non-empty fields.
+- The Quality and Splits desktop tabs are placeholders for future richer workflows.
+- SQLite remains planned for durable project state beyond the v0.1 file-backed loop.
 
 ## Product principles
 
@@ -88,3 +111,13 @@ Create project
 6. Cleaning should be reversible or auditable.
 7. Export formats must be deterministic.
 8. Evaluation datasets are as important as training datasets.
+
+## v0.2 priority direction
+
+The next product slice should turn saved examples into a stronger review loop:
+
+1. show saved example details in the Examples tab
+2. expose quality checks in the desktop app
+3. add split generation to the desktop app
+4. make validation stricter for schema field types
+5. add import preview and failed-row reporting

@@ -33,7 +33,7 @@
 
 ## Documentation
 
-- [ ] Expand product spec.
-- [ ] Add screenshots when UI exists.
-- [ ] Add schema examples.
-- [ ] Add development setup guide.
+- [x] Expand product spec.
+- [x] Add screenshots when UI exists.
+- [x] Add schema examples.
+- [x] Add development setup guide.

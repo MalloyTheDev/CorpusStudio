@@ -38,6 +38,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/PRODUCT_SPEC.md`
 - `docs/QUALITY_GATES.md`
 - `docs/ROADMAP.md`
+- `docs/SCHEMA_EXAMPLES.md`
 - `docs/SCHEMA_SYSTEM.md`
 - `docs/SPLITTING.md`
 - `docs/TRAINING_PREP.md`
@@ -53,6 +54,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/schemas/preference.md`
 - `docs/schemas/raw_text.md`
 - `docs/schemas/retrieval.md`
+- `docs/screenshots/desktop-v0.1.png`
 - `docs/workflows/create_instruction_dataset.md`
 - `docs/workflows/create_preference_dataset.md`
 - `docs/workflows/create_pretraining_corpus.md`
