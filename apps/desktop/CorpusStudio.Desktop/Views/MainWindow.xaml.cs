@@ -162,6 +162,7 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Importing dataset...");
             ViewModel.SetImportInProgress(importPath);
             var report = await _engineService.PreviewImportAsync(importPath, ViewModel.ActiveSchemaId);
             ViewModel.ApplyImportPreview(report);
@@ -606,6 +607,7 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Checking evaluation backend...");
             ViewModel.SetEvaluationHealthCheckInProgress();
             var report = await _engineService.CheckBackendHealthAsync(
                 backend,
@@ -646,6 +648,7 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Loading models...");
             ViewModel.SetEvaluationModelListInProgress();
             var report = await _engineService.ListBackendModelsAsync(
                 backend,
@@ -855,6 +858,7 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Checking AI Assist backend...");
             ViewModel.SetAiAssistHealthCheckInProgress();
             var report = await _engineService.CheckBackendHealthAsync(
                 backend,
@@ -895,6 +899,7 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Loading models...");
             ViewModel.SetAiAssistModelListInProgress();
             var report = await _engineService.ListBackendModelsAsync(
                 backend,
@@ -1319,6 +1324,7 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Generating training config...");
             ViewModel.SetTrainingConfigInProgress();
             var result = await _engineService.GenerateTrainingConfigAsync(
                 ViewModel.ActiveProjectPath,
@@ -1357,6 +1363,7 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Generating dataset card...");
             ViewModel.SetDatasetCardInProgress();
             var result = await _engineService.GenerateDatasetCardAsync(
                 ViewModel.ActiveProjectPath,
@@ -1435,6 +1442,7 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Exporting JSONL...");
             var outputPath = await _engineService.ExportProjectExamplesAsync(
                 ViewModel.ActiveProjectPath,
                 ViewModel.ActiveSchemaId
@@ -1481,6 +1489,7 @@ public partial class MainWindow : Window
             }
 
             Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Generating splits...");
             ViewModel.SetSplitInProgress(trainRatio, validationRatio, seed);
             var report = await _engineService.GenerateProjectSplitsAsync(
                 ViewModel.ActiveProjectPath,
@@ -2092,6 +2101,7 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Running quality checks...");
             ViewModel.SetQualityInProgress();
             var report = await _engineService.BuildQualityReportAsync(ViewModel.ActiveProjectPath);
             if (recordHistory)

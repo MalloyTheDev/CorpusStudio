@@ -456,47 +456,67 @@
                                      DisplayMemberPath="DisplayName"
                                      Margin="0,0,12,0" />
 
-                            <TextBox Grid.Row="2"
-                                     Grid.Column="1"
-                                     Grid.ColumnSpan="2"
-                                     AutomationProperties.AutomationId="PreferencePromptTextBox"
-                                     Text="{Binding PreferencePromptText, Mode=OneWay}"
-                                     IsReadOnly="True"
-                                     AcceptsReturn="True"
-                                     TextWrapping="Wrap"
-                                     VerticalScrollBarVisibility="Auto"
-                                     Margin="0,0,0,8" />
+                            <DockPanel Grid.Row="2"
+                                       Grid.Column="1"
+                                       Grid.ColumnSpan="2"
+                                       Margin="0,0,0,8">
+                                <TextBlock DockPanel.Dock="Top"
+                                           Text="Prompt"
+                                           Style="{StaticResource SectionHeaderTextStyle}"
+                                           Margin="0,0,0,3" />
+                                <TextBox AutomationProperties.AutomationId="PreferencePromptTextBox"
+                                         Text="{Binding PreferencePromptText, Mode=OneWay}"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto" />
+                            </DockPanel>
 
-                            <TextBox Grid.Row="3"
-                                     Grid.Column="1"
-                                     AutomationProperties.AutomationId="PreferenceChosenTextBox"
-                                     Text="{Binding PreferenceChosenText, Mode=OneWay}"
-                                     IsReadOnly="True"
-                                     AcceptsReturn="True"
-                                     TextWrapping="Wrap"
-                                     VerticalScrollBarVisibility="Auto"
-                                     Margin="0,0,8,0" />
+                            <DockPanel Grid.Row="3"
+                                       Grid.Column="1"
+                                       Margin="0,0,8,0">
+                                <TextBlock DockPanel.Dock="Top"
+                                           Text="Chosen response"
+                                           Style="{StaticResource SectionHeaderTextStyle}"
+                                           Margin="0,0,0,3" />
+                                <TextBox AutomationProperties.AutomationId="PreferenceChosenTextBox"
+                                         Text="{Binding PreferenceChosenText, Mode=OneWay}"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto" />
+                            </DockPanel>
 
-                            <TextBox Grid.Row="3"
-                                     Grid.Column="2"
-                                     AutomationProperties.AutomationId="PreferenceRejectedTextBox"
-                                     Text="{Binding PreferenceRejectedText, Mode=OneWay}"
-                                     IsReadOnly="True"
-                                     AcceptsReturn="True"
-                                     TextWrapping="Wrap"
-                                     VerticalScrollBarVisibility="Auto" />
+                            <DockPanel Grid.Row="3"
+                                       Grid.Column="2">
+                                <TextBlock DockPanel.Dock="Top"
+                                           Text="Rejected response"
+                                           Style="{StaticResource SectionHeaderTextStyle}"
+                                           Margin="0,0,0,3" />
+                                <TextBox AutomationProperties.AutomationId="PreferenceRejectedTextBox"
+                                         Text="{Binding PreferenceRejectedText, Mode=OneWay}"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto" />
+                            </DockPanel>
 
-                            <TextBox Grid.Row="4"
-                                     Grid.Column="0"
-                                     Grid.ColumnSpan="2"
-                                     AutomationProperties.AutomationId="PreferenceReasonTextBox"
-                                     Text="{Binding PreferenceReasonText, Mode=OneWay}"
-                                     IsReadOnly="True"
-                                     AcceptsReturn="True"
-                                     TextWrapping="Wrap"
-                                     VerticalScrollBarVisibility="Auto"
-                                     MinHeight="58"
-                                     Margin="0,8,8,0" />
+                            <DockPanel Grid.Row="4"
+                                       Grid.Column="0"
+                                       Grid.ColumnSpan="2"
+                                       Margin="0,8,8,0">
+                                <TextBlock DockPanel.Dock="Top"
+                                           Text="Reason"
+                                           Style="{StaticResource SectionHeaderTextStyle}"
+                                           Margin="0,0,0,3" />
+                                <TextBox AutomationProperties.AutomationId="PreferenceReasonTextBox"
+                                         Text="{Binding PreferenceReasonText, Mode=OneWay}"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto"
+                                         MinHeight="58" />
+                            </DockPanel>
 
                             <StackPanel Grid.Row="4"
                                         Grid.Column="2"
@@ -965,12 +985,17 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <ListBox Grid.Column="0"
-                                                     AutomationProperties.AutomationId="ReviewedFixesListBox"
-                                                     ItemsSource="{Binding ReviewedFixes}"
-                                                     SelectedItem="{Binding SelectedReviewedFix, Mode=TwoWay}"
-                                                     DisplayMemberPath="DisplayName"
-                                                     MaxHeight="120" />
+                                            <Grid Grid.Column="0">
+                                                <ListBox x:Name="ReviewedFixesListBox"
+                                                         AutomationProperties.AutomationId="ReviewedFixesListBox"
+                                                         ItemsSource="{Binding ReviewedFixes}"
+                                                         SelectedItem="{Binding SelectedReviewedFix, Mode=TwoWay}"
+                                                         DisplayMemberPath="DisplayName"
+                                                         MaxHeight="120" />
+                                                <TextBlock Style="{StaticResource ListEmptyPlaceholderStyle}"
+                                                           Text="No reviewed fixes yet. Edit a failed evaluation row to start tracking."
+                                                           Visibility="{Binding HasItems, ElementName=ReviewedFixesListBox, Converter={StaticResource InverseBoolToVis}}" />
+                                            </Grid>
                                             <Button Grid.Column="1"
                                                     AutomationProperties.AutomationId="ReopenReviewedFixButton"
                                                     Content="Reopen Fix"
@@ -1188,12 +1213,17 @@
                                             Click="LoadAiAssistQueueViewButton_Click" />
                                 </WrapPanel>
 
-                                <ListBox Grid.Row="4"
-                                         AutomationProperties.AutomationId="AiAssistReviewQueueListBox"
-                                         ItemsSource="{Binding AiAssistReviewQueue}"
-                                         SelectedItem="{Binding SelectedAiAssistReviewQueueItem, Mode=TwoWay}"
-                                         DisplayMemberPath="DisplayName"
-                                         MinHeight="140" />
+                                <Grid Grid.Row="4">
+                                    <ListBox x:Name="AiAssistReviewQueueListBox"
+                                             AutomationProperties.AutomationId="AiAssistReviewQueueListBox"
+                                             ItemsSource="{Binding AiAssistReviewQueue}"
+                                             SelectedItem="{Binding SelectedAiAssistReviewQueueItem, Mode=TwoWay}"
+                                             DisplayMemberPath="DisplayName"
+                                             MinHeight="140" />
+                                    <TextBlock Style="{StaticResource ListEmptyPlaceholderStyle}"
+                                               Text="No AI Assist reviews yet. Run AI Assist to queue a suggestion for review."
+                                               Visibility="{Binding HasItems, ElementName=AiAssistReviewQueueListBox, Converter={StaticResource InverseBoolToVis}}" />
+                                </Grid>
 
                                 <TextBlock Grid.Row="5"
                                            Text="Rewrite Batches"
