@@ -746,6 +746,7 @@ try {
 
     $aiAssistQueuePath = Join-Path $projectPath "ai_assist_reviews.jsonl"
     $aiAssistQueueViewsPath = Join-Path $projectPath "ai_assist_queue_views.json"
+    $aiAssistRewriteBatchesPath = Join-Path $projectPath "ai_assist_rewrite_batches.json"
     $aiAssistSuggestedJsonl = @{
         instruction = "Explain queued AI Assist."
         input = ""
@@ -1499,14 +1500,25 @@ try {
     $syntheticBatchRewritePreparedText = Wait-Until -TimeoutSeconds 10 -Message "Synthetic triage did not prepare batch rewrite controls" -Block {
         $actionValue = Get-ElementSelectionName (Find-Descendant $main "AiAssistActionComboBox")
         $instructionValue = Get-ElementValue (Find-Descendant $main "AiAssistInstructionTextBox")
+        $batchSummaryValue = Get-ElementText (Find-Descendant $main "AiAssistRewriteBatchSummaryTextBlock")
         if ($actionValue -eq "rewrite-output" `
             -and $instructionValue -like "*Rewrite affected rows 23, 24, 25 as a batch*" `
             -and $instructionValue -like "*corrected JSONL rows only*" `
-            -and $instructionValue -like "*generic_phrase*") {
-            return "$actionValue`n$instructionValue"
+            -and $instructionValue -like "*generic_phrase*" `
+            -and $batchSummaryValue -like "*Saved rewrite batch for rows 23, 24, 25*") {
+            return "$actionValue`n$instructionValue`n$batchSummaryValue"
         }
 
         return $null
+    }
+    if (-not (Test-Path $aiAssistRewriteBatchesPath)) {
+        throw "AI Assist rewrite batches were not written at $aiAssistRewriteBatchesPath"
+    }
+    $rewriteBatchJson = Get-Content -Raw -Path $aiAssistRewriteBatchesPath
+    if ($rewriteBatchJson -notlike "*synthetic quality smoke row 0*" `
+        -or $rewriteBatchJson -notlike "*Rewrite affected rows 23, 24, 25 as a batch*" `
+        -or $rewriteBatchJson -notlike "*generic_phrase*") {
+        throw "AI Assist rewrite batch file did not include expected source draft and instruction at $aiAssistRewriteBatchesPath"
     }
     Select-Tab $main "Writing Studio"
     $syntheticBatchDraftPreparedText = Wait-Until -TimeoutSeconds 10 -Message "Synthetic batch rewrite did not load affected rows into the draft editor" -Block {
@@ -1516,6 +1528,43 @@ try {
             -and $value -like "*synthetic quality smoke row 2*" `
             -and $value.Trim().StartsWith("[")) {
             return $value
+        }
+
+        return $null
+    }
+
+    Stop-CorpusStudio $process
+    $process = Start-CorpusStudio $dataDir $exportDir
+    $main = Wait-Window $process.Id
+    Select-Tab $main "AI Assist"
+    $syntheticRewriteBatchReloadedText = Wait-Until -TimeoutSeconds 10 -Message "Saved AI Assist rewrite batch was not reloaded" -Block {
+        $summaryValue = Get-ElementText (Find-Descendant $main "AiAssistRewriteBatchSummaryTextBlock")
+        if ($summaryValue -like "*Saved rewrite batches: 1*") {
+            return $summaryValue
+        }
+
+        return $null
+    }
+    Select-ListItemContaining $main "AiAssistRewriteBatchesListBox" "3 row(s)" | Out-Null
+    Invoke-Element (Find-Descendant $main "ResumeAiAssistRewriteBatchButton")
+    $syntheticRewriteBatchResumedText = Wait-Until -TimeoutSeconds 10 -Message "Saved AI Assist rewrite batch did not resume into the draft" -Block {
+        $value = Get-ElementValue (Find-Descendant $main "DraftTextBox")
+        if ($value -like "*synthetic quality smoke row 0*" `
+            -and $value -like "*synthetic quality smoke row 1*" `
+            -and $value -like "*synthetic quality smoke row 2*" `
+            -and $value.Trim().StartsWith("[")) {
+            return $value
+        }
+
+        return $null
+    }
+    Select-Tab $main "AI Assist"
+    $syntheticRewriteBatchInstructionReloadedText = Wait-Until -TimeoutSeconds 10 -Message "Saved AI Assist rewrite batch did not restore the instruction" -Block {
+        $instructionValue = Get-ElementValue (Find-Descendant $main "AiAssistInstructionTextBox")
+        $summaryValue = Get-ElementText (Find-Descendant $main "AiAssistRewriteBatchSummaryTextBlock")
+        if ($instructionValue -like "*Rewrite affected rows 23, 24, 25 as a batch*" `
+            -and $summaryValue -like "*Resumed rewrite batch for rows 23, 24, 25*") {
+            return "$instructionValue`n$summaryValue"
         }
 
         return $null
@@ -1702,6 +1751,9 @@ try {
         SyntheticDraftPreparedLength = $syntheticDraftPreparedText.Length
         SyntheticBatchRewritePreparedLength = $syntheticBatchRewritePreparedText.Length
         SyntheticBatchDraftPreparedLength = $syntheticBatchDraftPreparedText.Length
+        SyntheticRewriteBatchReloadedLength = $syntheticRewriteBatchReloadedText.Length
+        SyntheticRewriteBatchResumedLength = $syntheticRewriteBatchResumedText.Length
+        SyntheticRewriteBatchInstructionReloadedLength = $syntheticRewriteBatchInstructionReloadedText.Length
         PreferenceRankingLength = $preferenceRankingText.Length
         PreferenceWeakFilterLength = $preferenceWeakFilterText.Length
         PreferenceRankingExportLength = $preferenceRankingExportText.Length
@@ -1748,6 +1800,7 @@ try {
         EvaluationComparisonReportPath = $evaluationComparisonReportPath
         AiAssistQueuePath = $aiAssistQueuePath
         AiAssistQueueViewsPath = $aiAssistQueueViewsPath
+        AiAssistRewriteBatchesPath = $aiAssistRewriteBatchesPath
         TrainingConfigPath = $trainingConfigFile
         PreferenceRankingPath = $preferenceRankingFile
     }

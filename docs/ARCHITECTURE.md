@@ -88,8 +88,13 @@ the latest successful split settings (`train_ratio`, `validation_ratio`, and
 Dataset rows, quality history, AI Assist queues, and queue views remain in
 JSON or JSONL files.
 
-SQLite can be added later for indexing and UI speed while preserving JSON/JSONL
-as the inspectable project interchange format.
+An **optional** SQLite project index (`storage/index.py`, written to
+`<projects_root>/index.sqlite3`) accelerates listing and filtering projects
+without changing the storage model. It is a derived cache: it is created only on
+first use of the `project-list`/`project-index-rebuild` CLI commands (or when
+`CORPUS_STUDIO_USE_INDEX` is set during `new-project`), can be rebuilt from the
+`project.json` files at any time, and can be deleted with no data loss. JSON/JSONL
+remain the inspectable source of truth.
 
 ## IPC options
 
@@ -137,6 +142,7 @@ Desktop AI Assist tab -> Python backend-health CLI -> model_backends -> health s
 Desktop AI Assist tab -> Python model-list CLI -> model_backends -> model picker
 Desktop AI Assist tab -> ai_assist_reviews.jsonl -> filtered/searched/sorted accept/reject queue + bulk triage/undo + source/suggestion comparison
 Desktop AI Assist tab -> ai_assist_queue_views.json -> saved filter/search/sort views
+Desktop AI Assist tab -> ai_assist_rewrite_batches.json -> resume prepared synthetic batch rewrite drafts after restart
 Desktop Quality panel -> synthetic_pattern_issues -> draft row or batch draft + AI Assist rewrite instruction
 Desktop Preference Review tab -> saved preference rows -> contrast ranking/filter -> draft row or batch draft + AI Assist preference judge instruction
 Desktop Preference Review tab -> visible preference ranking -> exports/<project_id>/preference_review JSON artifact

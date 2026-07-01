@@ -93,6 +93,6 @@ The current app should not add a trainer process launcher, CUDA dependency,
 PyTorch, Transformers, or tool-specific package dependencies. Config export
 should stay lightweight, inspectable, and safe to run without a GPU.
 
-Near-term hardening should add target-specific compatibility warnings, clearer
-dataset/split path selection, and dataset-card context. It should not start
-training processes.
+Near-term hardening should improve target-specific config rendering depth,
+clearer dataset/split path selection, and richer dataset-card context. It
+should not start training processes.

@@ -138,6 +138,11 @@ Current desktop MVP supports the basic loop: filter to failed rows, load a
 failed row into Writing Studio, edit and validate it, save the reviewed row, and
 rerun the saved evaluation configuration for comparison.
 
+For synthetic-pattern quality issues, the desktop can also prepare a selected
+row or affected row batch for AI Assist `rewrite-output` review. Prepared batch
+rewrite handoffs are saved project-locally so they can be resumed after restart
+before validation and explicit save.
+
 ### Training Preparation
 
 After dataset quality and evaluation are stable, the user generates a training

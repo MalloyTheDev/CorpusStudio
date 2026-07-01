@@ -93,15 +93,23 @@
 - [x] Add batch synthetic rewrite preparation for affected rows.
 - [x] Add preference ranking export and visible batch judge preparation.
 
+## UI/UX hardening
+
+- [x] Add desktop shell visual polish with shared WPF control styles.
+- [x] Add workflow stage strip for dataset, validation, split, evaluation, assist, export, and training config surfaces.
+- [x] Wire sidebar Export Center action to the real export controls.
+
 ## Next priority board
 
 - [x] Add Evaluation run comparison for two saved reports.
 - [x] Add Evaluation regression rerun flow using the same dataset, backend, model, and score threshold.
 - [x] Add weak-example edit/re-test loop from failed evaluation rows back into Writing Studio.
 - [x] Add richer Evaluation report summaries by tag, failure reason, and score band.
-- [ ] Add persistent AI Assist rewrite batches so prepared synthetic rewrites can be resumed after app restart.
+- [x] Add persistent AI Assist rewrite batches so prepared synthetic rewrites can be resumed after app restart.
 - [x] Add target-specific Training config compatibility warnings for schema/format mismatches.
 - [x] Add dataset card export using project metadata, schema, splits, quality history, and evaluation summary.
-- [ ] Add optional SQLite-backed project index while keeping JSON/JSONL files inspectable.
-- [ ] Add opt-in local integration tests for Ollama discovery, health, Evaluation, and AI Assist.
-- [ ] Add a release checklist for public repo hygiene, screenshots, smoke evidence, and known non-features.
+- [x] Add versioned reviewed-fix tracking or explicit in-place replacement for edited failed rows.
+- [x] Add interactive Evaluation drilldowns and saved failure filters.
+- [x] Add optional SQLite-backed project index while keeping JSON/JSONL files inspectable.
+- [x] Add opt-in local integration tests for Ollama discovery, health, Evaluation, and AI Assist.
+- [x] Add a release checklist for public repo hygiene, screenshots, smoke evidence, and known non-features.

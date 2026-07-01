@@ -54,7 +54,8 @@ Lab config export surfaces. They should be hardened in place:
   Writing Studio, and AI Assist triage preparation.
 - AI Assist Lab: review-first local model suggestions, persistent queue,
   filters, search, sorting, saved views, bulk triage/undo, schema-aware
-  actions, synthetic issue handoff, and preference judge preparation.
+  actions, synthetic issue handoff, persistent rewrite batches, and preference
+  judge preparation.
 - Training Lab: inspectable config export only. Do not implement a trainer
   launcher yet.
 
@@ -71,12 +72,19 @@ Lab config export surfaces. They should be hardened in place:
 
 ## Next Implementation Targets
 
-1. Persist prepared AI Assist rewrite batches so they survive app restart.
-2. Add target-specific Training config compatibility warnings.
-3. Add dataset card export from project metadata, schema, splits, quality history, and evaluation summary.
-4. Add versioned reviewed-fix tracking or explicit in-place replacement for edited failed rows.
-5. Add interactive Evaluation drilldowns and saved failure filters.
-6. Keep full training launch, logs, checkpoints, and resume support out of the core app until the Evaluation workflow is stable.
+The previous top-five board is complete: versioned reviewed-fix tracking,
+interactive Evaluation drilldowns with saved failure filters, an optional
+SQLite-backed project index, opt-in Ollama integration tests, and a public-repo
+release checklist. Next candidates:
+
+1. Wire the desktop project list to the optional SQLite index for faster
+   load/filter on large project sets (`storage/index.py`, `project-list` CLI).
+2. Add desktop-side automated tests for the project-local JSON workflow state
+   (reviewed fixes, rewrite batches, saved failure filters, queue views).
+3. Add production-grade synthetic pattern clustering in the AI Assist Lab.
+4. Add target-specific DPO/reward-model export formats.
+5. Keep full training launch, logs, checkpoints, and resume support out of the
+   core app until the Evaluation workflow is stable.
 
 Read these files first:
 

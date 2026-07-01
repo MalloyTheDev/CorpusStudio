@@ -54,6 +54,7 @@ Corpus Studio now has a working local dataset loop and first-pass lab surfaces:
   rows
 - manage an AI Assist review queue with filters, search, sorting, saved views,
   bulk triage, and undo
+- save and resume prepared AI Assist rewrite batches after app restart
 - review preference-pair contrast and prepare preference judge passes
 - export inspectable Training Lab config files without launching trainers, with
   schema/format/target compatibility warnings
@@ -128,3 +129,5 @@ For dataset card output, see [`docs/DATASET_CARD.md`](docs/DATASET_CARD.md).
 For the staged labs, see [`docs/EVALUATION_LAB.md`](docs/EVALUATION_LAB.md),
 [`docs/AI_ASSIST_LAB.md`](docs/AI_ASSIST_LAB.md), and
 [`docs/TRAINING_LAB.md`](docs/TRAINING_LAB.md).
+For public-release hygiene and known non-features, see
+[`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md).
