@@ -166,6 +166,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_model_backend_config.py`
 - `engine/tests/test_ollama_integration.py`
 - `engine/tests/test_preference_exporter.py`
+- `engine/tests/test_preference_integrity.py`
 - `engine/tests/test_project_index.py`
 - `engine/tests/test_quality_clustering.py`
 - `engine/tests/test_quality_unicode.py`

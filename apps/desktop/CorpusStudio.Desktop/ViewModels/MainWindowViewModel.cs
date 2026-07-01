@@ -1444,8 +1444,23 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public void ApplyPreferenceTrainingExport(PreferenceExportResult result)
     {
-        PreferenceReviewSummary =
-            $"Exported {result.OutputRows} row(s) as {result.Format}: {result.OutputPath}";
+        var lines = new List<string>
+        {
+            $"Exported {result.OutputRows} row(s) as {result.Format}: {result.OutputPath}",
+        };
+
+        if (result.DroppedDegenerate > 0)
+        {
+            lines.Add($"Dropped {result.DroppedDegenerate} degenerate pair(s).");
+        }
+
+        if (result.Warnings.Count > 0)
+        {
+            lines.Add("Warnings:");
+            lines.AddRange(result.Warnings.Select(warning => $"- {warning}"));
+        }
+
+        PreferenceReviewSummary = string.Join(Environment.NewLine, lines);
     }
 
     public void SetPreferenceRankingExportError(string message)

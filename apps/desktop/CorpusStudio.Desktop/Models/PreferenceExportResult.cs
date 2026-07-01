@@ -14,6 +14,12 @@ public sealed class PreferenceExportResult
     [JsonPropertyName("output_rows")]
     public int OutputRows { get; init; }
 
+    [JsonPropertyName("dropped_degenerate")]
+    public int DroppedDegenerate { get; init; }
+
     [JsonPropertyName("output_path")]
     public string OutputPath { get; init; } = string.Empty;
+
+    [JsonPropertyName("warnings")]
+    public List<string> Warnings { get; init; } = [];
 }

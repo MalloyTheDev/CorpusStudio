@@ -9,7 +9,12 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from pydantic import BaseModel
+
+from corpus_studio.quality.basic_quality import normalized_text_signature
+
 PREFERENCE_EXPORT_FORMATS = ("dpo", "kto", "reward")
+PREFERENCE_LOW_CONTRAST_THRESHOLD = 0.9
 
 
 def _pair_fields(row: dict[str, Any]) -> tuple[str, str, str]:
@@ -74,3 +79,70 @@ def export_preference(
             f"Unsupported preference export format '{target_format}'. Use one of: {supported}."
         )
     return exporter(list(rows))
+
+
+class PreferencePairIssues(BaseModel):
+    """Integrity summary for preference (chosen/rejected) rows."""
+
+    total: int = 0
+    empty_chosen: int = 0
+    empty_rejected: int = 0
+    identical: int = 0
+    low_contrast: int = 0
+    degenerate: int = 0
+
+
+def _pair_status(row: dict[str, Any]) -> tuple[bool, bool, bool, bool]:
+    """Return (empty_chosen, empty_rejected, identical, low_contrast) for a pair."""
+    _, chosen, rejected = _pair_fields(row)
+    empty_chosen = not chosen.strip()
+    empty_rejected = not rejected.strip()
+    identical = False
+    low_contrast = False
+    if not empty_chosen and not empty_rejected:
+        chosen_sig = normalized_text_signature(chosen)
+        rejected_sig = normalized_text_signature(rejected)
+        if chosen_sig and chosen_sig == rejected_sig:
+            identical = True
+        else:
+            chosen_tokens = set(chosen_sig.split())
+            rejected_tokens = set(rejected_sig.split())
+            if chosen_tokens and rejected_tokens:
+                overlap = len(chosen_tokens & rejected_tokens) / len(
+                    chosen_tokens | rejected_tokens
+                )
+                low_contrast = overlap >= PREFERENCE_LOW_CONTRAST_THRESHOLD
+    return empty_chosen, empty_rejected, identical, low_contrast
+
+
+def _is_degenerate(row: dict[str, Any]) -> bool:
+    empty_chosen, empty_rejected, identical, _ = _pair_status(row)
+    return empty_chosen or empty_rejected or identical
+
+
+def analyze_preference_pairs(rows: Iterable[dict[str, Any]]) -> PreferencePairIssues:
+    """Count empty, identical, and low-contrast (weak) preference pairs.
+
+    Identical or empty pairs are a zero-margin / contradictory training signal
+    for DPO/KTO/reward models; low-contrast pairs are weak. Nothing is mutated.
+    """
+    issues = PreferencePairIssues()
+    for row in rows:
+        empty_chosen, empty_rejected, identical, low_contrast = _pair_status(row)
+        issues.total += 1
+        if empty_chosen:
+            issues.empty_chosen += 1
+        if empty_rejected:
+            issues.empty_rejected += 1
+        if identical:
+            issues.identical += 1
+        if low_contrast:
+            issues.low_contrast += 1
+        if empty_chosen or empty_rejected or identical:
+            issues.degenerate += 1
+    return issues
+
+
+def drop_degenerate_pairs(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return only usable preference pairs (drop empty or identical chosen/rejected)."""
+    return [row for row in rows if not _is_degenerate(row)]
