@@ -13,12 +13,35 @@ public sealed class InverseBooleanToVisibilityConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
     {
-        var flag = value is bool b && b;
+        // Only support converting to Visibility (or nullable Visibility).
+        if (targetType != typeof(Visibility) && targetType != typeof(Visibility?))
+        {
+            return DependencyProperty.UnsetValue;
+        }
+
+        // Only support bool inputs; surface misconfigurations instead of treating them as false.
+        if (value is not bool flag)
+        {
+            return DependencyProperty.UnsetValue;
+        }
+
         return flag ? Visibility.Collapsed : Visibility.Visible;
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
     {
-        return value is Visibility visibility && visibility != Visibility.Visible;
+        // Only support converting back to bool (or nullable bool).
+        if (targetType != typeof(bool) && targetType != typeof(bool?))
+        {
+            return DependencyProperty.UnsetValue;
+        }
+
+        if (value is not Visibility visibility)
+        {
+            return DependencyProperty.UnsetValue;
+        }
+
+        // Inverse converter: Visible -> false, Collapsed/Hidden -> true.
+        return visibility != Visibility.Visible;
     }
 }
