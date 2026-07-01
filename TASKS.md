@@ -101,7 +101,7 @@
 - [x] Add richer Evaluation report summaries by tag, failure reason, and score band.
 - [ ] Add persistent AI Assist rewrite batches so prepared synthetic rewrites can be resumed after app restart.
 - [ ] Add target-specific Training config compatibility warnings for schema/format mismatches.
-- [ ] Add dataset card export using project metadata, schema, splits, quality history, and evaluation summary.
+- [x] Add dataset card export using project metadata, schema, splits, quality history, and evaluation summary.
 - [ ] Add optional SQLite-backed project index while keeping JSON/JSONL files inspectable.
 - [ ] Add opt-in local integration tests for Ollama discovery, health, Evaluation, and AI Assist.
 - [ ] Add a release checklist for public repo hygiene, screenshots, smoke evidence, and known non-features.

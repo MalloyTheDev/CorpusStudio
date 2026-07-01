@@ -1069,6 +1069,26 @@
                 <Button AutomationProperties.AutomationId="ExportJsonlButton"
                         Content="Export JSONL"
                         Click="ExportJsonlButton_Click" />
+                <Button AutomationProperties.AutomationId="GenerateDatasetCardButton"
+                        Content="Generate Dataset Card"
+                        Margin="0,8,0,8"
+                        Click="GenerateDatasetCardButton_Click" />
+                <TextBox AutomationProperties.AutomationId="DatasetCardSummaryTextBox"
+                         Text="{Binding DatasetCardSummary, Mode=OneWay}"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         MinHeight="48"
+                         Margin="0,0,0,8"
+                         VerticalScrollBarVisibility="Auto" />
+                <TextBox AutomationProperties.AutomationId="DatasetCardPreviewTextBox"
+                         Text="{Binding DatasetCardPreview, Mode=OneWay}"
+                         IsReadOnly="True"
+                         FontFamily="Consolas"
+                         TextWrapping="NoWrap"
+                         MinHeight="120"
+                         Margin="0,0,0,8"
+                         HorizontalScrollBarVisibility="Auto"
+                         VerticalScrollBarVisibility="Auto" />
             </StackPanel>
         </Border>
     </Grid>

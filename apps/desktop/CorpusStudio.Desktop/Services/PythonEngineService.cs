@@ -1017,6 +1017,38 @@ public sealed class PythonEngineService
             ?? throw new InvalidOperationException("The Python engine returned an invalid training config result.");
     }
 
+    public async Task<DatasetCardResult> GenerateDatasetCardAsync(
+        string projectPath,
+        string schemaId
+    )
+    {
+        var projectFile = Path.Combine(projectPath, "project.json");
+        if (!File.Exists(projectFile))
+        {
+            throw new FileNotFoundException("Project metadata file was not found.", projectFile);
+        }
+
+        var projectId = new DirectoryInfo(projectPath).Name;
+        var exportDirectory = Path.Combine(ResolveExportRoot(), projectId);
+        var outputPath = Path.Combine(exportDirectory, "dataset_card.md");
+
+        var output = await RunEngineCommandAsync(
+            "dataset-card",
+            projectPath,
+            "--schema",
+            schemaId,
+            "--export-dir",
+            exportDirectory,
+            "--output-path",
+            outputPath
+        );
+
+        return JsonSerializer.Deserialize<DatasetCardResult>(output, JsonOptions)
+            ?? throw new InvalidOperationException(
+                "The Python engine returned an invalid dataset card result."
+            );
+    }
+
     public SplitSettings LoadProjectSplitSettings(string projectPath)
     {
         var project = LoadProjectFromPath(projectPath);

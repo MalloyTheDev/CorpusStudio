@@ -1139,6 +1139,34 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void GenerateDatasetCardButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetDatasetCardError("Create or select a dataset project before generating a dataset card.");
+            return;
+        }
+
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetDatasetCardInProgress();
+            var result = await _engineService.GenerateDatasetCardAsync(
+                ViewModel.ActiveProjectPath,
+                ViewModel.ActiveSchemaId
+            );
+            ViewModel.ApplyDatasetCardResult(result);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetDatasetCardError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
+    }
+
     private void SaveLabSettingsButton_Click(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))

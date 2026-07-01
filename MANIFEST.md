@@ -24,6 +24,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/AiAssistReviewQueueItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/BackendHealthReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/BackendModelListReport.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/DatasetCardResult.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/DatasetProject.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/DatasetProjectListItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/DatasetSchema.cs`
@@ -58,6 +59,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `data/.gitkeep`
 - `docs/ARCHITECTURE.md`
 - `docs/AI_ASSIST_LAB.md`
+- `docs/DATASET_CARD.md`
 - `docs/DATA_MODEL.md`
 - `docs/DATASET_TESTING_WORKFLOW.md`
 - `docs/DEVELOPMENT_SETUP.md`
@@ -116,6 +118,8 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/model_backends/openai_compatible.py`
 - `engine/corpus_studio/quality/__init__.py`
 - `engine/corpus_studio/quality/basic_quality.py`
+- `engine/corpus_studio/reporting/__init__.py`
+- `engine/corpus_studio/reporting/dataset_card.py`
 - `engine/corpus_studio/schemas/__init__.py`
 - `engine/corpus_studio/schemas/base.py`
 - `engine/corpus_studio/schemas/registry.py`
@@ -135,6 +139,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_ai_assist.py`
 - `engine/tests/test_basic_validator.py`
 - `engine/tests/test_cli.py`
+- `engine/tests/test_dataset_card.py`
 - `engine/tests/test_evaluation_report.py`
 - `engine/tests/test_import_preview.py`
 - `engine/tests/test_model_backend_config.py`

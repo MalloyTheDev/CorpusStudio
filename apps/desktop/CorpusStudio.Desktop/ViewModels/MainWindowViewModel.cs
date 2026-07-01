@@ -86,6 +86,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _trainingSummary =
         "Generate a training config after validation, splits, and evaluation checks.";
     private string _trainingConfigPreview = "Training config preview appears here.";
+    private string _datasetCardSummary =
+        "Generate a dataset card to summarize metadata, schema, splits, quality, and evaluation.";
+    private string _datasetCardPreview = "Dataset card preview appears here.";
     private string _splitTrainPercent = "90";
     private string _splitValidationPercent = "5";
     private string _splitSeed = "42";
@@ -663,6 +666,18 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _trainingConfigPreview;
         private set => SetField(ref _trainingConfigPreview, value);
+    }
+
+    public string DatasetCardSummary
+    {
+        get => _datasetCardSummary;
+        private set => SetField(ref _datasetCardSummary, value);
+    }
+
+    public string DatasetCardPreview
+    {
+        get => _datasetCardPreview;
+        private set => SetField(ref _datasetCardPreview, value);
     }
 
     public string SplitTrainPercent
@@ -1771,6 +1786,43 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         TrainingSummary = $"Training config could not be generated.{Environment.NewLine}{message}";
         TrainingConfigPreview = "No training config was generated.";
+    }
+
+    public void SetDatasetCardInProgress()
+    {
+        DatasetCardSummary = "Generating dataset card...";
+        DatasetCardPreview = "Waiting for the dataset card.";
+    }
+
+    public void ApplyDatasetCardResult(DatasetCardResult result)
+    {
+        var lines = new List<string>();
+        if (!string.IsNullOrWhiteSpace(result.OutputPath))
+        {
+            lines.Add($"Dataset card: {result.OutputPath}");
+        }
+
+        if (result.Warnings.Count > 0)
+        {
+            lines.Add("");
+            lines.Add("Warnings:");
+            lines.AddRange(result.Warnings.Select(warning => $"- {warning}"));
+        }
+        else
+        {
+            lines.Add("No outstanding warnings.");
+        }
+
+        DatasetCardSummary = string.Join(Environment.NewLine, lines);
+        DatasetCardPreview = string.IsNullOrWhiteSpace(result.Markdown)
+            ? "The dataset card was empty."
+            : result.Markdown;
+    }
+
+    public void SetDatasetCardError(string message)
+    {
+        DatasetCardSummary = $"Dataset card could not be generated.{Environment.NewLine}{message}";
+        DatasetCardPreview = "No dataset card was generated.";
     }
 
     public void SetValidationInProgress()

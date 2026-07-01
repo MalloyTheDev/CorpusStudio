@@ -35,6 +35,8 @@ Corpus Studio now has a working local dataset loop and first-pass lab surfaces:
 - triage synthetic-pattern quality issues into a prepared AI Assist rewrite flow
 - generate train/validation/test split files with saved ratios, seed, and tiny-split warnings
 - export validated JSONL
+- generate an inspectable dataset card summarizing metadata, schema, splits,
+  quality checks, and the latest evaluation run
 - run Evaluation Lab samples against configured Ollama or OpenAI-compatible
   local endpoints
 - check backend health before model-backed runs
@@ -121,6 +123,7 @@ See [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) and [`docs/ARCHITECTURE.md`](
 
 For hands-on setup, see [`docs/DEVELOPMENT_SETUP.md`](docs/DEVELOPMENT_SETUP.md).
 For copyable row formats, see [`docs/SCHEMA_EXAMPLES.md`](docs/SCHEMA_EXAMPLES.md).
+For dataset card output, see [`docs/DATASET_CARD.md`](docs/DATASET_CARD.md).
 For the staged labs, see [`docs/EVALUATION_LAB.md`](docs/EVALUATION_LAB.md),
 [`docs/AI_ASSIST_LAB.md`](docs/AI_ASSIST_LAB.md), and
 [`docs/TRAINING_LAB.md`](docs/TRAINING_LAB.md).

@@ -22,6 +22,13 @@ from corpus_studio.model_backends.openai_compatible import (
     default_openai_compatible_config,
 )
 from corpus_studio.quality.basic_quality import build_basic_quality_report
+from corpus_studio.reporting.dataset_card import (
+    DatasetCardEvaluation,
+    DatasetCardSplits,
+    build_dataset_card,
+    render_dataset_card_markdown,
+)
+from corpus_studio.evaluation.reports import EvaluationReport
 from corpus_studio.schemas.registry import list_builtin_schemas, load_builtin_schema, repository_root
 from corpus_studio.splitters.random_splitter import random_split
 from corpus_studio.storage.project import DatasetProject, create_project
@@ -409,6 +416,132 @@ def training_config(
             indent=2,
         )
     )
+
+
+@app.command("dataset-card")
+def dataset_card(
+    project_dir: Path,
+    output_path: Optional[Path] = typer.Option(
+        None, "--output-path", help="Write the rendered Markdown card."
+    ),
+    schema: Optional[str] = typer.Option(
+        None, "--schema", help="Schema id override. Defaults to the project schema."
+    ),
+    export_dir: Optional[Path] = typer.Option(
+        None,
+        "--export-dir",
+        help="Export directory holding splits/ and evaluation/ for this project.",
+    ),
+):
+    """Build an inspectable dataset card from a project's existing artifacts."""
+
+    project_file = project_dir / "project.json"
+    if not project_file.exists():
+        typer.echo(f"Project metadata was not found: {project_file}", err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        metadata = json.loads(project_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        typer.echo(f"Project metadata is not valid JSON: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    schema_id = schema or metadata.get("schema_id")
+    if not schema_id:
+        typer.echo("Project metadata is missing a schema id.", err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        dataset_schema = load_builtin_schema(schema_id)
+    except (ValueError, ValidationError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    examples_path = project_dir / "examples.jsonl"
+    rows = list(read_jsonl(examples_path)) if examples_path.exists() else []
+
+    resolved_export_dir = export_dir or (
+        _repo_relative_path("CORPUS_STUDIO_EXPORT_DIR", Path("exports")) / project_dir.name
+    )
+    splits = _load_split_counts(resolved_export_dir)
+    evaluation = _load_latest_evaluation_summary(resolved_export_dir)
+
+    card = build_dataset_card(
+        project_id=metadata.get("id", project_dir.name),
+        project_name=metadata.get("name", project_dir.name),
+        schema=dataset_schema,
+        rows=rows,
+        created_at=metadata.get("created_at"),
+        updated_at=metadata.get("updated_at"),
+        splits=splits,
+        evaluation=evaluation,
+    )
+    markdown = render_dataset_card_markdown(card)
+
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(markdown, encoding="utf-8")
+
+    typer.echo(
+        json.dumps(
+            {
+                "output_path": str(output_path) if output_path is not None else None,
+                "markdown": markdown,
+                "warnings": card.warnings,
+                "card": card.model_dump(),
+            },
+            indent=2,
+        )
+    )
+
+
+def _count_jsonl_rows(path: Path) -> int:
+    if not path.exists():
+        return 0
+
+    count = 0
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                count += 1
+    return count
+
+
+def _load_split_counts(export_dir: Path) -> Optional[DatasetCardSplits]:
+    split_dir = export_dir / "splits"
+    train_path = split_dir / "train.jsonl"
+    validation_path = split_dir / "validation.jsonl"
+    test_path = split_dir / "test.jsonl"
+    if not any(path.exists() for path in (train_path, validation_path, test_path)):
+        return None
+
+    return DatasetCardSplits(
+        train=_count_jsonl_rows(train_path),
+        validation=_count_jsonl_rows(validation_path),
+        test=_count_jsonl_rows(test_path),
+    )
+
+
+def _load_latest_evaluation_summary(export_dir: Path) -> Optional[DatasetCardEvaluation]:
+    evaluation_dir = export_dir / "evaluation"
+    if not evaluation_dir.is_dir():
+        return None
+
+    reports = sorted(
+        evaluation_dir.glob("*_evaluation_report.json"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    for report_path in reports:
+        try:
+            report = EvaluationReport.model_validate_json(
+                report_path.read_text(encoding="utf-8")
+            )
+        except (ValidationError, json.JSONDecodeError, OSError):
+            continue
+        return DatasetCardEvaluation.from_report(report, source_report=report_path.name)
+
+    return None
 
 
 @app.command()
