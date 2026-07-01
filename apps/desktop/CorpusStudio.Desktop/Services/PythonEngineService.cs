@@ -104,8 +104,14 @@ public sealed class PythonEngineService
                 continue;
             }
 
-            DateTime.TryParse(entry.CreatedAt, out var createdAt);
-            DateTime.TryParse(entry.UpdatedAt, out var updatedAt);
+            if (!DateTime.TryParse(entry.CreatedAt, out var createdAt))
+            {
+                createdAt = DateTime.UtcNow;
+            }
+            if (!DateTime.TryParse(entry.UpdatedAt, out var updatedAt))
+            {
+                updatedAt = createdAt;
+            }
             var project = new DatasetProject(
                 entry.Id,
                 string.IsNullOrWhiteSpace(entry.Name) ? entry.Id : entry.Name,

@@ -160,6 +160,9 @@ def rebuild_index(projects_root: Path, db_path: Optional[Path] = None) -> int:
     connection = open_index(resolved_db)
     try:
         connection.execute("DELETE FROM projects")
+        # Commit the clear immediately so a rebuild that finds zero projects
+        # still prunes stale rows (upsert_project only commits when rows exist).
+        connection.commit()
         count = 0
         for project_dir in _iter_project_dirs(projects_root):
             entry = read_project_entry(project_dir)

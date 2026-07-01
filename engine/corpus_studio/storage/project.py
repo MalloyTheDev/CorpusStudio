@@ -1,7 +1,12 @@
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 from pydantic import BaseModel, Field
+
+# A project id becomes a directory name under the projects root, so restrict it
+# to a safe slug that cannot traverse out of the root (no "/", "\\", or "..").
+_PROJECT_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]*")
 
 
 class SplitSettings(BaseModel):
@@ -20,6 +25,12 @@ class DatasetProject(BaseModel):
 
 
 def create_project(root: Path, project: DatasetProject) -> Path:
+    if not _PROJECT_ID_PATTERN.fullmatch(project.id or ""):
+        raise ValueError(
+            "Project id must start with a lowercase letter or digit and use only "
+            "lowercase letters, digits, underscores, or hyphens."
+        )
+
     project_dir = root / project.id
     if project_dir.exists():
         raise FileExistsError(f"Project already exists: {project_dir}")

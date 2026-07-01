@@ -91,6 +91,19 @@ def test_rebuild_prunes_removed_projects(tmp_path: Path):
     assert {entry.id for entry in list_projects_from_root(root)} == {"alpha"}
 
 
+def test_rebuild_to_empty_prunes_all_projects(tmp_path: Path):
+    root = tmp_path / "projects"
+    alpha_dir = _make_project(root, "alpha", "Alpha", "instruction", 1)
+    rebuild_index(root)
+    assert len(list_projects_from_root(root)) == 1
+
+    # Removing the last project must clear the index; the DELETE has to commit
+    # even when the rebuild finds zero projects to upsert.
+    shutil.rmtree(alpha_dir)
+    assert rebuild_index(root) == 0
+    assert list_projects_from_root(root) == []
+
+
 def test_list_auto_rebuilds_when_index_missing(tmp_path: Path):
     root = tmp_path / "projects"
     _make_project(root, "alpha", "Alpha", "instruction", 2)
