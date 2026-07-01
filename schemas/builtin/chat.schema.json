@@ -2,6 +2,7 @@
   "id": "chat",
   "name": "Chat Messages Dataset",
   "version": "0.1.0",
+  "description": "Multi-turn conversations for chat tuning. Each message has a role (system, user, assistant, or tool) and content.",
   "fields": [
     {
       "name": "messages",
@@ -13,5 +14,13 @@
       "type": "list",
       "required": false
     }
-  ]
+  ],
+  "example": {
+    "messages": [
+      { "role": "system", "content": "Answer like a concise programming tutor." },
+      { "role": "user", "content": "What is recursion?" },
+      { "role": "assistant", "content": "Recursion is when a function solves a problem by calling itself on a smaller version of that problem." }
+    ],
+    "tags": ["programming", "concepts"]
+  }
 }

@@ -30,7 +30,9 @@ class DatasetSchema(BaseModel):
     id: str
     name: str
     version: str
+    description: str | None = None
     fields: list[SchemaField] = Field(default_factory=list)
+    example: dict[str, Any] | None = None
 
 
 class DatasetExample(BaseModel):

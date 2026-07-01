@@ -1,6 +1,6 @@
 # Schema Examples
 
-Corpus Studio v0.1 focuses on four authoring schemas in the desktop app: raw text, instruction, chat, and preference. Each line below is a single JSONL row.
+Corpus Studio ships eight built-in schemas. Each carries a `description` and a valid `example` row; the desktop new-project dialog shows both and pre-fills the editor with the example so the correct format is obvious. Each line below is a single JSONL row.
 
 The current validator checks that each row is a JSON object, required fields are present and non-empty, declared field types match, and chat messages include valid role/content structure.
 
@@ -43,6 +43,46 @@ Required fields: `prompt`, `chosen`, `rejected`
 ```
 
 Use preference rows for DPO, ORPO, reward modeling, or ranking datasets where one answer should be preferred over another.
+
+## Code
+
+Required fields: `task`, `language`, `instruction`, `output`
+
+```json
+{"task":"function-implementation","language":"python","instruction":"Write a function that returns the factorial of a non-negative integer.","input":"","output":"def factorial(n): return 1 if n < 2 else n * factorial(n - 1)","tests":["assert factorial(0) == 1","assert factorial(5) == 120"]}
+```
+
+Use code rows for code-generation fine-tuning. `tests` can hold assertions used to check generated output.
+
+## Image caption
+
+Required fields: `image`, `caption`
+
+```json
+{"image":"images/golden_retriever.jpg","caption":"A golden retriever sitting on a grass lawn in bright sunlight.","tags":["animal","dog"],"license":"CC-BY-4.0"}
+```
+
+Use image-caption rows for vision-language datasets. `image` is a file path relative to the project.
+
+## Retrieval
+
+Required fields: `query`, `positive`
+
+```json
+{"query":"How do I reverse a list in Python?","positive":"Use slicing with a step of -1: reversed_list = original[::-1].","negative":"Python lists are ordered, mutable collections of items.","source":"python_docs"}
+```
+
+Use retrieval rows for embedding or reranker training, pairing a query with a relevant passage and an optional hard negative.
+
+## Evaluation
+
+Required fields: `id`, `prompt`, `expected_answer`
+
+```json
+{"id":"eval-001","prompt":"What is the time complexity of binary search?","expected_answer":"O(log n).","rubric":"Full credit for O(log n); partial credit for mentioning logarithmic time.","category":"algorithms"}
+```
+
+Use evaluation rows for held-out Evaluation Lab test sets. Keep these separate from training data.
 
 ## Validate a row file
 

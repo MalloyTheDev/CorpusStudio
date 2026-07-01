@@ -2,6 +2,7 @@
   "id": "image_caption",
   "name": "Image Caption Dataset",
   "version": "0.1.0",
+  "description": "Image-caption pairs for vision-language training. The image field is a file path relative to the project; caption describes it.",
   "fields": [
     {
       "name": "image",
@@ -23,5 +24,11 @@
       "type": "string",
       "required": false
     }
-  ]
+  ],
+  "example": {
+    "image": "images/golden_retriever.jpg",
+    "caption": "A golden retriever sitting on a grass lawn in bright sunlight.",
+    "tags": ["animal", "dog"],
+    "license": "CC-BY-4.0"
+  }
 }

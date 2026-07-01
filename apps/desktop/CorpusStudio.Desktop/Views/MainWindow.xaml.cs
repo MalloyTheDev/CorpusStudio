@@ -93,6 +93,9 @@ public partial class MainWindow : Window
             ViewModel.SetImportQuarantineItems(_engineService.LoadImportQuarantineItems(createdPath));
             await RefreshQualityAsync(recordHistory: false);
 
+            var template = schemas.FirstOrDefault(schema => schema.Id == dialog.ProjectRequest.SchemaId);
+            ViewModel.ApplyNewProjectTemplate(template?.ExampleText ?? string.Empty);
+
             MessageBox.Show(
                 this,
                 $"Created project at:\n{createdPath}",

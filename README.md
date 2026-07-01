@@ -98,7 +98,7 @@ CorpusStudio
 
 ## Desktop preview
 
-![Corpus Studio desktop v0.1](docs/screenshots/desktop-v0.1.png)
+![Corpus Studio desktop](docs/screenshots/desktop-v0.2.png)
 
 ## Core Local Loop
 
