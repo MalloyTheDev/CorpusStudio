@@ -44,6 +44,7 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Rebuilding project index...");
             var result = await _engineService.RebuildProjectIndexAsync();
             ViewModel.SetProjects(await _engineService.LoadProjectsFromIndexAsync());
             ViewModel.SelectedProject = ViewModel.Projects
@@ -57,6 +58,7 @@ public partial class MainWindow : Window
         finally
         {
             Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
         }
     }
 
@@ -226,6 +228,7 @@ public partial class MainWindow : Window
         finally
         {
             Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
         }
     }
 
@@ -284,6 +287,7 @@ public partial class MainWindow : Window
         finally
         {
             Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
         }
     }
 
@@ -339,6 +343,7 @@ public partial class MainWindow : Window
         finally
         {
             Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
         }
     }
 
@@ -617,6 +622,7 @@ public partial class MainWindow : Window
         finally
         {
             Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
         }
     }
 
@@ -655,6 +661,7 @@ public partial class MainWindow : Window
         finally
         {
             Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
         }
     }
 
@@ -689,6 +696,7 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Running evaluation...");
             ViewModel.SetEvaluationPreflightInProgress();
             var healthReport = await _engineService.CheckBackendHealthAsync(
                 backend,
@@ -726,6 +734,7 @@ public partial class MainWindow : Window
         finally
         {
             Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
         }
     }
 
@@ -764,6 +773,7 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Rerunning evaluation...");
             ViewModel.SetEvaluationRegressionRerunPreflightInProgress(settings);
             var healthReport = await _engineService.CheckBackendHealthAsync(
                 settings.Backend,
@@ -819,6 +829,7 @@ public partial class MainWindow : Window
         finally
         {
             Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
         }
     }
 
@@ -860,6 +871,7 @@ public partial class MainWindow : Window
         finally
         {
             Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
         }
     }
 
@@ -898,6 +910,7 @@ public partial class MainWindow : Window
         finally
         {
             Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
         }
     }
 
@@ -932,6 +945,7 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Running AI Assist...");
             ViewModel.SetAiAssistInProgress();
             var result = await _engineService.RunAiAssistAsync(
                 ViewModel.DraftText,
@@ -963,6 +977,7 @@ public partial class MainWindow : Window
         finally
         {
             Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
         }
     }
 
@@ -1327,6 +1342,7 @@ public partial class MainWindow : Window
         finally
         {
             Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
         }
     }
 
@@ -1355,6 +1371,7 @@ public partial class MainWindow : Window
         finally
         {
             Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
         }
     }
 
@@ -1438,6 +1455,7 @@ public partial class MainWindow : Window
         finally
         {
             Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
         }
     }
 
@@ -1490,6 +1508,7 @@ public partial class MainWindow : Window
         finally
         {
             Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
         }
     }
 
@@ -2090,6 +2109,7 @@ public partial class MainWindow : Window
         finally
         {
             Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
         }
     }
 }
