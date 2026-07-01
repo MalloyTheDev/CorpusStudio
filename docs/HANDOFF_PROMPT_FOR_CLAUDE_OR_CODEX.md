@@ -75,12 +75,14 @@ Lab config export surfaces. They should be hardened in place:
 The previous top-five board is complete: versioned reviewed-fix tracking,
 interactive Evaluation drilldowns with saved failure filters, an optional
 SQLite-backed project index, opt-in Ollama integration tests, and a public-repo
-release checklist. Next candidates:
+release checklist. Desktop-side unit tests now cover the project-local JSON
+persistence (reviewed fixes, rewrite batches, saved failure filters) and run in
+CI on Windows via `.github/workflows/desktop-tests.yml`. Next candidates:
 
 1. Wire the desktop project list to the optional SQLite index for faster
    load/filter on large project sets (`storage/index.py`, `project-list` CLI).
-2. Add desktop-side automated tests for the project-local JSON workflow state
-   (reviewed fixes, rewrite batches, saved failure filters, queue views).
+2. Extend desktop test coverage to AI Assist queue views and the ViewModel
+   filter/reconcile logic.
 3. Add production-grade synthetic pattern clustering in the AI Assist Lab.
 4. Add target-specific DPO/reward-model export formats.
 5. Keep full training launch, logs, checkpoints, and resume support out of the

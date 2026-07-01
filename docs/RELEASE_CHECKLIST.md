@@ -20,6 +20,8 @@ in the release PR.
 - [ ] Engine tests pass: `cd engine && .\.venv\Scripts\python.exe -m pytest -q --basetemp .pytest-tmp`.
 - [ ] Desktop builds clean (0 warnings, 0 errors):
       `dotnet build apps/desktop/CorpusStudio.Desktop.sln`.
+- [ ] Desktop unit tests pass:
+      `dotnet test apps/desktop/CorpusStudio.Desktop.Tests/CorpusStudio.Desktop.Tests.csproj`.
 - [ ] `ruff check engine` is clean (or documented).
 - [ ] CI is green on the release commit (`.github/workflows/engine-tests.yml`).
 

@@ -58,6 +58,13 @@ dotnet build apps\desktop\CorpusStudio.Desktop.sln
 .\apps\desktop\CorpusStudio.Desktop\bin\Debug\net8.0-windows\CorpusStudio.Desktop.exe
 ```
 
+Run the desktop unit tests (project-local JSON persistence logic — reviewed
+fixes, rewrite batches, and saved failure filters):
+
+```powershell
+dotnet test apps\desktop\CorpusStudio.Desktop.Tests\CorpusStudio.Desktop.Tests.csproj
+```
+
 The desktop app uses the local Python engine. If the app cannot find Python or the engine, confirm `.env` contains:
 
 ```text

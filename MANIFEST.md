@@ -6,6 +6,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `.env.example`
 - `.github/ISSUE_TEMPLATE/bug_report.md`
 - `.github/ISSUE_TEMPLATE/feature_request.md`
+- `.github/workflows/desktop-tests.yml`
 - `.github/workflows/engine-tests.yml`
 - `.gitignore`
 - `CODE_OF_CONDUCT.md`
@@ -56,6 +57,11 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml`
 - `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/AiAssistRewriteBatchServiceTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/CorpusStudio.Desktop.Tests.csproj`
+- `apps/desktop/CorpusStudio.Desktop.Tests/EvaluationFailureFilterServiceTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/ReviewedFixServiceTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/TempProjectDirectory.cs`
 - `apps/desktop/CorpusStudio.Desktop.sln`
 - `apps/desktop/CorpusStudio.Desktop.sln.README.md`
 - `apps/desktop/README.md`
