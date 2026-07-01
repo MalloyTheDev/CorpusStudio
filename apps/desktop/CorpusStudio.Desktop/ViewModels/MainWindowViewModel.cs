@@ -106,6 +106,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         "Rejected import rows appear here after a mixed import.";
     private string _settingsSummary = "Settings load when the app starts.";
     private string _projectIndexSummary = "Projects list from local files. Rebuild the index to list from SQLite.";
+    private bool _isBusy;
+    private string _busyStatus = "Working...";
     private string _labSettingsSummary = "Lab backend settings can be saved per project.";
     private DatasetProjectListItem? _selectedProject;
     private SavedExampleItem? _selectedExample;
@@ -921,6 +923,30 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         DraftText = exampleText;
         ValidationSummary = "Loaded the schema's example row. Edit the values, then Save Example.";
+    }
+
+    public bool IsBusy
+    {
+        get => _isBusy;
+        private set => SetField(ref _isBusy, value);
+    }
+
+    public string BusyStatus
+    {
+        get => _busyStatus;
+        private set => SetField(ref _busyStatus, value);
+    }
+
+    /// <summary>Show the blocking busy overlay with a status message.</summary>
+    public void SetBusy(string status)
+    {
+        BusyStatus = string.IsNullOrWhiteSpace(status) ? "Working..." : status;
+        IsBusy = true;
+    }
+
+    public void ClearBusy()
+    {
+        IsBusy = false;
     }
 
     public void SetSettings(DesktopSettings settings)

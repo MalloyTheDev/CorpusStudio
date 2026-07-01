@@ -27,6 +27,9 @@ The current v0.1 workflow supports:
 - local settings inspection and per-project lab backend settings persistence
 - polished desktop shell styling, a workflow stage strip, and a wired sidebar
   Export Center affordance
+- a blocking busy overlay with progress feedback during long engine/model runs
+  (evaluation, rerun, AI Assist, index rebuild) that prevents duplicate runs
+- empty-state placeholders on the Examples and Evaluation result lists
 
 Build and launch from the repository root:
 

@@ -19,6 +19,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `TASKS.md`
 - `apps/desktop/CorpusStudio.Desktop/App.xaml`
 - `apps/desktop/CorpusStudio.Desktop/App.xaml.cs`
+- `apps/desktop/CorpusStudio.Desktop/Converters.cs`
 - `apps/desktop/CorpusStudio.Desktop/CorpusStudio.Desktop.csproj`
 - `apps/desktop/CorpusStudio.Desktop/Models/AiAssistRunResult.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/AiAssistQueueView.cs`

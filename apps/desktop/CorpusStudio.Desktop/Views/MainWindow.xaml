@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:CorpusStudio.Desktop.ViewModels"
+        xmlns:local="clr-namespace:CorpusStudio.Desktop"
         Title="Corpus Studio"
         Height="800"
         Width="1180"
@@ -201,6 +202,20 @@
             <Setter Property="Padding" Value="10,8" />
             <Setter Property="Margin" Value="0,0,0,8" />
         </Style>
+
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <local:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVis" />
+
+        <Style x:Key="ListEmptyPlaceholderStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="TextAlignment" Value="Center" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="16" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+        </Style>
     </Window.Resources>
 
     <Grid Background="{StaticResource AppBackgroundBrush}">
@@ -368,11 +383,16 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
 
-                            <ListBox Grid.Column="0"
-                                     AutomationProperties.AutomationId="ExamplesListBox"
-                                     ItemsSource="{Binding Examples}"
-                                     SelectedItem="{Binding SelectedExample, Mode=TwoWay}"
-                                     DisplayMemberPath="DisplayName" />
+                            <Grid Grid.Column="0">
+                                <ListBox x:Name="ExamplesListBox"
+                                         AutomationProperties.AutomationId="ExamplesListBox"
+                                         ItemsSource="{Binding Examples}"
+                                         SelectedItem="{Binding SelectedExample, Mode=TwoWay}"
+                                         DisplayMemberPath="DisplayName" />
+                                <TextBlock Style="{StaticResource ListEmptyPlaceholderStyle}"
+                                           Text="No examples yet. Author one in Writing Studio, or import a JSONL file."
+                                           Visibility="{Binding HasItems, ElementName=ExamplesListBox, Converter={StaticResource InverseBoolToVis}}" />
+                            </Grid>
 
                             <TextBox Grid.Column="1"
                                      AutomationProperties.AutomationId="SelectedExampleTextBox"
@@ -868,12 +888,16 @@
                                         </Border>
                                     </StackPanel>
 
-                                    <ListBox Grid.Row="3"
-                                             Grid.Column="0"
-                                             AutomationProperties.AutomationId="EvaluationResultsListBox"
-                                             ItemsSource="{Binding EvaluationResults}"
-                                             SelectedItem="{Binding SelectedEvaluationExampleResult, Mode=TwoWay}"
-                                             DisplayMemberPath="DisplayName" />
+                                    <Grid Grid.Row="3" Grid.Column="0">
+                                        <ListBox x:Name="EvaluationResultsListBox"
+                                                 AutomationProperties.AutomationId="EvaluationResultsListBox"
+                                                 ItemsSource="{Binding EvaluationResults}"
+                                                 SelectedItem="{Binding SelectedEvaluationExampleResult, Mode=TwoWay}"
+                                                 DisplayMemberPath="DisplayName" />
+                                        <TextBlock Style="{StaticResource ListEmptyPlaceholderStyle}"
+                                                   Text="Run an evaluation or reload a report to see per-example results."
+                                                   Visibility="{Binding HasItems, ElementName=EvaluationResultsListBox, Converter={StaticResource InverseBoolToVis}}" />
+                                    </Grid>
 
                                     <TextBox Grid.Row="3"
                                              Grid.Column="1"
@@ -1521,6 +1545,28 @@
                          HorizontalScrollBarVisibility="Auto"
                          VerticalScrollBarVisibility="Auto" />
             </StackPanel>
+        </Border>
+        <Border Grid.ColumnSpan="3"
+                Panel.ZIndex="100"
+                Background="#73101828"
+                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}">
+            <Border Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource PanelBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="28,22"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center">
+                <StackPanel>
+                    <TextBlock AutomationProperties.AutomationId="BusyStatusTextBlock"
+                               Text="{Binding BusyStatus, Mode=OneWay}"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource HeadingTextBrush}"
+                               HorizontalAlignment="Center"
+                               Margin="0,0,0,14" />
+                    <ProgressBar IsIndeterminate="True" Width="240" Height="6" />
+                </StackPanel>
+            </Border>
         </Border>
     </Grid>
 </Window>
