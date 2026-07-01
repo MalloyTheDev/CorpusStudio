@@ -15,7 +15,11 @@ from corpus_studio.evaluation.evaluator import (
     run_evaluation,
 )
 from corpus_studio.exporters.jsonl_exporter import export_jsonl, write_jsonl
-from corpus_studio.exporters.preference_exporter import export_preference
+from corpus_studio.exporters.preference_exporter import (
+    analyze_preference_pairs,
+    drop_degenerate_pairs,
+    export_preference,
+)
 from corpus_studio.importers.jsonl_importer import read_jsonl
 from corpus_studio.importers.jsonl_preview import preview_jsonl_import
 from corpus_studio.model_backends.base import BackendHealthReport, BackendModelListReport
@@ -93,6 +97,33 @@ def _build_split_warnings(validation_count: int, test_count: int) -> list[str]:
                 f"{split_name} split has only 1 row. Add examples or adjust split ratios before relying on scores."
             )
 
+    return warnings
+
+
+def _build_preference_warnings(issues, drop_degenerate: bool, dropped_count: int) -> list[str]:
+    warnings: list[str] = []
+    if issues.identical:
+        warnings.append(
+            f"{issues.identical} pair(s) have identical chosen and rejected text "
+            "(zero training signal)."
+        )
+    empty = issues.empty_chosen + issues.empty_rejected
+    if empty:
+        warnings.append(f"{empty} pair(s) have an empty chosen or rejected side.")
+    if issues.low_contrast:
+        warnings.append(
+            f"{issues.low_contrast} pair(s) are low-contrast (chosen and rejected "
+            "are very similar)."
+        )
+    if drop_degenerate and dropped_count:
+        warnings.append(
+            f"Dropped {dropped_count} degenerate pair(s) before export (--drop-degenerate)."
+        )
+    elif issues.degenerate and not drop_degenerate:
+        warnings.append(
+            f"{issues.degenerate} degenerate pair(s) were exported; re-run with "
+            "--drop-degenerate to exclude them."
+        )
     return warnings
 
 
@@ -580,14 +611,24 @@ def preference_export(
     input_path: Path,
     output_path: Path = typer.Option(..., "--output-path", help="Write the reshaped JSONL."),
     export_format: str = typer.Option("dpo", "--format", help="Target format: dpo, kto, or reward."),
+    drop_degenerate: bool = typer.Option(
+        False,
+        "--drop-degenerate",
+        help="Exclude empty or identical chosen/rejected pairs before export.",
+    ),
 ):
     """Export preference rows into a trainer-ready format (DPO/KTO/reward)."""
     report = validate_jsonl_file(input_path, "preference")
     _exit_if_invalid(report)
 
     rows = list(read_jsonl(input_path))
+    pair_issues = analyze_preference_pairs(rows)
+
+    export_rows = drop_degenerate_pairs(rows) if drop_degenerate else rows
+    dropped = len(rows) - len(export_rows)
+
     try:
-        exported = export_preference(rows, export_format)
+        exported = export_preference(export_rows, export_format)
     except ValueError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
@@ -598,8 +639,12 @@ def preference_export(
             {
                 "format": export_format.strip().lower(),
                 "input_rows": len(rows),
+                "exported_source_rows": len(export_rows),
                 "output_rows": len(exported),
+                "dropped_degenerate": dropped,
+                "pair_issues": pair_issues.model_dump(),
                 "output_path": str(output_path),
+                "warnings": _build_preference_warnings(pair_issues, drop_degenerate, dropped),
             },
             indent=2,
         )

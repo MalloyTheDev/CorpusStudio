@@ -175,7 +175,9 @@ without trainer dependencies.
   triage-to-rewrite and batch rewrite handoff with persistent resume batches,
   preference-pair ranking/judge handoff, preference ranking export, and visible batch judge preparation
   exist, along with near-duplicate synthetic-pattern clustering and
-  target-specific DPO/KTO/reward preference exports.
+  target-specific DPO/KTO/reward preference exports with a preference-integrity
+  gate (counts of empty, identical, and low-contrast pairs, plus an opt-in
+  `--drop-degenerate` that excludes unusable pairs before export).
 - v0.4: Training config generation for Axolotl, TRL, Unsloth, Hugging Face
   Trainer, and LLaMA-Factory; first-pass engine and desktop export exists.
 - v0.5: Local LoRA/adapters launcher with logs, checkpoints, resume support,
