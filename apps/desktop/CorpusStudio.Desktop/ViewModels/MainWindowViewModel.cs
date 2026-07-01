@@ -1170,6 +1170,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 $"Status: {health}",
         };
 
+        if (report.SyntheticPatternClusters.Count > 0)
+        {
+            lines.Add("");
+            lines.Add($"Synthetic pattern clusters: {report.SyntheticPatternClusters.Count} (near-duplicate families)");
+            lines.AddRange(report.SyntheticPatternClusters.Take(3).Select(cluster => $"- {cluster.DisplayName}"));
+        }
+
         if (report.SyntheticPatternIssues.Count > 0)
         {
             lines.Add("");

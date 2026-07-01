@@ -24,6 +24,18 @@ class SyntheticPatternIssue(BaseModel):
     message: str
     row_numbers: list[int] = Field(default_factory=list)
     suggestion: str
+    pattern: str = ""
+
+
+class SyntheticPatternCluster(BaseModel):
+    """A group of near-duplicate synthetic patterns of the same kind."""
+
+    kind: str
+    label: str
+    severity: str
+    member_count: int
+    row_numbers: list[int] = Field(default_factory=list)
+    suggestion: str
 
 
 class QualityReport(BaseModel):
@@ -36,6 +48,7 @@ class QualityReport(BaseModel):
     synthetic_pattern_count: int = 0
     synthetic_pattern_warnings: list[str] = Field(default_factory=list)
     synthetic_pattern_issues: list[SyntheticPatternIssue] = Field(default_factory=list)
+    synthetic_pattern_clusters: list[SyntheticPatternCluster] = Field(default_factory=list)
 
 
 def build_basic_quality_report(rows: list[dict]) -> QualityReport:
@@ -47,6 +60,7 @@ def build_basic_quality_report(rows: list[dict]) -> QualityReport:
     low_information_count = 0
     synthetic_pattern_issues = _synthetic_pattern_issues(rows)
     synthetic_pattern_warnings = [issue.message for issue in synthetic_pattern_issues]
+    synthetic_pattern_clusters = cluster_synthetic_pattern_issues(synthetic_pattern_issues)
 
     for row in rows:
         exact_signature = json.dumps(row, sort_keys=True, separators=(",", ":"), default=str)
@@ -75,6 +89,7 @@ def build_basic_quality_report(rows: list[dict]) -> QualityReport:
         synthetic_pattern_count=len(synthetic_pattern_issues),
         synthetic_pattern_warnings=synthetic_pattern_warnings,
         synthetic_pattern_issues=synthetic_pattern_issues,
+        synthetic_pattern_clusters=synthetic_pattern_clusters,
     )
 
 
@@ -137,6 +152,7 @@ def _synthetic_pattern_issues(rows: list[dict]) -> list[SyntheticPatternIssue]:
             issues.append(
                 SyntheticPatternIssue(
                     kind="generic_phrase",
+                    pattern=phrase,
                     severity="medium",
                     message=(
                         f"generic synthetic phrase '{phrase}' appears in row(s): "
@@ -158,6 +174,7 @@ def _synthetic_pattern_issues(rows: list[dict]) -> list[SyntheticPatternIssue]:
             issues.append(
                 SyntheticPatternIssue(
                     kind="repeated_opening",
+                    pattern=opening,
                     severity=_severity_for_repetition(len(row_numbers), rows),
                     message=(
                         f"repeated opening '{opening}' appears in row(s): "
@@ -179,6 +196,7 @@ def _synthetic_pattern_issues(rows: list[dict]) -> list[SyntheticPatternIssue]:
             issues.append(
                 SyntheticPatternIssue(
                     kind="repeated_closing",
+                    pattern=closing,
                     severity=_severity_for_repetition(len(row_numbers), rows),
                     message=(
                         f"repeated closing '{closing}' appears in row(s): "
@@ -215,3 +233,75 @@ def _format_row_numbers(row_numbers: list[int]) -> str:
         return f"{preview}, +{len(row_numbers) - 8} more"
 
     return preview
+
+
+_SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2}
+SYNTHETIC_CLUSTER_SIMILARITY = 0.5
+
+
+def _pattern_tokens(pattern: str) -> set[str]:
+    return set(pattern.split())
+
+
+def _token_jaccard(left: set[str], right: set[str]) -> float:
+    if not left and not right:
+        return 1.0
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
+
+
+def _max_severity(severities: list[str]) -> str:
+    best = "low"
+    for severity in severities:
+        if _SEVERITY_ORDER.get(severity, 0) > _SEVERITY_ORDER.get(best, 0):
+            best = severity
+    return best
+
+
+def cluster_synthetic_pattern_issues(
+    issues: list[SyntheticPatternIssue],
+    similarity_threshold: float = SYNTHETIC_CLUSTER_SIMILARITY,
+) -> list[SyntheticPatternCluster]:
+    """Merge same-kind synthetic issues whose patterns overlap into clusters.
+
+    Near-duplicate templates (e.g. openings that differ by a word or two) are
+    grouped by token-set Jaccard similarity so a family of related issues shows
+    up as one cluster instead of many fragmented warnings.
+    """
+    clusters: list[SyntheticPatternCluster] = []
+
+    for kind in dict.fromkeys(issue.kind for issue in issues):
+        kind_issues = [issue for issue in issues if issue.kind == kind]
+        merged = [False] * len(kind_issues)
+
+        for index, issue in enumerate(kind_issues):
+            if merged[index]:
+                continue
+
+            members = [issue]
+            merged[index] = True
+            tokens = _pattern_tokens(issue.pattern)
+
+            for other_index in range(index + 1, len(kind_issues)):
+                if merged[other_index]:
+                    continue
+                other = kind_issues[other_index]
+                if _token_jaccard(tokens, _pattern_tokens(other.pattern)) >= similarity_threshold:
+                    members.append(other)
+                    merged[other_index] = True
+
+            row_numbers = sorted({row for member in members for row in member.row_numbers})
+            clusters.append(
+                SyntheticPatternCluster(
+                    kind=kind,
+                    label=issue.pattern or issue.message,
+                    severity=_max_severity([member.severity for member in members]),
+                    member_count=len(members),
+                    row_numbers=row_numbers,
+                    suggestion=issue.suggestion,
+                )
+            )
+
+    clusters.sort(key=lambda cluster: (-len(cluster.row_numbers), cluster.kind, cluster.label))
+    return clusters
