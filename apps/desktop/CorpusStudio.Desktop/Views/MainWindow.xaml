@@ -3,25 +3,153 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:CorpusStudio.Desktop.ViewModels"
         Title="Corpus Studio"
-        Height="720"
+        Height="800"
         Width="1180"
-        MinHeight="600"
-        MinWidth="960">
+        MinHeight="680"
+        MinWidth="960"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display">
     <Window.DataContext>
         <vm:MainWindowViewModel />
     </Window.DataContext>
 
-    <Grid>
+    <Window.Resources>
+        <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F4F7FB" />
+        <SolidColorBrush x:Key="PanelBrush" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="PanelBorderBrush" Color="#D8E0EA" />
+        <SolidColorBrush x:Key="SidebarBrush" Color="#101828" />
+        <SolidColorBrush x:Key="PrimaryBrush" Color="#2563EB" />
+        <SolidColorBrush x:Key="PrimaryHoverBrush" Color="#1D4ED8" />
+        <SolidColorBrush x:Key="MutedTextBrush" Color="#64748B" />
+        <SolidColorBrush x:Key="ControlBackgroundBrush" Color="#F8FAFC" />
+
+        <Style TargetType="{x:Type Button}">
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="Padding" Value="10,5" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="#102033" />
+            <Setter Property="Background" Value="#F8FAFC" />
+            <Setter Property="BorderBrush" Value="#B8C4D4" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border x:Name="ButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#EEF4FF" />
+                                <Setter Property="BorderBrush" Value="#93B4F8" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#DBEAFE" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#94A3B8" />
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#EEF2F7" />
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#D8E0EA" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="{x:Type TextBox}">
+            <Setter Property="Background" Value="{StaticResource ControlBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="#CAD5E3" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="7,5" />
+            <Setter Property="SelectionBrush" Value="#BBD3FF" />
+        </Style>
+
+        <Style TargetType="{x:Type ComboBox}">
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="Padding" Value="6,4" />
+            <Setter Property="Background" Value="{StaticResource ControlBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="#CAD5E3" />
+        </Style>
+
+        <Style TargetType="{x:Type ListBox}">
+            <Setter Property="Background" Value="{StaticResource ControlBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="#CAD5E3" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="4" />
+        </Style>
+
+        <Style TargetType="{x:Type TabControl}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+
+        <Style TargetType="{x:Type TabItem}">
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="Foreground" Value="#475569" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type TabItem}">
+                        <Border x:Name="TabBorder"
+                                Background="#E8EEF6"
+                                BorderBrush="#D2DCE9"
+                                BorderThickness="1"
+                                CornerRadius="6,6,0,0"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter ContentSource="Header"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="{StaticResource PanelBrush}" />
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource PanelBorderBrush}" />
+                                <Setter Property="Foreground" Value="#0F172A" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="StagePillStyle" TargetType="{x:Type Border}">
+            <Setter Property="Background" Value="#EEF4FF" />
+            <Setter Property="BorderBrush" Value="#C7D7FE" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="9,4" />
+            <Setter Property="Margin" Value="0,0,6,6" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Background="{StaticResource AppBackgroundBrush}">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="260" />
+            <ColumnDefinition Width="270" />
             <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="320" />
+            <ColumnDefinition Width="340" />
         </Grid.ColumnDefinitions>
 
-        <Border Grid.Column="0" BorderBrush="#DDD" BorderThickness="0,0,1,0" Padding="16">
+        <Border Grid.Column="0"
+                Background="{StaticResource SidebarBrush}"
+                BorderBrush="#1F2937"
+                BorderThickness="0,0,1,0"
+                Padding="18">
             <StackPanel>
-                <TextBlock Text="Corpus Studio" FontSize="24" FontWeight="Bold" />
-                <TextBlock Text="Dataset Creation Studio" Margin="0,4,0,24" Opacity="0.7" />
+                <TextBlock Text="Corpus Studio"
+                           FontSize="24"
+                           FontWeight="Bold"
+                           Foreground="#F8FAFC" />
+                <TextBlock Text="Dataset Creation Studio"
+                           Margin="0,4,0,24"
+                           Foreground="#CBD5E1" />
 
                 <Button AutomationProperties.AutomationId="NewDatasetProjectButton"
                         Content="New Dataset Project"
@@ -31,9 +159,15 @@
                         Content="Import Dataset"
                         Margin="0,0,0,8"
                         Click="ImportDatasetButton_Click" />
-                <Button Content="Export Center" Margin="0,0,0,24" />
+                <Button AutomationProperties.AutomationId="ExportCenterButton"
+                        Content="Export Center"
+                        Margin="0,0,0,24"
+                        Click="ExportCenterButton_Click" />
 
-                <TextBlock Text="Projects" FontWeight="Bold" Margin="0,0,0,8" />
+                <TextBlock Text="Projects"
+                           FontWeight="Bold"
+                           Foreground="#E2E8F0"
+                           Margin="0,0,0,8" />
                 <ListBox AutomationProperties.AutomationId="ProjectsListBox"
                          ItemsSource="{Binding Projects}"
                          SelectedItem="{Binding SelectedProject, Mode=TwoWay}"
@@ -42,17 +176,77 @@
             </StackPanel>
         </Border>
 
-        <Border Grid.Column="1" Padding="20">
+        <Border Grid.Column="1"
+                Padding="20"
+                Background="{StaticResource AppBackgroundBrush}">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <StackPanel Grid.Row="0" Margin="0,0,0,16">
-                    <TextBlock Text="{Binding ActiveProjectTitle}" FontSize="22" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding ActiveSchemaDescription}" Opacity="0.7" />
-                </StackPanel>
+                <Border Grid.Row="0"
+                        Background="{StaticResource PanelBrush}"
+                        BorderBrush="{StaticResource PanelBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="16"
+                        Margin="0,0,0,14">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="{Binding ActiveProjectTitle}"
+                                       FontSize="22"
+                                       FontWeight="SemiBold"
+                                       Foreground="#0F172A" />
+                            <TextBlock Text="{Binding ActiveSchemaDescription}"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap" />
+                            <WrapPanel Margin="0,10,0,0">
+                                <Border Style="{StaticResource StagePillStyle}">
+                                    <TextBlock Text="Dataset" Foreground="#1D4ED8" FontWeight="SemiBold" />
+                                </Border>
+                                <Border Style="{StaticResource StagePillStyle}">
+                                    <TextBlock Text="Validate" Foreground="#1D4ED8" FontWeight="SemiBold" />
+                                </Border>
+                                <Border Style="{StaticResource StagePillStyle}">
+                                    <TextBlock Text="Split" Foreground="#1D4ED8" FontWeight="SemiBold" />
+                                </Border>
+                                <Border Style="{StaticResource StagePillStyle}">
+                                    <TextBlock Text="Evaluate" Foreground="#1D4ED8" FontWeight="SemiBold" />
+                                </Border>
+                                <Border Style="{StaticResource StagePillStyle}">
+                                    <TextBlock Text="Assist" Foreground="#1D4ED8" FontWeight="SemiBold" />
+                                </Border>
+                                <Border Style="{StaticResource StagePillStyle}">
+                                    <TextBlock Text="Export" Foreground="#1D4ED8" FontWeight="SemiBold" />
+                                </Border>
+                                <Border Style="{StaticResource StagePillStyle}">
+                                    <TextBlock Text="Train Config" Foreground="#1D4ED8" FontWeight="SemiBold" />
+                                </Border>
+                            </WrapPanel>
+                        </StackPanel>
+                        <Border Grid.Column="1"
+                                Background="#ECFDF5"
+                                BorderBrush="#BBF7D0"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Padding="12,8"
+                                Margin="16,0,0,0"
+                                VerticalAlignment="Top">
+                            <StackPanel>
+                                <TextBlock Text="Local-first"
+                                           FontWeight="SemiBold"
+                                           Foreground="#166534" />
+                                <TextBlock Text="Files stay inspectable"
+                                           Foreground="#166534" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Border>
 
                 <TabControl Grid.Row="1">
                     <TabItem x:Name="WritingStudioTab" Header="Writing Studio">
@@ -480,6 +674,7 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="*" />
                                         <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="260" />
@@ -507,18 +702,73 @@
                                     <WrapPanel Grid.Row="2"
                                                Grid.ColumnSpan="2"
                                                Margin="0,0,0,6">
-                                        <TextBlock Text="Queue"
+                                        <TextBlock Text="Status"
                                                    VerticalAlignment="Center"
                                                    Margin="0,0,6,0" />
                                         <ComboBox AutomationProperties.AutomationId="EvaluationResultFilterComboBox"
                                                   ItemsSource="{Binding EvaluationResultFilterOptions}"
                                                   SelectedItem="{Binding EvaluationResultFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                  Width="132"
+                                                  Width="120"
+                                                  Margin="0,0,10,0" />
+                                        <TextBlock Text="Tag"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,6,0" />
+                                        <ComboBox AutomationProperties.AutomationId="EvaluationTagFilterComboBox"
+                                                  ItemsSource="{Binding EvaluationTagFilterOptions}"
+                                                  SelectedItem="{Binding EvaluationTagFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Width="120"
+                                                  Margin="0,0,10,0" />
+                                        <TextBlock Text="Reason"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,6,0" />
+                                        <ComboBox AutomationProperties.AutomationId="EvaluationFailureReasonFilterComboBox"
+                                                  ItemsSource="{Binding EvaluationFailureReasonFilterOptions}"
+                                                  SelectedItem="{Binding EvaluationFailureReasonFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Width="150"
+                                                  Margin="0,0,10,0" />
+                                        <TextBlock Text="Band"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,6,0" />
+                                        <ComboBox AutomationProperties.AutomationId="EvaluationScoreBandFilterComboBox"
+                                                  ItemsSource="{Binding EvaluationScoreBandFilterOptions}"
+                                                  SelectedItem="{Binding EvaluationScoreBandFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Width="90"
                                                   Margin="0,0,10,0" />
                                         <TextBlock AutomationProperties.AutomationId="EvaluationResultsSummaryTextBlock"
                                                    Text="{Binding EvaluationResultsSummary, Mode=OneWay}"
                                                    VerticalAlignment="Center"
-                                                   TextWrapping="Wrap" />
+                                                   TextWrapping="Wrap"
+                                                   Width="360"
+                                                   Margin="0,6,0,0" />
+                                        <TextBlock Text="Saved filter"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,6,6,0" />
+                                        <TextBox AutomationProperties.AutomationId="EvaluationFailureFilterNameTextBox"
+                                                 Text="{Binding EvaluationFailureFilterName, UpdateSourceTrigger=PropertyChanged}"
+                                                 Width="120"
+                                                 Margin="0,6,8,0" />
+                                        <ComboBox AutomationProperties.AutomationId="EvaluationFailureFiltersComboBox"
+                                                  ItemsSource="{Binding EvaluationFailureFilters}"
+                                                  SelectedItem="{Binding SelectedEvaluationFailureFilter, Mode=TwoWay}"
+                                                  DisplayMemberPath="DisplayName"
+                                                  Width="180"
+                                                  Margin="0,6,8,0" />
+                                        <Button AutomationProperties.AutomationId="SaveEvaluationFailureFilterButton"
+                                                Content="Save Filter"
+                                                Width="96"
+                                                Margin="0,6,8,0"
+                                                Click="SaveEvaluationFailureFilterButton_Click" />
+                                        <Button AutomationProperties.AutomationId="ApplyEvaluationFailureFilterButton"
+                                                Content="Apply Filter"
+                                                Width="96"
+                                                Margin="0,6,8,0"
+                                                Click="ApplyEvaluationFailureFilterButton_Click" />
+                                        <TextBlock AutomationProperties.AutomationId="EvaluationFailureFilterSummaryTextBlock"
+                                                   Text="{Binding EvaluationFailureFilterSummary, Mode=OneWay}"
+                                                   VerticalAlignment="Center"
+                                                   TextWrapping="Wrap"
+                                                   Width="320"
+                                                   Margin="0,6,0,0" />
                                     </WrapPanel>
 
                                     <ListBox Grid.Row="3"
@@ -578,6 +828,37 @@
                                                 Width="108"
                                                 Click="SaveEvaluationReviewButton_Click" />
                                     </WrapPanel>
+
+                                    <StackPanel Grid.Row="5"
+                                                Grid.ColumnSpan="2"
+                                                Margin="0,10,0,0">
+                                        <TextBlock Text="Reviewed Fixes"
+                                                   FontWeight="SemiBold"
+                                                   Margin="0,0,0,4" />
+                                        <TextBlock AutomationProperties.AutomationId="ReviewedFixSummaryTextBlock"
+                                                   Text="{Binding ReviewedFixSummary, Mode=OneWay}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,0,0,6" />
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <ListBox Grid.Column="0"
+                                                     AutomationProperties.AutomationId="ReviewedFixesListBox"
+                                                     ItemsSource="{Binding ReviewedFixes}"
+                                                     SelectedItem="{Binding SelectedReviewedFix, Mode=TwoWay}"
+                                                     DisplayMemberPath="DisplayName"
+                                                     MaxHeight="120" />
+                                            <Button Grid.Column="1"
+                                                    AutomationProperties.AutomationId="ReopenReviewedFixButton"
+                                                    Content="Reopen Fix"
+                                                    Width="108"
+                                                    VerticalAlignment="Top"
+                                                    Margin="8,0,0,0"
+                                                    Click="ResumeReviewedFixButton_Click" />
+                                        </Grid>
+                                    </StackPanel>
                                 </Grid>
                             </Grid>
                         </Grid>
@@ -697,7 +978,10 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="1.4*" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="120" />
                                 </Grid.RowDefinitions>
 
                                 <TextBox Grid.Row="0"
@@ -786,6 +1070,32 @@
                                          AutomationProperties.AutomationId="AiAssistReviewQueueListBox"
                                          ItemsSource="{Binding AiAssistReviewQueue}"
                                          SelectedItem="{Binding SelectedAiAssistReviewQueueItem, Mode=TwoWay}"
+                                         DisplayMemberPath="DisplayName"
+                                         MinHeight="140" />
+
+                                <TextBlock Grid.Row="5"
+                                           Text="Rewrite Batches"
+                                           FontWeight="SemiBold"
+                                           Margin="0,8,0,4" />
+
+                                <WrapPanel Grid.Row="6"
+                                           Margin="0,0,0,6">
+                                    <Button AutomationProperties.AutomationId="ResumeAiAssistRewriteBatchButton"
+                                            Content="Resume Batch"
+                                            Width="112"
+                                            Margin="0,0,8,0"
+                                            Click="ResumeAiAssistRewriteBatchButton_Click" />
+                                    <TextBlock AutomationProperties.AutomationId="AiAssistRewriteBatchSummaryTextBlock"
+                                               Text="{Binding AiAssistRewriteBatchSummary, Mode=OneWay}"
+                                               Width="188"
+                                               TextWrapping="Wrap"
+                                               VerticalAlignment="Center" />
+                                </WrapPanel>
+
+                                <ListBox Grid.Row="7"
+                                         AutomationProperties.AutomationId="AiAssistRewriteBatchesListBox"
+                                         ItemsSource="{Binding AiAssistRewriteBatches}"
+                                         SelectedItem="{Binding SelectedAiAssistRewriteBatch, Mode=TwoWay}"
                                          DisplayMemberPath="DisplayName" />
                             </Grid>
 
@@ -1002,9 +1312,16 @@
             </Grid>
         </Border>
 
-        <Border Grid.Column="2" BorderBrush="#DDD" BorderThickness="1,0,0,0" Padding="16">
+        <Border Grid.Column="2"
+                Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource PanelBorderBrush}"
+                BorderThickness="1,0,0,0"
+                Padding="18">
             <StackPanel>
-                <TextBlock Text="Validation" FontSize="18" FontWeight="Bold" />
+                <TextBlock Text="Validation"
+                           FontSize="18"
+                           FontWeight="Bold"
+                           Foreground="#0F172A" />
                 <TextBox AutomationProperties.AutomationId="ValidationSummaryTextBox"
                          Text="{Binding ValidationSummary, Mode=OneWay}"
                          Margin="0,8,0,8"
@@ -1012,7 +1329,9 @@
                          IsReadOnly="True"
                          TextWrapping="Wrap"
                          VerticalScrollBarVisibility="Auto" />
-                <TextBlock Text="Issues" FontWeight="SemiBold" />
+                <TextBlock Text="Issues"
+                           FontWeight="SemiBold"
+                           Foreground="#334155" />
                 <ListBox AutomationProperties.AutomationId="ValidationIssuesListBox"
                          ItemsSource="{Binding ValidationIssues}"
                          SelectedItem="{Binding SelectedValidationIssue, Mode=TwoWay}"
@@ -1021,7 +1340,10 @@
                          Height="96"
                          Margin="0,8,0,24" />
 
-                <TextBlock Text="Quality" FontSize="18" FontWeight="Bold" />
+                <TextBlock Text="Quality"
+                           FontSize="18"
+                           FontWeight="Bold"
+                           Foreground="#0F172A" />
                 <TextBox AutomationProperties.AutomationId="QualitySummaryTextBox"
                          Text="{Binding QualitySummary, Mode=OneWay}"
                          Margin="0,8,0,8"
@@ -1033,7 +1355,9 @@
                         Content="Run Quality"
                         Margin="0,0,0,8"
                         Click="RunQualityButton_Click" />
-                <TextBlock Text="Synthetic Triage" FontWeight="SemiBold" />
+                <TextBlock Text="Synthetic Triage"
+                           FontWeight="SemiBold"
+                           Foreground="#334155" />
                 <ListBox AutomationProperties.AutomationId="SyntheticPatternIssuesListBox"
                          ItemsSource="{Binding SyntheticPatternIssues}"
                          SelectedItem="{Binding SelectedSyntheticPatternIssue, Mode=TwoWay}"
@@ -1052,7 +1376,9 @@
                         Content="Prepare Batch Rewrite"
                         Margin="0,0,0,8"
                         Click="PrepareSyntheticBatchRewriteButton_Click" />
-                <TextBlock Text="History" FontWeight="SemiBold" />
+                <TextBlock Text="History"
+                           FontWeight="SemiBold"
+                           Foreground="#334155" />
                 <TextBox AutomationProperties.AutomationId="QualityHistoryTextBox"
                          Text="{Binding QualityHistorySummary, Mode=OneWay}"
                          Margin="0,8,0,24"
@@ -1061,12 +1387,16 @@
                          TextWrapping="Wrap"
                          VerticalScrollBarVisibility="Auto" />
 
-                <TextBlock Text="Export" FontSize="18" FontWeight="Bold" />
+                <TextBlock Text="Export"
+                           FontSize="18"
+                           FontWeight="Bold"
+                           Foreground="#0F172A" />
                 <Button AutomationProperties.AutomationId="ValidateButton"
                         Content="Validate"
                         Margin="0,8,0,8"
                         Click="ValidateButton_Click" />
-                <Button AutomationProperties.AutomationId="ExportJsonlButton"
+                <Button x:Name="ExportJsonlButton"
+                        AutomationProperties.AutomationId="ExportJsonlButton"
                         Content="Export JSONL"
                         Click="ExportJsonlButton_Click" />
                 <Button AutomationProperties.AutomationId="GenerateDatasetCardButton"

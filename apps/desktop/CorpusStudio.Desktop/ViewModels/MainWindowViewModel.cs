@@ -43,6 +43,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _evaluationResultsSummary =
         "Evaluation example review queue appears after a run or report reload.";
     private string _evaluationResultFilter = "All";
+    private string _evaluationTagFilter = "All";
+    private string _evaluationFailureReasonFilter = "All";
+    private string _evaluationScoreBandFilter = "All";
+    private string _evaluationFailureFilterName = "Failure View";
+    private string _evaluationFailureFilterSummary =
+        "Save the active status, tag, failure-reason, and score-band filters as a named view.";
     private string _evaluationManualScore = string.Empty;
     private string _evaluationManualNotes = string.Empty;
     private string _evaluationReviewSummary = "Select an evaluation result to add a manual score or note.";
@@ -72,6 +78,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _aiAssistQueueSearch = string.Empty;
     private string _aiAssistQueueSort = "Newest";
     private string _aiAssistQueueViewName = "Review View";
+    private string _aiAssistRewriteBatchSummary =
+        "Prepared rewrite batches appear here after synthetic batch triage.";
+    private string _reviewedFixSummary =
+        "Edited failed rows appear here so you can track which fixes were re-tested.";
     private string _aiAssistModelListSummary =
         "Refresh models to load running Ollama or OpenAI-compatible models.";
     private string _trainingTarget = "axolotl_yaml";
@@ -107,6 +117,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private EvaluationExampleResult? _selectedEvaluationExampleResult;
     private AiAssistReviewQueueItem? _selectedAiAssistReviewQueueItem;
     private AiAssistQueueView? _selectedAiAssistQueueView;
+    private AiAssistRewriteBatch? _selectedAiAssistRewriteBatch;
+    private AiAssistRewriteBatch? _lastPreparedAiAssistRewriteBatch;
+    private ReviewedFixRecord? _selectedReviewedFix;
+    private ReviewedFixRecord? _lastPreparedEvaluationFix;
+    private EvaluationFailureFilter? _selectedEvaluationFailureFilter;
     private readonly List<EvaluationExampleResult> _allEvaluationResults = [];
     private readonly List<PreferenceReviewItem> _allPreferenceReviewItems = [];
     private readonly List<AiAssistReviewQueueItem> _allAiAssistReviewQueue = [];
@@ -148,9 +163,28 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         "Manually Scored",
     ];
 
+    public ObservableCollection<string> EvaluationTagFilterOptions { get; } = ["All"];
+
+    public ObservableCollection<string> EvaluationFailureReasonFilterOptions { get; } = ["All"];
+
+    public ObservableCollection<string> EvaluationScoreBandFilterOptions { get; } =
+    [
+        "All",
+        "0-49",
+        "50-69",
+        "70-84",
+        "85-100",
+    ];
+
+    public ObservableCollection<EvaluationFailureFilter> EvaluationFailureFilters { get; } = [];
+
     public ObservableCollection<AiAssistReviewQueueItem> AiAssistReviewQueue { get; } = [];
 
     public ObservableCollection<AiAssistQueueView> AiAssistQueueViews { get; } = [];
+
+    public ObservableCollection<AiAssistRewriteBatch> AiAssistRewriteBatches { get; } = [];
+
+    public ObservableCollection<ReviewedFixRecord> ReviewedFixes { get; } = [];
 
     public ObservableCollection<string> AiAssistAvailableModels { get; } = [];
 
@@ -433,6 +467,60 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
+    public string EvaluationTagFilter
+    {
+        get => _evaluationTagFilter;
+        set
+        {
+            if (SetField(ref _evaluationTagFilter, string.IsNullOrWhiteSpace(value) ? "All" : value))
+            {
+                RebuildEvaluationResults();
+            }
+        }
+    }
+
+    public string EvaluationFailureReasonFilter
+    {
+        get => _evaluationFailureReasonFilter;
+        set
+        {
+            if (SetField(ref _evaluationFailureReasonFilter, string.IsNullOrWhiteSpace(value) ? "All" : value))
+            {
+                RebuildEvaluationResults();
+            }
+        }
+    }
+
+    public string EvaluationScoreBandFilter
+    {
+        get => _evaluationScoreBandFilter;
+        set
+        {
+            if (SetField(ref _evaluationScoreBandFilter, string.IsNullOrWhiteSpace(value) ? "All" : value))
+            {
+                RebuildEvaluationResults();
+            }
+        }
+    }
+
+    public string EvaluationFailureFilterName
+    {
+        get => _evaluationFailureFilterName;
+        set => SetField(ref _evaluationFailureFilterName, value);
+    }
+
+    public EvaluationFailureFilter? SelectedEvaluationFailureFilter
+    {
+        get => _selectedEvaluationFailureFilter;
+        set => SetField(ref _selectedEvaluationFailureFilter, value);
+    }
+
+    public string EvaluationFailureFilterSummary
+    {
+        get => _evaluationFailureFilterSummary;
+        private set => SetField(ref _evaluationFailureFilterSummary, value);
+    }
+
     public string EvaluationManualScore
     {
         get => _evaluationManualScore;
@@ -594,6 +682,44 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _selectedAiAssistQueueView;
         set => SetField(ref _selectedAiAssistQueueView, value);
+    }
+
+    public AiAssistRewriteBatch? SelectedAiAssistRewriteBatch
+    {
+        get => _selectedAiAssistRewriteBatch;
+        set
+        {
+            if (SetField(ref _selectedAiAssistRewriteBatch, value) && value is not null)
+            {
+                AiAssistRewriteBatchSummary =
+                    $"Selected rewrite batch for rows {FormatRowNumbers(value.RowNumbers)}.";
+            }
+        }
+    }
+
+    public string AiAssistRewriteBatchSummary
+    {
+        get => _aiAssistRewriteBatchSummary;
+        private set => SetField(ref _aiAssistRewriteBatchSummary, value);
+    }
+
+    public ReviewedFixRecord? SelectedReviewedFix
+    {
+        get => _selectedReviewedFix;
+        set
+        {
+            if (SetField(ref _selectedReviewedFix, value) && value is not null)
+            {
+                ReviewedFixSummary =
+                    $"Selected reviewed fix for {value.ExampleId} (v{value.Version}): {value.StatusLabel}.";
+            }
+        }
+    }
+
+    public string ReviewedFixSummary
+    {
+        get => _reviewedFixSummary;
+        private set => SetField(ref _reviewedFixSummary, value);
     }
 
     public string AiAssistModelListSummary
@@ -827,6 +953,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         EvaluationReportJson = "Evaluation reports appear here after a run.";
         EvaluationReportHistory.Clear();
         ClearEvaluationResults();
+        ResetEvaluationFailureFilters();
         SelectedEvaluationReportHistoryItem = null;
         AiAssistSummary = "Run AI Assist on the current draft. Suggestions require human review.";
         AiAssistReviewText = "AI Assist review output appears here.";
@@ -834,6 +961,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         AiAssistQueueViewName = "Review View";
         AiAssistQueueViews.Clear();
         SelectedAiAssistQueueView = null;
+        AiAssistRewriteBatches.Clear();
+        SelectedAiAssistRewriteBatch = null;
+        _lastPreparedAiAssistRewriteBatch = null;
+        AiAssistRewriteBatchSummary =
+            "Prepared rewrite batches appear here after synthetic batch triage.";
+        ReviewedFixes.Clear();
+        SelectedReviewedFix = null;
+        _lastPreparedEvaluationFix = null;
+        ReviewedFixSummary =
+            "Edited failed rows appear here so you can track which fixes were re-tested.";
         _aiAssistSuggestionJsonl = string.Empty;
         ClearAiAssistComparison();
         _allAiAssistReviewQueue.Clear();
@@ -1039,6 +1176,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         AiAssistInstruction = BuildSyntheticBatchRewriteInstruction(SyntheticPatternIssues, rowNumbers);
+        _lastPreparedAiAssistRewriteBatch = new AiAssistRewriteBatch
+        {
+            SchemaId = ActiveSchemaId,
+            Action = "rewrite-output",
+            RowNumbers = rowNumbers,
+            IssueCount = SyntheticPatternIssues.Count,
+            IssueSummary = BuildSyntheticIssueSummary(SyntheticPatternIssues),
+            SourceDraft = DraftText,
+            Instruction = AiAssistInstruction,
+        };
         QualityTriageSummary =
             $"Prepared {affectedRows.Count} affected row(s) from {SyntheticPatternIssues.Count} synthetic issue(s) for batch rewrite.";
         return true;
@@ -1104,6 +1251,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 $"Saved row {rowNumber} is not loaded in the Examples list.";
             return false;
         }
+
+        var failure = SelectedEvaluationExampleResult;
+        _lastPreparedEvaluationFix = new ReviewedFixRecord
+        {
+            ExampleId = failure.ExampleId,
+            RowNumber = rowNumber,
+            SchemaId = ActiveSchemaId,
+            OriginalScore = failure.Score,
+            FailureReason = FailureReason(failure),
+            SourceReport = SelectedEvaluationReportHistoryItem?.DisplayName ?? "current evaluation run",
+        };
 
         SelectedExample = example;
         DraftText = example.Json;
@@ -1592,6 +1750,24 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             ?? AiAssistQueueViews.FirstOrDefault();
     }
 
+    public void SetAiAssistRewriteBatches(IEnumerable<AiAssistRewriteBatch> batches)
+    {
+        var selectedBatchId = SelectedAiAssistRewriteBatch?.BatchId;
+        AiAssistRewriteBatches.Clear();
+        foreach (var batch in batches)
+        {
+            AiAssistRewriteBatches.Add(batch);
+        }
+
+        SelectedAiAssistRewriteBatch = AiAssistRewriteBatches
+            .FirstOrDefault(batch => string.Equals(batch.BatchId, selectedBatchId, StringComparison.Ordinal))
+            ?? AiAssistRewriteBatches.FirstOrDefault();
+
+        AiAssistRewriteBatchSummary = AiAssistRewriteBatches.Count == 0
+            ? "No prepared rewrite batches are saved for this project."
+            : $"Saved rewrite batches: {AiAssistRewriteBatches.Count}. Select one to resume.";
+    }
+
     public AiAssistQueueView BuildCurrentAiAssistQueueView()
     {
         return new AiAssistQueueView
@@ -1619,6 +1795,266 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public void ApplyAiAssistQueueViewLoaded(AiAssistQueueView view)
     {
         AiAssistQueueSummary = $"AI Assist queue view loaded: {view.Name}.";
+    }
+
+    public bool TryGetLastPreparedAiAssistRewriteBatch(
+        out AiAssistRewriteBatch batch,
+        out string errorMessage
+    )
+    {
+        if (_lastPreparedAiAssistRewriteBatch is null)
+        {
+            batch = new AiAssistRewriteBatch();
+            errorMessage = "Prepare a synthetic batch rewrite before saving it.";
+            return false;
+        }
+
+        batch = _lastPreparedAiAssistRewriteBatch;
+        errorMessage = string.Empty;
+        return true;
+    }
+
+    public void ApplyAiAssistRewriteBatchSaved(AiAssistRewriteBatch batch)
+    {
+        AiAssistRewriteBatchSummary =
+            $"Saved rewrite batch for rows {FormatRowNumbers(batch.RowNumbers)}.";
+    }
+
+    public bool ResumeAiAssistRewriteBatch()
+    {
+        if (SelectedAiAssistRewriteBatch is null)
+        {
+            AiAssistRewriteBatchSummary = "Select a saved rewrite batch before resuming.";
+            return false;
+        }
+
+        DraftText = SelectedAiAssistRewriteBatch.SourceDraft;
+        AiAssistAction = AiAssistActionPresets.Contains(SelectedAiAssistRewriteBatch.Action)
+            ? SelectedAiAssistRewriteBatch.Action
+            : "rewrite-output";
+        AiAssistInstruction = SelectedAiAssistRewriteBatch.Instruction;
+        AiAssistRewriteBatchSummary =
+            $"Resumed rewrite batch for rows {FormatRowNumbers(SelectedAiAssistRewriteBatch.RowNumbers)}.";
+        return true;
+    }
+
+    public void SetAiAssistRewriteBatchError(string message)
+    {
+        AiAssistRewriteBatchSummary = $"AI Assist rewrite batch could not be updated.{Environment.NewLine}{message}";
+    }
+
+    public void SetReviewedFixes(IEnumerable<ReviewedFixRecord> fixes)
+    {
+        var selectedFixId = SelectedReviewedFix?.FixId;
+        ReviewedFixes.Clear();
+        foreach (var fix in fixes)
+        {
+            ReviewedFixes.Add(fix);
+        }
+
+        SelectedReviewedFix = ReviewedFixes
+            .FirstOrDefault(fix => string.Equals(fix.FixId, selectedFixId, StringComparison.Ordinal))
+            ?? ReviewedFixes.FirstOrDefault();
+
+        ReviewedFixSummary = BuildReviewedFixSummary();
+    }
+
+    public bool TryGetLastPreparedEvaluationFix(
+        out ReviewedFixRecord fix,
+        out string errorMessage
+    )
+    {
+        if (_lastPreparedEvaluationFix is null)
+        {
+            fix = new ReviewedFixRecord();
+            errorMessage = "Edit a failed evaluation row before tracking a reviewed fix.";
+            return false;
+        }
+
+        fix = _lastPreparedEvaluationFix;
+        errorMessage = string.Empty;
+        return true;
+    }
+
+    public void ApplyReviewedFixRecorded(ReviewedFixRecord fix)
+    {
+        _lastPreparedEvaluationFix = null;
+        ReviewedFixSummary =
+            $"Tracked reviewed fix for {fix.ExampleId} (v{fix.Version}). Rerun evaluation to confirm the fix.";
+    }
+
+    public void ApplyReviewedFixesReconciled()
+    {
+        ReviewedFixSummary = BuildReviewedFixSummary();
+    }
+
+    public bool ResumeReviewedFix()
+    {
+        if (SelectedReviewedFix is null)
+        {
+            ReviewedFixSummary = "Select a tracked reviewed fix before reopening it.";
+            return false;
+        }
+
+        var example = Examples.FirstOrDefault(item => item.RowNumber == SelectedReviewedFix.RowNumber);
+        if (example is null)
+        {
+            ReviewedFixSummary =
+                $"Saved row {SelectedReviewedFix.RowNumber} for {SelectedReviewedFix.ExampleId} is not loaded in the Examples list.";
+            return false;
+        }
+
+        SelectedExample = example;
+        DraftText = example.Json;
+        ReviewedFixSummary =
+            $"Reopened reviewed fix for {SelectedReviewedFix.ExampleId} (v{SelectedReviewedFix.Version}). Edit, validate, save, then rerun evaluation.";
+        return true;
+    }
+
+    public void SetReviewedFixError(string message)
+    {
+        ReviewedFixSummary = $"Reviewed fix could not be updated.{Environment.NewLine}{message}";
+    }
+
+    private string BuildReviewedFixSummary()
+    {
+        if (ReviewedFixes.Count == 0)
+        {
+            return "No reviewed fixes are tracked for this project.";
+        }
+
+        var resolved = ReviewedFixes.Count(fix => fix.Status == ReviewedFixRecord.StatusResolved);
+        var stillFailing = ReviewedFixes.Count(fix => fix.Status == ReviewedFixRecord.StatusStillFailing);
+        var awaiting = ReviewedFixes.Count(fix => fix.Status == ReviewedFixRecord.StatusEdited);
+        return $"Reviewed fixes: {ReviewedFixes.Count} tracked ({resolved} resolved, {stillFailing} still failing, {awaiting} awaiting re-test).";
+    }
+
+    public void SetEvaluationFailureFilters(IEnumerable<EvaluationFailureFilter> filters)
+    {
+        var selectedName = SelectedEvaluationFailureFilter?.Name;
+        EvaluationFailureFilters.Clear();
+        foreach (var filter in filters)
+        {
+            EvaluationFailureFilters.Add(filter);
+        }
+
+        SelectedEvaluationFailureFilter = EvaluationFailureFilters
+            .FirstOrDefault(filter => string.Equals(filter.Name, selectedName, StringComparison.OrdinalIgnoreCase))
+            ?? EvaluationFailureFilters.FirstOrDefault();
+
+        EvaluationFailureFilterSummary = EvaluationFailureFilters.Count == 0
+            ? "No saved failure filters. Set filters, name the view, then Save Filter."
+            : $"Saved failure filters: {EvaluationFailureFilters.Count}. Select one and Apply Filter.";
+    }
+
+    public EvaluationFailureFilter BuildCurrentEvaluationFailureFilter()
+    {
+        return new EvaluationFailureFilter
+        {
+            Name = EvaluationFailureFilterName.Trim(),
+            Status = EvaluationResultFilter,
+            Tag = EvaluationTagFilter,
+            FailureReason = EvaluationFailureReasonFilter,
+            ScoreBand = EvaluationScoreBandFilter,
+        };
+    }
+
+    public void ApplyEvaluationFailureFilter(EvaluationFailureFilter filter)
+    {
+        EvaluationFailureFilterName = filter.Name;
+        SetField(
+            ref _evaluationResultFilter,
+            EvaluationResultFilterOptions.Contains(filter.Status) ? filter.Status : "All",
+            nameof(EvaluationResultFilter)
+        );
+        SetField(
+            ref _evaluationTagFilter,
+            EvaluationTagFilterOptions.Contains(filter.Tag) ? filter.Tag : "All",
+            nameof(EvaluationTagFilter)
+        );
+        SetField(
+            ref _evaluationFailureReasonFilter,
+            EvaluationFailureReasonFilterOptions.Contains(filter.FailureReason) ? filter.FailureReason : "All",
+            nameof(EvaluationFailureReasonFilter)
+        );
+        SetField(
+            ref _evaluationScoreBandFilter,
+            EvaluationScoreBandFilterOptions.Contains(filter.ScoreBand) ? filter.ScoreBand : "All",
+            nameof(EvaluationScoreBandFilter)
+        );
+        RebuildEvaluationResults();
+        EvaluationFailureFilterSummary = $"Applied failure filter: {filter.Name}.";
+    }
+
+    public void ApplyEvaluationFailureFilterSaved(EvaluationFailureFilter filter)
+    {
+        EvaluationFailureFilterSummary = $"Saved failure filter: {filter.Name}.";
+    }
+
+    public void SetEvaluationFailureFilterError(string message)
+    {
+        EvaluationFailureFilterSummary =
+            $"Failure filter could not be updated.{Environment.NewLine}{message}";
+    }
+
+    private void RebuildEvaluationFilterOptions()
+    {
+        var tags = _allEvaluationResults
+            .SelectMany(result => result.Tags)
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .Select(tag => tag.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(tag => tag, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        SyncFilterOptions(EvaluationTagFilterOptions, tags);
+
+        var reasons = _allEvaluationResults
+            .Where(result => !result.Passed)
+            .Select(FailureReason)
+            .Where(reason => !string.IsNullOrWhiteSpace(reason))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(reason => reason, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        SyncFilterOptions(EvaluationFailureReasonFilterOptions, reasons);
+
+        if (!EvaluationTagFilterOptions.Contains(EvaluationTagFilter))
+        {
+            SetField(ref _evaluationTagFilter, "All", nameof(EvaluationTagFilter));
+        }
+        if (!EvaluationFailureReasonFilterOptions.Contains(EvaluationFailureReasonFilter))
+        {
+            SetField(ref _evaluationFailureReasonFilter, "All", nameof(EvaluationFailureReasonFilter));
+        }
+    }
+
+    private static void SyncFilterOptions(ObservableCollection<string> target, IReadOnlyList<string> values)
+    {
+        var desired = new List<string> { "All" };
+        desired.AddRange(values);
+        if (target.SequenceEqual(desired, StringComparer.Ordinal))
+        {
+            return;
+        }
+
+        target.Clear();
+        foreach (var value in desired)
+        {
+            target.Add(value);
+        }
+    }
+
+    private void ResetEvaluationFailureFilters()
+    {
+        EvaluationFailureFilters.Clear();
+        SelectedEvaluationFailureFilter = null;
+        EvaluationFailureFilterName = "Failure View";
+        SetField(ref _evaluationTagFilter, "All", nameof(EvaluationTagFilter));
+        SetField(ref _evaluationFailureReasonFilter, "All", nameof(EvaluationFailureReasonFilter));
+        SetField(ref _evaluationScoreBandFilter, "All", nameof(EvaluationScoreBandFilter));
+        SyncFilterOptions(EvaluationTagFilterOptions, []);
+        SyncFilterOptions(EvaluationFailureReasonFilterOptions, []);
+        EvaluationFailureFilterSummary =
+            "Save the active status, tag, failure-reason, and score-band filters as a named view.";
     }
 
     public void ApplyAiAssistReviewQueueItem(AiAssistReviewQueueItem item)
@@ -1961,6 +2397,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         _allEvaluationResults.Clear();
         _allEvaluationResults.AddRange(results);
+        RebuildEvaluationFilterOptions();
         RebuildEvaluationResults();
     }
 
@@ -1988,7 +2425,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     private bool MatchesEvaluationResultFilter(EvaluationExampleResult result)
     {
-        return EvaluationResultFilter switch
+        var statusMatch = EvaluationResultFilter switch
         {
             "Failed" => !result.Passed,
             "Passed" => result.Passed,
@@ -1996,6 +2433,37 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 || !string.IsNullOrWhiteSpace(result.ManualNotes),
             _ => true,
         };
+        if (!statusMatch)
+        {
+            return false;
+        }
+
+        if (!IsAllFilter(EvaluationTagFilter)
+            && !result.Tags.Any(tag =>
+                string.Equals(tag?.Trim(), EvaluationTagFilter, StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        if (!IsAllFilter(EvaluationFailureReasonFilter)
+            && !string.Equals(FailureReason(result), EvaluationFailureReasonFilter, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!IsAllFilter(EvaluationScoreBandFilter)
+            && !string.Equals(ScoreBand(result.Score), EvaluationScoreBandFilter, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsAllFilter(string value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            || string.Equals(value, "All", StringComparison.OrdinalIgnoreCase);
     }
 
     private string BuildEvaluationResultsSummary()
@@ -2010,7 +2478,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         var manuallyScored = _allEvaluationResults.Count(result =>
             result.ManualScore is not null || !string.IsNullOrWhiteSpace(result.ManualNotes)
         );
-        return $"Results: {failed} failed, {passed} passed, {manuallyScored} manually reviewed. Filter: {EvaluationResultFilter}, showing {EvaluationResults.Count} of {_allEvaluationResults.Count}.";
+
+        var drilldown = new List<string>();
+        if (!IsAllFilter(EvaluationTagFilter)) drilldown.Add($"tag={EvaluationTagFilter}");
+        if (!IsAllFilter(EvaluationFailureReasonFilter)) drilldown.Add($"reason={EvaluationFailureReasonFilter}");
+        if (!IsAllFilter(EvaluationScoreBandFilter)) drilldown.Add($"band={EvaluationScoreBandFilter}");
+        var drilldownText = drilldown.Count == 0
+            ? string.Empty
+            : $" Drilldown: {string.Join(", ", drilldown)}.";
+
+        return $"Results: {failed} failed, {passed} passed, {manuallyScored} manually reviewed. Filter: {EvaluationResultFilter}, showing {EvaluationResults.Count} of {_allEvaluationResults.Count}.{drilldownText}";
     }
 
     private void ApplySelectedEvaluationExample(EvaluationExampleResult? result)
@@ -3044,6 +3521,35 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 $"Issues: {string.Join(" | ", issueSummaries)}",
             ]
         );
+    }
+
+    private static string BuildSyntheticIssueSummary(IEnumerable<SyntheticPatternIssue> issues)
+    {
+        return string.Join(
+            " | ",
+            issues
+                .Take(8)
+                .Select(issue =>
+                {
+                    var severity = string.IsNullOrWhiteSpace(issue.Severity)
+                        ? "unknown"
+                        : issue.Severity;
+                    var kind = string.IsNullOrWhiteSpace(issue.Kind)
+                        ? "synthetic_pattern"
+                        : issue.Kind;
+                    return $"{severity} {kind}: {issue.Message}";
+                })
+        );
+    }
+
+    private static string FormatRowNumbers(IEnumerable<int> rowNumbers)
+    {
+        var rows = rowNumbers
+            .Where(rowNumber => rowNumber > 0)
+            .Distinct()
+            .Order()
+            .ToList();
+        return rows.Count == 0 ? "none" : string.Join(", ", rows);
     }
 
     private static string BuildEvaluationFailureInstruction(EvaluationExampleResult result)
