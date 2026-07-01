@@ -384,6 +384,100 @@
                 </Border>
 
                 <TabControl Grid.Row="2">
+                    <TabItem x:Name="DashboardTab" Header="Dashboard">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      Padding="8">
+                            <StackPanel>
+                                <TextBlock Text="Quick actions"
+                                           Style="{StaticResource SectionHeaderTextStyle}" />
+                                <WrapPanel Margin="0,0,0,16">
+                                    <Button Style="{StaticResource PrimaryButtonStyle}"
+                                            AutomationProperties.AutomationId="DashboardAuthorButton"
+                                            Content="Author examples"
+                                            Width="140" Margin="0,0,8,8"
+                                            Click="GoToWritingStudioButton_Click" />
+                                    <Button AutomationProperties.AutomationId="DashboardRunQualityButton"
+                                            Content="Run quality"
+                                            Width="120" Margin="0,0,8,8"
+                                            Click="RunQualityButton_Click" />
+                                    <Button AutomationProperties.AutomationId="DashboardSplitsButton"
+                                            Content="Generate splits"
+                                            Width="128" Margin="0,0,8,8"
+                                            Click="GoToSplitsButton_Click" />
+                                    <Button AutomationProperties.AutomationId="DashboardEvaluationButton"
+                                            Content="Run evaluation"
+                                            Width="128" Margin="0,0,8,8"
+                                            Click="GoToEvaluationButton_Click" />
+                                    <Button AutomationProperties.AutomationId="DashboardTrainingButton"
+                                            Content="Training config"
+                                            Width="128" Margin="0,0,8,8"
+                                            Click="GoToTrainingButton_Click" />
+                                    <Button AutomationProperties.AutomationId="DashboardNewProjectButton"
+                                            Content="New project"
+                                            Width="120" Margin="0,0,8,8"
+                                            Click="NewDatasetProjectButton_Click" />
+                                </WrapPanel>
+
+                                <TextBlock Text="Project overview"
+                                           Style="{StaticResource SectionHeaderTextStyle}" />
+                                <WrapPanel>
+                                    <Border Style="{StaticResource CardBorderStyle}"
+                                            Width="332" Margin="0,0,12,12" VerticalAlignment="Top">
+                                        <StackPanel>
+                                            <TextBlock Text="Dataset"
+                                                       Style="{StaticResource SectionHeaderTextStyle}" />
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding Examples.Count, Mode=OneWay}"
+                                                           FontSize="26" FontWeight="Bold"
+                                                           Foreground="{StaticResource HeadingTextBrush}" />
+                                                <TextBlock Text="saved examples"
+                                                           Style="{StaticResource CaptionTextStyle}"
+                                                           VerticalAlignment="Bottom"
+                                                           Margin="8,0,0,4" />
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding ActiveSchemaDescription, Mode=OneWay}"
+                                                       Style="{StaticResource CaptionTextStyle}"
+                                                       Margin="0,8,0,0" />
+                                            <TextBlock Text="{Binding QualityHistorySummary, Mode=OneWay}"
+                                                       Style="{StaticResource CaptionTextStyle}"
+                                                       Margin="0,8,0,0" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource CardBorderStyle}"
+                                            Width="332" Margin="0,0,12,12" VerticalAlignment="Top">
+                                        <StackPanel>
+                                            <TextBlock Text="Quality"
+                                                       Style="{StaticResource SectionHeaderTextStyle}" />
+                                            <TextBlock Text="{Binding QualitySummary, Mode=OneWay}"
+                                                       Style="{StaticResource CaptionTextStyle}" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource CardBorderStyle}"
+                                            Width="332" Margin="0,0,12,12" VerticalAlignment="Top">
+                                        <StackPanel>
+                                            <TextBlock Text="Splits"
+                                                       Style="{StaticResource SectionHeaderTextStyle}" />
+                                            <TextBlock Text="{Binding SplitSummary, Mode=OneWay}"
+                                                       Style="{StaticResource CaptionTextStyle}" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource CardBorderStyle}"
+                                            Width="332" Margin="0,0,12,12" VerticalAlignment="Top">
+                                        <StackPanel>
+                                            <TextBlock Text="Evaluation"
+                                                       Style="{StaticResource SectionHeaderTextStyle}" />
+                                            <TextBlock Text="{Binding EvaluationSummary, Mode=OneWay}"
+                                                       Style="{StaticResource CaptionTextStyle}" />
+                                        </StackPanel>
+                                    </Border>
+                                </WrapPanel>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
                     <TabItem x:Name="WritingStudioTab" Header="Writing Studio">
                         <Grid>
                             <Grid.RowDefinitions>
@@ -619,7 +713,7 @@
                                     Click="RetryQuarantineItemButton_Click" />
                         </Grid>
                     </TabItem>
-                    <TabItem Header="Splits">
+                    <TabItem x:Name="SplitsTab" Header="Splits">
                         <Grid Margin="8">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
@@ -667,7 +761,7 @@
                                      VerticalScrollBarVisibility="Auto" />
                         </Grid>
                     </TabItem>
-                    <TabItem Header="Evaluation">
+                    <TabItem x:Name="EvaluationTab" Header="Evaluation">
                         <Grid Margin="8">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
@@ -1366,7 +1460,7 @@
                             </Grid>
                         </Grid>
                     </TabItem>
-                    <TabItem Header="Training">
+                    <TabItem x:Name="TrainingTab" Header="Training">
                         <Grid Margin="8">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
