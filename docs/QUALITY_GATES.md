@@ -32,10 +32,10 @@ Current:
 - normalized duplicate content detection
 - low-information text detection
 - first-pass synthetic-pattern warnings
+- train/test leakage detection (post-split, non-destructive warning)
 
 Next:
 
-- train/test leakage detection
 - token length outlier detection
 - category imbalance warnings
 - report-level Evaluation failure summaries

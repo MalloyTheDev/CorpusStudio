@@ -41,8 +41,13 @@ Better split strategies:
 - source-aware split
 - group-aware split
 - dedupe-aware split
-- leakage-checked split
 
 ## Leakage warning
 
-Near-identical examples should not appear in both train and test sets.
+Near-identical examples should not appear in both train and test sets. The
+`split` command now detects this: after splitting it reports
+`rows_shared_across_splits` and a `leakage` breakdown (which splits share each
+duplicate group, and whether the match is exact or normalized/near-duplicate)
+using the same NFKC/Unicode-aware normalization as the quality report, and adds
+a train/test-leakage warning. Detection is non-destructive — it reports the
+collision rather than silently moving rows, so the user decides how to dedupe.

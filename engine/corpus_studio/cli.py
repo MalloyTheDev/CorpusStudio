@@ -33,6 +33,7 @@ from corpus_studio.reporting.dataset_card import (
 )
 from corpus_studio.evaluation.reports import EvaluationReport
 from corpus_studio.schemas.registry import list_builtin_schemas, load_builtin_schema, repository_root
+from corpus_studio.splitters.leakage import detect_split_leakage
 from corpus_studio.splitters.random_splitter import random_split
 from corpus_studio.storage.index import (
     default_index_path,
@@ -260,6 +261,23 @@ def split(
     write_jsonl(split_result.validation, output_dir / "validation.jsonl")
     write_jsonl(split_result.test, output_dir / "test.jsonl")
 
+    leakage = detect_split_leakage(
+        split_result.train,
+        split_result.validation,
+        split_result.test,
+    )
+    warnings = _build_split_warnings(
+        len(split_result.validation),
+        len(split_result.test),
+    )
+    if leakage.leaked_group_count > 0:
+        warnings.append(
+            f"{leakage.rows_shared_across_splits} row(s) in "
+            f"{leakage.leaked_group_count} duplicate group(s) are shared across "
+            "splits (train/test leakage); dedupe before training to avoid "
+            "inflated evaluation scores."
+        )
+
     typer.echo(
         json.dumps(
             {
@@ -271,10 +289,9 @@ def split(
                 "validation_ratio": validation_ratio,
                 "test_ratio": test_ratio,
                 "seed": seed,
-                "warnings": _build_split_warnings(
-                    len(split_result.validation),
-                    len(split_result.test),
-                ),
+                "rows_shared_across_splits": leakage.rows_shared_across_splits,
+                "leakage": leakage.model_dump(),
+                "warnings": warnings,
             },
             indent=2,
         )

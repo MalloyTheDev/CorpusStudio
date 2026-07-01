@@ -1484,6 +1484,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             $"Test: {report.Test}",
             $"Ratios: train {FormatPercent(report.TrainRatio)}, validation {FormatPercent(report.ValidationRatio)}, test {FormatPercent(report.TestRatio)}",
             $"Seed: {report.Seed}",
+            $"Rows shared across splits: {report.RowsSharedAcrossSplits}"
+                + (report.RowsSharedAcrossSplits > 0 ? " (train/test leakage)" : ""),
             $"Output: {report.OutputDirectory}",
         };
 
