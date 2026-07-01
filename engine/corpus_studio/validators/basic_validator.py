@@ -163,7 +163,7 @@ def validate_jsonl_row(
 def validate_jsonl_file(path: Path, schema_id: str) -> ValidationReport:
     report = ValidationReport(valid=True, schema_id=schema_id)
 
-    with path.open("r", encoding="utf-8") as f:
+    with path.open("r", encoding="utf-8-sig") as f:
         for row_number, line in enumerate(f, start=1):
             if not line.strip():
                 continue
