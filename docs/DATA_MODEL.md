@@ -150,6 +150,13 @@ filter keeps a status, tag, failure-reason, and score-band selection so a
 reviewer can reapply the same failure slice across runs. It is workflow state,
 not accepted training data.
 
+`quality_history.jsonl` snapshots include `synthetic_pattern_issues` (individual
+findings) and `synthetic_pattern_clusters`. A cluster groups same-kind issues
+whose patterns overlap by token-set Jaccard similarity (default 0.5), keeping
+`kind`, a representative `label`, the max `severity` across members,
+`member_count`, merged `row_numbers`, and a `suggestion`, so near-duplicate
+boilerplate families read as one finding instead of many fragmented warnings.
+
 Export folders can contain:
 
 - `export.jsonl`
