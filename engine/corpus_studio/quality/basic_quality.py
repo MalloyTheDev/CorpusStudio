@@ -1,5 +1,6 @@
 import json
 import re
+import unicodedata
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -97,8 +98,24 @@ def _normalized_text_signature(value: Any) -> str:
     return " ".join(_tokenize_text_values(value))
 
 
+# CJK / kana / Hangul scripts have no spaces between words, so each such
+# character is treated as its own token; other word characters group into runs.
+# This keeps near-duplicate signatures and low-information counts meaningful for
+# non-Latin text while preserving ASCII tokenization exactly.
+_CJK_RANGES = (
+    "぀-ヿ"  # Hiragana + Katakana
+    "㐀-䶿"  # CJK Extension A
+    "一-鿿"  # CJK Unified Ideographs
+    "豈-﫿"  # CJK Compatibility Ideographs
+    "가-힯"  # Hangul syllables
+    "ｦ-ﾟ"  # Half-width Katakana
+)
+_TOKEN_RE = re.compile(rf"[{_CJK_RANGES}]|[^\W{_CJK_RANGES}]+", re.UNICODE)
+
+
 def _tokenize_text_values(value: Any) -> list[str]:
-    return re.findall(r"[a-z0-9_]+", " ".join(_collect_text_values(value)).lower())
+    text = unicodedata.normalize("NFKC", " ".join(_collect_text_values(value))).lower()
+    return _TOKEN_RE.findall(text)
 
 
 def _collect_text_values(value: Any) -> list[str]:

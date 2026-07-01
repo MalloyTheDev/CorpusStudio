@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 import os
 import sqlite3
+import sys
 from typing import Optional
 
 import typer
@@ -793,5 +794,20 @@ def _build_backend_model_list_report(backend_client) -> BackendModelListReport:
     )
 
 
+def _ensure_utf8_stdio() -> None:
+    """Force UTF-8 on stdout/stderr so non-ASCII JSON output never dies on the
+    Windows console/pipe code page (cp1252). Safe no-op where a stream does not
+    support reconfigure (e.g. some test capture buffers)."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (ValueError, OSError):
+            pass
+
+
 if __name__ == "__main__":
+    _ensure_utf8_stdio()
     app()
