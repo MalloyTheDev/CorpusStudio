@@ -26,3 +26,6 @@ line-length = 100
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: opt-in tests that require a running local backend (e.g. Ollama). Enable with CORPUS_STUDIO_OLLAMA_INTEGRATION=1.",
+]
