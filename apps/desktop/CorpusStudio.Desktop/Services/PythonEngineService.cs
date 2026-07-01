@@ -78,6 +78,54 @@ public sealed class PythonEngineService
             .ToList();
     }
 
+    public async Task<ProjectIndexRebuildResult> RebuildProjectIndexAsync()
+    {
+        var projectRoot = ResolveProjectRoot();
+        var output = await RunEngineCommandAsync("project-index-rebuild", "--root", projectRoot);
+        return JsonSerializer.Deserialize<ProjectIndexRebuildResult>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The engine returned an invalid project index result.");
+    }
+
+    public async Task<IReadOnlyList<DatasetProjectListItem>> LoadProjectsFromIndexAsync()
+    {
+        var projectRoot = ResolveProjectRoot();
+        var output = await RunEngineCommandAsync("project-list", "--root", projectRoot);
+        var report = JsonSerializer.Deserialize<ProjectIndexListReport>(output, JsonOptions);
+        if (report?.Projects is null)
+        {
+            return [];
+        }
+
+        var items = new List<DatasetProjectListItem>();
+        foreach (var entry in report.Projects)
+        {
+            if (string.IsNullOrWhiteSpace(entry.Id))
+            {
+                continue;
+            }
+
+            DateTime.TryParse(entry.CreatedAt, out var createdAt);
+            DateTime.TryParse(entry.UpdatedAt, out var updatedAt);
+            var project = new DatasetProject(
+                entry.Id,
+                string.IsNullOrWhiteSpace(entry.Name) ? entry.Id : entry.Name,
+                entry.SchemaId,
+                createdAt,
+                updatedAt
+            );
+            items.Add(new DatasetProjectListItem(
+                project,
+                string.IsNullOrWhiteSpace(entry.Path)
+                    ? Path.Combine(projectRoot, entry.Id)
+                    : entry.Path
+            ));
+        }
+
+        return items
+            .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     public IReadOnlyList<SavedExampleItem> LoadExamples(string projectPath)
     {
         var examplesPath = Path.Combine(projectPath, "examples.jsonl");

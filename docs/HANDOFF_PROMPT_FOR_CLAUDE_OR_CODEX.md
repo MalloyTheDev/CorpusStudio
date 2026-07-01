@@ -79,12 +79,11 @@ release checklist. Desktop-side unit tests now cover the project-local JSON
 persistence (reviewed fixes, rewrite batches, saved failure filters) and run in
 CI on Windows via `.github/workflows/desktop-tests.yml`. Next candidates:
 
-1. Wire the desktop project list to the optional SQLite index for faster
-   load/filter on large project sets (`storage/index.py`, `project-list` CLI).
-2. Extend desktop test coverage to AI Assist queue views and the ViewModel
+1. Extend desktop test coverage to AI Assist queue views and the ViewModel
    filter/reconcile logic.
-3. Add production-grade synthetic pattern clustering in the AI Assist Lab.
-4. Add target-specific DPO/reward-model export formats.
+2. Add production-grade synthetic pattern clustering in the AI Assist Lab.
+3. Add target-specific DPO/reward-model export formats.
+4. Add a Dashboard/overview tab summarizing the active project.
 5. Keep full training launch, logs, checkpoints, and resume support out of the
    core app until the Evaluation workflow is stable.
 

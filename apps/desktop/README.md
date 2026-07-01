@@ -16,6 +16,8 @@ The current v0.1 workflow supports:
 - project-level quality history
 - saved example inspection
 - project reopening from the project list
+- "Rebuild Index" action that rebuilds the optional engine SQLite project index
+  and re-lists projects from it (JSON/JSONL stay authoritative)
 - train/validation/test split generation with saved ratios, seed, and tiny-split warnings
 - Evaluation Lab MVP runs, backend checks, pre-run health gates, report history, two-report comparison, saved regression reruns, report summaries by tag/failure reason/score band, failed-example review filtering, failed-row edit handoff to Writing Studio, failed-example AI Assist triage preparation, and manual per-example notes/scores for configured Ollama or OpenAI-compatible local endpoints
 - AI Assist MVP backend checks plus schema-aware action presets, persistent review queue, filters, search, sorting, saved queue views, persistent rewrite batches, bulk triage with multi-step undo, accept/reject states, source/suggestion comparison, batch synthetic rewrite preparation, preference-pair judge handoff, preference ranking export, and visible batch judge preparation

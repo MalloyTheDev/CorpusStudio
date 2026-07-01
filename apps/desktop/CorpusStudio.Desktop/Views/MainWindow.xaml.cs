@@ -38,6 +38,28 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void RebuildProjectIndexButton_Click(object sender, RoutedEventArgs e)
+    {
+        var selectedId = ViewModel.SelectedProject?.Id;
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            var result = await _engineService.RebuildProjectIndexAsync();
+            ViewModel.SetProjects(await _engineService.LoadProjectsFromIndexAsync());
+            ViewModel.SelectedProject = ViewModel.Projects
+                .FirstOrDefault(project => project.Id == selectedId);
+            ViewModel.ApplyProjectIndexRebuilt(result);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetProjectIndexError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
+    }
+
     private async void NewDatasetProjectButton_Click(object sender, RoutedEventArgs e)
     {
         try
