@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading;
 
 using CorpusStudio.Desktop.Models;
 
@@ -19,6 +20,64 @@ public sealed class PythonEngineService
     };
 
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
+    private CancellationTokenSource? _currentRunCts;
+
+    /// <summary>Cancel the engine command currently running, if any, killing its
+    /// process tree. Backs the desktop Cancel affordance for long local runs.</summary>
+    public void CancelRunningEngineCommand() => _currentRunCts?.Cancel();
+
+    /// <summary>Whether an engine command is currently running (and thus cancellable).</summary>
+    public bool IsEngineCommandRunning => _currentRunCts is not null;
+
+    /// <summary>Write text by writing a sibling temp file and atomically replacing the
+    /// target, so a crash mid-write cannot truncate or corrupt a live data file.</summary>
+    private static void WriteAllTextAtomic(string path, string content, Encoding? encoding = null)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var tempPath = path + ".tmp-" + Guid.NewGuid().ToString("N");
+        if (encoding is null)
+        {
+            File.WriteAllText(tempPath, content);
+        }
+        else
+        {
+            File.WriteAllText(tempPath, content, encoding);
+        }
+
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Replace(tempPath, path, destinationBackupFileName: null);
+            }
+            else
+            {
+                File.Move(tempPath, path);
+            }
+        }
+        catch
+        {
+            try
+            {
+                if (File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                }
+            }
+            catch
+            {
+                // Ignore cleanup failure; surface the original write error.
+            }
+
+            throw;
+        }
+    }
 
     private readonly string _repositoryRoot;
     private readonly string _engineDirectory;
@@ -307,7 +366,7 @@ public sealed class PythonEngineService
             .ToList();
 
         Directory.CreateDirectory(projectPath);
-        File.WriteAllText(
+        WriteAllTextAtomic(
             GetAiAssistQueueViewsPath(projectPath),
             JsonSerializer.Serialize(views, new JsonSerializerOptions(JsonOptions)
             {
@@ -402,7 +461,7 @@ public sealed class PythonEngineService
             .ToList();
 
         Directory.CreateDirectory(projectPath);
-        File.WriteAllText(
+        WriteAllTextAtomic(
             GetAiAssistRewriteBatchesPath(projectPath),
             JsonSerializer.Serialize(batches, new JsonSerializerOptions(JsonOptions)
             {
@@ -548,7 +607,7 @@ public sealed class PythonEngineService
             .ToList();
 
         Directory.CreateDirectory(projectPath);
-        File.WriteAllText(
+        WriteAllTextAtomic(
             GetReviewedFixesPath(projectPath),
             JsonSerializer.Serialize(trimmed, new JsonSerializerOptions(JsonOptions)
             {
@@ -623,7 +682,7 @@ public sealed class PythonEngineService
             .ToList();
 
         Directory.CreateDirectory(projectPath);
-        File.WriteAllText(
+        WriteAllTextAtomic(
             GetEvaluationFailureFiltersPath(projectPath),
             JsonSerializer.Serialize(filters, new JsonSerializerOptions(JsonOptions)
             {
@@ -682,7 +741,7 @@ public sealed class PythonEngineService
         target.DecidedAt = reviewState == "review_required" ? null : DateTime.UtcNow;
 
         var lines = items.Select(item => JsonSerializer.Serialize(item, JsonOptions));
-        File.WriteAllText(queuePath, string.Join(Environment.NewLine, lines) + Environment.NewLine, encoding: Utf8NoBom);
+        WriteAllTextAtomic(queuePath, string.Join(Environment.NewLine, lines) + Environment.NewLine, encoding: Utf8NoBom);
         return target;
     }
 
@@ -732,7 +791,7 @@ public sealed class PythonEngineService
         }
 
         var lines = items.Select(item => JsonSerializer.Serialize(item, JsonOptions));
-        File.WriteAllText(queuePath, string.Join(Environment.NewLine, lines) + Environment.NewLine, encoding: Utf8NoBom);
+        WriteAllTextAtomic(queuePath, string.Join(Environment.NewLine, lines) + Environment.NewLine, encoding: Utf8NoBom);
         return updatedCount;
     }
 
@@ -785,7 +844,7 @@ public sealed class PythonEngineService
         }
 
         var lines = items.Select(item => JsonSerializer.Serialize(item, JsonOptions));
-        File.WriteAllText(queuePath, string.Join(Environment.NewLine, lines) + Environment.NewLine, encoding: Utf8NoBom);
+        WriteAllTextAtomic(queuePath, string.Join(Environment.NewLine, lines) + Environment.NewLine, encoding: Utf8NoBom);
         return updatedCount;
     }
 
@@ -994,7 +1053,7 @@ public sealed class PythonEngineService
             }),
         };
 
-        File.WriteAllText(
+        WriteAllTextAtomic(
             outputPath,
             JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonOptions)
             {
@@ -1187,7 +1246,7 @@ public sealed class PythonEngineService
         }
 
         var updatedJson = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(reportItem.ReportPath, updatedJson + Environment.NewLine, encoding: Utf8NoBom);
+        WriteAllTextAtomic(reportItem.ReportPath, updatedJson + Environment.NewLine, encoding: Utf8NoBom);
 
         var updatedReport = JsonSerializer.Deserialize<EvaluationReport>(updatedJson, JsonOptions)
             ?? throw new InvalidOperationException("The saved evaluation report could not be reloaded.");
@@ -1496,7 +1555,7 @@ public sealed class PythonEngineService
         root["split_settings"] = JsonSerializer.SerializeToNode(settings, JsonOptions);
         root["updated_at"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
 
-        File.WriteAllText(
+        WriteAllTextAtomic(
             projectFile,
             root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }),
             encoding: Utf8NoBom
@@ -1522,7 +1581,7 @@ public sealed class PythonEngineService
         root["lab_settings"] = JsonSerializer.SerializeToNode(settings, JsonOptions);
         root["updated_at"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
 
-        File.WriteAllText(
+        WriteAllTextAtomic(
             projectFile,
             root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }),
             encoding: Utf8NoBom
@@ -1667,9 +1726,44 @@ public sealed class PythonEngineService
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start Python engine process.");
 
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
+        // No hard timeout: local eval / AI Assist runs can legitimately be long.
+        // Cancellation is user-driven via CancelRunningEngineCommand().
+        using var runCts = new CancellationTokenSource();
+        _currentRunCts = runCts;
+
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+
+        try
+        {
+            await process.WaitForExitAsync(runCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch
+            {
+                // Process may have exited between the HasExited check and Kill.
+            }
+
+            throw new OperationCanceledException("The engine command was cancelled.");
+        }
+        finally
+        {
+            if (ReferenceEquals(_currentRunCts, runCts))
+            {
+                _currentRunCts = null;
+            }
+        }
+
+        var output = await outputTask;
+        var error = await errorTask;
 
         return new EngineProcessResult(process.ExitCode, output, error);
     }
@@ -1680,7 +1774,7 @@ public sealed class PythonEngineService
         Directory.CreateDirectory(directory);
 
         var path = Path.Combine(directory, $"{Guid.NewGuid():N}.jsonl");
-        File.WriteAllText(path, NormalizeDraftToJsonl(draftText), encoding: Utf8NoBom);
+        WriteAllTextAtomic(path, NormalizeDraftToJsonl(draftText), encoding: Utf8NoBom);
         return path;
     }
 
@@ -1746,7 +1840,7 @@ public sealed class PythonEngineService
             );
         });
 
-        File.WriteAllText(
+        WriteAllTextAtomic(
             quarantinePath,
             string.Join(Environment.NewLine, entries) + Environment.NewLine,
             encoding: Utf8NoBom

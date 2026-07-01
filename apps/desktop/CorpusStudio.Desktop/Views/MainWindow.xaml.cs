@@ -162,6 +162,12 @@ public partial class MainWindow : Window
         ViewModel.DismissError();
     }
 
+    private void CancelEngineButton_Click(object sender, RoutedEventArgs e)
+    {
+        _engineService.CancelRunningEngineCommand();
+        ViewModel.SetBusy("Cancelling...");
+    }
+
     private void GoToWritingStudioButton_Click(object sender, RoutedEventArgs e)
     {
         WritingStudioTab.IsSelected = true;
