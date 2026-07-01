@@ -50,6 +50,10 @@ Corpus Studio now has a working local dataset loop and first-pass lab surfaces:
 - review failed evaluation examples, load failed rows back into Writing Studio
   for explicit edits, add manual scores/notes, and prepare AI Assist rewrite
   triage
+- track reviewed edits per failed example, versioned per example and
+  auto-reconciled to resolved or still-failing on the next re-test
+- drill into results by status, tag, failure reason, and score band, and save
+  named per-project failure filters for repeated review passes
 - run review-first AI Assist passes without automatically accepting generated
   rows
 - manage an AI Assist review queue with filters, search, sorting, saved views,
@@ -115,11 +119,15 @@ The recommended stack is:
 
 - C# WPF / WinUI-style desktop front-end
 - Python dataset engine
-- file-backed project state today
-- SQLite later for indexing and larger project state
+- file-backed project state, with an optional SQLite index for fast project listing
 - JSONL as the first export target
 - Pydantic for schema validation
 - Polars / DuckDB later for large datasets when needed
+
+Tests: the Python engine has a pytest suite (with opt-in local Ollama
+integration tests), and the desktop app has xUnit tests over its persistence
+layer. Both run in CI (`.github/workflows/engine-tests.yml` and
+`.github/workflows/desktop-tests.yml`).
 
 See [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 

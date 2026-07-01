@@ -23,7 +23,8 @@ in the release PR.
 - [ ] Desktop unit tests pass:
       `dotnet test apps/desktop/CorpusStudio.Desktop.Tests/CorpusStudio.Desktop.Tests.csproj`.
 - [ ] `ruff check engine` is clean (or documented).
-- [ ] CI is green on the release commit (`.github/workflows/engine-tests.yml`).
+- [ ] CI is green on the release commit (`.github/workflows/engine-tests.yml`
+      and `.github/workflows/desktop-tests.yml`).
 
 ## 3. Local backend smoke evidence (opt-in)
 

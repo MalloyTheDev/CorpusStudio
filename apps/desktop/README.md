@@ -52,10 +52,13 @@ picker from running Ollama or OpenAI-compatible endpoints. It
 also reloads saved JSON reports from the project's evaluation export folder. It
 can compare two saved reports for score, failure, weak-tag, and row-level
 deltas, rerun saved configurations from report `run_settings`, summarize
-results by tag/failure reason/score band, filter the example review queue to
-failed rows, and persist manual per-example scores and notes back into the
+results by tag/failure reason/score band, drill down and save named failure
+filters by status/tag/failure-reason/score-band, filter the example review queue
+to failed rows, and persist manual per-example scores and notes back into the
 report JSON. A failed row can be loaded back into Writing Studio as the current
-saved JSON row for explicit edit, validation, save, and rerun. A failed example
+saved JSON row for explicit edit, validation, save, and rerun, and the edit is
+recorded as a versioned reviewed fix that auto-reconciles to resolved or
+still-failing on the next evaluation run. A failed example
 can also be prepared for AI Assist triage, which loads a draft from the
 expected answer and copies the prompt, expected output, model output, and score
 into the AI Assist instruction.

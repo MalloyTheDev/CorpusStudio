@@ -96,6 +96,21 @@ first use of the `project-list`/`project-index-rebuild` CLI commands (or when
 `project.json` files at any time, and can be deleted with no data loss. JSON/JSONL
 remain the inspectable source of truth.
 
+## Testing
+
+The Python engine has a pytest suite (64 tests) covering schemas, validation,
+importers, quality, evaluation reporting, training config, dataset cards, and
+the optional project index. Opt-in local Ollama integration tests
+(`engine/tests/test_ollama_integration.py`) require
+`CORPUS_STUDIO_OLLAMA_INTEGRATION=1` and a running backend, and self-skip when it
+is unavailable.
+
+The desktop app has xUnit tests (`apps/desktop/CorpusStudio.Desktop.Tests`)
+covering the `PythonEngineService` project-local JSON persistence for reviewed
+fixes, evaluation failure filters, and AI Assist rewrite batches. Engine tests
+run in CI via `.github/workflows/engine-tests.yml`; desktop tests run on Windows
+via `.github/workflows/desktop-tests.yml`.
+
 ## IPC options
 
 Possible app-to-engine communication:
@@ -127,6 +142,8 @@ Desktop Evaluation tab -> selected report run_settings -> backend health gate ->
 Desktop Evaluation tab -> report JSON -> failed-example filter + manual score/notes writeback
 Desktop Evaluation tab -> failed row -> Writing Studio draft -> explicit validate/save/rerun
 Desktop Evaluation tab -> failed example -> expected-answer draft + AI Assist rewrite instruction
+Desktop Evaluation tab -> reviewed_fixes.json -> versioned reviewed-fix tracking + resolved/still-failing reconcile
+Desktop Evaluation tab -> evaluation_failure_filters.json -> saved status/tag/failure-reason/score-band drilldown filters
 Desktop Settings tab -> project.json lab_settings -> Evaluation/AI Assist backend defaults
 ```
 

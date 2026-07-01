@@ -120,6 +120,7 @@ Backends should not own:
 
 ## Testing Rule
 
-Unit tests for backend config must not make network calls. Network behavior
-should be covered later by opt-in integration tests that require explicit local
-backend configuration.
+Unit tests for backend config must not make network calls. Network behavior is
+covered by opt-in integration tests (`engine/tests/test_ollama_integration.py`)
+that require `CORPUS_STUDIO_OLLAMA_INTEGRATION=1` and a running local backend;
+the tests self-skip when the backend is unavailable.
