@@ -1,0 +1,216 @@
+# Evaluation Lab
+
+Evaluation Lab is the staged Corpus Studio workspace for testing datasets by
+running prompts through selected models and comparing the model responses with
+expected outputs, rubrics, or human scores.
+
+Evaluation Lab is the v0.2 lab surface. It should build on the dataset
+creation loop without turning Corpus Studio into a trainer.
+
+Current status: Corpus Studio has an MVP `eval-run` CLI command that can
+explicitly run instruction or chat JSONL through Ollama or an OpenAI-compatible
+local endpoint and export a JSON report. The WPF desktop app also has a
+first-pass Evaluation tab that collects backend settings, runs the same engine
+command, displays the JSON report, and checks backend health through the engine
+`backend-health` command. It also reloads saved JSON reports from the desktop
+history list, compares two saved reports for score/failure/tag/example deltas,
+stores repeatable `run_settings`, reruns saved configurations as regression
+checks, blocks runs when the pre-run backend health check fails, filters
+example review to failed rows, and saves manual per-example scores and notes
+back into report JSON. A selected failed row can be loaded back into Writing
+Studio as the current saved JSON row for explicit edit, validation, save, and
+rerun. A selected failed example can also be prepared as a Writing Studio draft
+with an AI Assist `rewrite-output` triage instruction. Multi-model comparison,
+richer score summaries, and benchmark suites remain planned.
+
+## Purpose
+
+The purpose of Evaluation Lab is to answer practical dataset questions before a
+user trains or ships a model:
+
+- Does a model already answer these examples well?
+- Which examples are too vague, too easy, too hard, or inconsistent?
+- Which categories fail most often?
+- Did a dataset edit improve model behavior?
+- Did a checkpoint regress compared with a previous run?
+
+Evaluation Lab should treat model runs as repeatable dataset tests. A user
+should be able to run a sample, inspect failures, edit examples, and rerun the
+same test.
+
+## Training Data vs Evaluation Data
+
+Training data teaches the model. Evaluation data tests the model.
+
+Training examples can be used to update model weights, adapters, or prompts.
+Evaluation examples must be held out from training so they remain a meaningful
+measurement of model behavior. If the same examples are used for both training
+and evaluation, scores can look better than the model's real generalization.
+
+Evaluation sets should be:
+
+- separate from train splits
+- stable across repeat runs
+- representative of target behavior
+- tagged by capability, topic, or failure mode
+- small enough for fast iteration at first
+- expandable into larger regression suites later
+
+## Why Eval Sets Must Stay Separate
+
+Mixing evaluation examples into training creates leakage. Leakage makes the
+model look competent on memorized examples while hiding weak generalization. For
+Corpus Studio, this means:
+
+- train, validation, and test splits must be visible to the user
+- evaluation exports should identify which examples were tested
+- Training Lab must warn before using held-out eval files as training input
+- before/after model comparisons must use the same held-out eval set
+
+## Initial Workflows
+
+Evaluation Lab should initially support these workflows:
+
+- run a model on instruction examples
+- run a model on chat examples
+- compare model output against expected output
+- score the model answer manually or with a simple rubric
+- flag weak examples for editing
+- export an evaluation report
+
+The first version should favor human-readable evidence over clever automation.
+Scores are useful, but the user needs to see the prompt, expected answer, model
+answer, tags, and failure notes.
+
+## v0.2 MVP Scope and Status
+
+The v0.2 MVP includes:
+
+- Ollama backend through the engine MVP CLI
+- OpenAI-compatible local HTTP endpoint through the engine MVP CLI
+- desktop Evaluation tab that launches the engine run and displays report JSON
+- backend health check command and desktop button
+- saved report history and reload UI
+- comparison for two saved reports
+- regression rerun button using saved report `run_settings`
+- manual per-example score and notes persistence
+- report summaries by tag, failure reason, and score band
+- one dataset run at a time
+- instruction and chat dataset support
+- simple scoring interface
+- JSON evaluation report export
+- no training launcher
+- no cloud-only requirement
+
+Still to harden:
+
+- add versioned reviewed-fix tracking and in-place row replacement options
+
+The MVP runs locally and should continue to work without CUDA or heavyweight ML
+libraries inside Corpus Studio itself. Model execution belongs behind the model
+backend abstraction.
+
+## Future Scope
+
+Future Evaluation Lab versions can add:
+
+- multiple model comparison
+- regression testing
+- named benchmark suites
+- rubric-based grading
+- judge-model evaluation
+- checkpoint comparison
+- interactive per-tag drilldowns and saved filters
+- prompt template versioning
+- cost and token accounting
+- failed-example review queues
+
+## Example Report Format
+
+```json
+{
+  "dataset": "coding_tutor_v0.1",
+  "model": "qwen2.5-coder:7b",
+  "examples_tested": 100,
+  "average_score": 86.4,
+  "failed_examples": 9,
+  "weak_tags": ["recursion", "oop", "error-handling"]
+}
+```
+
+## Report Design Notes
+
+An implementation-ready evaluation report should include summary fields plus
+per-example details:
+
+- dataset id and dataset version
+- split or file path used
+- model backend and model name
+- repeatable run settings, including schema id, backend, base URL, limit, score threshold, and timeout
+- prompt template id
+- start and end timestamps
+- score scale
+- per-example prompt, expected output, model output, score, tags, and notes
+- failed example count
+- weak tags or categories
+- tag summary with example count, failed count, and average score
+- failure reason summary from result notes or automatic score-threshold failures
+- score band summary for `0-49`, `50-69`, `70-84`, and `85-100`
+- app and engine version metadata
+
+Reports should be JSON first, with Markdown or HTML summaries later.
+
+## Current CLI MVP
+
+```powershell
+python -m corpus_studio.cli eval-run examples\datasets\instruction\train.jsonl instruction --backend ollama --model qwen2.5-coder:7b --limit 10 --output-path exports\eval_report.json
+```
+
+The CLI validates the dataset first, extracts instruction/chat prompts, calls
+the selected local backend, scores model output with the current lightweight
+overlap scorer, and writes the serializable evaluation report with a
+`run_settings` object plus derived `tag_summary`,
+`failure_reason_summary`, and `score_band_summary` arrays. This command
+requires the chosen local backend to already be running.
+
+## Current Desktop MVP
+
+The desktop Evaluation tab is a thin UI over the CLI MVP:
+
+- backend, model, base URL, limit, score threshold, and timeout fields
+- Refresh Models control that lists Ollama/OpenAI-compatible backend models
+  through the engine `model-list` command
+- input validation before any backend call
+- single active project run using the project's `examples.jsonl`
+- JSON report written under `exports/<project_id>/evaluation`
+- summary and raw report JSON displayed in the app
+- backend health summary for the configured provider and model
+- pre-run backend health gate before evaluation generation
+- saved report history loaded from `exports/<project_id>/evaluation`
+- two-report comparison showing score, failure, weak-tag, and row-level deltas
+- saved regression reruns that reuse report `run_settings` after a backend health gate
+- summary lines for tag count/failure/average score, failure reasons, and score bands
+- failed-example review filter
+- failed-row edit handoff that loads the current saved row into Writing Studio
+  for explicit validation, save, and rerun
+- per-example result list with manual score and notes fields saved to report JSON
+- failed-example AI Assist triage handoff that loads the expected answer as a
+  draft and includes the prompt, expected output, model output, and score in the
+  instruction
+
+It does not yet provide streaming progress, hosted-provider credential
+management, multi-run failure triage, or multi-model benchmark comparison.
+
+## UI Screen Basis
+
+Evaluation Lab can become these screens:
+
+- backend selector
+- dataset and split selector
+- prompt preview
+- run progress
+- model output review table
+- report comparison panel
+- score and notes panel
+- weak-example queue
+- report export panel

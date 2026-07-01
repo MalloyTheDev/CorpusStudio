@@ -1,128 +1,185 @@
 # Corpus Studio Roadmap
 
-## v0.1 — Dataset Writing Studio
+Corpus Studio should become a one-stop shop for creating, validating, testing,
+exporting, and eventually training datasets. The implementation must stay
+staged so v0.1 remains focused and usable.
+
+## Current Checkpoint
+
+The repository now has a runnable WPF desktop app backed by the Python engine.
+The local dataset loop, import quarantine, quality reports, split generation,
+JSONL export, Evaluation Lab MVP, AI Assist Lab MVP, and Training Lab config
+export MVP are present. The app remains local-first and file-backed.
+
+The next roadmap work is hardening, not expanding into full trainer
+orchestration. Local training launch, trainer logs, checkpoint tracking, CUDA,
+PyTorch, Transformers, and cloud publishing remain outside the current app.
+
+## v0.1 - Dataset Creation Studio
 
 Goal: prove the local dataset authoring loop.
 
-Features:
+Scope:
 
 - local project creation
-- built-in schemas:
-  - raw text
-  - instruction
-  - chat/messages
-  - preference
-- example editor
-- basic validation panel
+- built-in schema templates
+- dataset editors
+- validation
+- JSONL import preview
 - JSONL export
-- train/validation/test split
-- SQLite project storage
-- basic quality dashboard
+- train/validation/test splitting
+- basic quality checks
+- import quarantine review/retry
+- project-level quality history
 
 Exit criteria:
 
 - user can create a dataset project
-- user can add examples
+- user can add or import examples
 - examples are validated against schema
-- user can export valid JSONL
 - user can split dataset into train/validation/test
+- user can export valid JSONL
+- user can recover rejected import rows into the editor
+- user can inspect recent quality history
 
-## v0.2 — Cleaning and Quality Lab
+## v0.2 - Evaluation Lab
 
-Features:
+Goal: test datasets against local models before training.
 
-- duplicate detection
-- near-duplicate detection
-- empty-field detection
-- token length estimation
-- quality report
-- bad-row quarantine
-- reversible cleaning operations
+Scope:
 
-## v0.3 — Code Dataset Studio
+- Ollama backend; engine CLI and desktop MVP run path exists
+- OpenAI-compatible local endpoint; engine CLI and desktop MVP run path exists
+- single dataset run
+- instruction and chat examples
+- compare model output with expected output
+- simple scoring interface
+- JSON evaluation report export
+- desktop Evaluation Lab workflow; first-pass tab exists
+- backend health check CLI and desktop buttons
+- Ollama/local backend model discovery CLI and desktop pickers
+- per-project Evaluation and AI Assist backend settings persistence
+- automatic backend health checks before long runs
+- report history and reload UI
+- comparison for two saved reports
+- saved Evaluation configuration reruns for regression checks
+- failed-example review queue filter
+- failed-row edit handoff to Writing Studio for validate/save/rerun loops
+- failed-example AI Assist triage preparation
+- report summaries by tag, failure reason, and score band
+- manual per-example scoring and notes
 
-Features:
+Remaining hardening:
 
-- code schema
-- syntax validation
-- bug-fix pair editor
-- code explanation editor
-- test-case field support
-- language metadata
+- add versioned reviewed-fix tracking and in-place row replacement options
+- add interactive Evaluation drilldowns and saved failure filters
 
-## v0.4 — Image-Caption Dataset Studio
+Out of scope:
 
-Features:
+- full training launcher
+- multi-model benchmark suites
+- cloud-only evaluation requirements
 
-- image folder import
-- image preview
-- caption editor
-- tag editor
-- resolution metadata
-- transparent-background metadata
-- pixel-art workflow support
+## v0.3 - AI Assist Lab
 
-## v0.5 — Import and Transform System
+Goal: help users review and improve datasets while preserving human control.
 
-Features:
+Scope:
 
-- CSV import
-- JSONL import
-- Markdown import
-- source folder import
-- schema mapping UI
-- import preview
-- failed-row report
+- review-first engine and desktop MVP; first-pass tab exists
+- persistent review queue with accept/reject states
+- side-by-side source draft and suggested JSONL comparison
+- schema-aware action presets instead of free-form action text
+- first-pass repetitive synthetic pattern warnings
+- first-pass preference-pair strength warnings
+- preference-pair review UI and AI Assist judge handoff
+- multi-pair preference ranking and contrast filters
+- review queue filters and bulk triage controls
+- review queue search, sorting, and multi-step bulk triage undo
+- saved queue views for repeated review passes
+- first-pass dataset-wide synthetic-pattern quality warnings
+- synthetic warning severity levels and repair suggestions
+- synthetic issue triage-to-rewrite handoff
+- batch synthetic rewrite preparation for affected rows
+- preference ranking export for DPO/reward-model review
+- visible preference queue batch judge preparation
+- suggest tags
+- detect vague examples
+- rewrite weak outputs
+- generate draft examples
+- create chosen/rejected pairs
+- judge preference strength
+- identify schema violations
+- detect repetitive synthetic patterns
 
-## v0.6 — Export Ecosystem
+Remaining hardening:
 
-Features:
+- production-grade synthetic pattern clustering
+- persistent rewrite batches that survive app restart
+- target-specific DPO/reward-model export formats
 
-- Alpaca export
-- ShareGPT export
-- DPO export
-- ChatML-like export
-- Hugging Face folder export
-- generated README and dataset card
+Out of scope:
 
-## v0.7 — Local LLM Assist
+- automatic acceptance of generated data
+- bypassing validators or quality gates
 
-Features:
+## v0.4 - Training Config Generation
 
-- draft example generation
-- output rewriting
-- tag suggestions
-- weak-example detection
-- chosen/rejected quality feedback
-- local model provider abstraction
+Goal: generate inspectable training configs after datasets and evals are stable.
 
-## v0.8 — Evaluation Dataset Studio
+Current MVP status: the engine exposes a `training-config` command and the
+desktop app has a Training tab that writes inspectable config files. It does
+not launch training jobs.
 
-Features:
+Scope:
 
-- eval case editor
-- expected-answer fields
-- rubric fields
-- category balancing
-- regression test set support
+- Axolotl YAML config
+- TRL config
+- Unsloth notebook/script config
+- Hugging Face Trainer config
+- LLaMA-Factory config
+- token budget estimate
+- VRAM estimate placeholder
+- LoRA parameter helper
+- target-specific schema/format compatibility warnings
 
-## v0.9 — Training Config Generator
+Out of scope:
 
-Features:
+- launching trainers
+- CUDA/PyTorch/Transformers dependency in the core app
 
-- Axolotl config templates
-- TRL config templates
-- Unsloth config templates
-- llama.cpp preparation notes
-- dataset format compatibility checks
+## v0.5 - Local Training Launcher
 
-## v1.0 — Full Local Dataset Studio
+Goal: launch local LoRA or adapter jobs with enough safety and visibility to be
+useful.
 
-Features:
+Scope:
+
+- local command preview
+- training log viewer
+- checkpoint tracking
+- resume training
+- stop/cancel support
+- before/after eval comparison
+
+Out of scope:
+
+- cloud training orchestration by default
+- hiding trainer commands from the user
+
+## v1.0 - Full Dataset-to-Model Workflow
+
+Goal: stable end-to-end workflow from dataset creation to evaluated model
+artifacts.
+
+Scope:
 
 - stable schema engine
-- stable project database
-- stable export center
+- stable project storage
+- stable import/export center
+- Evaluation Lab
+- AI Assist Lab
+- Training Lab
 - version history
 - full documentation
 - examples for all built-in schemas

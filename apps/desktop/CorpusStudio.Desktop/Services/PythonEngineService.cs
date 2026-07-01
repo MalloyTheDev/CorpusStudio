@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 using CorpusStudio.Desktop.Models;
 
@@ -100,6 +102,323 @@ public sealed class PythonEngineService
         return examples;
     }
 
+    public IReadOnlyList<QualityHistoryEntry> LoadQualityHistory(
+        string projectPath,
+        int maxEntries = 5
+    )
+    {
+        var historyPath = Path.Combine(projectPath, "quality_history.jsonl");
+        if (!File.Exists(historyPath))
+        {
+            return [];
+        }
+
+        return File.ReadLines(historyPath, Encoding.UTF8)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Select(TryDeserializeQualityHistoryEntry)
+            .Where(entry => entry is not null)
+            .Cast<QualityHistoryEntry>()
+            .OrderByDescending(entry => entry.RecordedAt)
+            .Take(maxEntries)
+            .ToList();
+    }
+
+    public QualityHistoryEntry SaveQualityHistoryEntry(string projectPath, QualityReport report)
+    {
+        Directory.CreateDirectory(projectPath);
+        var entry = QualityHistoryEntry.FromReport(report);
+        var historyPath = Path.Combine(projectPath, "quality_history.jsonl");
+        var json = JsonSerializer.Serialize(entry, JsonOptions) + Environment.NewLine;
+        File.AppendAllText(historyPath, json, encoding: Utf8NoBom);
+        return entry;
+    }
+
+    public IReadOnlyList<ImportQuarantineItem> LoadImportQuarantineItems(string projectPath)
+    {
+        var quarantineDirectory = Path.Combine(projectPath, "import_quarantine");
+        if (!Directory.Exists(quarantineDirectory))
+        {
+            return [];
+        }
+
+        var items = new List<ImportQuarantineItem>();
+        foreach (var path in Directory
+            .EnumerateFiles(quarantineDirectory, "*_rejected.jsonl")
+            .OrderByDescending(File.GetLastWriteTimeUtc))
+        {
+            foreach (var rawLine in File.ReadLines(path, Encoding.UTF8))
+            {
+                if (string.IsNullOrWhiteSpace(rawLine))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var item = JsonSerializer.Deserialize<ImportQuarantineItem>(rawLine, JsonOptions);
+                    if (item is not null)
+                    {
+                        item.QuarantinePath = path;
+                        items.Add(item);
+                    }
+                }
+                catch (JsonException)
+                {
+                    continue;
+                }
+            }
+        }
+
+        return items;
+    }
+
+    public IReadOnlyList<AiAssistReviewQueueItem> LoadAiAssistReviewQueue(
+        string projectPath,
+        int maxItems = 50
+    )
+    {
+        var queuePath = GetAiAssistReviewQueuePath(projectPath);
+        if (!File.Exists(queuePath))
+        {
+            return [];
+        }
+
+        return File.ReadLines(queuePath, Encoding.UTF8)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Select(TryDeserializeAiAssistReviewQueueItem)
+            .Where(item => item is not null)
+            .Cast<AiAssistReviewQueueItem>()
+            .OrderByDescending(item => item.CreatedAt)
+            .Take(maxItems)
+            .ToList();
+    }
+
+    public IReadOnlyList<AiAssistQueueView> LoadAiAssistQueueViews(string projectPath)
+    {
+        var viewsPath = GetAiAssistQueueViewsPath(projectPath);
+        if (!File.Exists(viewsPath))
+        {
+            return [];
+        }
+
+        try
+        {
+            var views = JsonSerializer.Deserialize<List<AiAssistQueueView>>(
+                File.ReadAllText(viewsPath, Encoding.UTF8),
+                JsonOptions
+            ) ?? [];
+
+            return views
+                .Where(view => !string.IsNullOrWhiteSpace(view.Name))
+                .OrderBy(view => view.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    public AiAssistQueueView SaveAiAssistQueueView(string projectPath, AiAssistQueueView view)
+    {
+        var name = view.Name.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new InvalidOperationException("AI Assist queue view name is required.");
+        }
+
+        var savedView = new AiAssistQueueView
+        {
+            Name = name,
+            Filter = string.IsNullOrWhiteSpace(view.Filter) ? "All" : view.Filter,
+            Search = view.Search.Trim(),
+            Sort = string.IsNullOrWhiteSpace(view.Sort) ? "Newest" : view.Sort,
+        };
+        var views = LoadAiAssistQueueViews(projectPath).ToList();
+        var existingIndex = views.FindIndex(existing =>
+            string.Equals(existing.Name, savedView.Name, StringComparison.OrdinalIgnoreCase)
+        );
+
+        if (existingIndex >= 0)
+        {
+            views[existingIndex] = savedView;
+        }
+        else
+        {
+            views.Add(savedView);
+        }
+
+        views = views
+            .OrderBy(existing => existing.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        Directory.CreateDirectory(projectPath);
+        File.WriteAllText(
+            GetAiAssistQueueViewsPath(projectPath),
+            JsonSerializer.Serialize(views, new JsonSerializerOptions(JsonOptions)
+            {
+                WriteIndented = true
+            }) + Environment.NewLine,
+            encoding: Utf8NoBom
+        );
+
+        return savedView;
+    }
+
+    public AiAssistReviewQueueItem SaveAiAssistReviewQueueItem(
+        string projectPath,
+        string sourceDraft,
+        AiAssistRunResult result
+    )
+    {
+        var item = AiAssistReviewQueueItem.FromRunResult(sourceDraft, result);
+        var queuePath = GetAiAssistReviewQueuePath(projectPath);
+        Directory.CreateDirectory(projectPath);
+        File.AppendAllText(
+            queuePath,
+            JsonSerializer.Serialize(item, JsonOptions) + Environment.NewLine,
+            encoding: Utf8NoBom
+        );
+        return item;
+    }
+
+    public AiAssistReviewQueueItem UpdateAiAssistReviewState(
+        string projectPath,
+        string reviewId,
+        string reviewState
+    )
+    {
+        if (reviewState is not ("accepted" or "rejected" or "review_required"))
+        {
+            throw new InvalidOperationException("AI Assist review state must be accepted, rejected, or review_required.");
+        }
+
+        var queuePath = GetAiAssistReviewQueuePath(projectPath);
+        if (!File.Exists(queuePath))
+        {
+            throw new FileNotFoundException("AI Assist review queue was not found.", queuePath);
+        }
+
+        var items = File.ReadLines(queuePath, Encoding.UTF8)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Select(line => JsonSerializer.Deserialize<AiAssistReviewQueueItem>(line, JsonOptions))
+            .Where(item => item is not null)
+            .Cast<AiAssistReviewQueueItem>()
+            .ToList();
+
+        var target = items.FirstOrDefault(item => item.ReviewId == reviewId)
+            ?? throw new InvalidOperationException($"AI Assist review was not found: {reviewId}");
+        target.ReviewState = reviewState;
+        target.DecidedAt = reviewState == "review_required" ? null : DateTime.UtcNow;
+
+        var lines = items.Select(item => JsonSerializer.Serialize(item, JsonOptions));
+        File.WriteAllText(queuePath, string.Join(Environment.NewLine, lines) + Environment.NewLine, encoding: Utf8NoBom);
+        return target;
+    }
+
+    public int UpdateAiAssistReviewStates(
+        string projectPath,
+        IReadOnlyCollection<string> reviewIds,
+        string reviewState
+    )
+    {
+        if (reviewState is not ("accepted" or "rejected" or "review_required"))
+        {
+            throw new InvalidOperationException("AI Assist review state must be accepted, rejected, or review_required.");
+        }
+
+        var reviewIdSet = reviewIds
+            .Where(reviewId => !string.IsNullOrWhiteSpace(reviewId))
+            .ToHashSet(StringComparer.Ordinal);
+        if (reviewIdSet.Count == 0)
+        {
+            return 0;
+        }
+
+        var queuePath = GetAiAssistReviewQueuePath(projectPath);
+        if (!File.Exists(queuePath))
+        {
+            throw new FileNotFoundException("AI Assist review queue was not found.", queuePath);
+        }
+
+        var items = File.ReadLines(queuePath, Encoding.UTF8)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Select(line => JsonSerializer.Deserialize<AiAssistReviewQueueItem>(line, JsonOptions))
+            .Where(item => item is not null)
+            .Cast<AiAssistReviewQueueItem>()
+            .ToList();
+
+        var updatedCount = 0;
+        foreach (var item in items.Where(item => reviewIdSet.Contains(item.ReviewId)))
+        {
+            item.ReviewState = reviewState;
+            item.DecidedAt = reviewState == "review_required" ? null : DateTime.UtcNow;
+            updatedCount++;
+        }
+
+        if (updatedCount == 0)
+        {
+            throw new InvalidOperationException("No matching AI Assist reviews were found.");
+        }
+
+        var lines = items.Select(item => JsonSerializer.Serialize(item, JsonOptions));
+        File.WriteAllText(queuePath, string.Join(Environment.NewLine, lines) + Environment.NewLine, encoding: Utf8NoBom);
+        return updatedCount;
+    }
+
+    public int UpdateAiAssistReviewStates(
+        string projectPath,
+        IReadOnlyDictionary<string, string> reviewStatesById
+    )
+    {
+        var requestedStates = reviewStatesById
+            .Where(pair => !string.IsNullOrWhiteSpace(pair.Key))
+            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        if (requestedStates.Count == 0)
+        {
+            return 0;
+        }
+
+        foreach (var reviewState in requestedStates.Values)
+        {
+            if (reviewState is not ("accepted" or "rejected" or "review_required"))
+            {
+                throw new InvalidOperationException("AI Assist review state must be accepted, rejected, or review_required.");
+            }
+        }
+
+        var queuePath = GetAiAssistReviewQueuePath(projectPath);
+        if (!File.Exists(queuePath))
+        {
+            throw new FileNotFoundException("AI Assist review queue was not found.", queuePath);
+        }
+
+        var items = File.ReadLines(queuePath, Encoding.UTF8)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Select(line => JsonSerializer.Deserialize<AiAssistReviewQueueItem>(line, JsonOptions))
+            .Where(item => item is not null)
+            .Cast<AiAssistReviewQueueItem>()
+            .ToList();
+
+        var updatedCount = 0;
+        foreach (var item in items.Where(item => requestedStates.ContainsKey(item.ReviewId)))
+        {
+            var reviewState = requestedStates[item.ReviewId];
+            item.ReviewState = reviewState;
+            item.DecidedAt = reviewState == "review_required" ? null : DateTime.UtcNow;
+            updatedCount++;
+        }
+
+        if (updatedCount == 0)
+        {
+            throw new InvalidOperationException("No matching AI Assist reviews were found.");
+        }
+
+        var lines = items.Select(item => JsonSerializer.Serialize(item, JsonOptions));
+        File.WriteAllText(queuePath, string.Join(Environment.NewLine, lines) + Environment.NewLine, encoding: Utf8NoBom);
+        return updatedCount;
+    }
+
     public DesktopSettings GetSettings()
     {
         return new DesktopSettings(
@@ -178,12 +497,26 @@ public sealed class PythonEngineService
         return rowCount;
     }
 
-    public int AppendJsonlFileToProjectExamples(string projectPath, string importPath)
+    public ImportCommitResult CommitJsonlImportToProjectExamples(
+        string projectPath,
+        string importPath,
+        ImportPreviewReport report
+    )
     {
+        var failedRowNumbers = report.FailedRows
+            .Select(row => row.RowNumber)
+            .ToHashSet();
         var rows = new List<string>();
+        var rowNumber = 0;
         foreach (var rawLine in File.ReadLines(importPath, Encoding.UTF8))
         {
+            rowNumber++;
             if (string.IsNullOrWhiteSpace(rawLine))
+            {
+                continue;
+            }
+
+            if (failedRowNumbers.Contains(rowNumber))
             {
                 continue;
             }
@@ -192,16 +525,23 @@ public sealed class PythonEngineService
             rows.Add(JsonSerializer.Serialize(document.RootElement));
         }
 
-        if (rows.Count == 0)
+        var quarantinePath = report.FailedRows.Count == 0
+            ? null
+            : WriteImportQuarantine(projectPath, importPath, report);
+
+        if (rows.Count > 0)
         {
-            return 0;
+            var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+            Directory.CreateDirectory(projectPath);
+            var jsonl = string.Join(Environment.NewLine, rows) + Environment.NewLine;
+            File.AppendAllText(examplesPath, jsonl, encoding: Utf8NoBom);
         }
 
-        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
-        Directory.CreateDirectory(projectPath);
-        var jsonl = string.Join(Environment.NewLine, rows) + Environment.NewLine;
-        File.AppendAllText(examplesPath, jsonl, encoding: Utf8NoBom);
-        return rows.Count;
+        return new ImportCommitResult(
+            rows.Count,
+            report.FailedRows.Count,
+            quarantinePath
+        );
     }
 
     public async Task<string> ExportProjectExamplesAsync(string projectPath, string schemaId)
@@ -218,7 +558,59 @@ public sealed class PythonEngineService
         return outputPath;
     }
 
-    public async Task<SplitReport> GenerateProjectSplitsAsync(string projectPath, string schemaId)
+    public string ExportPreferenceRanking(
+        string projectPath,
+        IReadOnlyList<PreferenceReviewItem> items
+    )
+    {
+        if (items.Count == 0)
+        {
+            throw new InvalidOperationException("No visible preference ranking items are available to export.");
+        }
+
+        var projectId = new DirectoryInfo(projectPath).Name;
+        var outputDirectory = Path.Combine(ResolveExportRoot(), projectId, "preference_review");
+        Directory.CreateDirectory(outputDirectory);
+
+        var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+        var outputPath = Path.Combine(outputDirectory, $"{timestamp}_preference_ranking.json");
+        var payload = new
+        {
+            project_id = projectId,
+            exported_at = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+            purpose = "DPO and reward-model preference-pair review",
+            item_count = items.Count,
+            items = items.Select(item => new
+            {
+                row_number = item.RowNumber,
+                prompt = item.Prompt,
+                chosen = item.Chosen,
+                rejected = item.Rejected,
+                reason = item.Reason,
+                contrast = item.Contrast,
+                token_overlap = Math.Round(item.TokenOverlap, 4),
+                character_delta = item.CharacterDelta,
+            }),
+        };
+
+        File.WriteAllText(
+            outputPath,
+            JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonOptions)
+            {
+                WriteIndented = true
+            }) + Environment.NewLine,
+            encoding: Utf8NoBom
+        );
+        return outputPath;
+    }
+
+    public async Task<SplitReport> GenerateProjectSplitsAsync(
+        string projectPath,
+        string schemaId,
+        double trainRatio,
+        double validationRatio,
+        int seed
+    )
     {
         var examplesPath = Path.Combine(projectPath, "examples.jsonl");
         if (!File.Exists(examplesPath))
@@ -228,14 +620,512 @@ public sealed class PythonEngineService
 
         var projectId = new DirectoryInfo(projectPath).Name;
         var outputDirectory = Path.Combine(ResolveExportRoot(), projectId, "splits");
-        var output = await RunEngineCommandAsync("split", examplesPath, outputDirectory, schemaId);
+        var output = await RunEngineCommandAsync(
+            "split",
+            examplesPath,
+            outputDirectory,
+            schemaId,
+            "--train-ratio",
+            trainRatio.ToString(CultureInfo.InvariantCulture),
+            "--validation-ratio",
+            validationRatio.ToString(CultureInfo.InvariantCulture),
+            "--seed",
+            seed.ToString(CultureInfo.InvariantCulture)
+        );
         return JsonSerializer.Deserialize<SplitReport>(output, JsonOptions)
             ?? throw new InvalidOperationException("The Python engine returned an invalid split report.");
+    }
+
+    public async Task<EvaluationRunResult> RunEvaluationAsync(
+        string projectPath,
+        string schemaId,
+        string backend,
+        string model,
+        string? baseUrl,
+        int? limit,
+        double scoreThreshold,
+        int timeoutSeconds
+    )
+    {
+        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+        if (!File.Exists(examplesPath))
+        {
+            throw new FileNotFoundException("Project examples file was not found.", examplesPath);
+        }
+
+        var projectId = new DirectoryInfo(projectPath).Name;
+        var reportDirectory = Path.Combine(ResolveExportRoot(), projectId, "evaluation");
+        var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+        var reportPath = Path.Combine(reportDirectory, $"{timestamp}_evaluation_report.json");
+
+        var arguments = new List<string>
+        {
+            "eval-run",
+            examplesPath,
+            schemaId,
+            "--model",
+            model,
+            "--backend",
+            backend,
+            "--output-path",
+            reportPath,
+            "--score-threshold",
+            scoreThreshold.ToString(CultureInfo.InvariantCulture),
+            "--timeout-seconds",
+            timeoutSeconds.ToString(CultureInfo.InvariantCulture),
+        };
+
+        if (!string.IsNullOrWhiteSpace(baseUrl))
+        {
+            arguments.Add("--base-url");
+            arguments.Add(baseUrl);
+        }
+
+        if (limit is not null)
+        {
+            arguments.Add("--limit");
+            arguments.Add(limit.Value.ToString(CultureInfo.InvariantCulture));
+        }
+
+        var output = await RunEngineCommandAsync(arguments.ToArray());
+        var reportJson = File.Exists(reportPath)
+            ? File.ReadAllText(reportPath, Encoding.UTF8)
+            : output;
+        var report = JsonSerializer.Deserialize<EvaluationReport>(reportJson, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid evaluation report.");
+
+        return new EvaluationRunResult(report, reportPath, reportJson);
+    }
+
+    public IReadOnlyList<EvaluationReportHistoryItem> LoadEvaluationReportHistory(
+        string projectPath,
+        int maxReports = 20
+    )
+    {
+        var projectId = new DirectoryInfo(projectPath).Name;
+        var reportDirectory = Path.Combine(ResolveExportRoot(), projectId, "evaluation");
+        if (!Directory.Exists(reportDirectory))
+        {
+            return [];
+        }
+
+        var reports = new List<EvaluationReportHistoryItem>();
+        foreach (var path in Directory
+            .EnumerateFiles(reportDirectory, "*_evaluation_report.json")
+            .OrderByDescending(File.GetLastWriteTimeUtc))
+        {
+            try
+            {
+                var reportJson = File.ReadAllText(path, Encoding.UTF8);
+                var report = JsonSerializer.Deserialize<EvaluationReport>(reportJson, JsonOptions);
+                if (report is not null)
+                {
+                    reports.Add(new EvaluationReportHistoryItem(
+                        report,
+                        path,
+                        reportJson,
+                        File.GetLastWriteTime(path)
+                    ));
+                }
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+        }
+
+        return reports.Take(maxReports).ToList();
+    }
+
+    public EvaluationReportHistoryItem SaveEvaluationManualReview(
+        EvaluationReportHistoryItem reportItem,
+        string exampleId,
+        double? manualScore,
+        string? manualNotes
+    )
+    {
+        var target = reportItem.Report.Results.FirstOrDefault(result => result.ExampleId == exampleId)
+            ?? throw new InvalidOperationException($"Evaluation example was not found: {exampleId}");
+
+        target.ManualScore = manualScore;
+        target.ManualNotes = string.IsNullOrWhiteSpace(manualNotes) ? null : manualNotes.Trim();
+
+        var manualScores = reportItem.Report.Results
+            .Where(result => result.ManualScore is not null)
+            .Select(result => result.ManualScore!.Value)
+            .ToList();
+
+        var root = JsonNode.Parse(reportItem.ReportJson)?.AsObject()
+            ?? throw new InvalidOperationException("Evaluation report is not a JSON object.");
+        root["manually_scored_examples"] = manualScores.Count;
+        root["average_manual_score"] = manualScores.Count == 0
+            ? null
+            : Math.Round(manualScores.Average(), 2);
+
+        var results = root["results"]?.AsArray()
+            ?? throw new InvalidOperationException("Evaluation report does not contain a results list.");
+        foreach (var node in results)
+        {
+            if (node is not JsonObject resultObject
+                || !string.Equals(
+                    resultObject["example_id"]?.GetValue<string>(),
+                    exampleId,
+                    StringComparison.Ordinal
+                ))
+            {
+                continue;
+            }
+
+            resultObject["manual_score"] = manualScore;
+            resultObject["manual_notes"] = target.ManualNotes;
+            break;
+        }
+
+        var updatedJson = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(reportItem.ReportPath, updatedJson + Environment.NewLine, encoding: Utf8NoBom);
+
+        var updatedReport = JsonSerializer.Deserialize<EvaluationReport>(updatedJson, JsonOptions)
+            ?? throw new InvalidOperationException("The saved evaluation report could not be reloaded.");
+        return new EvaluationReportHistoryItem(
+            updatedReport,
+            reportItem.ReportPath,
+            updatedJson,
+            File.GetLastWriteTime(reportItem.ReportPath)
+        );
+    }
+
+    public async Task<AiAssistRunResult> RunAiAssistAsync(
+        string draftText,
+        string schemaId,
+        string action,
+        string backend,
+        string model,
+        string? baseUrl,
+        int timeoutSeconds,
+        string? instruction
+    )
+    {
+        var tempPath = WriteDraftToTempJsonl(draftText);
+
+        try
+        {
+            var arguments = new List<string>
+            {
+                "ai-assist",
+                tempPath,
+                schemaId,
+                "--action",
+                action,
+                "--model",
+                model,
+                "--backend",
+                backend,
+                "--timeout-seconds",
+                timeoutSeconds.ToString(CultureInfo.InvariantCulture),
+            };
+
+            if (!string.IsNullOrWhiteSpace(baseUrl))
+            {
+                arguments.Add("--base-url");
+                arguments.Add(baseUrl);
+            }
+
+            if (!string.IsNullOrWhiteSpace(instruction))
+            {
+                arguments.Add("--instruction");
+                arguments.Add(instruction);
+            }
+
+            var output = await RunEngineCommandAsync(arguments.ToArray());
+            return JsonSerializer.Deserialize<AiAssistRunResult>(output, JsonOptions)
+                ?? throw new InvalidOperationException("The Python engine returned an invalid AI Assist result.");
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    public async Task<BackendHealthReport> CheckBackendHealthAsync(
+        string backend,
+        string model,
+        string? baseUrl,
+        int timeoutSeconds
+    )
+    {
+        var arguments = new List<string>
+        {
+            "backend-health",
+            "--model",
+            model,
+            "--backend",
+            backend,
+            "--timeout-seconds",
+            timeoutSeconds.ToString(CultureInfo.InvariantCulture),
+        };
+
+        if (!string.IsNullOrWhiteSpace(baseUrl))
+        {
+            arguments.Add("--base-url");
+            arguments.Add(baseUrl);
+        }
+
+        var result = await RunEngineProcessAsync(_engineDirectory, arguments.ToArray());
+        var payload = string.IsNullOrWhiteSpace(result.Output) ? result.Error : result.Output;
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            throw new InvalidOperationException("The Python engine returned an empty backend health report.");
+        }
+
+        if (!payload.TrimStart().StartsWith('{'))
+        {
+            throw new InvalidOperationException(payload);
+        }
+
+        var report = JsonSerializer.Deserialize<BackendHealthReport>(payload, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid backend health report.");
+
+        if (result.ExitCode != 0 && report.Error is null)
+        {
+            throw new InvalidOperationException(payload);
+        }
+
+        return report;
+    }
+
+    public async Task<BackendModelListReport> ListBackendModelsAsync(
+        string backend,
+        string? baseUrl,
+        int timeoutSeconds
+    )
+    {
+        var arguments = new List<string>
+        {
+            "model-list",
+            "--backend",
+            backend,
+            "--timeout-seconds",
+            timeoutSeconds.ToString(CultureInfo.InvariantCulture),
+        };
+
+        if (!string.IsNullOrWhiteSpace(baseUrl))
+        {
+            arguments.Add("--base-url");
+            arguments.Add(baseUrl);
+        }
+
+        var result = await RunEngineProcessAsync(_engineDirectory, arguments.ToArray());
+        var payload = string.IsNullOrWhiteSpace(result.Output) ? result.Error : result.Output;
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            throw new InvalidOperationException("The Python engine returned an empty model list report.");
+        }
+
+        if (!payload.TrimStart().StartsWith('{'))
+        {
+            throw new InvalidOperationException(payload);
+        }
+
+        var report = JsonSerializer.Deserialize<BackendModelListReport>(payload, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid model list report.");
+
+        if (result.ExitCode != 0 && report.Error is null)
+        {
+            throw new InvalidOperationException(payload);
+        }
+
+        return report;
+    }
+
+    public async Task<TrainingConfigExportResult> GenerateTrainingConfigAsync(
+        string projectPath,
+        string schemaId,
+        string target,
+        string baseModel,
+        string datasetFormat,
+        int sequenceLen,
+        int loraR,
+        int loraAlpha,
+        int microBatchSize,
+        int gradientAccumulationSteps,
+        double learningRate
+    )
+    {
+        var projectId = new DirectoryInfo(projectPath).Name;
+        var projectExportRoot = Path.Combine(ResolveExportRoot(), projectId);
+        var splitDirectory = Path.Combine(projectExportRoot, "splits");
+        var trainSplitPath = Path.Combine(splitDirectory, "train.jsonl");
+        var validationSplitPath = Path.Combine(splitDirectory, "validation.jsonl");
+        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+
+        var datasetPath = File.Exists(trainSplitPath) ? trainSplitPath : examplesPath;
+        if (!File.Exists(datasetPath))
+        {
+            throw new FileNotFoundException("Project examples file was not found.", examplesPath);
+        }
+
+        var evalDatasetPath = File.Exists(validationSplitPath) ? validationSplitPath : null;
+        var trainingDirectory = Path.Combine(projectExportRoot, "training");
+        var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+        var outputPath = Path.Combine(
+            trainingDirectory,
+            $"{timestamp}_{SanitizeFileNamePart(target)}_config{GetTrainingConfigExtension(target)}"
+        );
+
+        var arguments = new List<string>
+        {
+            "training-config",
+            datasetPath,
+            schemaId,
+            "--output-path",
+            outputPath,
+            "--base-model",
+            baseModel,
+            "--target",
+            target,
+            "--format",
+            datasetFormat,
+            "--sequence-len",
+            sequenceLen.ToString(CultureInfo.InvariantCulture),
+            "--lora-r",
+            loraR.ToString(CultureInfo.InvariantCulture),
+            "--lora-alpha",
+            loraAlpha.ToString(CultureInfo.InvariantCulture),
+            "--micro-batch-size",
+            microBatchSize.ToString(CultureInfo.InvariantCulture),
+            "--gradient-accumulation-steps",
+            gradientAccumulationSteps.ToString(CultureInfo.InvariantCulture),
+            "--learning-rate",
+            learningRate.ToString(CultureInfo.InvariantCulture),
+        };
+
+        if (!string.IsNullOrWhiteSpace(evalDatasetPath))
+        {
+            arguments.Add("--eval-dataset-path");
+            arguments.Add(evalDatasetPath);
+        }
+
+        var output = await RunEngineCommandAsync(arguments.ToArray());
+        return JsonSerializer.Deserialize<TrainingConfigExportResult>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid training config result.");
+    }
+
+    public SplitSettings LoadProjectSplitSettings(string projectPath)
+    {
+        var project = LoadProjectFromPath(projectPath);
+        return project?.Project.SplitSettings ?? SplitSettings.Default;
+    }
+
+    public void SaveProjectSplitSettings(string projectPath, SplitSettings settings)
+    {
+        var projectFile = Path.Combine(projectPath, "project.json");
+        if (!File.Exists(projectFile))
+        {
+            throw new FileNotFoundException("Project metadata file was not found.", projectFile);
+        }
+
+        var root = JsonNode.Parse(File.ReadAllText(projectFile, Encoding.UTF8))?.AsObject()
+            ?? throw new InvalidOperationException("Project metadata is not a JSON object.");
+        root["split_settings"] = JsonSerializer.SerializeToNode(settings, JsonOptions);
+        root["updated_at"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+
+        File.WriteAllText(
+            projectFile,
+            root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }),
+            encoding: Utf8NoBom
+        );
+    }
+
+    public LabBackendSettings LoadProjectLabSettings(string projectPath)
+    {
+        var project = LoadProjectFromPath(projectPath);
+        return project?.Project.LabSettings ?? LabBackendSettings.Default;
+    }
+
+    public void SaveProjectLabSettings(string projectPath, LabBackendSettings settings)
+    {
+        var projectFile = Path.Combine(projectPath, "project.json");
+        if (!File.Exists(projectFile))
+        {
+            throw new FileNotFoundException("Project metadata file was not found.", projectFile);
+        }
+
+        var root = JsonNode.Parse(File.ReadAllText(projectFile, Encoding.UTF8))?.AsObject()
+            ?? throw new InvalidOperationException("Project metadata is not a JSON object.");
+        root["lab_settings"] = JsonSerializer.SerializeToNode(settings, JsonOptions);
+        root["updated_at"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+
+        File.WriteAllText(
+            projectFile,
+            root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }),
+            encoding: Utf8NoBom
+        );
     }
 
     public async Task<string> ValidateAsync(string engineDirectory, string datasetPath, string schemaId)
     {
         return await RunEngineCommandInDirectoryAsync(engineDirectory, "validate", datasetPath, schemaId);
+    }
+
+    private static DatasetProjectListItem? LoadProjectFromPath(string projectPath)
+    {
+        var projectFile = Path.Combine(projectPath, "project.json");
+        if (!File.Exists(projectFile))
+        {
+            return null;
+        }
+
+        try
+        {
+            var json = File.ReadAllText(projectFile, Encoding.UTF8);
+            var project = JsonSerializer.Deserialize<DatasetProject>(json, JsonOptions);
+            return project is null ? null : new DatasetProjectListItem(project, projectPath);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static QualityHistoryEntry? TryDeserializeQualityHistoryEntry(string rawLine)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<QualityHistoryEntry>(rawLine, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static AiAssistReviewQueueItem? TryDeserializeAiAssistReviewQueueItem(string rawLine)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<AiAssistReviewQueueItem>(rawLine, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string GetAiAssistReviewQueuePath(string projectPath)
+    {
+        return Path.Combine(projectPath, "ai_assist_reviews.jsonl");
+    }
+
+    private static string GetAiAssistQueueViewsPath(string projectPath)
+    {
+        return Path.Combine(projectPath, "ai_assist_queue_views.json");
     }
 
     private Task<string> RunEngineCommandAsync(params string[] arguments)
@@ -338,6 +1228,69 @@ public sealed class PythonEngineService
                 ? draftText
                 : draftText + Environment.NewLine;
         }
+    }
+
+    private static string WriteImportQuarantine(
+        string projectPath,
+        string importPath,
+        ImportPreviewReport report
+    )
+    {
+        var rawLinesByRowNumber = File.ReadLines(importPath, Encoding.UTF8)
+            .Select((line, index) => new { RowNumber = index + 1, Line = line.TrimEnd('\r', '\n') })
+            .ToDictionary(row => row.RowNumber, row => row.Line);
+
+        var quarantineDirectory = Path.Combine(projectPath, "import_quarantine");
+        Directory.CreateDirectory(quarantineDirectory);
+
+        var sourceName = SanitizeFileNamePart(Path.GetFileNameWithoutExtension(importPath));
+        var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+        var quarantinePath = Path.Combine(
+            quarantineDirectory,
+            $"{timestamp}_{sourceName}_rejected.jsonl"
+        );
+
+        var entries = report.FailedRows.Select(failedRow =>
+        {
+            rawLinesByRowNumber.TryGetValue(failedRow.RowNumber, out var rawLine);
+            return JsonSerializer.Serialize(
+                new Dictionary<string, object?>
+                {
+                    ["source_path"] = importPath,
+                    ["row_number"] = failedRow.RowNumber,
+                    ["raw"] = rawLine ?? failedRow.RawPreview,
+                    ["errors"] = failedRow.Errors,
+                }
+            );
+        });
+
+        File.WriteAllText(
+            quarantinePath,
+            string.Join(Environment.NewLine, entries) + Environment.NewLine,
+            encoding: Utf8NoBom
+        );
+        return quarantinePath;
+    }
+
+    private static string SanitizeFileNamePart(string value)
+    {
+        var invalidCharacters = Path.GetInvalidFileNameChars().ToHashSet();
+        var safeCharacters = value
+            .Select(character => invalidCharacters.Contains(character) ? '_' : character)
+            .ToArray();
+        var safeValue = new string(safeCharacters).Trim();
+        return string.IsNullOrWhiteSpace(safeValue) ? "import" : safeValue;
+    }
+
+    private static string GetTrainingConfigExtension(string target)
+    {
+        var normalized = target.Trim().Replace('-', '_').ToLowerInvariant();
+        return normalized switch
+        {
+            "axolotl" or "axolotl_yaml" or "llama_factory" or "llamafactory" => ".yaml",
+            "unsloth" or "unsloth_script" => ".py",
+            _ => ".json",
+        };
     }
 
     private static SavedExampleItem BuildSavedExampleItem(int rowNumber, string rawLine)

@@ -6,7 +6,8 @@
 4. Run validation.
 5. Review warnings.
 6. Export.
-7. Open export folder.
+7. Optionally generate a Training Lab config from the clean export or split.
+8. Open export folder.
 
 ## Export guarantee
 

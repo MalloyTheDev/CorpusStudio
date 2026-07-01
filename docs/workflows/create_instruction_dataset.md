@@ -7,7 +7,9 @@
 5. Add tags and metadata.
 6. Run quality checks.
 7. Split train/validation/test.
-8. Export JSONL.
+8. Optionally run an Evaluation Lab sample against a local model.
+9. Prepare weak examples for AI Assist review when needed.
+10. Export JSONL.
 
 ## Example row
 

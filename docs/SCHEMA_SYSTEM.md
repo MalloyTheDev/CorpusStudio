@@ -12,6 +12,8 @@ A schema defines:
 - editor hints
 - export mappings
 - quality checks
+- evaluation prompt and expected-output hints
+- training format compatibility metadata
 
 ## Why schema-driven?
 
@@ -67,6 +69,8 @@ Initial field types:
 2. semantic validation
 3. quality validation
 4. export compatibility validation
+5. evaluation readiness validation
+6. training compatibility validation
 
 ## Current structural checks
 
@@ -82,5 +86,28 @@ The engine currently rejects:
 ## Example lifecycle
 
 ```text
-draft -> valid -> reviewed -> split -> exported
+draft -> valid -> reviewed -> split -> evaluated -> exported
 ```
+
+Training preparation is staged after export:
+
+```text
+exported -> training config generated -> local training run
+```
+
+## Lab schema hints
+
+Evaluation Lab, AI Assist Lab, and Training Lab features should read schema
+metadata instead of hardcoding dataset behavior in the UI.
+
+Useful hints include:
+
+- which field becomes the model prompt
+- which field is the expected output
+- which field stores chat messages
+- which fields are safe for tags
+- which fields should be hidden from the model during evaluation
+- which export formats are compatible with training tools
+
+Evaluation examples must remain separate from training examples so test results
+measure generalization rather than memorization.

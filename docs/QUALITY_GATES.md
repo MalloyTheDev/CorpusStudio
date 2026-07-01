@@ -24,14 +24,49 @@ Warnings:
 - missing source metadata
 - missing license metadata
 
-## v0.2 gates
+## Current and Next Gates
+
+Current:
 
 - duplicate content detection
-- near-duplicate content detection
+- normalized duplicate content detection
+- low-information text detection
+- first-pass synthetic-pattern warnings
+
+Next:
+
 - train/test leakage detection
 - token length outlier detection
-- low-information text detection
 - category imbalance warnings
+- report-level Evaluation failure summaries
+
+## Current basic quality report
+
+The engine currently reports:
+
+- example count
+- empty rows
+- exact duplicate rows
+- normalized duplicate rows
+- low-information rows under the current token threshold
+- dataset-wide synthetic-pattern warnings, including repeated openings,
+  repeated closings, and generic AI-style phrases
+- structured synthetic issue details with severity, affected row numbers, and
+  repair suggestions
+
+The desktop app appends quality snapshots to each project's
+`quality_history.jsonl` after user-triggered quality checks and dataset-changing
+actions. The history issue count includes duplicate, low-information, empty-row,
+and synthetic-pattern warning counts, giving the user a lightweight trend line
+for whether edits and imports are improving the dataset.
+
+The desktop app also exposes structured synthetic issues as a triage list. A
+selected issue can prepare an AI Assist `rewrite-output` pass by loading the
+first affected row into the draft editor and copying the repair suggestion into
+the AI Assist instruction. This is a handoff, not automatic cleaning.
+
+Synthetic issue severities are heuristic and intentionally conservative. They
+help prioritize review; they do not automatically block export or rewrite rows.
 
 ## Code dataset gates
 

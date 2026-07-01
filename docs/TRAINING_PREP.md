@@ -1,8 +1,8 @@
 # Training Prep
 
-Corpus Studio v0.1 does not train models.
+Corpus Studio currently does not train models.
 
-It prepares datasets for training.
+It prepares datasets and inspectable config files for training.
 
 ## Later training integrations
 
@@ -25,6 +25,11 @@ Possible future targets:
 - quality report
 - training config draft
 
+The current engine and desktop app can export first-pass Training Lab config
+files. They do not install CUDA, PyTorch, Transformers, or trainer-specific
+packages, and they do not launch training processes.
+
 ## Rule
 
-Training should only run after validation and quality checks pass.
+Training should only run after validation, quality checks, splitting, and
+Evaluation Lab checks are stable.

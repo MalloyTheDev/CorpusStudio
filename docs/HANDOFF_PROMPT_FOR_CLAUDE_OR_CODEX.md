@@ -4,7 +4,8 @@ You are working inside the Corpus Studio repository.
 
 Corpus Studio is a local-first dataset creation studio for AI builders. It is MIT-licensed.
 
-Your job is to help implement the v0.1 skeleton into a working application while preserving the architecture.
+Your job is to continue hardening the existing working application while
+preserving the architecture. Do not restart the project from scratch.
 
 ## Product goal
 
@@ -22,9 +23,9 @@ The app should eventually support:
 - retrieval/embedding datasets
 - evaluation datasets
 
-## v0.1 scope
+## Current Scope
 
-Implement only:
+The working local dataset loop covers:
 
 - raw text
 - instruction
@@ -43,6 +44,20 @@ Create project
 -> export JSONL
 ```
 
+The repository also has first-pass Evaluation Lab, AI Assist Lab, and Training
+Lab config export surfaces. They should be hardened in place:
+
+- Evaluation Lab: Ollama/OpenAI-compatible local runs, backend health checks,
+  model discovery, saved reports, two-report comparison, saved regression
+  reruns from report `run_settings`, failed-example review, manual score/notes,
+  report summaries by tag/failure reason/score band, failed-row edit handoff to
+  Writing Studio, and AI Assist triage preparation.
+- AI Assist Lab: review-first local model suggestions, persistent queue,
+  filters, search, sorting, saved views, bulk triage/undo, schema-aware
+  actions, synthetic issue handoff, and preference judge preparation.
+- Training Lab: inspectable config export only. Do not implement a trainer
+  launcher yet.
+
 ## Architecture constraints
 
 - Keep the app local-first.
@@ -54,18 +69,14 @@ Create project
 - Exports must be deterministic.
 - Validation errors must be specific and actionable.
 
-## First implementation targets
+## Next Implementation Targets
 
-1. Make the Python engine tests pass.
-2. Add a project creation CLI.
-3. Add split command.
-4. Add export command with schema validation.
-5. Create the desktop solution.
-6. Wire the desktop Validate button to the Python engine.
-7. Add a New Project dialog.
-8. Add schema picker using built-in schema JSON files.
-9. Add a simple example list/editor.
-10. Add JSONL export.
+1. Persist prepared AI Assist rewrite batches so they survive app restart.
+2. Add target-specific Training config compatibility warnings.
+3. Add dataset card export from project metadata, schema, splits, quality history, and evaluation summary.
+4. Add versioned reviewed-fix tracking or explicit in-place replacement for edited failed rows.
+5. Add interactive Evaluation drilldowns and saved failure filters.
+6. Keep full training launch, logs, checkpoints, and resume support out of the core app until the Evaluation workflow is stable.
 
 Read these files first:
 

@@ -1,6 +1,13 @@
-from pathlib import Path
-from pydantic import BaseModel, Field
 from datetime import datetime, timezone
+from pathlib import Path
+
+from pydantic import BaseModel, Field
+
+
+class SplitSettings(BaseModel):
+    train_ratio: float = 0.9
+    validation_ratio: float = 0.05
+    seed: int = 42
 
 
 class DatasetProject(BaseModel):
@@ -9,6 +16,7 @@ class DatasetProject(BaseModel):
     schema_id: str
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    split_settings: SplitSettings = Field(default_factory=SplitSettings)
 
 
 def create_project(root: Path, project: DatasetProject) -> Path:

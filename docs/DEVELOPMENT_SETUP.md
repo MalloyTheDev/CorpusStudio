@@ -89,6 +89,13 @@ Or run the automated Windows desktop smoke test:
 .\scripts\smoke_desktop_examples.ps1
 ```
 
+The smoke script exercises the current desktop loop, including project
+creation, validation, quality checks, splits, imports, Evaluation Lab shelling,
+Evaluation report comparison, saved Evaluation regression rerun settings, AI
+Assist queue behavior, Evaluation tag/failure/score-band summaries, failed
+Evaluation row edit handoff to Writing Studio, Training Lab config export, and
+saved lab backend settings.
+
 ## Validate example datasets
 
 ```powershell
@@ -104,4 +111,18 @@ Or run the automated Windows desktop smoke test:
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli quality examples\datasets\instruction\train.jsonl
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli split examples\datasets\instruction\train.jsonl exports\instruction_split instruction
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli export examples\datasets\instruction\train.jsonl exports\instruction.jsonl instruction
+```
+
+## Local model-backed commands
+
+These commands require Ollama, LM Studio, or another compatible local backend to
+already be running. They do not pull models, install ML packages, or launch
+training jobs.
+
+```powershell
+.\engine\.venv\Scripts\python.exe -m corpus_studio.cli model-list --backend ollama
+.\engine\.venv\Scripts\python.exe -m corpus_studio.cli backend-health --backend ollama --model qwen2.5-coder:7b
+.\engine\.venv\Scripts\python.exe -m corpus_studio.cli eval-run examples\datasets\instruction\train.jsonl instruction --backend ollama --model qwen2.5-coder:7b --limit 5
+.\engine\.venv\Scripts\python.exe -m corpus_studio.cli ai-assist examples\datasets\instruction\train.jsonl instruction --action review --backend ollama --model qwen2.5-coder:7b
+.\engine\.venv\Scripts\python.exe -m corpus_studio.cli training-config examples\datasets\instruction\train.jsonl instruction --output-path exports\instruction_axolotl.yaml --base-model Qwen/Qwen2.5-Coder-7B-Instruct --target axolotl_yaml
 ```

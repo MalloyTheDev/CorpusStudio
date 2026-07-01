@@ -12,5 +12,9 @@ public sealed record DatasetProject(
     [property: JsonPropertyName("created_at")]
     DateTime CreatedAt,
     [property: JsonPropertyName("updated_at")]
-    DateTime UpdatedAt
+    DateTime UpdatedAt,
+    [property: JsonPropertyName("split_settings")]
+    SplitSettings? SplitSettings = null,
+    [property: JsonPropertyName("lab_settings")]
+    LabBackendSettings? LabSettings = null
 );

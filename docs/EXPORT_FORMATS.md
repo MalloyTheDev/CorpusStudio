@@ -30,7 +30,7 @@ One JSON object per line.
 {"prompt":"Explain recursion simply.","chosen":"Recursion is when a function calls itself.","rejected":"Recursion is when code does things again."}
 ```
 
-## Future exports
+## Planned dataset exports
 
 - CSV
 - Parquet
@@ -40,7 +40,10 @@ One JSON object per line.
 - DPO
 - Hugging Face dataset folder
 - dataset card
-- training config templates
+- richer target-specific training config templates
+
+Training Lab now has a first-pass config export path, but dataset format
+exports and full target-specific compatibility checks remain staged work.
 
 ## Export rule
 

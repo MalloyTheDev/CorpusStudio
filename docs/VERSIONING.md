@@ -22,4 +22,5 @@ coding_tutor_v1.0
 
 ## Future
 
-Support Git-backed dataset versioning and comparison reports.
+Support Git-backed dataset versioning, dataset cards, Evaluation report
+comparison, and checkpoint comparison once local training launch is added.

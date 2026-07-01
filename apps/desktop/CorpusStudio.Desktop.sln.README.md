@@ -1,11 +1,16 @@
 # Solution note
 
-Create the Visual Studio solution with:
+The Visual Studio solution now exists at:
 
-```powershell
-cd apps/desktop
-dotnet new sln -n CorpusStudio.Desktop
-dotnet sln add CorpusStudio.Desktop/CorpusStudio.Desktop.csproj
+```text
+apps/desktop/CorpusStudio.Desktop.sln
 ```
 
-A generated `.sln` file is intentionally not hand-authored in this skeleton.
+Build it from the repository root with:
+
+```powershell
+dotnet build apps\desktop\CorpusStudio.Desktop.sln
+```
+
+This note exists only as a reminder of the expected solution location. Do not
+recreate the solution unless the `.sln` file is intentionally removed.

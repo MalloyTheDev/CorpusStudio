@@ -6,7 +6,9 @@
 4. Write the rejected response.
 5. Explain why chosen is better.
 6. Validate the pair.
-7. Export DPO-style JSONL.
+7. Use Preference Review to inspect chosen/rejected contrast.
+8. Optionally prepare an AI Assist preference-strength judge pass.
+9. Export preference JSONL or a preference ranking artifact.
 
 ## Example row
 

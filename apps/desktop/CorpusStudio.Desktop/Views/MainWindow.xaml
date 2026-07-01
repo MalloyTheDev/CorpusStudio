@@ -55,7 +55,7 @@
                 </StackPanel>
 
                 <TabControl Grid.Row="1">
-                    <TabItem Header="Writing Studio">
+                    <TabItem x:Name="WritingStudioTab" Header="Writing Studio">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
@@ -72,7 +72,8 @@
                                         Click="SaveExampleButton_Click" />
                             </StackPanel>
 
-                            <TextBox Grid.Row="1"
+                            <TextBox x:Name="DraftTextBox"
+                                     Grid.Row="1"
                                      AutomationProperties.AutomationId="DraftTextBox"
                                      AcceptsReturn="True"
                                      VerticalScrollBarVisibility="Auto"
@@ -107,6 +108,158 @@
                                      HorizontalScrollBarVisibility="Auto" />
                         </Grid>
                     </TabItem>
+                    <TabItem Header="Preference Review">
+                        <Grid Margin="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="2*" />
+                                <RowDefinition Height="3*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="260" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Row="0"
+                                       Grid.ColumnSpan="3"
+                                       AutomationProperties.AutomationId="PreferenceReviewSummaryTextBlock"
+                                       Text="{Binding PreferenceReviewSummary, Mode=OneWay}"
+                                       FontWeight="SemiBold"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,8" />
+
+                            <WrapPanel Grid.Row="1"
+                                       Grid.ColumnSpan="3"
+                                       Margin="0,0,0,8">
+                                <TextBlock Text="Contrast"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <ComboBox AutomationProperties.AutomationId="PreferenceContrastFilterComboBox"
+                                          ItemsSource="{Binding PreferenceContrastFilterOptions}"
+                                          SelectedItem="{Binding PreferenceContrastFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          Width="112"
+                                          Margin="0,0,10,0" />
+                                <TextBlock AutomationProperties.AutomationId="PreferenceRankingSummaryTextBlock"
+                                           Text="{Binding PreferenceRankingSummary, Mode=OneWay}"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="Wrap" />
+                            </WrapPanel>
+
+                            <ListBox Grid.Row="2"
+                                     Grid.RowSpan="2"
+                                     Grid.Column="0"
+                                     AutomationProperties.AutomationId="PreferenceExamplesListBox"
+                                     ItemsSource="{Binding PreferenceReviewItems}"
+                                     SelectedItem="{Binding SelectedPreferenceReviewItem, Mode=TwoWay}"
+                                     DisplayMemberPath="DisplayName"
+                                     Margin="0,0,12,0" />
+
+                            <TextBox Grid.Row="2"
+                                     Grid.Column="1"
+                                     Grid.ColumnSpan="2"
+                                     AutomationProperties.AutomationId="PreferencePromptTextBox"
+                                     Text="{Binding PreferencePromptText, Mode=OneWay}"
+                                     IsReadOnly="True"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     Margin="0,0,0,8" />
+
+                            <TextBox Grid.Row="3"
+                                     Grid.Column="1"
+                                     AutomationProperties.AutomationId="PreferenceChosenTextBox"
+                                     Text="{Binding PreferenceChosenText, Mode=OneWay}"
+                                     IsReadOnly="True"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     Margin="0,0,8,0" />
+
+                            <TextBox Grid.Row="3"
+                                     Grid.Column="2"
+                                     AutomationProperties.AutomationId="PreferenceRejectedTextBox"
+                                     Text="{Binding PreferenceRejectedText, Mode=OneWay}"
+                                     IsReadOnly="True"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto" />
+
+                            <TextBox Grid.Row="4"
+                                     Grid.Column="0"
+                                     Grid.ColumnSpan="2"
+                                     AutomationProperties.AutomationId="PreferenceReasonTextBox"
+                                     Text="{Binding PreferenceReasonText, Mode=OneWay}"
+                                     IsReadOnly="True"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     MinHeight="58"
+                                     Margin="0,8,8,0" />
+
+                            <StackPanel Grid.Row="4"
+                                        Grid.Column="2"
+                                        Margin="0,8,0,0">
+                                <Button AutomationProperties.AutomationId="PreparePreferenceJudgeButton"
+                                        Content="Prepare Judge Review"
+                                        Height="32"
+                                        Margin="0,0,0,6"
+                                        Click="PreparePreferenceJudgeButton_Click" />
+                                <Button AutomationProperties.AutomationId="PreparePreferenceBatchJudgeButton"
+                                        Content="Prepare Batch Judge"
+                                        Height="32"
+                                        Margin="0,0,0,6"
+                                        Click="PreparePreferenceBatchJudgeButton_Click" />
+                                <Button AutomationProperties.AutomationId="ExportPreferenceRankingButton"
+                                        Content="Export Ranking"
+                                        Height="32"
+                                        Click="ExportPreferenceRankingButton_Click" />
+                            </StackPanel>
+                        </Grid>
+                    </TabItem>
+                    <TabItem Header="Quarantine">
+                        <Grid Margin="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="320" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <ListBox Grid.Row="0"
+                                     Grid.Column="0"
+                                     AutomationProperties.AutomationId="ImportQuarantineListBox"
+                                     ItemsSource="{Binding ImportQuarantineItems}"
+                                     SelectedItem="{Binding SelectedImportQuarantineItem, Mode=TwoWay}"
+                                     DisplayMemberPath="DisplayName" />
+
+                            <TextBox Grid.Row="0"
+                                     Grid.Column="1"
+                                     AutomationProperties.AutomationId="ImportQuarantineDetailTextBox"
+                                     Text="{Binding SelectedImportQuarantineDetail, Mode=OneWay}"
+                                     Margin="12,0,0,0"
+                                     IsReadOnly="True"
+                                     AcceptsReturn="True"
+                                     FontFamily="Consolas"
+                                     FontSize="13"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     HorizontalScrollBarVisibility="Auto" />
+
+                            <Button Grid.Row="1"
+                                    Grid.Column="1"
+                                    AutomationProperties.AutomationId="RetryQuarantineItemButton"
+                                    Content="Retry Selected"
+                                    Width="116"
+                                    HorizontalAlignment="Right"
+                                    Margin="0,8,0,0"
+                                    Click="RetryQuarantineItemButton_Click" />
+                        </Grid>
+                    </TabItem>
                     <TabItem Header="Splits">
                         <Grid Margin="8">
                             <Grid.RowDefinitions>
@@ -114,15 +267,36 @@
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
 
-                            <StackPanel Grid.Row="0"
-                                        Orientation="Horizontal"
-                                        HorizontalAlignment="Right"
-                                        Margin="0,0,0,8">
+                            <WrapPanel Grid.Row="0"
+                                       HorizontalAlignment="Right"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,0,8">
+                                <TextBlock Text="Train %"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="SplitTrainPercentTextBox"
+                                         Text="{Binding SplitTrainPercent, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="64"
+                                         Margin="0,0,12,0" />
+                                <TextBlock Text="Validation %"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="SplitValidationPercentTextBox"
+                                         Text="{Binding SplitValidationPercent, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="64"
+                                         Margin="0,0,12,0" />
+                                <TextBlock Text="Seed"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="SplitSeedTextBox"
+                                         Text="{Binding SplitSeed, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="80"
+                                         Margin="0,0,12,0" />
                                 <Button AutomationProperties.AutomationId="GenerateSplitsButton"
                                         Content="Generate Splits"
                                         Width="124"
                                         Click="GenerateSplitsButton_Click" />
-                            </StackPanel>
+                            </WrapPanel>
 
                             <TextBox Grid.Row="1"
                                      AutomationProperties.AutomationId="SplitSummaryTextBox"
@@ -133,12 +307,696 @@
                                      VerticalScrollBarVisibility="Auto" />
                         </Grid>
                     </TabItem>
+                    <TabItem Header="Evaluation">
+                        <Grid Margin="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="320" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <WrapPanel Grid.Row="0"
+                                       Grid.ColumnSpan="2"
+                                       HorizontalAlignment="Right"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,0,8">
+                                <TextBlock Text="Backend"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="EvaluationBackendTextBox"
+                                         Text="{Binding EvaluationBackend, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="132"
+                                         Margin="0,0,12,0" />
+                                <TextBlock Text="Model"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="EvaluationModelTextBox"
+                                         Text="{Binding EvaluationModel, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="172"
+                                         Margin="0,0,8,0" />
+                                <ComboBox AutomationProperties.AutomationId="EvaluationModelComboBox"
+                                          ItemsSource="{Binding EvaluationAvailableModels}"
+                                          SelectedItem="{Binding EvaluationModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          Width="172"
+                                          Margin="0,0,12,0" />
+                                <TextBlock Text="Base URL"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="EvaluationBaseUrlTextBox"
+                                         Text="{Binding EvaluationBaseUrl, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="184"
+                                         Margin="0,0,12,0" />
+                                <Button AutomationProperties.AutomationId="CheckEvaluationBackendButton"
+                                        Content="Check Backend"
+                                        Width="116"
+                                        Margin="0,0,8,0"
+                                        Click="CheckEvaluationBackendButton_Click" />
+                                <Button AutomationProperties.AutomationId="RefreshEvaluationModelsButton"
+                                        Content="Refresh Models"
+                                        Width="116"
+                                        Margin="0,0,8,0"
+                                        Click="RefreshEvaluationModelsButton_Click" />
+                                <Button AutomationProperties.AutomationId="RunEvaluationButton"
+                                        Content="Run Evaluation"
+                                        Width="124"
+                                        Margin="0,0,8,0"
+                                        Click="RunEvaluationButton_Click" />
+                                <TextBlock AutomationProperties.AutomationId="EvaluationModelListSummaryTextBlock"
+                                           Text="{Binding EvaluationModelListSummary, Mode=OneWay}"
+                                           Width="260"
+                                           TextWrapping="Wrap"
+                                           VerticalAlignment="Center" />
+                            </WrapPanel>
+
+                            <Grid Grid.Row="1"
+                                  Grid.ColumnSpan="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="320" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
+                                <WrapPanel Grid.Row="0"
+                                           Grid.ColumnSpan="2"
+                                           HorizontalAlignment="Right"
+                                           Margin="0,0,0,8">
+                                    <TextBlock Text="Limit"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,6,0" />
+                                    <TextBox AutomationProperties.AutomationId="EvaluationLimitTextBox"
+                                             Text="{Binding EvaluationLimit, UpdateSourceTrigger=PropertyChanged}"
+                                             Width="64"
+                                             Margin="0,0,12,0" />
+                                    <TextBlock Text="Threshold"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,6,0" />
+                                    <TextBox AutomationProperties.AutomationId="EvaluationScoreThresholdTextBox"
+                                             Text="{Binding EvaluationScoreThreshold, UpdateSourceTrigger=PropertyChanged}"
+                                             Width="64"
+                                             Margin="0,0,12,0" />
+                                    <TextBlock Text="Timeout"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,6,0" />
+                                    <TextBox AutomationProperties.AutomationId="EvaluationTimeoutTextBox"
+                                             Text="{Binding EvaluationTimeoutSeconds, UpdateSourceTrigger=PropertyChanged}"
+                                             Width="72" />
+                                </WrapPanel>
+
+                                <Grid Grid.Row="1"
+                                      Grid.Column="0">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="2*" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBox Grid.Row="0"
+                                             AutomationProperties.AutomationId="EvaluationSummaryTextBox"
+                                             Text="{Binding EvaluationSummary, Mode=OneWay}"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto" />
+
+                                    <TextBlock Grid.Row="1"
+                                               Text="Report History"
+                                               FontWeight="SemiBold"
+                                               Margin="0,8,0,4" />
+
+                                    <ListBox Grid.Row="2"
+                                             AutomationProperties.AutomationId="EvaluationReportHistoryListBox"
+                                             ItemsSource="{Binding EvaluationReportHistory}"
+                                             SelectedItem="{Binding SelectedEvaluationReportHistoryItem, Mode=TwoWay}"
+                                             DisplayMemberPath="DisplayName" />
+
+                                    <TextBlock Grid.Row="3"
+                                               Text="Compare Against"
+                                               FontWeight="SemiBold"
+                                               Margin="0,8,0,4" />
+
+                                    <WrapPanel Grid.Row="4"
+                                               Margin="0,0,0,6">
+                                        <ComboBox AutomationProperties.AutomationId="EvaluationCompareReportComboBox"
+                                                  ItemsSource="{Binding EvaluationReportHistory}"
+                                                  SelectedItem="{Binding SecondaryEvaluationReportHistoryItem, Mode=TwoWay}"
+                                                  DisplayMemberPath="DisplayName"
+                                                  Width="204"
+                                                  Margin="0,0,8,0" />
+                                        <Button AutomationProperties.AutomationId="CompareEvaluationReportsButton"
+                                                Content="Compare"
+                                                Width="88"
+                                                Margin="0,0,8,0"
+                                                Click="CompareEvaluationReportsButton_Click" />
+                                        <Button AutomationProperties.AutomationId="RerunEvaluationReportButton"
+                                                Content="Rerun Selected"
+                                                Width="116"
+                                                Click="RerunEvaluationReportButton_Click" />
+                                    </WrapPanel>
+
+                                    <TextBox Grid.Row="5"
+                                             AutomationProperties.AutomationId="EvaluationComparisonTextBox"
+                                             Text="{Binding EvaluationComparisonSummary, Mode=OneWay}"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto" />
+                                </Grid>
+
+                                <Grid Grid.Row="1"
+                                      Grid.Column="1"
+                                      Margin="12,0,0,0">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="2*" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="260" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBox Grid.Row="0"
+                                             Grid.ColumnSpan="2"
+                                             AutomationProperties.AutomationId="EvaluationReportTextBox"
+                                             Text="{Binding EvaluationReportJson, Mode=OneWay}"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             FontFamily="Consolas"
+                                             FontSize="13"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             HorizontalScrollBarVisibility="Auto" />
+
+                                    <TextBlock Grid.Row="1"
+                                               Grid.ColumnSpan="2"
+                                               Text="Example Review"
+                                               FontWeight="SemiBold"
+                                               Margin="0,8,0,4" />
+
+                                    <WrapPanel Grid.Row="2"
+                                               Grid.ColumnSpan="2"
+                                               Margin="0,0,0,6">
+                                        <TextBlock Text="Queue"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,6,0" />
+                                        <ComboBox AutomationProperties.AutomationId="EvaluationResultFilterComboBox"
+                                                  ItemsSource="{Binding EvaluationResultFilterOptions}"
+                                                  SelectedItem="{Binding EvaluationResultFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Width="132"
+                                                  Margin="0,0,10,0" />
+                                        <TextBlock AutomationProperties.AutomationId="EvaluationResultsSummaryTextBlock"
+                                                   Text="{Binding EvaluationResultsSummary, Mode=OneWay}"
+                                                   VerticalAlignment="Center"
+                                                   TextWrapping="Wrap" />
+                                    </WrapPanel>
+
+                                    <ListBox Grid.Row="3"
+                                             Grid.Column="0"
+                                             AutomationProperties.AutomationId="EvaluationResultsListBox"
+                                             ItemsSource="{Binding EvaluationResults}"
+                                             SelectedItem="{Binding SelectedEvaluationExampleResult, Mode=TwoWay}"
+                                             DisplayMemberPath="DisplayName" />
+
+                                    <TextBox Grid.Row="3"
+                                             Grid.Column="1"
+                                             AutomationProperties.AutomationId="EvaluationExampleDetailTextBox"
+                                             Text="{Binding SelectedEvaluationExampleDetail, Mode=OneWay}"
+                                             Margin="8,0,0,0"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             HorizontalScrollBarVisibility="Auto" />
+
+                                    <WrapPanel Grid.Row="4"
+                                               Grid.ColumnSpan="2"
+                                               HorizontalAlignment="Right"
+                                               VerticalAlignment="Center"
+                                               Margin="0,8,0,0">
+                                        <TextBlock Text="{Binding EvaluationReviewSummary, Mode=OneWay}"
+                                                   VerticalAlignment="Center"
+                                                   Width="320"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,0,12,0" />
+                                        <TextBlock Text="Manual Score"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,6,0" />
+                                        <TextBox AutomationProperties.AutomationId="EvaluationManualScoreTextBox"
+                                                 Text="{Binding EvaluationManualScore, UpdateSourceTrigger=PropertyChanged}"
+                                                 Width="72"
+                                                 Margin="0,0,12,0" />
+                                        <TextBlock Text="Notes"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,6,0" />
+                                        <TextBox AutomationProperties.AutomationId="EvaluationManualNotesTextBox"
+                                                 Text="{Binding EvaluationManualNotes, UpdateSourceTrigger=PropertyChanged}"
+                                                 Width="240"
+                                                 Margin="0,0,12,0" />
+                                        <Button AutomationProperties.AutomationId="PrepareEvaluationFailureButton"
+                                                Content="Prepare Failure"
+                                                Width="112"
+                                                Margin="0,0,8,0"
+                                                Click="PrepareEvaluationFailureButton_Click" />
+                                        <Button AutomationProperties.AutomationId="EditEvaluationFailureButton"
+                                                Content="Edit Failed Row"
+                                                Width="116"
+                                                Margin="0,0,8,0"
+                                                Click="EditEvaluationFailureButton_Click" />
+                                        <Button AutomationProperties.AutomationId="SaveEvaluationReviewButton"
+                                                Content="Save Review"
+                                                Width="108"
+                                                Click="SaveEvaluationReviewButton_Click" />
+                                    </WrapPanel>
+                                </Grid>
+                            </Grid>
+                        </Grid>
+                    </TabItem>
+                    <TabItem x:Name="AiAssistTab" Header="AI Assist">
+                        <Grid Margin="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="320" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <WrapPanel Grid.Row="0"
+                                       Grid.ColumnSpan="2"
+                                       HorizontalAlignment="Right"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,0,8">
+                                <TextBlock Text="Backend"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="AiAssistBackendTextBox"
+                                         Text="{Binding AiAssistBackend, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="132"
+                                         Margin="0,0,12,0" />
+                                <TextBlock Text="Model"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="AiAssistModelTextBox"
+                                         Text="{Binding AiAssistModel, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="172"
+                                         Margin="0,0,8,0" />
+                                <ComboBox AutomationProperties.AutomationId="AiAssistModelComboBox"
+                                          ItemsSource="{Binding AiAssistAvailableModels}"
+                                          SelectedItem="{Binding AiAssistModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          Width="172"
+                                          Margin="0,0,12,0" />
+                                <TextBlock Text="Base URL"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="AiAssistBaseUrlTextBox"
+                                         Text="{Binding AiAssistBaseUrl, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="184"
+                                         Margin="0,0,12,0" />
+                                <Button AutomationProperties.AutomationId="CheckAiAssistBackendButton"
+                                        Content="Check Backend"
+                                        Width="116"
+                                        Margin="0,0,8,0"
+                                        Click="CheckAiAssistBackendButton_Click" />
+                                <Button AutomationProperties.AutomationId="RefreshAiAssistModelsButton"
+                                        Content="Refresh Models"
+                                        Width="116"
+                                        Margin="0,0,8,0"
+                                        Click="RefreshAiAssistModelsButton_Click" />
+                                <Button AutomationProperties.AutomationId="RunAiAssistButton"
+                                        Content="Run AI Assist"
+                                        Width="124"
+                                        Margin="0,0,8,0"
+                                        Click="RunAiAssistButton_Click" />
+                                <TextBlock AutomationProperties.AutomationId="AiAssistModelListSummaryTextBlock"
+                                           Text="{Binding AiAssistModelListSummary, Mode=OneWay}"
+                                           Width="260"
+                                           TextWrapping="Wrap"
+                                           VerticalAlignment="Center" />
+                            </WrapPanel>
+
+                            <WrapPanel Grid.Row="1"
+                                       Grid.ColumnSpan="2"
+                                       HorizontalAlignment="Right"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,0,8">
+                                <TextBlock Text="Action"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <ComboBox AutomationProperties.AutomationId="AiAssistActionComboBox"
+                                          ItemsSource="{Binding AiAssistActionPresets}"
+                                          SelectedItem="{Binding AiAssistAction, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          Width="132"
+                                          Margin="0,0,12,0" />
+                                <TextBlock Text="Instruction"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="AiAssistInstructionTextBox"
+                                         Text="{Binding AiAssistInstruction, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="360"
+                                         Margin="0,0,12,0" />
+                                <TextBlock Text="Timeout"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="AiAssistTimeoutTextBox"
+                                         Text="{Binding AiAssistTimeoutSeconds, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="72"
+                                         Margin="0,0,12,0" />
+                                <Button AutomationProperties.AutomationId="UseAiAssistSuggestionButton"
+                                        Content="Use In Draft"
+                                        Width="108"
+                                        Margin="0,0,8,0"
+                                        Click="UseAiAssistSuggestionButton_Click" />
+                                <Button AutomationProperties.AutomationId="AcceptAiAssistReviewButton"
+                                        Content="Accept"
+                                        Width="84"
+                                        Margin="0,0,8,0"
+                                        Click="AcceptAiAssistReviewButton_Click" />
+                                <Button AutomationProperties.AutomationId="RejectAiAssistReviewButton"
+                                        Content="Reject"
+                                        Width="84"
+                                        Click="RejectAiAssistReviewButton_Click" />
+                            </WrapPanel>
+
+                            <Grid Grid.Row="2"
+                                  Grid.Column="0">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="2*" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
+                                <TextBox Grid.Row="0"
+                                         AutomationProperties.AutomationId="AiAssistSummaryTextBox"
+                                         Text="{Binding AiAssistSummary, Mode=OneWay}"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto" />
+
+                                <TextBlock Grid.Row="1"
+                                           AutomationProperties.AutomationId="AiAssistQueueSummaryTextBlock"
+                                           Text="{Binding AiAssistQueueSummary, Mode=OneWay}"
+                                           FontWeight="SemiBold"
+                                           Margin="0,8,0,4"
+                                           TextWrapping="Wrap" />
+
+                                <WrapPanel Grid.Row="2"
+                                           Margin="0,0,0,6">
+                                    <TextBlock Text="Filter"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,6,0" />
+                                    <ComboBox AutomationProperties.AutomationId="AiAssistQueueFilterComboBox"
+                                              ItemsSource="{Binding AiAssistQueueFilterOptions}"
+                                              SelectedItem="{Binding AiAssistQueueFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                              Width="104"
+                                              Margin="0,0,8,0" />
+                                    <TextBlock Text="Search"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,6,0" />
+                                    <TextBox AutomationProperties.AutomationId="AiAssistQueueSearchTextBox"
+                                             Text="{Binding AiAssistQueueSearch, UpdateSourceTrigger=PropertyChanged}"
+                                             Width="136"
+                                             Margin="0,0,8,0" />
+                                    <TextBlock Text="Sort"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,6,0" />
+                                    <ComboBox AutomationProperties.AutomationId="AiAssistQueueSortComboBox"
+                                              ItemsSource="{Binding AiAssistQueueSortOptions}"
+                                              SelectedItem="{Binding AiAssistQueueSort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                              Width="104"
+                                              Margin="0,0,8,0" />
+                                    <Button AutomationProperties.AutomationId="BulkAcceptAiAssistReviewsButton"
+                                            Content="Accept Visible"
+                                            Width="104"
+                                            Margin="0,0,8,0"
+                                            Click="BulkAcceptAiAssistReviewsButton_Click" />
+                                    <Button AutomationProperties.AutomationId="BulkRejectAiAssistReviewsButton"
+                                            Content="Reject Visible"
+                                            Width="104"
+                                            Margin="0,0,8,0"
+                                            Click="BulkRejectAiAssistReviewsButton_Click" />
+                                    <Button AutomationProperties.AutomationId="UndoBulkAiAssistReviewsButton"
+                                            Content="Undo Bulk"
+                                            Width="92"
+                                            Click="UndoBulkAiAssistReviewsButton_Click" />
+                                </WrapPanel>
+
+                                <WrapPanel Grid.Row="3"
+                                           Margin="0,0,0,6">
+                                    <TextBlock Text="View"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,6,0" />
+                                    <ComboBox AutomationProperties.AutomationId="AiAssistQueueViewComboBox"
+                                              ItemsSource="{Binding AiAssistQueueViews}"
+                                              SelectedItem="{Binding SelectedAiAssistQueueView, Mode=TwoWay}"
+                                              DisplayMemberPath="DisplayName"
+                                              Width="136"
+                                              Margin="0,0,8,0" />
+                                    <TextBox AutomationProperties.AutomationId="AiAssistQueueViewNameTextBox"
+                                             Text="{Binding AiAssistQueueViewName, UpdateSourceTrigger=PropertyChanged}"
+                                             Width="128"
+                                             Margin="0,0,8,0" />
+                                    <Button AutomationProperties.AutomationId="SaveAiAssistQueueViewButton"
+                                            Content="Save View"
+                                            Width="84"
+                                            Margin="0,0,8,0"
+                                            Click="SaveAiAssistQueueViewButton_Click" />
+                                    <Button AutomationProperties.AutomationId="LoadAiAssistQueueViewButton"
+                                            Content="Load View"
+                                            Width="84"
+                                            Click="LoadAiAssistQueueViewButton_Click" />
+                                </WrapPanel>
+
+                                <ListBox Grid.Row="4"
+                                         AutomationProperties.AutomationId="AiAssistReviewQueueListBox"
+                                         ItemsSource="{Binding AiAssistReviewQueue}"
+                                         SelectedItem="{Binding SelectedAiAssistReviewQueueItem, Mode=TwoWay}"
+                                         DisplayMemberPath="DisplayName" />
+                            </Grid>
+
+                            <Grid Grid.Row="2"
+                                  Grid.Column="1"
+                                  Margin="12,0,0,0">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="3*" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="4*" />
+                                </Grid.RowDefinitions>
+
+                                <TextBox Grid.Row="0"
+                                         AutomationProperties.AutomationId="AiAssistReviewTextBox"
+                                         Text="{Binding AiAssistReviewText, Mode=OneWay}"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         FontFamily="Consolas"
+                                         FontSize="13"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto"
+                                         HorizontalScrollBarVisibility="Auto" />
+
+                                <TextBox Grid.Row="1"
+                                         AutomationProperties.AutomationId="AiAssistDiffSummaryTextBox"
+                                         Text="{Binding AiAssistDiffSummary, Mode=OneWay}"
+                                         Margin="0,8,0,8"
+                                         IsReadOnly="True"
+                                         TextWrapping="Wrap" />
+
+                                <Grid Grid.Row="2">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock Grid.Row="0"
+                                               Grid.Column="0"
+                                               Text="Source Draft"
+                                               FontWeight="SemiBold"
+                                               Margin="0,0,0,4" />
+                                    <TextBlock Grid.Row="0"
+                                               Grid.Column="1"
+                                               Text="Suggested JSONL"
+                                               FontWeight="SemiBold"
+                                               Margin="8,0,0,4" />
+
+                                    <TextBox Grid.Row="1"
+                                             Grid.Column="0"
+                                             AutomationProperties.AutomationId="AiAssistSourceDraftTextBox"
+                                             Text="{Binding AiAssistSourceDraftText, Mode=OneWay}"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             FontFamily="Consolas"
+                                             FontSize="13"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             HorizontalScrollBarVisibility="Auto" />
+                                    <TextBox Grid.Row="1"
+                                             Grid.Column="1"
+                                             AutomationProperties.AutomationId="AiAssistSuggestedJsonlTextBox"
+                                             Text="{Binding AiAssistSuggestedJsonlText, Mode=OneWay}"
+                                             Margin="8,0,0,0"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             FontFamily="Consolas"
+                                             FontSize="13"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             HorizontalScrollBarVisibility="Auto" />
+                                </Grid>
+                            </Grid>
+                        </Grid>
+                    </TabItem>
+                    <TabItem Header="Training">
+                        <Grid Margin="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="320" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <WrapPanel Grid.Row="0"
+                                       Grid.ColumnSpan="2"
+                                       HorizontalAlignment="Right"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,0,8">
+                                <TextBlock Text="Target"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="TrainingTargetTextBox"
+                                         Text="{Binding TrainingTarget, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="132"
+                                         Margin="0,0,12,0" />
+                                <TextBlock Text="Base Model"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="TrainingBaseModelTextBox"
+                                         Text="{Binding TrainingBaseModel, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="240"
+                                         Margin="0,0,12,0" />
+                                <TextBlock Text="Format"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="TrainingFormatTextBox"
+                                         Text="{Binding TrainingFormat, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="112"
+                                         Margin="0,0,12,0" />
+                                <Button AutomationProperties.AutomationId="GenerateTrainingConfigButton"
+                                        Content="Generate Config"
+                                        Width="132"
+                                        Click="GenerateTrainingConfigButton_Click" />
+                            </WrapPanel>
+
+                            <WrapPanel Grid.Row="1"
+                                       Grid.ColumnSpan="2"
+                                       HorizontalAlignment="Right"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,0,8">
+                                <TextBlock Text="Seq Len"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="TrainingSequenceLenTextBox"
+                                         Text="{Binding TrainingSequenceLen, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="72"
+                                         Margin="0,0,12,0" />
+                                <TextBlock Text="LoRA r"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="TrainingLoraRTextBox"
+                                         Text="{Binding TrainingLoraR, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="56"
+                                         Margin="0,0,12,0" />
+                                <TextBlock Text="Alpha"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="TrainingLoraAlphaTextBox"
+                                         Text="{Binding TrainingLoraAlpha, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="56"
+                                         Margin="0,0,12,0" />
+                                <TextBlock Text="Micro Batch"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="TrainingMicroBatchSizeTextBox"
+                                         Text="{Binding TrainingMicroBatchSize, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="56"
+                                         Margin="0,0,12,0" />
+                                <TextBlock Text="Grad Accum"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="TrainingGradientAccumulationStepsTextBox"
+                                         Text="{Binding TrainingGradientAccumulationSteps, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="56"
+                                         Margin="0,0,12,0" />
+                                <TextBlock Text="LR"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBox AutomationProperties.AutomationId="TrainingLearningRateTextBox"
+                                         Text="{Binding TrainingLearningRate, UpdateSourceTrigger=PropertyChanged}"
+                                         Width="80" />
+                            </WrapPanel>
+
+                            <TextBox Grid.Row="2"
+                                     Grid.Column="0"
+                                     AutomationProperties.AutomationId="TrainingSummaryTextBox"
+                                     Text="{Binding TrainingSummary, Mode=OneWay}"
+                                     IsReadOnly="True"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto" />
+
+                            <TextBox Grid.Row="2"
+                                     Grid.Column="1"
+                                     AutomationProperties.AutomationId="TrainingConfigPreviewTextBox"
+                                     Text="{Binding TrainingConfigPreview, Mode=OneWay}"
+                                     Margin="12,0,0,0"
+                                     IsReadOnly="True"
+                                     AcceptsReturn="True"
+                                     FontFamily="Consolas"
+                                     FontSize="13"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     HorizontalScrollBarVisibility="Auto" />
+                        </Grid>
+                    </TabItem>
                     <TabItem Header="Settings">
-                        <TextBox Text="{Binding SettingsSummary, Mode=OneWay}"
-                                 Margin="8"
-                                 IsReadOnly="True"
-                                 TextWrapping="Wrap"
-                                 VerticalScrollBarVisibility="Auto" />
+                        <StackPanel Margin="8">
+                            <TextBox Text="{Binding SettingsSummary, Mode=OneWay}"
+                                     IsReadOnly="True"
+                                     TextWrapping="Wrap"
+                                     MinHeight="120"
+                                     Margin="0,0,0,8"
+                                     VerticalScrollBarVisibility="Auto" />
+                            <TextBlock Text="{Binding LabSettingsSummary, Mode=OneWay}"
+                                       AutomationProperties.AutomationId="LabSettingsSummaryTextBlock"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,8" />
+                            <Button AutomationProperties.AutomationId="SaveLabSettingsButton"
+                                    Content="Save Lab Settings"
+                                    Width="140"
+                                    HorizontalAlignment="Left"
+                                    Click="SaveLabSettingsButton_Click" />
+                        </StackPanel>
                     </TabItem>
                 </TabControl>
             </Grid>
@@ -149,11 +1007,19 @@
                 <TextBlock Text="Validation" FontSize="18" FontWeight="Bold" />
                 <TextBox AutomationProperties.AutomationId="ValidationSummaryTextBox"
                          Text="{Binding ValidationSummary, Mode=OneWay}"
-                         Margin="0,8,0,24"
-                         MinHeight="150"
+                         Margin="0,8,0,8"
+                         MinHeight="120"
                          IsReadOnly="True"
                          TextWrapping="Wrap"
                          VerticalScrollBarVisibility="Auto" />
+                <TextBlock Text="Issues" FontWeight="SemiBold" />
+                <ListBox AutomationProperties.AutomationId="ValidationIssuesListBox"
+                         ItemsSource="{Binding ValidationIssues}"
+                         SelectedItem="{Binding SelectedValidationIssue, Mode=TwoWay}"
+                         DisplayMemberPath="DisplayName"
+                         SelectionChanged="ValidationIssuesListBox_SelectionChanged"
+                         Height="96"
+                         Margin="0,8,0,24" />
 
                 <TextBlock Text="Quality" FontSize="18" FontWeight="Bold" />
                 <TextBox AutomationProperties.AutomationId="QualitySummaryTextBox"
@@ -165,8 +1031,35 @@
                          VerticalScrollBarVisibility="Auto" />
                 <Button AutomationProperties.AutomationId="RunQualityButton"
                         Content="Run Quality"
-                        Margin="0,0,0,24"
+                        Margin="0,0,0,8"
                         Click="RunQualityButton_Click" />
+                <TextBlock Text="Synthetic Triage" FontWeight="SemiBold" />
+                <ListBox AutomationProperties.AutomationId="SyntheticPatternIssuesListBox"
+                         ItemsSource="{Binding SyntheticPatternIssues}"
+                         SelectedItem="{Binding SelectedSyntheticPatternIssue, Mode=TwoWay}"
+                         DisplayMemberPath="DisplayName"
+                         Height="92"
+                         Margin="0,8,0,8" />
+                <TextBlock AutomationProperties.AutomationId="QualityTriageSummaryTextBlock"
+                           Text="{Binding QualityTriageSummary, Mode=OneWay}"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,8" />
+                <Button AutomationProperties.AutomationId="PrepareSyntheticRewriteButton"
+                        Content="Prepare Rewrite"
+                        Margin="0,0,0,8"
+                        Click="PrepareSyntheticRewriteButton_Click" />
+                <Button AutomationProperties.AutomationId="PrepareSyntheticBatchRewriteButton"
+                        Content="Prepare Batch Rewrite"
+                        Margin="0,0,0,8"
+                        Click="PrepareSyntheticBatchRewriteButton_Click" />
+                <TextBlock Text="History" FontWeight="SemiBold" />
+                <TextBox AutomationProperties.AutomationId="QualityHistoryTextBox"
+                         Text="{Binding QualityHistorySummary, Mode=OneWay}"
+                         Margin="0,8,0,24"
+                         MinHeight="72"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto" />
 
                 <TextBlock Text="Export" FontSize="18" FontWeight="Bold" />
                 <Button AutomationProperties.AutomationId="ValidateButton"
