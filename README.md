@@ -124,3 +124,10 @@ For copyable row formats, see [`docs/SCHEMA_EXAMPLES.md`](docs/SCHEMA_EXAMPLES.m
 For the staged labs, see [`docs/EVALUATION_LAB.md`](docs/EVALUATION_LAB.md),
 [`docs/AI_ASSIST_LAB.md`](docs/AI_ASSIST_LAB.md), and
 [`docs/TRAINING_LAB.md`](docs/TRAINING_LAB.md).
+For the full roadmap, see [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+## Community & Contributing
+
+- Contribution guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Code of conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
+- Security policy: [`SECURITY.md`](SECURITY.md)
