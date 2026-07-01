@@ -101,12 +101,12 @@
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,18,0,0">
-            <Button Content="Cancel"
+            <Button Content="_Cancel"
                     Width="92"
                     Margin="0,0,8,0"
                     IsCancel="True" />
             <Button AutomationProperties.AutomationId="CreateProjectButton"
-                    Content="Create"
+                    Content="_Create"
                     Width="92"
                     IsDefault="True"
                     Click="CreateButton_Click" />

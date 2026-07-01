@@ -756,7 +756,7 @@
                                          Margin="0,0,12,0" />
                                 <Button Style="{StaticResource PrimaryButtonStyle}"
                                         AutomationProperties.AutomationId="GenerateSplitsButton"
-                                        Content="Generate Splits"
+                                        Content="_Generate Splits"
                                         Width="124"
                                         Click="GenerateSplitsButton_Click" />
                             </WrapPanel>
@@ -1659,7 +1659,7 @@
                          VerticalScrollBarVisibility="Auto" />
                 <Button Style="{StaticResource PrimaryButtonStyle}"
                         AutomationProperties.AutomationId="RunQualityButton"
-                        Content="Run Quality"
+                        Content="Run _Quality"
                         Margin="0,0,0,8"
                         Click="RunQualityButton_Click" />
                 <TextBlock Text="Synthetic Triage"
@@ -1704,13 +1704,13 @@
                            FontWeight="Bold"
                            Foreground="#0F172A" />
                 <Button AutomationProperties.AutomationId="ValidateButton"
-                        Content="Validate"
+                        Content="_Validate"
                         Margin="0,8,0,8"
                         Click="ValidateButton_Click" />
                 <Button x:Name="ExportJsonlButton"
                         Style="{StaticResource PrimaryButtonStyle}"
                         AutomationProperties.AutomationId="ExportJsonlButton"
-                        Content="Export JSONL"
+                        Content="_Export JSONL"
                         Click="ExportJsonlButton_Click" />
                 <Button AutomationProperties.AutomationId="GenerateDatasetCardButton"
                         Content="Generate Dataset Card"
