@@ -125,6 +125,11 @@ public partial class MainWindow : Window
         await PreviewAndImportJsonlAsync(dialog.FileName);
     }
 
+    private void ExportCenterButton_Click(object sender, RoutedEventArgs e)
+    {
+        ExportJsonlButton.Focus();
+    }
+
     private async Task PreviewAndImportJsonlAsync(string importPath)
     {
         try
@@ -334,7 +339,43 @@ public partial class MainWindow : Window
             return;
         }
 
+        SaveLastPreparedAiAssistRewriteBatch();
         AiAssistTab.IsSelected = true;
+    }
+
+    private void SaveLastPreparedAiAssistRewriteBatch()
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetAiAssistRewriteBatchError(
+                "Create or select a dataset project before saving a prepared rewrite batch."
+            );
+            return;
+        }
+
+        if (!ViewModel.TryGetLastPreparedAiAssistRewriteBatch(out var batch, out var errorMessage))
+        {
+            ViewModel.SetAiAssistRewriteBatchError(errorMessage);
+            return;
+        }
+
+        try
+        {
+            var savedBatch = _engineService.SaveAiAssistRewriteBatch(
+                ViewModel.ActiveProjectPath,
+                batch
+            );
+            ViewModel.SetAiAssistRewriteBatches(
+                _engineService.LoadAiAssistRewriteBatches(ViewModel.ActiveProjectPath)
+            );
+            ViewModel.SelectedAiAssistRewriteBatch = ViewModel.AiAssistRewriteBatches
+                .FirstOrDefault(item => item.BatchId == savedBatch.BatchId);
+            ViewModel.ApplyAiAssistRewriteBatchSaved(savedBatch);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetAiAssistRewriteBatchError(ex.Message);
+        }
     }
 
     private void PrepareEvaluationFailureButton_Click(object sender, RoutedEventArgs e)
@@ -354,12 +395,120 @@ public partial class MainWindow : Window
             return;
         }
 
+        RecordReviewedFixFromLastPrepared();
         WritingStudioTab.IsSelected = true;
         Dispatcher.BeginInvoke(new Action(() =>
         {
             DraftTextBox.Focus();
             DraftTextBox.Select(0, DraftTextBox.Text.Length);
         }));
+    }
+
+    private void RecordReviewedFixFromLastPrepared()
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetReviewedFixError(
+                "Create or select a dataset project before tracking a reviewed fix."
+            );
+            return;
+        }
+
+        if (!ViewModel.TryGetLastPreparedEvaluationFix(out var fix, out var errorMessage))
+        {
+            ViewModel.SetReviewedFixError(errorMessage);
+            return;
+        }
+
+        try
+        {
+            var savedFix = _engineService.RecordReviewedFix(ViewModel.ActiveProjectPath, fix);
+            ViewModel.SetReviewedFixes(
+                _engineService.LoadReviewedFixes(ViewModel.ActiveProjectPath)
+            );
+            ViewModel.SelectedReviewedFix = ViewModel.ReviewedFixes
+                .FirstOrDefault(item => item.FixId == savedFix.FixId);
+            ViewModel.ApplyReviewedFixRecorded(savedFix);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetReviewedFixError(ex.Message);
+        }
+    }
+
+    private void SaveEvaluationFailureFilterButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetEvaluationFailureFilterError(
+                "Create or select a dataset project before saving a failure filter."
+            );
+            return;
+        }
+
+        try
+        {
+            var savedFilter = _engineService.SaveEvaluationFailureFilter(
+                ViewModel.ActiveProjectPath,
+                ViewModel.BuildCurrentEvaluationFailureFilter()
+            );
+            ViewModel.SetEvaluationFailureFilters(
+                _engineService.LoadEvaluationFailureFilters(ViewModel.ActiveProjectPath)
+            );
+            ViewModel.SelectedEvaluationFailureFilter = ViewModel.EvaluationFailureFilters
+                .FirstOrDefault(item => item.Name == savedFilter.Name);
+            ViewModel.ApplyEvaluationFailureFilterSaved(savedFilter);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetEvaluationFailureFilterError(ex.Message);
+        }
+    }
+
+    private void ApplyEvaluationFailureFilterButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.SelectedEvaluationFailureFilter is null)
+        {
+            ViewModel.SetEvaluationFailureFilterError("Select a saved failure filter before applying it.");
+            return;
+        }
+
+        ViewModel.ApplyEvaluationFailureFilter(ViewModel.SelectedEvaluationFailureFilter);
+    }
+
+    private void ResumeReviewedFixButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.ResumeReviewedFix())
+        {
+            return;
+        }
+
+        WritingStudioTab.IsSelected = true;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            DraftTextBox.Focus();
+            DraftTextBox.Select(0, DraftTextBox.Text.Length);
+        }));
+    }
+
+    private void ReconcileReviewedFixesAfterRun(EvaluationRunResult result)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            return;
+        }
+
+        try
+        {
+            ViewModel.SetReviewedFixes(
+                _engineService.ReconcileReviewedFixes(ViewModel.ActiveProjectPath, result.Report.Results)
+            );
+            ViewModel.ApplyReviewedFixesReconciled();
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetReviewedFixError(ex.Message);
+        }
     }
 
     private void PreparePreferenceJudgeButton_Click(object sender, RoutedEventArgs e)
@@ -543,6 +692,7 @@ public partial class MainWindow : Window
             ViewModel.SetEvaluationReportHistory(
                 _engineService.LoadEvaluationReportHistory(ViewModel.ActiveProjectPath)
             );
+            ReconcileReviewedFixesAfterRun(result);
         }
         catch (Exception ex)
         {
@@ -617,6 +767,7 @@ public partial class MainWindow : Window
             ViewModel.SetEvaluationReportHistory(
                 _engineService.LoadEvaluationReportHistory(ViewModel.ActiveProjectPath)
             );
+            ReconcileReviewedFixesAfterRun(result);
 
             var newItem = ViewModel.EvaluationReportHistory
                 .FirstOrDefault(item => item.ReportPath == result.ReportPath);
@@ -888,6 +1039,21 @@ public partial class MainWindow : Window
         var view = ViewModel.SelectedAiAssistQueueView;
         ViewModel.ApplyAiAssistQueueView(view);
         ViewModel.ApplyAiAssistQueueViewLoaded(view);
+    }
+
+    private void ResumeAiAssistRewriteBatchButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.ResumeAiAssistRewriteBatch())
+        {
+            return;
+        }
+
+        WritingStudioTab.IsSelected = true;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            DraftTextBox.Focus();
+            DraftTextBox.Select(0, DraftTextBox.Text.Length);
+        }));
     }
 
     private bool MarkSelectedAiAssistReview(string reviewState)
@@ -1855,6 +2021,15 @@ public partial class MainWindow : Window
         ViewModel.SetImportQuarantineItems(_engineService.LoadImportQuarantineItems(project.ProjectPath));
         ViewModel.SetAiAssistReviewQueue(_engineService.LoadAiAssistReviewQueue(project.ProjectPath));
         ViewModel.SetAiAssistQueueViews(_engineService.LoadAiAssistQueueViews(project.ProjectPath));
+        ViewModel.SetAiAssistRewriteBatches(
+            _engineService.LoadAiAssistRewriteBatches(project.ProjectPath)
+        );
+        ViewModel.SetReviewedFixes(
+            _engineService.LoadReviewedFixes(project.ProjectPath)
+        );
+        ViewModel.SetEvaluationFailureFilters(
+            _engineService.LoadEvaluationFailureFilters(project.ProjectPath)
+        );
         ClearAiAssistBulkUndoStack();
         ViewModel.SetEvaluationReportHistory(
             _engineService.LoadEvaluationReportHistory(project.ProjectPath)

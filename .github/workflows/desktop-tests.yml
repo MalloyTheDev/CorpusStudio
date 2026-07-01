@@ -1,0 +1,22 @@
+name: Desktop Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  desktop-tests:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore apps/desktop/CorpusStudio.Desktop.Tests/CorpusStudio.Desktop.Tests.csproj
+
+      - name: Test
+        run: dotnet test apps/desktop/CorpusStudio.Desktop.Tests/CorpusStudio.Desktop.Tests.csproj -c Release --no-restore

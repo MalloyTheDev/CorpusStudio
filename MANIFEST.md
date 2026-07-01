@@ -6,6 +6,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `.env.example`
 - `.github/ISSUE_TEMPLATE/bug_report.md`
 - `.github/ISSUE_TEMPLATE/feature_request.md`
+- `.github/workflows/desktop-tests.yml`
 - `.github/workflows/engine-tests.yml`
 - `.gitignore`
 - `CODE_OF_CONDUCT.md`
@@ -21,6 +22,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/CorpusStudio.Desktop.csproj`
 - `apps/desktop/CorpusStudio.Desktop/Models/AiAssistRunResult.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/AiAssistQueueView.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/AiAssistRewriteBatch.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/AiAssistReviewQueueItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/BackendHealthReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/BackendModelListReport.cs`
@@ -30,6 +32,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/DatasetSchema.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/DesktopSettings.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/EvaluationExampleResult.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/EvaluationFailureFilter.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/EvaluationReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/EvaluationReportHistoryItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/EvaluationRunResult.cs`
@@ -41,6 +44,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/PreferenceReviewItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/QualityHistoryEntry.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/QualityReport.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/ReviewedFixRecord.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/SavedExampleItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/SplitReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/SplitSettings.cs`
@@ -53,6 +57,11 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml`
 - `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/AiAssistRewriteBatchServiceTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/CorpusStudio.Desktop.Tests.csproj`
+- `apps/desktop/CorpusStudio.Desktop.Tests/EvaluationFailureFilterServiceTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/ReviewedFixServiceTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/TempProjectDirectory.cs`
 - `apps/desktop/CorpusStudio.Desktop.sln`
 - `apps/desktop/CorpusStudio.Desktop.sln.README.md`
 - `apps/desktop/README.md`
@@ -71,6 +80,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/MODEL_BACKENDS.md`
 - `docs/PRODUCT_SPEC.md`
 - `docs/QUALITY_GATES.md`
+- `docs/RELEASE_CHECKLIST.md`
 - `docs/ROADMAP.md`
 - `docs/SCHEMA_EXAMPLES.md`
 - `docs/SCHEMA_SYSTEM.md`
@@ -126,6 +136,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/splitters/__init__.py`
 - `engine/corpus_studio/splitters/random_splitter.py`
 - `engine/corpus_studio/storage/__init__.py`
+- `engine/corpus_studio/storage/index.py`
 - `engine/corpus_studio/storage/project.py`
 - `engine/corpus_studio/training/__init__.py`
 - `engine/corpus_studio/training/compatibility.py`
@@ -144,6 +155,8 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_evaluation_report.py`
 - `engine/tests/test_import_preview.py`
 - `engine/tests/test_model_backend_config.py`
+- `engine/tests/test_ollama_integration.py`
+- `engine/tests/test_project_index.py`
 - `engine/tests/test_training_compatibility.py`
 - `engine/tests/test_training_config_template.py`
 - `examples/datasets/chat/train.jsonl`

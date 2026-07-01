@@ -27,7 +27,9 @@ does not directly mutate accepted examples. The Quality panel can also send a
 selected synthetic-pattern issue into a prepared `rewrite-output` AI Assist
 workflow by loading the first affected row into the draft and copying the repair
 guidance into the instruction. It can also prepare a batch rewrite draft for
-the affected rows across the current structured synthetic issues. Preference
+the affected rows across the current structured synthetic issues and persist
+that prepared batch in `ai_assist_rewrite_batches.json` for resume after app
+restart. Preference
 projects also have a first-pass
 Preference Review tab that shows prompt/chosen/rejected/reason fields side by
 side, ranks pairs by weak/moderate/strong contrast, filters the queue by
@@ -89,8 +91,9 @@ review-only until the user deliberately moves suggested JSONL into Writing
 Studio. It also preserves a side-by-side source draft and suggested JSONL view
 for auditability. Review-state filters, search, sorting, visible-item bulk
 triage, saved queue views, and multi-step undo help process larger queues
-without bypassing human decisions. From there the normal validator and save
-controls remain the acceptance path.
+without bypassing human decisions. Prepared synthetic batch rewrites can also
+be resumed from a project-local rewrite-batch list after restart. From there
+the normal validator and save controls remain the acceptance path.
 
 ## Synthetic Data Warning
 
@@ -181,10 +184,25 @@ Current desktop queue item shape adds local review metadata around that result:
 }
 ```
 
-Near-term hardening should focus on persistent rewrite batches, clearer
-before/after review diffs, production-grade synthetic pattern clustering, and
-target-specific preference export preparation. It should not bypass the
-validator or auto-save model output.
+Prepared synthetic batch rewrites are stored separately from review results:
+
+```json
+{
+  "batch_id": "local-id",
+  "created_at": "2026-07-01T12:00:00Z",
+  "schema_id": "instruction",
+  "action": "rewrite-output",
+  "row_numbers": [23, 24, 25],
+  "issue_count": 3,
+  "source_draft": "[{\"instruction\":\"...\"}]",
+  "instruction": "Rewrite affected rows 23, 24, 25 as a batch..."
+}
+```
+
+Near-term hardening should focus on production-grade synthetic pattern
+clustering, target-specific preference export preparation, and stronger
+reviewed-fix tracking. It should not bypass the validator or auto-save model
+output.
 
 ## Current CLI MVP
 

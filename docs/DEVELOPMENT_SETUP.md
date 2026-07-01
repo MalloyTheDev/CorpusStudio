@@ -58,6 +58,13 @@ dotnet build apps\desktop\CorpusStudio.Desktop.sln
 .\apps\desktop\CorpusStudio.Desktop\bin\Debug\net8.0-windows\CorpusStudio.Desktop.exe
 ```
 
+Run the desktop unit tests (project-local JSON persistence logic — reviewed
+fixes, rewrite batches, and saved failure filters):
+
+```powershell
+dotnet test apps\desktop\CorpusStudio.Desktop.Tests\CorpusStudio.Desktop.Tests.csproj
+```
+
 The desktop app uses the local Python engine. If the app cannot find Python or the engine, confirm `.env` contains:
 
 ```text
@@ -92,9 +99,9 @@ Or run the automated Windows desktop smoke test:
 The smoke script exercises the current desktop loop, including project
 creation, validation, quality checks, splits, imports, Evaluation Lab shelling,
 Evaluation report comparison, saved Evaluation regression rerun settings, AI
-Assist queue behavior, Evaluation tag/failure/score-band summaries, failed
-Evaluation row edit handoff to Writing Studio, Training Lab config export, and
-saved lab backend settings.
+Assist queue behavior, persistent AI Assist rewrite batch resume, Evaluation
+tag/failure/score-band summaries, failed Evaluation row edit handoff to Writing
+Studio, Training Lab config export, and saved lab backend settings.
 
 ## Validate example datasets
 
@@ -111,7 +118,14 @@ saved lab backend settings.
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli quality examples\datasets\instruction\train.jsonl
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli split examples\datasets\instruction\train.jsonl exports\instruction_split instruction
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli export examples\datasets\instruction\train.jsonl exports\instruction.jsonl instruction
+.\engine\.venv\Scripts\python.exe -m corpus_studio.cli project-index-rebuild
+.\engine\.venv\Scripts\python.exe -m corpus_studio.cli project-list --schema instruction
 ```
+
+`project-list` and `project-index-rebuild` use an optional SQLite index
+(`data/projects/index.sqlite3`) for fast listing/filtering. The index is built
+on first use, can be rebuilt from disk at any time, and never replaces the
+inspectable `project.json`/`examples.jsonl` files.
 
 ## Local model-backed commands
 
@@ -126,3 +140,22 @@ training jobs.
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli ai-assist examples\datasets\instruction\train.jsonl instruction --action review --backend ollama --model qwen2.5-coder:7b
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli training-config examples\datasets\instruction\train.jsonl instruction --output-path exports\instruction_axolotl.yaml --base-model Qwen/Qwen2.5-Coder-7B-Instruct --target axolotl_yaml
 ```
+
+## Opt-in local integration tests
+
+The default `pytest` run stays offline: the Ollama integration tests
+(`engine/tests/test_ollama_integration.py`) are skipped unless explicitly
+enabled. With a running Ollama server and at least one model pulled:
+
+```powershell
+cd engine
+$env:CORPUS_STUDIO_OLLAMA_INTEGRATION = "1"
+.\.venv\Scripts\python.exe -m pytest -m integration -q --basetemp .pytest-tmp
+```
+
+Optional overrides: `CORPUS_STUDIO_OLLAMA_MODEL` (default `llama3.2`) and
+`CORPUS_STUDIO_OLLAMA_BASE_URL` (default `http://localhost:11434`). Each test
+self-skips if the backend is unreachable or has no models, so an
+enabled-but-unavailable environment reports skips rather than failures. These
+tests cover model discovery, backend health, an Evaluation run, and an AI Assist
+review against the real backend.

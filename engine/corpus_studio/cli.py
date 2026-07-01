@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import os
+import sqlite3
 from typing import Optional
 
 import typer
@@ -31,6 +32,12 @@ from corpus_studio.reporting.dataset_card import (
 from corpus_studio.evaluation.reports import EvaluationReport
 from corpus_studio.schemas.registry import list_builtin_schemas, load_builtin_schema, repository_root
 from corpus_studio.splitters.random_splitter import random_split
+from corpus_studio.storage.index import (
+    default_index_path,
+    index_single_project,
+    list_projects_from_root,
+    rebuild_index,
+)
 from corpus_studio.storage.project import DatasetProject, create_project
 from corpus_studio.training.compatibility import training_compatibility_warnings
 from corpus_studio.training.config_templates import (
@@ -50,6 +57,16 @@ def _repo_relative_path(env_name: str, fallback: Path) -> Path:
     if not path.is_absolute():
         path = repository_root() / path
     return path
+
+
+def _index_enabled() -> bool:
+    """Whether the optional SQLite project index should be kept in sync on writes."""
+    return os.environ.get("CORPUS_STUDIO_USE_INDEX", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _exit_if_invalid(report: ValidationReport) -> None:
@@ -110,7 +127,84 @@ def new_project(project_id: str, name: str, schema: str, root: Optional[Path] = 
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
+    if _index_enabled():
+        try:
+            index_single_project(project_root, path)
+        except (sqlite3.Error, OSError):
+            pass  # the index is an optional cache; never fail project creation
+
     typer.echo(str(path))
+
+
+@app.command("project-list")
+def project_list(
+    root: Optional[Path] = typer.Option(
+        None, "--root", help="Projects root. Defaults to the data dir."
+    ),
+    schema: Optional[str] = typer.Option(None, "--schema", help="Filter by schema id."),
+    name_contains: Optional[str] = typer.Option(
+        None, "--name-contains", help="Filter by a case-insensitive name substring."
+    ),
+    rebuild: bool = typer.Option(
+        False, "--rebuild", help="Rebuild the index from disk before listing."
+    ),
+    index_path: Optional[Path] = typer.Option(
+        None, "--index-path", help="Override the SQLite index path."
+    ),
+):
+    """List local dataset projects using the optional SQLite index.
+
+    The index is built from project.json files on first use and rebuilt on
+    demand; the JSON/JSONL files remain the source of truth.
+    """
+    projects_root = root or _repo_relative_path(
+        "CORPUS_STUDIO_DATA_DIR", Path("data") / "projects"
+    )
+    entries = list_projects_from_root(
+        projects_root,
+        db_path=index_path,
+        schema_id=schema,
+        name_contains=name_contains,
+        rebuild=rebuild,
+    )
+    typer.echo(
+        json.dumps(
+            {
+                "projects_root": str(projects_root),
+                "index_path": str(index_path or default_index_path(projects_root)),
+                "count": len(entries),
+                "projects": [entry.model_dump() for entry in entries],
+            },
+            indent=2,
+        )
+    )
+
+
+@app.command("project-index-rebuild")
+def project_index_rebuild(
+    root: Optional[Path] = typer.Option(
+        None, "--root", help="Projects root. Defaults to the data dir."
+    ),
+    index_path: Optional[Path] = typer.Option(
+        None, "--index-path", help="Override the SQLite index path."
+    ),
+):
+    """Rebuild the optional SQLite project index from project.json files on disk."""
+    projects_root = root or _repo_relative_path(
+        "CORPUS_STUDIO_DATA_DIR", Path("data") / "projects"
+    )
+    resolved_index = index_path or default_index_path(projects_root)
+    count = rebuild_index(projects_root, resolved_index)
+    typer.echo(
+        json.dumps(
+            {
+                "projects_root": str(projects_root),
+                "index_path": str(resolved_index),
+                "indexed": count,
+            },
+            indent=2,
+        )
+    )
 
 
 @app.command()

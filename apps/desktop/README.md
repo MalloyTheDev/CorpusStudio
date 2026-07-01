@@ -18,10 +18,12 @@ The current v0.1 workflow supports:
 - project reopening from the project list
 - train/validation/test split generation with saved ratios, seed, and tiny-split warnings
 - Evaluation Lab MVP runs, backend checks, pre-run health gates, report history, two-report comparison, saved regression reruns, report summaries by tag/failure reason/score band, failed-example review filtering, failed-row edit handoff to Writing Studio, failed-example AI Assist triage preparation, and manual per-example notes/scores for configured Ollama or OpenAI-compatible local endpoints
-- AI Assist MVP backend checks plus schema-aware action presets, persistent review queue, filters, search, sorting, saved queue views, bulk triage with multi-step undo, accept/reject states, source/suggestion comparison, batch synthetic rewrite preparation, preference-pair judge handoff, preference ranking export, and visible batch judge preparation
+- AI Assist MVP backend checks plus schema-aware action presets, persistent review queue, filters, search, sorting, saved queue views, persistent rewrite batches, bulk triage with multi-step undo, accept/reject states, source/suggestion comparison, batch synthetic rewrite preparation, preference-pair judge handoff, preference ranking export, and visible batch judge preparation
 - Training Lab MVP config export for inspectable trainer config files
 - JSONL export
 - local settings inspection and per-project lab backend settings persistence
+- polished desktop shell styling, a workflow stage strip, and a wired sidebar
+  Export Center affordance
 
 Build and launch from the repository root:
 
@@ -87,6 +89,8 @@ list. Preparing a rewrite loads the first affected row into the draft editor,
 sets AI Assist to `rewrite-output`, and copies the repair guidance into the AI
 Assist instruction. Preparing a batch rewrite loads affected rows from the
 current issue set as a JSON array and asks AI Assist for corrected JSONL rows.
+Prepared batch rewrites are saved to `ai_assist_rewrite_batches.json` in the
+project folder and can be resumed from the AI Assist tab after restart.
 The user still runs AI Assist, reviews the suggestion, validates the result,
 and saves explicitly.
 
@@ -103,3 +107,7 @@ It prefers generated train/validation split files when they exist, falls back to
 the project's saved examples for config preview, and writes rendered config
 files under the configured export directory. It does not launch trainers,
 install ML packages, show logs, manage checkpoints, or resume runs.
+
+The desktop shell uses shared WPF styles for controls, tabs, side rails, and
+the project header so new lab surfaces should reuse the existing visual frame
+instead of adding one-off styling.

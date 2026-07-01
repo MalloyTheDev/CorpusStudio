@@ -63,7 +63,9 @@ for whether edits and imports are improving the dataset.
 The desktop app also exposes structured synthetic issues as a triage list. A
 selected issue can prepare an AI Assist `rewrite-output` pass by loading the
 first affected row into the draft editor and copying the repair suggestion into
-the AI Assist instruction. This is a handoff, not automatic cleaning.
+the AI Assist instruction. Batch rewrite preparation can also save a project-
+local resume record in `ai_assist_rewrite_batches.json`. This is a handoff, not
+automatic cleaning.
 
 Synthetic issue severities are heuristic and intentionally conservative. They
 help prioritize review; they do not automatically block export or rewrite rows.

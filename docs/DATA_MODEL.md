@@ -129,6 +129,26 @@ Project folders can also contain:
 - `import_quarantine/`
 - `ai_assist_reviews.jsonl`
 - `ai_assist_queue_views.json`
+- `ai_assist_rewrite_batches.json`
+- `reviewed_fixes.json`
+- `evaluation_failure_filters.json`
+
+`ai_assist_rewrite_batches.json` stores prepared synthetic batch rewrite
+handoffs only. Each item keeps the affected row numbers, issue count, source
+draft, and AI Assist instruction so a user can resume the rewrite after app
+restart. It is not accepted training data.
+
+`reviewed_fixes.json` tracks failed evaluation rows that a user opened for
+editing. Each record keeps the example id, saved row number, originating report,
+original score, and a version number that increments on repeat edits of the same
+example. After the next evaluation run the record is reconciled to `resolved` or
+`still-failing`, giving an inspectable audit trail of which failures were
+addressed. It is workflow state, not accepted training data.
+
+`evaluation_failure_filters.json` stores named Evaluation drilldowns. Each saved
+filter keeps a status, tag, failure-reason, and score-band selection so a
+reviewer can reapply the same failure slice across runs. It is workflow state,
+not accepted training data.
 
 Export folders can contain:
 

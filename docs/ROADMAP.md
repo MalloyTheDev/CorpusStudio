@@ -68,11 +68,8 @@ Scope:
 - failed-example AI Assist triage preparation
 - report summaries by tag, failure reason, and score band
 - manual per-example scoring and notes
-
-Remaining hardening:
-
-- add versioned reviewed-fix tracking and in-place row replacement options
-- add interactive Evaluation drilldowns and saved failure filters
+- versioned reviewed-fix tracking with re-test resolution status
+- interactive failure drilldowns with saved per-project failure filters
 
 Out of scope:
 
@@ -101,6 +98,7 @@ Scope:
 - synthetic warning severity levels and repair suggestions
 - synthetic issue triage-to-rewrite handoff
 - batch synthetic rewrite preparation for affected rows
+- persistent rewrite batches that survive app restart
 - preference ranking export for DPO/reward-model review
 - visible preference queue batch judge preparation
 - suggest tags
@@ -115,7 +113,6 @@ Scope:
 Remaining hardening:
 
 - production-grade synthetic pattern clustering
-- persistent rewrite batches that survive app restart
 - target-specific DPO/reward-model export formats
 
 Out of scope:

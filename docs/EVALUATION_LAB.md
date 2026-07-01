@@ -197,6 +197,12 @@ The desktop Evaluation tab is a thin UI over the CLI MVP:
 - failed-example AI Assist triage handoff that loads the expected answer as a
   draft and includes the prompt, expected output, model output, and score in the
   instruction
+- reviewed-fix tracking that records each edited failed row, versions repeat
+  edits of the same example, and marks a fix resolved or still-failing after the
+  next evaluation run, persisted to `reviewed_fixes.json`
+- interactive failure drilldowns that cross-filter the result list by status,
+  tag, failure reason, and score band, plus named per-project failure filters
+  saved to `evaluation_failure_filters.json` for repeated review passes
 
 It does not yet provide streaming progress, hosted-provider credential
 management, multi-run failure triage, or multi-model benchmark comparison.

@@ -265,6 +265,322 @@ public sealed class PythonEngineService
         return savedView;
     }
 
+    public IReadOnlyList<AiAssistRewriteBatch> LoadAiAssistRewriteBatches(
+        string projectPath,
+        int maxBatches = 20
+    )
+    {
+        var batchesPath = GetAiAssistRewriteBatchesPath(projectPath);
+        if (!File.Exists(batchesPath))
+        {
+            return [];
+        }
+
+        try
+        {
+            var batches = JsonSerializer.Deserialize<List<AiAssistRewriteBatch>>(
+                File.ReadAllText(batchesPath, Encoding.UTF8),
+                JsonOptions
+            ) ?? [];
+
+            return batches
+                .Where(batch => !string.IsNullOrWhiteSpace(batch.BatchId))
+                .OrderByDescending(batch => batch.CreatedAt)
+                .Take(maxBatches)
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    public AiAssistRewriteBatch SaveAiAssistRewriteBatch(
+        string projectPath,
+        AiAssistRewriteBatch batch
+    )
+    {
+        if (string.IsNullOrWhiteSpace(batch.SourceDraft))
+        {
+            throw new InvalidOperationException("AI Assist rewrite batch source draft is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(batch.Instruction))
+        {
+            throw new InvalidOperationException("AI Assist rewrite batch instruction is required.");
+        }
+
+        var savedBatch = new AiAssistRewriteBatch
+        {
+            BatchId = string.IsNullOrWhiteSpace(batch.BatchId)
+                ? Guid.NewGuid().ToString("N")
+                : batch.BatchId,
+            CreatedAt = batch.CreatedAt == default ? DateTime.UtcNow : batch.CreatedAt,
+            SchemaId = batch.SchemaId,
+            Action = string.IsNullOrWhiteSpace(batch.Action) ? "rewrite-output" : batch.Action,
+            RowNumbers = batch.RowNumbers
+                .Where(rowNumber => rowNumber > 0)
+                .Distinct()
+                .Order()
+                .ToList(),
+            IssueCount = batch.IssueCount,
+            IssueSummary = batch.IssueSummary.Trim(),
+            SourceDraft = batch.SourceDraft.TrimEnd(),
+            Instruction = batch.Instruction.Trim(),
+        };
+
+        var batches = LoadAiAssistRewriteBatches(projectPath, maxBatches: 100).ToList();
+        var existingIndex = batches.FindIndex(existing =>
+            string.Equals(existing.BatchId, savedBatch.BatchId, StringComparison.Ordinal)
+        );
+        if (existingIndex >= 0)
+        {
+            batches[existingIndex] = savedBatch;
+        }
+        else
+        {
+            batches.Add(savedBatch);
+        }
+
+        batches = batches
+            .OrderByDescending(existing => existing.CreatedAt)
+            .Take(20)
+            .ToList();
+
+        Directory.CreateDirectory(projectPath);
+        File.WriteAllText(
+            GetAiAssistRewriteBatchesPath(projectPath),
+            JsonSerializer.Serialize(batches, new JsonSerializerOptions(JsonOptions)
+            {
+                WriteIndented = true
+            }) + Environment.NewLine,
+            encoding: Utf8NoBom
+        );
+
+        return savedBatch;
+    }
+
+    public IReadOnlyList<ReviewedFixRecord> LoadReviewedFixes(
+        string projectPath,
+        int maxRecords = 200
+    )
+    {
+        var fixesPath = GetReviewedFixesPath(projectPath);
+        if (!File.Exists(fixesPath))
+        {
+            return [];
+        }
+
+        try
+        {
+            var records = JsonSerializer.Deserialize<List<ReviewedFixRecord>>(
+                File.ReadAllText(fixesPath, Encoding.UTF8),
+                JsonOptions
+            ) ?? [];
+
+            return records
+                .Where(record => !string.IsNullOrWhiteSpace(record.FixId)
+                    && !string.IsNullOrWhiteSpace(record.ExampleId))
+                .OrderByDescending(record => record.CreatedAt)
+                .Take(maxRecords)
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    public ReviewedFixRecord RecordReviewedFix(string projectPath, ReviewedFixRecord fix)
+    {
+        if (string.IsNullOrWhiteSpace(fix.ExampleId))
+        {
+            throw new InvalidOperationException("Reviewed fix requires an evaluation example id.");
+        }
+
+        var records = LoadReviewedFixes(projectPath, maxRecords: 500).ToList();
+        var nextVersion = records
+            .Where(record => string.Equals(record.ExampleId, fix.ExampleId, StringComparison.Ordinal))
+            .Select(record => record.Version)
+            .DefaultIfEmpty(0)
+            .Max() + 1;
+
+        var savedFix = new ReviewedFixRecord
+        {
+            FixId = string.IsNullOrWhiteSpace(fix.FixId)
+                ? Guid.NewGuid().ToString("N")
+                : fix.FixId,
+            ExampleId = fix.ExampleId,
+            RowNumber = fix.RowNumber,
+            SchemaId = fix.SchemaId,
+            Version = nextVersion,
+            Status = ReviewedFixRecord.StatusEdited,
+            OriginalScore = fix.OriginalScore,
+            LatestScore = null,
+            FailureReason = fix.FailureReason.Trim(),
+            SourceReport = fix.SourceReport.Trim(),
+            CreatedAt = fix.CreatedAt == default ? DateTime.UtcNow : fix.CreatedAt,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        records.Add(savedFix);
+        PersistReviewedFixes(projectPath, records);
+        return savedFix;
+    }
+
+    /// <summary>
+    /// Reconciles open reviewed fixes against a fresh set of evaluation results.
+    /// Only the latest version per example is updated: a passing re-test marks the
+    /// fix resolved, a failing re-test marks it still-failing. Older versions and
+    /// examples absent from the run are left untouched.
+    /// </summary>
+    public IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(
+        string projectPath,
+        IReadOnlyList<EvaluationExampleResult> results
+    )
+    {
+        var records = LoadReviewedFixes(projectPath, maxRecords: 500).ToList();
+        if (records.Count == 0)
+        {
+            return records;
+        }
+
+        var latestResultByExample = results
+            .GroupBy(result => result.ExampleId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.Ordinal);
+
+        var latestVersionByExample = records
+            .GroupBy(record => record.ExampleId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Max(record => record.Version), StringComparer.Ordinal);
+
+        var changed = false;
+        foreach (var record in records)
+        {
+            var isLatestVersion =
+                latestVersionByExample.TryGetValue(record.ExampleId, out var latestVersion)
+                && latestVersion == record.Version;
+
+            if (!isLatestVersion || record.Status != ReviewedFixRecord.StatusEdited)
+            {
+                continue;
+            }
+
+            if (!latestResultByExample.TryGetValue(record.ExampleId, out var result))
+            {
+                continue;
+            }
+
+            record.Status = result.Passed
+                ? ReviewedFixRecord.StatusResolved
+                : ReviewedFixRecord.StatusStillFailing;
+            record.LatestScore = result.Score;
+            record.UpdatedAt = DateTime.UtcNow;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            PersistReviewedFixes(projectPath, records);
+        }
+
+        return LoadReviewedFixes(projectPath);
+    }
+
+    private void PersistReviewedFixes(string projectPath, List<ReviewedFixRecord> records)
+    {
+        var trimmed = records
+            .OrderByDescending(record => record.CreatedAt)
+            .Take(200)
+            .ToList();
+
+        Directory.CreateDirectory(projectPath);
+        File.WriteAllText(
+            GetReviewedFixesPath(projectPath),
+            JsonSerializer.Serialize(trimmed, new JsonSerializerOptions(JsonOptions)
+            {
+                WriteIndented = true
+            }) + Environment.NewLine,
+            encoding: Utf8NoBom
+        );
+    }
+
+    public IReadOnlyList<EvaluationFailureFilter> LoadEvaluationFailureFilters(string projectPath)
+    {
+        var filtersPath = GetEvaluationFailureFiltersPath(projectPath);
+        if (!File.Exists(filtersPath))
+        {
+            return [];
+        }
+
+        try
+        {
+            var filters = JsonSerializer.Deserialize<List<EvaluationFailureFilter>>(
+                File.ReadAllText(filtersPath, Encoding.UTF8),
+                JsonOptions
+            ) ?? [];
+
+            return filters
+                .Where(filter => !string.IsNullOrWhiteSpace(filter.Name))
+                .OrderBy(filter => filter.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    public EvaluationFailureFilter SaveEvaluationFailureFilter(
+        string projectPath,
+        EvaluationFailureFilter filter
+    )
+    {
+        var name = filter.Name.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new InvalidOperationException("Evaluation failure filter name is required.");
+        }
+
+        var savedFilter = new EvaluationFailureFilter
+        {
+            Name = name,
+            Status = string.IsNullOrWhiteSpace(filter.Status) ? "All" : filter.Status,
+            Tag = string.IsNullOrWhiteSpace(filter.Tag) ? "All" : filter.Tag,
+            FailureReason = string.IsNullOrWhiteSpace(filter.FailureReason) ? "All" : filter.FailureReason,
+            ScoreBand = string.IsNullOrWhiteSpace(filter.ScoreBand) ? "All" : filter.ScoreBand,
+        };
+
+        var filters = LoadEvaluationFailureFilters(projectPath).ToList();
+        var existingIndex = filters.FindIndex(existing =>
+            string.Equals(existing.Name, savedFilter.Name, StringComparison.OrdinalIgnoreCase)
+        );
+
+        if (existingIndex >= 0)
+        {
+            filters[existingIndex] = savedFilter;
+        }
+        else
+        {
+            filters.Add(savedFilter);
+        }
+
+        filters = filters
+            .OrderBy(existing => existing.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        Directory.CreateDirectory(projectPath);
+        File.WriteAllText(
+            GetEvaluationFailureFiltersPath(projectPath),
+            JsonSerializer.Serialize(filters, new JsonSerializerOptions(JsonOptions)
+            {
+                WriteIndented = true
+            }) + Environment.NewLine,
+            encoding: Utf8NoBom
+        );
+
+        return savedFilter;
+    }
+
     public AiAssistReviewQueueItem SaveAiAssistReviewQueueItem(
         string projectPath,
         string sourceDraft,
@@ -1158,6 +1474,21 @@ public sealed class PythonEngineService
     private static string GetAiAssistQueueViewsPath(string projectPath)
     {
         return Path.Combine(projectPath, "ai_assist_queue_views.json");
+    }
+
+    private static string GetAiAssistRewriteBatchesPath(string projectPath)
+    {
+        return Path.Combine(projectPath, "ai_assist_rewrite_batches.json");
+    }
+
+    private static string GetReviewedFixesPath(string projectPath)
+    {
+        return Path.Combine(projectPath, "reviewed_fixes.json");
+    }
+
+    private static string GetEvaluationFailureFiltersPath(string projectPath)
+    {
+        return Path.Combine(projectPath, "evaluation_failure_filters.json");
     }
 
     private Task<string> RunEngineCommandAsync(params string[] arguments)
