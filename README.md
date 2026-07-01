@@ -55,7 +55,8 @@ Corpus Studio now has a working local dataset loop and first-pass lab surfaces:
 - manage an AI Assist review queue with filters, search, sorting, saved views,
   bulk triage, and undo
 - review preference-pair contrast and prepare preference judge passes
-- export inspectable Training Lab config files without launching trainers
+- export inspectable Training Lab config files without launching trainers, with
+  schema/format/target compatibility warnings
 
 The next phase is hardening these surfaces into a dependable v0.2/v0.3
 workflow. Corpus Studio still does not launch local training jobs, manage CUDA

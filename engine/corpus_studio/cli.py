@@ -32,6 +32,7 @@ from corpus_studio.evaluation.reports import EvaluationReport
 from corpus_studio.schemas.registry import list_builtin_schemas, load_builtin_schema, repository_root
 from corpus_studio.splitters.random_splitter import random_split
 from corpus_studio.storage.project import DatasetProject, create_project
+from corpus_studio.training.compatibility import training_compatibility_warnings
 from corpus_studio.training.config_templates import (
     build_lora_config_template,
     normalize_training_config_target,
@@ -396,12 +397,19 @@ def training_config(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(config_text, encoding="utf-8")
 
+    compatibility_warnings = training_compatibility_warnings(
+        schema_id=schema,
+        dataset_format=dataset_format or schema,
+        target=normalized_target,
+    )
+
     warnings = [
         "Training config export only; Corpus Studio does not launch training yet.",
         "Review dataset rights, eval readiness, compute budget, and target tool docs before training.",
     ]
     if eval_dataset_path is None:
         warnings.append("No validation dataset path was provided; generate splits before training.")
+    warnings.extend(compatibility_warnings)
 
     typer.echo(
         json.dumps(
@@ -412,6 +420,7 @@ def training_config(
                 "config": template.to_training_dict(),
                 "config_text": config_text,
                 "warnings": warnings,
+                "compatibility_warnings": compatibility_warnings,
             },
             indent=2,
         )

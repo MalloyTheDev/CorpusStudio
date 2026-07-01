@@ -128,6 +128,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/storage/__init__.py`
 - `engine/corpus_studio/storage/project.py`
 - `engine/corpus_studio/training/__init__.py`
+- `engine/corpus_studio/training/compatibility.py`
 - `engine/corpus_studio/training/config_templates.py`
 - `engine/corpus_studio/training/estimators.py`
 - `engine/corpus_studio/tokenization/__init__.py`
@@ -143,6 +144,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_evaluation_report.py`
 - `engine/tests/test_import_preview.py`
 - `engine/tests/test_model_backend_config.py`
+- `engine/tests/test_training_compatibility.py`
 - `engine/tests/test_training_config_template.py`
 - `examples/datasets/chat/train.jsonl`
 - `examples/datasets/code/train.jsonl`

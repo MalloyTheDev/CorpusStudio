@@ -56,6 +56,9 @@ gradient_accumulation_steps: 8
 learning_rate: 0.0002
 ```
 
+Each target's supported training styles are declared in
+`engine/corpus_studio/training/compatibility.py`.
+
 ## Generation Rules
 
 Config generation should:
@@ -66,6 +69,23 @@ Config generation should:
 - preserve schema and export format metadata
 - avoid hardware-specific claims unless measured or configured
 - avoid hidden defaults that change training behavior dramatically
+
+## Compatibility Warnings
+
+The `training-config` command runs advisory schema/format/target checks and adds
+the results to both the `warnings` and `compatibility_warnings` fields of its
+JSON output. The checks are advisory only; they never block export. They flag:
+
+- **Format vs schema mismatch** — a `--format` label that is unusual for the
+  chosen schema (for example `sharegpt` on the `instruction` schema).
+- **Preference datasets** — the `preference` schema needs a DPO/reward pipeline;
+  targets that support it (Axolotl, TRL, Unsloth, LLaMA-Factory) are told to
+  configure that trainer, and targets without a preference path are told a custom
+  trainer is required. The LoRA template itself only renders SFT-shaped fields.
+- **Non causal-LM schemas** — `image_caption`, `retrieval`, and `evaluation`
+  data is not causal-LM fine-tuning data and needs a different trainer.
+- **Classification / raw pretraining** — flagged when the chosen target does not
+  express that training style with a LoRA causal-LM config.
 
 ## Current Non-Goals
 
