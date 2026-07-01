@@ -14,6 +14,7 @@ from corpus_studio.evaluation.evaluator import (
     extract_evaluation_examples,
     run_evaluation,
 )
+from corpus_studio.exporters.cleaning import clean_rows
 from corpus_studio.exporters.jsonl_exporter import export_jsonl, write_jsonl
 from corpus_studio.exporters.preference_exporter import (
     analyze_preference_pairs,
@@ -778,13 +779,76 @@ def _load_latest_evaluation_summary(export_dir: Path) -> Optional[DatasetCardEva
 
 
 @app.command()
-def export(input_path: Path, output_path: Path, schema: str):
-    """Validate and export a JSONL file."""
+def export(
+    input_path: Path,
+    output_path: Path,
+    schema: str,
+    dedupe: bool = typer.Option(
+        False,
+        "--dedupe",
+        help="Drop exact and normalized-duplicate rows before export.",
+    ),
+    drop_low_information: bool = typer.Option(
+        False,
+        "--drop-low-information",
+        help="Drop rows below the low-information token threshold.",
+    ),
+):
+    """Validate and export a JSONL file, optionally cleaning it first."""
     report = validate_jsonl_file(input_path, schema)
     _exit_if_invalid(report)
 
-    export_jsonl(input_path, output_path)
-    typer.echo(f"Exported {input_path} -> {output_path}")
+    warnings: list[str] = []
+
+    if dedupe or drop_low_information:
+        rows = list(read_jsonl(input_path))
+        kept, clean_result = clean_rows(
+            rows,
+            dedupe=dedupe,
+            drop_low_information=drop_low_information,
+        )
+        write_jsonl(kept, output_path)
+
+        manifest_path = output_path.with_name(output_path.name + ".cleaning_manifest.json")
+        manifest_path.write_text(
+            clean_result.model_dump_json(indent=2) + "\n", encoding="utf-8"
+        )
+
+        payload = {
+            "input_path": str(input_path),
+            "output_path": str(output_path),
+            "cleaned": True,
+            "input_rows": clean_result.input_rows,
+            "output_rows": clean_result.kept_rows,
+            "removed_rows": clean_result.removed_rows,
+            "removed_exact_duplicates": clean_result.removed_exact_duplicates,
+            "removed_normalized_duplicates": clean_result.removed_normalized_duplicates,
+            "removed_low_information": clean_result.removed_low_information,
+            "manifest_path": str(manifest_path),
+            "warnings": warnings,
+        }
+    else:
+        # Verbatim copy, but still surface remaining duplicates so the quality
+        # surfaces are not purely advisory when the deliverable is produced.
+        quality = build_basic_quality_report(list(read_jsonl(input_path)))
+        export_jsonl(input_path, output_path)
+        if quality.duplicate_exact_count or quality.duplicate_normalized_count:
+            warnings.append(
+                f"Exported without cleaning: {quality.duplicate_exact_count} exact and "
+                f"{quality.duplicate_normalized_count} normalized duplicate row(s) remain. "
+                "Re-run with --dedupe to remove them."
+            )
+        payload = {
+            "input_path": str(input_path),
+            "output_path": str(output_path),
+            "cleaned": False,
+            "input_rows": quality.example_count,
+            "output_rows": quality.example_count,
+            "removed_rows": 0,
+            "warnings": warnings,
+        }
+
+    typer.echo(json.dumps(payload, indent=2))
 
 
 def _build_backend(

@@ -160,6 +160,7 @@ boilerplate families read as one finding instead of many fragmented warnings.
 Export folders can contain:
 
 - `export.jsonl`
+- `export.jsonl.cleaning_manifest.json` (only when `--dedupe`/`--drop-low-information` cleaning ran; lists each removed row's number, reason, and a sample)
 - `splits/train.jsonl`
 - `splits/validation.jsonl`
 - `splits/test.jsonl`
