@@ -42,6 +42,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/ImportPreviewReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/LabBackendSettings.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/NewProjectRequest.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/PreferenceExportResult.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/PreferenceReviewItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ProjectIndexModels.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/QualityHistoryEntry.cs`
@@ -121,6 +122,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/evaluation/scoring.py`
 - `engine/corpus_studio/exporters/__init__.py`
 - `engine/corpus_studio/exporters/jsonl_exporter.py`
+- `engine/corpus_studio/exporters/preference_exporter.py`
 - `engine/corpus_studio/importers/__init__.py`
 - `engine/corpus_studio/importers/jsonl_importer.py`
 - `engine/corpus_studio/importers/jsonl_preview.py`
@@ -162,6 +164,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_input_hardening.py`
 - `engine/tests/test_model_backend_config.py`
 - `engine/tests/test_ollama_integration.py`
+- `engine/tests/test_preference_exporter.py`
 - `engine/tests/test_project_index.py`
 - `engine/tests/test_schema_examples.py`
 - `engine/tests/test_splitters.py`

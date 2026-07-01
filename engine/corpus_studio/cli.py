@@ -14,6 +14,7 @@ from corpus_studio.evaluation.evaluator import (
     run_evaluation,
 )
 from corpus_studio.exporters.jsonl_exporter import export_jsonl, write_jsonl
+from corpus_studio.exporters.preference_exporter import export_preference
 from corpus_studio.importers.jsonl_importer import read_jsonl
 from corpus_studio.importers.jsonl_preview import preview_jsonl_import
 from corpus_studio.model_backends.base import BackendHealthReport, BackendModelListReport
@@ -550,6 +551,37 @@ def training_compat(
                 "format": dataset_format or schema,
                 "compatible": len(warnings) == 0,
                 "warnings": warnings,
+            },
+            indent=2,
+        )
+    )
+
+
+@app.command("preference-export")
+def preference_export(
+    input_path: Path,
+    output_path: Path = typer.Option(..., "--output-path", help="Write the reshaped JSONL."),
+    export_format: str = typer.Option("dpo", "--format", help="Target format: dpo, kto, or reward."),
+):
+    """Export preference rows into a trainer-ready format (DPO/KTO/reward)."""
+    report = validate_jsonl_file(input_path, "preference")
+    _exit_if_invalid(report)
+
+    rows = list(read_jsonl(input_path))
+    try:
+        exported = export_preference(rows, export_format)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    write_jsonl(exported, output_path)
+    typer.echo(
+        json.dumps(
+            {
+                "format": export_format.strip().lower(),
+                "input_rows": len(rows),
+                "output_rows": len(exported),
+                "output_path": str(output_path),
             },
             indent=2,
         )

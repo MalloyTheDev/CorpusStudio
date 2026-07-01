@@ -665,6 +665,15 @@
                                         Content="Export Ranking"
                                         Height="32"
                                         Click="ExportPreferenceRankingButton_Click" />
+                                <ComboBox AutomationProperties.AutomationId="PreferenceExportFormatComboBox"
+                                          ItemsSource="{Binding PreferenceExportFormatOptions}"
+                                          SelectedItem="{Binding PreferenceExportFormat, Mode=TwoWay}"
+                                          Height="30"
+                                          Margin="0,6,0,6" />
+                                <Button AutomationProperties.AutomationId="ExportPreferenceForTrainingButton"
+                                        Content="Export for Training"
+                                        Height="32"
+                                        Click="ExportPreferenceForTrainingButton_Click" />
                             </StackPanel>
                         </Grid>
                     </TabItem>
