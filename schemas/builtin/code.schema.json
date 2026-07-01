@@ -32,6 +32,7 @@
     {
       "name": "tests",
       "type": "list",
+      "item_type": "string",
       "required": false
     }
   ],
