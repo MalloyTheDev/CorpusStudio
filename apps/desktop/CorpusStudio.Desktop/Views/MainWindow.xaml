@@ -128,6 +128,79 @@
             <Setter Property="Padding" Value="9,4" />
             <Setter Property="Margin" Value="0,0,6,6" />
         </Style>
+
+        <SolidColorBrush x:Key="HeadingTextBrush" Color="#0F172A" />
+
+        <Style x:Key="PrimaryButtonStyle" TargetType="{x:Type Button}">
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="Padding" Value="14,5" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Background" Value="{StaticResource PrimaryBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border x:Name="ButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="{StaticResource PrimaryHoverBrush}" />
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{StaticResource PrimaryHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#1E40AF" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#E2E8F0" />
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#93B4F8" />
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#93B4F8" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SectionHeaderTextStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{StaticResource HeadingTextBrush}" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+
+        <Style x:Key="CaptionTextStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+
+        <Style x:Key="CardBorderStyle" TargetType="{x:Type Border}">
+            <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource PanelBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="14" />
+        </Style>
+
+        <Style x:Key="FilterGroupBorderStyle" TargetType="{x:Type Border}">
+            <Setter Property="Background" Value="#FBFCFE" />
+            <Setter Property="BorderBrush" Value="{StaticResource PanelBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
     </Window.Resources>
 
     <Grid Background="{StaticResource AppBackgroundBrush}">
@@ -151,7 +224,8 @@
                            Margin="0,4,0,24"
                            Foreground="#CBD5E1" />
 
-                <Button AutomationProperties.AutomationId="NewDatasetProjectButton"
+                <Button Style="{StaticResource PrimaryButtonStyle}"
+                        AutomationProperties.AutomationId="NewDatasetProjectButton"
                         Content="New Dataset Project"
                         Margin="0,0,0,8"
                         Click="NewDatasetProjectButton_Click" />
@@ -173,6 +247,16 @@
                          SelectedItem="{Binding SelectedProject, Mode=TwoWay}"
                          DisplayMemberPath="DisplayName"
                          SelectionChanged="ProjectsListBox_SelectionChanged" />
+
+                <Button AutomationProperties.AutomationId="RebuildProjectIndexButton"
+                        Content="Rebuild Index"
+                        Margin="0,10,0,6"
+                        Click="RebuildProjectIndexButton_Click" />
+                <TextBlock AutomationProperties.AutomationId="ProjectIndexSummaryTextBlock"
+                           Text="{Binding ProjectIndexSummary, Mode=OneWay}"
+                           Foreground="#94A3B8"
+                           FontSize="11"
+                           TextWrapping="Wrap" />
             </StackPanel>
         </Border>
 
@@ -260,7 +344,8 @@
                                         Orientation="Horizontal"
                                         HorizontalAlignment="Right"
                                         Margin="0,0,0,8">
-                                <Button AutomationProperties.AutomationId="SaveExampleButton"
+                                <Button Style="{StaticResource PrimaryButtonStyle}"
+                                        AutomationProperties.AutomationId="SaveExampleButton"
                                         Content="Save Example"
                                         Width="112"
                                         Click="SaveExampleButton_Click" />
@@ -486,7 +571,8 @@
                                          Text="{Binding SplitSeed, UpdateSourceTrigger=PropertyChanged}"
                                          Width="80"
                                          Margin="0,0,12,0" />
-                                <Button AutomationProperties.AutomationId="GenerateSplitsButton"
+                                <Button Style="{StaticResource PrimaryButtonStyle}"
+                                        AutomationProperties.AutomationId="GenerateSplitsButton"
                                         Content="Generate Splits"
                                         Width="124"
                                         Click="GenerateSplitsButton_Click" />
@@ -553,7 +639,8 @@
                                         Width="116"
                                         Margin="0,0,8,0"
                                         Click="RefreshEvaluationModelsButton_Click" />
-                                <Button AutomationProperties.AutomationId="RunEvaluationButton"
+                                <Button Style="{StaticResource PrimaryButtonStyle}"
+                                        AutomationProperties.AutomationId="RunEvaluationButton"
                                         Content="Run Evaluation"
                                         Width="124"
                                         Margin="0,0,8,0"
@@ -696,80 +783,90 @@
                                     <TextBlock Grid.Row="1"
                                                Grid.ColumnSpan="2"
                                                Text="Example Review"
-                                               FontWeight="SemiBold"
+                                               Style="{StaticResource SectionHeaderTextStyle}"
                                                Margin="0,8,0,4" />
 
-                                    <WrapPanel Grid.Row="2"
-                                               Grid.ColumnSpan="2"
-                                               Margin="0,0,0,6">
-                                        <TextBlock Text="Status"
-                                                   VerticalAlignment="Center"
-                                                   Margin="0,0,6,0" />
-                                        <ComboBox AutomationProperties.AutomationId="EvaluationResultFilterComboBox"
-                                                  ItemsSource="{Binding EvaluationResultFilterOptions}"
-                                                  SelectedItem="{Binding EvaluationResultFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                  Width="120"
-                                                  Margin="0,0,10,0" />
-                                        <TextBlock Text="Tag"
-                                                   VerticalAlignment="Center"
-                                                   Margin="0,0,6,0" />
-                                        <ComboBox AutomationProperties.AutomationId="EvaluationTagFilterComboBox"
-                                                  ItemsSource="{Binding EvaluationTagFilterOptions}"
-                                                  SelectedItem="{Binding EvaluationTagFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                  Width="120"
-                                                  Margin="0,0,10,0" />
-                                        <TextBlock Text="Reason"
-                                                   VerticalAlignment="Center"
-                                                   Margin="0,0,6,0" />
-                                        <ComboBox AutomationProperties.AutomationId="EvaluationFailureReasonFilterComboBox"
-                                                  ItemsSource="{Binding EvaluationFailureReasonFilterOptions}"
-                                                  SelectedItem="{Binding EvaluationFailureReasonFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                  Width="150"
-                                                  Margin="0,0,10,0" />
-                                        <TextBlock Text="Band"
-                                                   VerticalAlignment="Center"
-                                                   Margin="0,0,6,0" />
-                                        <ComboBox AutomationProperties.AutomationId="EvaluationScoreBandFilterComboBox"
-                                                  ItemsSource="{Binding EvaluationScoreBandFilterOptions}"
-                                                  SelectedItem="{Binding EvaluationScoreBandFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                  Width="90"
-                                                  Margin="0,0,10,0" />
-                                        <TextBlock AutomationProperties.AutomationId="EvaluationResultsSummaryTextBlock"
-                                                   Text="{Binding EvaluationResultsSummary, Mode=OneWay}"
-                                                   VerticalAlignment="Center"
-                                                   TextWrapping="Wrap"
-                                                   Width="360"
-                                                   Margin="0,6,0,0" />
-                                        <TextBlock Text="Saved filter"
-                                                   VerticalAlignment="Center"
-                                                   Margin="0,6,6,0" />
-                                        <TextBox AutomationProperties.AutomationId="EvaluationFailureFilterNameTextBox"
-                                                 Text="{Binding EvaluationFailureFilterName, UpdateSourceTrigger=PropertyChanged}"
-                                                 Width="120"
-                                                 Margin="0,6,8,0" />
-                                        <ComboBox AutomationProperties.AutomationId="EvaluationFailureFiltersComboBox"
-                                                  ItemsSource="{Binding EvaluationFailureFilters}"
-                                                  SelectedItem="{Binding SelectedEvaluationFailureFilter, Mode=TwoWay}"
-                                                  DisplayMemberPath="DisplayName"
-                                                  Width="180"
-                                                  Margin="0,6,8,0" />
-                                        <Button AutomationProperties.AutomationId="SaveEvaluationFailureFilterButton"
-                                                Content="Save Filter"
-                                                Width="96"
-                                                Margin="0,6,8,0"
-                                                Click="SaveEvaluationFailureFilterButton_Click" />
-                                        <Button AutomationProperties.AutomationId="ApplyEvaluationFailureFilterButton"
-                                                Content="Apply Filter"
-                                                Width="96"
-                                                Margin="0,6,8,0"
-                                                Click="ApplyEvaluationFailureFilterButton_Click" />
-                                        <TextBlock AutomationProperties.AutomationId="EvaluationFailureFilterSummaryTextBlock"
-                                                   Text="{Binding EvaluationFailureFilterSummary, Mode=OneWay}"
-                                                   VerticalAlignment="Center"
-                                                   TextWrapping="Wrap"
-                                                   Width="320"
-                                                   Margin="0,6,0,0" />
-                                    </WrapPanel>
+                                    <StackPanel Grid.Row="2"
+                                                Grid.ColumnSpan="2"
+                                                Margin="0,0,0,6">
+                                        <Border Style="{StaticResource FilterGroupBorderStyle}">
+                                            <StackPanel>
+                                                <TextBlock Text="Filter results"
+                                                           Style="{StaticResource SectionHeaderTextStyle}" />
+                                                <WrapPanel>
+                                                    <TextBlock Text="Status"
+                                                               VerticalAlignment="Center"
+                                                               Margin="0,0,6,4" />
+                                                    <ComboBox AutomationProperties.AutomationId="EvaluationResultFilterComboBox"
+                                                              ItemsSource="{Binding EvaluationResultFilterOptions}"
+                                                              SelectedItem="{Binding EvaluationResultFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              Width="120"
+                                                              Margin="0,0,14,4" />
+                                                    <TextBlock Text="Tag"
+                                                               VerticalAlignment="Center"
+                                                               Margin="0,0,6,4" />
+                                                    <ComboBox AutomationProperties.AutomationId="EvaluationTagFilterComboBox"
+                                                              ItemsSource="{Binding EvaluationTagFilterOptions}"
+                                                              SelectedItem="{Binding EvaluationTagFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              Width="120"
+                                                              Margin="0,0,14,4" />
+                                                    <TextBlock Text="Reason"
+                                                               VerticalAlignment="Center"
+                                                               Margin="0,0,6,4" />
+                                                    <ComboBox AutomationProperties.AutomationId="EvaluationFailureReasonFilterComboBox"
+                                                              ItemsSource="{Binding EvaluationFailureReasonFilterOptions}"
+                                                              SelectedItem="{Binding EvaluationFailureReasonFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              Width="150"
+                                                              Margin="0,0,14,4" />
+                                                    <TextBlock Text="Band"
+                                                               VerticalAlignment="Center"
+                                                               Margin="0,0,6,4" />
+                                                    <ComboBox AutomationProperties.AutomationId="EvaluationScoreBandFilterComboBox"
+                                                              ItemsSource="{Binding EvaluationScoreBandFilterOptions}"
+                                                              SelectedItem="{Binding EvaluationScoreBandFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              Width="90"
+                                                              Margin="0,0,4,4" />
+                                                </WrapPanel>
+                                                <TextBlock AutomationProperties.AutomationId="EvaluationResultsSummaryTextBlock"
+                                                           Text="{Binding EvaluationResultsSummary, Mode=OneWay}"
+                                                           Style="{StaticResource CaptionTextStyle}"
+                                                           Margin="0,2,0,0" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Style="{StaticResource FilterGroupBorderStyle}"
+                                                Margin="0,0,0,0">
+                                            <StackPanel>
+                                                <TextBlock Text="Saved views"
+                                                           Style="{StaticResource SectionHeaderTextStyle}" />
+                                                <WrapPanel>
+                                                    <TextBox AutomationProperties.AutomationId="EvaluationFailureFilterNameTextBox"
+                                                             Text="{Binding EvaluationFailureFilterName, UpdateSourceTrigger=PropertyChanged}"
+                                                             Width="150"
+                                                             Margin="0,0,8,4" />
+                                                    <ComboBox AutomationProperties.AutomationId="EvaluationFailureFiltersComboBox"
+                                                              ItemsSource="{Binding EvaluationFailureFilters}"
+                                                              SelectedItem="{Binding SelectedEvaluationFailureFilter, Mode=TwoWay}"
+                                                              DisplayMemberPath="DisplayName"
+                                                              Width="200"
+                                                              Margin="0,0,8,4" />
+                                                    <Button AutomationProperties.AutomationId="SaveEvaluationFailureFilterButton"
+                                                            Content="Save Filter"
+                                                            Width="96"
+                                                            Margin="0,0,8,4"
+                                                            Click="SaveEvaluationFailureFilterButton_Click" />
+                                                    <Button AutomationProperties.AutomationId="ApplyEvaluationFailureFilterButton"
+                                                            Content="Apply Filter"
+                                                            Width="96"
+                                                            Margin="0,0,8,4"
+                                                            Click="ApplyEvaluationFailureFilterButton_Click" />
+                                                </WrapPanel>
+                                                <TextBlock AutomationProperties.AutomationId="EvaluationFailureFilterSummaryTextBlock"
+                                                           Text="{Binding EvaluationFailureFilterSummary, Mode=OneWay}"
+                                                           Style="{StaticResource CaptionTextStyle}"
+                                                           Margin="0,2,0,0" />
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
 
                                     <ListBox Grid.Row="3"
                                              Grid.Column="0"
@@ -833,7 +930,7 @@
                                                 Grid.ColumnSpan="2"
                                                 Margin="0,10,0,0">
                                         <TextBlock Text="Reviewed Fixes"
-                                                   FontWeight="SemiBold"
+                                                   Style="{StaticResource SectionHeaderTextStyle}"
                                                    Margin="0,0,0,4" />
                                         <TextBlock AutomationProperties.AutomationId="ReviewedFixSummaryTextBlock"
                                                    Text="{Binding ReviewedFixSummary, Mode=OneWay}"
@@ -916,7 +1013,8 @@
                                         Width="116"
                                         Margin="0,0,8,0"
                                         Click="RefreshAiAssistModelsButton_Click" />
-                                <Button AutomationProperties.AutomationId="RunAiAssistButton"
+                                <Button Style="{StaticResource PrimaryButtonStyle}"
+                                        AutomationProperties.AutomationId="RunAiAssistButton"
                                         Content="Run AI Assist"
                                         Width="124"
                                         Margin="0,0,8,0"
@@ -1212,7 +1310,8 @@
                                          Text="{Binding TrainingFormat, UpdateSourceTrigger=PropertyChanged}"
                                          Width="112"
                                          Margin="0,0,12,0" />
-                                <Button AutomationProperties.AutomationId="GenerateTrainingConfigButton"
+                                <Button Style="{StaticResource PrimaryButtonStyle}"
+                                        AutomationProperties.AutomationId="GenerateTrainingConfigButton"
                                         Content="Generate Config"
                                         Width="132"
                                         Click="GenerateTrainingConfigButton_Click" />
@@ -1351,7 +1450,8 @@
                          IsReadOnly="True"
                          TextWrapping="Wrap"
                          VerticalScrollBarVisibility="Auto" />
-                <Button AutomationProperties.AutomationId="RunQualityButton"
+                <Button Style="{StaticResource PrimaryButtonStyle}"
+                        AutomationProperties.AutomationId="RunQualityButton"
                         Content="Run Quality"
                         Margin="0,0,0,8"
                         Click="RunQualityButton_Click" />
@@ -1396,6 +1496,7 @@
                         Margin="0,8,0,8"
                         Click="ValidateButton_Click" />
                 <Button x:Name="ExportJsonlButton"
+                        Style="{StaticResource PrimaryButtonStyle}"
                         AutomationProperties.AutomationId="ExportJsonlButton"
                         Content="Export JSONL"
                         Click="ExportJsonlButton_Click" />

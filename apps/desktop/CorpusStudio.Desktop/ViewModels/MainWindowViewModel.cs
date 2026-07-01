@@ -105,6 +105,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _selectedImportQuarantineDetail =
         "Rejected import rows appear here after a mixed import.";
     private string _settingsSummary = "Settings load when the app starts.";
+    private string _projectIndexSummary = "Projects list from local files. Rebuild the index to list from SQLite.";
     private string _labSettingsSummary = "Lab backend settings can be saved per project.";
     private DatasetProjectListItem? _selectedProject;
     private SavedExampleItem? _selectedExample;
@@ -891,6 +892,24 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             Projects.Add(project);
         }
+    }
+
+    public string ProjectIndexSummary
+    {
+        get => _projectIndexSummary;
+        private set => SetField(ref _projectIndexSummary, value);
+    }
+
+    public void ApplyProjectIndexRebuilt(ProjectIndexRebuildResult result)
+    {
+        ProjectIndexSummary = result.Indexed == 0
+            ? "No projects found to index."
+            : $"Indexed {result.Indexed} project(s); listing from the SQLite index.";
+    }
+
+    public void SetProjectIndexError(string message)
+    {
+        ProjectIndexSummary = $"Project index update failed.{Environment.NewLine}{message}";
     }
 
     public void SetSettings(DesktopSettings settings)
