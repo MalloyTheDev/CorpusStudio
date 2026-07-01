@@ -928,6 +928,36 @@ public sealed class PythonEngineService
         return outputPath;
     }
 
+    public async Task<PreferenceExportResult> ExportPreferenceForTrainingAsync(
+        string projectPath,
+        string format
+    )
+    {
+        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+        if (!File.Exists(examplesPath))
+        {
+            throw new FileNotFoundException("Project examples file was not found.", examplesPath);
+        }
+
+        var projectId = new DirectoryInfo(projectPath).Name;
+        var outputDirectory = Path.Combine(ResolveExportRoot(), projectId, "preference_export");
+        Directory.CreateDirectory(outputDirectory);
+        var outputPath = Path.Combine(outputDirectory, $"preference_{format}.jsonl");
+
+        var output = await RunEngineCommandAsync(
+            "preference-export",
+            examplesPath,
+            "--output-path",
+            outputPath,
+            "--format",
+            format
+        );
+        return JsonSerializer.Deserialize<PreferenceExportResult>(output, JsonOptions)
+            ?? throw new InvalidOperationException(
+                "The engine returned an invalid preference export result."
+            );
+    }
+
     public string ExportPreferenceRanking(
         string projectPath,
         IReadOnlyList<PreferenceReviewItem> items

@@ -619,6 +619,41 @@ public partial class MainWindow : Window
         AiAssistTab.IsSelected = true;
     }
 
+    private async void ExportPreferenceForTrainingButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetPreferenceRankingExportError("Create or select a preference project before exporting.");
+            return;
+        }
+
+        if (ViewModel.ActiveSchemaId != "preference")
+        {
+            ViewModel.SetPreferenceRankingExportError("Training export is available for preference projects.");
+            return;
+        }
+
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Exporting preference data...");
+            var result = await _engineService.ExportPreferenceForTrainingAsync(
+                ViewModel.ActiveProjectPath,
+                ViewModel.PreferenceExportFormat
+            );
+            ViewModel.ApplyPreferenceTrainingExport(result);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetPreferenceRankingExportError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
+        }
+    }
+
     private void ExportPreferenceRankingButton_Click(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))

@@ -27,6 +27,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _preferenceRankingSummary =
         "Preference ranking appears after saved preference pairs are loaded.";
     private string _preferenceContrastFilter = "All";
+    private string _preferenceExportFormat = "dpo";
     private string _preferenceReviewSummary =
         "Preference pair review is available for preference projects.";
     private string _evaluationBackend = "ollama";
@@ -158,6 +159,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         "Weak",
         "Moderate",
         "Strong",
+    ];
+
+    public ObservableCollection<string> PreferenceExportFormatOptions { get; } =
+    [
+        "dpo",
+        "kto",
+        "reward",
     ];
 
     public ObservableCollection<string> EvaluationResultFilterOptions { get; } =
@@ -1419,6 +1427,18 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         PreferenceReviewSummary =
             $"Exported {itemCount} visible preference ranking item(s) for DPO review: {outputPath}";
+    }
+
+    public string PreferenceExportFormat
+    {
+        get => _preferenceExportFormat;
+        set => SetField(ref _preferenceExportFormat, value);
+    }
+
+    public void ApplyPreferenceTrainingExport(PreferenceExportResult result)
+    {
+        PreferenceReviewSummary =
+            $"Exported {result.OutputRows} row(s) as {result.Format}: {result.OutputPath}";
     }
 
     public void SetPreferenceRankingExportError(string message)

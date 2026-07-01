@@ -117,7 +117,10 @@ chosen/rejected contrast, can filter the queue by contrast strength, shows
 prompt/chosen/rejected/reason fields, and can prepare AI Assist's
 `judge-preference-strength` action for the selected pair. The visible queue can
 also be prepared as a batch judge pass or exported as an inspectable JSON
-ranking artifact under `exports/<project_id>/preference_review`.
+ranking artifact under `exports/<project_id>/preference_review`. An "Export for
+Training" action reshapes the pairs into a trainer-ready JSONL format (DPO, KTO,
+or reward) via the engine `preference-export` command, written under
+`exports/<project_id>/preference_export`.
 
 The Training tab shells through the Python engine's `training-config` command.
 It prefers generated train/validation split files when they exist, falls back to
