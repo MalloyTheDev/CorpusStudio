@@ -2316,6 +2316,25 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ReportError(message);
     }
 
+    public void ApplyTrainingCompatibility(TrainingCompatibilityResult result)
+    {
+        if (result.Compatible)
+        {
+            TrainingSummary =
+                $"Compatible: {result.Schema} / {result.Format} → {result.Target}. "
+                + "No compatibility warnings — safe to generate.";
+            return;
+        }
+
+        TrainingSummary = string.Join(
+            Environment.NewLine,
+            new[]
+            {
+                $"Compatibility warnings for {result.Schema} / {result.Format} → {result.Target}:",
+            }.Concat(result.Warnings.Select(warning => $"- {warning}"))
+        );
+    }
+
     public void SetDatasetCardInProgress()
     {
         DatasetCardSummary = "Generating dataset card...";

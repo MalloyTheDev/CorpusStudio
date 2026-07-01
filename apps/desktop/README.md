@@ -122,8 +122,10 @@ ranking artifact under `exports/<project_id>/preference_review`.
 The Training tab shells through the Python engine's `training-config` command.
 It prefers generated train/validation split files when they exist, falls back to
 the project's saved examples for config preview, and writes rendered config
-files under the configured export directory. It does not launch trainers,
-install ML packages, show logs, manage checkpoints, or resume runs.
+files under the configured export directory. A "Check Compatibility" button runs
+the engine's `training-compat` pre-check and reports schema/format/target
+mismatches before generating, so problems surface early. It does not launch
+trainers, install ML packages, show logs, manage checkpoints, or resume runs.
 
 The desktop shell uses shared WPF styles for controls, tabs, side rails, and
 the project header so new lab surfaces should reuse the existing visual frame

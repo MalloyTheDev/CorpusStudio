@@ -138,6 +138,7 @@ training jobs.
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli backend-health --backend ollama --model qwen2.5-coder:7b
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli eval-run examples\datasets\instruction\train.jsonl instruction --backend ollama --model qwen2.5-coder:7b --limit 5
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli ai-assist examples\datasets\instruction\train.jsonl instruction --action review --backend ollama --model qwen2.5-coder:7b
+.\engine\.venv\Scripts\python.exe -m corpus_studio.cli training-compat --schema preference --target trl_config
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli training-config examples\datasets\instruction\train.jsonl instruction --output-path exports\instruction_axolotl.yaml --base-model Qwen/Qwen2.5-Coder-7B-Instruct --target axolotl_yaml
 ```
 
