@@ -10,6 +10,27 @@ from corpus_studio.training.compatibility import training_compatibility_warnings
 runner = CliRunner()
 
 
+def test_training_compat_command_clean_for_instruction_sft():
+    result = runner.invoke(app, ["training-compat", "--schema", "instruction", "--target", "axolotl_yaml"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["compatible"] is True
+    assert payload["warnings"] == []
+
+
+def test_training_compat_command_flags_preference_mismatch():
+    result = runner.invoke(app, ["training-compat", "--schema", "preference", "--target", "trl_config"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["compatible"] is False
+    assert payload["warnings"]
+
+
+def test_training_compat_command_rejects_unknown_schema():
+    result = runner.invoke(app, ["training-compat", "--schema", "does_not_exist"])
+    assert result.exit_code == 1
+
+
 def write_rows(path: Path, rows: list[dict]) -> None:
     path.write_text(
         "".join(json.dumps(row) + "\n" for row in rows),

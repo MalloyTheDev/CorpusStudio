@@ -182,6 +182,38 @@ public partial class MainWindow : Window
         TrainingTab.IsSelected = true;
     }
 
+    private async void CheckTrainingCompatibilityButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveSchemaId))
+        {
+            ViewModel.SetTrainingConfigError(
+                "Create or select a dataset project before checking training compatibility."
+            );
+            return;
+        }
+
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Checking training compatibility...");
+            var result = await _engineService.CheckTrainingCompatibilityAsync(
+                ViewModel.ActiveSchemaId,
+                ViewModel.TrainingFormat,
+                ViewModel.TrainingTarget
+            );
+            ViewModel.ApplyTrainingCompatibility(result);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetTrainingConfigError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
+        }
+    }
+
     private async Task PreviewAndImportJsonlAsync(string importPath)
     {
         try

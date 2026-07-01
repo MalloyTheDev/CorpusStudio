@@ -1314,6 +1314,33 @@ public sealed class PythonEngineService
         return report;
     }
 
+    public async Task<TrainingCompatibilityResult> CheckTrainingCompatibilityAsync(
+        string schemaId,
+        string datasetFormat,
+        string target
+    )
+    {
+        var arguments = new List<string>
+        {
+            "training-compat",
+            "--schema",
+            schemaId,
+            "--target",
+            target,
+        };
+        if (!string.IsNullOrWhiteSpace(datasetFormat))
+        {
+            arguments.Add("--format");
+            arguments.Add(datasetFormat);
+        }
+
+        var output = await RunEngineCommandAsync(arguments.ToArray());
+        return JsonSerializer.Deserialize<TrainingCompatibilityResult>(output, JsonOptions)
+            ?? throw new InvalidOperationException(
+                "The engine returned an invalid training compatibility result."
+            );
+    }
+
     public async Task<TrainingConfigExportResult> GenerateTrainingConfigAsync(
         string projectPath,
         string schemaId,

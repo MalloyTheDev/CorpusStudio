@@ -50,6 +50,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/SavedExampleItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/SplitReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/SplitSettings.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/TrainingCompatibilityResult.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/TrainingConfigExportResult.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ValidationIssueNavigationItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ValidationReport.cs`

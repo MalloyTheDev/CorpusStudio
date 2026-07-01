@@ -521,6 +521,41 @@ def training_config(
     )
 
 
+@app.command("training-compat")
+def training_compat(
+    schema: str = typer.Option(..., "--schema", help="Dataset schema id."),
+    target: str = typer.Option("axolotl_yaml", "--target", help="Training config target."),
+    dataset_format: Optional[str] = typer.Option(
+        None, "--format", help="Training data format label. Defaults to the schema id."
+    ),
+):
+    """Report training-config compatibility warnings without generating a config."""
+    try:
+        load_builtin_schema(schema)
+        normalized_target = normalize_training_config_target(target)
+    except (ValueError, ValidationError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    warnings = training_compatibility_warnings(
+        schema_id=schema,
+        dataset_format=dataset_format or schema,
+        target=normalized_target,
+    )
+    typer.echo(
+        json.dumps(
+            {
+                "schema": schema,
+                "target": normalized_target,
+                "format": dataset_format or schema,
+                "compatible": len(warnings) == 0,
+                "warnings": warnings,
+            },
+            indent=2,
+        )
+    )
+
+
 @app.command("dataset-card")
 def dataset_card(
     project_dir: Path,
