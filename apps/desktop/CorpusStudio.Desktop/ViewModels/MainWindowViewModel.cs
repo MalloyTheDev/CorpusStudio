@@ -108,6 +108,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _projectIndexSummary = "Projects list from local files. Rebuild the index to list from SQLite.";
     private bool _isBusy;
     private string _busyStatus = "Working...";
+    private bool _hasError;
+    private string _errorMessage = string.Empty;
     private string _labSettingsSummary = "Lab backend settings can be saved per project.";
     private DatasetProjectListItem? _selectedProject;
     private SavedExampleItem? _selectedExample;
@@ -940,6 +942,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// <summary>Show the blocking busy overlay with a status message.</summary>
     public void SetBusy(string status)
     {
+        HasError = false;
         BusyStatus = string.IsNullOrWhiteSpace(status) ? "Working..." : status;
         IsBusy = true;
     }
@@ -947,6 +950,32 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public void ClearBusy()
     {
         IsBusy = false;
+    }
+
+    public bool HasError
+    {
+        get => _hasError;
+        private set => SetField(ref _hasError, value);
+    }
+
+    public string ErrorMessage
+    {
+        get => _errorMessage;
+        private set => SetField(ref _errorMessage, value);
+    }
+
+    /// <summary>Surface an operation error in the shared, dismissible error banner.</summary>
+    public void ReportError(string message)
+    {
+        ErrorMessage = string.IsNullOrWhiteSpace(message)
+            ? "An unexpected error occurred."
+            : message.Trim();
+        HasError = true;
+    }
+
+    public void DismissError()
+    {
+        HasError = false;
     }
 
     public void SetSettings(DesktopSettings settings)
@@ -1156,6 +1185,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         QualitySummary = $"Quality checks could not run.{Environment.NewLine}{message}";
         QualityTriageSummary = "Synthetic quality triage could not be refreshed.";
+        ReportError(message);
     }
 
     public bool PrepareSyntheticIssueRewrite()
@@ -1443,6 +1473,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public void SetSplitError(string message)
     {
         SplitSummary = $"Splits could not be generated.{Environment.NewLine}{message}";
+        ReportError(message);
     }
 
     public void SetEvaluationInProgress()
@@ -1669,6 +1700,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         EvaluationSummary = $"Evaluation could not run.{Environment.NewLine}{message}";
         EvaluationReportJson = "No evaluation report was produced.";
+        ReportError(message);
     }
 
     public void SetEvaluationHealthCheckInProgress()
@@ -1709,6 +1741,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public void SetEvaluationModelListError(string message)
     {
         EvaluationModelListSummary = $"Evaluation model refresh failed.{Environment.NewLine}{message}";
+        ReportError(message);
     }
 
     public void SetAiAssistInProgress()
@@ -2172,6 +2205,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public void SetAiAssistError(string message)
     {
         AiAssistSummary = $"AI Assist could not run.{Environment.NewLine}{message}";
+        ReportError(message);
         AiAssistReviewText = "No AI Assist suggestion was produced.";
         _aiAssistSuggestionJsonl = string.Empty;
         ClearAiAssistComparison(
@@ -2224,6 +2258,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public void SetAiAssistModelListError(string message)
     {
         AiAssistModelListSummary = $"AI Assist model refresh failed.{Environment.NewLine}{message}";
+        ReportError(message);
     }
 
     public bool MoveAiAssistSuggestionToDraft()
@@ -2278,6 +2313,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         TrainingSummary = $"Training config could not be generated.{Environment.NewLine}{message}";
         TrainingConfigPreview = "No training config was generated.";
+        ReportError(message);
     }
 
     public void SetDatasetCardInProgress()
@@ -2315,6 +2351,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         DatasetCardSummary = $"Dataset card could not be generated.{Environment.NewLine}{message}";
         DatasetCardPreview = "No dataset card was generated.";
+        ReportError(message);
     }
 
     public void SetValidationInProgress()
@@ -2353,6 +2390,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         ClearValidationIssues();
         ValidationSummary = $"Validation could not run.{Environment.NewLine}{message}";
+        ReportError(message);
     }
 
     public void SetImportInProgress(string path)
@@ -2398,6 +2436,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         ClearValidationIssues();
         ValidationSummary = $"Import preview could not run.{Environment.NewLine}{message}";
+        ReportError(message);
     }
 
     public void SetImportQuarantineItems(IEnumerable<ImportQuarantineItem> items)
