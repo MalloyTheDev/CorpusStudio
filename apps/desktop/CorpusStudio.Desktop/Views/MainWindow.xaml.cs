@@ -162,6 +162,26 @@ public partial class MainWindow : Window
         ViewModel.DismissError();
     }
 
+    private void GoToWritingStudioButton_Click(object sender, RoutedEventArgs e)
+    {
+        WritingStudioTab.IsSelected = true;
+    }
+
+    private void GoToSplitsButton_Click(object sender, RoutedEventArgs e)
+    {
+        SplitsTab.IsSelected = true;
+    }
+
+    private void GoToEvaluationButton_Click(object sender, RoutedEventArgs e)
+    {
+        EvaluationTab.IsSelected = true;
+    }
+
+    private void GoToTrainingButton_Click(object sender, RoutedEventArgs e)
+    {
+        TrainingTab.IsSelected = true;
+    }
+
     private async Task PreviewAndImportJsonlAsync(string importPath)
     {
         try

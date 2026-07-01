@@ -4,7 +4,9 @@ C# WPF desktop app for Corpus Studio.
 
 The current v0.1 workflow supports:
 
-- dashboard
+- a Dashboard landing tab with quick-action buttons (author, run quality,
+  generate splits, run evaluation, training config, new project) and
+  at-a-glance cards for dataset size, quality, splits, and evaluation
 - local dataset project creation
 - built-in schema selection, with each template showing a description and a
   valid example row that is pre-filled into the editor on project creation
