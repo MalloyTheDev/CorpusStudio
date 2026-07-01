@@ -2,6 +2,7 @@
   "id": "preference",
   "name": "Preference Dataset",
   "version": "0.1.0",
+  "description": "Preference pairs for DPO, ORPO, or reward modeling: a prompt with a preferred (chosen) and a worse (rejected) response.",
   "fields": [
     {
       "name": "prompt",
@@ -23,5 +24,11 @@
       "type": "markdown",
       "required": false
     }
-  ]
+  ],
+  "example": {
+    "prompt": "Explain recursion in one sentence.",
+    "chosen": "Recursion is when a function calls itself to solve smaller pieces of a problem.",
+    "rejected": "Recursion is when code repeats somehow.",
+    "reason": "The chosen response is specific and technically correct."
+  }
 }

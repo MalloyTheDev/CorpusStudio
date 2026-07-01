@@ -2,6 +2,7 @@
   "id": "instruction",
   "name": "Instruction Dataset",
   "version": "0.1.0",
+  "description": "Single-turn supervised fine-tuning: an instruction (with optional input) paired with the target output.",
   "fields": [
     {
       "name": "instruction",
@@ -23,5 +24,11 @@
       "type": "list",
       "required": false
     }
-  ]
+  ],
+  "example": {
+    "instruction": "Explain what a variable is.",
+    "input": "",
+    "output": "A variable stores a value so a program can reuse or change it later.",
+    "tags": ["programming", "beginner"]
+  }
 }

@@ -158,6 +158,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_model_backend_config.py`
 - `engine/tests/test_ollama_integration.py`
 - `engine/tests/test_project_index.py`
+- `engine/tests/test_schema_examples.py`
 - `engine/tests/test_training_compatibility.py`
 - `engine/tests/test_training_config_template.py`
 - `examples/datasets/chat/train.jsonl`

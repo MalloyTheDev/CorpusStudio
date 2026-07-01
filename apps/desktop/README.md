@@ -6,7 +6,8 @@ The current v0.1 workflow supports:
 
 - dashboard
 - local dataset project creation
-- built-in schema selection
+- built-in schema selection, with each template showing a description and a
+  valid example row that is pre-filled into the editor on project creation
 - JSON example authoring
 - Python-engine validation with selectable issue navigation
 - saving examples to the active project

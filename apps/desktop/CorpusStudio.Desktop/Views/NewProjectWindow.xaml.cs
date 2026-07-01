@@ -18,9 +18,28 @@ public partial class NewProjectWindow : Window
         SchemaComboBox.ItemsSource = Schemas;
         SchemaComboBox.SelectedItem = Schemas.FirstOrDefault(schema => schema.Id == "instruction")
             ?? Schemas.FirstOrDefault();
+        UpdateSchemaPreview();
     }
 
     public ObservableCollection<DatasetSchema> Schemas { get; }
+
+    private void SchemaComboBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        UpdateSchemaPreview();
+    }
+
+    private void UpdateSchemaPreview()
+    {
+        if (SchemaComboBox.SelectedItem is not DatasetSchema schema)
+        {
+            SchemaDescriptionTextBlock.Text = string.Empty;
+            SchemaExampleTextBox.Text = string.Empty;
+            return;
+        }
+
+        SchemaDescriptionTextBlock.Text = schema.Description ?? string.Empty;
+        SchemaExampleTextBox.Text = schema.ExampleText;
+    }
 
     public NewProjectRequest? ProjectRequest { get; private set; }
 

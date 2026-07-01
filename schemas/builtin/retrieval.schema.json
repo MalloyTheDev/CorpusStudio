@@ -2,6 +2,7 @@
   "id": "retrieval",
   "name": "Retrieval Dataset",
   "version": "0.1.0",
+  "description": "A query with a relevant (positive) passage and an optional irrelevant (negative) passage for embedding or retriever training.",
   "fields": [
     {
       "name": "query",
@@ -23,5 +24,11 @@
       "type": "string",
       "required": false
     }
-  ]
+  ],
+  "example": {
+    "query": "How do I reverse a list in Python?",
+    "positive": "Use slicing with a step of -1: reversed_list = original[::-1].",
+    "negative": "Python lists are ordered, mutable collections of items.",
+    "source": "python_docs"
+  }
 }

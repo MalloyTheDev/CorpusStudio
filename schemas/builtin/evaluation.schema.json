@@ -2,6 +2,7 @@
   "id": "evaluation",
   "name": "Evaluation Dataset",
   "version": "0.1.0",
+  "description": "Held-out test items for the Evaluation Lab: an id, a prompt, the expected answer, and an optional rubric and category.",
   "fields": [
     {
       "name": "id",
@@ -28,5 +29,12 @@
       "type": "string",
       "required": false
     }
-  ]
+  ],
+  "example": {
+    "id": "eval-001",
+    "prompt": "What is the time complexity of binary search?",
+    "expected_answer": "O(log n).",
+    "rubric": "Full credit for O(log n); partial credit for mentioning logarithmic time.",
+    "category": "algorithms"
+  }
 }

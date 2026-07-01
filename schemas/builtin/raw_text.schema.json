@@ -2,6 +2,7 @@
   "id": "raw_text",
   "name": "Raw Text Corpus",
   "version": "0.1.0",
+  "description": "Plain source text for pretraining or continued-pretraining corpora, with optional provenance metadata (source, domain, license, language).",
   "fields": [
     {
       "name": "text",
@@ -28,5 +29,12 @@
       "type": "string",
       "required": false
     }
-  ]
+  ],
+  "example": {
+    "text": "A compiler translates source code into a lower-level representation the machine can run.",
+    "source": "developer_notes.md",
+    "domain": "programming",
+    "license": "MIT",
+    "language": "en"
+  }
 }

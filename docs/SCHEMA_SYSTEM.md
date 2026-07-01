@@ -37,14 +37,26 @@ A schema-driven app can use the same underlying engine for many dataset types.
   "id": "instruction",
   "name": "Instruction Dataset",
   "version": "0.1.0",
+  "description": "Single-turn supervised fine-tuning: an instruction (with optional input) paired with the target output.",
   "fields": [
     {"name": "instruction", "type": "text", "required": true},
     {"name": "input", "type": "text", "required": false},
     {"name": "output", "type": "markdown", "required": true},
     {"name": "tags", "type": "list", "required": false}
-  ]
+  ],
+  "example": {
+    "instruction": "Explain what a variable is.",
+    "input": "",
+    "output": "A variable stores a value so a program can reuse or change it later.",
+    "tags": ["programming", "beginner"]
+  }
 }
 ```
+
+Each built-in schema carries a `description` and a valid `example` row. The
+desktop new-project dialog shows both, and pre-fills the editor with the example
+so the correct format is obvious. A test (`engine/tests/test_schema_examples.py`)
+asserts every example validates against its own schema.
 
 ## Field types
 
