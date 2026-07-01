@@ -31,7 +31,11 @@ The current v0.1 workflow supports:
   (evaluation, AI Assist, quality, splits, import, export, training config,
   dataset card, backend/model checks, index rebuild) that prevents duplicate runs
 - empty-state placeholders on the Examples, Evaluation result, Reviewed Fixes,
-  and AI Assist review lists, plus labeled Preference Review panes
+  AI Assist review, import quarantine, validation-issue, and synthetic-issue
+  lists, plus labeled Preference Review panes
+- a shared, dismissible error banner that surfaces operation failures (backend
+  unreachable, validation/import/quality/split/training errors) at the top of
+  the workspace instead of burying them in a summary box
 
 Build and launch from the repository root:
 

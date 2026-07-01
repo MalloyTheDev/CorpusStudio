@@ -281,6 +281,7 @@
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
@@ -347,7 +348,42 @@
                     </Grid>
                 </Border>
 
-                <TabControl Grid.Row="1">
+                <Border Grid.Row="1"
+                        Background="#FEF2F2"
+                        BorderBrush="#FCA5A5"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="14,10"
+                        Margin="0,0,0,12"
+                        Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Orientation="Horizontal">
+                            <TextBlock Text="&#x26A0;"
+                                       FontSize="15"
+                                       Foreground="#B91C1C"
+                                       VerticalAlignment="Top"
+                                       Margin="0,0,10,0" />
+                            <TextBlock AutomationProperties.AutomationId="ErrorBannerTextBlock"
+                                       Text="{Binding ErrorMessage, Mode=OneWay}"
+                                       Foreground="#7F1D1D"
+                                       TextWrapping="Wrap"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                        <Button Grid.Column="1"
+                                AutomationProperties.AutomationId="DismissErrorButton"
+                                Content="Dismiss"
+                                Width="88"
+                                VerticalAlignment="Center"
+                                Margin="12,0,0,0"
+                                Click="DismissErrorButton_Click" />
+                    </Grid>
+                </Border>
+
+                <TabControl Grid.Row="2">
                     <TabItem x:Name="WritingStudioTab" Header="Writing Studio">
                         <Grid>
                             <Grid.RowDefinitions>
@@ -549,12 +585,16 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
 
-                            <ListBox Grid.Row="0"
-                                     Grid.Column="0"
-                                     AutomationProperties.AutomationId="ImportQuarantineListBox"
-                                     ItemsSource="{Binding ImportQuarantineItems}"
-                                     SelectedItem="{Binding SelectedImportQuarantineItem, Mode=TwoWay}"
-                                     DisplayMemberPath="DisplayName" />
+                            <Grid Grid.Row="0" Grid.Column="0">
+                                <ListBox x:Name="ImportQuarantineListBox"
+                                         AutomationProperties.AutomationId="ImportQuarantineListBox"
+                                         ItemsSource="{Binding ImportQuarantineItems}"
+                                         SelectedItem="{Binding SelectedImportQuarantineItem, Mode=TwoWay}"
+                                         DisplayMemberPath="DisplayName" />
+                                <TextBlock Style="{StaticResource ListEmptyPlaceholderStyle}"
+                                           Text="No quarantined rows. Rejected import rows appear here for repair."
+                                           Visibility="{Binding HasItems, ElementName=ImportQuarantineListBox, Converter={StaticResource InverseBoolToVis}}" />
+                            </Grid>
 
                             <TextBox Grid.Row="0"
                                      Grid.Column="1"
@@ -1485,13 +1525,18 @@
                 <TextBlock Text="Issues"
                            FontWeight="SemiBold"
                            Foreground="#334155" />
-                <ListBox AutomationProperties.AutomationId="ValidationIssuesListBox"
-                         ItemsSource="{Binding ValidationIssues}"
-                         SelectedItem="{Binding SelectedValidationIssue, Mode=TwoWay}"
-                         DisplayMemberPath="DisplayName"
-                         SelectionChanged="ValidationIssuesListBox_SelectionChanged"
-                         Height="96"
-                         Margin="0,8,0,24" />
+                <Grid Margin="0,8,0,24">
+                    <ListBox x:Name="ValidationIssuesListBox"
+                             AutomationProperties.AutomationId="ValidationIssuesListBox"
+                             ItemsSource="{Binding ValidationIssues}"
+                             SelectedItem="{Binding SelectedValidationIssue, Mode=TwoWay}"
+                             DisplayMemberPath="DisplayName"
+                             SelectionChanged="ValidationIssuesListBox_SelectionChanged"
+                             Height="96" />
+                    <TextBlock Style="{StaticResource ListEmptyPlaceholderStyle}"
+                               Text="No validation issues. Validate a draft to see any errors here."
+                               Visibility="{Binding HasItems, ElementName=ValidationIssuesListBox, Converter={StaticResource InverseBoolToVis}}" />
+                </Grid>
 
                 <TextBlock Text="Quality"
                            FontSize="18"
@@ -1512,12 +1557,17 @@
                 <TextBlock Text="Synthetic Triage"
                            FontWeight="SemiBold"
                            Foreground="#334155" />
-                <ListBox AutomationProperties.AutomationId="SyntheticPatternIssuesListBox"
-                         ItemsSource="{Binding SyntheticPatternIssues}"
-                         SelectedItem="{Binding SelectedSyntheticPatternIssue, Mode=TwoWay}"
-                         DisplayMemberPath="DisplayName"
-                         Height="92"
-                         Margin="0,8,0,8" />
+                <Grid Margin="0,8,0,8">
+                    <ListBox x:Name="SyntheticPatternIssuesListBox"
+                             AutomationProperties.AutomationId="SyntheticPatternIssuesListBox"
+                             ItemsSource="{Binding SyntheticPatternIssues}"
+                             SelectedItem="{Binding SelectedSyntheticPatternIssue, Mode=TwoWay}"
+                             DisplayMemberPath="DisplayName"
+                             Height="92" />
+                    <TextBlock Style="{StaticResource ListEmptyPlaceholderStyle}"
+                               Text="No synthetic-pattern issues found."
+                               Visibility="{Binding HasItems, ElementName=SyntheticPatternIssuesListBox, Converter={StaticResource InverseBoolToVis}}" />
+                </Grid>
                 <TextBlock AutomationProperties.AutomationId="QualityTriageSummaryTextBlock"
                            Text="{Binding QualityTriageSummary, Mode=OneWay}"
                            TextWrapping="Wrap"

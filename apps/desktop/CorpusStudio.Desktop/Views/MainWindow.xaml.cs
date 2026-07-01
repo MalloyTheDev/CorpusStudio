@@ -157,6 +157,11 @@ public partial class MainWindow : Window
         ExportJsonlButton.Focus();
     }
 
+    private void DismissErrorButton_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel.DismissError();
+    }
+
     private async Task PreviewAndImportJsonlAsync(string importPath)
     {
         try
