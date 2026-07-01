@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from corpus_studio.schemas.base import SchemaField
+from corpus_studio.schemas.base import DatasetSchema, SchemaField
 from corpus_studio.schemas.registry import load_builtin_schema
 from corpus_studio.validators.results import ValidationIssue, ValidationReport
 
@@ -71,43 +71,71 @@ def _validate_messages(value: Any, field_name: str, row_number: int | None) -> l
     return issues
 
 
+def _matches_scalar_type(field_type: str, value: Any) -> bool:
+    if field_type in TEXT_FIELD_TYPES:
+        return isinstance(value, str)
+    if field_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if field_type == "float":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if field_type == "boolean":
+        return isinstance(value, bool)
+    if field_type == "list":
+        return isinstance(value, list)
+    if field_type == "object":
+        return isinstance(value, dict)
+    return True
+
+
+def _type_error_message(field_type: str) -> str:
+    if field_type in TEXT_FIELD_TYPES:
+        return f"Expected {field_type} string."
+    if field_type == "integer":
+        return "Expected integer."
+    if field_type == "float":
+        return "Expected number."
+    if field_type == "boolean":
+        return "Expected boolean."
+    if field_type == "list":
+        return "Expected list."
+    if field_type == "object":
+        return "Expected object."
+    return "Invalid value."
+
+
 def _validate_field_type(field: SchemaField, value: Any, row_number: int | None) -> list[ValidationIssue]:
     field_type = field.type
-
-    if field_type in TEXT_FIELD_TYPES:
-        if not isinstance(value, str):
-            return [_issue(f"Expected {field_type} string.", row_number, field.name)]
-        return []
-
-    if field_type == "integer":
-        if not isinstance(value, int) or isinstance(value, bool):
-            return [_issue("Expected integer.", row_number, field.name)]
-        return []
-
-    if field_type == "float":
-        if not isinstance(value, (int, float)) or isinstance(value, bool):
-            return [_issue("Expected number.", row_number, field.name)]
-        return []
-
-    if field_type == "boolean":
-        if not isinstance(value, bool):
-            return [_issue("Expected boolean.", row_number, field.name)]
-        return []
-
-    if field_type == "list":
-        if not isinstance(value, list):
-            return [_issue("Expected list.", row_number, field.name)]
-        return []
-
-    if field_type == "object":
-        if not isinstance(value, dict):
-            return [_issue("Expected object.", row_number, field.name)]
-        return []
 
     if field_type == "messages":
         return _validate_messages(value, field.name, row_number)
 
-    return []
+    if not _matches_scalar_type(field_type, value):
+        return [_issue(_type_error_message(field_type), row_number, field.name)]
+
+    issues: list[ValidationIssue] = []
+
+    if field_type == "list" and field.item_type is not None:
+        for index, element in enumerate(value, start=1):
+            if not _matches_scalar_type(field.item_type, element):
+                issues.append(
+                    _issue(
+                        f"List element {index} must be {field.item_type}.",
+                        row_number,
+                        field.name,
+                    )
+                )
+
+    if field.enum is not None and value not in field.enum:
+        allowed = ", ".join(str(option) for option in field.enum)
+        issues.append(
+            _issue(
+                f"Value must be one of: {allowed}.",
+                row_number,
+                field.name,
+            )
+        )
+
+    return issues
 
 
 def validate_example_fields(
@@ -115,7 +143,14 @@ def validate_example_fields(
     schema_id: str,
     row_number: int | None = None,
 ) -> list[ValidationIssue]:
-    schema = load_builtin_schema(schema_id)
+    return validate_example_fields_against(row, load_builtin_schema(schema_id), row_number)
+
+
+def validate_example_fields_against(
+    row: dict[str, Any],
+    schema: DatasetSchema,
+    row_number: int | None = None,
+) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
 
     for field in schema.fields:

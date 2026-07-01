@@ -24,6 +24,10 @@ class SchemaField(BaseModel):
     type: FieldType
     required: bool = False
     description: str | None = None
+    # Element type for ``list`` fields (e.g. a list of strings).
+    item_type: FieldType | None = None
+    # Allowed values for a scalar field (e.g. a fixed classification label set).
+    enum: list[Any] | None = None
 
 
 class DatasetSchema(BaseModel):

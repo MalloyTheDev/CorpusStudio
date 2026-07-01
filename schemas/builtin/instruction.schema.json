@@ -22,6 +22,7 @@
     {
       "name": "tags",
       "type": "list",
+      "item_type": "string",
       "required": false
     }
   ],
