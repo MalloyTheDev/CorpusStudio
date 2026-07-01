@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -344,7 +345,8 @@ def _extract_text_values(value: Any) -> list[str]:
 
 
 def _normalize_for_pattern(value: str) -> str:
-    collapsed = re.sub(r"[^a-z0-9\s]", " ", value.lower())
+    normalized = unicodedata.normalize("NFKC", value).lower()
+    collapsed = re.sub(r"[^\w\s]", " ", normalized, flags=re.UNICODE)
     return re.sub(r"\s+", " ", collapsed).strip()
 
 

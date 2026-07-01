@@ -1635,12 +1635,19 @@ public sealed class PythonEngineService
             WorkingDirectory = engineDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = Utf8NoBom,
+            StandardErrorEncoding = Utf8NoBom,
             UseShellExecute = false,
             CreateNoWindow = true
         };
 
         startInfo.ArgumentList.Add("-m");
         startInfo.ArgumentList.Add("corpus_studio.cli");
+
+        // Force UTF-8 across the desktop<->engine pipe so non-ASCII dataset text
+        // round-trips instead of corrupting on the Windows console/pipe code page.
+        startInfo.Environment["PYTHONUTF8"] = "1";
+        startInfo.Environment["PYTHONIOENCODING"] = "utf-8";
 
         foreach (var argument in arguments)
         {
