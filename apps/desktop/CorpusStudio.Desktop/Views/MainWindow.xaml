@@ -1753,6 +1753,13 @@
                                HorizontalAlignment="Center"
                                Margin="0,0,0,14" />
                     <ProgressBar IsIndeterminate="True" Width="240" Height="6" />
+                    <Button x:Name="CancelEngineButton"
+                            AutomationProperties.AutomationId="CancelEngineButton"
+                            Content="Cancel"
+                            Click="CancelEngineButton_Click"
+                            HorizontalAlignment="Center"
+                            Padding="16,6"
+                            Margin="0,16,0,0" />
                 </StackPanel>
             </Border>
         </Border>
