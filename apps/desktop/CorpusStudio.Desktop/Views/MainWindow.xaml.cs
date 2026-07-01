@@ -1535,17 +1535,23 @@ public partial class MainWindow : Window
         {
             Mouse.OverrideCursor = Cursors.Wait;
             ViewModel.SetBusy("Exporting JSONL...");
-            var outputPath = await _engineService.ExportProjectExamplesAsync(
+            var exportResult = await _engineService.ExportProjectExamplesAsync(
                 ViewModel.ActiveProjectPath,
                 ViewModel.ActiveSchemaId
             );
 
+            var message = $"Exported {exportResult.OutputRows} row(s) to:\n{exportResult.OutputPath}";
+            if (exportResult.Warnings.Count > 0)
+            {
+                message += "\n\nWarnings:\n- " + string.Join("\n- ", exportResult.Warnings);
+            }
+
             MessageBox.Show(
                 this,
-                $"Exported JSONL to:\n{outputPath}",
+                message,
                 "Export Complete",
                 MessageBoxButton.OK,
-                MessageBoxImage.Information
+                exportResult.Warnings.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information
             );
         }
         catch (Exception ex)

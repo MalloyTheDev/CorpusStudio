@@ -37,6 +37,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/EvaluationReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/EvaluationReportHistoryItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/EvaluationRunResult.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/ExportResult.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ImportCommitResult.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ImportQuarantineItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ImportPreviewReport.cs`
@@ -121,6 +122,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/evaluation/reports.py`
 - `engine/corpus_studio/evaluation/scoring.py`
 - `engine/corpus_studio/exporters/__init__.py`
+- `engine/corpus_studio/exporters/cleaning.py`
 - `engine/corpus_studio/exporters/jsonl_exporter.py`
 - `engine/corpus_studio/exporters/preference_exporter.py`
 - `engine/corpus_studio/importers/__init__.py`
@@ -160,6 +162,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_cli.py`
 - `engine/tests/test_dataset_card.py`
 - `engine/tests/test_evaluation_report.py`
+- `engine/tests/test_export_cleaning.py`
 - `engine/tests/test_import_preview.py`
 - `engine/tests/test_importers.py`
 - `engine/tests/test_input_hardening.py`
