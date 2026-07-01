@@ -98,6 +98,10 @@ def _normalized_text_signature(value: Any) -> str:
     return " ".join(_tokenize_text_values(value))
 
 
+# Public alias so split-leakage detection can reuse the same normalization.
+normalized_text_signature = _normalized_text_signature
+
+
 # CJK / kana / Hangul scripts have no spaces between words, so each such
 # character is treated as its own token; other word characters group into runs.
 # This keeps near-duplicate signatures and low-information counts meaningful for

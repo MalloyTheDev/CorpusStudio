@@ -28,6 +28,9 @@ public sealed class SplitReport
     [JsonPropertyName("seed")]
     public int Seed { get; init; }
 
+    [JsonPropertyName("rows_shared_across_splits")]
+    public int RowsSharedAcrossSplits { get; init; }
+
     [JsonPropertyName("warnings")]
     public List<string> Warnings { get; init; } = [];
 }
