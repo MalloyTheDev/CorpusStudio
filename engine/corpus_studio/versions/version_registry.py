@@ -4,10 +4,12 @@ A dataset version is a lightweight *lineage anchor*: it records the identity of
 the project's dataset at a moment in time — ``row_count`` plus a streaming
 SHA-256 ``content_fingerprint`` over the ordered per-row exact signatures — and
 pins the artifacts that co-existed with it (training runs, model artifacts, an
-eval report, a gate report). It stores **no row bodies**: diff and restore need
-stable per-row identity the current line-number-only storage cannot cheaply
-provide, so they are deferred (v1.0.2+). Nothing derivable is stored; eval
-scores, base model, and integrity are resolved live in the version card.
+eval report, a gate report). The record JSON itself stores no row bodies (eval
+scores, base model, and integrity are all resolved live in the version card).
+As of v1.0.2, :func:`capture_dataset` (with ``store_rows``) also writes each row
+to a content-addressed store plus an ordered per-version manifest, which powers
+``dataset-version-diff`` (see ``row_store`` / ``version_diff``); only
+restore-to-version remains deferred.
 
 Records are per-version inspectable JSON under ``dataset_versions/`` (mutable
 metadata like label/links => a per-record file, never a JSONL append log).
@@ -255,13 +257,33 @@ def load_row_manifest(project_dir: Path | str, version_id: str) -> list[str] | N
 
 
 class DatasetCapture(BaseModel):
-    """Result of one streaming capture pass. ``content_fingerprint`` is ``None``
-    (and the lists empty) when the dataset was missing/unreadable."""
+    """Result of one streaming capture pass.
+
+    ``content_fingerprint`` is ``None`` (lists empty) when the dataset was
+    missing/unreadable. ``rows_stored`` is True only when row storage was
+    requested AND fully succeeded; if the store could not be written, the
+    fingerprint is still returned but ``rows_stored`` is False (a fingerprint-only
+    version), so a store I/O error never masquerades as an unreadable dataset.
+    """
 
     content_fingerprint: str | None = None
     row_count: int = 0
     row_ids: list[str] = Field(default_factory=list)
     new_rows_stored: int = 0
+    rows_stored: bool = False
+
+
+def _truncate_row_store(store_target: Path | None, size: int) -> None:
+    """Best-effort rollback: shrink the row store back to its pre-capture size so a
+    failed/partial capture leaves nothing new on disk (there is no GC for blobs)."""
+
+    if store_target is None:
+        return
+    try:
+        if store_target.exists():
+            os.truncate(store_target, size)
+    except OSError:
+        pass
 
 
 def capture_dataset(
@@ -274,12 +296,17 @@ def capture_dataset(
     :func:`fingerprint_dataset` — (2) computes each row_id, and (3) when
     ``store_rows`` appends any not-yet-stored row to the shared content-addressed
     store. Because everything derives from the same iteration, the returned
-    fingerprint and ordered ``row_ids`` can never desync, even against a dataset
-    being written concurrently.
+    fingerprint and ordered ``row_ids`` can never desync.
+
+    Failure handling keeps two domains separate so the report is always honest:
+    an **unreadable dataset** (missing/malformed/bad bytes) returns an empty
+    capture; a **row-store I/O failure** on an otherwise-readable dataset still
+    returns the real fingerprint with ``rows_stored=False``. On either failure the
+    store is rolled back to its pre-capture size, so a failed capture leaves
+    nothing new on disk. Never raises.
 
     The caller (the CLI, which mints the version_id) writes the manifest via
-    :func:`save_row_manifest` and the record. Returns an empty capture (``None``
-    fingerprint) on a missing/unreadable dataset — never raises.
+    :func:`save_row_manifest` and the record when ``rows_stored`` is True.
     """
 
     from corpus_studio.versions.row_store import load_row_id_set, row_store_path, store_line
@@ -288,11 +315,24 @@ def capture_dataset(
     if not path.exists():
         return DatasetCapture()
 
+    store_target: Path | None = None
+    store_start_size = 0
+    existing: set[str] = set()
+    if store_rows:
+        existing = load_row_id_set(project_dir)
+        store_target = row_store_path(project_dir)
+        if store_target.exists():
+            try:
+                store_start_size = store_target.stat().st_size
+            except OSError:
+                store_start_size = 0
+
     digest = hashlib.sha256()
     row_ids: list[str] = []
     new_stored = 0
-    existing: set[str] = load_row_id_set(project_dir) if store_rows else set()
     store_handle = None
+    store_failed = False
+    dataset_unreadable = False
     count = 0
     try:
         for row in read_jsonl(path):
@@ -303,23 +343,39 @@ def capture_dataset(
             rid = hashlib.sha256(signature.encode("utf-8")).hexdigest()
             row_ids.append(rid)
             count += 1
-            if store_rows and rid not in existing:
+            if store_rows and not store_failed and rid not in existing:
                 existing.add(rid)
-                if store_handle is None:
-                    store_target = row_store_path(project_dir)
-                    store_target.parent.mkdir(parents=True, exist_ok=True)
-                    store_handle = store_target.open("a", encoding="utf-8")
-                store_handle.write(store_line(rid, row))
-                new_stored += 1
+                try:
+                    if store_handle is None:
+                        store_target.parent.mkdir(parents=True, exist_ok=True)
+                        store_handle = store_target.open("a", encoding="utf-8")
+                    store_handle.write(store_line(rid, row))
+                    new_stored += 1
+                except OSError:
+                    # A store I/O failure must NOT null the fingerprint of a
+                    # readable dataset: stop storing, keep computing identity.
+                    store_failed = True
     except (OSError, ValueError, RecursionError):
-        return DatasetCapture()
+        dataset_unreadable = True
     finally:
         if store_handle is not None:
-            store_handle.close()
+            try:
+                store_handle.close()
+            except OSError:
+                pass
+
+    # Roll the store back on any failure so a failed/partial capture stores
+    # nothing on disk (not just in the return value).
+    if store_rows and (dataset_unreadable or store_failed):
+        _truncate_row_store(store_target, store_start_size)
+
+    if dataset_unreadable:
+        return DatasetCapture()
 
     return DatasetCapture(
         content_fingerprint=digest.hexdigest(),
         row_count=count,
         row_ids=row_ids,
-        new_rows_stored=new_stored,
+        new_rows_stored=0 if store_failed else new_stored,
+        rows_stored=store_rows and not store_failed,
     )

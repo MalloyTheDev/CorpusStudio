@@ -4,8 +4,9 @@ A dataset version is a lightweight lineage anchor: it records the *identity* of
 the project's dataset at a moment in time (row count + a streaming SHA-256
 fingerprint over the ordered per-row exact signatures) plus pinned links to the
 artifacts that co-existed with it (training runs, model artifacts, an eval
-report, a gate report). It stores no row bodies — diff and restore need stable
-row identity the current storage cannot cheaply provide and are deferred.
+report, a gate report). As of v1.0.2, capture also writes each row to a
+content-addressed, deduped row store plus a per-version ordered manifest, which
+powers a read-only ``dataset-version-diff``; only restore-to-version is deferred.
 """
 
 from corpus_studio.versions.version_registry import (

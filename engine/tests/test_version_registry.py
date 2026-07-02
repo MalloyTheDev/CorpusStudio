@@ -129,8 +129,43 @@ def test_capture_no_store_rows_skips_store(tmp_path: Path):
     path = _write_examples(tmp_path, ROWS)
     capture = capture_dataset(path, tmp_path, store_rows=False)
     assert capture.content_fingerprint is not None
+    assert capture.rows_stored is False
     assert capture.new_rows_stored == 0
     assert not (registry_dir(tmp_path) / "row_store.jsonl").exists()
+
+
+def _store_text(project: Path) -> str:
+    store = registry_dir(project) / "row_store.jsonl"
+    return store.read_text(encoding="utf-8") if store.exists() else ""
+
+
+def test_capture_rolls_back_store_on_malformed_line(tmp_path: Path):
+    # A valid row then a torn line: the dataset is unreadable, and the row already
+    # read must NOT be left orphaned in the store ("failed capture stores nothing").
+    path = tmp_path / "examples.jsonl"
+    path.write_text(json.dumps(ROWS[0]) + "\n" + "{ torn line\n", encoding="utf-8")
+    capture = capture_dataset(path, tmp_path, store_rows=True)
+    assert capture.content_fingerprint is None
+    assert capture.rows_stored is False
+    assert _store_text(tmp_path) == ""  # rolled back
+
+
+def test_capture_store_failure_keeps_fingerprint(tmp_path: Path, monkeypatch):
+    # A store I/O failure on a READABLE dataset must keep the real fingerprint
+    # (rows_stored=False), not masquerade as an unreadable dataset.
+    import corpus_studio.versions.row_store as rs
+
+    path = _write_examples(tmp_path, ROWS)
+
+    def boom(*args, **kwargs):
+        raise OSError("read-only store")
+
+    monkeypatch.setattr(rs, "store_line", boom)
+    capture = capture_dataset(path, tmp_path, store_rows=True)
+    assert capture.content_fingerprint == fingerprint_dataset(path)[0]  # parity preserved
+    assert capture.rows_stored is False
+    assert capture.new_rows_stored == 0
+    assert _store_text(tmp_path) == ""  # partial store rolled back
 
 
 def test_row_manifest_round_trip_and_absent(tmp_path: Path):

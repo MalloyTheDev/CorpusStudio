@@ -99,6 +99,21 @@ def test_cli_diff_refuses_when_rows_not_stored(tmp_path: Path):
     assert "no stored rows" in result.stderr.lower()
 
 
+def test_cli_diff_refuses_corrupt_record(tmp_path: Path):
+    from corpus_studio.versions.version_registry import record_path
+
+    _write_examples(tmp_path, [{"instruction": "A", "output": "1"}])
+    v1 = _create(tmp_path)
+    v2 = _create(tmp_path)
+    record_path(tmp_path, v1).write_text("not json {{{", encoding="utf-8")
+
+    result = runner.invoke(
+        app, ["dataset-version-diff", str(tmp_path), "--version-id", v1, "--other", v2]
+    )
+    assert result.exit_code == 1
+    assert "corrupt record" in result.stderr.lower()  # clean message, not a traceback
+
+
 def test_cli_no_store_rows_sets_flags(tmp_path: Path):
     _write_examples(tmp_path, [{"instruction": "A", "output": "1"}])
     result = runner.invoke(app, ["dataset-version-create", str(tmp_path), "--no-store-rows"])

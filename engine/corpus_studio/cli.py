@@ -1592,14 +1592,20 @@ def dataset_version_create(
 
     examples_path = project_dir / "examples.jsonl"
     capture = capture_dataset(examples_path, project_dir, store_rows=store_rows)
+    rows_stored = capture.rows_stored
     if capture.content_fingerprint is None:
         typer.echo(
             "Note: examples.jsonl is missing or unreadable; recording a version without a fingerprint.",
             err=True,
         )
-    # Rows are only actually stored when the dataset was readable.
-    rows_stored = store_rows and capture.content_fingerprint is not None
-    if rows_stored and capture.row_count > 0:
+    elif store_rows and not rows_stored:
+        # Readable dataset, but the row store could not be written: record a
+        # fingerprint-only version rather than falsely claiming it is diffable.
+        typer.echo(
+            "Note: the row store could not be written; recording a fingerprint-only version (not diffable).",
+            err=True,
+        )
+    elif rows_stored and capture.row_count > 0:
         typer.echo(
             f"Stored {capture.row_count} row(s) ({capture.new_rows_stored} new) to the row store.",
             err=True,
@@ -1810,7 +1816,11 @@ def dataset_version_diff(
         if not path.exists():
             typer.echo(f"No dataset version '{vid}'.", err=True)
             raise typer.Exit(code=1)
-        record = load_version_record(path)
+        try:
+            record = load_version_record(path)
+        except Exception as exc:  # noqa: BLE001 - a corrupt record degrades cleanly.
+            typer.echo(f"Version '{vid}' could not be read (corrupt record).", err=True)
+            raise typer.Exit(code=1) from exc
         manifest = load_row_manifest(project_dir, vid)
         if not record.rows_stored or manifest is None:
             typer.echo(
