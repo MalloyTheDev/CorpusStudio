@@ -1655,8 +1655,13 @@
                                         Click="ResumeTrainingButton_Click" />
                                 <Button AutomationProperties.AutomationId="RefreshTrainingCheckpointsButton"
                                         Content="Refresh checkpoints"
-                                        Margin="0,0,12,0"
+                                        Margin="0,0,8,0"
                                         Click="RefreshTrainingCheckpointsButton_Click" />
+                                <Button AutomationProperties.AutomationId="CompareTrainingBaselineButton"
+                                        Content="Compare vs baseline"
+                                        ToolTip="Compare the newest evaluation report against the baseline captured at launch"
+                                        Margin="0,0,12,0"
+                                        Click="CompareTrainingBaselineButton_Click" />
                                 <TextBlock Text="Status:"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
@@ -1671,17 +1676,31 @@
                                            VerticalAlignment="Center" />
                             </WrapPanel>
 
-                            <TextBox Grid.Row="4"
-                                     Grid.ColumnSpan="2"
-                                     AutomationProperties.AutomationId="TrainingRunLogTextBox"
-                                     Text="{Binding TrainingRunLog, Mode=OneWay}"
-                                     IsReadOnly="True"
-                                     AcceptsReturn="True"
-                                     FontFamily="Consolas"
-                                     FontSize="12"
-                                     TextWrapping="NoWrap"
-                                     VerticalScrollBarVisibility="Auto"
-                                     HorizontalScrollBarVisibility="Auto" />
+                            <Grid Grid.Row="4"
+                                  Grid.ColumnSpan="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="340" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0"
+                                         AutomationProperties.AutomationId="TrainingRunLogTextBox"
+                                         Text="{Binding TrainingRunLog, Mode=OneWay}"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         FontFamily="Consolas"
+                                         FontSize="12"
+                                         TextWrapping="NoWrap"
+                                         VerticalScrollBarVisibility="Auto"
+                                         HorizontalScrollBarVisibility="Auto" />
+                                <TextBox Grid.Column="1"
+                                         AutomationProperties.AutomationId="TrainingComparisonSummaryTextBox"
+                                         Text="{Binding TrainingComparisonSummary, Mode=OneWay}"
+                                         Margin="12,0,0,0"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto" />
+                            </Grid>
                         </Grid>
                     </TabItem>
                     <TabItem Header="Settings">

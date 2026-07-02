@@ -1513,6 +1513,20 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Capture the pre-training baseline (newest saved eval report, if any) so
+        // the run can be compared before/after once the trained model is evaluated.
+        try
+        {
+            var baseline = ViewModel.HasActiveProject && !string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath)
+                ? _engineService.LoadEvaluationReportHistory(ViewModel.ActiveProjectPath).FirstOrDefault()
+                : null;
+            ViewModel.SetTrainingBaseline(baseline);
+        }
+        catch
+        {
+            ViewModel.SetTrainingBaseline(null);
+        }
+
         var workingDirectory = ViewModel.TrainingLaunchWorkingDirectory;
         var cts = new CancellationTokenSource();
         _trainingRunCts = cts;
@@ -1586,6 +1600,25 @@ public partial class MainWindow : Window
     private async void RefreshTrainingCheckpointsButton_Click(object sender, RoutedEventArgs e)
     {
         await RefreshTrainingCheckpointsAsync();
+    }
+
+    private void CompareTrainingBaselineButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            return;
+        }
+
+        try
+        {
+            ViewModel.CompareTrainingBaseline(
+                _engineService.LoadEvaluationReportHistory(ViewModel.ActiveProjectPath)
+            );
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetTrainingConfigError(ex.Message);
+        }
     }
 
     private async Task RefreshTrainingCheckpointsAsync()

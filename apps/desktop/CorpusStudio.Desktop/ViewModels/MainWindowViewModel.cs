@@ -109,6 +109,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         "Checkpoints appear here after a training run writes them.";
     private IReadOnlyList<string> _trainingResumeArgv = [];
     private string _trainingResumeCommand = string.Empty;
+    private EvaluationReportHistoryItem? _trainingBaselineReport;
+    private string _trainingComparisonSummary =
+        "Run an evaluation before training to capture a baseline for before/after comparison.";
     private readonly List<string> _trainingRunLines = [];
     private int _trainingRunId;
     private string _trainingRunLog = "Launch training after generating a config; live logs appear here.";
@@ -1020,6 +1023,67 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// <summary>Resume is available when the target supports a resume flag, a
     /// checkpoint exists, and no run is active.</summary>
     public bool CanResumeTraining => !_isTrainingRunning && _trainingResumeArgv.Count > 0;
+
+    public string TrainingComparisonSummary
+    {
+        get => _trainingComparisonSummary;
+        private set => SetField(ref _trainingComparisonSummary, value);
+    }
+
+    /// <summary>The "before" evaluation report captured at training launch (null if
+    /// no evaluation had been saved yet).</summary>
+    public EvaluationReportHistoryItem? TrainingBaselineReport => _trainingBaselineReport;
+
+    /// <summary>Capture the pre-training baseline (the newest saved evaluation
+    /// report at launch time, or null when none exists).</summary>
+    public void SetTrainingBaseline(EvaluationReportHistoryItem? baseline)
+    {
+        _trainingBaselineReport = baseline;
+        TrainingComparisonSummary = baseline is null
+            ? "No baseline: no evaluation report existed when this run started. "
+              + "Run an evaluation before the next training run to enable before/after comparison."
+            : $"Baseline captured: {baseline.DisplayName}{Environment.NewLine}"
+              + "After training: load the trained adapter into your local backend, run an "
+              + "evaluation against it, then click Compare vs baseline.";
+    }
+
+    /// <summary>Compare the newest post-training evaluation report against the
+    /// captured baseline. <paramref name="history"/> is newest-first.</summary>
+    public void CompareTrainingBaseline(IReadOnlyList<EvaluationReportHistoryItem> history)
+    {
+        if (_trainingBaselineReport is null)
+        {
+            TrainingComparisonSummary =
+                "No baseline was captured for the last training run. Run an evaluation, "
+                + "train, then evaluate the trained model to compare.";
+            return;
+        }
+
+        var after = history.FirstOrDefault(item => !string.Equals(
+            item.ReportPath,
+            _trainingBaselineReport.ReportPath,
+            StringComparison.OrdinalIgnoreCase
+        ));
+        if (after is null)
+        {
+            TrainingComparisonSummary =
+                "No post-training evaluation found yet. Load the trained adapter into your "
+                + "local backend and run an evaluation, then compare again.";
+            return;
+        }
+
+        if (after.LastModified < _trainingBaselineReport.LastModified)
+        {
+            TrainingComparisonSummary =
+                "The newest other report is older than the baseline. Run an evaluation of "
+                + "the trained model first, then compare again.";
+            return;
+        }
+
+        TrainingComparisonSummary =
+            $"Before/after (after − before):{Environment.NewLine}"
+            + BuildEvaluationReportComparison(after, _trainingBaselineReport);
+    }
 
     public void ApplyTrainingCheckpoints(TrainingCheckpointsResult result)
     {

@@ -73,6 +73,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/ProjectSearchViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ReviewedFixServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingCheckpointsViewModelTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/TrainingComparisonViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingLaunchViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingProcessRunnerTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingRunViewModelTests.cs`
