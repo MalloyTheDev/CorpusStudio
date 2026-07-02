@@ -33,6 +33,46 @@ public sealed class QualityReport
 
     [JsonPropertyName("synthetic_pattern_clusters")]
     public IReadOnlyList<SyntheticPatternCluster> SyntheticPatternClusters { get; init; } = [];
+
+    [JsonPropertyName("pii_finding_count")]
+    public int PiiFindingCount { get; init; }
+
+    [JsonPropertyName("pii_findings")]
+    public IReadOnlyList<PiiFinding> PiiFindings { get; init; } = [];
+}
+
+public sealed class PiiFinding
+{
+    [JsonPropertyName("kind")]
+    public string Kind { get; init; } = string.Empty;
+
+    [JsonPropertyName("severity")]
+    public string Severity { get; init; } = string.Empty;
+
+    [JsonPropertyName("match_count")]
+    public int MatchCount { get; init; }
+
+    [JsonPropertyName("row_numbers")]
+    public IReadOnlyList<int> RowNumbers { get; init; } = [];
+
+    [JsonPropertyName("sample")]
+    public string Sample { get; init; } = string.Empty;
+
+    [JsonPropertyName("suggestion")]
+    public string Suggestion { get; init; } = string.Empty;
+
+    public string DisplayName
+    {
+        get
+        {
+            var severity = string.IsNullOrWhiteSpace(Severity) ? "unknown" : Severity;
+            var kind = string.IsNullOrWhiteSpace(Kind) ? "pii" : Kind;
+            var rows = RowNumbers.Count == 0
+                ? "rows unknown"
+                : $"row(s) {string.Join(", ", RowNumbers.Take(4))}";
+            return $"[{severity}] {kind} ×{MatchCount} | {rows}";
+        }
+    }
 }
 
 public sealed class SyntheticPatternCluster

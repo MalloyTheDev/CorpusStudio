@@ -33,6 +33,7 @@ Current:
 - low-information text detection
 - first-pass synthetic-pattern warnings
 - train/test leakage detection (post-split, non-destructive warning)
+- first-pass PII / secret detection (emails, SSNs, private keys, AWS/API keys, JWTs, Luhn-valid cards)
 
 Next:
 
