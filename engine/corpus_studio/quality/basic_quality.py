@@ -1,9 +1,12 @@
 import json
 import re
 import unicodedata
+from collections import Counter
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from corpus_studio.tokenization.estimate import estimate_tokens
 
 
 LOW_INFORMATION_TOKEN_THRESHOLD = 5
@@ -50,6 +53,24 @@ class PiiFinding(BaseModel):
     suggestion: str
 
 
+class TokenLengthOutlier(BaseModel):
+    """A row whose estimated token count is an unusually high outlier."""
+
+    row_number: int
+    token_count: int
+
+
+class CategoryImbalance(BaseModel):
+    """A low-cardinality field where one value dominates the dataset."""
+
+    field: str
+    dominant_value: str
+    dominant_count: int
+    total: int
+    share: float
+    distinct_values: int
+
+
 class QualityReport(BaseModel):
     example_count: int
     empty_row_count: int
@@ -63,6 +84,10 @@ class QualityReport(BaseModel):
     synthetic_pattern_clusters: list[SyntheticPatternCluster] = Field(default_factory=list)
     pii_finding_count: int = 0
     pii_findings: list[PiiFinding] = Field(default_factory=list)
+    token_length_threshold: int = 0
+    token_length_outlier_count: int = 0
+    token_length_outliers: list[TokenLengthOutlier] = Field(default_factory=list)
+    category_imbalances: list[CategoryImbalance] = Field(default_factory=list)
 
 
 def build_basic_quality_report(rows: list[dict]) -> QualityReport:
@@ -76,6 +101,8 @@ def build_basic_quality_report(rows: list[dict]) -> QualityReport:
     synthetic_pattern_warnings = [issue.message for issue in synthetic_pattern_issues]
     synthetic_pattern_clusters = cluster_synthetic_pattern_issues(synthetic_pattern_issues)
     pii_findings = _detect_pii(rows)
+    token_length_threshold, token_length_outliers = _token_length_outliers(rows)
+    category_imbalances = _category_imbalances(rows)
 
     for row in rows:
         exact_signature = json.dumps(row, sort_keys=True, separators=(",", ":"), default=str)
@@ -107,6 +134,10 @@ def build_basic_quality_report(rows: list[dict]) -> QualityReport:
         synthetic_pattern_clusters=synthetic_pattern_clusters,
         pii_finding_count=len(pii_findings),
         pii_findings=pii_findings,
+        token_length_threshold=token_length_threshold,
+        token_length_outlier_count=len(token_length_outliers),
+        token_length_outliers=token_length_outliers,
+        category_imbalances=category_imbalances,
     )
 
 
@@ -444,3 +475,91 @@ def _detect_pii(rows: list[dict]) -> list["PiiFinding"]:
     ]
     findings.sort(key=lambda finding: (-_SEVERITY_ORDER.get(finding.severity, 0), -finding.match_count, finding.kind))
     return findings
+
+
+# --- token-length outliers & category imbalance ----------------------------
+TOKEN_LENGTH_MIN_ROWS = 8
+TOKEN_LENGTH_OUTLIER_LIMIT = 50
+CATEGORY_IMBALANCE_MIN_ROWS = 10
+CATEGORY_IMBALANCE_SHARE = 0.8
+CATEGORY_IMBALANCE_MAX_DISTINCT = 20
+CATEGORY_IMBALANCE_LIMIT = 20
+
+
+def _percentile(sorted_values: list[int], quantile: float) -> float:
+    if not sorted_values:
+        return 0.0
+    if len(sorted_values) == 1:
+        return float(sorted_values[0])
+    position = quantile * (len(sorted_values) - 1)
+    lower = int(position)
+    upper = min(lower + 1, len(sorted_values) - 1)
+    fraction = position - lower
+    return sorted_values[lower] * (1 - fraction) + sorted_values[upper] * fraction
+
+
+def _token_length_outliers(rows: list[dict]) -> tuple[int, list[TokenLengthOutlier]]:
+    counts: list[tuple[int, int]] = []
+    for row_number, row in enumerate(rows, start=1):
+        text = " ".join(_collect_text_values(row))
+        if not text.strip():
+            continue
+        counts.append((row_number, estimate_tokens(text)))
+
+    if len(counts) < TOKEN_LENGTH_MIN_ROWS:
+        return 0, []
+
+    values = sorted(count for _, count in counts)
+    q1 = _percentile(values, 0.25)
+    q3 = _percentile(values, 0.75)
+    threshold = q3 + 1.5 * (q3 - q1)
+
+    outliers = [
+        TokenLengthOutlier(row_number=row_number, token_count=count)
+        for row_number, count in counts
+        if count > threshold and count > q3
+    ]
+    outliers.sort(key=lambda outlier: -outlier.token_count)
+    return round(threshold), outliers[:TOKEN_LENGTH_OUTLIER_LIMIT]
+
+
+def _category_imbalances(rows: list[dict]) -> list[CategoryImbalance]:
+    if len(rows) < CATEGORY_IMBALANCE_MIN_ROWS:
+        return []
+
+    scalar_values: dict[str, list[str]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for key, value in row.items():
+            if isinstance(value, (str, int, float, bool)):
+                scalar_values.setdefault(key, []).append(str(value))
+
+    total_rows = len(rows)
+    max_distinct = min(CATEGORY_IMBALANCE_MAX_DISTINCT, total_rows // 2)
+    findings: list[CategoryImbalance] = []
+
+    for field, values in scalar_values.items():
+        # Field must be present (as a scalar) in most rows to be a category.
+        if len(values) < total_rows * 0.8:
+            continue
+        counter = Counter(values)
+        distinct = len(counter)
+        if distinct < 2 or distinct > max_distinct:
+            continue
+        dominant_value, dominant_count = counter.most_common(1)[0]
+        share = dominant_count / len(values)
+        if share >= CATEGORY_IMBALANCE_SHARE:
+            findings.append(
+                CategoryImbalance(
+                    field=field,
+                    dominant_value=dominant_value[:80],
+                    dominant_count=dominant_count,
+                    total=len(values),
+                    share=round(share, 3),
+                    distinct_values=distinct,
+                )
+            )
+
+    findings.sort(key=lambda finding: -finding.share)
+    return findings[:CATEGORY_IMBALANCE_LIMIT]

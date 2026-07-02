@@ -39,6 +39,51 @@ public sealed class QualityReport
 
     [JsonPropertyName("pii_findings")]
     public IReadOnlyList<PiiFinding> PiiFindings { get; init; } = [];
+
+    [JsonPropertyName("token_length_threshold")]
+    public int TokenLengthThreshold { get; init; }
+
+    [JsonPropertyName("token_length_outlier_count")]
+    public int TokenLengthOutlierCount { get; init; }
+
+    [JsonPropertyName("token_length_outliers")]
+    public IReadOnlyList<TokenLengthOutlier> TokenLengthOutliers { get; init; } = [];
+
+    [JsonPropertyName("category_imbalances")]
+    public IReadOnlyList<CategoryImbalance> CategoryImbalances { get; init; } = [];
+}
+
+public sealed class TokenLengthOutlier
+{
+    [JsonPropertyName("row_number")]
+    public int RowNumber { get; init; }
+
+    [JsonPropertyName("token_count")]
+    public int TokenCount { get; init; }
+}
+
+public sealed class CategoryImbalance
+{
+    [JsonPropertyName("field")]
+    public string Field { get; init; } = string.Empty;
+
+    [JsonPropertyName("dominant_value")]
+    public string DominantValue { get; init; } = string.Empty;
+
+    [JsonPropertyName("dominant_count")]
+    public int DominantCount { get; init; }
+
+    [JsonPropertyName("total")]
+    public int Total { get; init; }
+
+    [JsonPropertyName("share")]
+    public double Share { get; init; }
+
+    [JsonPropertyName("distinct_values")]
+    public int DistinctValues { get; init; }
+
+    public string DisplayName =>
+        $"'{Field}' = '{DominantValue}' in {DominantCount}/{Total} rows ({Share:P0}, {DistinctValues} distinct)";
 }
 
 public sealed class PiiFinding

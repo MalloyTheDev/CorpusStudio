@@ -1178,6 +1178,22 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             lines.AddRange(report.PiiFindings.Take(5).Select(finding => $"- {finding.DisplayName}"));
         }
 
+        if (report.TokenLengthOutlierCount > 0)
+        {
+            lines.Add("");
+            lines.Add($"Token-length outliers: {report.TokenLengthOutlierCount} row(s) over ~{report.TokenLengthThreshold} tokens");
+            lines.AddRange(report.TokenLengthOutliers
+                .Take(3)
+                .Select(outlier => $"- row {outlier.RowNumber}: ~{outlier.TokenCount} tokens"));
+        }
+
+        if (report.CategoryImbalances.Count > 0)
+        {
+            lines.Add("");
+            lines.Add($"Category imbalance: {report.CategoryImbalances.Count} field(s) dominated by one value");
+            lines.AddRange(report.CategoryImbalances.Take(3).Select(item => $"- {item.DisplayName}"));
+        }
+
         if (report.SyntheticPatternClusters.Count > 0)
         {
             lines.Add("");
