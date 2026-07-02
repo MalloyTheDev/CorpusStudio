@@ -136,8 +136,15 @@ Last reconciled: 2026-07-02 (v1.0.0 engine slice landed).
   never moves/copies/deletes the dataset. See [`VERSIONING.md`](VERSIONING.md).
 - A desktop **Versions** tab surfaces the history: a read-only list with a live
   integrity badge (matches/drifted/unreadable), an opt-in **Capture version**
-  button, and **View card**. Capture and listing go through the engine, so the
-  desktop never recomputes the fingerprint (integrity is verified, not guessed).
+  button, **View card**, and **Restore this version** (in-place). Capture and
+  listing go through the engine, so the desktop never recomputes the fingerprint
+  (integrity is verified, not guessed).
+- **In-place restore** (desktop): a confirmed "Restore this version" first
+  captures the current dataset as an undo version, and *refuses* if that undo
+  isn't a genuine recovery point (rows couldn't be stored); then the engine
+  reconstructs the selected version to a verified temp and the desktop atomically
+  swaps it onto `examples.jsonl`. Any failure before the swap leaves the dataset
+  untouched. The engine still never writes `examples.jsonl` — the desktop does.
 - Stable per-row identity + a content-addressed, deduped row store
   (`dataset_versions/row_store.jsonl`) with a per-version ordered manifest,
   captured in one pass with the fingerprint. `dataset-version-diff` compares two
@@ -148,9 +155,8 @@ Last reconciled: 2026-07-02 (v1.0.0 engine slice landed).
   `--output` file, verified against the recorded fingerprint (all-or-nothing,
   overwrite-safe, atomic). The engine **refuses to write `examples.jsonl`** — the
   dataset has one writer (the desktop); in-place restore is deferred to the desktop.
-- Deferred: desktop in-place restore (atomic replace of `examples.jsonl` +
-  quiescence + auto-capture), desktop diff surfacing, auto-capture after import
-  commit, reorder detection, store GC, and a normalized row identity.
+- Deferred: desktop diff surfacing, auto-capture after import commit, reorder
+  detection, store GC, and a normalized row identity.
 
 ## Not built yet (future roadmap)
 

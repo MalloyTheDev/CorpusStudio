@@ -53,6 +53,15 @@ public sealed class DatasetVersionRecord
     [JsonPropertyName("notes")]
     public string Notes { get; set; } = string.Empty;
 
+    /// <summary>Whether this version stored its row bodies (=> diffable/restorable).
+    /// The engine records a fingerprint-only version with <c>rows_stored=false</c> when
+    /// the row store could not be written; such a version is NOT a safe undo point.</summary>
+    [JsonPropertyName("rows_stored")]
+    public bool RowsStored { get; set; }
+
+    [JsonPropertyName("stored_row_count")]
+    public int StoredRowCount { get; set; }
+
     /// <summary>Live integrity of the version vs the current dataset, annotated by
     /// <c>dataset-version-list</c> (matches | drifted | unreadable). Null when this
     /// record came from a bare <c>dataset-version-create</c> response.</summary>
@@ -65,6 +74,27 @@ public sealed class DatasetVersionListResult
 {
     [JsonPropertyName("versions")]
     public List<DatasetVersionRecord> Versions { get; set; } = [];
+}
+
+/// <summary>Result of an engine <c>dataset-version-restore</c> (mirrors the engine
+/// RestoreResult). The engine reconstructs to a temp file, verified against the
+/// recorded fingerprint; the desktop performs the atomic in-place swap.</summary>
+public sealed class RestoreResult
+{
+    [JsonPropertyName("version_id")]
+    public string VersionId { get; set; } = string.Empty;
+
+    [JsonPropertyName("rows_written")]
+    public int RowsWritten { get; set; }
+
+    [JsonPropertyName("verified")]
+    public bool Verified { get; set; }
+
+    [JsonPropertyName("verify_skipped")]
+    public bool VerifySkipped { get; set; }
+
+    [JsonPropertyName("output_path")]
+    public string OutputPath { get; set; } = string.Empty;
 }
 
 /// <summary>A view row: a version record plus a display string with a live

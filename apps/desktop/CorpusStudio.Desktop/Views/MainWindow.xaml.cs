@@ -2131,6 +2131,61 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void RestoreDatasetVersionButton_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = ViewModel.SelectedDatasetVersion;
+        if (selected is null)
+        {
+            ViewModel.SetDatasetVersionError("Select a version to restore.");
+            return;
+        }
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetDatasetVersionError("Create or select a dataset project first.");
+            return;
+        }
+
+        var projectPath = ViewModel.ActiveProjectPath;
+
+        // Confirm — this overwrites the current dataset. The dialog is honest about the
+        // undo capture and the canonical caveat.
+        var confirm = MessageBox.Show(
+            MainWindowViewModel.BuildRestoreConfirmation(selected, ViewModel.Examples.Count),
+            "Restore version",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (confirm != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Restoring version (capturing the current dataset first)...");
+
+            // The service captures the current dataset as an undo version, then restores
+            // the selected version to a verified temp and atomically swaps it in. Any
+            // failure before the swap leaves examples.jsonl untouched.
+            var result = await _engineService.RestoreDatasetVersionInPlaceAsync(
+                projectPath, selected.Record.VersionId, MainWindowViewModel.BuildRestoreUndoLabel(selected));
+
+            // Reflect the restored dataset (and the flipped integrity badges) in the UI.
+            ViewModel.SetExamples(_engineService.LoadExamples(projectPath));
+            ViewModel.ApplyRestoreResult(result);
+            await RefreshDatasetVersionsAsync();
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetDatasetVersionError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
+        }
+    }
+
     private async void RefreshDatasetVersionsButton_Click(object sender, RoutedEventArgs e)
     {
         await RefreshDatasetVersionsAsync();

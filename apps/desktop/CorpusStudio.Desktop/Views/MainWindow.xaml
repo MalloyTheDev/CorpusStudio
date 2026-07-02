@@ -1904,6 +1904,11 @@
                                         Content="View card"
                                         Margin="0,0,8,0"
                                         Click="ViewDatasetVersionCardButton_Click" />
+                                <Button AutomationProperties.AutomationId="RestoreDatasetVersionButton"
+                                        Content="Restore this version"
+                                        ToolTip="Overwrite the current dataset with this version (your current dataset is captured first so you can undo)"
+                                        Margin="0,0,8,0"
+                                        Click="RestoreDatasetVersionButton_Click" />
                                 <Button AutomationProperties.AutomationId="RefreshDatasetVersionsButton"
                                         Content="Refresh"
                                         Click="RefreshDatasetVersionsButton_Click" />
