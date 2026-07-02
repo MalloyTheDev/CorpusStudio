@@ -200,6 +200,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_training_config_template.py`
 - `engine/tests/test_training_launch.py`
 - `engine/tests/test_training_token_budget.py`
+- `engine/tests/test_vram_lora_estimators.py`
 - `examples/datasets/chat/train.jsonl`
 - `examples/datasets/code/train.jsonl`
 - `examples/datasets/evaluation/test.jsonl`

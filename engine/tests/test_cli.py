@@ -614,11 +614,11 @@ def test_training_config_command_writes_config_without_training_dependencies(tmp
     payload = json.loads(result.output)
     written_config = output_path.read_text(encoding="utf-8")
     assert payload["target"] == "axolotl_yaml"
-    assert payload["training_launcher_implemented"] is False
+    assert payload["training_launcher_implemented"] is True
     assert payload["config"]["sequence_len"] == 2048
     assert payload["config"]["lora_r"] == 8
     assert 'base_model: "Qwen/Qwen2.5-Coder-7B-Instruct"' in written_config
-    assert "Training config export only" in payload["warnings"][0]
+    assert "exports the config only" in payload["warnings"][0]
 
 
 def test_training_config_command_rejects_invalid_lora_values(tmp_path: Path):
