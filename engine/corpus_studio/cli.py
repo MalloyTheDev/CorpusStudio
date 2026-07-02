@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from corpus_studio.ai_assist.assistant import run_ai_assist
 from corpus_studio.arena.judge import judge_arena
 from corpus_studio.arena.runner import load_prompt_suite, run_arena
+from corpus_studio.arena.storage import save_arena_report
 from corpus_studio.gates.runner import (
     run_dataset_gates,
     run_export_gates,
@@ -1063,6 +1064,7 @@ def arena_run(
     base_url: Optional[str] = typer.Option(None, "--base-url", help="Override provider base URL."),
     api_key: Optional[str] = typer.Option(None, "--api-key", help="Optional API key."),
     output_path: Optional[Path] = typer.Option(None, "--output-path", help="Write report JSON."),
+    project_dir: Optional[Path] = typer.Option(None, "--project-dir", help="Save under arena_reports/."),
     limit: Optional[int] = typer.Option(None, "--limit", help="Maximum prompts to run."),
     timeout_seconds: int = typer.Option(120, "--timeout-seconds"),
     judge_model: Optional[str] = typer.Option(None, "--judge-model", help="Evaluator model that ranks responses."),
@@ -1141,6 +1143,8 @@ def arena_run(
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(payload + "\n", encoding="utf-8")
+    if project_dir is not None:
+        save_arena_report(project_dir, report, input_path.stem)
 
     typer.echo(payload)
 

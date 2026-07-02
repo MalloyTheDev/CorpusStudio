@@ -85,8 +85,9 @@ Last reconciled: 2026-07-02 (v0.6 in progress).
 - Optional evaluator-only judging (`--judge-model`): a judge scores each
   candidate and picks a winner, aggregated into per-model win counts and average
   judge scores. Judging is an evaluator activity, so OpenAI/Anthropic are
-  permitted as the judge (enforced via provider policy). Saved reports and a
-  desktop surface are next.
+  permitted as the judge (enforced via provider policy).
+- Saved comparison reports: `arena-run --project-dir` persists the report under
+  project-local `arena_reports/`. A desktop Arena surface is next.
 
 ## Not built yet (future roadmap)
 
