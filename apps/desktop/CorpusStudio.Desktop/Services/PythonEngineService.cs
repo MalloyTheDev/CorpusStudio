@@ -1462,6 +1462,112 @@ public sealed class PythonEngineService
             ?? throw new InvalidOperationException("Engine returned no dataset version record.");
     }
 
+    /// <summary>Parse a <c>dataset-version-restore --json</c> RestoreResult.</summary>
+    public static RestoreResult ParseRestoreResult(string json)
+    {
+        return JsonSerializer.Deserialize<RestoreResult>(json, JsonOptions)
+            ?? throw new InvalidOperationException("Engine returned no restore result.");
+    }
+
+    /// <summary>Reconstruct a version to a temp file BESIDE examples.jsonl (same volume,
+    /// so the later swap can be atomic), verified against the recorded fingerprint. The
+    /// engine refuses examples.jsonl, so the temp is a distinct sibling name.</summary>
+    public async Task<(string TempPath, RestoreResult Result)> RestoreVersionToTempAsync(
+        string projectPath, string versionId)
+    {
+        var tempPath = Path.Combine(
+            projectPath, "examples.jsonl.restore-" + Guid.NewGuid().ToString("N") + ".tmp");
+        // VERIFY ON (never --no-verify): the engine writes the temp only if the
+        // reconstruction matches the version's recorded fingerprint.
+        var output = await RunEngineCommandAsync(
+            "dataset-version-restore", projectPath, "--version-id", versionId,
+            "--output", tempPath, "--json");
+        return (tempPath, ParseRestoreResult(output));
+    }
+
+    /// <summary>Atomically move an EXISTING temp file onto a target on the same volume:
+    /// <c>File.Replace</c> when the target exists, else <c>File.Move</c>. Distinct from
+    /// <see cref="WriteAllTextAtomic"/>, which takes content rather than a source file.</summary>
+    public static void AtomicReplaceFromFile(string sourceTempPath, string targetPath)
+    {
+        if (File.Exists(targetPath))
+        {
+            File.Replace(sourceTempPath, targetPath, destinationBackupFileName: null);
+        }
+        else
+        {
+            File.Move(sourceTempPath, targetPath);
+        }
+    }
+
+    /// <summary>Whether a captured undo version is a safe recovery point before a restore.
+    /// A "successful" capture (no exception) is NOT enough: the engine records a
+    /// fingerprint-only version with <c>rows_stored=false</c> (exit 0) when the row store
+    /// can't be written, and such a version cannot be restored. It is safe to proceed only
+    /// when the undo actually stored its rows, OR the current dataset had nothing to
+    /// preserve (0 rows — empty or unreadable).</summary>
+    public static bool IsUndoRestorable(DatasetVersionRecord undo)
+    {
+        return undo.RowsStored || undo.RowCount == 0;
+    }
+
+    /// <summary>Restore a version in place — the app's highest-stakes write. The ordering
+    /// is deliberately paranoid because it overwrites the user's dataset:
+    /// <list type="number">
+    /// <item>Capture the CURRENT dataset as an undo version AND confirm it is a genuine,
+    /// restorable recovery point. If capture throws, or produced a hollow undo for a
+    /// non-empty dataset, we abort so examples.jsonl is never overwritten unrecoverably.</item>
+    /// <item>Reconstruct the selected version to a verified temp beside examples.jsonl.</item>
+    /// <item>Atomically swap the temp onto examples.jsonl.</item>
+    /// </list>
+    /// Any failure before step 3 leaves examples.jsonl untouched; <c>File.Replace</c>
+    /// makes step 3 all-or-nothing. The temp is always cleaned up.</summary>
+    public async Task<RestoreResult> RestoreDatasetVersionInPlaceAsync(
+        string projectPath, string versionId, string undoLabel)
+    {
+        // (1) Undo point FIRST. A throw here aborts before the dataset is touched.
+        var undo = await CreateDatasetVersionAsync(projectPath, undoLabel, "before_restore");
+
+        // A non-throwing capture is not proof of a usable undo: the engine records a
+        // fingerprint-only version (rows_stored=false, exit 0) when the row store can't be
+        // written. Overwriting the dataset after that would destroy it with no way back, so
+        // refuse when the current dataset had rows but they were not stored.
+        if (!IsUndoRestorable(undo))
+        {
+            throw new InvalidOperationException(
+                $"Refusing to restore: the current dataset ({undo.RowCount} rows) could not be captured for "
+                + "undo (the row store could not be written — likely low disk space or a locked project). "
+                + "Free space or unlock the project and retry. Your dataset was not changed.");
+        }
+
+        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+        string? tempPath = null;
+        try
+        {
+            var (temp, result) = await RestoreVersionToTempAsync(projectPath, versionId);
+            tempPath = temp;
+            // (3) Atomic swap. File.Replace/Move consumes the temp; on success it is gone.
+            AtomicReplaceFromFile(tempPath, examplesPath);
+            tempPath = null;
+            return result;
+        }
+        finally
+        {
+            // Robust cleanup: if the temp still exists (restore or swap failed), remove it.
+            if (tempPath is not null)
+            {
+                try
+                {
+                    File.Delete(tempPath);
+                }
+                catch
+                {
+                    // Best-effort; a leftover .tmp is harmless.
+                }
+            }
+        }
+    }
+
     public int AppendDraftToProjectExamples(string projectPath, string draftText)
     {
         var jsonl = NormalizeDraftToJsonl(draftText);

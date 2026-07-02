@@ -1383,6 +1383,38 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         return $"✅ Captured version {record.VersionId} ({record.RowCount} rows).";
     }
 
+    /// <summary>Honest confirmation text for an in-place restore. It overwrites the
+    /// current dataset, so it names both row counts, the undo safety net, and the
+    /// canonical caveat. Pure/testable.</summary>
+    public static string BuildRestoreConfirmation(DatasetVersionDisplayItem version, int currentRowCount)
+    {
+        return $"Overwrite the current dataset ({currentRowCount} row(s)) with version "
+            + $"{version.Record.VersionId} ({version.Record.RowCount} row(s))?"
+            + Environment.NewLine + Environment.NewLine
+            + "Your current dataset is captured as a version first (a readable dataset becomes a "
+            + "restorable undo point); if it cannot be captured for undo, the restore is refused."
+            + Environment.NewLine + Environment.NewLine
+            + "Rows are reconstructed in canonical form (key order may change).";
+    }
+
+    /// <summary>Label for the undo version captured just before a restore.</summary>
+    public static string BuildRestoreUndoLabel(DatasetVersionDisplayItem version)
+    {
+        return $"before restore of {version.Record.VersionId}";
+    }
+
+    /// <summary>Report a completed in-place restore honestly in the detail pane.</summary>
+    public void ApplyRestoreResult(RestoreResult result)
+    {
+        var verifiedNote = result.Verified
+            ? "verified — fingerprint matches, semantically identical to the recorded version"
+            : (result.VerifySkipped ? "unverified" : "written");
+        SetDatasetVersionDetail(
+            $"✅ Restored version {result.VersionId}: {result.RowsWritten} row(s) [{verifiedNote}]. "
+            + "Your previous dataset was captured as an undo version (restore it to revert). "
+            + "Rows are in canonical form (key order may be normalized).");
+    }
+
     /// <summary>Refresh the version list (newest first) + a one-line integrity summary.
     /// Selection is preserved by version_id across refreshes.</summary>
     public void ApplyDatasetVersions(IReadOnlyList<DatasetVersionDisplayItem> items)

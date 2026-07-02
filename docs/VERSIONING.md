@@ -174,11 +174,15 @@ ordered manifest captured single-pass with the fingerprint
 an `--output` file, verified against the recorded fingerprint (all-or-nothing,
 overwrite-safe, atomic). The engine still **never** writes `examples.jsonl`.
 
+**Implemented (desktop in-place restore):** a confirmed "Restore this version"
+button captures the current dataset as an **undo** version first (and refuses if
+that undo isn't a genuine recovery point — e.g. the row store couldn't be
+written), then the engine reconstructs the selected version to a verified temp
+beside `examples.jsonl` and the desktop atomically swaps it in. Any failure
+before the swap leaves the dataset untouched; the engine still never writes
+`examples.jsonl`. The undo version stays in the history, so restoring it reverts.
+
 **Deferred:**
-- **Desktop in-place restore** — reconstruct to a temp file, atomically replace
-  `examples.jsonl` (quiescence + explicit confirmation), then auto-capture the
-  restored state as a new version so history stays honest. This is where the
-  dataset actually gets rewritten — and it stays the desktop's job (single writer).
 - Desktop surfacing of diff; auto-capture after an import/append commit; restore
   straight to stdout.
 - Reorder/"moved" detection in diff, GC of orphaned store blobs (which must never
