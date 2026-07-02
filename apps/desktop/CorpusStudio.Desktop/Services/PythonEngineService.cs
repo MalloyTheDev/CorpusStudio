@@ -1173,6 +1173,70 @@ public sealed class PythonEngineService
         return new EvaluationRunResult(report, reportPath, reportJson);
     }
 
+    public async Task<BenchmarkReport> RunBenchmarkAsync(
+        string projectPath,
+        string schemaId,
+        string backend,
+        IReadOnlyList<string> models,
+        string? baseUrl,
+        int? limit,
+        double scoreThreshold,
+        int timeoutSeconds
+    )
+    {
+        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+        if (!File.Exists(examplesPath))
+        {
+            throw new FileNotFoundException("Project examples file was not found.", examplesPath);
+        }
+
+        var projectId = new DirectoryInfo(projectPath).Name;
+        var reportDirectory = Path.Combine(ResolveExportRoot(), projectId, "evaluation");
+        var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+        var reportPath = Path.Combine(reportDirectory, $"{timestamp}_benchmark_report.json");
+
+        var arguments = new List<string>
+        {
+            "benchmark",
+            examplesPath,
+            schemaId,
+            "--backend",
+            backend,
+            "--output-path",
+            reportPath,
+            "--score-threshold",
+            scoreThreshold.ToString(CultureInfo.InvariantCulture),
+            "--timeout-seconds",
+            timeoutSeconds.ToString(CultureInfo.InvariantCulture),
+        };
+
+        foreach (var model in models)
+        {
+            arguments.Add("--model");
+            arguments.Add(model);
+        }
+
+        if (!string.IsNullOrWhiteSpace(baseUrl))
+        {
+            arguments.Add("--base-url");
+            arguments.Add(baseUrl);
+        }
+
+        if (limit is not null)
+        {
+            arguments.Add("--limit");
+            arguments.Add(limit.Value.ToString(CultureInfo.InvariantCulture));
+        }
+
+        var output = await RunEngineCommandAsync(arguments.ToArray());
+        var reportJson = File.Exists(reportPath)
+            ? File.ReadAllText(reportPath, Encoding.UTF8)
+            : output;
+        var parsed = JsonSerializer.Deserialize<BenchmarkRunOutput>(reportJson, JsonOptions);
+        return parsed?.Benchmark
+            ?? throw new InvalidOperationException("The Python engine returned an invalid benchmark report.");
+    }
+
     public IReadOnlyList<EvaluationReportHistoryItem> LoadEvaluationReportHistory(
         string projectPath,
         int maxReports = 20
