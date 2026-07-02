@@ -973,7 +973,12 @@ public sealed class PythonEngineService
         );
     }
 
-    public async Task<ExportResult> ExportProjectExamplesAsync(string projectPath, string schemaId)
+    public async Task<ExportResult> ExportProjectExamplesAsync(
+        string projectPath,
+        string schemaId,
+        bool removeDuplicates = false,
+        bool removeLowInformation = false
+    )
     {
         var examplesPath = Path.Combine(projectPath, "examples.jsonl");
         if (!File.Exists(examplesPath))
@@ -983,7 +988,18 @@ public sealed class PythonEngineService
 
         var projectId = new DirectoryInfo(projectPath).Name;
         var outputPath = Path.Combine(ResolveExportRoot(), projectId, "export.jsonl");
-        var output = await RunEngineCommandAsync("export", examplesPath, outputPath, schemaId);
+
+        var arguments = new List<string> { "export", examplesPath, outputPath, schemaId };
+        if (removeDuplicates)
+        {
+            arguments.Add("--dedupe");
+        }
+        if (removeLowInformation)
+        {
+            arguments.Add("--drop-low-information");
+        }
+
+        var output = await RunEngineCommandAsync(arguments.ToArray());
         return JsonSerializer.Deserialize<ExportResult>(output, JsonOptions)
             ?? throw new InvalidOperationException("The engine returned an invalid export result.");
     }

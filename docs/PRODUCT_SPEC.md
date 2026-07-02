@@ -122,7 +122,7 @@ The current app proves the smallest local dataset-authoring loop:
 18. Add manual per-example Evaluation scores and notes to saved reports.
 19. Run a first-pass AI Assist review against the current draft.
 20. Review queued AI Assist results, mark them accepted or rejected, and move accepted suggestions into Writing Studio for human validation.
-21. Export validated JSONL to `exports/<project_id>/export.jsonl`, with an optional cleaning pass (`--dedupe`, `--drop-low-information`) that drops exact/normalized-duplicate and low-information rows and writes a `*.cleaning_manifest.json` of exactly what was removed; a verbatim export still warns when duplicate rows remain.
+21. Export validated JSONL to `exports/<project_id>/export.jsonl`, with an optional cleaning pass (Export Center checkboxes, or the `--dedupe` / `--drop-low-information` CLI flags) that drops exact/normalized-duplicate and low-information rows and writes a `*.cleaning_manifest.json` of exactly what was removed; a verbatim export still warns when duplicate rows remain, and the desktop reports how many rows cleaning removed.
 22. Inspect local repository, engine, Python, project, and export paths from Settings.
 
 The Python engine also exposes schema listing, validation, project creation,
