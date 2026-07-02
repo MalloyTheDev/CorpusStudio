@@ -104,6 +104,15 @@ Last reconciled: 2026-07-02 (v0.6 in progress).
   when the after-eval targeted the base model (provenance via the record's
   `after_eval_model`). Surfaced by a "Gate run" button in the Training tab.
 
+## In progress — v0.9 (Model Artifact / Weight Registry)
+
+- Durable model artifact records under `model_artifacts/` (adapters/checkpoints
+  a run produced) with keep/reject status, referenced by path (never moved).
+  Base model + eval are resolved live through the source `run_id`, not stored.
+  **Path integrity** is re-checked on load — a record flags `missing` or
+  `modified` if the weights change on disk. A desktop Artifacts tab registers
+  from a run and keeps/rejects. The weight card + promote gate are v0.9.1.
+
 ## Not built yet (future roadmap)
 
 Model Chat Lab / Arena (v0.7), Training Run Registry (v0.8), Model Artifact /

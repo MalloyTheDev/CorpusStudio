@@ -249,6 +249,31 @@ Out of scope:
 - Re-launch from a record, config diffing, delete/archive (that is v0.9).
 - Backfill of past ephemeral runs — the registry records from here forward.
 
+## v0.9 - Model Artifact / Weight Registry
+
+Goal: track the model artifacts a training run produced (adapters, promoted
+checkpoints) as durable, inspectable first-class objects the user keeps or
+rejects — referenced by path, never owned.
+
+Scope:
+
+- v0.9.0 (done): a `ModelArtifactRecord` under `model_artifacts/` with
+  keep/reject status, referencing the source `run_id` (base model + eval are
+  resolved live through the run, never stored). The headline feature is **path
+  integrity**: a cheap fingerprint (size + mtime of a key descriptor file, never
+  a hash of weight bytes) is captured at register time and re-checked on load,
+  flagging `missing` or `modified` so a record can never quietly point at
+  deleted/overwritten weights. Idempotent register (same run+path → one record).
+  Engine `artifact-register`/`artifact-list`/`artifact-update`; a desktop
+  Artifacts tab (register-from-run, keep/reject, integrity badge).
+- v0.9.1 (planned): a rendered weight card and the `model_artifact` promote gate
+  (block "keep" on regression or `modified`/`missing`).
+
+Out of scope:
+
+- Any move/copy/delete of weight files; gguf/quantization/merge/serve;
+  auto-detection of "the final adapter."
+
 ## v1.0 - Full Dataset-to-Model Workflow
 
 Goal: stable end-to-end workflow from dataset creation to evaluated model

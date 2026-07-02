@@ -1053,6 +1053,187 @@ public sealed class PythonEngineService
         return records;
     }
 
+    // --- Model artifact registry (v0.9; writes-direct, reference paths only) ---
+
+    private static readonly string[] ArtifactDescriptorFiles = ["adapter_config.json", "config.json"];
+
+    /// <summary>Cheap fingerprint (never hashes weight bytes): a file's size+mtime,
+    /// or a directory's key descriptor file. Null when nothing is readable.</summary>
+    public static string? ComputeArtifactFingerprint(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                var info = new FileInfo(path);
+                return $"{info.Length}:{info.LastWriteTimeUtc.Ticks}";
+            }
+            if (Directory.Exists(path))
+            {
+                var descriptor = ArtifactDescriptorFiles
+                    .Select(name => Path.Combine(path, name))
+                    .FirstOrDefault(File.Exists)
+                    ?? Directory.EnumerateFiles(path).OrderBy(p => p, StringComparer.Ordinal).FirstOrDefault();
+                if (descriptor is null)
+                {
+                    return null;
+                }
+                var info = new FileInfo(descriptor);
+                return $"{Path.GetFileName(descriptor)}={info.Length}:{info.LastWriteTimeUtc.Ticks}";
+            }
+        }
+        catch
+        {
+            return null;
+        }
+        return null;
+    }
+
+    /// <summary>Integrity vs current disk state (never persisted). Pure over an
+    /// injected fingerprint function so it is unit-testable.</summary>
+    public static string ComputeArtifactIntegrity(ModelArtifactRecord record, Func<string, string?> fingerprintOf)
+    {
+        if (!File.Exists(record.Path) && !Directory.Exists(record.Path))
+        {
+            return "missing";
+        }
+        if (string.IsNullOrEmpty(record.Fingerprint))
+        {
+            return "ok"; // could not verify at register time; don't cry wolf
+        }
+        var current = fingerprintOf(record.Path);
+        if (current is null)
+        {
+            return "ok";
+        }
+        return current == record.Fingerprint ? "ok" : "modified";
+    }
+
+    private static string NormalizeArtifactPath(string path) => Path.GetFullPath(path);
+
+    private static string MakeArtifactId(string runId, string normalizedPath)
+    {
+        var hash = Convert.ToHexString(
+            System.Security.Cryptography.SHA1.HashData(Utf8NoBom.GetBytes(normalizedPath)))
+            .ToLowerInvariant()[..8];
+        return $"{runId}-{hash}";
+    }
+
+    private void SaveArtifactRecord(string projectPath, ModelArtifactRecord record)
+    {
+        if (string.IsNullOrEmpty(record.ArtifactId) || !ValidRunId.IsMatch(record.ArtifactId))
+        {
+            throw new ArgumentException($"Invalid artifact_id '{record.ArtifactId}'.", nameof(record));
+        }
+        var directory = Path.Combine(projectPath, "model_artifacts");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, record.ArtifactId + ".json");
+        WriteAllTextAtomic(path, JsonSerializer.Serialize(record, JsonOptions) + "\n", encoding: Utf8NoBom);
+    }
+
+    /// <summary>Register (idempotently) an artifact for a run. Re-registering the
+    /// same run+path preserves created_at + status and refreshes fingerprint.</summary>
+    public ModelArtifactRecord RegisterArtifact(
+        string projectPath, string runId, string path, string kind = "adapter", string notes = "")
+    {
+        if (!File.Exists(Path.Combine(projectPath, "training_runs", runId + ".json")))
+        {
+            throw new InvalidOperationException($"No training run '{runId}' to attach an artifact to.");
+        }
+
+        var normalized = NormalizeArtifactPath(path);
+        var artifactId = MakeArtifactId(runId, normalized);
+        var artifactFile = Path.Combine(projectPath, "model_artifacts", artifactId + ".json");
+        var now = UtcNowIso();
+
+        var createdAt = now;
+        var status = "candidate";
+        var keepNotes = notes;
+        if (File.Exists(artifactFile))
+        {
+            try
+            {
+                var existing = JsonSerializer.Deserialize<ModelArtifactRecord>(File.ReadAllText(artifactFile), JsonOptions);
+                if (existing is not null)
+                {
+                    createdAt = existing.CreatedAt;
+                    status = existing.Status;
+                    keepNotes = string.IsNullOrEmpty(notes) ? existing.Notes : notes;
+                }
+            }
+            catch
+            {
+                // A corrupt prior record is replaced.
+            }
+        }
+
+        var record = new ModelArtifactRecord
+        {
+            ArtifactId = artifactId,
+            RunId = runId,
+            CreatedAt = createdAt,
+            UpdatedAt = now,
+            Path = normalized,
+            Kind = string.IsNullOrWhiteSpace(kind) ? "adapter" : kind,
+            Status = status,
+            Fingerprint = ComputeArtifactFingerprint(normalized),
+            Notes = keepNotes,
+        };
+        SaveArtifactRecord(projectPath, record);
+        return record;
+    }
+
+    public IReadOnlyList<(ModelArtifactRecord Record, string Integrity)> LoadArtifacts(
+        string projectPath, Func<ModelArtifactRecord, string>? integrityOf = null)
+    {
+        integrityOf ??= record => ComputeArtifactIntegrity(record, ComputeArtifactFingerprint);
+        var directory = Path.Combine(projectPath, "model_artifacts");
+        if (!Directory.Exists(directory))
+        {
+            return [];
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var records = new List<ModelArtifactRecord>();
+        foreach (var file in Directory.EnumerateFiles(directory, "*.json"))
+        {
+            try
+            {
+                var record = JsonSerializer.Deserialize<ModelArtifactRecord>(File.ReadAllText(file), JsonOptions);
+                if (record is not null && seen.Add(record.ArtifactId))
+                {
+                    records.Add(record);
+                }
+            }
+            catch
+            {
+                // Skip a corrupt record.
+            }
+        }
+
+        records.Sort((a, b) => string.CompareOrdinal(b.ArtifactId, a.ArtifactId));
+        return records.Select(record => (record, integrityOf(record))).ToList();
+    }
+
+    public ModelArtifactRecord UpdateArtifactStatus(string projectPath, string artifactId, string status)
+    {
+        if (status is not ("candidate" or "kept" or "rejected"))
+        {
+            throw new ArgumentException($"Unknown artifact status '{status}'.", nameof(status));
+        }
+        var file = Path.Combine(projectPath, "model_artifacts", artifactId + ".json");
+        if (!File.Exists(file))
+        {
+            throw new InvalidOperationException($"No artifact '{artifactId}'.");
+        }
+        var record = JsonSerializer.Deserialize<ModelArtifactRecord>(File.ReadAllText(file), JsonOptions)
+            ?? throw new InvalidOperationException("Corrupt artifact record.");
+        record.Status = status;
+        record.UpdatedAt = UtcNowIso();
+        SaveArtifactRecord(projectPath, record);
+        return record;
+    }
+
     /// <summary>Link an after-training evaluation (path + the model it targeted,
     /// for provenance) to the newest run record. Returns the linked run_id.</summary>
     public string? LinkAfterEvalToNewestRun(string projectPath, string afterEvalPath, string? afterEvalModel)

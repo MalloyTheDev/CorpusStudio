@@ -807,6 +807,60 @@ def training_run_update(
     typer.echo(saved.model_dump_json(indent=2))
 
 
+@app.command("artifact-register")
+def artifact_register(
+    project_dir: Path,
+    run_id: str = typer.Option(..., "--run-id", help="Source training run."),
+    path: str = typer.Option(..., "--path", help="Path to the adapter/checkpoint (referenced, never moved)."),
+    kind: str = typer.Option("adapter", "--kind", help="User label (e.g. adapter, checkpoint)."),
+    notes: str = typer.Option("", "--notes"),
+):
+    """Register (idempotently) a model artifact produced by a training run."""
+
+    from corpus_studio.training.artifact_registry import register_artifact
+
+    try:
+        record = register_artifact(project_dir, run_id, path, kind=kind, notes=notes, now=_utc_now_iso())
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(record.model_dump_json(indent=2))
+
+
+@app.command("artifact-list")
+def artifact_list(project_dir: Path):
+    """List model artifacts (newest first) with computed path integrity."""
+
+    from corpus_studio.training.artifact_registry import artifact_integrity, list_artifacts
+
+    _ = artifact_integrity  # (kept for clarity; integrity is returned by list_artifacts)
+    artifacts = [
+        {**record.model_dump(), "integrity": integrity}
+        for record, integrity in list_artifacts(project_dir)
+    ]
+    typer.echo(json.dumps({"artifacts": artifacts}, indent=2))
+
+
+@app.command("artifact-update")
+def artifact_update(
+    project_dir: Path,
+    artifact_id: str = typer.Option(..., "--artifact-id"),
+    status: str = typer.Option(..., "--status", help="candidate | kept | rejected."),
+):
+    """Update an artifact's keep/reject status."""
+
+    from corpus_studio.training.artifact_registry import update_artifact_status
+
+    try:
+        record = update_artifact_status(project_dir, artifact_id, status, now=_utc_now_iso())
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(record.model_dump_json(indent=2))
+
+
 @app.command("training-run-gate")
 def training_run_gate_command(
     project_dir: Path,

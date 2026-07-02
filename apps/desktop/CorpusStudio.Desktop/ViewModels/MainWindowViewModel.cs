@@ -116,6 +116,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private IReadOnlyList<string> _trainingCheckpointNames = [];
     private string _trainingRunHistorySummary = "Refresh to see past training runs recorded for this project.";
     private string _trainingRunGateSummary = "Gate a run to check for regression vs its baseline.";
+    private string _artifactSummary = "Register a model artifact from a completed run, then keep or reject it.";
+    private ArtifactDisplayItem? _selectedModelArtifact;
     private string _trainingCheckpointsSummary =
         "Checkpoints appear here after a training run writes them.";
     private IReadOnlyList<string> _trainingResumeArgv = [];
@@ -1235,6 +1237,46 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _trainingRunGateSummary;
         private set => SetField(ref _trainingRunGateSummary, value);
+    }
+
+    public ObservableCollection<ArtifactDisplayItem> ModelArtifacts { get; } = [];
+
+    public ArtifactDisplayItem? SelectedModelArtifact
+    {
+        get => _selectedModelArtifact;
+        set => SetField(ref _selectedModelArtifact, value);
+    }
+
+    public string ArtifactSummary
+    {
+        get => _artifactSummary;
+        private set => SetField(ref _artifactSummary, value);
+    }
+
+    public void SetArtifactError(string message)
+    {
+        ArtifactSummary = $"Artifact action failed.{Environment.NewLine}{message}";
+    }
+
+    /// <summary>Refresh the artifact list + a one-line summary (kept / flagged counts).</summary>
+    public void ApplyArtifacts(IReadOnlyList<ArtifactDisplayItem> items)
+    {
+        var selectedId = SelectedModelArtifact?.Record.ArtifactId;
+        ModelArtifacts.Clear();
+        foreach (var item in items)
+        {
+            ModelArtifacts.Add(item);
+        }
+        SelectedModelArtifact = ModelArtifacts.FirstOrDefault(i => i.Record.ArtifactId == selectedId);
+
+        if (items.Count == 0)
+        {
+            ArtifactSummary = "No artifacts registered yet. Register one from a completed run.";
+            return;
+        }
+        var kept = items.Count(i => i.Record.Status == "kept");
+        var flagged = items.Count(i => i.Integrity != "ok");
+        ArtifactSummary = $"{items.Count} artifact(s): {kept} kept, {flagged} with integrity issues (missing/modified).";
     }
 
     public void SetTrainingRunGateError(string message)
