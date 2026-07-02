@@ -1935,7 +1935,77 @@ public partial class MainWindow : Window
         }
     }
 
-    private void KeepArtifactButton_Click(object sender, RoutedEventArgs e) => SetSelectedArtifactStatus("kept");
+    private async void KeepArtifactButton_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = ViewModel.SelectedModelArtifact;
+        if (selected is null)
+        {
+            ViewModel.SetArtifactError("Select an artifact first.");
+            return;
+        }
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            return;
+        }
+
+        var projectPath = ViewModel.ActiveProjectPath;
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Promote-gating artifact...");
+
+            // The promote gate is the enforcement point: a block refuses the keep.
+            var report = await _engineService.GateArtifactAsync(projectPath, selected.Record.ArtifactId);
+            var allowed = ViewModel.ApplyPromoteGate(report);
+            if (!allowed)
+            {
+                return;
+            }
+
+            _engineService.UpdateArtifactStatus(projectPath, selected.Record.ArtifactId, "kept");
+            RefreshArtifacts();
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetArtifactError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
+        }
+    }
+
+    private async void ViewArtifactCardButton_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = ViewModel.SelectedModelArtifact;
+        if (selected is null)
+        {
+            ViewModel.SetArtifactError("Select an artifact first.");
+            return;
+        }
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            return;
+        }
+
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Rendering weight card...");
+            var markdown = await _engineService.GetWeightCardAsync(ViewModel.ActiveProjectPath, selected.Record.ArtifactId);
+            ViewModel.SetArtifactDetail(markdown);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetArtifactError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
+        }
+    }
 
     private void RejectArtifactButton_Click(object sender, RoutedEventArgs e) => SetSelectedArtifactStatus("rejected");
 

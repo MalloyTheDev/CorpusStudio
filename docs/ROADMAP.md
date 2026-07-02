@@ -266,8 +266,11 @@ Scope:
   deleted/overwritten weights. Idempotent register (same run+path → one record).
   Engine `artifact-register`/`artifact-list`/`artifact-update`; a desktop
   Artifacts tab (register-from-run, keep/reject, integrity badge).
-- v0.9.1 (planned): a rendered weight card and the `model_artifact` promote gate
-  (block "keep" on regression or `modified`/`missing`).
+- v0.9.1 (done): a weight card rendered live (`artifact-card`, never stored, so
+  it can't drift; carries the "unverified linkage" caveat) and the
+  `model_artifact` promote gate (`artifact-gate`) that blocks "keep" when the
+  artifact is `modified`/`missing` or the source run regressed. Keep in the
+  desktop Artifacts tab is gated: a block refuses the keep.
 
 Out of scope:
 

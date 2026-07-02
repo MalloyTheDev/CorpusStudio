@@ -861,6 +861,86 @@ def artifact_update(
     typer.echo(record.model_dump_json(indent=2))
 
 
+def _load_artifact_context(project_dir: Path, artifact_id: str):
+    """Load an artifact + its integrity + source run + an eval-report loader."""
+
+    from corpus_studio.evaluation.reports import EvaluationReport
+    from corpus_studio.training.artifact_registry import (
+        artifact_integrity,
+        artifact_path,
+        load_artifact_record,
+    )
+    from corpus_studio.training.run_registry import load_run_record, record_path
+
+    path = artifact_path(project_dir, artifact_id)
+    if not path.exists():
+        raise FileNotFoundError(f"No artifact '{artifact_id}'.")
+    artifact = load_artifact_record(path)
+    integrity = artifact_integrity(artifact)
+
+    run = None
+    run_path = record_path(project_dir, artifact.run_id)
+    if run_path.exists():
+        try:
+            run = load_run_record(run_path)
+        except Exception:  # noqa: BLE001
+            run = None
+
+    def load_report(report_path: str):
+        try:
+            return EvaluationReport.model_validate_json(
+                Path(report_path).read_text(encoding="utf-8")
+            )
+        except (ValidationError, json.JSONDecodeError, OSError):
+            return None
+
+    return artifact, integrity, run, load_report
+
+
+@app.command("artifact-card")
+def artifact_card(
+    project_dir: Path,
+    artifact_id: str = typer.Option(..., "--artifact-id"),
+):
+    """Render a weight card for an artifact (live projection; nothing stored)."""
+
+    from corpus_studio.reporting.weight_card import (
+        build_weight_card,
+        render_weight_card_markdown,
+    )
+
+    try:
+        artifact, integrity, run, load_report = _load_artifact_context(project_dir, artifact_id)
+    except FileNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    before = load_report(run.before_eval_path) if run and run.before_eval_path else None
+    after = load_report(run.after_eval_path) if run and run.after_eval_path else None
+    card = build_weight_card(artifact, run, before, after, integrity)
+    typer.echo(render_weight_card_markdown(card))
+
+
+@app.command("artifact-gate")
+def artifact_gate(
+    project_dir: Path,
+    artifact_id: str = typer.Option(..., "--artifact-id"),
+):
+    """Promote-gate an artifact (integrity + source-run regression) and save it."""
+
+    from corpus_studio.gates.runner import run_artifact_gate, save_gate_report
+
+    try:
+        artifact, integrity, run, load_report = _load_artifact_context(project_dir, artifact_id)
+    except FileNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    report = run_artifact_gate(artifact, integrity, run, load_report, generated_at=_utc_now_iso())
+    save_gate_report(project_dir, report)
+    typer.echo(report.model_dump_json(indent=2))
+
+
 @app.command("training-run-gate")
 def training_run_gate_command(
     project_dir: Path,

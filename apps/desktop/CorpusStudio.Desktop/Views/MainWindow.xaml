@@ -1830,17 +1830,37 @@
                                         Content="Reject"
                                         Margin="0,0,8,0"
                                         Click="RejectArtifactButton_Click" />
+                                <Button AutomationProperties.AutomationId="ViewArtifactCardButton"
+                                        Content="View card"
+                                        Margin="0,0,8,0"
+                                        Click="ViewArtifactCardButton_Click" />
                                 <Button AutomationProperties.AutomationId="RefreshArtifactsButton"
                                         Content="Refresh"
                                         Click="RefreshArtifactsButton_Click" />
                             </WrapPanel>
-                            <ListBox Grid.Row="2"
-                                     AutomationProperties.AutomationId="ModelArtifactsListBox"
-                                     ItemsSource="{Binding ModelArtifacts}"
-                                     SelectedItem="{Binding SelectedModelArtifact, Mode=TwoWay}"
-                                     DisplayMemberPath="DisplayName"
-                                     FontFamily="Consolas"
-                                     FontSize="12" />
+                            <Grid Grid.Row="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <ListBox Grid.Column="0"
+                                         AutomationProperties.AutomationId="ModelArtifactsListBox"
+                                         ItemsSource="{Binding ModelArtifacts}"
+                                         SelectedItem="{Binding SelectedModelArtifact, Mode=TwoWay}"
+                                         DisplayMemberPath="DisplayName"
+                                         FontFamily="Consolas"
+                                         FontSize="12" />
+                                <TextBox Grid.Column="1"
+                                         AutomationProperties.AutomationId="ArtifactDetailTextBox"
+                                         Text="{Binding ArtifactDetail, Mode=OneWay}"
+                                         Margin="12,0,0,0"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         FontFamily="Consolas"
+                                         FontSize="12"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto" />
+                            </Grid>
                         </Grid>
                     </TabItem>
                     <TabItem Header="Settings">

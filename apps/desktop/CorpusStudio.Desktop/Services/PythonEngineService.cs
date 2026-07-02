@@ -1215,6 +1215,20 @@ public sealed class PythonEngineService
         return records.Select(record => (record, integrityOf(record))).ToList();
     }
 
+    /// <summary>Render the weight card markdown for an artifact (live; nothing stored).</summary>
+    public async Task<string> GetWeightCardAsync(string projectPath, string artifactId)
+    {
+        return await RunEngineCommandAsync("artifact-card", projectPath, "--artifact-id", artifactId);
+    }
+
+    /// <summary>Run the promote gate for an artifact (integrity + source-run regression).</summary>
+    public async Task<GateReport> GateArtifactAsync(string projectPath, string artifactId)
+    {
+        var output = await RunEngineCommandAsync("artifact-gate", projectPath, "--artifact-id", artifactId);
+        return JsonSerializer.Deserialize<GateReport>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid gate report.");
+    }
+
     public ModelArtifactRecord UpdateArtifactStatus(string projectPath, string artifactId, string status)
     {
         if (status is not ("candidate" or "kept" or "rejected"))

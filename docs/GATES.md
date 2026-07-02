@@ -57,6 +57,16 @@ linkage* when the after-eval targeted the base model (or no model id was linked)
 against the trained model. Surfaced by a "Gate run" button in the Training tab
 that links the newest trained-model eval and runs the gate.
 
+## Promote gate (model_artifact scope)
+
+`artifact-gate --project-dir <p> --artifact-id <id>` is the enforcement point for
+keeping a model artifact. It **blocks** when the artifact integrity is `missing`
+or `modified` (the weights changed/vanished since evaluation) **or** the source
+run's regression gate blocks; it **warns** on unverified linkage or a missing
+source run; otherwise **passes**. In the desktop Artifacts tab, "Keep" runs this
+gate first and a block refuses the keep. The companion `artifact-card` renders a
+live weight card (never stored) carrying the same provenance caveat.
+
 ## Future work
 
 Per-project threshold configuration and a richer per-run selection UI are

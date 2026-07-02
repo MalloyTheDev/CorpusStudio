@@ -169,6 +169,26 @@ def pii_gate(
     )
 
 
+def artifact_integrity_gate(
+    integrity: str, scope: GateScope = GateScope.MODEL_ARTIFACT
+) -> GateResult:
+    """Block promotion when the weights changed or vanished since evaluation."""
+
+    ok = integrity == "ok"
+    return GateResult(
+        gate_id="integrity",
+        name="Artifact integrity",
+        scope=scope,
+        status=GateStatus.PASS if ok else GateStatus.BLOCK,
+        observed=f"integrity={integrity}",
+        expected="integrity=ok (weights unchanged since evaluation)",
+        message="Artifact weights are intact."
+        if ok
+        else f"Artifact weights are {integrity} (changed or gone since evaluation); do not promote.",
+        repair=None if ok else "Re-evaluate the current weights, then re-register and re-gate.",
+    )
+
+
 def regression_gate(
     before: EvaluationReport | None,
     after: EvaluationReport | None,
