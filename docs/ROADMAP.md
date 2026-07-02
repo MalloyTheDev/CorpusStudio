@@ -168,7 +168,9 @@ Scope:
   relaunches from the newest checkpoint through the same confirmation;
   config-driven targets show an explanatory note)
 - stop/cancel support (done: Stop kills the process tree)
-- before/after eval comparison
+- before/after eval comparison (done: the newest evaluation report is captured
+  as the baseline at launch; after evaluating the trained model, "Compare vs
+  baseline" shows score/failure/tag deltas in the Training tab)
 
 Out of scope:
 

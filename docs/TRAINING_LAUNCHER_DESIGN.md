@@ -56,7 +56,12 @@ That is net-new infrastructure and where the risk concentrates:
   manual), and "Resume latest" relaunches through the same confirmation for
   targets with a CLI resume flag. The directory is the persistence — no state
   file, latest-only resume.
-- **v0.5.3 — before/after eval comparison** (reuses the multi-model benchmark).
+- **v0.5.3 — before/after eval comparison (done).** The newest saved evaluation
+  report is captured as the "before" baseline at launch. The app cannot serve
+  the trained adapter itself, so the user loads it into their local backend and
+  runs an evaluation; "Compare vs baseline" then reuses the existing two-report
+  comparison (after − before deltas), with honest guidance for the
+  no-baseline / no-after-eval cases.
 
 ## Risks and mitigations
 
