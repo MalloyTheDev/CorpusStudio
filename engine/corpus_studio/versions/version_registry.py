@@ -79,11 +79,22 @@ class DatasetVersionRecord(BaseModel):
 
 
 def _slug(version_id: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", version_id).strip("_") or "version"
+    # No strip(): every char in the validated alphabet (including a leading or
+    # trailing '_') is preserved, so distinct valid version_ids never collapse to
+    # the same filename. For a validated id this is the identity; the ``or`` only
+    # guards an empty string (which validation already rejects on the save path).
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", version_id) or "version"
 
 
 def mint_version_id(timestamp_compact: str, suffix: str) -> str:
-    """Chronologically-sortable id, e.g. '20260702T183000-004217'."""
+    """Chronologically-sortable id, e.g. '20260702T183000-004217-9af3c1'.
+
+    ``list_version_records`` sorts on the id string, so chronological ordering
+    holds only when ids are **fixed width** (a fixed-width timestamp prefix and a
+    fixed-width suffix). The CLI guarantees this (zero-padded microseconds + a
+    fixed-length random token); a caller minting variable-width suffixes must not
+    rely on list ordering being chronological within the same second.
+    """
 
     return f"{timestamp_compact}-{suffix}"
 
@@ -121,9 +132,10 @@ def fingerprint_dataset(examples_path: Path | str) -> tuple[str | None, int]:
                 digest.update(b"\n")
             digest.update(exact_row_signature(row).encode("utf-8"))
             count += 1
-    except (OSError, ValueError):
-        # ValueError covers a malformed JSON line (json.JSONDecodeError). An
-        # unreadable dataset yields no fingerprint rather than a partial/wrong one.
+    except (OSError, ValueError, RecursionError):
+        # ValueError covers a malformed line (json.JSONDecodeError) and bad bytes
+        # (UnicodeDecodeError); RecursionError covers pathologically nested JSON.
+        # An unreadable dataset yields no fingerprint, never a partial/wrong one.
         return None, 0
     return digest.hexdigest(), count
 

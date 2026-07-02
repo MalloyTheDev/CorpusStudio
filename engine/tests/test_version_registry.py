@@ -80,6 +80,20 @@ def test_fingerprint_none_on_malformed_line(tmp_path: Path):
     assert compute_content_fingerprint(path) is None  # unreadable, not a wrong hash
 
 
+def test_fingerprint_none_on_deeply_nested_line(tmp_path: Path):
+    # Pathologically nested JSON makes json.loads raise RecursionError (not a
+    # ValueError); the loader must still degrade to (None, 0), never crash.
+    path = tmp_path / "examples.jsonl"
+    path.write_text('{"ok": 1}\n' + "[" * 6000 + "]" * 6000 + "\n", encoding="utf-8")
+    assert fingerprint_dataset(path) == (None, 0)
+
+
+def test_fingerprint_none_on_invalid_utf8(tmp_path: Path):
+    path = tmp_path / "examples.jsonl"
+    path.write_bytes(b'{"ok": 1}\n\xff\xfe not utf-8\n')
+    assert compute_content_fingerprint(path) is None
+
+
 def test_empty_file_has_stable_fingerprint(tmp_path: Path):
     path = tmp_path / "examples.jsonl"
     path.touch()
@@ -111,6 +125,19 @@ def test_list_newest_first_and_corrupt_tolerant(tmp_path: Path):
     (registry_dir(tmp_path) / "corrupt.json").write_text("{ not json", encoding="utf-8")
     records = list_version_records(tmp_path)
     assert [r.version_id for r in records] == ["20260301T000000-b", "20260101T000000-a"]
+
+
+def test_slug_is_injective_for_underscore_ids(tmp_path: Path):
+    # '_abc', 'abc', 'abc_' are all valid ids and must map to distinct files
+    # (the old strip('_') slug collapsed them and silently overwrote).
+    save_version_record(tmp_path, _record("abc", label="FIRST"))
+    save_version_record(tmp_path, _record("_abc", label="SECOND"))
+    save_version_record(tmp_path, _record("abc_", label="THIRD"))
+    records = list_version_records(tmp_path)
+    assert sorted(r.version_id for r in records) == ["_abc", "abc", "abc_"]
+    assert load_version_record(record_path(tmp_path, "abc")).label == "FIRST"
+    assert load_version_record(record_path(tmp_path, "_abc")).label == "SECOND"
+    assert load_version_record(record_path(tmp_path, "abc_")).label == "THIRD"
 
 
 def test_list_dedupes_same_version_id(tmp_path: Path):
@@ -217,6 +244,53 @@ def test_cli_stamp_missing_run_errors(tmp_path: Path):
     _write_examples(tmp_path, ROWS)
     created = runner.invoke(app, ["dataset-version-create", str(tmp_path), "--stamp-run", "nope"])
     assert created.exit_code == 1
+
+
+def test_cli_stamp_not_written_when_version_save_fails(tmp_path: Path, monkeypatch):
+    # The version must be committed before the run's back-link; if the version
+    # save fails, the run must NOT be left stamped with a phantom snapshot id.
+    import corpus_studio.versions.version_registry as vr
+
+    _write_examples(tmp_path, ROWS)
+    save_run_record(
+        tmp_path, TrainingRunRecord(run_id="20260101T000000-r", created_at="t", updated_at="t")
+    )
+
+    def boom(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(vr, "save_version_record", boom)
+    result = runner.invoke(
+        app, ["dataset-version-create", str(tmp_path), "--stamp-run", "20260101T000000-r"]
+    )
+    assert result.exit_code != 0
+    run = load_run_record(run_record_path(tmp_path, "20260101T000000-r"))
+    assert run.source_snapshot_id is None
+
+
+def test_cli_two_creates_do_not_collide(tmp_path: Path):
+    # A random token in the id prevents two same-tick in-process creates from
+    # minting the same id and silently overwriting the first version's file.
+    _write_examples(tmp_path, ROWS)
+    first = runner.invoke(app, ["dataset-version-create", str(tmp_path), "--label", "first"])
+    second = runner.invoke(app, ["dataset-version-create", str(tmp_path), "--label", "second"])
+    assert json.loads(first.stdout)["version_id"] != json.loads(second.stdout)["version_id"]
+    records = list_version_records(tmp_path)
+    assert len(records) == 2
+    assert {r.label for r in records} == {"first", "second"}
+
+
+def test_cli_show_degrades_on_invalid_utf8_eval_report(tmp_path: Path):
+    _write_examples(tmp_path, ROWS)
+    bad = tmp_path / "eval.json"
+    bad.write_bytes(b"\xff\xfe\x00 not valid utf-8")
+    created = runner.invoke(
+        app, ["dataset-version-create", str(tmp_path), "--eval-report-path", str(bad)]
+    )
+    version_id = json.loads(created.stdout)["version_id"]
+    shown = runner.invoke(app, ["dataset-version-show", str(tmp_path), "--version-id", version_id])
+    assert shown.exit_code == 0, shown.output
+    assert "missing" in shown.stdout.lower()  # degraded to a flag, not a crash
 
 
 def test_old_run_record_without_source_snapshot_id_loads_none(tmp_path: Path):

@@ -1589,8 +1589,15 @@ def dataset_version_create(
             err=True,
         )
 
+    import secrets
+
     now_dt = datetime.now(timezone.utc)
-    version_id = mint_version_id(now_dt.strftime("%Y%m%dT%H%M%S"), f"{now_dt.microsecond:06d}")
+    # A random token breaks ties: the wall clock can be too coarse to advance
+    # between two in-process creates (esp. on Windows), and a pure-timestamp id
+    # would collide and silently overwrite the earlier version's file.
+    version_id = mint_version_id(
+        now_dt.strftime("%Y%m%dT%H%M%S"), f"{now_dt.microsecond:06d}-{secrets.token_hex(3)}"
+    )
     now_iso = now_dt.isoformat()
 
     record = DatasetVersionRecord(
@@ -1607,6 +1614,7 @@ def dataset_version_create(
         gate_report_path=gate_report_path or _newest_dataset_gate_report(project_dir),
     )
 
+    run_to_stamp = None
     if stamp_run is not None:
         from corpus_studio.training.run_registry import (
             load_run_record,
@@ -1618,15 +1626,22 @@ def dataset_version_create(
         if not run_path.exists():
             typer.echo(f"No training run '{stamp_run}' to stamp.", err=True)
             raise typer.Exit(code=1)
-        run = load_run_record(run_path)
-        save_run_record(
-            project_dir,
-            run.model_copy(update={"source_snapshot_id": version_id, "updated_at": now_iso}),
-        )
+        run_to_stamp = load_run_record(run_path)
         if stamp_run not in record.source_run_ids:
             record.source_run_ids.append(stamp_run)
 
+    # Commit the version FIRST, then write the run's back-link. If the version
+    # save fails, no run is left pointing at a version that was never saved (a
+    # version listing a run that lacks the back-link is tolerated; the reverse
+    # corrupts lineage).
     save_version_record(project_dir, record)
+
+    if run_to_stamp is not None:
+        save_run_record(
+            project_dir,
+            run_to_stamp.model_copy(update={"source_snapshot_id": version_id, "updated_at": now_iso}),
+        )
+
     typer.echo(record.model_dump_json(indent=2))
 
 
@@ -1713,13 +1728,15 @@ def dataset_version_show(
             return EvaluationReport.model_validate_json(
                 Path(report_path).read_text(encoding="utf-8")
             )
-        except (ValidationError, json.JSONDecodeError, OSError):
+        # ValueError covers json.JSONDecodeError and a non-UTF-8 file
+        # (UnicodeDecodeError); a corrupt linked report degrades to a card flag.
+        except (ValidationError, ValueError, OSError):
             return None
 
     def load_gate(report_path: str):
         try:
             return GateReport.model_validate_json(Path(report_path).read_text(encoding="utf-8"))
-        except (ValidationError, json.JSONDecodeError, OSError):
+        except (ValidationError, ValueError, OSError):
             return None
 
     card = build_version_card(

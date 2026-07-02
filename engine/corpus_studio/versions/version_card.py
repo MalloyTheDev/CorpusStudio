@@ -9,6 +9,7 @@ is gone, the card says so *first* rather than presenting stale lineage as fact.
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable
 from typing import Any
@@ -148,7 +149,18 @@ def build_version_card(
         else:
             eval_present = True
             score = getattr(report, "average_score", None)
-            eval_score = float(score) if score is not None else None
+            if score is not None:
+                # A caller-injected loader may return a report whose score is
+                # non-numeric or non-finite; degrade to a flag rather than crash.
+                try:
+                    numeric = float(score)
+                except (TypeError, ValueError):
+                    warnings.append("Linked evaluation report has a non-numeric average score.")
+                else:
+                    if math.isfinite(numeric):
+                        eval_score = numeric
+                    else:
+                        warnings.append("Linked evaluation report has a non-finite average score.")
 
     gate_linked = record.gate_report_path is not None
     gate_present = False
@@ -200,7 +212,7 @@ def render_version_card_markdown(card: DatasetVersionCard) -> str:
         f"- **Trigger**: {_safe(card.trigger) or '(unspecified)'}",
         f"- **Rows**: {card.row_count}",
         f"- **Fingerprint**: {_safe(card.fingerprint_algo)}/{_safe(card.row_signature_kind)} "
-        f"{_short_fp(card.content_fingerprint)}",
+        f"{_safe(_short_fp(card.content_fingerprint))}",
         f"- **Current integrity**: {card.current_integrity}",
     ]
 

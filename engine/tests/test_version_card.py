@@ -71,6 +71,37 @@ def test_eval_link_present_and_missing():
     assert any("evaluation report is missing" in w for w in missing.warnings)
 
 
+def test_non_numeric_eval_score_degrades_not_crash():
+    record = _record(eval_report_path="/x/eval.json")
+    card = build_version_card(
+        record,
+        current_fingerprint="abc",
+        load_eval_report=lambda _p: SimpleNamespace(average_score="n/a"),
+    )
+    assert card.eval_report_present and card.eval_average_score is None
+    assert any("non-numeric" in w for w in card.warnings)
+
+
+def test_non_finite_eval_score_degrades():
+    record = _record(eval_report_path="/x/eval.json")
+    card = build_version_card(
+        record,
+        current_fingerprint="abc",
+        load_eval_report=lambda _p: SimpleNamespace(average_score=float("nan")),
+    )
+    assert card.eval_average_score is None
+    assert any("non-finite" in w for w in card.warnings)
+
+
+def test_fingerprint_render_is_injection_safe():
+    # A hand-edited record with a control char in the (<=12 char) fingerprint must
+    # not inject an extra Markdown line — the fingerprint is sanitized on render.
+    record = _record(content_fingerprint="x\n> PWNED-fp")
+    card = build_version_card(record, current_fingerprint="x\n> PWNED-fp")  # matches
+    markdown = render_version_card_markdown(card)
+    assert "\n> PWNED-fp" not in markdown
+
+
 def test_gate_link_reports_overall_status():
     record = _record(gate_report_path="/x/gate.json")
     card = build_version_card(
