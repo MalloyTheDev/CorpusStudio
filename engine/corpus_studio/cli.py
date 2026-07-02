@@ -9,6 +9,7 @@ import typer
 from pydantic import ValidationError
 
 from corpus_studio.ai_assist.assistant import run_ai_assist
+from corpus_studio.evaluation.benchmark import build_benchmark_report
 from corpus_studio.evaluation.evaluator import (
     EvaluationRunConfig,
     extract_evaluation_examples,
@@ -380,6 +381,84 @@ def eval_run(
         limit=limit,
     )
     payload = report.model_dump_json(indent=2)
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(payload + "\n", encoding="utf-8")
+
+    typer.echo(payload)
+
+
+@app.command("benchmark")
+def benchmark(
+    input_path: Path,
+    schema: str,
+    models: list[str] = typer.Option(..., "--model", help="Model to benchmark (repeatable)."),
+    backend: str = typer.Option("ollama", "--backend", help="ollama or openai-compatible."),
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="Override provider base URL."),
+    api_key: Optional[str] = typer.Option(None, "--api-key", help="Optional API key."),
+    output_path: Optional[Path] = typer.Option(None, "--output-path", help="Write report JSON."),
+    limit: Optional[int] = typer.Option(None, "--limit", help="Maximum examples per model."),
+    score_threshold: float = typer.Option(70.0, "--score-threshold"),
+    timeout_seconds: int = typer.Option(120, "--timeout-seconds"),
+):
+    """Benchmark one dataset across several models and compare/rank them."""
+
+    validation_report = validate_jsonl_file(input_path, schema)
+    _exit_if_invalid(validation_report)
+
+    unique_models = list(dict.fromkeys(name.strip() for name in models if name.strip()))
+    if not unique_models:
+        typer.echo("Provide at least one --model.", err=True)
+        raise typer.Exit(code=1)
+
+    rows = list(read_jsonl(input_path))
+    try:
+        examples = extract_evaluation_examples(rows, schema)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    reports = []
+    for model in unique_models:
+        try:
+            backend_client = _build_backend(
+                backend=backend,
+                model=model,
+                base_url=base_url,
+                api_key=api_key,
+                timeout_seconds=timeout_seconds,
+            )
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+
+        reports.append(
+            run_evaluation(
+                EvaluationRunConfig(
+                    dataset=input_path.stem,
+                    model=model,
+                    schema_id=schema,
+                    dataset_path=str(input_path),
+                    backend=backend,
+                    base_url=base_url,
+                    limit=limit,
+                    score_threshold=score_threshold,
+                    timeout_seconds=timeout_seconds,
+                ),
+                examples,
+                backend_client,
+                limit=limit,
+            )
+        )
+
+    benchmark_report = build_benchmark_report(input_path.stem, reports)
+    payload = json.dumps(
+        {
+            "benchmark": benchmark_report.model_dump(),
+            "model_reports": [report.model_dump() for report in reports],
+        },
+        indent=2,
+    )
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(payload + "\n", encoding="utf-8")
