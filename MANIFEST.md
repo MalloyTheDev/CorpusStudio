@@ -178,6 +178,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_quality_unicode.py`
 - `engine/tests/test_schema_examples.py`
 - `engine/tests/test_schema_field_constraints.py`
+- `engine/tests/test_schema_nested_and_bounds.py`
 - `engine/tests/test_split_leakage.py`
 - `engine/tests/test_splitters.py`
 - `engine/tests/test_tokenization.py`
