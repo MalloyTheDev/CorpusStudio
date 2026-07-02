@@ -120,6 +120,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/cleaners/basic_cleaner.py`
 - `engine/corpus_studio/cli.py`
 - `engine/corpus_studio/evaluation/__init__.py`
+- `engine/corpus_studio/evaluation/benchmark.py`
 - `engine/corpus_studio/evaluation/evaluator.py`
 - `engine/corpus_studio/evaluation/reports.py`
 - `engine/corpus_studio/evaluation/scoring.py`
@@ -160,6 +161,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/pyproject.toml`
 - `engine/tests/test_ai_assist.py`
 - `engine/tests/test_basic_validator.py`
+- `engine/tests/test_benchmark.py`
 - `engine/tests/test_cleaners.py`
 - `engine/tests/test_cli.py`
 - `engine/tests/test_dataset_card.py`
