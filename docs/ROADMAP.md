@@ -208,8 +208,10 @@ Scope (in progress):
 - Run a prompt suite across several models and capture responses side by side
   (engine `arena-run`, `ArenaReport`). Responses are comparison artifacts, not
   trainable dataset rows.
-- Planned: evaluator-only judging/ranking of responses, saved comparison
-  reports, and a desktop Arena surface.
+- Evaluator-only judging (`--judge-model`): a judge scores each candidate and
+  picks a winner, aggregated into per-model win counts / average judge scores;
+  the judge must be an evaluator-role provider (OpenAI/Anthropic allowed).
+- Planned: saved comparison reports and a desktop Arena surface.
 
 Out of scope:
 

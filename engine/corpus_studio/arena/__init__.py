@@ -7,7 +7,9 @@ rows. Judging (an evaluator-only model ranking responses) and saved comparison
 reports build on this foundation in later slices.
 """
 
+from corpus_studio.arena.judge import build_judge_prompt, judge_arena, parse_judgment
 from corpus_studio.arena.models import (
+    ArenaJudgment,
     ArenaModelSummary,
     ArenaPrompt,
     ArenaReport,
@@ -17,11 +19,15 @@ from corpus_studio.arena.models import (
 from corpus_studio.arena.runner import load_prompt_suite, run_arena
 
 __all__ = [
+    "ArenaJudgment",
     "ArenaModelSummary",
     "ArenaPrompt",
     "ArenaReport",
     "ArenaResponse",
     "build_arena_report",
+    "build_judge_prompt",
+    "judge_arena",
     "load_prompt_suite",
+    "parse_judgment",
     "run_arena",
 ]

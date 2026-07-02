@@ -316,6 +316,19 @@ def is_trainable_action(action: str) -> bool:
     return action in TRAINABLE_ACTIONS
 
 
+def authorize_evaluation(policy: ProviderPolicy) -> None:
+    """Raise if the policy may not act as an evaluator/judge (non-trainable).
+
+    Judging (e.g. arena response ranking) is an evaluator activity, so
+    evaluator-only providers like OpenAI/Anthropic are permitted.
+    """
+
+    if not policy.can_evaluate():
+        raise ProviderPolicyError(
+            f"{policy.provider_id} is not permitted to evaluate/judge."
+        )
+
+
 def authorize_action(policy: ProviderPolicy, action: str) -> None:
     """Raise ``ProviderPolicyError`` if ``action`` is not permitted for ``policy``.
 

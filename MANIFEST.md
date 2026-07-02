@@ -134,6 +134,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/ai_assist/__init__.py`
 - `engine/corpus_studio/ai_assist/assistant.py`
 - `engine/corpus_studio/arena/__init__.py`
+- `engine/corpus_studio/arena/judge.py`
 - `engine/corpus_studio/arena/models.py`
 - `engine/corpus_studio/arena/runner.py`
 - `engine/corpus_studio/cleaners/__init__.py`

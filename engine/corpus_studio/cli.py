@@ -9,6 +9,7 @@ import typer
 from pydantic import ValidationError
 
 from corpus_studio.ai_assist.assistant import run_ai_assist
+from corpus_studio.arena.judge import judge_arena
 from corpus_studio.arena.runner import load_prompt_suite, run_arena
 from corpus_studio.gates.runner import (
     run_dataset_gates,
@@ -1064,8 +1065,17 @@ def arena_run(
     output_path: Optional[Path] = typer.Option(None, "--output-path", help="Write report JSON."),
     limit: Optional[int] = typer.Option(None, "--limit", help="Maximum prompts to run."),
     timeout_seconds: int = typer.Option(120, "--timeout-seconds"),
+    judge_model: Optional[str] = typer.Option(None, "--judge-model", help="Evaluator model that ranks responses."),
+    judge_backend: str = typer.Option("ollama", "--judge-backend", help="Judge backend."),
+    judge_base_url: Optional[str] = typer.Option(None, "--judge-base-url", help="Judge provider base URL."),
+    judge_api_key: Optional[str] = typer.Option(None, "--judge-api-key", help="Judge API key."),
 ):
-    """Run a prompt suite across several models and capture responses side by side."""
+    """Run a prompt suite across several models and capture responses side by side.
+
+    With ``--judge-model`` an evaluator model scores the responses and picks a
+    winner. Judging is an evaluator activity, so evaluator-only providers
+    (OpenAI/Anthropic) are permitted as the judge.
+    """
 
     try:
         prompts = load_prompt_suite(input_path)
@@ -1101,6 +1111,32 @@ def arena_run(
         raise typer.Exit(code=1) from exc
 
     report = run_arena(prompts, model_backends, limit=limit, generated_at=_utc_now_iso())
+
+    if judge_model is not None:
+        judge_provider = infer_provider_id(judge_backend, judge_base_url)
+        judge_route = judge_model if judge_provider == "openrouter" else None
+        judge_policy = resolve_policy(
+            judge_provider,
+            model_id=judge_model,
+            route_id=judge_route,
+            overrides=load_overrides(input_path.parent),
+        )
+        try:
+            judge_client = _build_backend(
+                backend=judge_backend,
+                model=judge_model,
+                base_url=judge_base_url,
+                api_key=judge_api_key,
+                timeout_seconds=timeout_seconds,
+            )
+            report = judge_arena(report, judge_client, judge_model, policy=judge_policy)
+        except ProviderPolicyError as exc:
+            typer.echo(f"Provider policy blocked judging: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+
     payload = report.model_dump_json(indent=2)
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -5,10 +5,12 @@ import pytest
 from typer.testing import CliRunner
 
 import corpus_studio.cli as cli
+from corpus_studio.arena.judge import judge_arena, parse_judgment
 from corpus_studio.arena.models import ArenaPrompt, build_arena_report
 from corpus_studio.arena.runner import load_prompt_suite, responses_for_prompt, run_arena
 from corpus_studio.cli import app
 from corpus_studio.model_backends.base import BackendGenerateResponse
+from corpus_studio.providers.policy import ProviderPolicyError, resolve_policy
 
 runner = CliRunner()
 
@@ -110,3 +112,88 @@ def test_cli_arena_run_rejects_empty_suite(tmp_path: Path):
     src.write_text("", encoding="utf-8")
     result = runner.invoke(app, ["arena-run", str(src), "--model", "alpha"])
     assert result.exit_code == 1
+
+
+# --- judging -----------------------------------------------------------------
+
+class JudgeBackend:
+    """Judge that always prefers model 'a' with fixed scores."""
+
+    def __init__(self, text: str | None = None):
+        self._text = text
+
+    def generate(self, request):
+        text = self._text if self._text is not None else json.dumps(
+            {"scores": {"a": 90, "b": 40}, "winner": "a", "rationale": "clearer"}
+        )
+        return BackendGenerateResponse(text=text, model_name="judge")
+
+
+def test_parse_judgment_validates_against_candidates():
+    judgment = parse_judgment(
+        "p1",
+        {"a": "x", "b": "y"},
+        json.dumps({"scores": {"a": 80, "b": 60, "ghost": 99}, "winner": "a", "rationale": "ok"}),
+    )
+    assert judgment.parsed is True
+    assert judgment.winner == "a"
+    assert judgment.scores == {"a": 80.0, "b": 60.0}  # unknown 'ghost' dropped
+
+
+def test_parse_judgment_falls_back_to_top_score_on_bad_winner():
+    judgment = parse_judgment(
+        "p1", {"a": "x", "b": "y"}, json.dumps({"scores": {"a": 30, "b": 70}, "winner": "nope"})
+    )
+    assert judgment.winner == "b"
+
+
+def test_parse_judgment_marks_unparseable():
+    judgment = parse_judgment("p1", {"a": "x"}, "not json at all")
+    assert judgment.parsed is False
+    assert judgment.winner == ""
+
+
+def test_judge_arena_aggregates_wins_and_scores():
+    report = run_arena(PROMPTS, [("a", EchoBackend("a")), ("b", EchoBackend("b"))])
+    judged = judge_arena(report, JudgeBackend(), "judge")
+    assert judged.judge_model == "judge"
+    assert len(judged.judgments) == 2
+    summary = {s.model: s for s in judged.model_summaries}
+    assert summary["a"].win_count == 2  # judge always picks 'a'
+    assert summary["a"].average_judge_score == 90.0
+    assert summary["b"].win_count == 0
+
+
+def test_judge_arena_blocks_non_evaluator_policy():
+    report = run_arena([PROMPTS[0]], [("a", EchoBackend("a"))])
+    # A policy with the evaluator role blocked cannot judge.
+    from corpus_studio.providers.policy import ProviderPolicy, ProviderRole
+
+    policy = ProviderPolicy(provider_id="x", blocked_roles=[ProviderRole.EVALUATOR])
+    with pytest.raises(ProviderPolicyError):
+        judge_arena(report, JudgeBackend(), "judge", policy=policy)
+
+
+def test_evaluator_only_provider_may_judge():
+    # OpenAI is evaluator-only, which is exactly what judging needs.
+    report = run_arena([PROMPTS[0]], [("a", EchoBackend("a"))])
+    judged = judge_arena(report, JudgeBackend(), "gpt-4o", policy=resolve_policy("openai"))
+    assert judged.judgments[0].winner == "a"
+
+
+def test_cli_arena_run_with_judge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    src = tmp_path / "suite.jsonl"
+    _write(src, [{"prompt": "Explain recursion."}])
+
+    def fake_build(**kwargs):
+        return JudgeBackend() if kwargs["model"] == "judge" else EchoBackend(kwargs["model"])
+
+    monkeypatch.setattr(cli, "_build_backend", fake_build)
+    result = runner.invoke(
+        app,
+        ["arena-run", str(src), "--model", "a", "--model", "b", "--judge-model", "judge"],
+    )
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.output)
+    assert report["judge_model"] == "judge"
+    assert report["judgments"][0]["winner"] == "a"
