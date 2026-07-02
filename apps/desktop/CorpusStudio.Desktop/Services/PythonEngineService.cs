@@ -884,6 +884,31 @@ public sealed class PythonEngineService
             ?? throw new InvalidOperationException("The Python engine returned an invalid quality report.");
     }
 
+    public async Task<GateReport> RunDatasetGatesAsync(
+        string projectPath,
+        string schemaId,
+        bool exportScope = false
+    )
+    {
+        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+        if (!File.Exists(examplesPath))
+        {
+            throw new FileNotFoundException("Project examples file was not found.", examplesPath);
+        }
+
+        var output = await RunEngineCommandAsync(
+            "gate-run",
+            examplesPath,
+            schemaId,
+            "--scope",
+            exportScope ? "export" : "dataset",
+            "--project-dir",
+            projectPath
+        );
+        return JsonSerializer.Deserialize<GateReport>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid gate report.");
+    }
+
     public async Task<ValidationReport> ValidateDraftAsync(string draftText, string schemaId)
     {
         var tempPath = WriteDraftToTempJsonl(draftText);

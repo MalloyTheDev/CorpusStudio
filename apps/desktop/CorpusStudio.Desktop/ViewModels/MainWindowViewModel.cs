@@ -17,6 +17,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         "Choose a schema, write examples, validate rows, and export model-ready JSONL.";
     private string _validationSummary = "Create a project to start validation.";
     private string _qualitySummary = "Create or select a project to run quality checks.";
+    private string _gateSummary = "Run gates to check whether this dataset may move forward.";
     private string _qualityHistorySummary = "Quality history appears after quality checks run.";
     private string _qualityTriageSummary = "Synthetic quality issues appear here after quality checks run.";
     private string _splitSummary = "Create or select a project to generate train, validation, and test splits.";
@@ -362,6 +363,56 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _qualitySummary;
         private set => SetField(ref _qualitySummary, value);
+    }
+
+    public string GateSummary
+    {
+        get => _gateSummary;
+        private set => SetField(ref _gateSummary, value);
+    }
+
+    public void SetGateInProgress()
+    {
+        GateSummary = "Running gates...";
+    }
+
+    public void SetGateError(string message)
+    {
+        GateSummary = $"Gates could not run.{Environment.NewLine}{message}";
+    }
+
+    /// <summary>Format a gate report into a readable pass/warn/block summary.</summary>
+    public void ApplyGateReport(GateReport report)
+    {
+        var icon = report.OverallStatus switch
+        {
+            "block" => "⛔", // no-entry
+            "warn" => "⚠",  // warning
+            _ => "✅",       // check
+        };
+        var lines = new List<string>
+        {
+            $"{icon} {report.Scope} gates: {report.OverallStatus.ToUpperInvariant()} "
+            + $"({report.PassCount} pass, {report.WarnCount} warn, {report.BlockCount} block)",
+            string.Empty,
+        };
+
+        foreach (var result in report.Results)
+        {
+            var mark = result.Status switch
+            {
+                "block" => "[BLOCK]",
+                "warn" => "[WARN]",
+                _ => "[PASS]",
+            };
+            lines.Add($"{mark} {result.Name}: {result.Message}");
+            if (result.Status != "pass" && !string.IsNullOrWhiteSpace(result.Repair))
+            {
+                lines.Add($"    fix: {result.Repair}");
+            }
+        }
+
+        GateSummary = string.Join(Environment.NewLine, lines);
     }
 
     public string QualityHistorySummary

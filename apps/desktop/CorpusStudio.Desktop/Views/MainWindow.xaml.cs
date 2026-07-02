@@ -425,6 +425,36 @@ public partial class MainWindow : Window
         await RefreshQualityAsync();
     }
 
+    private async void RunGatesButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetGateError("Create or select a dataset project before running gates.");
+            return;
+        }
+
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Running gates...");
+            ViewModel.SetGateInProgress();
+            var report = await _engineService.RunDatasetGatesAsync(
+                ViewModel.ActiveProjectPath,
+                ViewModel.ActiveSchemaId
+            );
+            ViewModel.ApplyGateReport(report);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetGateError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
+        }
+    }
+
     private void PrepareSyntheticRewriteButton_Click(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.PrepareSyntheticIssueRewrite())
