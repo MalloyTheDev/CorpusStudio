@@ -204,8 +204,10 @@ The desktop Evaluation tab is a thin UI over the CLI MVP:
   tag, failure reason, and score band, plus named per-project failure filters
   saved to `evaluation_failure_filters.json` for repeated review passes
 
-It does not yet provide streaming progress, hosted-provider credential
-management, multi-run failure triage, or multi-model benchmark comparison.
+Multi-model benchmark comparison exists (`benchmark` runs one dataset across
+several models and ranks them), and the Model Arena compares models on ad-hoc
+prompt suites with optional evaluator-only judging. Not yet provided: streaming
+progress, hosted-provider credential management, and multi-run failure triage.
 
 ## UI Screen Basis
 
