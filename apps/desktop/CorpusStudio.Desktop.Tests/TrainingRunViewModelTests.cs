@@ -72,6 +72,36 @@ public sealed class TrainingRunViewModelTests
     }
 
     [Fact]
+    public void BeginTrainingRun_IncrementsRunId()
+    {
+        var vm = new MainWindowViewModel();
+        Assert.NotEqual(vm.BeginTrainingRun(), vm.BeginTrainingRun());
+    }
+
+    [Fact]
+    public void AppendTrainingRunLogBatch_DropsStaleRunId()
+    {
+        var vm = new MainWindowViewModel();
+        var runId = vm.BeginTrainingRun();
+
+        vm.AppendTrainingRunLogBatch(runId, new[] { "current-line" });
+        vm.AppendTrainingRunLogBatch(runId - 1, new[] { "stale-line" });
+
+        Assert.Contains("current-line", vm.TrainingRunLog);
+        Assert.DoesNotContain("stale-line", vm.TrainingRunLog);
+    }
+
+    [Fact]
+    public void AppendTrainingRunLogBatch_AppendsAndCaps()
+    {
+        var vm = new MainWindowViewModel();
+        var runId = vm.BeginTrainingRun();
+        vm.AppendTrainingRunLogBatch(runId, new[] { "a", "b", "c" });
+        Assert.Contains("a", vm.TrainingRunLog);
+        Assert.Contains("c", vm.TrainingRunLog);
+    }
+
+    [Fact]
     public void AppendTrainingRunLog_CapsAtMaxLines()
     {
         var vm = new MainWindowViewModel();

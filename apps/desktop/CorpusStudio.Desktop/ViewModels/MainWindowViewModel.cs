@@ -104,6 +104,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private IReadOnlyList<string> _trainingLaunchArgv = [];
     private string _trainingLaunchWorkingDirectory = string.Empty;
     private readonly List<string> _trainingRunLines = [];
+    private int _trainingRunId;
     private string _trainingRunLog = "Launch training after generating a config; live logs appear here.";
     private string _trainingRunStatus = "Idle";
     private bool _isTrainingRunning;
@@ -931,17 +932,38 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public const int TrainingLogMaxLines = 2000;
 
-    public void BeginTrainingRun()
+    /// <summary>Start a run and return its id; log appends are tagged with this
+    /// id so a prior (cancelled) run's late output cannot contaminate this one.</summary>
+    public int BeginTrainingRun()
     {
         _trainingRunLines.Clear();
         TrainingRunLog = string.Empty;
         TrainingRunStatus = "Running...";
         IsTrainingRunning = true;
+        return ++_trainingRunId;
     }
 
     public void AppendTrainingRunLog(string line)
     {
         _trainingRunLines.Add(line);
+        TrimAndPublishTrainingLog();
+    }
+
+    /// <summary>Append a batch of streamed lines for a specific run. Lines tagged
+    /// with a stale run id (from a cancelled run) are dropped.</summary>
+    public void AppendTrainingRunLogBatch(int runId, IReadOnlyList<string> lines)
+    {
+        if (runId != _trainingRunId || lines.Count == 0)
+        {
+            return;
+        }
+
+        _trainingRunLines.AddRange(lines);
+        TrimAndPublishTrainingLog();
+    }
+
+    private void TrimAndPublishTrainingLog()
+    {
         if (_trainingRunLines.Count > TrainingLogMaxLines)
         {
             _trainingRunLines.RemoveRange(0, _trainingRunLines.Count - TrainingLogMaxLines);
