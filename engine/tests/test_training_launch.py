@@ -23,6 +23,26 @@ def test_axolotl_command_and_resume_flag():
     assert "axolotl" in plan.dependencies
 
 
+def test_argv_forms_are_shell_free():
+    plan = build_launch_plan("axolotl_yaml", "out/config.yaml", resume_checkpoint="out/checkpoint-9")
+    assert plan.argv == ["accelerate", "launch", "-m", "axolotl.cli.train", "out/config.yaml"]
+    assert plan.resume_argv == [
+        "accelerate",
+        "launch",
+        "-m",
+        "axolotl.cli.train",
+        "out/config.yaml",
+        "--resume_from_checkpoint",
+        "out/checkpoint-9",
+    ]
+
+
+def test_python_target_argv():
+    plan = build_launch_plan("unsloth_script", "out/train.py")
+    assert plan.argv == ["python", "out/train.py"]
+    assert plan.resume_argv == plan.argv  # config-driven resume
+
+
 def test_axolotl_resume_with_checkpoint():
     plan = build_launch_plan("axolotl_yaml", "c.yaml", resume_checkpoint="out/checkpoint-200")
     assert '--resume_from_checkpoint="out/checkpoint-200"' in plan.resume_command

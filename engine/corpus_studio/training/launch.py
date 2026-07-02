@@ -21,6 +21,9 @@ class LaunchPlan(BaseModel):
     command: str
     resume_command: str
     resume_supported: bool
+    # Structured command so a launcher can spawn without shell parsing.
+    argv: list[str] = Field(default_factory=list)
+    resume_argv: list[str] = Field(default_factory=list)
     dependencies: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
@@ -35,27 +38,37 @@ _REVIEW_NOTE = (
 _TARGET_LAUNCH: dict[str, dict] = {
     "axolotl_yaml": {
         "template": 'accelerate launch -m axolotl.cli.train "{config}"',
+        "argv_prefix": ["accelerate", "launch", "-m", "axolotl.cli.train"],
         "resume_flag": '--resume_from_checkpoint="{checkpoint}"',
+        "resume_argv_flag": ["--resume_from_checkpoint"],
         "dependencies": ["axolotl", "accelerate"],
     },
     "llama_factory": {
         "template": 'llamafactory-cli train "{config}"',
+        "argv_prefix": ["llamafactory-cli", "train"],
         "resume_flag": None,
+        "resume_argv_flag": None,
         "dependencies": ["llama-factory"],
     },
     "trl_config": {
         "template": 'python "{config}"',
+        "argv_prefix": ["python"],
         "resume_flag": None,
+        "resume_argv_flag": None,
         "dependencies": ["trl", "transformers", "torch"],
     },
     "unsloth_script": {
         "template": 'python "{config}"',
+        "argv_prefix": ["python"],
         "resume_flag": None,
+        "resume_argv_flag": None,
         "dependencies": ["unsloth", "trl", "torch"],
     },
     "huggingface_trainer": {
         "template": 'python "{config}"',
+        "argv_prefix": ["python"],
         "resume_flag": None,
+        "resume_argv_flag": None,
         "dependencies": ["transformers", "torch"],
     },
 }
@@ -76,15 +89,18 @@ def build_launch_plan(
         raise ValueError(f"Unknown training target '{target}'. Use one of: {supported}.")
 
     command = meta["template"].format(config=config_path)
+    argv = [*meta["argv_prefix"], config_path]
     notes = [_REVIEW_NOTE, f"Requires: {', '.join(meta['dependencies'])}."]
 
     resume_flag = meta["resume_flag"]
     if resume_flag is not None:
         checkpoint = resume_checkpoint or RESUME_CHECKPOINT_PLACEHOLDER
         resume_command = f"{command} {resume_flag.format(checkpoint=checkpoint)}"
+        resume_argv = [*argv, *meta["resume_argv_flag"], checkpoint]
         resume_supported = True
     else:
         resume_command = command
+        resume_argv = list(argv)
         resume_supported = False
         notes.append(
             "Resume is config-driven for this target; set the checkpoint path in the config."
@@ -95,6 +111,8 @@ def build_launch_plan(
         command=command,
         resume_command=resume_command,
         resume_supported=resume_supported,
+        argv=argv,
+        resume_argv=resume_argv,
         dependencies=list(meta["dependencies"]),
         notes=notes,
     )

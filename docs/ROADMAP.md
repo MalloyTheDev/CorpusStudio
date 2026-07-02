@@ -161,10 +161,10 @@ the log viewer would require live process streaming (see
 Scope:
 
 - local command preview (done, guided)
-- training log viewer
+- training log viewer (done: in-app launch streams live stdout/stderr)
 - checkpoint tracking (checkpoint listing done; live tracking planned)
 - resume training (resume command done; in-app resume planned)
-- stop/cancel support
+- stop/cancel support (done: Stop kills the process tree)
 - before/after eval comparison
 
 Out of scope:

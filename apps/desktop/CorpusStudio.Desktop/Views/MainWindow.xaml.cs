@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Globalization;
+using System.Threading;
 using System.Windows.Input;
 using Microsoft.Win32;
 
@@ -16,6 +17,8 @@ public partial class MainWindow : Window
 
     private readonly PythonEngineService _engineService = new();
     private readonly List<IReadOnlyDictionary<string, string>> _aiAssistBulkUndoStack = [];
+    private readonly TrainingProcessRunner _trainingRunner = new();
+    private CancellationTokenSource? _trainingRunCts;
 
     public MainWindow()
     {
@@ -1455,6 +1458,81 @@ public partial class MainWindow : Window
     private void CompareEvaluationReportsButton_Click(object sender, RoutedEventArgs e)
     {
         ViewModel.CompareSelectedEvaluationReports();
+    }
+
+    private async void LaunchTrainingButton_Click(object sender, RoutedEventArgs e)
+    {
+        var argv = ViewModel.TrainingLaunchArgv;
+        if (argv.Count == 0)
+        {
+            MessageBox.Show(
+                this,
+                "Generate a training config first — the launch command is produced with it.",
+                "Corpus Studio",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information
+            );
+            return;
+        }
+
+        if (ViewModel.IsTrainingRunning)
+        {
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            this,
+            "This runs the trainer on your machine (it can use significant CPU/GPU for a long "
+                + "time) with your installed tools. Corpus Studio only launches the command below "
+                + "and streams its output.\n\n"
+                + ViewModel.TrainingLaunchCommand
+                + "\n\nRun it now?",
+            "Launch training",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning
+        );
+        if (confirm != MessageBoxResult.OK)
+        {
+            return;
+        }
+
+        var workingDirectory = ViewModel.TrainingLaunchWorkingDirectory;
+        var cts = new CancellationTokenSource();
+        _trainingRunCts = cts;
+        ViewModel.BeginTrainingRun();
+
+        try
+        {
+            var exitCode = await _trainingRunner.RunAsync(
+                argv,
+                workingDirectory,
+                line => Dispatcher.BeginInvoke(() => ViewModel.AppendTrainingRunLog(line)),
+                cts.Token
+            );
+            ViewModel.CompleteTrainingRun(exitCode);
+        }
+        catch (OperationCanceledException)
+        {
+            ViewModel.SetTrainingRunCancelled();
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetTrainingRunError(ex.Message);
+        }
+        finally
+        {
+            if (ReferenceEquals(_trainingRunCts, cts))
+            {
+                _trainingRunCts = null;
+            }
+
+            cts.Dispose();
+        }
+    }
+
+    private void StopTrainingButton_Click(object sender, RoutedEventArgs e)
+    {
+        _trainingRunCts?.Cancel();
     }
 
     private void CopyLaunchCommandButton_Click(object sender, RoutedEventArgs e)
