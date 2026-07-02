@@ -5,6 +5,7 @@ import pytest
 from typer.testing import CliRunner
 
 from corpus_studio.cli import app
+from corpus_studio.training import run_registry
 from corpus_studio.training.run_registry import (
     INTERRUPTED,
     RUNNING,
@@ -14,6 +15,7 @@ from corpus_studio.training.run_registry import (
     load_run_record,
     mint_run_id,
     reconcile_running_records,
+    record_path,
     save_run_record,
     validate_transition,
 )
@@ -116,6 +118,32 @@ def test_cli_training_run_list_and_update(tmp_path: Path):
     payload = json.loads(updated.output)
     assert payload["status"] == "succeeded"
     assert payload["exit_code"] == 0
+
+
+def test_save_rejects_invalid_run_id(tmp_path: Path):
+    # A run_id with a path separator/space would slug-collide with others.
+    with pytest.raises(ValueError):
+        save_run_record(tmp_path, _record("20260702T180000-a b"))
+    with pytest.raises(ValueError):
+        save_run_record(tmp_path, _record("bad/slashes"))
+
+
+def test_cli_list_reconciles_dead_running(tmp_path: Path, monkeypatch):
+    save_run_record(tmp_path, _record("20260702T180000-a", status="running", pid=4242))
+    monkeypatch.setattr(run_registry, "pid_alive", lambda pid: False)
+
+    result = runner.invoke(app, ["training-run-list", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["runs"][0]["status"] == "interrupted"
+    # Reconciliation is persisted, not just displayed.
+    assert load_run_record(record_path(tmp_path, "20260702T180000-a")).status == "interrupted"
+
+
+def test_cli_list_keeps_alive_running(tmp_path: Path, monkeypatch):
+    save_run_record(tmp_path, _record("20260702T180000-a", status="running", pid=1))
+    monkeypatch.setattr(run_registry, "pid_alive", lambda pid: True)
+    result = runner.invoke(app, ["training-run-list", str(tmp_path)])
+    assert json.loads(result.output)["runs"][0]["status"] == "running"
 
 
 def test_cli_update_rejects_illegal_transition(tmp_path: Path):

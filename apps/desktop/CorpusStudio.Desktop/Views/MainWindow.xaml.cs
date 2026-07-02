@@ -1712,7 +1712,7 @@ public partial class MainWindow : Window
                 workingDirectory,
                 _trainingLogQueue.Enqueue,
                 cts.Token,
-                onStarted: pid => RecordRunPid(runProjectPath, runRecord, pid)
+                onStarted: (pid, startedAt) => RecordRunPid(runProjectPath, runRecord, pid, startedAt)
             );
 
             FlushTrainingLogQueue(runId);
@@ -1756,7 +1756,7 @@ public partial class MainWindow : Window
             await RefreshTrainingCheckpointsAsync();
 
             // Finalize the durable record with fresh checkpoints + terminal status.
-            FinalizeRunRecord(runProjectPath, runRecord, terminalStatus, terminalExitCode, terminalNote);
+            await FinalizeRunRecord(runProjectPath, runRecord, terminalStatus, terminalExitCode, terminalNote);
         }
     }
 
@@ -1785,7 +1785,7 @@ public partial class MainWindow : Window
         return record;
     }
 
-    private void RecordRunPid(string? projectPath, TrainingRunRecord? record, int pid)
+    private void RecordRunPid(string? projectPath, TrainingRunRecord? record, int pid, DateTime? startedAt)
     {
         if (string.IsNullOrWhiteSpace(projectPath) || record is null)
         {
@@ -1793,11 +1793,12 @@ public partial class MainWindow : Window
         }
 
         record.Pid = pid;
+        record.ProcessStartedAt = startedAt?.ToString("o", System.Globalization.CultureInfo.InvariantCulture);
         record.UpdatedAt = PythonEngineService.UtcNowIso();
         TrySaveRunRecord(projectPath, record);
     }
 
-    private void FinalizeRunRecord(
+    private async Task FinalizeRunRecord(
         string? projectPath,
         TrainingRunRecord? record,
         string status,
@@ -1810,9 +1811,27 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Enumerate checkpoints against THIS run's captured output dir/config, not
+        // the live VM (which the user may have changed by regenerating a config).
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(record.OutputDir))
+            {
+                var checkpoints = await _engineService.GetTrainingCheckpointsAsync(
+                    record.OutputDir,
+                    string.IsNullOrWhiteSpace(record.Target) ? "axolotl_yaml" : record.Target,
+                    record.ConfigPath
+                );
+                record.Checkpoints = checkpoints.Checkpoints.ToList();
+            }
+        }
+        catch
+        {
+            // Leave checkpoints as-is if enumeration fails.
+        }
+
         record.Status = status;
         record.ExitCode = exitCode;
-        record.Checkpoints = ViewModel.TrainingCheckpointNames.ToList();
         record.UpdatedAt = PythonEngineService.UtcNowIso();
         if (!string.IsNullOrWhiteSpace(note))
         {

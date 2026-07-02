@@ -739,12 +739,28 @@ def training_config(
 def training_run_list(
     project_dir: Path,
 ):
-    """List durable training run records for a project (newest first)."""
+    """List durable training run records for a project (newest first).
 
-    from corpus_studio.training.run_registry import list_run_records
+    Reconciles any ``running`` record whose process is gone to ``interrupted``
+    (best-effort pid liveness) and persists the change, so the headless view
+    honors the same 'reconcile on load' invariant the desktop enforces.
+    """
 
-    records = [record.model_dump() for record in list_run_records(project_dir)]
-    typer.echo(json.dumps({"runs": records}, indent=2))
+    from corpus_studio.training.run_registry import (
+        list_run_records,
+        pid_alive,
+        reconcile_running_records,
+        save_run_record,
+    )
+
+    records = list_run_records(project_dir)
+    prior = {record.run_id: record.status for record in records}
+    reconciled = reconcile_running_records(records, pid_alive, _utc_now_iso())
+    for record in reconciled:
+        if prior.get(record.run_id) != record.status:
+            save_run_record(project_dir, record)
+
+    typer.echo(json.dumps({"runs": [record.model_dump() for record in reconciled]}, indent=2))
 
 
 @app.command("training-run-update")

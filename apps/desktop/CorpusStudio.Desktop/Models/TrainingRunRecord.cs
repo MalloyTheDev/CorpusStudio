@@ -38,6 +38,11 @@ public sealed class TrainingRunRecord
     [JsonPropertyName("pid")]
     public int? Pid { get; set; }
 
+    /// <summary>Process start time (round-trip string) so a recycled pid is not
+    /// mistaken for a live run.</summary>
+    [JsonPropertyName("process_started_at")]
+    public string? ProcessStartedAt { get; set; }
+
     [JsonPropertyName("exit_code")]
     public int? ExitCode { get; set; }
 

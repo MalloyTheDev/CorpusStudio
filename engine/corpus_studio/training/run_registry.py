@@ -44,6 +44,8 @@ class TrainingRunRecord(BaseModel):
     output_dir: str = ""
     argv: list[str] = Field(default_factory=list)
     pid: int | None = None
+    # Process identity so a recycled pid is not mistaken for a live run.
+    process_started_at: str | None = None
     exit_code: int | None = None
     checkpoints: list[str] = Field(default_factory=list)
     before_eval_path: str | None = None
@@ -65,8 +67,32 @@ class TrainingRunRecord(BaseModel):
         return self.status == RUNNING
 
 
+_VALID_RUN_ID = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
 def _slug(run_id: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", run_id).strip("_") or "run"
+
+
+def pid_alive(pid: int | None) -> bool:
+    """Best-effort process liveness. POSIX probes via signal 0; on Windows
+    (where ``os.kill(pid, 0)`` would terminate the process) it conservatively
+    returns True — the desktop reconciles Windows runs via the OS process table.
+    """
+
+    if pid is None:
+        return False
+    if os.name != "posix":
+        return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, owned by another user
+    except OSError:
+        return True  # unknown; do not flip on ambiguity
 
 
 def mint_run_id(timestamp_compact: str, suffix: str) -> str:
@@ -84,7 +110,16 @@ def record_path(project_dir: Path | str, run_id: str) -> Path:
 
 
 def save_run_record(project_dir: Path | str, record: TrainingRunRecord) -> Path:
-    """Atomically write a run record (temp + replace)."""
+    """Atomically write a run record (temp + replace).
+
+    ``run_id`` must match ``[A-Za-z0-9._-]+`` so the slugged filename is injective
+    (distinct ids can never collapse to the same file and silently overwrite).
+    """
+
+    if not _VALID_RUN_ID.match(record.run_id):
+        raise ValueError(
+            f"Invalid run_id '{record.run_id}': must match [A-Za-z0-9._-]+."
+        )
 
     directory = registry_dir(project_dir)
     directory.mkdir(parents=True, exist_ok=True)

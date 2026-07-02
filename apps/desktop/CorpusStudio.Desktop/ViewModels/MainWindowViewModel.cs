@@ -1251,7 +1251,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             lines.Add($"[{record.Status}] {record.RunId} — {record.BaseModel} ({record.Target})");
             var bits = new List<string>
             {
-                $"{record.Checkpoints.Count} checkpoint(s)",
+                $"{record.Checkpoints?.Count ?? 0} checkpoint(s)",
                 string.IsNullOrWhiteSpace(record.BeforeEvalPath) ? "before-eval –" : "before-eval ✓",
                 string.IsNullOrWhiteSpace(record.AfterEvalPath) ? "after-eval –" : "after-eval ✓",
             };

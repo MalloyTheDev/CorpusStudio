@@ -42,8 +42,9 @@ public sealed class TrainingRunRegistryTests
     [Fact]
     public void Reconcile_PidlessRunningIsInterrupted()
     {
+        // Liveness is decided by the injected check; a pidless run resolves to dead.
         var records = new[] { Record("r1", "running", pid: null) };
-        PythonEngineService.ReconcileRunningRecords(records, _ => true, "t2");
+        PythonEngineService.ReconcileRunningRecords(records, r => r.Pid is not null, "t2");
         Assert.Equal("interrupted", records[0].Status);
     }
 
@@ -80,6 +81,24 @@ public sealed class TrainingRunRegistryTests
         Assert.Contains("before-eval ✓", vm.TrainingRunHistorySummary);
         Assert.Contains("after-eval –", vm.TrainingRunHistorySummary);
         Assert.Contains("exit 0", vm.TrainingRunHistorySummary);
+    }
+
+    [Fact]
+    public void SaveTrainingRunRecord_RejectsUnsafeRunId()
+    {
+        var service = new PythonEngineService();
+        var record = Record("bad id/with slash", "running");
+        Assert.Throws<System.ArgumentException>(() => service.SaveTrainingRunRecord("proj", record));
+    }
+
+    [Fact]
+    public void ApplyTrainingRunHistory_NullCheckpoints_DoesNotThrow()
+    {
+        var vm = new MainWindowViewModel();
+        var record = Record("20260702T183000-x", "succeeded");
+        record.Checkpoints = null!; // simulates "checkpoints": null in JSON
+        vm.ApplyTrainingRunHistory([record]);
+        Assert.Contains("0 checkpoint(s)", vm.TrainingRunHistorySummary);
     }
 
     [Fact]

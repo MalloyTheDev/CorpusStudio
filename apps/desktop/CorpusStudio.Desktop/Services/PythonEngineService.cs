@@ -975,23 +975,29 @@ public sealed class PythonEngineService
         return DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
     }
 
-    private static string TrainingRunSlug(string runId)
-    {
-        var slug = System.Text.RegularExpressions.Regex.Replace(runId, "[^A-Za-z0-9._-]+", "_").Trim('_');
-        return string.IsNullOrEmpty(slug) ? "run" : slug;
-    }
+    private static readonly System.Text.RegularExpressions.Regex ValidRunId =
+        new("^[A-Za-z0-9._-]+$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     public void SaveTrainingRunRecord(string projectPath, TrainingRunRecord record)
     {
+        // run_id must be filename-safe so distinct ids can never collapse to the
+        // same file and silently overwrite each other.
+        if (string.IsNullOrEmpty(record.RunId) || !ValidRunId.IsMatch(record.RunId))
+        {
+            throw new ArgumentException($"Invalid run_id '{record.RunId}'.", nameof(record));
+        }
+
         var directory = Path.Combine(projectPath, "training_runs");
         Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, TrainingRunSlug(record.RunId) + ".json");
+        var path = Path.Combine(directory, record.RunId + ".json");
         WriteAllTextAtomic(path, JsonSerializer.Serialize(record, JsonOptions) + "\n", encoding: Utf8NoBom);
     }
 
     /// <summary>Load run records (newest first). A run left in `running` whose
-    /// process is gone is reconciled to `interrupted` and persisted, so a
-    /// force-closed/crashed run does not stay `running` forever.</summary>
+    /// process is gone is reconciled to `interrupted` and persisted (to the file
+    /// it was loaded from), so a force-closed/crashed run does not stay `running`
+    /// forever. Duplicate-run_id files are tolerated (first wins), so one stray
+    /// copy cannot hide the whole history.</summary>
     public IReadOnlyList<TrainingRunRecord> LoadTrainingRunRecords(string projectPath)
     {
         var directory = Path.Combine(projectPath, "training_runs");
@@ -1000,7 +1006,7 @@ public sealed class PythonEngineService
             return [];
         }
 
-        var records = new List<TrainingRunRecord>();
+        var loaded = new List<(string Path, TrainingRunRecord Record)>();
         foreach (var file in Directory.EnumerateFiles(directory, "*.json"))
         {
             try
@@ -1008,7 +1014,7 @@ public sealed class PythonEngineService
                 var record = JsonSerializer.Deserialize<TrainingRunRecord>(File.ReadAllText(file), JsonOptions);
                 if (record is not null)
                 {
-                    records.Add(record);
+                    loaded.Add((file, record));
                 }
             }
             catch
@@ -1017,15 +1023,23 @@ public sealed class PythonEngineService
             }
         }
 
-        var priorStatuses = records.ToDictionary(r => r.RunId, r => r.Status, StringComparer.Ordinal);
-        ReconcileRunningRecords(records, IsProcessAlive, UtcNowIso());
-        foreach (var record in records)
+        // Tolerate duplicate run_ids (e.g. a hand-copied file): keep the first.
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var unique = loaded.Where(item => seen.Add(item.Record.RunId)).ToList();
+
+        var now = UtcNowIso();
+        foreach (var (path, record) in unique)
         {
-            if (priorStatuses.TryGetValue(record.RunId, out var prior) && prior != record.Status)
+            if (record.Status == "running" && !IsRecordProcessAlive(record))
             {
+                record.Status = "interrupted";
+                record.UpdatedAt = now;
+                record.Notes = (string.IsNullOrEmpty(record.Notes) ? string.Empty : record.Notes + " ")
+                    + "reconciled: process not alive on load";
                 try
                 {
-                    SaveTrainingRunRecord(projectPath, record);
+                    // Persist to the file it was loaded from, not a recomputed name.
+                    WriteAllTextAtomic(path, JsonSerializer.Serialize(record, JsonOptions) + "\n", encoding: Utf8NoBom);
                 }
                 catch
                 {
@@ -1034,21 +1048,22 @@ public sealed class PythonEngineService
             }
         }
 
+        var records = unique.Select(item => item.Record).ToList();
         records.Sort((a, b) => string.CompareOrdinal(b.RunId, a.RunId));
         return records;
     }
 
-    /// <summary>Flip any `running` record whose pid is not alive to `interrupted`.
+    /// <summary>Flip any `running` record that is not alive to `interrupted`.
     /// Pure over an injected liveness check so it is unit-testable.</summary>
     public static IReadOnlyList<TrainingRunRecord> ReconcileRunningRecords(
         IReadOnlyList<TrainingRunRecord> records,
-        Func<int, bool> isAlive,
+        Func<TrainingRunRecord, bool> isAlive,
         string updatedAt
     )
     {
         foreach (var record in records)
         {
-            if (record.Status == "running" && (record.Pid is not int pid || !isAlive(pid)))
+            if (record.Status == "running" && !isAlive(record))
             {
                 record.Status = "interrupted";
                 record.UpdatedAt = updatedAt;
@@ -1060,12 +1075,44 @@ public sealed class PythonEngineService
         return records;
     }
 
-    private static bool IsProcessAlive(int pid)
+    /// <summary>Liveness by pid AND process identity: a recycled pid whose start
+    /// time differs from the recorded one is treated as dead.</summary>
+    private static bool IsRecordProcessAlive(TrainingRunRecord record)
     {
+        if (record.Pid is not int pid)
+        {
+            return false;
+        }
+
         try
         {
             using var process = Process.GetProcessById(pid);
-            return !process.HasExited;
+            if (process.HasExited)
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrEmpty(record.ProcessStartedAt)
+                && DateTime.TryParse(
+                    record.ProcessStartedAt,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind,
+                    out var recordedStart))
+            {
+                try
+                {
+                    if (Math.Abs((process.StartTime - recordedStart).TotalSeconds) > 2)
+                    {
+                        return false; // pid was recycled by an unrelated process
+                    }
+                }
+                catch
+                {
+                    // Start time unreadable -> fall back to presence only.
+                }
+            }
+
+            return true;
         }
         catch
         {

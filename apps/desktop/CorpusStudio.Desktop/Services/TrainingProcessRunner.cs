@@ -32,7 +32,7 @@ public sealed class TrainingProcessRunner
         string? workingDirectory,
         Action<string> onOutputLine,
         CancellationToken cancellationToken,
-        Action<int>? onStarted = null
+        Action<int, DateTime?>? onStarted = null
     )
     {
         if (argv is null || argv.Count == 0)
@@ -112,7 +112,17 @@ public sealed class TrainingProcessRunner
         {
             try
             {
-                onStarted?.Invoke(process.Id);
+                DateTime? startedAt = null;
+                try
+                {
+                    startedAt = process.StartTime;
+                }
+                catch
+                {
+                    // StartTime can be inaccessible; pid-only liveness is the fallback.
+                }
+
+                onStarted?.Invoke(process.Id, startedAt);
             }
             catch
             {
