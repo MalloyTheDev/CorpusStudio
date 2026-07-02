@@ -41,6 +41,9 @@ DATASET_VERSION_REGISTRY_DIRNAME = "dataset_versions"
 FINGERPRINT_ALGO = "sha256-ordered-exact-v1"
 ROW_SIGNATURE_EXACT = "exact"
 
+# Per-version ordered row-id manifest sidecar: dataset_versions/<version_id>.rows
+ROW_MANIFEST_SUFFIX = ".rows"
+
 # current_integrity values — computed live (record vs disk), never stored.
 MATCHES = "matches"
 DRIFTED = "drifted"
@@ -76,6 +79,11 @@ class DatasetVersionRecord(BaseModel):
     # Dataset-scope gate report inside the project's gate_reports/.
     gate_report_path: str | None = None
     notes: str = ""
+    # v1.0.2 row store: whether this version stored its row bodies (=> diffable).
+    # Tolerant defaults so pre-v1.0.2 records load as "no rows stored".
+    rows_stored: bool = False
+    stored_row_count: int = 0
+    row_manifest_algo: str | None = None
 
 
 def _slug(version_id: str) -> str:
@@ -210,3 +218,108 @@ def list_version_records(project_dir: Path | str) -> list[DatasetVersionRecord]:
         records.append(record)
     records.sort(key=lambda record: record.version_id, reverse=True)
     return records
+
+
+# --- v1.0.2: row-id manifest sidecar + single-pass capture -------------------
+
+
+def manifest_path(project_dir: Path | str, version_id: str) -> Path:
+    return registry_dir(project_dir) / f"{_slug(version_id)}{ROW_MANIFEST_SUFFIX}"
+
+
+def save_row_manifest(project_dir: Path | str, version_id: str, row_ids: list[str]) -> Path:
+    """Atomically write the ordered row-id manifest (one id per line)."""
+
+    directory = registry_dir(project_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{_slug(version_id)}{ROW_MANIFEST_SUFFIX}"
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text("".join(row_id + "\n" for row_id in row_ids), encoding="utf-8")
+    os.replace(tmp, path)
+    return path
+
+
+def load_row_manifest(project_dir: Path | str, version_id: str) -> list[str] | None:
+    """The ordered row-ids for a version, or ``None`` if no manifest exists (a
+    pre-v1.0.2 record, or one captured with ``--no-store-rows``). An existing but
+    empty manifest returns ``[]`` (captured with storage, 0 rows)."""
+
+    path = manifest_path(project_dir, version_id)
+    if not path.exists():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+class DatasetCapture(BaseModel):
+    """Result of one streaming capture pass. ``content_fingerprint`` is ``None``
+    (and the lists empty) when the dataset was missing/unreadable."""
+
+    content_fingerprint: str | None = None
+    row_count: int = 0
+    row_ids: list[str] = Field(default_factory=list)
+    new_rows_stored: int = 0
+
+
+def capture_dataset(
+    examples_path: Path | str, project_dir: Path | str, *, store_rows: bool
+) -> DatasetCapture:
+    """Single streaming pass over ``examples.jsonl`` producing the identity + rows.
+
+    In ONE read it (1) feeds the content fingerprint digest with the exact,
+    ordered per-row signatures — byte-for-byte identical to
+    :func:`fingerprint_dataset` — (2) computes each row_id, and (3) when
+    ``store_rows`` appends any not-yet-stored row to the shared content-addressed
+    store. Because everything derives from the same iteration, the returned
+    fingerprint and ordered ``row_ids`` can never desync, even against a dataset
+    being written concurrently.
+
+    The caller (the CLI, which mints the version_id) writes the manifest via
+    :func:`save_row_manifest` and the record. Returns an empty capture (``None``
+    fingerprint) on a missing/unreadable dataset — never raises.
+    """
+
+    from corpus_studio.versions.row_store import load_row_id_set, row_store_path, store_line
+
+    path = Path(examples_path)
+    if not path.exists():
+        return DatasetCapture()
+
+    digest = hashlib.sha256()
+    row_ids: list[str] = []
+    new_stored = 0
+    existing: set[str] = load_row_id_set(project_dir) if store_rows else set()
+    store_handle = None
+    count = 0
+    try:
+        for row in read_jsonl(path):
+            signature = exact_row_signature(row)
+            if count:
+                digest.update(b"\n")
+            digest.update(signature.encode("utf-8"))
+            rid = hashlib.sha256(signature.encode("utf-8")).hexdigest()
+            row_ids.append(rid)
+            count += 1
+            if store_rows and rid not in existing:
+                existing.add(rid)
+                if store_handle is None:
+                    store_target = row_store_path(project_dir)
+                    store_target.parent.mkdir(parents=True, exist_ok=True)
+                    store_handle = store_target.open("a", encoding="utf-8")
+                store_handle.write(store_line(rid, row))
+                new_stored += 1
+    except (OSError, ValueError, RecursionError):
+        return DatasetCapture()
+    finally:
+        if store_handle is not None:
+            store_handle.close()
+
+    return DatasetCapture(
+        content_fingerprint=digest.hexdigest(),
+        row_count=count,
+        row_ids=row_ids,
+        new_rows_stored=new_stored,
+    )
