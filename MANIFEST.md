@@ -66,6 +66,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/CorpusStudio.Desktop.Tests.csproj`
 - `apps/desktop/CorpusStudio.Desktop.Tests/EvaluationFailureFilterServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ImportCommitServiceTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/ProjectSearchViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ReviewedFixServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TempProjectDirectory.cs`
 - `apps/desktop/CorpusStudio.Desktop.sln`
