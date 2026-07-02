@@ -107,6 +107,54 @@ def test_cli_training_config_includes_launch(tmp_path: Path):
     assert str(out) in launch["command"]
 
 
+def test_cli_training_config_emits_output_dir_and_config_field(tmp_path: Path):
+    dataset = tmp_path / "train.jsonl"
+    _write(dataset, [{"instruction": "x", "output": "y"}])
+    out = tmp_path / "training" / "config.yaml"
+    result = runner.invoke(
+        app,
+        [
+            "training-config",
+            str(dataset),
+            "instruction",
+            "--output-path",
+            str(out),
+            "--base-model",
+            "some-model",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    # Relative default "output" resolves against the config's directory.
+    assert payload["training_output_dir"] == str(out.parent / "output")
+    assert payload["config"]["output_dir"] == "output"
+    assert "output_dir" in payload["config_text"]
+
+
+def test_cli_training_checkpoints_emits_resume_argv(tmp_path: Path):
+    output_dir = tmp_path / "run"
+    (output_dir / "checkpoint-7").mkdir(parents=True)
+    config = tmp_path / "config.yaml"
+    config.write_text("x: 1\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "training-checkpoints",
+            str(output_dir),
+            "--target",
+            "axolotl",
+            "--config-path",
+            str(config),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["resume_supported"] is True
+    assert payload["resume_argv"][-2] == "--resume_from_checkpoint"
+    assert payload["resume_argv"][-1].endswith("checkpoint-7")
+
+
 def test_cli_training_checkpoints_lists_and_builds_resume(tmp_path: Path):
     output_dir = tmp_path / "run"
     (output_dir / "checkpoint-10").mkdir(parents=True)

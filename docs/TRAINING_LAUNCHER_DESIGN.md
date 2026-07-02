@@ -50,7 +50,12 @@ That is net-new infrastructure and where the risk concentrates:
 - **v0.5.1 — in-app launch + live log viewer + stop.** The streaming runner and
   job state machine. Engine adds an `argv` form of the command so the desktop
   spawns without shell parsing.
-- **v0.5.2 — live checkpoint tracking + in-app resume.**
+- **v0.5.2 — live checkpoint tracking + in-app resume (done).** Configs carry
+  `output_dir`; the desktop refreshes the checkpoint list via the
+  `training-checkpoints` CLI (slow poll during a run + on end/stop/error +
+  manual), and "Resume latest" relaunches through the same confirmation for
+  targets with a CLI resume flag. The directory is the persistence — no state
+  file, latest-only resume.
 - **v0.5.3 — before/after eval comparison** (reuses the multi-model benchmark).
 
 ## Risks and mitigations

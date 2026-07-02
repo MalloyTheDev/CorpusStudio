@@ -594,6 +594,11 @@ def training_config(
     micro_batch_size: int = typer.Option(1, "--micro-batch-size"),
     gradient_accumulation_steps: int = typer.Option(8, "--gradient-accumulation-steps"),
     learning_rate: float = typer.Option(0.0002, "--learning-rate"),
+    training_output_dir: str = typer.Option(
+        "output",
+        "--training-output-dir",
+        help="Where the trainer writes checkpoints (relative paths resolve against the config's directory).",
+    ),
 ):
     """Generate an inspectable Training Lab config without launching training."""
 
@@ -612,6 +617,7 @@ def training_config(
             eval_dataset_path=str(eval_dataset_path) if eval_dataset_path is not None else None,
             dataset_format=dataset_format or schema,
             target=normalized_target,
+            output_dir=training_output_dir,
             sequence_len=sequence_len,
             lora_r=lora_r,
             lora_alpha=lora_alpha,
@@ -629,6 +635,11 @@ def training_config(
 
     token_budget = build_training_token_budget(list(read_jsonl(input_path)), sequence_len)
     launch_plan = build_launch_plan(normalized_target, str(output_path))
+
+    # Relative output dirs resolve against the config's directory (the launch CWD).
+    resolved_output_dir = Path(training_output_dir)
+    if not resolved_output_dir.is_absolute():
+        resolved_output_dir = output_path.parent / resolved_output_dir
 
     compatibility_warnings = training_compatibility_warnings(
         schema_id=schema,
@@ -659,6 +670,7 @@ def training_config(
                 "config_text": config_text,
                 "token_budget": token_budget.model_dump(),
                 "launch": launch_plan.model_dump(),
+                "training_output_dir": str(resolved_output_dir),
                 "warnings": warnings,
                 "compatibility_warnings": compatibility_warnings,
             },
@@ -682,6 +694,8 @@ def training_checkpoints(
     latest = latest_checkpoint(output_dir)
 
     resume_command = None
+    resume_argv: list[str] | None = None
+    resume_supported = None
     if config_path is not None:
         plan = build_launch_plan(
             normalized_target,
@@ -689,6 +703,8 @@ def training_checkpoints(
             resume_checkpoint=str(output_dir / latest) if latest else None,
         )
         resume_command = plan.resume_command
+        resume_argv = plan.resume_argv
+        resume_supported = plan.resume_supported
 
     typer.echo(
         json.dumps(
@@ -697,6 +713,8 @@ def training_checkpoints(
                 "checkpoints": checkpoints,
                 "latest_checkpoint": latest,
                 "resume_command": resume_command,
+                "resume_argv": resume_argv,
+                "resume_supported": resume_supported,
             },
             indent=2,
         )

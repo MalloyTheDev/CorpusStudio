@@ -1584,6 +1584,30 @@ public sealed class PythonEngineService
             ?? throw new InvalidOperationException("The Python engine returned an invalid training config result.");
     }
 
+    public async Task<TrainingCheckpointsResult> GetTrainingCheckpointsAsync(
+        string outputDirectory,
+        string target,
+        string? configPath
+    )
+    {
+        var arguments = new List<string>
+        {
+            "training-checkpoints",
+            outputDirectory,
+            "--target",
+            target,
+        };
+        if (!string.IsNullOrWhiteSpace(configPath))
+        {
+            arguments.Add("--config-path");
+            arguments.Add(configPath);
+        }
+
+        var output = await RunEngineCommandAsync(arguments.ToArray());
+        return JsonSerializer.Deserialize<TrainingCheckpointsResult>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid checkpoints result.");
+    }
+
     public async Task<DatasetCardResult> GenerateDatasetCardAsync(
         string projectPath,
         string schemaId

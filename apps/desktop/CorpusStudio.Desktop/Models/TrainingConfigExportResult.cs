@@ -22,6 +22,9 @@ public sealed class TrainingConfigExportResult
     [JsonPropertyName("launch")]
     public TrainingLaunchPlan? Launch { get; init; }
 
+    [JsonPropertyName("training_output_dir")]
+    public string TrainingOutputDirectory { get; init; } = string.Empty;
+
     [JsonPropertyName("warnings")]
     public List<string> Warnings { get; init; } = [];
 }
