@@ -1402,6 +1402,66 @@ public sealed class PythonEngineService
         }
     }
 
+    // --- Dataset version history (v1.0; engine-through, never recompute fingerprint) ---
+
+    /// <summary>List dataset versions (newest first) with live integrity, via the engine
+    /// (<c>dataset-version-list</c>). The engine owns the fingerprint, so integrity is
+    /// verified against the current dataset rather than guessed in C#.</summary>
+    public async Task<IReadOnlyList<DatasetVersionDisplayItem>> LoadDatasetVersionsAsync(string projectPath)
+    {
+        var output = await RunEngineCommandAsync("dataset-version-list", projectPath);
+        return ParseDatasetVersionList(output);
+    }
+
+    /// <summary>Capture a dataset version through the engine (<c>dataset-version-create</c>),
+    /// which computes the fingerprint + row count. Opt-in; call only when the dataset is
+    /// quiescent (after an append/import commit), never automatically per-mutation.</summary>
+    public async Task<DatasetVersionRecord> CreateDatasetVersionAsync(
+        string projectPath, string label, string trigger)
+    {
+        var arguments = new List<string> { "dataset-version-create", projectPath };
+        if (!string.IsNullOrWhiteSpace(trigger))
+        {
+            arguments.Add("--trigger");
+            arguments.Add(trigger);
+        }
+        if (!string.IsNullOrWhiteSpace(label))
+        {
+            arguments.Add("--label");
+            arguments.Add(label);
+        }
+
+        var output = await RunEngineCommandAsync(arguments.ToArray());
+        return ParseDatasetVersionRecord(output);
+    }
+
+    /// <summary>Render a dataset version card (live projection; nothing stored).</summary>
+    public async Task<string> GetDatasetVersionCardAsync(string projectPath, string versionId)
+    {
+        return await RunEngineCommandAsync("dataset-version-show", projectPath, "--version-id", versionId);
+    }
+
+    /// <summary>Parse a <c>dataset-version-list</c> payload into display rows. Pure/static
+    /// so the JSON contract (including the live <c>current_integrity</c> annotation) is
+    /// unit-testable without spawning the engine.</summary>
+    public static IReadOnlyList<DatasetVersionDisplayItem> ParseDatasetVersionList(string json)
+    {
+        var result = JsonSerializer.Deserialize<DatasetVersionListResult>(json, JsonOptions);
+        if (result?.Versions is null)
+        {
+            return [];
+        }
+
+        return result.Versions.Select(record => new DatasetVersionDisplayItem(record)).ToList();
+    }
+
+    /// <summary>Parse a bare <c>dataset-version-create</c> record (no integrity annotation).</summary>
+    public static DatasetVersionRecord ParseDatasetVersionRecord(string json)
+    {
+        return JsonSerializer.Deserialize<DatasetVersionRecord>(json, JsonOptions)
+            ?? throw new InvalidOperationException("Engine returned no dataset version record.");
+    }
+
     public int AppendDraftToProjectExamples(string projectPath, string draftText)
     {
         var jsonl = NormalizeDraftToJsonl(draftText);

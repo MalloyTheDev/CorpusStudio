@@ -1863,6 +1863,76 @@
                             </Grid>
                         </Grid>
                     </TabItem>
+                    <TabItem Header="Versions">
+                        <Grid Margin="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <StackPanel Grid.Row="0">
+                                <TextBlock Text="Dataset Version History"
+                                           FontSize="18"
+                                           FontWeight="Bold"
+                                           Foreground="#0F172A" />
+                                <TextBlock Text="A version records the dataset's fingerprint + row count and links to the runs, artifacts, and evaluations from that state. Capture is opt-in and goes through the engine, so integrity is verified — not guessed."
+                                           Foreground="#475569"
+                                           TextWrapping="Wrap"
+                                           Margin="0,4,0,8" />
+                                <TextBlock AutomationProperties.AutomationId="DatasetVersionSummaryTextBlock"
+                                           Text="{Binding DatasetVersionSummary, Mode=OneWay}"
+                                           Foreground="#334155"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,8" />
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                    <TextBlock Text="Label (optional):"
+                                               VerticalAlignment="Center"
+                                               Foreground="#334155"
+                                               Margin="0,0,8,0" />
+                                    <TextBox AutomationProperties.AutomationId="DatasetVersionLabelTextBox"
+                                             Text="{Binding DatasetVersionLabel, UpdateSourceTrigger=PropertyChanged}"
+                                             Width="280" />
+                                </StackPanel>
+                            </StackPanel>
+                            <WrapPanel Grid.Row="1" Margin="0,0,0,8">
+                                <Button AutomationProperties.AutomationId="CaptureDatasetVersionButton"
+                                        Content="Capture version"
+                                        ToolTip="Record the current dataset (examples.jsonl) as a version, via the engine"
+                                        Margin="0,0,8,0"
+                                        Click="CaptureDatasetVersionButton_Click" />
+                                <Button AutomationProperties.AutomationId="ViewDatasetVersionCardButton"
+                                        Content="View card"
+                                        Margin="0,0,8,0"
+                                        Click="ViewDatasetVersionCardButton_Click" />
+                                <Button AutomationProperties.AutomationId="RefreshDatasetVersionsButton"
+                                        Content="Refresh"
+                                        Click="RefreshDatasetVersionsButton_Click" />
+                            </WrapPanel>
+                            <Grid Grid.Row="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <ListBox Grid.Column="0"
+                                         AutomationProperties.AutomationId="DatasetVersionsListBox"
+                                         ItemsSource="{Binding DatasetVersions}"
+                                         SelectedItem="{Binding SelectedDatasetVersion, Mode=TwoWay}"
+                                         DisplayMemberPath="DisplayName"
+                                         FontFamily="Consolas"
+                                         FontSize="12" />
+                                <TextBox Grid.Column="1"
+                                         AutomationProperties.AutomationId="DatasetVersionDetailTextBox"
+                                         Text="{Binding DatasetVersionDetail, Mode=OneWay}"
+                                         Margin="12,0,0,0"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         FontFamily="Consolas"
+                                         FontSize="12"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto" />
+                            </Grid>
+                        </Grid>
+                    </TabItem>
                     <TabItem Header="Settings">
                         <StackPanel Margin="8">
                             <TextBox Text="{Binding SettingsSummary, Mode=OneWay}"

@@ -2063,6 +2063,98 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void CaptureDatasetVersionButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetDatasetVersionError("Create or select a dataset project first.");
+            return;
+        }
+
+        var projectPath = ViewModel.ActiveProjectPath;
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Capturing dataset version...");
+
+            // Capture goes through the engine so the fingerprint is computed one way
+            // (never reimplemented in C#, which would risk a phantom 'drifted').
+            var record = await _engineService.CreateDatasetVersionAsync(
+                projectPath, ViewModel.DatasetVersionLabel, "manual");
+            ViewModel.DatasetVersionLabel = string.Empty;
+            // Honest confirmation: a fingerprint-less record (missing/unreadable
+            // dataset) must not read as a verified success.
+            ViewModel.SetDatasetVersionDetail(MainWindowViewModel.FormatCaptureConfirmation(record));
+            await RefreshDatasetVersionsAsync();
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetDatasetVersionError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
+        }
+    }
+
+    private async void ViewDatasetVersionCardButton_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = ViewModel.SelectedDatasetVersion;
+        if (selected is null)
+        {
+            ViewModel.SetDatasetVersionError("Select a version first.");
+            return;
+        }
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            return;
+        }
+
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Rendering version card...");
+
+            var markdown = await _engineService.GetDatasetVersionCardAsync(
+                ViewModel.ActiveProjectPath, selected.Record.VersionId);
+            ViewModel.SetDatasetVersionDetail(markdown);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetDatasetVersionError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
+        }
+    }
+
+    private async void RefreshDatasetVersionsButton_Click(object sender, RoutedEventArgs e)
+    {
+        await RefreshDatasetVersionsAsync();
+    }
+
+    private async Task RefreshDatasetVersionsAsync()
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetDatasetVersionError("Create or select a dataset project first.");
+            return;
+        }
+
+        try
+        {
+            var items = await _engineService.LoadDatasetVersionsAsync(ViewModel.ActiveProjectPath);
+            ViewModel.ApplyDatasetVersions(items);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetDatasetVersionError(ex.Message);
+        }
+    }
+
     private void RefreshTrainingRunsButton_Click(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
