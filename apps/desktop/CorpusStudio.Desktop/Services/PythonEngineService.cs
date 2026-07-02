@@ -909,6 +909,60 @@ public sealed class PythonEngineService
             ?? throw new InvalidOperationException("The Python engine returned an invalid gate report.");
     }
 
+    public async Task<ArenaReport> RunArenaAsync(
+        string promptsText,
+        IReadOnlyList<string> models,
+        string? judgeModel = null,
+        string? projectPath = null
+    )
+    {
+        var suitePath = WritePromptSuiteToTempJsonl(promptsText);
+
+        var arguments = new List<string> { "arena-run", suitePath };
+        foreach (var model in models)
+        {
+            arguments.Add("--model");
+            arguments.Add(model);
+        }
+        if (!string.IsNullOrWhiteSpace(judgeModel))
+        {
+            arguments.Add("--judge-model");
+            arguments.Add(judgeModel);
+        }
+        if (!string.IsNullOrWhiteSpace(projectPath))
+        {
+            arguments.Add("--project-dir");
+            arguments.Add(projectPath);
+        }
+
+        var output = await RunEngineCommandAsync(arguments.ToArray());
+        return JsonSerializer.Deserialize<ArenaReport>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid arena report.");
+    }
+
+    /// <summary>Turn one-prompt-per-line text into a JSONL prompt suite temp file.</summary>
+    private static string WritePromptSuiteToTempJsonl(string promptsText)
+    {
+        var lines = (promptsText ?? string.Empty)
+            .Replace("\r\n", "\n")
+            .Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0);
+
+        var builder = new StringBuilder();
+        foreach (var line in lines)
+        {
+            builder.Append(JsonSerializer.Serialize(new Dictionary<string, string> { ["prompt"] = line }));
+            builder.Append('\n');
+        }
+
+        var directory = Path.Combine(Path.GetTempPath(), "CorpusStudio");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, $"arena-{Guid.NewGuid():N}.jsonl");
+        WriteAllTextAtomic(path, builder.ToString(), encoding: Utf8NoBom);
+        return path;
+    }
+
     public async Task<IReadOnlyList<ProviderPolicyItem>> GetProviderPoliciesAsync(string projectPath)
     {
         var output = await RunEngineCommandAsync("provider-policy", "--project-dir", projectPath);

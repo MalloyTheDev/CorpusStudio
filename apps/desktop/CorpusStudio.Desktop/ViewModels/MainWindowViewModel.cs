@@ -18,6 +18,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _validationSummary = "Create a project to start validation.";
     private string _qualitySummary = "Create or select a project to run quality checks.";
     private string _gateSummary = "Run gates to check whether this dataset may move forward.";
+    private string _arenaPromptsInput = string.Empty;
+    private string _arenaModelsInput = string.Empty;
+    private string _arenaJudgeModelInput = string.Empty;
+    private string _arenaSummary =
+        "Enter prompts (one per line) and models (comma or newline separated), then Run Arena.";
     private string _providerPolicySummary =
         "Provider generation policy: refresh to see which providers may create trainable rows.";
     private string _qualityHistorySummary = "Quality history appears after quality checks run.";
@@ -377,6 +382,124 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _providerPolicySummary;
         private set => SetField(ref _providerPolicySummary, value);
+    }
+
+    public string ArenaPromptsInput
+    {
+        get => _arenaPromptsInput;
+        set => SetField(ref _arenaPromptsInput, value);
+    }
+
+    public string ArenaModelsInput
+    {
+        get => _arenaModelsInput;
+        set => SetField(ref _arenaModelsInput, value);
+    }
+
+    public string ArenaJudgeModelInput
+    {
+        get => _arenaJudgeModelInput;
+        set => SetField(ref _arenaJudgeModelInput, value);
+    }
+
+    public string ArenaSummary
+    {
+        get => _arenaSummary;
+        private set => SetField(ref _arenaSummary, value);
+    }
+
+    /// <summary>Split a comma/newline-separated model list into a trimmed,
+    /// de-duplicated (case-insensitive, order-preserving) list.</summary>
+    public static IReadOnlyList<string> ParseModelList(string text)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var models = new List<string>();
+        foreach (var token in (text ?? string.Empty).Split(
+                     [',', '\n', '\r'],
+                     StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (seen.Add(token))
+            {
+                models.Add(token);
+            }
+        }
+
+        return models;
+    }
+
+    public void SetArenaInProgress()
+    {
+        ArenaSummary = "Running arena...";
+    }
+
+    public void SetArenaError(string message)
+    {
+        ArenaSummary = $"Arena could not run.{Environment.NewLine}{message}";
+    }
+
+    /// <summary>Format an arena report: per-model win/score summary, then each
+    /// prompt's side-by-side responses with the judge's winner marked.</summary>
+    public void ApplyArenaReport(ArenaReport report)
+    {
+        var judged = !string.IsNullOrWhiteSpace(report.JudgeModel);
+        var judgmentByPrompt = report.Judgments
+            .GroupBy(judgment => judgment.PromptId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.Ordinal);
+
+        var header = $"Arena: {report.Models.Count} model(s) × {report.PromptCount} prompt(s)";
+        if (judged)
+        {
+            header += $"   judge: {report.JudgeModel}";
+        }
+
+        var lines = new List<string> { header, string.Empty, "Models:" };
+        foreach (var summary in report.ModelSummaries)
+        {
+            var parts = new List<string> { $"{summary.WinCount} win(s)" };
+            if (summary.AverageJudgeScore is { } score)
+            {
+                parts.Add($"avg {score:0.#}");
+            }
+            if (summary.EmptyResponseCount > 0)
+            {
+                parts.Add($"{summary.EmptyResponseCount} empty");
+            }
+            lines.Add($"  {summary.Model} — {string.Join(", ", parts)}");
+        }
+
+        foreach (var prompt in report.Prompts)
+        {
+            lines.Add(string.Empty);
+            lines.Add($"── {prompt.Id}: {SingleLine(prompt.Prompt)}");
+            judgmentByPrompt.TryGetValue(prompt.Id, out var judgment);
+            foreach (var response in report.Responses.Where(r => r.PromptId == prompt.Id))
+            {
+                var win = judgment is not null && judgment.Winner == response.Model ? "🏆 " : "   ";
+                lines.Add($"  {win}{response.Model}:");
+                lines.Add(IndentBlock(string.IsNullOrWhiteSpace(response.Text) ? "(empty response)" : response.Text));
+            }
+
+            if (judged && judgment is not null)
+            {
+                lines.Add(judgment.Parsed
+                    ? $"  judge: {judgment.Winner} — {SingleLine(judgment.Rationale)}"
+                    : "  judge: (could not parse judge output)");
+            }
+        }
+
+        ArenaSummary = string.Join(Environment.NewLine, lines);
+    }
+
+    private static string SingleLine(string text)
+    {
+        return string.Join(" ", (text ?? string.Empty).Split(
+            ['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
+
+    private static string IndentBlock(string text)
+    {
+        var body = (text ?? string.Empty).Replace("\r\n", "\n").Split('\n');
+        return string.Join(Environment.NewLine, body.Select(line => "       " + line));
     }
 
     public void SetProviderPolicyError(string message)

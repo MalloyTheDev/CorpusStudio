@@ -87,7 +87,10 @@ Last reconciled: 2026-07-02 (v0.6 in progress).
   judge scores. Judging is an evaluator activity, so OpenAI/Anthropic are
   permitted as the judge (enforced via provider policy).
 - Saved comparison reports: `arena-run --project-dir` persists the report under
-  project-local `arena_reports/`. A desktop Arena surface is next.
+  project-local `arena_reports/`.
+- A desktop **Arena** tab: enter prompts (one per line) + a model list (+ an
+  optional judge), Run, and see side-by-side responses per prompt with per-model
+  win/score summary and the judge's winner marked.
 
 ## Not built yet (future roadmap)
 
