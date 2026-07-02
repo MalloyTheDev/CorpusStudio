@@ -1369,6 +1369,20 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         DatasetVersionDetail = text;
     }
 
+    /// <summary>Honest capture confirmation. A record with no content fingerprint
+    /// (examples.jsonl was missing/unreadable) can never be verified against the
+    /// dataset — the engine annotates it 'unreadable' forever — so it must NOT read
+    /// as a green "captured" success (the ✅ vocabulary the 'matches' badge uses).</summary>
+    public static string FormatCaptureConfirmation(DatasetVersionRecord record)
+    {
+        if (string.IsNullOrEmpty(record.ContentFingerprint))
+        {
+            return $"⛔ Recorded version {record.VersionId}, but examples.jsonl was missing or "
+                + "unreadable — no fingerprint was captured, so this version's integrity can never be verified.";
+        }
+        return $"✅ Captured version {record.VersionId} ({record.RowCount} rows).";
+    }
+
     /// <summary>Refresh the version list (newest first) + a one-line integrity summary.
     /// Selection is preserved by version_id across refreshes.</summary>
     public void ApplyDatasetVersions(IReadOnlyList<DatasetVersionDisplayItem> items)

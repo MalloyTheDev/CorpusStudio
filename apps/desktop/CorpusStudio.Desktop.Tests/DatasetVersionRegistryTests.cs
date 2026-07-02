@@ -128,4 +128,43 @@ public sealed class DatasetVersionRegistryTests
         vm.SetDatasetVersionDetail("# Dataset Version Card — v1");
         Assert.Contains("Dataset Version Card", vm.DatasetVersionDetail);
     }
+
+    // --- audit: honest capture confirmation ----------------------------------
+
+    [Fact]
+    public void FormatCaptureConfirmation_SuccessWhenFingerprinted()
+    {
+        var record = new DatasetVersionRecord { VersionId = "v1", RowCount = 12, ContentFingerprint = "abc" };
+        var text = MainWindowViewModel.FormatCaptureConfirmation(record);
+        Assert.Contains("✅ Captured version v1", text);
+        Assert.Contains("12 rows", text);
+    }
+
+    [Fact]
+    public void FormatCaptureConfirmation_HonestWhenNoFingerprint()
+    {
+        // Missing/unreadable examples.jsonl -> engine records a null fingerprint that
+        // is 'unreadable' forever; the confirmation must not read as a green success.
+        var record = new DatasetVersionRecord { VersionId = "v1", RowCount = 0, ContentFingerprint = null };
+        var text = MainWindowViewModel.FormatCaptureConfirmation(record);
+        Assert.DoesNotContain("✅", text);
+        Assert.Contains("can never be verified", text);
+    }
+
+    // --- audit: unknown integrity is unreadable in badge AND summary ---------
+
+    [Fact]
+    public void UnknownIntegrity_TreatedAsUnreadableEverywhere()
+    {
+        var record = new DatasetVersionRecord { VersionId = "v1", RowCount = 1, CurrentIntegrity = "stale" };
+        var item = new DatasetVersionDisplayItem(record);
+        Assert.Equal("unreadable", item.Integrity);        // getter normalizes
+        Assert.Contains("⛔ unreadable", item.DisplayName); // badge
+
+        var vm = new MainWindowViewModel();
+        vm.ApplyDatasetVersions([item]);
+        // Buckets sum to the total: the unknown value is counted as unverifiable.
+        Assert.Contains("1 version(s)", vm.DatasetVersionSummary);
+        Assert.Contains("1 unverifiable", vm.DatasetVersionSummary);
+    }
 }

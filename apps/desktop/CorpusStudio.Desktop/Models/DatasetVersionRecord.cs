@@ -78,10 +78,17 @@ public sealed class DatasetVersionDisplayItem
 
     public DatasetVersionRecord Record { get; }
 
-    /// <summary>matches | drifted | unreadable. A missing annotation is treated as
-    /// unreadable (we never claim "matches" without the engine confirming it).</summary>
-    public string Integrity =>
-        string.IsNullOrEmpty(Record.CurrentIntegrity) ? "unreadable" : Record.CurrentIntegrity;
+    /// <summary>Normalized to exactly matches | drifted | unreadable — the single
+    /// source of truth for both the badge and the summary counts. Anything else
+    /// (null, empty, or an unrecognized engine value) is treated as unreadable, so
+    /// we never claim "matches" without the engine confirming it and a row can never
+    /// show a badge that no summary bucket counts.</summary>
+    public string Integrity => Record.CurrentIntegrity switch
+    {
+        "matches" => "matches",
+        "drifted" => "drifted",
+        _ => "unreadable",
+    };
 
     public int LinkCount => Record.SourceRunIds.Count + Record.ArtifactIds.Count;
 

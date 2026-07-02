@@ -2082,8 +2082,9 @@ public partial class MainWindow : Window
             var record = await _engineService.CreateDatasetVersionAsync(
                 projectPath, ViewModel.DatasetVersionLabel, "manual");
             ViewModel.DatasetVersionLabel = string.Empty;
-            ViewModel.SetDatasetVersionDetail(
-                $"✅ Captured version {record.VersionId} ({record.RowCount} rows).");
+            // Honest confirmation: a fingerprint-less record (missing/unreadable
+            // dataset) must not read as a verified success.
+            ViewModel.SetDatasetVersionDetail(MainWindowViewModel.FormatCaptureConfirmation(record));
             await RefreshDatasetVersionsAsync();
         }
         catch (Exception ex)
