@@ -144,9 +144,13 @@ Last reconciled: 2026-07-02 (v1.0.0 engine slice landed).
   versions (multiset added/removed/common + sample rows). Storing rows is the
   default (`--no-store-rows` opts out; cost is surfaced, not silent). Rows are
   stored canonically, so diff/restore normalize key order (not byte-identical).
-- Deferred: desktop surfacing of diff, auto-capture after import/append commit,
-  restore-to-version (rewrites `examples.jsonl`), reorder detection, store GC,
-  and a normalized row identity.
+- `dataset-version-restore` reconstructs a version's rows from the store to an
+  `--output` file, verified against the recorded fingerprint (all-or-nothing,
+  overwrite-safe, atomic). The engine **refuses to write `examples.jsonl`** — the
+  dataset has one writer (the desktop); in-place restore is deferred to the desktop.
+- Deferred: desktop in-place restore (atomic replace of `examples.jsonl` +
+  quiescence + auto-capture), desktop diff surfacing, auto-capture after import
+  commit, reorder detection, store GC, and a normalized row identity.
 
 ## Not built yet (future roadmap)
 

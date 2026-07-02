@@ -1847,6 +1847,150 @@ def dataset_version_diff(
     typer.echo(render_dataset_version_diff_markdown(diff, sample_added, sample_removed))
 
 
+@app.command("dataset-version-restore")
+def dataset_version_restore(
+    project_dir: Path,
+    version_id: str = typer.Option(..., "--version-id", help="Version to reconstruct."),
+    output: Path = typer.Option(
+        ..., "--output", help="File to write the reconstructed rows to (never examples.jsonl)."
+    ),
+    force: bool = typer.Option(False, "--force", help="Overwrite --output if it already exists."),
+    verify: bool = typer.Option(
+        True,
+        "--verify/--no-verify",
+        help="Verify the reconstruction against the recorded fingerprint (default: on).",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit the RestoreResult as JSON."),
+):
+    """Reconstruct a version's exact rows from the row store to --output.
+
+    Rows are rebuilt in canonical form (keys normalized); by default the result is
+    verified against the version's recorded fingerprint, proving it is semantically
+    identical. The engine NEVER writes examples.jsonl — restore to another path and
+    adopt it (in-place restore is a desktop operation). All-or-nothing: if any row
+    is missing from the store, or verification fails, nothing is written.
+    """
+
+    from corpus_studio.versions.row_store import load_rows_by_id
+    from corpus_studio.versions.version_registry import (
+        load_row_manifest,
+        load_version_record,
+        record_path,
+    )
+    from corpus_studio.versions.version_restore import RestoreResult, reconstruct_and_verify
+
+    path = record_path(project_dir, version_id)
+    if not path.exists():
+        typer.echo(f"No dataset version '{version_id}'.", err=True)
+        raise typer.Exit(code=1)
+    try:
+        record = load_version_record(path)
+    except Exception as exc:  # noqa: BLE001 - a corrupt record degrades cleanly.
+        typer.echo(f"Version '{version_id}' could not be read (corrupt record).", err=True)
+        raise typer.Exit(code=1) from exc
+
+    manifest = load_row_manifest(project_dir, version_id)
+    if not record.rows_stored or manifest is None:
+        typer.echo(
+            f"Version '{version_id}' has no stored rows; recapture with row storage "
+            "(dataset-version-create --store-rows) to restore.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    # The engine never writes the dataset — refuse to target examples.jsonl.
+    examples_path = project_dir / "examples.jsonl"
+    try:
+        targets_examples = output.resolve() == examples_path.resolve()
+    except OSError:
+        targets_examples = False
+    if targets_examples:
+        typer.echo(
+            "Refusing to overwrite examples.jsonl; the engine never writes the dataset. "
+            "Restore to another path and adopt it via the desktop.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    if output.is_dir():
+        typer.echo(f"--output '{output}' is a directory.", err=True)
+        raise typer.Exit(code=1)
+    if output.exists() and not force:
+        typer.echo(f"'{output}' exists; pass --force to overwrite.", err=True)
+        raise typer.Exit(code=1)
+
+    rows_by_id = load_rows_by_id(project_dir, set(manifest))
+    lines, _computed, matches, missing_ids = reconstruct_and_verify(
+        manifest, rows_by_id, record.content_fingerprint
+    )
+
+    if missing_ids:
+        sample = ", ".join(missing_ids[:5])
+        typer.echo(
+            f"{len(missing_ids)} row(s) missing from the store (e.g. {sample}); "
+            "cannot faithfully restore.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    verify_skipped = not verify
+    if verify:
+        if record.content_fingerprint is None:
+            verify_skipped = True
+            typer.echo(
+                "Warning: cannot verify (no recorded fingerprint); writing a best-effort restore.",
+                err=True,
+            )
+        elif not matches:
+            typer.echo(
+                "Reconstructed fingerprint does not match the recorded version; "
+                "refusing to write a corrupted restore.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+    # Atomic write: a UNIQUE temp file beside --output (mkstemp is exclusive, so it
+    # can't clobber a real sibling or race a concurrent restore), then os.replace.
+    # Guarded so a write/replace failure (locked/read-only target, bad parent path)
+    # degrades to a clean exit-1 and never leaves a dangling temp.
+    import tempfile
+
+    content = ("\n".join(lines) + "\n") if lines else ""
+    tmp_path: Optional[Path] = None
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=str(output.parent), prefix=output.name + ".", suffix=".tmp")
+        os.close(fd)
+        tmp_path = Path(tmp_name)
+        tmp_path.write_text(content, encoding="utf-8")
+        os.replace(tmp_path, output)
+    except OSError as exc:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+        typer.echo(f"Could not write '{output}': {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    result = RestoreResult(
+        version_id=version_id,
+        rows_written=len(lines),
+        verified=verify and not verify_skipped and matches,
+        verify_skipped=verify_skipped,
+        output_path=str(output),
+    )
+    if as_json:
+        typer.echo(result.model_dump_json(indent=2))
+    else:
+        status = (
+            "verified — fingerprint matches, semantically identical to the recorded version"
+            if result.verified
+            else ("unverified" if verify_skipped else "written")
+        )
+        typer.echo(
+            f"Restored version {version_id}: {result.rows_written} row(s) -> {output} [{status}]. "
+            "Rows are reconstructed in canonical form (keys normalized)."
+        )
+
+
 def _utc_now_iso() -> str:
     from datetime import datetime, timezone
 

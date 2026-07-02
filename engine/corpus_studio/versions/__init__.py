@@ -54,6 +54,10 @@ from corpus_studio.versions.version_diff import (
     diff_manifests,
     render_dataset_version_diff_markdown,
 )
+from corpus_studio.versions.version_restore import (
+    RestoreResult,
+    reconstruct_and_verify,
+)
 
 __all__ = [
     "DATASET_VERSION_REGISTRY_DIRNAME",
@@ -69,12 +73,14 @@ __all__ = [
     "DatasetVersionCard",
     "DatasetVersionDiff",
     "DatasetVersionRecord",
+    "RestoreResult",
     "append_rows",
     "build_version_card",
     "capture_dataset",
     "compute_content_fingerprint",
     "current_integrity",
     "diff_manifests",
+    "reconstruct_and_verify",
     "fingerprint_dataset",
     "integrity_from_fingerprints",
     "list_version_records",

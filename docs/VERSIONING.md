@@ -71,6 +71,10 @@ python -m corpus_studio.cli dataset-version-show <project-dir> --version-id <id>
 # Diff two versions (added/removed/common rows; needs both captured with rows)
 python -m corpus_studio.cli dataset-version-diff <project-dir> \
   --version-id <base> --other <other> [--samples 5] [--json]
+
+# Restore a version's rows to a file (never examples.jsonl; verified by default)
+python -m corpus_studio.cli dataset-version-restore <project-dir> \
+  --version-id <id> --output <path> [--force] [--no-verify] [--json]
 ```
 
 `dataset-version-create` computes the fingerprint + row count from the project's
@@ -111,6 +115,32 @@ A version captured before v1.0.2 (or with `--no-store-rows`) has no manifest;
 `dataset-version-diff` refuses it with a clear "recapture with row storage"
 message rather than guessing.
 
+## Restore (v1.0.3)
+
+`dataset-version-restore` reconstructs a version's exact rows (manifest order,
+from the store) and writes them as JSONL to `--output`:
+
+- **The engine never writes `examples.jsonl`.** Restore targets an explicit
+  `--output` path and *refuses* if that path resolves to the project's
+  `examples.jsonl`. The long-standing boundary holds — the dataset has one
+  writer (the desktop); in-place restore is a deferred desktop capability. A
+  CLI user restores to another file and adopts it deliberately.
+- **Verified by default.** The reconstruction is re-fingerprinted and must equal
+  the version's recorded `content_fingerprint` — because the row signature is
+  idempotent on canonical rows, a faithful restore *must* reproduce it. On a
+  mismatch, restore writes nothing. `--no-verify` skips the check.
+- **All-or-nothing.** If any manifest row is missing from the store, restore
+  refuses (reports the count + a few sample ids) and writes nothing — never a
+  partial dataset.
+- **Overwrite-safe & atomic.** Refuses an existing `--output` unless `--force`;
+  writes a temp file beside `--output` then `os.replace` (no half-written file).
+- **Canonical caveat, made concrete.** Restored rows are in canonical form (keys
+  normalized), so the file is *not* byte-identical to the original — the
+  fingerprint match is the proof the rows are semantically identical.
+
+A version without stored rows (pre-v1.0.2 or `--no-store-rows`) can't be
+restored and refuses with the same "recapture with row storage" message.
+
 ## Hard boundaries
 
 The engine only **reads** `examples.jsonl` and **writes** JSON under
@@ -139,11 +169,17 @@ ordered manifest captured single-pass with the fingerprint
 (`versions/version_registry.py`), and a read-only `dataset-version-diff`
 (`versions/version_diff.py`, multiset added/removed/common + sample rows).
 
+**Implemented (v1.0.3, engine):** `dataset-version-restore`
+(`versions/version_restore.py`) — reconstruct a version's rows from the store to
+an `--output` file, verified against the recorded fingerprint (all-or-nothing,
+overwrite-safe, atomic). The engine still **never** writes `examples.jsonl`.
+
 **Deferred:**
-- Desktop surfacing of diff (a follow-up desktop slice).
-- Auto-capture after an import/append commit (a `trigger` other than `manual`).
-- **Restore-to-version** — reconstruct `examples.jsonl` from a manifest + the
-  store; the only operation that rewrites the dataset, so it is deferred last to
-  respect the append-only write contract.
-- Reorder/"moved" detection in diff, GC of orphaned store blobs, and a
-  `normalized` (near-duplicate) row identity (guarded by `row_signature_kind`).
+- **Desktop in-place restore** — reconstruct to a temp file, atomically replace
+  `examples.jsonl` (quiescence + explicit confirmation), then auto-capture the
+  restored state as a new version so history stays honest. This is where the
+  dataset actually gets rewritten — and it stays the desktop's job (single writer).
+- Desktop surfacing of diff; auto-capture after an import/append commit; restore
+  straight to stdout.
+- Reorder/"moved" detection in diff, GC of orphaned store blobs (which must never
+  prune rows referenced by a manifest), and a `normalized` row identity.
