@@ -26,8 +26,11 @@ serializable, project-local report. No gate adds new detection logic.
 | **pii** | quality report `pii_findings` | **block** on high-severity (keys/tokens/JWT); **warn** on medium (email/SSN). |
 | **eval_score** | `EvaluationReport` | **block** below the average-score or pass-rate threshold. |
 
-The **export gate** is a composite: schema + PII (critical, can block) plus
-quality (warn). Thresholds ship as sensible defaults in `GateThresholds` and are
+The **export gate** is a composite: it **blocks** on empty input, schema, or PII
+failure, and **warns** on quality issues (duplicates/low-information) because the
+export command has a dedicated cleaning pass. An `input_present` gate ensures an
+empty dataset can never pass silently (warn for `dataset` scope, block for
+`export`). Thresholds ship as sensible defaults in `GateThresholds` and are
 designed for future per-project configuration.
 
 ## Running gates
@@ -37,7 +40,9 @@ python -m corpus_studio.cli gate-run dataset.jsonl instruction --scope dataset \
   --project-dir path/to/project
 ```
 
-Writes `gate_reports/<scope>.json` under the project and echoes the report.
+Writes `gate_reports/<scope>-<target>.json` under the project (the target is in
+the filename so gating different files in one scope does not clobber earlier
+reports) and echoes the report.
 `--scope export` runs the export gate. Split and evaluation gates are available
 through the engine API (`run_split_gate`, `run_evaluation_gate`).
 

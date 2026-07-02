@@ -38,10 +38,21 @@ Evaluator-only output never enters trainable fields through the normal save flow
 2. For OpenRouter, apply route inheritance (`openai/*`, `anthropic/*` → blocked; others → generator role allowed but still needs approval).
 3. Apply the most-specific project override (`provider/route:…`, `provider/model:…`, or `provider`).
 
-Provider identity is inferred from the transport backend + `base_url`
-(`api.openai.com → openai`, `openrouter.ai → openrouter`, otherwise a local
-OpenAI-compatible server). This is a **heuristic** — set an explicit provider id
-when it matters.
+Provider identity is inferred from the transport backend + `base_url` by exact
+hostname (`api.openai.com → openai`, `openrouter.ai → openrouter`, otherwise a
+local OpenAI-compatible server). This is a **heuristic** — set an explicit
+provider id when it matters (a provider reached through a proxy/gateway URL
+cannot be identified from the host alone).
+
+**Safety invariants (enforced):**
+- User overrides may only set a safe key allowlist (`outputs_trainable`,
+  `user_approved_generation`, notes, display name). Role and blocking fields are
+  **not** overridable, and the frontier block is re-asserted last — so no
+  override can re-enable generation for OpenAI/Anthropic/frontier routes.
+- OpenRouter routes must be fully qualified (`vendor/model`). A bare, slash-less
+  route id (e.g. `gpt-4o`) cannot be vetted and is treated as frontier — denied.
+- `authorize_action` is default-deny: an action that is neither a known trainable
+  nor a known evaluator action is rejected, not permitted as an evaluator call.
 
 ## Approving a local model (local-first, inspectable)
 

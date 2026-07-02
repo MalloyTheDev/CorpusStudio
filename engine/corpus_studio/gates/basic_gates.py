@@ -13,8 +13,32 @@ from corpus_studio.splitters.leakage import SplitLeakageReport
 from corpus_studio.validators.results import ValidationReport
 
 
+def input_present_gate(
+    row_count: int, scope: GateScope, block_when_empty: bool = False
+) -> GateResult:
+    """Flag an empty input so it cannot pass every other gate silently."""
+
+    if row_count > 0:
+        status = GateStatus.PASS
+    else:
+        status = GateStatus.BLOCK if block_when_empty else GateStatus.WARN
+    return GateResult(
+        gate_id="input_present",
+        name="Input present",
+        scope=scope,
+        status=status,
+        observed=f"{row_count} row(s)",
+        expected=">= 1 row",
+        message="Input has rows." if row_count else "Input is empty.",
+        repair=None if row_count else "Add or import rows before gating.",
+    )
+
+
 def schema_gate(report: ValidationReport, scope: GateScope = GateScope.DATASET) -> GateResult:
-    invalid = len(report.errors)
+    error_count = len(report.errors)
+    failing_rows = len(
+        {issue.row_number for issue in report.errors if issue.row_number is not None}
+    )
     status = GateStatus.PASS if report.valid else GateStatus.BLOCK
     affected = sorted(
         {str(issue.row_number) for issue in report.errors if issue.row_number is not None}
@@ -24,12 +48,12 @@ def schema_gate(report: ValidationReport, scope: GateScope = GateScope.DATASET) 
         name="Schema validation",
         scope=scope,
         status=status,
-        observed=f"{invalid} validation error(s) across {report.checked_rows} row(s)",
+        observed=f"{error_count} validation error(s) across {report.checked_rows} row(s)",
         expected="0 validation errors",
         affected=affected,
         message="All rows validate against the schema."
         if report.valid
-        else f"{invalid} row(s) fail schema validation.",
+        else f"{failing_rows} row(s) fail schema validation.",
         repair=None if report.valid else "Fix or remove invalid rows before continuing.",
     )
 
@@ -42,7 +66,9 @@ def quality_gate(
     statuses = [GateStatus.PASS]
     messages: list[str] = []
     if report.duplicate_exact_count > thresholds.max_exact_duplicates:
-        statuses.append(GateStatus.BLOCK)
+        statuses.append(
+            GateStatus.BLOCK if thresholds.block_exact_duplicates else GateStatus.WARN
+        )
         messages.append(f"{report.duplicate_exact_count} exact duplicate row(s)")
     if report.duplicate_normalized_count > thresholds.max_normalized_duplicates:
         statuses.append(GateStatus.WARN)
@@ -80,6 +106,16 @@ def quality_gate(
 def leakage_gate(report: SplitLeakageReport, scope: GateScope = GateScope.SPLIT) -> GateResult:
     leaked = report.rows_shared_across_splits
     status = GateStatus.BLOCK if leaked > 0 else GateStatus.PASS
+    # SplitLeakage carries no row ids, so keep `affected` empty (row-id typed,
+    # like the other gates) and surface sample text in the message instead.
+    samples = "; ".join(leak.sample for leak in report.leaks[:2])
+    message = (
+        "No leakage across splits."
+        if status == GateStatus.PASS
+        else f"{leaked} duplicate/near-duplicate row(s) leak across splits"
+        + (f" (e.g. {samples})" if samples else "")
+        + "."
+    )
     return GateResult(
         gate_id="leakage",
         name="Train/validation/test leakage",
@@ -87,10 +123,8 @@ def leakage_gate(report: SplitLeakageReport, scope: GateScope = GateScope.SPLIT)
         status=status,
         observed=f"{leaked} row(s) shared across splits in {report.leaked_group_count} group(s)",
         expected="0 rows shared across splits",
-        affected=[leak.sample for leak in report.leaks],
-        message="No leakage across splits."
-        if status == GateStatus.PASS
-        else f"{leaked} duplicate/near-duplicate row(s) leak across splits.",
+        affected=[],
+        message=message,
         repair=None
         if status == GateStatus.PASS
         else "Deduplicate before splitting so copies do not span train and test.",
