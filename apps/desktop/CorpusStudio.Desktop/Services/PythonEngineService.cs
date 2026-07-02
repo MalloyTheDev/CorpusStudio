@@ -909,6 +909,43 @@ public sealed class PythonEngineService
             ?? throw new InvalidOperationException("The Python engine returned an invalid gate report.");
     }
 
+    public async Task<IReadOnlyList<ProviderPolicyItem>> GetProviderPoliciesAsync(string projectPath)
+    {
+        var output = await RunEngineCommandAsync("provider-policy", "--project-dir", projectPath);
+        var result = JsonSerializer.Deserialize<ProviderPolicyListResult>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid provider policy list.");
+        return result.Providers.Values
+            .OrderBy(policy => policy.ProviderId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public async Task ApproveProviderGenerationAsync(
+        string projectPath,
+        string providerId,
+        string modelId,
+        bool revoke = false
+    )
+    {
+        var arguments = new List<string>
+        {
+            "provider-approve",
+            "--provider",
+            providerId,
+            "--project-dir",
+            projectPath,
+            "--model",
+            modelId,
+        };
+        if (revoke)
+        {
+            arguments.Add("--revoke");
+        }
+
+        // Throws (via RunEngineCommandAsync) if the engine rejects the request,
+        // e.g. approving an evaluator-only provider (exit code 2).
+        await RunEngineCommandAsync(arguments.ToArray());
+    }
+
     public async Task<ValidationReport> ValidateDraftAsync(string draftText, string schemaId)
     {
         var tempPath = WriteDraftToTempJsonl(draftText);

@@ -455,6 +455,80 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void RefreshProviderPoliciesButton_Click(object sender, RoutedEventArgs e)
+    {
+        await RefreshProviderPoliciesAsync();
+    }
+
+    private async Task RefreshProviderPoliciesAsync()
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetProviderPolicyError("Create or select a dataset project first.");
+            return;
+        }
+
+        try
+        {
+            var policies = await _engineService.GetProviderPoliciesAsync(ViewModel.ActiveProjectPath);
+            ViewModel.ApplyProviderPolicies(policies);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetProviderPolicyError(ex.Message);
+        }
+    }
+
+    private async void ApproveProviderGenerationButton_Click(object sender, RoutedEventArgs e)
+    {
+        await ApplyProviderApprovalAsync(revoke: false);
+    }
+
+    private async void RevokeProviderGenerationButton_Click(object sender, RoutedEventArgs e)
+    {
+        await ApplyProviderApprovalAsync(revoke: true);
+    }
+
+    private async Task ApplyProviderApprovalAsync(bool revoke)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetProviderPolicyError("Create or select a dataset project first.");
+            return;
+        }
+
+        var provider = (ProviderApprovalProviderComboBox.SelectedItem as ComboBoxItem)?.Content?.ToString()
+            ?? string.Empty;
+        var model = ProviderApprovalModelTextBox.Text?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(provider) || string.IsNullOrWhiteSpace(model))
+        {
+            ViewModel.SetProviderPolicyError("Choose a provider and enter a model name.");
+            return;
+        }
+
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy(revoke ? "Revoking generation approval..." : "Approving generation...");
+            await _engineService.ApproveProviderGenerationAsync(
+                ViewModel.ActiveProjectPath,
+                provider,
+                model,
+                revoke
+            );
+            await RefreshProviderPoliciesAsync();
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetProviderPolicyError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
+        }
+    }
+
     private void PrepareSyntheticRewriteButton_Click(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.PrepareSyntheticIssueRewrite())

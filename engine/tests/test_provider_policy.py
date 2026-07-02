@@ -199,3 +199,16 @@ def test_unknown_action_is_denied():
     policy = resolve_policy("ollama", model_id="llama3")
     with pytest.raises(ProviderPolicyError):
         authorize_action(policy, "generate")  # not a categorized action
+
+
+def test_effective_capability_is_serialized():
+    dumped = resolve_policy("openai").model_dump()
+    assert dumped["generation_allowed"] is False
+    assert dumped["evaluation_allowed"] is True
+
+    approved = resolve_policy(
+        "ollama",
+        model_id="llama3",
+        overrides={"ollama/model:llama3": {"outputs_trainable": True, "user_approved_generation": True}},
+    ).model_dump()
+    assert approved["generation_allowed"] is True

@@ -1720,6 +1720,52 @@
                                     Width="140"
                                     HorizontalAlignment="Left"
                                     Click="SaveLabSettingsButton_Click" />
+
+                            <TextBlock Text="Provider Generation Policy"
+                                       FontSize="16"
+                                       FontWeight="Bold"
+                                       Foreground="#0F172A"
+                                       Margin="0,20,0,4" />
+                            <TextBlock Text="OpenAI/Anthropic are evaluator-only. Approve a local model (Ollama or a local OpenAI-compatible server) to let AI Assist use it for trainable generation — always review-required."
+                                       Foreground="#475569"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,8" />
+                            <TextBox AutomationProperties.AutomationId="ProviderPolicySummaryTextBox"
+                                     Text="{Binding ProviderPolicySummary, Mode=OneWay}"
+                                     IsReadOnly="True"
+                                     FontFamily="Consolas"
+                                     FontSize="12"
+                                     MinHeight="120"
+                                     Margin="0,0,0,8"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto" />
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <ComboBox x:Name="ProviderApprovalProviderComboBox"
+                                          AutomationProperties.AutomationId="ProviderApprovalProviderComboBox"
+                                          Width="180"
+                                          SelectedIndex="0"
+                                          Margin="0,0,8,0">
+                                    <ComboBoxItem Content="ollama" />
+                                    <ComboBoxItem Content="openai_compatible" />
+                                </ComboBox>
+                                <TextBox x:Name="ProviderApprovalModelTextBox"
+                                         AutomationProperties.AutomationId="ProviderApprovalModelTextBox"
+                                         Width="200"
+                                         VerticalContentAlignment="Center"
+                                         ToolTip="Model name to approve, e.g. llama3"
+                                         Margin="0,0,8,0" />
+                                <Button AutomationProperties.AutomationId="ApproveProviderGenerationButton"
+                                        Content="Approve"
+                                        Margin="0,0,8,0"
+                                        Click="ApproveProviderGenerationButton_Click" />
+                                <Button AutomationProperties.AutomationId="RevokeProviderGenerationButton"
+                                        Content="Revoke"
+                                        Margin="0,0,8,0"
+                                        Click="RevokeProviderGenerationButton_Click" />
+                                <Button AutomationProperties.AutomationId="RefreshProviderPoliciesButton"
+                                        Content="Refresh"
+                                        Click="RefreshProviderPoliciesButton_Click" />
+                            </StackPanel>
                         </StackPanel>
                     </TabItem>
                 </TabControl>
