@@ -4,7 +4,7 @@ from corpus_studio.training.config_templates import (
     render_training_config,
     training_config_file_extension,
 )
-from corpus_studio.training.estimators import describe_vram_estimate, estimate_token_budget
+from corpus_studio.training.estimators import build_vram_estimate, estimate_token_budget
 
 
 def test_training_config_template_returns_expected_fields():
@@ -45,10 +45,11 @@ def test_training_config_renderer_returns_inspectable_yaml():
     assert "lora_r: 8" in rendered
 
 
-def test_training_estimators_are_lightweight_placeholders():
+def test_training_estimators_are_lightweight():
     token_estimate = estimate_token_budget(["abcd", "abcdefgh"])
-    vram_estimate = describe_vram_estimate("Qwen/Qwen2.5-Coder-7B-Instruct")
+    vram_estimate = build_vram_estimate("Qwen/Qwen2.5-Coder-7B-Instruct")
 
     assert token_estimate.example_count == 2
     assert token_estimate.estimated_tokens == 3
-    assert "requires model size" in vram_estimate.note
+    assert vram_estimate.parameter_count_billions == 7.0
+    assert "planning estimate" in vram_estimate.note

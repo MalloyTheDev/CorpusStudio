@@ -145,7 +145,11 @@ still no trainer launcher.
   inspectable config files only, and now reports a token budget for the dataset
   (total/mean/max tokens, tokens-per-epoch after `sequence_len` truncation, and
   how many examples exceed `sequence_len`) using the Unicode-aware token
-  estimator. It also emits a guided **launch command** per target (the exact
+  estimator, plus a rough arithmetic VRAM planning estimate (fp16/8-bit/4-bit
+  totals derived from the parameter count parsed from the base-model name, with
+  assumptions listed and an honest "no estimate" when the name has no parseable
+  size — hardware is never inspected) and a LoRA rank/alpha suggestion with
+  sanity warnings for unusual choices. It also emits a guided **launch command** per target (the exact
   `accelerate`/`python`/`llamafactory-cli` invocation, the resume variant, and
   the dependencies to install), copyable from the desktop, and a
   `training-checkpoints` CLI lists checkpoints in an output directory and builds

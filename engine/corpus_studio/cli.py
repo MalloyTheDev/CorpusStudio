@@ -49,7 +49,12 @@ from corpus_studio.storage.index import (
 )
 from corpus_studio.storage.project import DatasetProject, create_project
 from corpus_studio.training.compatibility import training_compatibility_warnings
-from corpus_studio.training.estimators import build_training_token_budget
+from corpus_studio.training.estimators import (
+    build_training_token_budget,
+    build_vram_estimate,
+    parse_parameter_count,
+    recommend_lora,
+)
 from corpus_studio.training.launch import (
     build_launch_plan,
     find_checkpoints,
@@ -641,6 +646,16 @@ def training_config(
     if not resolved_output_dir.is_absolute():
         resolved_output_dir = output_path.parent / resolved_output_dir
 
+    vram_estimate = build_vram_estimate(
+        base_model,
+        lora_r=lora_r,
+        sequence_len=sequence_len,
+        micro_batch_size=micro_batch_size,
+    )
+    lora_recommendation = recommend_lora(
+        parse_parameter_count(base_model), lora_r, lora_alpha
+    )
+
     compatibility_warnings = training_compatibility_warnings(
         schema_id=schema,
         dataset_format=dataset_format or schema,
@@ -648,7 +663,8 @@ def training_config(
     )
 
     warnings = [
-        "Training config export only; Corpus Studio does not launch training yet.",
+        "This command exports the config only; launch it with the emitted command or "
+        "from the desktop Training tab.",
         "Review dataset rights, eval readiness, compute budget, and target tool docs before training.",
     ]
     if eval_dataset_path is None:
@@ -658,6 +674,11 @@ def training_config(
             f"{token_budget.examples_over_sequence_len} example(s) exceed sequence_len="
             f"{sequence_len} (est. {token_budget.method}) and will be truncated."
         )
+    if vram_estimate.parameter_count_billions is None:
+        warnings.append(
+            "No VRAM estimate: could not parse a parameter count from the base model name."
+        )
+    warnings.extend(lora_recommendation.warnings)
     warnings.extend(compatibility_warnings)
 
     typer.echo(
@@ -665,12 +686,14 @@ def training_config(
             {
                 "target": normalized_target,
                 "output_path": str(output_path),
-                "training_launcher_implemented": False,
+                "training_launcher_implemented": True,
                 "config": template.to_training_dict(),
                 "config_text": config_text,
                 "token_budget": token_budget.model_dump(),
                 "launch": launch_plan.model_dump(),
                 "training_output_dir": str(resolved_output_dir),
+                "vram_estimate": vram_estimate.model_dump(),
+                "lora_recommendation": lora_recommendation.model_dump(),
                 "warnings": warnings,
                 "compatibility_warnings": compatibility_warnings,
             },

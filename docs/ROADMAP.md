@@ -135,9 +135,11 @@ Scope:
 - Unsloth notebook/script config
 - Hugging Face Trainer config
 - LLaMA-Factory config
-- token budget estimate
-- VRAM estimate placeholder
-- LoRA parameter helper
+- token budget estimate (done: Unicode-aware, tokens-per-epoch after truncation)
+- VRAM estimate (done: rough arithmetic from the model-name parameter count,
+  fp16/8-bit/4-bit totals with listed assumptions; never inspects hardware)
+- LoRA parameter helper (done: recommended r/alpha by model size with sanity
+  warnings for unusual choices)
 - target-specific schema/format compatibility warnings
 
 Out of scope:

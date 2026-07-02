@@ -25,6 +25,12 @@ public sealed class TrainingConfigExportResult
     [JsonPropertyName("training_output_dir")]
     public string TrainingOutputDirectory { get; init; } = string.Empty;
 
+    [JsonPropertyName("vram_estimate")]
+    public VramEstimate? VramEstimate { get; init; }
+
+    [JsonPropertyName("lora_recommendation")]
+    public LoraRecommendation? LoraRecommendation { get; init; }
+
     [JsonPropertyName("warnings")]
     public List<string> Warnings { get; init; } = [];
 }
@@ -54,6 +60,39 @@ public sealed class TrainingLaunchPlan
 
     [JsonPropertyName("notes")]
     public List<string> Notes { get; init; } = [];
+}
+
+public sealed class VramEstimate
+{
+    [JsonPropertyName("parameter_count_billions")]
+    public double? ParameterCountBillions { get; init; }
+
+    [JsonPropertyName("weights_gb_fp16")]
+    public double? WeightsGbFp16 { get; init; }
+
+    [JsonPropertyName("total_gb_fp16")]
+    public double? TotalGbFp16 { get; init; }
+
+    [JsonPropertyName("total_gb_int8")]
+    public double? TotalGbInt8 { get; init; }
+
+    [JsonPropertyName("total_gb_int4")]
+    public double? TotalGbInt4 { get; init; }
+
+    [JsonPropertyName("note")]
+    public string Note { get; init; } = string.Empty;
+}
+
+public sealed class LoraRecommendation
+{
+    [JsonPropertyName("recommended_r")]
+    public int RecommendedR { get; init; }
+
+    [JsonPropertyName("recommended_alpha")]
+    public int RecommendedAlpha { get; init; }
+
+    [JsonPropertyName("warnings")]
+    public List<string> Warnings { get; init; } = [];
 }
 
 public sealed class TokenBudgetEstimate

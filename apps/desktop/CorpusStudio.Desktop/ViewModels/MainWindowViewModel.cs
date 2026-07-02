@@ -2706,6 +2706,27 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 + $"{budget.ExamplesOverSequenceLen} over seq_len");
         }
 
+        if (result.VramEstimate is { } vram)
+        {
+            lines.Add("");
+            if (vram.ParameterCountBillions is { } paramsB)
+            {
+                lines.Add(
+                    $"VRAM (rough, {paramsB:0.#}B params): ~{vram.TotalGbFp16:0.#} GB fp16 / "
+                    + $"~{vram.TotalGbInt8:0.#} GB 8-bit / ~{vram.TotalGbInt4:0.#} GB 4-bit");
+            }
+            else
+            {
+                lines.Add("VRAM: no estimate (model size not parseable from the name).");
+            }
+        }
+
+        if (result.LoraRecommendation is { } lora)
+        {
+            lines.Add($"LoRA suggestion: r={lora.RecommendedR}, alpha={lora.RecommendedAlpha}");
+            lines.AddRange(lora.Warnings.Select(warning => $"- {warning}"));
+        }
+
         _trainingOutputDirectory = result.TrainingOutputDirectory;
         _trainingConfigPath = result.OutputPath;
         _trainingResumeArgv = [];
