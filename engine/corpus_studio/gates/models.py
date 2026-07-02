@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from enum import Enum
+from pathlib import Path
 
 from pydantic import BaseModel, Field
+
+GATE_THRESHOLDS_FILENAME = "gate_thresholds.json"
 
 
 class GateScope(str, Enum):
@@ -96,3 +100,30 @@ class GateThresholds(BaseModel):
     min_eval_average_score: float = 70.0
     min_eval_pass_rate: float = 0.5  # fraction of examples that must pass
     max_regression_score_drop: float = 2.0  # block if trained avg drops more than this
+
+
+def gate_thresholds_path(project_dir: Path | str) -> Path:
+    return Path(project_dir) / GATE_THRESHOLDS_FILENAME
+
+
+def load_gate_thresholds(project_dir: Path | str) -> GateThresholds:
+    """Effective thresholds: project-local ``gate_thresholds.json`` merged over the
+    defaults. Missing keys keep their default, unknown keys are ignored, and an
+    absent/unreadable/invalid file falls back to defaults (never crashes).
+    """
+
+    path = gate_thresholds_path(project_dir)
+    if not path.exists():
+        return GateThresholds()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return GateThresholds()
+    if not isinstance(data, dict):
+        return GateThresholds()
+
+    known = {key: data[key] for key in GateThresholds.model_fields if key in data}
+    try:
+        return GateThresholds(**known)
+    except Exception:  # noqa: BLE001 - a bad value type falls back to defaults.
+        return GateThresholds()

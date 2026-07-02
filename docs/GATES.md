@@ -67,7 +67,20 @@ source run; otherwise **passes**. In the desktop Artifacts tab, "Keep" runs this
 gate first and a block refuses the keep. The companion `artifact-card` renders a
 live weight card (never stored) carrying the same provenance caveat.
 
+## Per-project thresholds
+
+Gate thresholds default to the values in `GateThresholds`, but a project can
+override any of them by writing a `gate_thresholds.json` in the project
+directory (partial — unlisted keys keep their default; unknown keys and an
+unreadable/invalid file fall back to defaults, never crashing). The gate CLI
+commands (`gate-run`, `training-run-gate`, `artifact-gate`) load it
+automatically. `gate-thresholds --project-dir <p>` prints the effective values
+so you can copy them into the file and edit. Example:
+
+```json
+{ "block_exact_duplicates": false, "max_regression_score_drop": 5.0 }
+```
+
 ## Future work
 
-Per-project threshold configuration and a richer per-run selection UI are
-follow-ups.
+A richer per-run selection UI and a desktop threshold editor are follow-ups.
