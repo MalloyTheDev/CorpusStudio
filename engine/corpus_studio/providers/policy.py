@@ -229,6 +229,18 @@ def resolve_policy(
     return policy
 
 
+def most_specific_override_key(
+    provider_id: str, model_id: str | None = None, route_id: str | None = None
+) -> str:
+    """The single most-specific override key for a provider/model/route."""
+
+    if route_id:
+        return f"{provider_id}/route:{route_id}"
+    if model_id:
+        return f"{provider_id}/model:{model_id}"
+    return provider_id
+
+
 def _override_keys(
     provider_id: str, model_id: str | None, route_id: str | None
 ) -> list[str]:

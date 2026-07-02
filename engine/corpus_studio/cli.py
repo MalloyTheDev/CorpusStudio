@@ -9,6 +9,12 @@ import typer
 from pydantic import ValidationError
 
 from corpus_studio.ai_assist.assistant import run_ai_assist
+from corpus_studio.providers.overrides import load_overrides
+from corpus_studio.providers.policy import (
+    ProviderPolicyError,
+    infer_provider_id,
+    resolve_policy,
+)
 from corpus_studio.evaluation.benchmark import build_benchmark_report
 from corpus_studio.evaluation.evaluator import (
     EvaluationRunConfig,
@@ -491,6 +497,15 @@ def ai_assist(
 ):
     """Run AI Assist Lab on draft rows and return review-only suggestions."""
 
+    provider_id = infer_provider_id(backend, base_url)
+    route_id = model if provider_id == "openrouter" else None
+    policy = resolve_policy(
+        provider_id,
+        model_id=model,
+        route_id=route_id,
+        overrides=load_overrides(input_path.parent),
+    )
+
     try:
         load_builtin_schema(schema)
         rows = list(read_jsonl(input_path))
@@ -508,7 +523,11 @@ def ai_assist(
             backend=backend_client,
             model=model,
             user_instruction=user_instruction,
+            policy=policy,
         )
+    except ProviderPolicyError as exc:
+        typer.echo(f"Provider policy blocked this action: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
     except (ValueError, json.JSONDecodeError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
