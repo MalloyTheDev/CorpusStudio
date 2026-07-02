@@ -77,6 +77,12 @@ Last reconciled: 2026-07-02 (v0.6 in progress).
   button in the desktop Quality tab (overall status + per-gate pass/warn/block
   with repair hints). See [`GATES.md`](GATES.md).
 
+## In progress — v0.7 (Model Chat Lab / Arena)
+
+- Run a prompt suite across several models and capture responses side by side
+  (engine `arena-run` → `ArenaReport`). Responses are comparison artifacts, not
+  trainable rows. Judging, saved reports, and a desktop surface are next.
+
 ## Not built yet (future roadmap)
 
 Model Chat Lab / Arena (v0.7), Training Run Registry (v0.8), Model Artifact /
