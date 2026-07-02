@@ -86,7 +86,8 @@ class GateReport(BaseModel):
 class GateThresholds(BaseModel):
     """Default gate thresholds (designed for future per-project configuration)."""
 
-    max_exact_duplicates: int = 0  # block above this
+    max_exact_duplicates: int = 0  # exceeding this is a finding
+    block_exact_duplicates: bool = True  # block (True) vs warn (False) on exact dups
     max_normalized_duplicates: int = 0  # warn above this
     max_low_information: int = 0  # warn above this
     warn_synthetic_pattern_issues: int = 1  # warn at/above this many issues

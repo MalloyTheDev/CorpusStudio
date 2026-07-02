@@ -35,6 +35,21 @@ def test_unparseable_name_returns_none():
     assert parse_parameter_count("my-custom-model") is None
 
 
+def test_moe_active_expert_suffix_uses_total_not_active():
+    # 'A##B' active-expert suffix must not win over the real total size.
+    assert parse_parameter_count("Qwen3-30B-A3B") == 30.0
+    assert parse_parameter_count("Qwen2-57B-A14B") == 57.0
+
+
+def test_bloom_style_trailing_digit_parses():
+    assert parse_parameter_count("bigscience/bloom-7b1") == 7.1
+
+
+def test_quantization_suffix_not_read_as_size():
+    # '8bit' is quantization, not an 8B size.
+    assert parse_parameter_count("some-model-8bit") is None
+
+
 # --- VRAM estimate -----------------------------------------------------------
 
 def test_7b_fp16_weights_are_14gb():

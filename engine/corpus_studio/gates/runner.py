@@ -7,9 +7,12 @@ import os
 from pathlib import Path
 from typing import Any
 
+import re
+
 from corpus_studio.evaluation.reports import EvaluationReport
 from corpus_studio.gates.basic_gates import (
     eval_score_gate,
+    input_present_gate,
     leakage_gate,
     pii_gate,
     quality_gate,
@@ -44,6 +47,7 @@ def run_dataset_gates(
     validation = _validate_rows(rows, schema_id)
     quality = build_basic_quality_report(rows)
     results = [
+        input_present_gate(len(rows), GateScope.DATASET, block_when_empty=False),
         schema_gate(validation, GateScope.DATASET),
         quality_gate(quality, thresholds, GateScope.DATASET),
         pii_gate(quality, thresholds, GateScope.DATASET),
@@ -58,15 +62,21 @@ def run_export_gates(
     target: str = "export",
     generated_at: str | None = None,
 ) -> GateReport:
-    """Export gate: block on schema or PII failure; warn on quality issues."""
+    """Export gate: block on empty input, schema, or PII failure; warn on quality.
 
-    thresholds = thresholds or GateThresholds()
+    Quality issues (duplicates, low-information) warn rather than block on export
+    because the export command has a dedicated cleaning pass.
+    """
+
+    base = thresholds or GateThresholds()
+    export_thresholds = base.model_copy(update={"block_exact_duplicates": False})
     validation = _validate_rows(rows, schema_id)
     quality = build_basic_quality_report(rows)
     results = [
+        input_present_gate(len(rows), GateScope.EXPORT, block_when_empty=True),
         schema_gate(validation, GateScope.EXPORT),
-        pii_gate(quality, thresholds, GateScope.EXPORT),
-        quality_gate(quality, thresholds, GateScope.EXPORT),
+        pii_gate(quality, export_thresholds, GateScope.EXPORT),
+        quality_gate(quality, export_thresholds, GateScope.EXPORT),
     ]
     return GateReport.build(GateScope.EXPORT, target, results, generated_at)
 
@@ -99,12 +109,23 @@ def run_evaluation_gate(
     )
 
 
+def _slug(text: str) -> str:
+    """Filesystem-safe discriminator from a target (usually a file path)."""
+
+    base = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(text).name).strip("_")
+    return base or "target"
+
+
 def save_gate_report(project_dir: Path | str, report: GateReport) -> Path:
-    """Write a gate report to project-local gate_reports/<scope>.json (atomic)."""
+    """Write a gate report to gate_reports/<scope>-<target>.json (atomic).
+
+    The target is part of the filename so gating different files in the same
+    scope does not silently clobber earlier reports.
+    """
 
     directory = Path(project_dir) / GATE_REPORTS_DIRNAME
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{report.scope.value}.json"
+    path = directory / f"{report.scope.value}-{_slug(report.target)}.json"
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
     os.replace(tmp, path)

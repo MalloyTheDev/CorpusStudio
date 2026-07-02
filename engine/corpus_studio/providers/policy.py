@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Any
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field
 
@@ -157,12 +158,19 @@ def infer_provider_id(backend: str | None, base_url: str | None) -> str:
     if normalized == "ollama":
         return "ollama"
 
-    host = (base_url or "").lower()
-    if "openrouter" in host:
+    # Match the exact hostname, not a substring of the whole URL, so a path or
+    # query containing 'openai'/'openrouter' cannot misclassify a local server
+    # (and 'api.openai.com.evil.example' is not treated as OpenAI).
+    host = ""
+    if base_url:
+        parsed = urlsplit(base_url if "://" in base_url else f"//{base_url}")
+        host = (parsed.hostname or "").lower()
+
+    if host == "openrouter.ai" or host.endswith(".openrouter.ai"):
         return "openrouter"
-    if "api.openai.com" in host:
+    if host == "openai.com" or host.endswith(".openai.com"):
         return "openai"
-    if "api.anthropic.com" in host:
+    if host == "anthropic.com" or host.endswith(".anthropic.com"):
         return "anthropic"
     return "openai_compatible"
 
@@ -179,6 +187,45 @@ def _fallback_policy(provider_id: str) -> ProviderPolicy:
     )
 
 
+# User overrides (from an editable JSON file) may only touch these fields. Role
+# and blocking fields are NOT overridable, so an override can never re-enable a
+# hard-blocked frontier provider.
+_OVERRIDE_ALLOWED_KEYS = frozenset(
+    {
+        "outputs_trainable",
+        "user_approved_generation",
+        "license_or_terms_note",
+        "safety_notes",
+        "display_name",
+        "requires_api_key",
+    }
+)
+
+
+def _is_frontier(provider_id: str, route_id: str | None) -> bool:
+    """Whether generation must be hard-blocked regardless of overrides/approval."""
+
+    if provider_id in _FRONTIER_ROUTE_PARENTS:
+        return True
+    if provider_id == "openrouter" and route_id:
+        # A bare (slash-less) route id can't be vetted, so treat it as frontier
+        # and deny generation; a fully-qualified route inherits its vendor.
+        if "/" not in route_id:
+            return True
+        return route_parent(route_id) in _FRONTIER_ROUTE_PARENTS
+    return False
+
+
+def _apply_frontier_block(policy: ProviderPolicy) -> ProviderPolicy:
+    return policy.model_copy(
+        update={
+            "allowed_roles": [ProviderRole.EVALUATOR],
+            "blocked_roles": [ProviderRole.TRAINABLE_OUTPUT_GENERATOR],
+            "outputs_trainable": False,
+        }
+    )
+
+
 def resolve_policy(
     provider_id: str,
     model_id: str | None = None,
@@ -187,30 +234,22 @@ def resolve_policy(
 ) -> ProviderPolicy:
     """Resolve the effective policy for a provider/model/route.
 
-    Applies OpenRouter route inheritance, then any user overrides keyed by the
-    most specific match (``provider/route``, ``provider/model``, or ``provider``).
+    Applies OpenRouter route inheritance, then any user overrides (restricted to
+    a safe key allowlist), then re-asserts the frontier block last so no override
+    or route-id spelling can grant generation to a frontier provider/route.
     """
 
     base = DEFAULT_PROVIDER_POLICIES.get(provider_id) or _fallback_policy(provider_id)
     policy = base.model_copy(update={"model_id": model_id, "route_id": route_id})
+    frontier = _is_frontier(provider_id, route_id)
 
     if provider_id == "openrouter" and route_id:
-        parent = route_parent(route_id)
-        if parent in _FRONTIER_ROUTE_PARENTS:
+        policy = policy.model_copy(update={"route_parent": route_parent(route_id)})
+        if not frontier:
+            # Fully-qualified non-frontier route: generation is *possible* but
+            # still requires explicit approval.
             policy = policy.model_copy(
                 update={
-                    "route_parent": parent,
-                    "allowed_roles": [ProviderRole.EVALUATOR],
-                    "blocked_roles": [ProviderRole.TRAINABLE_OUTPUT_GENERATOR],
-                    "outputs_trainable": False,
-                }
-            )
-        else:
-            # Non-frontier route: generation is *possible* but still requires
-            # explicit approval (outputs_trainable + user_approved_generation).
-            policy = policy.model_copy(
-                update={
-                    "route_parent": parent,
                     "allowed_roles": [
                         ProviderRole.EVALUATOR,
                         ProviderRole.TRAINABLE_OUTPUT_GENERATOR,
@@ -223,8 +262,14 @@ def resolve_policy(
         for key in _override_keys(provider_id, model_id, route_id):
             override = overrides.get(key)
             if override:
-                policy = policy.model_copy(update={**override, "default_policy_source": "user_override"})
+                safe = {k: v for k, v in override.items() if k in _OVERRIDE_ALLOWED_KEYS}
+                policy = policy.model_copy(
+                    update={**safe, "default_policy_source": "user_override"}
+                )
                 break
+
+    if frontier:
+        policy = _apply_frontier_block(policy)
 
     return policy
 
@@ -271,6 +316,14 @@ def authorize_action(policy: ProviderPolicy, action: str) -> None:
         label += f" route '{policy.route_id}'"
     elif policy.model_id:
         label += f" model '{policy.model_id}'"
+
+    # Default-deny: an action that is neither a known trainable nor a known
+    # evaluator action must not fall through to the permissive evaluator path.
+    if action not in TRAINABLE_ACTIONS and action not in EVALUATOR_ACTIONS:
+        raise ProviderPolicyError(
+            f"{label} was asked to run unrecognized action '{action}'; "
+            "only explicitly categorized trainable/evaluator actions are permitted."
+        )
 
     if is_trainable_action(action):
         if not policy.can_generate_trainable():

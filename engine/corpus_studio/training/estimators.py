@@ -115,7 +115,10 @@ def build_training_token_budget(rows: list[dict], sequence_len: int) -> TokenBud
 # nothing here inspects hardware or imports ML frameworks.
 
 _PARAM_MOE_RE = re.compile(r"(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*b\b", re.IGNORECASE)
-_PARAM_COUNT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*b\b", re.IGNORECASE)
+# Size token: digits (optional decimal) + 'b', with an optional trailing digit
+# for names like BLOOM 'b7b1' (= 7.1B). The negative lookahead for a letter
+# stops '8bit' (quantization) parsing as 8B.
+_PARAM_COUNT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*b(\d+)?(?![a-z])", re.IGNORECASE)
 
 # LoRA trainable fraction of base params at r=16 (all-linear targets, rough).
 _LORA_FRACTION_AT_R16 = 0.006
@@ -132,18 +135,28 @@ def parse_parameter_count(base_model: str) -> float | None:
     """Parse a parameter count in billions from a model name, or None.
 
     Handles ``7B``, ``0.5b``, ``Qwen2.5-Coder-7B-Instruct``, ``llama-3-8b``,
-    and MoE names like ``mixtral-8x7b`` (total parameters).
+    MoE names like ``mixtral-8x7b`` (total parameters), ``A##B`` active-expert
+    suffixes like ``Qwen3-30B-A3B`` (returns the 30B total), and BLOOM-style
+    ``7b1`` (= 7.1B). Known limitation: underscore-decimal names such as
+    ``stablelm-2-1_6b`` are not recognized (the ``_`` is ambiguous with a
+    separator, e.g. ``llama_2_7b``).
     """
 
     moe = _PARAM_MOE_RE.search(base_model)
     if moe:
         return round(float(moe.group(1)) * float(moe.group(2)), 3)
 
-    # Take the last size-looking token so version fragments like "Qwen2.5" or
-    # "llama-3" do not win over the real "7B"/"8b" suffix.
-    matches = _PARAM_COUNT_RE.findall(base_model)
-    if matches:
-        return float(matches[-1])
+    # Take the LARGEST size token. For 'Qwen3-30B-A3B' the total (30) must win
+    # over the active-expert suffix (3); version fragments like 'Qwen2.5' never
+    # match because they are not followed by 'b'.
+    sizes: list[float] = []
+    for whole, fraction in _PARAM_COUNT_RE.findall(base_model):
+        value = float(whole)
+        if fraction:  # e.g. '7' + 'b' + '1' -> 7.1
+            value += int(fraction) / (10 ** len(fraction))
+        sizes.append(round(value, 3))
+    if sizes:
+        return max(sizes)
 
     return None
 

@@ -149,3 +149,53 @@ def test_unknown_provider_falls_back_to_evaluator_only():
     assert policy.default_policy_source == "fallback"
     assert policy.can_generate_trainable() is False
     assert policy.can_evaluate() is True
+
+
+# --- audit hardening regressions ---------------------------------------------
+
+def test_frontier_block_survives_role_key_override():
+    # An override that tries to wipe the block/roles must NOT re-enable generation.
+    policy = resolve_policy(
+        "openai",
+        overrides={
+            "openai": {
+                "outputs_trainable": True,
+                "user_approved_generation": True,
+                "blocked_roles": [],
+                "allowed_roles": ["evaluator", "trainable_output_generator"],
+            }
+        },
+    )
+    assert policy.can_generate_trainable() is False
+    assert ProviderRole.TRAINABLE_OUTPUT_GENERATOR in policy.blocked_roles
+
+
+def test_openrouter_bare_slug_route_is_frontier_blocked():
+    # A slash-less route id (e.g. 'gpt-4o') cannot be vetted -> deny generation.
+    policy = resolve_policy(
+        "openrouter",
+        route_id="gpt-4o",
+        overrides={
+            "openrouter/route:gpt-4o": {"outputs_trainable": True, "user_approved_generation": True}
+        },
+    )
+    assert policy.can_generate_trainable() is False
+
+
+def test_infer_provider_id_matches_exact_host_only():
+    # Substrings in the path must not misclassify a local server.
+    assert infer_provider_id("openai-compatible", "http://localhost:1234/openrouter") == "openai_compatible"
+    assert infer_provider_id("openai-compatible", "http://localhost/api.openai.com/proxy") == "openai_compatible"
+    # Look-alike attacker domain is not treated as OpenAI.
+    assert infer_provider_id("openai-compatible", "https://api.openai.com.evil.example/v1") == "openai_compatible"
+    # Real hosts still resolve.
+    assert infer_provider_id("openai-compatible", "https://api.openai.com/v1") == "openai"
+    assert infer_provider_id("openai-compatible", "https://openrouter.ai/api/v1") == "openrouter"
+
+
+def test_unknown_action_is_denied():
+    from corpus_studio.providers.policy import ProviderPolicyError, authorize_action
+
+    policy = resolve_policy("ollama", model_id="llama3")
+    with pytest.raises(ProviderPolicyError):
+        authorize_action(policy, "generate")  # not a categorized action

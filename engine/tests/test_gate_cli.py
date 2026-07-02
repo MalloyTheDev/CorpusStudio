@@ -80,4 +80,15 @@ def test_gate_run_export_blocks_on_secret_and_writes_report(tmp_path: Path):
     report = json.loads(result.output)
     assert report["scope"] == "export"
     assert report["overall_status"] == "block"
-    assert (tmp_path / "gate_reports" / "export.json").exists()
+    written = list((tmp_path / "gate_reports").glob("export-*.json"))
+    assert len(written) == 1
+
+
+def test_gate_run_distinct_targets_do_not_collide(tmp_path: Path):
+    rows = [{"instruction": "Explain recursion.", "output": "A function calls itself on subproblems clearly."}]
+    for name in ("a.jsonl", "b.jsonl"):
+        src = tmp_path / name
+        _write(src, rows)
+        runner.invoke(app, ["gate-run", str(src), "instruction", "--project-dir", str(tmp_path)])
+    reports = list((tmp_path / "gate_reports").glob("dataset-*.json"))
+    assert len(reports) == 2  # a.jsonl and b.jsonl each kept a distinct report

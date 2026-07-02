@@ -21,7 +21,39 @@ def test_dataset_gates_pass_on_clean_rows():
     report = run_dataset_gates(CLEAN_ROWS, "instruction")
     assert report.overall_status == GateStatus.PASS
     assert report.block_count == 0
-    assert {result.gate_id for result in report.results} == {"schema", "quality", "pii"}
+    assert {result.gate_id for result in report.results} == {
+        "input_present",
+        "schema",
+        "quality",
+        "pii",
+    }
+
+
+def test_empty_dataset_warns_not_silently_passes():
+    report = run_dataset_gates([], "instruction")
+    assert report.overall_status == GateStatus.WARN
+    present = next(r for r in report.results if r.gate_id == "input_present")
+    assert present.status == GateStatus.WARN
+
+
+def test_empty_export_blocks():
+    report = run_export_gates([], "instruction")
+    assert report.overall_status == GateStatus.BLOCK
+
+
+def test_export_warns_not_blocks_on_exact_duplicates():
+    row = {"instruction": "Explain recursion in detail.", "output": "A function calls itself on subproblems."}
+    report = run_export_gates([row, row], "instruction")
+    quality = next(r for r in report.results if r.gate_id == "quality")
+    assert quality.status == GateStatus.WARN
+    assert report.overall_status != GateStatus.BLOCK
+
+
+def test_schema_gate_counts_rows_not_errors():
+    # One empty row against 'instruction' yields 2 errors but is 1 failing row.
+    report = run_dataset_gates([{}], "instruction")
+    schema = next(r for r in report.results if r.gate_id == "schema")
+    assert "1 row(s) fail" in schema.message
 
 
 def test_schema_gate_blocks_invalid_rows():
@@ -125,7 +157,7 @@ def test_custom_thresholds_relax_quality_gate():
 def test_gate_report_serializes_and_reloads(tmp_path: Path):
     report = run_dataset_gates(CLEAN_ROWS, "instruction", generated_at="2026-07-02T00:00:00Z")
     path = save_gate_report(tmp_path, report)
-    assert path.name == "dataset.json"
+    assert path.name.startswith("dataset-")  # scope + target discriminator
 
     reloaded = load_gate_report(path)
     assert reloaded.scope == GateScope.DATASET
