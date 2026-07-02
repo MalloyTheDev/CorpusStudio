@@ -199,6 +199,23 @@ Out of scope (future):
 - Real hosted-provider API clients; approved-generation review-queue pipeline
   (v1.2); regression gate (needs the v0.8 run registry); desktop surfacing.
 
+## v0.7 - Model Chat Lab / Arena
+
+Goal: compare models side by side on prompt suites, with evaluator-only judging.
+
+Scope (in progress):
+
+- Run a prompt suite across several models and capture responses side by side
+  (engine `arena-run`, `ArenaReport`). Responses are comparison artifacts, not
+  trainable dataset rows.
+- Planned: evaluator-only judging/ranking of responses, saved comparison
+  reports, and a desktop Arena surface.
+
+Out of scope:
+
+- Using arena responses as trainable data without the normal
+  generate → validate → gates → review → save flow.
+
 ## v1.0 - Full Dataset-to-Model Workflow
 
 Goal: stable end-to-end workflow from dataset creation to evaluated model

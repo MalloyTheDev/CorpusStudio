@@ -9,6 +9,7 @@ import typer
 from pydantic import ValidationError
 
 from corpus_studio.ai_assist.assistant import run_ai_assist
+from corpus_studio.arena.runner import load_prompt_suite, run_arena
 from corpus_studio.gates.runner import (
     run_dataset_gates,
     run_export_gates,
@@ -1051,6 +1052,61 @@ def export(
         }
 
     typer.echo(json.dumps(payload, indent=2))
+
+
+@app.command("arena-run")
+def arena_run(
+    input_path: Path,
+    models: list[str] = typer.Option(..., "--model", help="Model to run (repeatable)."),
+    backend: str = typer.Option("ollama", "--backend", help="ollama or openai-compatible."),
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="Override provider base URL."),
+    api_key: Optional[str] = typer.Option(None, "--api-key", help="Optional API key."),
+    output_path: Optional[Path] = typer.Option(None, "--output-path", help="Write report JSON."),
+    limit: Optional[int] = typer.Option(None, "--limit", help="Maximum prompts to run."),
+    timeout_seconds: int = typer.Option(120, "--timeout-seconds"),
+):
+    """Run a prompt suite across several models and capture responses side by side."""
+
+    try:
+        prompts = load_prompt_suite(input_path)
+    except (ValueError, json.JSONDecodeError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    if not prompts:
+        typer.echo("No prompts found in the suite (need rows with a non-empty 'prompt').", err=True)
+        raise typer.Exit(code=1)
+
+    unique_models = list(dict.fromkeys(name.strip() for name in models if name.strip()))
+    if not unique_models:
+        typer.echo("Provide at least one --model.", err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        model_backends = [
+            (
+                model,
+                _build_backend(
+                    backend=backend,
+                    model=model,
+                    base_url=base_url,
+                    api_key=api_key,
+                    timeout_seconds=timeout_seconds,
+                ),
+            )
+            for model in unique_models
+        ]
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    report = run_arena(prompts, model_backends, limit=limit, generated_at=_utc_now_iso())
+    payload = report.model_dump_json(indent=2)
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(payload + "\n", encoding="utf-8")
+
+    typer.echo(payload)
 
 
 @app.command("provider-policy")
