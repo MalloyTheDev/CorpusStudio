@@ -2366,6 +2366,18 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             $"Training launcher: {launcherStatus}",
         };
 
+        if (result.TokenBudget is { } budget && budget.ExampleCount > 0)
+        {
+            lines.Add("");
+            lines.Add(
+                $"Token budget ({budget.Method}): ~{budget.EstimatedTokens:N0} tokens over "
+                + $"{budget.ExampleCount} example(s), ~{budget.TokensPerEpoch:N0}/epoch at seq_len "
+                + $"{budget.SequenceLen}");
+            lines.Add(
+                $"  mean ~{budget.MeanTokensPerExample:N0}, max ~{budget.MaxTokensInExample:N0} tokens; "
+                + $"{budget.ExamplesOverSequenceLen} over seq_len");
+        }
+
         if (result.Warnings.Count > 0)
         {
             lines.Add("");
