@@ -1794,6 +1794,55 @@
                                      HorizontalScrollBarVisibility="Auto" />
                         </Grid>
                     </TabItem>
+                    <TabItem Header="Artifacts">
+                        <Grid Margin="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <StackPanel Grid.Row="0">
+                                <TextBlock Text="Model Artifacts"
+                                           FontSize="18"
+                                           FontWeight="Bold"
+                                           Foreground="#0F172A" />
+                                <TextBlock Text="Track adapters/checkpoints a run produced, and keep or reject them. Paths are referenced, never moved — a record flags 'modified' or 'missing' if the weights change on disk."
+                                           Foreground="#475569"
+                                           TextWrapping="Wrap"
+                                           Margin="0,4,0,8" />
+                                <TextBlock AutomationProperties.AutomationId="ArtifactSummaryTextBlock"
+                                           Text="{Binding ArtifactSummary, Mode=OneWay}"
+                                           Foreground="#334155"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,8" />
+                            </StackPanel>
+                            <WrapPanel Grid.Row="1" Margin="0,0,0,8">
+                                <Button AutomationProperties.AutomationId="RegisterArtifactFromRunButton"
+                                        Content="Register latest run's output"
+                                        ToolTip="Register the newest training run's output directory as an artifact"
+                                        Margin="0,0,8,0"
+                                        Click="RegisterArtifactFromRunButton_Click" />
+                                <Button AutomationProperties.AutomationId="KeepArtifactButton"
+                                        Content="Keep"
+                                        Margin="0,0,8,0"
+                                        Click="KeepArtifactButton_Click" />
+                                <Button AutomationProperties.AutomationId="RejectArtifactButton"
+                                        Content="Reject"
+                                        Margin="0,0,8,0"
+                                        Click="RejectArtifactButton_Click" />
+                                <Button AutomationProperties.AutomationId="RefreshArtifactsButton"
+                                        Content="Refresh"
+                                        Click="RefreshArtifactsButton_Click" />
+                            </WrapPanel>
+                            <ListBox Grid.Row="2"
+                                     AutomationProperties.AutomationId="ModelArtifactsListBox"
+                                     ItemsSource="{Binding ModelArtifacts}"
+                                     SelectedItem="{Binding SelectedModelArtifact, Mode=TwoWay}"
+                                     DisplayMemberPath="DisplayName"
+                                     FontFamily="Consolas"
+                                     FontSize="12" />
+                        </Grid>
+                    </TabItem>
                     <TabItem Header="Settings">
                         <StackPanel Margin="8">
                             <TextBox Text="{Binding SettingsSummary, Mode=OneWay}"

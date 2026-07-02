@@ -1903,6 +1903,96 @@ public partial class MainWindow : Window
         }
     }
 
+    private void RegisterArtifactFromRunButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetArtifactError("Create or select a dataset project first.");
+            return;
+        }
+
+        var projectPath = ViewModel.ActiveProjectPath;
+        try
+        {
+            var run = _engineService.LoadTrainingRunRecords(projectPath).FirstOrDefault();
+            if (run is null)
+            {
+                ViewModel.SetArtifactError("No training run has been recorded yet.");
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(run.OutputDir))
+            {
+                ViewModel.SetArtifactError("The latest run has no output directory to register.");
+                return;
+            }
+
+            _engineService.RegisterArtifact(projectPath, run.RunId, run.OutputDir);
+            RefreshArtifacts();
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetArtifactError(ex.Message);
+        }
+    }
+
+    private void KeepArtifactButton_Click(object sender, RoutedEventArgs e) => SetSelectedArtifactStatus("kept");
+
+    private void RejectArtifactButton_Click(object sender, RoutedEventArgs e) => SetSelectedArtifactStatus("rejected");
+
+    private void RefreshArtifactsButton_Click(object sender, RoutedEventArgs e) => RefreshArtifacts();
+
+    private void SetSelectedArtifactStatus(string status)
+    {
+        var selected = ViewModel.SelectedModelArtifact;
+        if (selected is null)
+        {
+            ViewModel.SetArtifactError("Select an artifact first.");
+            return;
+        }
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            return;
+        }
+
+        try
+        {
+            _engineService.UpdateArtifactStatus(ViewModel.ActiveProjectPath, selected.Record.ArtifactId, status);
+            RefreshArtifacts();
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetArtifactError(ex.Message);
+        }
+    }
+
+    private void RefreshArtifacts()
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetArtifactError("Create or select a dataset project first.");
+            return;
+        }
+
+        var projectPath = ViewModel.ActiveProjectPath;
+        try
+        {
+            // Resolve base_model live through run_id (never stored on the artifact).
+            var runs = _engineService.LoadTrainingRunRecords(projectPath)
+                .ToDictionary(r => r.RunId, r => r, StringComparer.Ordinal);
+            var items = _engineService.LoadArtifacts(projectPath)
+                .Select(entry => new ArtifactDisplayItem(
+                    entry.Record,
+                    entry.Integrity,
+                    runs.TryGetValue(entry.Record.RunId, out var run) ? run.BaseModel : string.Empty))
+                .ToList();
+            ViewModel.ApplyArtifacts(items);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetArtifactError(ex.Message);
+        }
+    }
+
     private void RefreshTrainingRunsButton_Click(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
