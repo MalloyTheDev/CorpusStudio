@@ -181,6 +181,35 @@ def test_evaluator_only_provider_may_judge():
     assert judged.judgments[0].winner == "a"
 
 
+def test_save_and_load_arena_report_roundtrip(tmp_path: Path):
+    from corpus_studio.arena.storage import (
+        list_arena_reports,
+        load_arena_report,
+        save_arena_report,
+    )
+
+    report = run_arena(PROMPTS, [("a", EchoBackend("a"))], generated_at="2026-07-02T00:00:00Z")
+    path = save_arena_report(tmp_path, report, "my suite")
+    assert path.name == "my_suite.json"
+
+    reloaded = load_arena_report(path)
+    assert reloaded.prompt_count == report.prompt_count
+    assert reloaded.generated_at == "2026-07-02T00:00:00Z"
+    assert [p.name for p in list_arena_reports(tmp_path)] == ["my_suite.json"]
+
+
+def test_cli_arena_run_saves_to_project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    src = tmp_path / "chat_suite.jsonl"
+    _write(src, [{"prompt": "hi"}])
+    monkeypatch.setattr(cli, "_build_backend", lambda **kwargs: EchoBackend(kwargs["model"]))
+
+    result = runner.invoke(
+        app, ["arena-run", str(src), "--model", "a", "--project-dir", str(tmp_path)]
+    )
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "arena_reports" / "chat_suite.json").exists()
+
+
 def test_cli_arena_run_with_judge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     src = tmp_path / "suite.jsonl"
     _write(src, [{"prompt": "Explain recursion."}])

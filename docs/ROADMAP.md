@@ -211,7 +211,9 @@ Scope (in progress):
 - Evaluator-only judging (`--judge-model`): a judge scores each candidate and
   picks a winner, aggregated into per-model win counts / average judge scores;
   the judge must be an evaluator-role provider (OpenAI/Anthropic allowed).
-- Planned: saved comparison reports and a desktop Arena surface.
+- Saved comparison reports: `arena-run --project-dir` writes an inspectable
+  report under `arena_reports/`.
+- Planned: a desktop Arena surface.
 
 Out of scope:
 

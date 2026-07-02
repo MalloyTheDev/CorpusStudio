@@ -137,6 +137,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/arena/judge.py`
 - `engine/corpus_studio/arena/models.py`
 - `engine/corpus_studio/arena/runner.py`
+- `engine/corpus_studio/arena/storage.py`
 - `engine/corpus_studio/cleaners/__init__.py`
 - `engine/corpus_studio/cleaners/basic_cleaner.py`
 - `engine/corpus_studio/cli.py`
