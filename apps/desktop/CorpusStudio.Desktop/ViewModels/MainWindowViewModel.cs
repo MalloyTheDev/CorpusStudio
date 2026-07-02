@@ -18,6 +18,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _validationSummary = "Create a project to start validation.";
     private string _qualitySummary = "Create or select a project to run quality checks.";
     private string _gateSummary = "Run gates to check whether this dataset may move forward.";
+    private string _providerPolicySummary =
+        "Provider generation policy: refresh to see which providers may create trainable rows.";
     private string _qualityHistorySummary = "Quality history appears after quality checks run.";
     private string _qualityTriageSummary = "Synthetic quality issues appear here after quality checks run.";
     private string _splitSummary = "Create or select a project to generate train, validation, and test splits.";
@@ -369,6 +371,49 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _gateSummary;
         private set => SetField(ref _gateSummary, value);
+    }
+
+    public string ProviderPolicySummary
+    {
+        get => _providerPolicySummary;
+        private set => SetField(ref _providerPolicySummary, value);
+    }
+
+    public void SetProviderPolicyError(string message)
+    {
+        ProviderPolicySummary = $"Provider policy action failed.{Environment.NewLine}{message}";
+    }
+
+    /// <summary>Format the provider generation policy (who may create trainable rows).</summary>
+    public void ApplyProviderPolicies(IReadOnlyList<ProviderPolicyItem> policies)
+    {
+        var lines = new List<string>
+        {
+            "Provider generation policy (who may create trainable rows):",
+            string.Empty,
+        };
+
+        foreach (var policy in policies)
+        {
+            var name = string.IsNullOrWhiteSpace(policy.DisplayName) ? policy.ProviderId : policy.DisplayName;
+            if (policy.GenerationAllowed)
+            {
+                lines.Add($"✅ {name} ({policy.ProviderKind}) — generation ALLOWED (approved)");
+            }
+            else if (policy.UserApprovedGeneration)
+            {
+                // Approved but still blocked (frontier provider): make that explicit.
+                lines.Add($"⛔ {name} ({policy.ProviderKind}) — approval ignored; evaluator-only");
+            }
+            else
+            {
+                lines.Add($"⛔ {name} ({policy.ProviderKind}) — generation blocked (evaluator-only or unapproved)");
+            }
+        }
+
+        lines.Add(string.Empty);
+        lines.Add("Approve a local model below to let AI Assist use it for generation (still review-required).");
+        ProviderPolicySummary = string.Join(Environment.NewLine, lines);
     }
 
     public void SetGateInProgress()

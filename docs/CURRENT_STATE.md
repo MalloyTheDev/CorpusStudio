@@ -68,7 +68,9 @@ Last reconciled: 2026-07-02 (v0.6 in progress).
 
 - Role-based provider/model capability policy, enforced in the engine:
   OpenAI/Anthropic evaluator-only by default; Ollama/local generation only when
-  explicitly approved; OpenRouter route-aware. See
+  explicitly approved; OpenRouter route-aware. Surfaced by a **Provider
+  Generation Policy** panel in the desktop Settings tab (shows which providers
+  may generate, and approve/revoke a local model). See
   [`PROVIDER_POLICY.md`](PROVIDER_POLICY.md).
 - A gate runner producing serializable pass/warn/block reports over existing
   schema, quality, leakage, PII, and evaluation logic, surfaced by a **Run Gates**

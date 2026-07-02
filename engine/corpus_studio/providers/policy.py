@@ -12,7 +12,7 @@ from enum import Enum
 from typing import Any
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class ProviderRole(str, Enum):
@@ -67,6 +67,18 @@ class ProviderPolicy(BaseModel):
             ProviderRole.EVALUATOR in self.allowed_roles
             and ProviderRole.EVALUATOR not in self.blocked_roles
         )
+
+    # Serialized so any consumer (desktop, tooling) can show the effective
+    # decision without re-implementing the role logic.
+    @computed_field
+    @property
+    def generation_allowed(self) -> bool:
+        return self.can_generate_trainable()
+
+    @computed_field
+    @property
+    def evaluation_allowed(self) -> bool:
+        return self.can_evaluate()
 
 
 _EVALUATOR_ONLY = {
