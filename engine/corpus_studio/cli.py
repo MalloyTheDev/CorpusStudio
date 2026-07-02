@@ -807,6 +807,37 @@ def training_run_update(
     typer.echo(saved.model_dump_json(indent=2))
 
 
+@app.command("training-run-gate")
+def training_run_gate_command(
+    project_dir: Path,
+    run_id: str = typer.Option(..., "--run-id", help="Run to regression-gate."),
+):
+    """Regression-gate a training run using its linked before/after eval reports."""
+
+    from corpus_studio.evaluation.reports import EvaluationReport
+    from corpus_studio.gates.runner import run_training_run_gate, save_gate_report
+    from corpus_studio.training.run_registry import load_run_record, record_path
+
+    path = record_path(project_dir, run_id)
+    if not path.exists():
+        typer.echo(f"No run record for '{run_id}'.", err=True)
+        raise typer.Exit(code=1)
+
+    record = load_run_record(path)
+
+    def load_report(report_path: str) -> Optional[EvaluationReport]:
+        try:
+            return EvaluationReport.model_validate_json(
+                Path(report_path).read_text(encoding="utf-8")
+            )
+        except (ValidationError, json.JSONDecodeError, OSError):
+            return None
+
+    report = run_training_run_gate(record, load_report, generated_at=_utc_now_iso())
+    save_gate_report(project_dir, report)
+    typer.echo(report.model_dump_json(indent=2))
+
+
 @app.command("training-checkpoints")
 def training_checkpoints(
     output_dir: Path,

@@ -169,6 +169,75 @@ def pii_gate(
     )
 
 
+def regression_gate(
+    before: EvaluationReport | None,
+    after: EvaluationReport | None,
+    thresholds: GateThresholds,
+    provenance_ok: bool,
+    scope: GateScope = GateScope.TRAINING_RUN,
+) -> GateResult:
+    """Block when the trained model regressed vs the baseline.
+
+    Trust depends on provenance: if the after-eval targeted the base model (or no
+    model id was linked), the comparison is not trustworthy and the gate WARNs
+    with 'unverified linkage' rather than claiming a pass/block.
+    """
+
+    if before is None or after is None:
+        return GateResult(
+            gate_id="regression",
+            name="Training regression",
+            scope=scope,
+            status=GateStatus.WARN,
+            observed="missing before and/or after evaluation link",
+            expected="a baseline eval and an eval of the trained model, both linked",
+            message="Cannot gate regression: link a baseline eval and an eval of the trained model.",
+            repair="Evaluate the base model (baseline) and the trained model, then link both to the run.",
+        )
+
+    delta = round(after.average_score - before.average_score, 2)
+    observed = (
+        f"after {after.average_score:.1f} vs before {before.average_score:.1f} (Δ{delta:+.1f})"
+    )
+
+    if not provenance_ok:
+        return GateResult(
+            gate_id="regression",
+            name="Training regression",
+            scope=scope,
+            status=GateStatus.WARN,
+            observed=observed,
+            expected="the after-eval must target the trained model, not the base model",
+            message="Unverified linkage: the after-eval appears to target the base model "
+            "(or its model id is missing), so this before/after comparison is not trustworthy.",
+            repair="Evaluate the trained adapter (not the base model) and re-link the after-eval.",
+        )
+
+    if delta < -thresholds.max_regression_score_drop:
+        return GateResult(
+            gate_id="regression",
+            name="Training regression",
+            scope=scope,
+            status=GateStatus.BLOCK,
+            observed=observed,
+            expected=f"after >= before - {thresholds.max_regression_score_drop:.1f}",
+            message=f"Trained model regressed: average score dropped {abs(delta):.1f} "
+            f"(tolerance {thresholds.max_regression_score_drop:.1f}).",
+            repair="Keep the base model, or retrain/adjust before promoting this run.",
+        )
+
+    trend = "improved" if delta > 0 else "held within tolerance"
+    return GateResult(
+        gate_id="regression",
+        name="Training regression",
+        scope=scope,
+        status=GateStatus.PASS,
+        observed=observed,
+        expected=f"after >= before - {thresholds.max_regression_score_drop:.1f}",
+        message=f"No regression: average score {trend} (Δ{delta:+.1f}).",
+    )
+
+
 def eval_score_gate(
     report: EvaluationReport,
     thresholds: GateThresholds,

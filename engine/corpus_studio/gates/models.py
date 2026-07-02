@@ -95,3 +95,4 @@ class GateThresholds(BaseModel):
     warn_on_medium_severity_pii: bool = True
     min_eval_average_score: float = 70.0
     min_eval_pass_rate: float = 0.5  # fraction of examples that must pass
+    max_regression_score_drop: float = 2.0  # block if trained avg drops more than this

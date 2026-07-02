@@ -238,8 +238,11 @@ Scope:
   left `running` whose process is gone reconciles to `interrupted` on load (pid
   liveness), so a force-closed run does not stay `running` forever. A read-only
   run history in the Training tab.
-- v0.8.1 (planned): the `training_run` regression gate (block when the trained
-  model regressed vs the baseline), once after-eval link provenance is enforced.
+- v0.8.1 (done): the `training_run` regression gate — `training-run-gate` blocks
+  when the trained model regressed vs the baseline, and warns with "unverified
+  linkage" when the after-eval targeted the base model (provenance enforced via
+  the record's `after_eval_model`). Surfaced by a "Gate run" button that links
+  the newest trained-model eval and runs the gate.
 
 Out of scope:
 

@@ -98,8 +98,11 @@ Last reconciled: 2026-07-02 (v0.6 in progress).
   metadata (argv, config, output dir), status lifecycle, pid, exit code,
   checkpoints, and the before-eval link. The desktop writes records directly;
   a run left `running` whose process is gone reconciles to `interrupted` on
-  load. A read-only run history shows past runs in the Training tab. The
-  regression gate (after-eval provenance) is v0.8.1.
+  load. A read-only run history shows past runs in the Training tab.
+- A `training_run` **regression gate** (`training-run-gate`): blocks when the
+  trained model regressed vs the baseline, and warns with "unverified linkage"
+  when the after-eval targeted the base model (provenance via the record's
+  `after_eval_model`). Surfaced by a "Gate run" button in the Training tab.
 
 ## Not built yet (future roadmap)
 

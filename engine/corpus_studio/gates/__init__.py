@@ -18,6 +18,7 @@ from corpus_studio.gates.runner import (
     run_evaluation_gate,
     run_export_gates,
     run_split_gate,
+    run_training_run_gate,
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "run_evaluation_gate",
     "run_export_gates",
     "run_split_gate",
+    "run_training_run_gate",
 ]

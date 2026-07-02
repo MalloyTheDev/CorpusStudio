@@ -219,6 +219,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_quality_length_and_imbalance.py`
 - `engine/tests/test_quality_pii.py`
 - `engine/tests/test_quality_unicode.py`
+- `engine/tests/test_regression_gate.py`
 - `engine/tests/test_run_registry.py`
 - `engine/tests/test_schema_examples.py`
 - `engine/tests/test_schema_field_constraints.py`

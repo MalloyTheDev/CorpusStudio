@@ -46,8 +46,18 @@ reports) and echoes the report.
 `--scope export` runs the export gate. Split and evaluation gates are available
 through the engine API (`run_split_gate`, `run_evaluation_gate`).
 
+## Regression gate (training_run scope)
+
+`training-run-gate --project-dir <p> --run-id <id>` reads a training run
+record's linked before/after evaluation reports and **blocks** when the trained
+model's average score dropped more than `GateThresholds.max_regression_score_drop`
+(default 2.0), **passes** on hold/improve, and **warns** with *unverified
+linkage* when the after-eval targeted the base model (or no model id was linked)
+— because a before/after comparison is only trustworthy if the after-eval ran
+against the trained model. Surfaced by a "Gate run" button in the Training tab
+that links the newest trained-model eval and runs the gate.
+
 ## Future work
 
-A **regression gate** (trained vs base model) depends on the before/after run
-registry (v0.8) and is intentionally not implemented in v0.6. Per-project
-threshold configuration and desktop surfacing of gate reports are follow-ups.
+Per-project threshold configuration and a richer per-run selection UI are
+follow-ups.

@@ -115,6 +115,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _trainingConfigPath = string.Empty;
     private IReadOnlyList<string> _trainingCheckpointNames = [];
     private string _trainingRunHistorySummary = "Refresh to see past training runs recorded for this project.";
+    private string _trainingRunGateSummary = "Gate a run to check for regression vs its baseline.";
     private string _trainingCheckpointsSummary =
         "Checkpoints appear here after a training run writes them.";
     private IReadOnlyList<string> _trainingResumeArgv = [];
@@ -1228,6 +1229,32 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _trainingRunHistorySummary;
         private set => SetField(ref _trainingRunHistorySummary, value);
+    }
+
+    public string TrainingRunGateSummary
+    {
+        get => _trainingRunGateSummary;
+        private set => SetField(ref _trainingRunGateSummary, value);
+    }
+
+    public void SetTrainingRunGateError(string message)
+    {
+        TrainingRunGateSummary = $"Regression gate could not run.{Environment.NewLine}{message}";
+    }
+
+    /// <summary>Format a training-run regression gate verdict (pass/warn/block).</summary>
+    public void ApplyTrainingRunGate(GateReport report)
+    {
+        var mark = report.OverallStatus switch
+        {
+            "block" => "⛔ BLOCK",
+            "warn" => "⚠ WARN",
+            _ => "✅ PASS",
+        };
+        var result = report.Results.Count > 0 ? report.Results[0] : null;
+        TrainingRunGateSummary = result is null
+            ? $"Regression gate: {mark}"
+            : $"Regression gate: {mark} — {result.Message}";
     }
 
     public void SetTrainingRunHistoryError(string message)

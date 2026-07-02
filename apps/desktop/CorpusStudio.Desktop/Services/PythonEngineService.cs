@@ -1053,6 +1053,30 @@ public sealed class PythonEngineService
         return records;
     }
 
+    /// <summary>Link an after-training evaluation (path + the model it targeted,
+    /// for provenance) to the newest run record. Returns the linked run_id.</summary>
+    public string? LinkAfterEvalToNewestRun(string projectPath, string afterEvalPath, string? afterEvalModel)
+    {
+        var newest = LoadTrainingRunRecords(projectPath).FirstOrDefault();
+        if (newest is null)
+        {
+            return null;
+        }
+
+        newest.AfterEvalPath = afterEvalPath;
+        newest.AfterEvalModel = afterEvalModel;
+        newest.UpdatedAt = UtcNowIso();
+        SaveTrainingRunRecord(projectPath, newest);
+        return newest.RunId;
+    }
+
+    public async Task<GateReport> RunTrainingRunGateAsync(string projectPath, string runId)
+    {
+        var output = await RunEngineCommandAsync("training-run-gate", projectPath, "--run-id", runId);
+        return JsonSerializer.Deserialize<GateReport>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid gate report.");
+    }
+
     /// <summary>Flip any `running` record that is not alive to `interrupted`.
     /// Pure over an injected liveness check so it is unit-testable.</summary>
     public static IReadOnlyList<TrainingRunRecord> ReconcileRunningRecords(
