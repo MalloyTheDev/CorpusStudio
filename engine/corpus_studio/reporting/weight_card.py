@@ -9,9 +9,18 @@ presented as a confident improvement.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+
+def _safe(text: Any) -> str:
+    """Neutralize newlines/control chars so an untrusted field (model name, path,
+    config, checkpoint) cannot inject extra Markdown lines/blockquotes into the card."""
+
+    collapsed = re.sub(r"[\x00-\x1f\x7f]+", " ", str(text))
+    return re.sub(r"\s+", " ", collapsed).strip()
 
 
 class WeightCard(BaseModel):
@@ -61,7 +70,12 @@ def build_weight_card(
                 "Unverified linkage: the after-eval's target model was not recorded; "
                 "treat the before/after numbers with caution."
             )
-        elif base_model and after_model == base_model:
+        elif not base_model:
+            provenance_note = (
+                "Unverified linkage: the base model was not recorded, so the after-eval target "
+                "cannot be verified; treat the before/after numbers with caution."
+            )
+        elif after_model == base_model:
             provenance_note = (
                 "Unverified linkage: the after-eval appears to target the base model, not the "
                 "trained adapter; the before/after numbers are not trustworthy."
@@ -92,33 +106,44 @@ def _score(value: float | None) -> str:
 
 def render_weight_card_markdown(card: WeightCard) -> str:
     lines = [
-        f"# Weight Card — {card.artifact_id}",
+        f"# Weight Card — {_safe(card.artifact_id)}",
         "",
-        f"- **Kind**: {card.kind}",
-        f"- **Status**: {card.status}",
+        f"- **Kind**: {_safe(card.kind)}",
+        f"- **Status**: {_safe(card.status)}",
         f"- **Integrity**: {card.integrity}",
-        f"- **Path**: {card.path}",
-        f"- **Source run**: {card.run_id}",
-        f"- **Base model**: {card.base_model or '(unknown — source run not found)'}",
+        f"- **Path**: {_safe(card.path)}",
+        f"- **Source run**: {_safe(card.run_id)}",
+        f"- **Base model**: {_safe(card.base_model) or '(unknown — source run not found)'}",
     ]
     if card.config_path:
-        lines.append(f"- **Config**: {card.config_path}")
+        lines.append(f"- **Config**: {_safe(card.config_path)}")
     if card.checkpoints:
-        lines.append(f"- **Checkpoints**: {len(card.checkpoints)} ({', '.join(card.checkpoints[:4])}{' …' if len(card.checkpoints) > 4 else ''})")
+        names = ", ".join(_safe(name) for name in card.checkpoints[:4])
+        lines.append(
+            f"- **Checkpoints**: {len(card.checkpoints)} ({names}{' …' if len(card.checkpoints) > 4 else ''})"
+        )
 
-    lines += [
-        "",
-        "## Evaluation (before → after)",
-        "",
-        f"- Base: {_score(card.before_score)}",
-        f"- Trained: {_score(card.after_score)}"
-        + (f" (Δ{card.delta:+.1f})" if card.delta is not None else ""),
-    ]
-
+    # Warnings first, so a modified/missing or unverified card never leads with
+    # confident numbers.
     if card.integrity != "ok":
-        lines += ["", f"> ⚠ Integrity is **{card.integrity}**: the weights changed or are gone since evaluation. These numbers may not describe the weights at this path."]
+        lines += [
+            "",
+            f"> ⚠ Integrity is **{card.integrity}**: the weights at this path changed or are gone "
+            "since evaluation, so the scores below do not describe them.",
+        ]
     if card.provenance_note:
-        lines += ["", f"> ⚠ {card.provenance_note}"]
+        lines += ["", f"> ⚠ {_safe(card.provenance_note)}"]
 
-    lines += ["", f"_Registered {card.created_at}, updated {card.updated_at}._"]
+    lines += ["", "## Evaluation (before → after)", ""]
+    if card.integrity != "ok":
+        # Never present a Δ improvement for weights that changed/vanished.
+        lines += ["- Base: —", f"- Trained: — (scores withheld; integrity is {card.integrity})"]
+    else:
+        lines += [
+            f"- Base: {_score(card.before_score)}",
+            f"- Trained: {_score(card.after_score)}"
+            + (f" (Δ{card.delta:+.1f})" if card.delta is not None else ""),
+        ]
+
+    lines += ["", f"_Registered {_safe(card.created_at)}, updated {_safe(card.updated_at)}._"]
     return "\n".join(lines)

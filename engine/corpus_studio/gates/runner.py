@@ -159,9 +159,11 @@ def _regression_inputs(
     provenance_ok = True
     if after is not None:
         if not run.after_eval_model:
-            provenance_ok = False
-        elif run.base_model and run.after_eval_model == run.base_model:
-            provenance_ok = False
+            provenance_ok = False  # after-eval target not recorded
+        elif not run.base_model:
+            provenance_ok = False  # base model unrecorded -> can't verify the target
+        elif run.after_eval_model == run.base_model:
+            provenance_ok = False  # after-eval targeted the base model
     return before, after, provenance_ok
 
 

@@ -55,9 +55,29 @@ def test_card_surfaces_unverified_linkage():
     assert "Unverified linkage" in render_weight_card_markdown(card)
 
 
-def test_card_flags_modified_integrity():
-    md = render_weight_card_markdown(build_weight_card(_artifact(), _run(), None, None, "modified"))
+def test_card_withholds_scores_when_integrity_modified():
+    run = _run()
+    md = render_weight_card_markdown(
+        build_weight_card(_artifact(), run, _report("base-model", 70), _report("trained", 82), "modified")
+    )
     assert "Integrity is **modified**" in md
+    assert "Base: —" in md  # confident numbers are withheld
+    assert "Δ+12" not in md  # no improvement framing for changed weights
+
+
+def test_card_flags_base_vs_base_when_base_unknown():
+    run = _run(base_model="", after_eval_model="mistral-7b")
+    card = build_weight_card(_artifact(), run, _report("base", 70), _report("mistral-7b", 95), "ok")
+    assert "Unverified linkage" in card.provenance_note
+
+
+def test_card_sanitizes_injected_fields():
+    run = _run(base_model="evil\n- Trained: 99.0 (Δ+40.0)\n> forged")
+    md = render_weight_card_markdown(build_weight_card(_artifact(), run, None, None, "ok"))
+    lines = [line.strip() for line in md.split("\n")]
+    # The injected newline content must not appear as its own Markdown lines.
+    assert "> forged" not in lines
+    assert not any(line.startswith("- Trained: 99.0") for line in lines)
 
 
 # --- promote gate ------------------------------------------------------------
@@ -70,6 +90,14 @@ def test_promote_blocks_on_modified_integrity():
 def test_promote_blocks_on_regressed_source_run():
     run = _run(before_eval_path="b.json", after_eval_path="a.json", after_eval_model="trained")
     reports = {"b.json": _report("base-model", 80), "a.json": _report("trained", 60)}
+    report = run_artifact_gate(_artifact(), "ok", run, lambda p: reports.get(p))
+    assert report.overall_status == GateStatus.BLOCK
+
+
+def test_promote_blocks_regressed_even_when_unverified():
+    # A drop is a drop: an unverified comparison that is DOWN must still block.
+    run = _run(before_eval_path="b.json", after_eval_path="a.json", after_eval_model="base-model")
+    reports = {"b.json": _report("base-model", 80), "a.json": _report("base-model", 55)}
     report = run_artifact_gate(_artifact(), "ok", run, lambda p: reports.get(p))
     assert report.overall_status == GateStatus.BLOCK
 

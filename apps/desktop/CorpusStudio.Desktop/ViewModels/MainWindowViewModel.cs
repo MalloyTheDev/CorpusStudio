@@ -1275,17 +1275,31 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// the keep is allowed (block => refused).</summary>
     public bool ApplyPromoteGate(GateReport report)
     {
-        var blocking = report.Results.FirstOrDefault(r => r.Status == "block");
-        if (blocking is not null)
+        // Drive the decision from the canonical OverallStatus (worst of results),
+        // and fail closed on anything that is not an explicit pass/warn.
+        string ReasonFor(string status) =>
+            report.Results.FirstOrDefault(r => r.Status == status)?.Message ?? string.Empty;
+
+        switch (report.OverallStatus)
         {
-            ArtifactDetail = $"⛔ Keep blocked by the promote gate:{Environment.NewLine}{blocking.Message}";
-            return false;
+            case "block":
+                var blockReason = ReasonFor("block");
+                ArtifactDetail = "⛔ Keep blocked by the promote gate:" + Environment.NewLine
+                    + (string.IsNullOrEmpty(blockReason) ? "the artifact did not pass promotion." : blockReason);
+                return false;
+            case "warn":
+                var warnReason = ReasonFor("warn");
+                ArtifactDetail = "⚠ Kept, but the promote gate warned:" + Environment.NewLine
+                    + (string.IsNullOrEmpty(warnReason) ? "review the weight card." : warnReason)
+                    + Environment.NewLine + "View the weight card before relying on it.";
+                return true;
+            case "pass":
+                ArtifactDetail = "✅ Kept — the promote gate passed (integrity ok, no regression).";
+                return true;
+            default:
+                ArtifactDetail = $"⛔ Keep blocked: unrecognized gate status '{report.OverallStatus}'.";
+                return false;
         }
-        var warning = report.Results.FirstOrDefault(r => r.Status == "warn");
-        ArtifactDetail = warning is not null
-            ? $"⚠ Kept, but the promote gate warned:{Environment.NewLine}{warning.Message}{Environment.NewLine}View the weight card before relying on it."
-            : "✅ Kept — the promote gate passed (integrity ok, no regression).";
-        return true;
     }
 
     /// <summary>Refresh the artifact list + a one-line summary (kept / flagged counts).</summary>

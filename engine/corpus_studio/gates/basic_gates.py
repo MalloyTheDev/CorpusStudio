@@ -209,10 +209,12 @@ def regression_gate(
             name="Training regression",
             scope=scope,
             status=GateStatus.WARN,
-            observed="missing before and/or after evaluation link",
-            expected="a baseline eval and an eval of the trained model, both linked",
-            message="Cannot gate regression: link a baseline eval and an eval of the trained model.",
-            repair="Evaluate the base model (baseline) and the trained model, then link both to the run.",
+            observed="before and/or after evaluation is missing or could not be read",
+            expected="a baseline eval and an eval of the trained model, both linked and readable",
+            message="Cannot gate regression: a before/after evaluation is not linked, "
+            "or the linked report could not be read.",
+            repair="Evaluate the base model and the trained model and link both; "
+            "if a report is already linked, repair or regenerate the unreadable file.",
         )
 
     delta = round(after.average_score - before.average_score, 2)
@@ -220,7 +222,23 @@ def regression_gate(
         f"after {after.average_score:.1f} vs before {before.average_score:.1f} (Δ{delta:+.1f})"
     )
 
+    regressed = delta < -thresholds.max_regression_score_drop
+
     if not provenance_ok:
+        # An unverified comparison that is DOWN is at best equal-or-worse, so a
+        # real drop still blocks; an unverified improvement can't be trusted (warn).
+        if regressed:
+            return GateResult(
+                gate_id="regression",
+                name="Training regression",
+                scope=scope,
+                status=GateStatus.BLOCK,
+                observed=observed,
+                expected="the after-eval must target the trained model, not the base model",
+                message=f"Trained model regressed (score dropped {abs(delta):.1f}) AND the linkage "
+                "is unverified — the after-eval may target the base model; do not promote.",
+                repair="Evaluate the trained adapter (not the base model), re-link, and re-check.",
+            )
         return GateResult(
             gate_id="regression",
             name="Training regression",
@@ -233,7 +251,7 @@ def regression_gate(
             repair="Evaluate the trained adapter (not the base model) and re-link the after-eval.",
         )
 
-    if delta < -thresholds.max_regression_score_drop:
+    if regressed:
         return GateResult(
             gate_id="regression",
             name="Training regression",
