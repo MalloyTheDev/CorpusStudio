@@ -16,6 +16,36 @@ public sealed class TrainingConfigExportResult
     [JsonPropertyName("config_text")]
     public string ConfigText { get; init; } = string.Empty;
 
+    [JsonPropertyName("token_budget")]
+    public TokenBudgetEstimate? TokenBudget { get; init; }
+
     [JsonPropertyName("warnings")]
     public List<string> Warnings { get; init; } = [];
+}
+
+public sealed class TokenBudgetEstimate
+{
+    [JsonPropertyName("example_count")]
+    public int ExampleCount { get; init; }
+
+    [JsonPropertyName("estimated_tokens")]
+    public long EstimatedTokens { get; init; }
+
+    [JsonPropertyName("method")]
+    public string Method { get; init; } = string.Empty;
+
+    [JsonPropertyName("sequence_len")]
+    public int SequenceLen { get; init; }
+
+    [JsonPropertyName("mean_tokens_per_example")]
+    public double MeanTokensPerExample { get; init; }
+
+    [JsonPropertyName("max_tokens_in_example")]
+    public int MaxTokensInExample { get; init; }
+
+    [JsonPropertyName("examples_over_sequence_len")]
+    public int ExamplesOverSequenceLen { get; init; }
+
+    [JsonPropertyName("tokens_per_epoch")]
+    public long TokensPerEpoch { get; init; }
 }

@@ -90,3 +90,8 @@ def estimate_tokens(text: str) -> int:
             pass
 
     return _heuristic_token_estimate(text)
+
+
+def estimator_name() -> str:
+    """Which estimator ``estimate_tokens`` will use: 'tiktoken' or 'heuristic'."""
+    return "tiktoken" if _tiktoken_encoder() is not None else "heuristic"

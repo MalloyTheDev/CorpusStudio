@@ -1,0 +1,77 @@
+import json
+from pathlib import Path
+
+from typer.testing import CliRunner
+
+from corpus_studio.cli import app
+from corpus_studio.training.estimators import (
+    build_training_token_budget,
+    estimate_token_budget,
+)
+
+runner = CliRunner()
+
+
+def _write(path: Path, rows: list[dict]) -> None:
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+
+
+def test_build_budget_counts_and_truncation():
+    rows = [
+        {"instruction": "q", "output": "word " * 100},  # well over 50 tokens
+        {"instruction": "q", "output": "short"},
+    ]
+    budget = build_training_token_budget(rows, sequence_len=50)
+    assert budget.example_count == 2
+    assert budget.max_tokens_in_example >= 100
+    assert budget.examples_over_sequence_len == 1
+    assert budget.tokens_per_epoch <= budget.estimated_tokens
+    assert budget.tokens_per_epoch >= 50
+    assert budget.method in {"heuristic", "tiktoken"}
+
+
+def test_build_budget_empty_rows():
+    budget = build_training_token_budget([], sequence_len=128)
+    assert budget.example_count == 0
+    assert budget.estimated_tokens == 0
+    assert budget.sequence_len == 128
+
+
+def test_estimate_token_budget_uses_shared_estimator():
+    estimate = estimate_token_budget(["abcd", "abcdefgh"])
+    assert estimate.example_count == 2
+    assert estimate.estimated_tokens == 3  # 1 + 2 via the shared estimator
+
+
+def test_cli_training_config_reports_token_budget(tmp_path: Path):
+    dataset = tmp_path / "train.jsonl"
+    _write(
+        dataset,
+        [
+            {"instruction": "explain recursion", "output": "word " * 60},
+            {"instruction": "explain loops", "output": "a short answer"},
+        ],
+    )
+    out = tmp_path / "config.yaml"
+    result = runner.invoke(
+        app,
+        [
+            "training-config",
+            str(dataset),
+            "instruction",
+            "--output-path",
+            str(out),
+            "--base-model",
+            "some-base-model",
+            "--sequence-len",
+            "50",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert "token_budget" in payload
+    budget = payload["token_budget"]
+    assert budget["example_count"] == 2
+    assert budget["sequence_len"] == 50
+    assert budget["examples_over_sequence_len"] >= 1
+    assert any("truncated" in warning for warning in payload["warnings"])

@@ -48,6 +48,7 @@ from corpus_studio.storage.index import (
 )
 from corpus_studio.storage.project import DatasetProject, create_project
 from corpus_studio.training.compatibility import training_compatibility_warnings
+from corpus_studio.training.estimators import build_training_token_budget
 from corpus_studio.training.config_templates import (
     build_lora_config_template,
     normalize_training_config_target,
@@ -542,6 +543,8 @@ def training_config(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(config_text, encoding="utf-8")
 
+    token_budget = build_training_token_budget(list(read_jsonl(input_path)), sequence_len)
+
     compatibility_warnings = training_compatibility_warnings(
         schema_id=schema,
         dataset_format=dataset_format or schema,
@@ -554,6 +557,11 @@ def training_config(
     ]
     if eval_dataset_path is None:
         warnings.append("No validation dataset path was provided; generate splits before training.")
+    if token_budget.examples_over_sequence_len > 0:
+        warnings.append(
+            f"{token_budget.examples_over_sequence_len} example(s) exceed sequence_len="
+            f"{sequence_len} (est. {token_budget.method}) and will be truncated."
+        )
     warnings.extend(compatibility_warnings)
 
     typer.echo(
@@ -564,6 +572,7 @@ def training_config(
                 "training_launcher_implemented": False,
                 "config": template.to_training_dict(),
                 "config_text": config_text,
+                "token_budget": token_budget.model_dump(),
                 "warnings": warnings,
                 "compatibility_warnings": compatibility_warnings,
             },
