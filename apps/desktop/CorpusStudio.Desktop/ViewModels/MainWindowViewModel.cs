@@ -119,6 +119,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _artifactSummary = "Register a model artifact from a completed run, then keep or reject it.";
     private string _artifactDetail = "Select an artifact, then View card or Keep (Keep is promote-gated).";
     private ArtifactDisplayItem? _selectedModelArtifact;
+    private string _datasetVersionSummary =
+        "Refresh to see dataset versions, or capture the current dataset as a version.";
+    private string _datasetVersionDetail =
+        "Select a version and View card to see its lineage (runs, artifacts, evals) and integrity.";
+    private string _datasetVersionLabel = string.Empty;
+    private DatasetVersionDisplayItem? _selectedDatasetVersion;
     private string _trainingCheckpointsSummary =
         "Checkpoints appear here after a training run writes them.";
     private IReadOnlyList<string> _trainingResumeArgv = [];
@@ -1321,6 +1327,70 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         var kept = items.Count(i => i.Record.Status == "kept");
         var flagged = items.Count(i => i.Integrity != "ok");
         ArtifactSummary = $"{items.Count} artifact(s): {kept} kept, {flagged} with integrity issues (missing/modified).";
+    }
+
+    // --- Dataset version history (v1.0) -------------------------------------
+
+    public ObservableCollection<DatasetVersionDisplayItem> DatasetVersions { get; } = [];
+
+    public DatasetVersionDisplayItem? SelectedDatasetVersion
+    {
+        get => _selectedDatasetVersion;
+        set => SetField(ref _selectedDatasetVersion, value);
+    }
+
+    public string DatasetVersionSummary
+    {
+        get => _datasetVersionSummary;
+        private set => SetField(ref _datasetVersionSummary, value);
+    }
+
+    public string DatasetVersionDetail
+    {
+        get => _datasetVersionDetail;
+        private set => SetField(ref _datasetVersionDetail, value);
+    }
+
+    /// <summary>Optional label typed before capturing a version (two-way bound).</summary>
+    public string DatasetVersionLabel
+    {
+        get => _datasetVersionLabel;
+        set => SetField(ref _datasetVersionLabel, value);
+    }
+
+    public void SetDatasetVersionError(string message)
+    {
+        DatasetVersionSummary = $"Dataset version action failed.{Environment.NewLine}{message}";
+    }
+
+    /// <summary>Set the detail pane (a rendered version card or a capture confirmation).</summary>
+    public void SetDatasetVersionDetail(string text)
+    {
+        DatasetVersionDetail = text;
+    }
+
+    /// <summary>Refresh the version list (newest first) + a one-line integrity summary.
+    /// Selection is preserved by version_id across refreshes.</summary>
+    public void ApplyDatasetVersions(IReadOnlyList<DatasetVersionDisplayItem> items)
+    {
+        var selectedId = SelectedDatasetVersion?.Record.VersionId;
+        DatasetVersions.Clear();
+        foreach (var item in items)
+        {
+            DatasetVersions.Add(item);
+        }
+        SelectedDatasetVersion = DatasetVersions.FirstOrDefault(i => i.Record.VersionId == selectedId);
+
+        if (items.Count == 0)
+        {
+            DatasetVersionSummary = "No versions captured yet. Capture the current dataset to start a history.";
+            return;
+        }
+        var matches = items.Count(i => i.Integrity == "matches");
+        var drifted = items.Count(i => i.Integrity == "drifted");
+        var unreadable = items.Count(i => i.Integrity == "unreadable");
+        DatasetVersionSummary =
+            $"{items.Count} version(s): {matches} matching the current dataset, {drifted} drifted, {unreadable} unverifiable.";
     }
 
     public void SetTrainingRunGateError(string message)

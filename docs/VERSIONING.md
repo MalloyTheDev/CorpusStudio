@@ -90,8 +90,15 @@ effect.
 live version card (`versions/version_card.py`), the `source_snapshot_id`
 run back-link, and the three CLI commands.
 
+**Implemented (v1.0.1, desktop):** a **Versions** tab surfacing the history —
+a read-only list with a live integrity badge (✅ matches / ⚠ drifted /
+⛔ unreadable), a one-line summary, a **Capture version** button (opt-in, with an
+optional label), and **View card** (the rendered version card). Both capture and
+list go **through the engine** (`dataset-version-create` / `-list`), so the
+desktop never recomputes the fingerprint and integrity is verified, not guessed.
+
 **Deferred:**
-- Desktop surfacing — a read-only History list + capture hook (v1.0.1).
+- Auto-capture after an import/append commit (a `trigger` other than `manual`).
 - Stable per-row identity + a content-addressed row store (v1.0.2) — the
   prerequisite for the below.
 - Version **diff** (added/removed/modified/moved rows) (v1.0.3).

@@ -134,8 +134,13 @@ Last reconciled: 2026-07-02 (v1.0.0 engine slice landed).
   `--stamp-run` writes the dataset→run back-link (`source_snapshot_id`). The
   engine only reads `examples.jsonl` and writes under `dataset_versions/` — it
   never moves/copies/deletes the dataset. See [`VERSIONING.md`](VERSIONING.md).
-- Deferred: desktop surfacing (v1.0.1), stable row identity + a content-addressed
-  row store (v1.0.2), version diff (v1.0.3), and restore-to-version (v1.0.4).
+- A desktop **Versions** tab surfaces the history: a read-only list with a live
+  integrity badge (matches/drifted/unreadable), an opt-in **Capture version**
+  button, and **View card**. Capture and listing go through the engine, so the
+  desktop never recomputes the fingerprint (integrity is verified, not guessed).
+- Deferred: auto-capture after import/append commit, stable row identity + a
+  content-addressed row store (v1.0.2), version diff (v1.0.3), and
+  restore-to-version (v1.0.4).
 
 ## Not built yet (future roadmap)
 
