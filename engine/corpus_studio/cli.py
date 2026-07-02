@@ -9,6 +9,23 @@ import typer
 from pydantic import ValidationError
 
 from corpus_studio.ai_assist.assistant import run_ai_assist
+from corpus_studio.gates.runner import (
+    run_dataset_gates,
+    run_export_gates,
+    save_gate_report,
+)
+from corpus_studio.providers.overrides import (
+    approve_generation,
+    load_overrides,
+    revoke_generation,
+)
+from corpus_studio.providers.policy import (
+    DEFAULT_PROVIDER_POLICIES,
+    ProviderPolicyError,
+    ProviderRole,
+    infer_provider_id,
+    resolve_policy,
+)
 from corpus_studio.evaluation.benchmark import build_benchmark_report
 from corpus_studio.evaluation.evaluator import (
     EvaluationRunConfig,
@@ -491,6 +508,15 @@ def ai_assist(
 ):
     """Run AI Assist Lab on draft rows and return review-only suggestions."""
 
+    provider_id = infer_provider_id(backend, base_url)
+    route_id = model if provider_id == "openrouter" else None
+    policy = resolve_policy(
+        provider_id,
+        model_id=model,
+        route_id=route_id,
+        overrides=load_overrides(input_path.parent),
+    )
+
     try:
         load_builtin_schema(schema)
         rows = list(read_jsonl(input_path))
@@ -508,7 +534,11 @@ def ai_assist(
             backend=backend_client,
             model=model,
             user_instruction=user_instruction,
+            policy=policy,
         )
+    except ProviderPolicyError as exc:
+        typer.echo(f"Provider policy blocked this action: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
     except (ValueError, json.JSONDecodeError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
@@ -1021,6 +1051,111 @@ def export(
         }
 
     typer.echo(json.dumps(payload, indent=2))
+
+
+@app.command("provider-policy")
+def provider_policy(
+    provider: Optional[str] = typer.Option(None, "--provider", help="Show one provider's effective policy."),
+    model: Optional[str] = typer.Option(None, "--model", help="Model id (for local approval scope)."),
+    route: Optional[str] = typer.Option(None, "--route", help="OpenRouter route id."),
+    project_dir: Optional[Path] = typer.Option(None, "--project-dir", help="Apply this project's overrides."),
+):
+    """Show effective provider role policies (with any project overrides applied)."""
+
+    overrides = load_overrides(project_dir) if project_dir is not None else {}
+    if provider is not None:
+        route_id = route or (model if provider == "openrouter" else None)
+        policy = resolve_policy(provider, model_id=model, route_id=route_id, overrides=overrides)
+        typer.echo(policy.model_dump_json(indent=2))
+        return
+
+    policies = {
+        provider_id: resolve_policy(provider_id, overrides=overrides).model_dump(mode="json")
+        for provider_id in DEFAULT_PROVIDER_POLICIES
+    }
+    typer.echo(json.dumps({"providers": policies}, indent=2))
+
+
+@app.command("provider-approve")
+def provider_approve(
+    provider: str = typer.Option(..., "--provider", help="Provider id (e.g. ollama, openrouter)."),
+    project_dir: Path = typer.Option(..., "--project-dir", help="Where to write the approval override."),
+    model: Optional[str] = typer.Option(None, "--model", help="Model id to approve."),
+    route: Optional[str] = typer.Option(None, "--route", help="OpenRouter route id to approve."),
+    revoke: bool = typer.Option(False, "--revoke", help="Remove the approval instead."),
+):
+    """Approve (or revoke) trainable generation for a specific local model/route."""
+
+    route_id = route or (model if provider == "openrouter" else None)
+
+    if revoke:
+        removed = revoke_generation(project_dir, provider, model_id=model, route_id=route_id)
+        typer.echo(json.dumps({"revoked": removed, "provider": provider, "model": model, "route": route_id}))
+        return
+
+    # A provider that is evaluator-only by role cannot be approved for generation.
+    resolved = resolve_policy(provider, model_id=model, route_id=route_id)
+    generator_allowed = (
+        ProviderRole.TRAINABLE_OUTPUT_GENERATOR in resolved.allowed_roles
+        and ProviderRole.TRAINABLE_OUTPUT_GENERATOR not in resolved.blocked_roles
+    )
+    if not generator_allowed:
+        typer.echo(
+            f"{provider} is evaluator-only and cannot be approved for trainable generation.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    key = approve_generation(project_dir, provider, model_id=model, route_id=route_id)
+    effective = resolve_policy(
+        provider, model_id=model, route_id=route_id, overrides=load_overrides(project_dir)
+    )
+    typer.echo(
+        json.dumps(
+            {
+                "approved_key": key,
+                "can_generate_trainable": effective.can_generate_trainable(),
+                "requires_human_review": effective.requires_human_review,
+            }
+        )
+    )
+
+
+@app.command("gate-run")
+def gate_run(
+    input_path: Path,
+    schema: str,
+    scope: str = typer.Option("dataset", "--scope", help="dataset or export."),
+    project_dir: Optional[Path] = typer.Option(None, "--project-dir", help="Write report under gate_reports/."),
+):
+    """Run gates over a dataset and emit a serializable pass/warn/block report."""
+
+    normalized = scope.strip().lower()
+    if normalized not in {"dataset", "export"}:
+        typer.echo("Unsupported gate scope. Use dataset or export.", err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        rows = list(read_jsonl(input_path))
+        generated_at = _utc_now_iso()
+        if normalized == "dataset":
+            report = run_dataset_gates(rows, schema, target=str(input_path), generated_at=generated_at)
+        else:
+            report = run_export_gates(rows, schema, target=str(input_path), generated_at=generated_at)
+    except (ValueError, json.JSONDecodeError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    if project_dir is not None:
+        save_gate_report(project_dir, report)
+
+    typer.echo(report.model_dump_json(indent=2))
+
+
+def _utc_now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _build_backend(

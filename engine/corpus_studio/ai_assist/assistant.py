@@ -14,6 +14,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from corpus_studio.model_backends.base import BackendGenerateRequest, ModelBackend
+from corpus_studio.providers.policy import ProviderPolicy, authorize_action
 from corpus_studio.validators.basic_validator import validate_jsonl_row
 
 AI_ASSIST_ACTIONS = {
@@ -90,8 +91,18 @@ def run_ai_assist(
     backend: ModelBackend,
     model: str,
     user_instruction: str | None = None,
+    policy: ProviderPolicy | None = None,
 ) -> AiAssistResult:
-    """Run one review-first AI Assist pass through a backend."""
+    """Run one review-first AI Assist pass through a backend.
+
+    When ``policy`` is provided, the provider role policy is enforced *before*
+    any provider call: a provider that is not generation-approved cannot run a
+    trainable-generating action (e.g. rewrite-output/draft-example). This guard
+    lives in the engine, so every caller (CLI, desktop, tests) is enforced.
+    """
+
+    if policy is not None:
+        authorize_action(policy, action)
 
     validation_warnings = _validation_warnings(rows, schema_id)
     prompt = build_ai_assist_prompt(

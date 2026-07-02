@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 import corpus_studio.cli as cli
 from corpus_studio.cli import app
 from corpus_studio.model_backends.base import BackendGenerateResponse, ModelBackendConfig
+from corpus_studio.providers.overrides import approve_generation
 
 
 runner = CliRunner()
@@ -406,6 +407,10 @@ def test_ai_assist_command_uses_backend_and_returns_review_required_suggestion(
             )
 
     monkeypatch.setattr(cli, "_build_backend", lambda **_: FakeBackend())
+
+    # rewrite-output is a trainable-generating action; v0.6 requires the local
+    # model to be explicitly generation-approved in the project overrides.
+    approve_generation(input_path.parent, "ollama", model_id="fake-model")
 
     result = runner.invoke(
         app,
