@@ -1167,8 +1167,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 $"Normalized duplicates: {report.DuplicateNormalizedCount}",
                 $"Low-information rows: {report.LowInformationCount} (< {report.LowInformationTokenThreshold} tokens)",
                 $"Synthetic pattern warnings: {report.SyntheticPatternCount}",
+                $"Possible PII / secrets: {report.PiiFindingCount}",
                 $"Status: {health}",
         };
+
+        if (report.PiiFindingCount > 0)
+        {
+            lines.Add("");
+            lines.Add($"⚠ Possible PII / secrets detected ({report.PiiFindingCount} kind(s)) — review before exporting:");
+            lines.AddRange(report.PiiFindings.Take(5).Select(finding => $"- {finding.DisplayName}"));
+        }
 
         if (report.SyntheticPatternClusters.Count > 0)
         {

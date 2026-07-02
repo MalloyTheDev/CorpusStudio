@@ -173,6 +173,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_preference_integrity.py`
 - `engine/tests/test_project_index.py`
 - `engine/tests/test_quality_clustering.py`
+- `engine/tests/test_quality_pii.py`
 - `engine/tests/test_quality_unicode.py`
 - `engine/tests/test_schema_examples.py`
 - `engine/tests/test_schema_field_constraints.py`
