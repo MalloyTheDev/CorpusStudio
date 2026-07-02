@@ -71,7 +71,9 @@ Last reconciled: 2026-07-02 (v0.6 in progress).
   explicitly approved; OpenRouter route-aware. See
   [`PROVIDER_POLICY.md`](PROVIDER_POLICY.md).
 - A gate runner producing serializable pass/warn/block reports over existing
-  schema, quality, leakage, PII, and evaluation logic. See [`GATES.md`](GATES.md).
+  schema, quality, leakage, PII, and evaluation logic, surfaced by a **Run Gates**
+  button in the desktop Quality tab (overall status + per-gate pass/warn/block
+  with repair hints). See [`GATES.md`](GATES.md).
 
 ## Not built yet (future roadmap)
 

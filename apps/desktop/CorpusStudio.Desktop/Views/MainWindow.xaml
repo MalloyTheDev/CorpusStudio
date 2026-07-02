@@ -1775,6 +1775,23 @@
                         Content="Run _Quality"
                         Margin="0,0,0,8"
                         Click="RunQualityButton_Click" />
+                <TextBlock Text="Gates"
+                           FontWeight="SemiBold"
+                           Foreground="#334155" />
+                <TextBox AutomationProperties.AutomationId="GateSummaryTextBox"
+                         Text="{Binding GateSummary, Mode=OneWay}"
+                         Margin="0,8,0,8"
+                         MinHeight="96"
+                         FontFamily="Consolas"
+                         FontSize="12"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto" />
+                <Button AutomationProperties.AutomationId="RunGatesButton"
+                        Content="Run _Gates"
+                        ToolTip="Check whether this dataset passes the schema, quality, and PII gates"
+                        Margin="0,0,0,8"
+                        Click="RunGatesButton_Click" />
                 <TextBlock Text="Synthetic Triage"
                            FontWeight="SemiBold"
                            Foreground="#334155" />
