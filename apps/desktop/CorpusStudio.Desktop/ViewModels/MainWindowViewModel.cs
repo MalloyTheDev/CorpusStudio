@@ -137,6 +137,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public ObservableCollection<DatasetProjectListItem> Projects { get; } = [];
 
+    private readonly List<DatasetProjectListItem> _allProjects = [];
+    private string _projectSearch = string.Empty;
+
+    public string ProjectSearch
+    {
+        get => _projectSearch;
+        set
+        {
+            if (SetField(ref _projectSearch, value))
+            {
+                ApplyProjectFilter();
+            }
+        }
+    }
+
     public ObservableCollection<SavedExampleItem> Examples { get; } = [];
 
     public ObservableCollection<ValidationIssueNavigationItem> ValidationIssues { get; } = [];
@@ -899,11 +914,34 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public void SetProjects(IEnumerable<DatasetProjectListItem> projects)
     {
+        _allProjects.Clear();
+        _allProjects.AddRange(projects);
+        ApplyProjectFilter();
+    }
+
+    private void ApplyProjectFilter()
+    {
+        var search = _projectSearch?.Trim() ?? string.Empty;
         Projects.Clear();
-        foreach (var project in projects)
+        foreach (var project in _allProjects)
         {
-            Projects.Add(project);
+            if (ProjectMatchesSearch(project, search))
+            {
+                Projects.Add(project);
+            }
         }
+    }
+
+    private static bool ProjectMatchesSearch(DatasetProjectListItem project, string search)
+    {
+        if (string.IsNullOrEmpty(search))
+        {
+            return true;
+        }
+
+        return ContainsSearch(project.Name, search)
+            || ContainsSearch(project.Id, search)
+            || ContainsSearch(project.SchemaId, search);
     }
 
     public string ProjectIndexSummary

@@ -257,6 +257,10 @@
                            FontWeight="Bold"
                            Foreground="#E2E8F0"
                            Margin="0,0,0,8" />
+                <TextBox AutomationProperties.AutomationId="ProjectSearchTextBox"
+                         Text="{Binding ProjectSearch, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         ToolTip="Filter projects by name, id, or schema"
+                         Margin="0,0,0,6" />
                 <ListBox AutomationProperties.AutomationId="ProjectsListBox"
                          ItemsSource="{Binding Projects}"
                          SelectedItem="{Binding SelectedProject, Mode=TwoWay}"

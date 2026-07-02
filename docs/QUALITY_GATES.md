@@ -36,10 +36,11 @@ Current:
 - first-pass PII / secret detection (emails, SSNs, private keys, AWS/API keys, JWTs, Luhn-valid cards)
 - token-length outlier detection (IQR-based, using the Unicode-aware token estimate)
 - category-imbalance warnings (low-cardinality field dominated by one value)
+- report-level Evaluation failure summaries (by tag, failure reason, and score band)
 
 Next:
 
-- report-level Evaluation failure summaries
+- (all previously listed gates are now implemented)
 
 ## Current basic quality report
 
