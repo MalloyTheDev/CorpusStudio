@@ -778,6 +778,7 @@
                         <Grid Margin="8">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
@@ -839,7 +840,39 @@
                                            VerticalAlignment="Center" />
                             </WrapPanel>
 
-                            <Grid Grid.Row="1"
+                            <Border Grid.Row="1"
+                                    Grid.ColumnSpan="2"
+                                    Style="{StaticResource CardBorderStyle}"
+                                    Margin="0,0,0,8">
+                                <StackPanel>
+                                    <TextBlock Text="Benchmark (compare models)"
+                                               Style="{StaticResource SectionHeaderTextStyle}" />
+                                    <TextBlock Text="One model per line (or comma-separated). Uses the backend above."
+                                               Style="{StaticResource CaptionTextStyle}"
+                                               Margin="0,0,0,6" />
+                                    <TextBox AutomationProperties.AutomationId="BenchmarkModelsTextBox"
+                                             Text="{Binding BenchmarkModelsInput, UpdateSourceTrigger=PropertyChanged}"
+                                             AcceptsReturn="True"
+                                             MinHeight="52"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             Margin="0,0,0,6" />
+                                    <Button Style="{StaticResource PrimaryButtonStyle}"
+                                            AutomationProperties.AutomationId="RunBenchmarkButton"
+                                            Content="Run _Benchmark"
+                                            HorizontalAlignment="Left"
+                                            Click="RunBenchmarkButton_Click" />
+                                    <TextBox AutomationProperties.AutomationId="BenchmarkSummaryTextBox"
+                                             Text="{Binding BenchmarkSummary, Mode=OneWay}"
+                                             IsReadOnly="True"
+                                             MinHeight="80"
+                                             Margin="0,8,0,0"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto" />
+                                </StackPanel>
+                            </Border>
+
+                            <Grid Grid.Row="2"
                                   Grid.ColumnSpan="2">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="320" />

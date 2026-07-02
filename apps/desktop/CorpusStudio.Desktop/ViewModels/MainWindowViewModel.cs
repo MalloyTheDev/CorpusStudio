@@ -38,6 +38,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _evaluationTimeoutSeconds = "120";
     private string _evaluationSummary =
         "Run a local model against this project's saved examples.";
+    private string _benchmarkModelsInput = string.Empty;
+    private string _benchmarkSummary =
+        "Enter one model per line, then benchmark them against this project's examples.";
     private string _evaluationReportJson = "Evaluation reports appear here after a run.";
     private string _selectedEvaluationExampleDetail =
         "Per-example evaluation results appear here after a run or report reload.";
@@ -457,6 +460,63 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _evaluationReportJson;
         private set => SetField(ref _evaluationReportJson, value);
+    }
+
+    public string BenchmarkModelsInput
+    {
+        get => _benchmarkModelsInput;
+        set => SetField(ref _benchmarkModelsInput, value);
+    }
+
+    public string BenchmarkSummary
+    {
+        get => _benchmarkSummary;
+        private set => SetField(ref _benchmarkSummary, value);
+    }
+
+    /// <summary>Parse the benchmark models input (one per line or comma-separated,
+    /// trimmed, de-duplicated, order preserved).</summary>
+    public IReadOnlyList<string> GetBenchmarkModels()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var models = new List<string>();
+        foreach (var token in _benchmarkModelsInput.Split(
+            new[] { '\n', '\r', ',' },
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (seen.Add(token))
+            {
+                models.Add(token);
+            }
+        }
+
+        return models;
+    }
+
+    public void ApplyBenchmarkReport(BenchmarkReport report)
+    {
+        var lines = new List<string>
+        {
+            $"Benchmarked {report.ModelCount} model(s) on {report.ExamplesTested} example(s)",
+            $"Best: {report.BestModel} · Worst: {report.WorstModel} · Score spread: {report.ScoreSpread:0.##}",
+            "",
+            "Ranking:",
+        };
+        lines.AddRange(report.Models.Select(model => $"- {model.DisplayName}"));
+
+        if (report.CommonlyFailedExamples.Count > 0)
+        {
+            lines.Add("");
+            lines.Add($"Failed by every model ({report.CommonlyFailedExamples.Count}): "
+                + string.Join(", ", report.CommonlyFailedExamples.Take(10)));
+        }
+
+        BenchmarkSummary = string.Join(Environment.NewLine, lines);
+    }
+
+    public void SetBenchmarkError(string message)
+    {
+        BenchmarkSummary = $"Benchmark could not run.{Environment.NewLine}{message}";
     }
 
     public EvaluationExampleResult? SelectedEvaluationExampleResult

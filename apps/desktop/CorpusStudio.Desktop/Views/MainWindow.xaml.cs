@@ -839,6 +839,69 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void RunBenchmarkButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetBenchmarkError("Create or select a dataset project before benchmarking.");
+            return;
+        }
+
+        if (ViewModel.ActiveSchemaId is not ("instruction" or "chat"))
+        {
+            ViewModel.SetBenchmarkError("Evaluation Lab supports instruction and chat projects.");
+            return;
+        }
+
+        var models = ViewModel.GetBenchmarkModels();
+        if (models.Count == 0)
+        {
+            ViewModel.SetBenchmarkError("Enter at least one model to benchmark (one per line).");
+            return;
+        }
+
+        if (!TryReadEvaluationOptions(
+            out var backend,
+            out _,
+            out var baseUrl,
+            out var limit,
+            out var scoreThreshold,
+            out var timeoutSeconds,
+            out var errorMessage,
+            requireModel: false
+        ))
+        {
+            ViewModel.SetBenchmarkError(errorMessage);
+            return;
+        }
+
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy($"Benchmarking {models.Count} model(s)...");
+            var report = await _engineService.RunBenchmarkAsync(
+                ViewModel.ActiveProjectPath,
+                ViewModel.ActiveSchemaId,
+                backend,
+                models,
+                baseUrl,
+                limit,
+                scoreThreshold,
+                timeoutSeconds
+            );
+            ViewModel.ApplyBenchmarkReport(report);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetBenchmarkError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
+        }
+    }
+
     private async void RerunEvaluationReportButton_Click(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
@@ -1788,7 +1851,8 @@ public partial class MainWindow : Window
         out int? limit,
         out double scoreThreshold,
         out int timeoutSeconds,
-        out string errorMessage
+        out string errorMessage,
+        bool requireModel = true
     )
     {
         backend = ViewModel.EvaluationBackend.Trim();
@@ -1807,7 +1871,7 @@ public partial class MainWindow : Window
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(model))
+        if (requireModel && string.IsNullOrWhiteSpace(model))
         {
             errorMessage = "Evaluation model is required.";
             return false;

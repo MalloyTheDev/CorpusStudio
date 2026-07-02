@@ -25,6 +25,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/AiAssistQueueView.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/AiAssistRewriteBatch.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/AiAssistReviewQueueItem.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/BenchmarkReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/BackendHealthReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/BackendModelListReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/DatasetCardResult.cs`
@@ -63,6 +64,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml`
 - `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/AiAssistRewriteBatchServiceTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/BenchmarkViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/CorpusStudio.Desktop.Tests.csproj`
 - `apps/desktop/CorpusStudio.Desktop.Tests/EvaluationFailureFilterServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ImportCommitServiceTests.cs`
