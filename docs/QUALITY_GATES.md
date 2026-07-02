@@ -34,11 +34,11 @@ Current:
 - first-pass synthetic-pattern warnings
 - train/test leakage detection (post-split, non-destructive warning)
 - first-pass PII / secret detection (emails, SSNs, private keys, AWS/API keys, JWTs, Luhn-valid cards)
+- token-length outlier detection (IQR-based, using the Unicode-aware token estimate)
+- category-imbalance warnings (low-cardinality field dominated by one value)
 
 Next:
 
-- token length outlier detection
-- category imbalance warnings
 - report-level Evaluation failure summaries
 
 ## Current basic quality report
