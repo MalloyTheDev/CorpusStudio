@@ -103,14 +103,20 @@ def _type_error_message(field_type: str) -> str:
     return "Invalid value."
 
 
-def _validate_field_type(field: SchemaField, value: Any, row_number: int | None) -> list[ValidationIssue]:
+def _validate_field_type(
+    field: SchemaField,
+    value: Any,
+    row_number: int | None,
+    field_prefix: str = "",
+) -> list[ValidationIssue]:
     field_type = field.type
+    full_name = f"{field_prefix}{field.name}"
 
     if field_type == "messages":
-        return _validate_messages(value, field.name, row_number)
+        return _validate_messages(value, full_name, row_number)
 
     if not _matches_scalar_type(field_type, value):
-        return [_issue(_type_error_message(field_type), row_number, field.name)]
+        return [_issue(_type_error_message(field_type), row_number, full_name)]
 
     issues: list[ValidationIssue] = []
 
@@ -121,9 +127,24 @@ def _validate_field_type(field: SchemaField, value: Any, row_number: int | None)
                     _issue(
                         f"List element {index} must be {field.item_type}.",
                         row_number,
-                        field.name,
+                        full_name,
                     )
                 )
+
+    if field_type in {"integer", "float"}:
+        if field.minimum is not None and value < field.minimum:
+            issues.append(
+                _issue(f"Value must be >= {field.minimum}.", row_number, full_name)
+            )
+        if field.maximum is not None and value > field.maximum:
+            issues.append(
+                _issue(f"Value must be <= {field.maximum}.", row_number, full_name)
+            )
+
+    if field_type == "object" and field.fields is not None:
+        issues.extend(
+            _validate_fields(value, field.fields, row_number, field_prefix=f"{full_name}.")
+        )
 
     if field.enum is not None and value not in field.enum:
         allowed = ", ".join(str(option) for option in field.enum)
@@ -131,7 +152,7 @@ def _validate_field_type(field: SchemaField, value: Any, row_number: int | None)
             _issue(
                 f"Value must be one of: {allowed}.",
                 row_number,
-                field.name,
+                full_name,
             )
         )
 
@@ -151,27 +172,37 @@ def validate_example_fields_against(
     schema: DatasetSchema,
     row_number: int | None = None,
 ) -> list[ValidationIssue]:
+    return _validate_fields(row, schema.fields, row_number)
+
+
+def _validate_fields(
+    data: dict[str, Any],
+    fields: list[SchemaField],
+    row_number: int | None = None,
+    field_prefix: str = "",
+) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
 
-    for field in schema.fields:
-        if field.name not in row:
+    for field in fields:
+        full_name = f"{field_prefix}{field.name}"
+        if field.name not in data:
             if field.required:
                 issues.append(
                     _issue(
-                        f"Missing required field: {field.name}",
+                        f"Missing required field: {full_name}",
                         row_number,
-                        field.name,
+                        full_name,
                     )
                 )
             continue
 
-        value = row[field.name]
+        value = data[field.name]
         if field.required and _is_empty_required_value(value):
             issues.append(
                 _issue(
-                    f"Required field is empty: {field.name}",
+                    f"Required field is empty: {full_name}",
                     row_number,
-                    field.name,
+                    full_name,
                 )
             )
             continue
@@ -179,7 +210,7 @@ def validate_example_fields_against(
         if value is None:
             continue
 
-        issues.extend(_validate_field_type(field, value, row_number))
+        issues.extend(_validate_field_type(field, value, row_number, field_prefix))
 
     return issues
 

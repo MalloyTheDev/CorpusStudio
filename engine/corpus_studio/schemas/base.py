@@ -28,6 +28,11 @@ class SchemaField(BaseModel):
     item_type: FieldType | None = None
     # Allowed values for a scalar field (e.g. a fixed classification label set).
     enum: list[Any] | None = None
+    # Inclusive numeric bounds for ``integer`` / ``float`` fields.
+    minimum: float | None = None
+    maximum: float | None = None
+    # Nested field shapes for an ``object`` field, validated recursively.
+    fields: list["SchemaField"] | None = None
 
 
 class DatasetSchema(BaseModel):
@@ -43,3 +48,7 @@ class DatasetExample(BaseModel):
     schema_id: str
     fields: dict[str, Any]
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+# Resolve the self-referencing ``SchemaField.fields`` forward reference.
+SchemaField.model_rebuild()
