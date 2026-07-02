@@ -13,6 +13,7 @@ from corpus_studio.evaluation.reports import EvaluationReport
 from collections.abc import Callable
 
 from corpus_studio.gates.basic_gates import (
+    artifact_integrity_gate,
     eval_score_gate,
     input_present_gate,
     leakage_gate,
@@ -21,7 +22,13 @@ from corpus_studio.gates.basic_gates import (
     regression_gate,
     schema_gate,
 )
-from corpus_studio.gates.models import GateReport, GateScope, GateThresholds
+from corpus_studio.gates.models import (
+    GateReport,
+    GateResult,
+    GateScope,
+    GateStatus,
+    GateThresholds,
+)
 from corpus_studio.quality.basic_quality import build_basic_quality_report
 from corpus_studio.splitters.leakage import detect_split_leakage
 from corpus_studio.validators.basic_validator import validate_jsonl_row
@@ -133,18 +140,70 @@ def run_training_run_gate(
     """
 
     thresholds = thresholds or GateThresholds()
-    before = load_report(record.before_eval_path) if record.before_eval_path else None
-    after = load_report(record.after_eval_path) if record.after_eval_path else None
-
-    provenance_ok = True
-    if after is not None:
-        if not record.after_eval_model:
-            provenance_ok = False
-        elif record.base_model and record.after_eval_model == record.base_model:
-            provenance_ok = False
-
+    before, after, provenance_ok = _regression_inputs(record, load_report)
     result = regression_gate(before, after, thresholds, provenance_ok, GateScope.TRAINING_RUN)
     return GateReport.build(GateScope.TRAINING_RUN, record.run_id, [result], generated_at)
+
+
+def _regression_inputs(
+    run: Any, load_report: Callable[[str], EvaluationReport | None]
+) -> tuple[EvaluationReport | None, EvaluationReport | None, bool]:
+    """Resolve (before, after, provenance_ok) for a run's linked eval reports.
+
+    Provenance holds only when the after-eval declared a model that is not the
+    base model — so a base-vs-base comparison is not trusted.
+    """
+
+    before = load_report(run.before_eval_path) if run.before_eval_path else None
+    after = load_report(run.after_eval_path) if run.after_eval_path else None
+    provenance_ok = True
+    if after is not None:
+        if not run.after_eval_model:
+            provenance_ok = False  # after-eval target not recorded
+        elif not run.base_model:
+            provenance_ok = False  # base model unrecorded -> can't verify the target
+        elif run.after_eval_model == run.base_model:
+            provenance_ok = False  # after-eval targeted the base model
+    return before, after, provenance_ok
+
+
+def run_artifact_gate(
+    artifact: Any,
+    integrity: str,
+    run: Any,
+    load_report: Callable[[str], EvaluationReport | None],
+    thresholds: GateThresholds | None = None,
+    generated_at: str | None = None,
+) -> GateReport:
+    """Promote gate for a model artifact (the enforcement point for 'keep').
+
+    Blocks when the artifact integrity is missing/modified OR the source run
+    regressed; warns on unverified linkage / a missing source run.
+    """
+
+    thresholds = thresholds or GateThresholds()
+    results = [artifact_integrity_gate(integrity, GateScope.MODEL_ARTIFACT)]
+
+    if run is None:
+        results.append(
+            GateResult(
+                gate_id="regression",
+                name="Training regression",
+                scope=GateScope.MODEL_ARTIFACT,
+                status=GateStatus.WARN,
+                observed="source run record not found",
+                expected="a source run with before/after evaluations",
+                message="Cannot assess regression: the artifact's source run record is missing.",
+                repair="Keep the source training run record so promotion can be judged.",
+            )
+        )
+    else:
+        before, after, provenance_ok = _regression_inputs(run, load_report)
+        results.append(
+            regression_gate(before, after, thresholds, provenance_ok, GateScope.MODEL_ARTIFACT)
+        )
+
+    return GateReport.build(GateScope.MODEL_ARTIFACT, artifact.artifact_id, results, generated_at)
 
 
 def save_gate_report(project_dir: Path | str, report: GateReport) -> Path:

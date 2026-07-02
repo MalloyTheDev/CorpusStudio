@@ -93,4 +93,53 @@ public sealed class ArtifactRegistryTests
         vm.ApplyArtifacts([]);
         Assert.Contains("No artifacts registered", vm.ArtifactSummary);
     }
+
+    // --- promote gate verdict (v0.9.1) ---------------------------------------
+
+    private static GateReport GateReport(string overall, params GateResult[] results) => new()
+    {
+        Scope = "model_artifact",
+        OverallStatus = overall,
+        Results = results,
+    };
+
+    [Fact]
+    public void ApplyPromoteGate_BlockRefusesKeep()
+    {
+        var vm = new MainWindowViewModel();
+        var allowed = vm.ApplyPromoteGate(GateReport("block",
+            new GateResult { GateId = "integrity", Status = "block", Message = "Artifact weights are modified." }));
+        Assert.False(allowed);
+        Assert.Contains("Keep blocked", vm.ArtifactDetail);
+        Assert.Contains("modified", vm.ArtifactDetail);
+    }
+
+    [Fact]
+    public void ApplyPromoteGate_WarnAllowsKeepWithNote()
+    {
+        var vm = new MainWindowViewModel();
+        var allowed = vm.ApplyPromoteGate(GateReport("warn",
+            new GateResult { GateId = "regression", Status = "warn", Message = "Unverified linkage." }));
+        Assert.True(allowed);
+        Assert.Contains("warned", vm.ArtifactDetail);
+        Assert.Contains("Unverified linkage", vm.ArtifactDetail);
+    }
+
+    [Fact]
+    public void ApplyPromoteGate_PassAllowsKeep()
+    {
+        var vm = new MainWindowViewModel();
+        var allowed = vm.ApplyPromoteGate(GateReport("pass",
+            new GateResult { GateId = "integrity", Status = "pass", Message = "ok" }));
+        Assert.True(allowed);
+        Assert.Contains("promote gate passed", vm.ArtifactDetail);
+    }
+
+    [Fact]
+    public void SetArtifactDetail_ShowsCardMarkdown()
+    {
+        var vm = new MainWindowViewModel();
+        vm.SetArtifactDetail("# Weight Card — abc");
+        Assert.Contains("Weight Card", vm.ArtifactDetail);
+    }
 }

@@ -175,6 +175,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/quality/basic_quality.py`
 - `engine/corpus_studio/reporting/__init__.py`
 - `engine/corpus_studio/reporting/dataset_card.py`
+- `engine/corpus_studio/reporting/weight_card.py`
 - `engine/corpus_studio/schemas/__init__.py`
 - `engine/corpus_studio/schemas/base.py`
 - `engine/corpus_studio/schemas/registry.py`
@@ -225,6 +226,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_artifact_registry.py`
 - `engine/tests/test_regression_gate.py`
 - `engine/tests/test_run_registry.py`
+- `engine/tests/test_weight_card_and_promote_gate.py`
 - `engine/tests/test_schema_examples.py`
 - `engine/tests/test_schema_field_constraints.py`
 - `engine/tests/test_schema_nested_and_bounds.py`

@@ -111,7 +111,12 @@ Last reconciled: 2026-07-02 (v0.6 in progress).
   Base model + eval are resolved live through the source `run_id`, not stored.
   **Path integrity** is re-checked on load — a record flags `missing` or
   `modified` if the weights change on disk. A desktop Artifacts tab registers
-  from a run and keeps/rejects. The weight card + promote gate are v0.9.1.
+  from a run and keeps/rejects.
+- A weight card rendered live (`artifact-card`, never stored) with base model +
+  eval resolved through the run and the "unverified linkage" caveat, and a
+  `model_artifact` **promote gate** (`artifact-gate`) that blocks "keep" when the
+  artifact is `modified`/`missing` or the source run regressed. Keep in the
+  desktop is promote-gated — a block refuses the keep.
 
 ## Not built yet (future roadmap)
 

@@ -117,6 +117,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _trainingRunHistorySummary = "Refresh to see past training runs recorded for this project.";
     private string _trainingRunGateSummary = "Gate a run to check for regression vs its baseline.";
     private string _artifactSummary = "Register a model artifact from a completed run, then keep or reject it.";
+    private string _artifactDetail = "Select an artifact, then View card or Keep (Keep is promote-gated).";
     private ArtifactDisplayItem? _selectedModelArtifact;
     private string _trainingCheckpointsSummary =
         "Checkpoints appear here after a training run writes them.";
@@ -1253,9 +1254,52 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         private set => SetField(ref _artifactSummary, value);
     }
 
+    public string ArtifactDetail
+    {
+        get => _artifactDetail;
+        private set => SetField(ref _artifactDetail, value);
+    }
+
     public void SetArtifactError(string message)
     {
         ArtifactSummary = $"Artifact action failed.{Environment.NewLine}{message}";
+    }
+
+    /// <summary>Set the detail pane (weight card markdown or a gate verdict).</summary>
+    public void SetArtifactDetail(string text)
+    {
+        ArtifactDetail = text;
+    }
+
+    /// <summary>Format a promote-gate verdict for the detail pane. Returns whether
+    /// the keep is allowed (block => refused).</summary>
+    public bool ApplyPromoteGate(GateReport report)
+    {
+        // Drive the decision from the canonical OverallStatus (worst of results),
+        // and fail closed on anything that is not an explicit pass/warn.
+        string ReasonFor(string status) =>
+            report.Results.FirstOrDefault(r => r.Status == status)?.Message ?? string.Empty;
+
+        switch (report.OverallStatus)
+        {
+            case "block":
+                var blockReason = ReasonFor("block");
+                ArtifactDetail = "⛔ Keep blocked by the promote gate:" + Environment.NewLine
+                    + (string.IsNullOrEmpty(blockReason) ? "the artifact did not pass promotion." : blockReason);
+                return false;
+            case "warn":
+                var warnReason = ReasonFor("warn");
+                ArtifactDetail = "⚠ Kept, but the promote gate warned:" + Environment.NewLine
+                    + (string.IsNullOrEmpty(warnReason) ? "review the weight card." : warnReason)
+                    + Environment.NewLine + "View the weight card before relying on it.";
+                return true;
+            case "pass":
+                ArtifactDetail = "✅ Kept — the promote gate passed (integrity ok, no regression).";
+                return true;
+            default:
+                ArtifactDetail = $"⛔ Keep blocked: unrecognized gate status '{report.OverallStatus}'.";
+                return false;
+        }
     }
 
     /// <summary>Refresh the artifact list + a one-line summary (kept / flagged counts).</summary>
