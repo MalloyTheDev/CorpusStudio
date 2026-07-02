@@ -54,6 +54,9 @@ class TrainingRunRecord(BaseModel):
     # (v0.8.1) must not trust a before/after comparison whose after-eval did not
     # run against the model this run produced.
     after_eval_model: str | None = None
+    # Back-link to the dataset version (v1.0) captured for this run, if any. A
+    # tolerant default so pre-v1.0 records without the field still load as None.
+    source_snapshot_id: str | None = None
     notes: str = ""
 
     @property

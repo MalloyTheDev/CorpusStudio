@@ -3,7 +3,7 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-07-02 (v0.6 in progress).
+Last reconciled: 2026-07-02 (v1.0.0 engine slice landed).
 
 ## What works today (implemented and tested)
 
@@ -118,10 +118,27 @@ Last reconciled: 2026-07-02 (v0.6 in progress).
   artifact is `modified`/`missing` or the source run regressed. Keep in the
   desktop is promote-gated — a block refuses the keep.
 
+## In progress — v1.0 (Dataset Version History & Lineage)
+
+- Durable dataset version records under `dataset_versions/` (engine): each pins
+  the dataset's identity — `row_count` + a streaming SHA-256 `content_fingerprint`
+  over the ordered per-row exact signatures (the same signature primitive used by
+  cleaning/quality/leakage) — plus links to source training runs, model
+  artifacts, an evaluation report, and a dataset gate report. Nothing derivable
+  is stored; scores/integrity/gate status resolve live in a version card.
+- Live drift detection: listing and the card recompute the current
+  `examples.jsonl` fingerprint and report `matches` / `drifted` / `unreadable`,
+  so a version can never silently misrepresent a changed dataset. The card leads
+  with a warning when drifted or a link is missing.
+- CLI `dataset-version-create` / `dataset-version-list` / `dataset-version-show`;
+  `--stamp-run` writes the dataset→run back-link (`source_snapshot_id`). The
+  engine only reads `examples.jsonl` and writes under `dataset_versions/` — it
+  never moves/copies/deletes the dataset. See [`VERSIONING.md`](VERSIONING.md).
+- Deferred: desktop surfacing (v1.0.1), stable row identity + a content-addressed
+  row store (v1.0.2), version diff (v1.0.3), and restore-to-version (v1.0.4).
+
 ## Not built yet (future roadmap)
 
-Model Chat Lab / Arena (v0.7), Training Run Registry (v0.8), Model Artifact /
-Weight Registry (v0.9), Dataset Version History & Lineage (v1.0), Dataset Debt
-Dashboard (v1.1), Approved Provider Generation into a review queue (v1.2),
-Evaluation Suites & Chat Gates (v1.3). Regression gates depend on the
-before/after registry (v0.8) and are documented as future work.
+Dataset Version diff & restore (v1.0.2+), Dataset Debt Dashboard (v1.1),
+Approved Provider Generation into a review queue (v1.2), Evaluation Suites &
+Chat Gates (v1.3).

@@ -290,6 +290,10 @@ Scope:
 - Evaluation Lab
 - AI Assist Lab
 - Training Lab
-- version history
+- version history — **v1.0.0 (engine) shipped**: dataset version registry with a
+  content fingerprint, live drift detection, lineage links, and a version card
+  (`dataset-version-create/-list/-show`). Deferred: desktop surfacing (v1.0.1),
+  row identity + content store (v1.0.2), diff (v1.0.3), restore (v1.0.4). See
+  [VERSIONING.md](VERSIONING.md).
 - full documentation
 - examples for all built-in schemas

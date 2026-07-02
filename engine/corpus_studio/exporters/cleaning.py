@@ -42,6 +42,12 @@ def _exact_signature(row: Any) -> str:
     return json.dumps(row, sort_keys=True, separators=(",", ":"), default=str)
 
 
+# Public alias for the canonical per-row exact signature. Reused verbatim by the
+# dataset version fingerprint (versions/version_registry.py) so row identity is
+# computed exactly one way across cleaning, quality, leakage, and versioning.
+exact_row_signature = _exact_signature
+
+
 def clean_rows(
     rows: list[dict[str, Any]],
     *,

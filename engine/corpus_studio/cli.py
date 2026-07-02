@@ -1520,6 +1520,223 @@ def gate_run(
     typer.echo(report.model_dump_json(indent=2))
 
 
+def _newest_dataset_gate_report(project_dir: Path) -> Optional[str]:
+    """Absolute path to the newest dataset-scope gate report in the project, or None.
+
+    Deterministic: only links a gate report already on disk; never runs a gate.
+    """
+
+    from corpus_studio.gates.runner import GATE_REPORTS_DIRNAME, load_gate_report
+
+    directory = project_dir / GATE_REPORTS_DIRNAME
+    if not directory.exists():
+        return None
+    best_path: Optional[Path] = None
+    best_key: Optional[str] = None
+    for path in directory.glob("dataset-*.json"):
+        try:
+            report = load_gate_report(path)
+        except Exception:  # noqa: BLE001 - a corrupt report is not a link candidate.
+            continue
+        key = report.generated_at or ""
+        if best_key is None or key > best_key:
+            best_key = key
+            best_path = path
+    return str(best_path.resolve()) if best_path is not None else None
+
+
+@app.command("dataset-version-create")
+def dataset_version_create(
+    project_dir: Path,
+    label: str = typer.Option("", "--label", help="Human label for this version."),
+    trigger: str = typer.Option(
+        "manual",
+        "--trigger",
+        help="What produced this version: manual | manual_add | import_commit | pre_training.",
+    ),
+    link_run: list[str] = typer.Option(None, "--link-run", help="Source training run id (repeatable)."),
+    link_artifact: list[str] = typer.Option(None, "--link-artifact", help="Model artifact id (repeatable)."),
+    eval_report_path: Optional[str] = typer.Option(
+        None, "--eval-report-path", help="Absolute path to a linked evaluation report."
+    ),
+    gate_report_path: Optional[str] = typer.Option(
+        None, "--gate-report-path", help="Path to a linked dataset gate report (else newest is auto-linked)."
+    ),
+    stamp_run: Optional[str] = typer.Option(
+        None, "--stamp-run", help="Also write source_snapshot_id=this version onto the given run."
+    ),
+):
+    """Capture a dataset version: fingerprint + row count of examples.jsonl with pinned lineage links.
+
+    Reads examples.jsonl and writes only under dataset_versions/. It never moves,
+    copies, or deletes the dataset or any weight file.
+    """
+
+    from datetime import datetime, timezone
+
+    from corpus_studio.versions.version_registry import (
+        DatasetVersionRecord,
+        fingerprint_dataset,
+        mint_version_id,
+        save_version_record,
+    )
+
+    examples_path = project_dir / "examples.jsonl"
+    fingerprint, row_count = fingerprint_dataset(examples_path)
+    if fingerprint is None:
+        typer.echo(
+            "Note: examples.jsonl is missing or unreadable; recording a version without a fingerprint.",
+            err=True,
+        )
+
+    now_dt = datetime.now(timezone.utc)
+    version_id = mint_version_id(now_dt.strftime("%Y%m%dT%H%M%S"), f"{now_dt.microsecond:06d}")
+    now_iso = now_dt.isoformat()
+
+    record = DatasetVersionRecord(
+        version_id=version_id,
+        created_at=now_iso,
+        updated_at=now_iso,
+        label=label,
+        trigger=trigger,
+        row_count=row_count,
+        content_fingerprint=fingerprint,
+        source_run_ids=list(link_run or []),
+        artifact_ids=list(link_artifact or []),
+        eval_report_path=eval_report_path,
+        gate_report_path=gate_report_path or _newest_dataset_gate_report(project_dir),
+    )
+
+    if stamp_run is not None:
+        from corpus_studio.training.run_registry import (
+            load_run_record,
+            record_path as run_record_path,
+            save_run_record,
+        )
+
+        run_path = run_record_path(project_dir, stamp_run)
+        if not run_path.exists():
+            typer.echo(f"No training run '{stamp_run}' to stamp.", err=True)
+            raise typer.Exit(code=1)
+        run = load_run_record(run_path)
+        save_run_record(
+            project_dir,
+            run.model_copy(update={"source_snapshot_id": version_id, "updated_at": now_iso}),
+        )
+        if stamp_run not in record.source_run_ids:
+            record.source_run_ids.append(stamp_run)
+
+    save_version_record(project_dir, record)
+    typer.echo(record.model_dump_json(indent=2))
+
+
+@app.command("dataset-version-list")
+def dataset_version_list(project_dir: Path):
+    """List dataset versions (newest first), each annotated with live integrity."""
+
+    from corpus_studio.versions.version_registry import (
+        compute_content_fingerprint,
+        integrity_from_fingerprints,
+        list_version_records,
+    )
+
+    records = list_version_records(project_dir)
+    live_fingerprint = compute_content_fingerprint(project_dir / "examples.jsonl")
+    versions = []
+    for record in records:
+        data = record.model_dump()
+        data["current_integrity"] = integrity_from_fingerprints(
+            record.content_fingerprint, live_fingerprint
+        )
+        versions.append(data)
+    typer.echo(json.dumps({"versions": versions}, indent=2))
+
+
+@app.command("dataset-version-show")
+def dataset_version_show(
+    project_dir: Path,
+    version_id: str = typer.Option(..., "--version-id"),
+    as_json: bool = typer.Option(False, "--json", help="Emit the resolved card as JSON instead of Markdown."),
+):
+    """Render a dataset version card (live projection; nothing stored)."""
+
+    from corpus_studio.evaluation.reports import EvaluationReport
+    from corpus_studio.gates.models import GateReport
+    from corpus_studio.training.artifact_registry import (
+        artifact_integrity,
+        artifact_path,
+        load_artifact_record,
+    )
+    from corpus_studio.training.run_registry import (
+        load_run_record,
+        record_path as run_record_path,
+    )
+    from corpus_studio.versions.version_card import (
+        build_version_card,
+        render_version_card_markdown,
+    )
+    from corpus_studio.versions.version_registry import (
+        compute_content_fingerprint,
+        load_version_record,
+        record_path,
+    )
+
+    path = record_path(project_dir, version_id)
+    if not path.exists():
+        typer.echo(f"No dataset version '{version_id}'.", err=True)
+        raise typer.Exit(code=1)
+    record = load_version_record(path)
+
+    live_fingerprint = compute_content_fingerprint(project_dir / "examples.jsonl")
+
+    runs_by_id: dict[str, object] = {}
+    for run_id in record.source_run_ids:
+        run_path = run_record_path(project_dir, run_id)
+        if run_path.exists():
+            try:
+                runs_by_id[run_id] = load_run_record(run_path)
+            except Exception:  # noqa: BLE001 - a corrupt run record resolves as 'not found'.
+                pass
+
+    artifacts_by_id: dict[str, tuple[object, str]] = {}
+    for artifact_id in record.artifact_ids:
+        ap = artifact_path(project_dir, artifact_id)
+        if ap.exists():
+            try:
+                artifact = load_artifact_record(ap)
+                artifacts_by_id[artifact_id] = (artifact, artifact_integrity(artifact))
+            except Exception:  # noqa: BLE001 - a corrupt artifact resolves as 'not found'.
+                pass
+
+    def load_eval(report_path: str):
+        try:
+            return EvaluationReport.model_validate_json(
+                Path(report_path).read_text(encoding="utf-8")
+            )
+        except (ValidationError, json.JSONDecodeError, OSError):
+            return None
+
+    def load_gate(report_path: str):
+        try:
+            return GateReport.model_validate_json(Path(report_path).read_text(encoding="utf-8"))
+        except (ValidationError, json.JSONDecodeError, OSError):
+            return None
+
+    card = build_version_card(
+        record,
+        current_fingerprint=live_fingerprint,
+        runs_by_id=runs_by_id,
+        artifacts_by_id=artifacts_by_id,
+        load_eval_report=load_eval,
+        load_gate_report=load_gate,
+    )
+
+    if as_json:
+        typer.echo(card.model_dump_json(indent=2))
+    else:
+        typer.echo(render_version_card_markdown(card))
+
+
 def _utc_now_iso() -> str:
     from datetime import datetime, timezone
 
