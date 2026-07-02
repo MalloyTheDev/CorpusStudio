@@ -81,7 +81,12 @@ Last reconciled: 2026-07-02 (v0.6 in progress).
 
 - Run a prompt suite across several models and capture responses side by side
   (engine `arena-run` → `ArenaReport`). Responses are comparison artifacts, not
-  trainable rows. Judging, saved reports, and a desktop surface are next.
+  trainable rows.
+- Optional evaluator-only judging (`--judge-model`): a judge scores each
+  candidate and picks a winner, aggregated into per-model win counts and average
+  judge scores. Judging is an evaluator activity, so OpenAI/Anthropic are
+  permitted as the judge (enforced via provider policy). Saved reports and a
+  desktop surface are next.
 
 ## Not built yet (future roadmap)
 
