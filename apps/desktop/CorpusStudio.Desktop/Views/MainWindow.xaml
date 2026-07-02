@@ -1647,12 +1647,27 @@
                                         IsEnabled="{Binding IsTrainingRunning, Mode=OneWay}"
                                         Margin="0,0,12,0"
                                         Click="StopTrainingButton_Click" />
+                                <Button AutomationProperties.AutomationId="ResumeTrainingButton"
+                                        Content="Resume latest"
+                                        IsEnabled="{Binding CanResumeTraining, Mode=OneWay}"
+                                        ToolTip="Relaunch from the newest checkpoint (targets with a resume flag only)"
+                                        Margin="0,0,8,0"
+                                        Click="ResumeTrainingButton_Click" />
+                                <Button AutomationProperties.AutomationId="RefreshTrainingCheckpointsButton"
+                                        Content="Refresh checkpoints"
+                                        Margin="0,0,12,0"
+                                        Click="RefreshTrainingCheckpointsButton_Click" />
                                 <TextBlock Text="Status:"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBlock AutomationProperties.AutomationId="TrainingRunStatusTextBlock"
                                            Text="{Binding TrainingRunStatus, Mode=OneWay}"
                                            FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,12,0" />
+                                <TextBlock AutomationProperties.AutomationId="TrainingCheckpointsSummaryTextBlock"
+                                           Text="{Binding TrainingCheckpointsSummary, Mode=OneWay}"
+                                           Foreground="#475569"
                                            VerticalAlignment="Center" />
                             </WrapPanel>
 

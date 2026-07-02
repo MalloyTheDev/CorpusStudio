@@ -1468,7 +1468,18 @@ public partial class MainWindow : Window
 
     private async void LaunchTrainingButton_Click(object sender, RoutedEventArgs e)
     {
-        var argv = ViewModel.TrainingLaunchArgv;
+        await RunTrainingAsync(ViewModel.TrainingLaunchArgv, ViewModel.TrainingLaunchCommand);
+    }
+
+    private async void ResumeTrainingButton_Click(object sender, RoutedEventArgs e)
+    {
+        await RunTrainingAsync(ViewModel.TrainingResumeArgv, ViewModel.TrainingResumeCommand);
+    }
+
+    /// <summary>Shared launch core for fresh runs and resume-from-checkpoint: the
+    /// user confirms the exact command, then the trainer is spawned and streamed.</summary>
+    private async Task RunTrainingAsync(IReadOnlyList<string> argv, string command)
+    {
         if (argv.Count == 0)
         {
             MessageBox.Show(
@@ -1491,7 +1502,7 @@ public partial class MainWindow : Window
             "This runs the trainer on your machine (it can use significant CPU/GPU for a long "
                 + "time) with your installed tools. Corpus Studio only launches the command below "
                 + "and streams its output.\n\n"
-                + ViewModel.TrainingLaunchCommand
+                + command
                 + "\n\nRun it now?",
             "Launch training",
             MessageBoxButton.OKCancel,
@@ -1517,6 +1528,15 @@ public partial class MainWindow : Window
         };
         logTimer.Tick += (_, _) => FlushTrainingLogQueue(runId);
         logTimer.Start();
+
+        // Slow poll so checkpoints surface while the run is live (they appear
+        // minutes apart; no hot timer).
+        var checkpointTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromSeconds(15),
+        };
+        checkpointTimer.Tick += async (_, _) => await RefreshTrainingCheckpointsAsync();
+        checkpointTimer.Start();
 
         try
         {
@@ -1550,12 +1570,44 @@ public partial class MainWindow : Window
         finally
         {
             logTimer.Stop();
+            checkpointTimer.Stop();
             if (ReferenceEquals(_trainingRunCts, cts))
             {
                 _trainingRunCts = null;
             }
 
             cts.Dispose();
+
+            // A stopped/crashed run is exactly when surviving checkpoints matter.
+            await RefreshTrainingCheckpointsAsync();
+        }
+    }
+
+    private async void RefreshTrainingCheckpointsButton_Click(object sender, RoutedEventArgs e)
+    {
+        await RefreshTrainingCheckpointsAsync();
+    }
+
+    private async Task RefreshTrainingCheckpointsAsync()
+    {
+        var outputDirectory = ViewModel.TrainingOutputDirectory;
+        if (string.IsNullOrWhiteSpace(outputDirectory))
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await _engineService.GetTrainingCheckpointsAsync(
+                outputDirectory,
+                string.IsNullOrWhiteSpace(ViewModel.TrainingTarget) ? "axolotl" : ViewModel.TrainingTarget,
+                ViewModel.TrainingConfigPath
+            );
+            ViewModel.ApplyTrainingCheckpoints(result);
+        }
+        catch
+        {
+            // Checkpoint refresh is advisory; never let it disrupt a run.
         }
     }
 

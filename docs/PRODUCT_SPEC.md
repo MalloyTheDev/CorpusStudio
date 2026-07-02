@@ -152,8 +152,12 @@ still no trainer launcher.
   a resume command for the latest one. The desktop can also launch the trainer
   in-app after an explicit confirmation (spawning the generated `argv` directly,
   no shell) and stream its stdout/stderr into a live log with a Stop button that
-  kills the process tree; live checkpoint tracking and before/after eval
-  comparison remain planned.
+  kills the process tree. Generated configs now carry an `output_dir` (default
+  `output/` beside the rendered config), the desktop tracks the checkpoint list
+  live during a run (slow poll, plus refresh on end/stop/error and a manual
+  button), and a "Resume latest" button relaunches from the newest checkpoint
+  through the same confirmation for targets with a CLI resume flag; before/after
+  eval comparison remains planned.
 - An optional SQLite-backed project index is available (`project-list` and `project-index-rebuild` CLI, opt-in via `CORPUS_STUDIO_USE_INDEX`); JSON/JSONL remain the authoritative, inspectable project state.
 - Desktop project-file writes are atomic (temp file + replace) so a crash mid-write cannot truncate or corrupt live project state, and a running engine command can be cancelled from the busy overlay, which kills the engine process tree. Long local evaluation/AI Assist runs are intentionally left without a hard timeout so they are not cut off mid-run.
 

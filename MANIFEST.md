@@ -53,6 +53,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/SavedExampleItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/SplitReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/SplitSettings.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/TrainingCheckpointsResult.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/TrainingCompatibilityResult.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/TrainingConfigExportResult.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ValidationIssueNavigationItem.cs`
@@ -71,6 +72,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/ImportCommitServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ProjectSearchViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ReviewedFixServiceTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/TrainingCheckpointsViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingLaunchViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingProcessRunnerTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingRunViewModelTests.cs`

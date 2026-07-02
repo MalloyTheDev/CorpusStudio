@@ -103,6 +103,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _trainingLaunchCommand = string.Empty;
     private IReadOnlyList<string> _trainingLaunchArgv = [];
     private string _trainingLaunchWorkingDirectory = string.Empty;
+    private string _trainingOutputDirectory = string.Empty;
+    private string _trainingConfigPath = string.Empty;
+    private string _trainingCheckpointsSummary =
+        "Checkpoints appear here after a training run writes them.";
+    private IReadOnlyList<string> _trainingResumeArgv = [];
+    private string _trainingResumeCommand = string.Empty;
     private readonly List<string> _trainingRunLines = [];
     private int _trainingRunId;
     private string _trainingRunLog = "Launch training after generating a config; live logs appear here.";
@@ -918,6 +924,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             if (SetField(ref _isTrainingRunning, value))
             {
                 OnPropertyChanged(nameof(CanLaunchTraining));
+                OnPropertyChanged(nameof(CanResumeTraining));
             }
         }
     }
@@ -991,6 +998,54 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         IsTrainingRunning = false;
         TrainingRunStatus = "Error";
         AppendTrainingRunLog($"[error] {message}");
+    }
+
+    /// <summary>Where the trainer writes checkpoints (from the last config export).</summary>
+    public string TrainingOutputDirectory => _trainingOutputDirectory;
+
+    /// <summary>The rendered config path from the last config export.</summary>
+    public string TrainingConfigPath => _trainingConfigPath;
+
+    public string TrainingCheckpointsSummary
+    {
+        get => _trainingCheckpointsSummary;
+        private set => SetField(ref _trainingCheckpointsSummary, value);
+    }
+
+    /// <summary>The exact resume command for the latest checkpoint (empty if none).</summary>
+    public string TrainingResumeCommand => _trainingResumeCommand;
+
+    public IReadOnlyList<string> TrainingResumeArgv => _trainingResumeArgv;
+
+    /// <summary>Resume is available when the target supports a resume flag, a
+    /// checkpoint exists, and no run is active.</summary>
+    public bool CanResumeTraining => !_isTrainingRunning && _trainingResumeArgv.Count > 0;
+
+    public void ApplyTrainingCheckpoints(TrainingCheckpointsResult result)
+    {
+        if (result.Checkpoints.Count == 0)
+        {
+            TrainingCheckpointsSummary = "No checkpoints found yet.";
+            _trainingResumeArgv = [];
+            _trainingResumeCommand = string.Empty;
+        }
+        else
+        {
+            TrainingCheckpointsSummary =
+                $"Checkpoints: {result.Checkpoints.Count} (latest {result.LatestCheckpoint})";
+            var resumeReady = result.ResumeSupported == true
+                && result.LatestCheckpoint is not null
+                && result.ResumeArgv is { Count: > 0 };
+            _trainingResumeArgv = resumeReady ? result.ResumeArgv!.ToArray() : [];
+            _trainingResumeCommand = resumeReady ? result.ResumeCommand ?? string.Empty : string.Empty;
+            if (!resumeReady && result.ResumeSupported == false)
+            {
+                TrainingCheckpointsSummary +=
+                    " — resume is config-driven for this target; set the checkpoint in the config.";
+            }
+        }
+
+        OnPropertyChanged(nameof(CanResumeTraining));
     }
 
     public string DatasetCardSummary
@@ -2586,6 +2641,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 $"  mean ~{budget.MeanTokensPerExample:N0}, max ~{budget.MaxTokensInExample:N0} tokens; "
                 + $"{budget.ExamplesOverSequenceLen} over seq_len");
         }
+
+        _trainingOutputDirectory = result.TrainingOutputDirectory;
+        _trainingConfigPath = result.OutputPath;
+        _trainingResumeArgv = [];
+        _trainingResumeCommand = string.Empty;
+        TrainingCheckpointsSummary = "Refresh checkpoints after a run writes them.";
+        OnPropertyChanged(nameof(CanResumeTraining));
 
         if (result.Launch is { } launch && !string.IsNullOrWhiteSpace(launch.Command))
         {

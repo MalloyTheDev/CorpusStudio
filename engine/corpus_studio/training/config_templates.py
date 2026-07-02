@@ -29,6 +29,9 @@ class TrainingConfigTemplate(BaseModel):
     dataset_path: str
     eval_dataset_path: str | None = None
     format: str
+    # Where the trainer writes checkpoints/adapters; relative paths resolve
+    # against the directory the trainer is launched from (the config's dir).
+    output_dir: str = "output"
     sequence_len: int = Field(default=4096, gt=0)
     adapter: str = "lora"
     lora_r: int = Field(default=16, gt=0)
@@ -49,6 +52,7 @@ def build_lora_config_template(
     eval_dataset_path: str | None,
     dataset_format: str,
     target: TrainingConfigTarget = "axolotl_yaml",
+    output_dir: str = "output",
     sequence_len: int = 4096,
     lora_r: int = 16,
     lora_alpha: int = 32,
@@ -68,6 +72,7 @@ def build_lora_config_template(
         dataset_path=dataset_path,
         eval_dataset_path=eval_dataset_path,
         format=dataset_format,
+        output_dir=output_dir,
         sequence_len=sequence_len,
         lora_r=lora_r,
         lora_alpha=lora_alpha,
