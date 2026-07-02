@@ -97,6 +97,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/SPLITTING.md`
 - `docs/TRAINING_CONFIGS.md`
 - `docs/TRAINING_LAB.md`
+- `docs/TRAINING_LAUNCHER_DESIGN.md`
 - `docs/TRAINING_PREP.md`
 - `docs/VERSIONING.md`
 - `docs/decisions/0001-local-first.md`

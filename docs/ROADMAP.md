@@ -156,7 +156,7 @@ target plus the resume variant and required dependencies (`launch` in the
 lists checkpoints in an output directory and builds a resume command for the
 latest one. Corpus Studio does not run the trainer itself yet; in-app launch and
 the log viewer would require live process streaming (see
-docs on the training launcher scope).
+`docs/TRAINING_LAUNCHER_DESIGN.md`).
 
 Scope:
 
