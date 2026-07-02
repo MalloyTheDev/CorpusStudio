@@ -10,12 +10,15 @@ from typing import Any
 import re
 
 from corpus_studio.evaluation.reports import EvaluationReport
+from collections.abc import Callable
+
 from corpus_studio.gates.basic_gates import (
     eval_score_gate,
     input_present_gate,
     leakage_gate,
     pii_gate,
     quality_gate,
+    regression_gate,
     schema_gate,
 )
 from corpus_studio.gates.models import GateReport, GateScope, GateThresholds
@@ -114,6 +117,34 @@ def _slug(text: str) -> str:
 
     base = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(text).name).strip("_")
     return base or "target"
+
+
+def run_training_run_gate(
+    record: Any,
+    load_report: Callable[[str], EvaluationReport | None],
+    thresholds: GateThresholds | None = None,
+    generated_at: str | None = None,
+) -> GateReport:
+    """Regression-gate a training run using its linked before/after eval reports.
+
+    ``record`` is a TrainingRunRecord (duck-typed: before_eval_path,
+    after_eval_path, after_eval_model, base_model, run_id). Provenance holds only
+    when the after-eval declared a model that is not the base model.
+    """
+
+    thresholds = thresholds or GateThresholds()
+    before = load_report(record.before_eval_path) if record.before_eval_path else None
+    after = load_report(record.after_eval_path) if record.after_eval_path else None
+
+    provenance_ok = True
+    if after is not None:
+        if not record.after_eval_model:
+            provenance_ok = False
+        elif record.base_model and record.after_eval_model == record.base_model:
+            provenance_ok = False
+
+    result = regression_gate(before, after, thresholds, provenance_ok, GateScope.TRAINING_RUN)
+    return GateReport.build(GateScope.TRAINING_RUN, record.run_id, [result], generated_at)
 
 
 def save_gate_report(project_dir: Path | str, report: GateReport) -> Path:

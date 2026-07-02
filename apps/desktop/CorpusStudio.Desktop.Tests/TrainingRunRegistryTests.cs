@@ -102,6 +102,43 @@ public sealed class TrainingRunRegistryTests
     }
 
     [Fact]
+    public void ApplyTrainingRunGate_FormatsVerdict()
+    {
+        var vm = new MainWindowViewModel();
+        vm.ApplyTrainingRunGate(new GateReport
+        {
+            Scope = "training_run",
+            OverallStatus = "block",
+            Results = [new GateResult { GateId = "regression", Status = "block", Message = "Trained model regressed: dropped 10." }],
+        });
+        Assert.Contains("Regression gate: ⛔ BLOCK", vm.TrainingRunGateSummary);
+        Assert.Contains("regressed", vm.TrainingRunGateSummary);
+    }
+
+    [Fact]
+    public void ApplyTrainingRunGate_WarnUnverified()
+    {
+        var vm = new MainWindowViewModel();
+        vm.ApplyTrainingRunGate(new GateReport
+        {
+            Scope = "training_run",
+            OverallStatus = "warn",
+            Results = [new GateResult { GateId = "regression", Status = "warn", Message = "Unverified linkage." }],
+        });
+        Assert.Contains("⚠ WARN", vm.TrainingRunGateSummary);
+        Assert.Contains("Unverified linkage", vm.TrainingRunGateSummary);
+    }
+
+    [Fact]
+    public void SetTrainingRunGateError_ShowsMessage()
+    {
+        var vm = new MainWindowViewModel();
+        vm.SetTrainingRunGateError("engine missing");
+        Assert.Contains("Regression gate could not run", vm.TrainingRunGateSummary);
+        Assert.Contains("engine missing", vm.TrainingRunGateSummary);
+    }
+
+    [Fact]
     public void SetTrainingRunHistoryError_ShowsMessage()
     {
         var vm = new MainWindowViewModel();

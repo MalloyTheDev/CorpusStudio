@@ -1665,8 +1665,13 @@
                                 <Button AutomationProperties.AutomationId="RefreshTrainingRunsButton"
                                         Content="Run history"
                                         ToolTip="Show durable records of past training runs for this project"
-                                        Margin="0,0,12,0"
+                                        Margin="0,0,8,0"
                                         Click="RefreshTrainingRunsButton_Click" />
+                                <Button AutomationProperties.AutomationId="GateTrainingRunButton"
+                                        Content="Gate run"
+                                        ToolTip="Link the latest trained-model eval and check for regression vs the baseline"
+                                        Margin="0,0,12,0"
+                                        Click="GateTrainingRunButton_Click" />
                                 <TextBlock Text="Status:"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
@@ -1709,17 +1714,23 @@
                                              AcceptsReturn="True"
                                              TextWrapping="Wrap"
                                              VerticalScrollBarVisibility="Auto" />
-                                    <TextBox Grid.Row="1"
-                                             AutomationProperties.AutomationId="TrainingRunHistoryTextBox"
-                                             Text="{Binding TrainingRunHistorySummary, Mode=OneWay}"
-                                             Margin="0,8,0,0"
-                                             IsReadOnly="True"
-                                             AcceptsReturn="True"
-                                             FontFamily="Consolas"
-                                             FontSize="11"
-                                             TextWrapping="NoWrap"
-                                             VerticalScrollBarVisibility="Auto"
-                                             HorizontalScrollBarVisibility="Auto" />
+                                    <DockPanel Grid.Row="1" Margin="0,8,0,0">
+                                        <TextBlock DockPanel.Dock="Top"
+                                                   AutomationProperties.AutomationId="TrainingRunGateSummaryTextBlock"
+                                                   Text="{Binding TrainingRunGateSummary, Mode=OneWay}"
+                                                   Foreground="#334155"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,0,0,6" />
+                                        <TextBox AutomationProperties.AutomationId="TrainingRunHistoryTextBox"
+                                                 Text="{Binding TrainingRunHistorySummary, Mode=OneWay}"
+                                                 IsReadOnly="True"
+                                                 AcceptsReturn="True"
+                                                 FontFamily="Consolas"
+                                                 FontSize="11"
+                                                 TextWrapping="NoWrap"
+                                                 VerticalScrollBarVisibility="Auto"
+                                                 HorizontalScrollBarVisibility="Auto" />
+                                    </DockPanel>
                                 </Grid>
                             </Grid>
                         </Grid>
