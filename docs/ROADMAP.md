@@ -179,6 +179,26 @@ Out of scope:
 - cloud training orchestration by default
 - hiding trainer commands from the user
 
+## v0.6 - Provider Policy + Gate Foundation
+
+Goal: enforce, in the engine, who may generate trainable data, and gate whether
+data/exports/evaluations may move forward.
+
+Scope (in progress):
+
+- Role-based provider/model capability policy enforced in the engine
+  (OpenAI/Anthropic evaluator-only; Ollama/local generation only when approved;
+  OpenRouter route-aware). See `PROVIDER_POLICY.md`.
+- Project-local, inspectable provider approval overrides.
+- Gate runner with serializable pass/warn/block reports over the existing
+  schema, quality, leakage, PII, and evaluation logic. See `GATES.md`.
+- `docs/CURRENT_STATE.md` as the single source of truth.
+
+Out of scope (future):
+
+- Real hosted-provider API clients; approved-generation review-queue pipeline
+  (v1.2); regression gate (needs the v0.8 run registry); desktop surfacing.
+
 ## v1.0 - Full Dataset-to-Model Workflow
 
 Goal: stable end-to-end workflow from dataset creation to evaluated model

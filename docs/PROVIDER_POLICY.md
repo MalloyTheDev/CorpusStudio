@@ -1,0 +1,69 @@
+# Provider Policy
+
+Corpus Studio enforces **role-based provider/model capability policy in the
+engine** — not only in the desktop UI. The same guard runs for the CLI, the
+desktop, and tests, so no surface can bypass it.
+
+## Roles
+
+- **Trainable Output Generator** — may produce trainable dataset content
+  (rewritten rows, drafted/synthetic examples, preference-pair candidates) only
+  when the exact provider/model/route policy allows it.
+- **Evaluator / Judge / Critic** — may score, critique, classify, label, compare
+  outputs, and judge preference strength, producing **non-trainable metadata**.
+
+Trainable-generating AI Assist actions today: `rewrite-output`, `draft-example`.
+Evaluator actions: `review`, `suggest-tags`, `judge-preference-strength`.
+
+## Defaults
+
+| Provider | Trainable generation | Notes |
+|---|---|---|
+| **OpenAI** | **Blocked** (evaluator-only) | The generator role is on `blocked_roles`; a user override cannot re-enable it. |
+| **Anthropic** | **Blocked** (evaluator-only) | Same as OpenAI. |
+| **OpenRouter** | **Route-aware** | Routes to `openai/*` and `anthropic/*` inherit the block; other routes may generate only when that exact route is approved. |
+| **Ollama** (local) | **Off until approved** | Approve a specific model (`outputs_trainable` + `user_approved_generation`). |
+| **Local OpenAI-compatible** | **Off until approved** | A `base_url` can point anywhere, so approve deliberately. |
+| Unknown provider | Blocked (evaluator-only) | Safest fallback. |
+
+`requires_human_review` is always true for trainable generation. Every generated
+candidate is returned `review_required` and must go through
+**generate → validate → quality check → gates → human review → accept/edit/reject → save**.
+Evaluator-only output never enters trainable fields through the normal save flow.
+
+## Policy resolution
+
+`resolve_policy(provider_id, model_id, route_id, overrides)`:
+1. Start from the built-in default for `provider_id` (evaluator-only fallback if unknown).
+2. For OpenRouter, apply route inheritance (`openai/*`, `anthropic/*` → blocked; others → generator role allowed but still needs approval).
+3. Apply the most-specific project override (`provider/route:…`, `provider/model:…`, or `provider`).
+
+Provider identity is inferred from the transport backend + `base_url`
+(`api.openai.com → openai`, `openrouter.ai → openrouter`, otherwise a local
+OpenAI-compatible server). This is a **heuristic** — set an explicit provider id
+when it matters.
+
+## Approving a local model (local-first, inspectable)
+
+Approvals live in project-local `provider_policy_overrides.json`:
+
+```
+python -m corpus_studio.cli provider-approve --provider ollama \
+  --project-dir path/to/project --model llama3
+```
+
+Inspect effective policy:
+
+```
+python -m corpus_studio.cli provider-policy --provider ollama \
+  --model llama3 --project-dir path/to/project
+```
+
+Revoke with `--revoke`. Approving an evaluator-only provider (OpenAI/Anthropic)
+is refused (exit code 2).
+
+## Not in v0.6
+
+Real OpenAI/Anthropic/OpenRouter API clients, and an approved-generation →
+review-queue pipeline (v1.2). Policy is enforced regardless of whether a given
+transport is implemented.
