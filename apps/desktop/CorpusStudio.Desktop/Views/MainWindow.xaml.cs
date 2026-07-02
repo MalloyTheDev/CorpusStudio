@@ -460,6 +460,48 @@ public partial class MainWindow : Window
         await RefreshProviderPoliciesAsync();
     }
 
+    private async void RunArenaButton_Click(object sender, RoutedEventArgs e)
+    {
+        var models = MainWindowViewModel.ParseModelList(ViewModel.ArenaModelsInput);
+        if (string.IsNullOrWhiteSpace(ViewModel.ArenaPromptsInput))
+        {
+            ViewModel.SetArenaError("Enter at least one prompt (one per line).");
+            return;
+        }
+        if (models.Count == 0)
+        {
+            ViewModel.SetArenaError("Enter at least one model (comma or newline separated).");
+            return;
+        }
+
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Running arena...");
+            ViewModel.SetArenaInProgress();
+            var judge = string.IsNullOrWhiteSpace(ViewModel.ArenaJudgeModelInput)
+                ? null
+                : ViewModel.ArenaJudgeModelInput.Trim();
+            var projectPath = ViewModel.HasActiveProject ? ViewModel.ActiveProjectPath : null;
+            var report = await _engineService.RunArenaAsync(
+                ViewModel.ArenaPromptsInput,
+                models,
+                judge,
+                projectPath
+            );
+            ViewModel.ApplyArenaReport(report);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetArenaError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
+        }
+    }
+
     private async Task RefreshProviderPoliciesAsync()
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))

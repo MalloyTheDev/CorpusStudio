@@ -213,7 +213,10 @@ Scope (in progress):
   the judge must be an evaluator-role provider (OpenAI/Anthropic allowed).
 - Saved comparison reports: `arena-run --project-dir` writes an inspectable
   report under `arena_reports/`.
-- Planned: a desktop Arena surface.
+- Desktop Arena tab: prompts + model list (+ optional judge) → side-by-side
+  responses with per-model win/score summary and the judge's winner.
+- Planned: per-provider backend selection in the UI, saved-report history
+  browsing, per-cell rerun.
 
 Out of scope:
 

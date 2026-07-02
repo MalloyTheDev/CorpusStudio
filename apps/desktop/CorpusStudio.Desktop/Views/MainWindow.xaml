@@ -1703,6 +1703,65 @@
                             </Grid>
                         </Grid>
                     </TabItem>
+                    <TabItem Header="Arena">
+                        <Grid Margin="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="320" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                                <TextBlock Text="Model Arena"
+                                           FontSize="18"
+                                           FontWeight="Bold"
+                                           Foreground="#0F172A" />
+                                <TextBlock Text="Compare how models answer the same prompts. Responses are comparison artifacts, not dataset rows."
+                                           Foreground="#475569"
+                                           TextWrapping="Wrap"
+                                           Margin="0,4,0,8" />
+                                <TextBlock Text="Prompts (one per line)"
+                                           FontWeight="SemiBold"
+                                           Foreground="#334155" />
+                                <TextBox AutomationProperties.AutomationId="ArenaPromptsTextBox"
+                                         Text="{Binding ArenaPromptsInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         AcceptsReturn="True"
+                                         MinHeight="120"
+                                         Margin="0,4,0,8"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto" />
+                                <TextBlock Text="Models (comma or newline separated)"
+                                           FontWeight="SemiBold"
+                                           Foreground="#334155" />
+                                <TextBox AutomationProperties.AutomationId="ArenaModelsTextBox"
+                                         Text="{Binding ArenaModelsInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         AcceptsReturn="True"
+                                         MinHeight="48"
+                                         Margin="0,4,0,8"
+                                         TextWrapping="Wrap" />
+                                <TextBlock Text="Judge model (optional, evaluator)"
+                                           FontWeight="SemiBold"
+                                           Foreground="#334155" />
+                                <TextBox AutomationProperties.AutomationId="ArenaJudgeModelTextBox"
+                                         Text="{Binding ArenaJudgeModelInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         Margin="0,4,0,8"
+                                         VerticalContentAlignment="Center" />
+                                <Button Style="{StaticResource PrimaryButtonStyle}"
+                                        AutomationProperties.AutomationId="RunArenaButton"
+                                        Content="Run _Arena"
+                                        Click="RunArenaButton_Click" />
+                            </StackPanel>
+
+                            <TextBox Grid.Column="1"
+                                     AutomationProperties.AutomationId="ArenaSummaryTextBox"
+                                     Text="{Binding ArenaSummary, Mode=OneWay}"
+                                     IsReadOnly="True"
+                                     FontFamily="Consolas"
+                                     FontSize="12"
+                                     TextWrapping="NoWrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     HorizontalScrollBarVisibility="Auto" />
+                        </Grid>
+                    </TabItem>
                     <TabItem Header="Settings">
                         <StackPanel Margin="8">
                             <TextBox Text="{Binding SettingsSummary, Mode=OneWay}"
