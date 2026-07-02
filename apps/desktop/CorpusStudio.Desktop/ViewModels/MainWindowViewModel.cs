@@ -100,6 +100,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _trainingSummary =
         "Generate a training config after validation, splits, and evaluation checks.";
     private string _trainingConfigPreview = "Training config preview appears here.";
+    private string _trainingLaunchCommand = string.Empty;
     private string _datasetCardSummary =
         "Generate a dataset card to summarize metadata, schema, splits, quality, and evaluation.";
     private string _datasetCardPreview = "Dataset card preview appears here.";
@@ -880,6 +881,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _trainingConfigPreview;
         private set => SetField(ref _trainingConfigPreview, value);
+    }
+
+    /// <summary>The exact launch command from the last training-config export
+    /// (empty if none). Backs the "Copy launch command" action.</summary>
+    public string TrainingLaunchCommand
+    {
+        get => _trainingLaunchCommand;
+        private set => SetField(ref _trainingLaunchCommand, value);
     }
 
     public string DatasetCardSummary
@@ -2474,6 +2483,26 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             lines.Add(
                 $"  mean ~{budget.MeanTokensPerExample:N0}, max ~{budget.MaxTokensInExample:N0} tokens; "
                 + $"{budget.ExamplesOverSequenceLen} over seq_len");
+        }
+
+        if (result.Launch is { } launch && !string.IsNullOrWhiteSpace(launch.Command))
+        {
+            TrainingLaunchCommand = launch.Command;
+            lines.Add("");
+            lines.Add("Launch command (review before running):");
+            lines.Add($"  {launch.Command}");
+            if (launch.ResumeSupported)
+            {
+                lines.Add($"  resume: {launch.ResumeCommand}");
+            }
+            if (launch.Dependencies.Count > 0)
+            {
+                lines.Add($"  requires: {string.Join(", ", launch.Dependencies)}");
+            }
+        }
+        else
+        {
+            TrainingLaunchCommand = string.Empty;
         }
 
         if (result.Warnings.Count > 0)
