@@ -31,7 +31,8 @@ public sealed class TrainingProcessRunner
         IReadOnlyList<string> argv,
         string? workingDirectory,
         Action<string> onOutputLine,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        Action<int>? onStarted = null
     )
     {
         if (argv is null || argv.Count == 0)
@@ -109,6 +110,15 @@ public sealed class TrainingProcessRunner
         _currentProcess = process;
         try
         {
+            try
+            {
+                onStarted?.Invoke(process.Id);
+            }
+            catch
+            {
+                // A recording callback must never break the run.
+            }
+
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 

@@ -1680,6 +1680,13 @@ public partial class MainWindow : Window
         while (_trainingLogQueue.TryDequeue(out _)) { } // discard any residual lines
         var runId = ViewModel.BeginTrainingRun();
 
+        // Durable run record (v0.8): recorded to the project's training_runs/.
+        var runProjectPath = ViewModel.HasActiveProject ? ViewModel.ActiveProjectPath : null;
+        var runRecord = CreateAndSaveRunRecord(runProjectPath, argv);
+        var terminalStatus = "interrupted";
+        int? terminalExitCode = null;
+        string? terminalNote = null;
+
         // Coalesce log lines: background reader threads enqueue, and a timer flushes
         // to the UI at a fixed rate so a chatty trainer can't flood the dispatcher.
         var logTimer = new DispatcherTimer(DispatcherPriority.Background)
@@ -1704,27 +1711,34 @@ public partial class MainWindow : Window
                 argv,
                 workingDirectory,
                 _trainingLogQueue.Enqueue,
-                cts.Token
+                cts.Token,
+                onStarted: pid => RecordRunPid(runProjectPath, runRecord, pid)
             );
 
             FlushTrainingLogQueue(runId);
+            terminalExitCode = exitCode;
             if (_trainingCancelRequested)
             {
+                terminalStatus = "cancelled";
                 ViewModel.SetTrainingRunCancelled();
             }
             else
             {
+                terminalStatus = exitCode == 0 ? "succeeded" : "failed";
                 ViewModel.CompleteTrainingRun(exitCode);
             }
         }
         catch (OperationCanceledException)
         {
             FlushTrainingLogQueue(runId);
+            terminalStatus = "cancelled";
             ViewModel.SetTrainingRunCancelled();
         }
         catch (Exception ex)
         {
             FlushTrainingLogQueue(runId);
+            terminalStatus = "failed";
+            terminalNote = ex.Message;
             ViewModel.SetTrainingRunError(ex.Message);
         }
         finally
@@ -1740,12 +1754,107 @@ public partial class MainWindow : Window
 
             // A stopped/crashed run is exactly when surviving checkpoints matter.
             await RefreshTrainingCheckpointsAsync();
+
+            // Finalize the durable record with fresh checkpoints + terminal status.
+            FinalizeRunRecord(runProjectPath, runRecord, terminalStatus, terminalExitCode, terminalNote);
+        }
+    }
+
+    private TrainingRunRecord? CreateAndSaveRunRecord(string? projectPath, IReadOnlyList<string> argv)
+    {
+        if (string.IsNullOrWhiteSpace(projectPath))
+        {
+            return null;
+        }
+
+        var now = PythonEngineService.UtcNowIso();
+        var record = new TrainingRunRecord
+        {
+            RunId = PythonEngineService.MintTrainingRunId(),
+            CreatedAt = now,
+            UpdatedAt = now,
+            Status = "running",
+            Target = ViewModel.TrainingTarget,
+            BaseModel = ViewModel.TrainingBaseModel,
+            ConfigPath = ViewModel.TrainingConfigPath,
+            OutputDir = ViewModel.TrainingOutputDirectory,
+            Argv = argv.ToList(),
+            BeforeEvalPath = ViewModel.TrainingBaselineReport?.ReportPath,
+        };
+        TrySaveRunRecord(projectPath, record);
+        return record;
+    }
+
+    private void RecordRunPid(string? projectPath, TrainingRunRecord? record, int pid)
+    {
+        if (string.IsNullOrWhiteSpace(projectPath) || record is null)
+        {
+            return;
+        }
+
+        record.Pid = pid;
+        record.UpdatedAt = PythonEngineService.UtcNowIso();
+        TrySaveRunRecord(projectPath, record);
+    }
+
+    private void FinalizeRunRecord(
+        string? projectPath,
+        TrainingRunRecord? record,
+        string status,
+        int? exitCode,
+        string? note
+    )
+    {
+        if (string.IsNullOrWhiteSpace(projectPath) || record is null)
+        {
+            return;
+        }
+
+        record.Status = status;
+        record.ExitCode = exitCode;
+        record.Checkpoints = ViewModel.TrainingCheckpointNames.ToList();
+        record.UpdatedAt = PythonEngineService.UtcNowIso();
+        if (!string.IsNullOrWhiteSpace(note))
+        {
+            record.Notes = note;
+        }
+        TrySaveRunRecord(projectPath, record);
+    }
+
+    private void TrySaveRunRecord(string projectPath, TrainingRunRecord record)
+    {
+        try
+        {
+            _engineService.SaveTrainingRunRecord(projectPath, record);
+        }
+        catch
+        {
+            // Recording must never break or interrupt the training run.
         }
     }
 
     private async void RefreshTrainingCheckpointsButton_Click(object sender, RoutedEventArgs e)
     {
         await RefreshTrainingCheckpointsAsync();
+    }
+
+    private void RefreshTrainingRunsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetTrainingRunHistoryError("Create or select a dataset project first.");
+            return;
+        }
+
+        try
+        {
+            var records = _engineService.LoadTrainingRunRecords(ViewModel.ActiveProjectPath);
+            ViewModel.ApplyTrainingRunHistory(records);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetTrainingRunHistoryError(ex.Message);
+        }
     }
 
     private void CompareTrainingBaselineButton_Click(object sender, RoutedEventArgs e)

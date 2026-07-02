@@ -92,6 +92,15 @@ Last reconciled: 2026-07-02 (v0.6 in progress).
   optional judge), Run, and see side-by-side responses per prompt with per-model
   win/score summary and the judge's winner marked.
 
+## In progress — v0.8 (Training Run Registry)
+
+- Durable, inspectable training run records under `training_runs/`: launch
+  metadata (argv, config, output dir), status lifecycle, pid, exit code,
+  checkpoints, and the before-eval link. The desktop writes records directly;
+  a run left `running` whose process is gone reconciles to `interrupted` on
+  load. A read-only run history shows past runs in the Training tab. The
+  regression gate (after-eval provenance) is v0.8.1.
+
 ## Not built yet (future roadmap)
 
 Model Chat Lab / Arena (v0.7), Training Run Registry (v0.8), Model Artifact /

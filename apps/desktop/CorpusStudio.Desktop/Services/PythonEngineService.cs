@@ -963,6 +963,116 @@ public sealed class PythonEngineService
         return path;
     }
 
+    // --- Training run registry (desktop writes-direct; engine owns the schema) ---
+
+    public static string MintTrainingRunId()
+    {
+        return $"{DateTime.UtcNow:yyyyMMddTHHmmss}-{Guid.NewGuid():N}"[..24];
+    }
+
+    public static string UtcNowIso()
+    {
+        return DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+    }
+
+    private static string TrainingRunSlug(string runId)
+    {
+        var slug = System.Text.RegularExpressions.Regex.Replace(runId, "[^A-Za-z0-9._-]+", "_").Trim('_');
+        return string.IsNullOrEmpty(slug) ? "run" : slug;
+    }
+
+    public void SaveTrainingRunRecord(string projectPath, TrainingRunRecord record)
+    {
+        var directory = Path.Combine(projectPath, "training_runs");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, TrainingRunSlug(record.RunId) + ".json");
+        WriteAllTextAtomic(path, JsonSerializer.Serialize(record, JsonOptions) + "\n", encoding: Utf8NoBom);
+    }
+
+    /// <summary>Load run records (newest first). A run left in `running` whose
+    /// process is gone is reconciled to `interrupted` and persisted, so a
+    /// force-closed/crashed run does not stay `running` forever.</summary>
+    public IReadOnlyList<TrainingRunRecord> LoadTrainingRunRecords(string projectPath)
+    {
+        var directory = Path.Combine(projectPath, "training_runs");
+        if (!Directory.Exists(directory))
+        {
+            return [];
+        }
+
+        var records = new List<TrainingRunRecord>();
+        foreach (var file in Directory.EnumerateFiles(directory, "*.json"))
+        {
+            try
+            {
+                var record = JsonSerializer.Deserialize<TrainingRunRecord>(File.ReadAllText(file), JsonOptions);
+                if (record is not null)
+                {
+                    records.Add(record);
+                }
+            }
+            catch
+            {
+                // Skip a corrupt record rather than failing the whole listing.
+            }
+        }
+
+        var priorStatuses = records.ToDictionary(r => r.RunId, r => r.Status, StringComparer.Ordinal);
+        ReconcileRunningRecords(records, IsProcessAlive, UtcNowIso());
+        foreach (var record in records)
+        {
+            if (priorStatuses.TryGetValue(record.RunId, out var prior) && prior != record.Status)
+            {
+                try
+                {
+                    SaveTrainingRunRecord(projectPath, record);
+                }
+                catch
+                {
+                    // Best-effort persistence of the reconciliation.
+                }
+            }
+        }
+
+        records.Sort((a, b) => string.CompareOrdinal(b.RunId, a.RunId));
+        return records;
+    }
+
+    /// <summary>Flip any `running` record whose pid is not alive to `interrupted`.
+    /// Pure over an injected liveness check so it is unit-testable.</summary>
+    public static IReadOnlyList<TrainingRunRecord> ReconcileRunningRecords(
+        IReadOnlyList<TrainingRunRecord> records,
+        Func<int, bool> isAlive,
+        string updatedAt
+    )
+    {
+        foreach (var record in records)
+        {
+            if (record.Status == "running" && (record.Pid is not int pid || !isAlive(pid)))
+            {
+                record.Status = "interrupted";
+                record.UpdatedAt = updatedAt;
+                record.Notes = (string.IsNullOrEmpty(record.Notes) ? string.Empty : record.Notes + " ")
+                    + "reconciled: process not alive on load";
+            }
+        }
+
+        return records;
+    }
+
+    private static bool IsProcessAlive(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return !process.HasExited;
+        }
+        catch
+        {
+            return false; // Not running (or not queryable) -> treat as dead.
+        }
+    }
+
     public async Task<IReadOnlyList<ProviderPolicyItem>> GetProviderPoliciesAsync(string projectPath)
     {
         var output = await RunEngineCommandAsync("provider-policy", "--project-dir", projectPath);

@@ -223,6 +223,29 @@ Out of scope:
 - Using arena responses as trainable data without the normal
   generate → validate → gates → review → save flow.
 
+## v0.8 - Training Run Registry
+
+Goal: durable, inspectable records of training runs (the spine v0.9 artifacts and
+the regression gate both need).
+
+Scope:
+
+- v0.8.0 (done): a `TrainingRunRecord` (run_id, timestamps, status, target,
+  base_model, config_path, argv, output_dir, pid, exit_code, checkpoints,
+  before/after eval links, notes) written per-run under `training_runs/`. The
+  desktop writes records directly (no subprocess on the crash path); the engine
+  owns the schema + `training-run-list`/`training-run-update` + storage. A run
+  left `running` whose process is gone reconciles to `interrupted` on load (pid
+  liveness), so a force-closed run does not stay `running` forever. A read-only
+  run history in the Training tab.
+- v0.8.1 (planned): the `training_run` regression gate (block when the trained
+  model regressed vs the baseline), once after-eval link provenance is enforced.
+
+Out of scope:
+
+- Re-launch from a record, config diffing, delete/archive (that is v0.9).
+- Backfill of past ephemeral runs — the registry records from here forward.
+
 ## v1.0 - Full Dataset-to-Model Workflow
 
 Goal: stable end-to-end workflow from dataset creation to evaluated model

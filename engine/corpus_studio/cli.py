@@ -735,6 +735,62 @@ def training_config(
     )
 
 
+@app.command("training-run-list")
+def training_run_list(
+    project_dir: Path,
+):
+    """List durable training run records for a project (newest first)."""
+
+    from corpus_studio.training.run_registry import list_run_records
+
+    records = [record.model_dump() for record in list_run_records(project_dir)]
+    typer.echo(json.dumps({"runs": records}, indent=2))
+
+
+@app.command("training-run-update")
+def training_run_update(
+    project_dir: Path,
+    run_id: str = typer.Option(..., "--run-id", help="Run to update."),
+    status: Optional[str] = typer.Option(None, "--status", help="New status."),
+    exit_code: Optional[int] = typer.Option(None, "--exit-code"),
+    after_eval_path: Optional[str] = typer.Option(None, "--after-eval-path"),
+    after_eval_model: Optional[str] = typer.Option(None, "--after-eval-model"),
+):
+    """Headless status/eval-link update with light transition validation."""
+
+    from corpus_studio.training.run_registry import (
+        load_run_record,
+        record_path,
+        save_run_record,
+        validate_transition,
+    )
+
+    path = record_path(project_dir, run_id)
+    if not path.exists():
+        typer.echo(f"No run record for '{run_id}'.", err=True)
+        raise typer.Exit(code=1)
+
+    record = load_run_record(path)
+    updates: dict[str, object] = {"updated_at": _utc_now_iso()}
+    if status is not None:
+        try:
+            validate_transition(record.status, status)
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+        updates["status"] = status
+    if exit_code is not None:
+        updates["exit_code"] = exit_code
+    if after_eval_path is not None:
+        updates["after_eval_path"] = after_eval_path
+    if after_eval_model is not None:
+        updates["after_eval_model"] = after_eval_model
+
+    saved = record.model_copy(update=updates)
+    save_run_record(project_dir, saved)
+    typer.echo(saved.model_dump_json(indent=2))
+
+
 @app.command("training-checkpoints")
 def training_checkpoints(
     output_dir: Path,
