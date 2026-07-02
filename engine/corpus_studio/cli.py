@@ -1489,9 +1489,15 @@ def gate_run(
         typer.echo("Unsupported gate scope. Use dataset or export.", err=True)
         raise typer.Exit(code=1)
 
-    from corpus_studio.gates.models import load_gate_thresholds
+    from corpus_studio.gates.models import gate_thresholds_path, load_gate_thresholds
 
     thresholds = load_gate_thresholds(project_dir) if project_dir is not None else None
+    if project_dir is None and gate_thresholds_path(input_path.parent).exists():
+        typer.echo(
+            "Note: a gate_thresholds.json sits next to the input but was NOT applied. "
+            "Pass --project-dir to use project thresholds.",
+            err=True,
+        )
 
     try:
         rows = list(read_jsonl(input_path))

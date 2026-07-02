@@ -71,11 +71,22 @@ live weight card (never stored) carrying the same provenance caveat.
 
 Gate thresholds default to the values in `GateThresholds`, but a project can
 override any of them by writing a `gate_thresholds.json` in the project
-directory (partial — unlisted keys keep their default; unknown keys and an
-unreadable/invalid file fall back to defaults, never crashing). The gate CLI
-commands (`gate-run`, `training-run-gate`, `artifact-gate`) load it
-automatically. `gate-thresholds --project-dir <p>` prints the effective values
-so you can copy them into the file and edit. Example:
+directory. Overrides are **partial** (unlisted keys keep their default) and
+**fail-closed**: unknown keys are ignored, and an unreadable/invalid file — or
+any single value that is out of range, negative, or non-finite (`NaN`/`inf`) —
+falls back to the strict defaults rather than silently disabling or inverting a
+gate. Every field is bounded (counts and scores are non-negative; the pass-rate
+is a fraction in `[0, 1]`), and the file is read as UTF-8 **with a tolerated
+BOM**, so overrides saved by Notepad or PowerShell still apply.
+
+`training-run-gate` and `artifact-gate` (which always take a project directory)
+load the file automatically. `gate-run` applies it **only when you pass
+`--project-dir`**; run without it, `gate-run` uses defaults and prints a stderr
+note if a `gate_thresholds.json` sits next to the input so the ignored config is
+never invisible. Each saved `GateReport` records the effective `thresholds`
+behind its verdict, so a gated report stays reproducible even after the file is
+edited. `gate-thresholds <project-dir>` prints the effective values so you can
+copy them into the file and edit. Example:
 
 ```json
 { "block_exact_duplicates": false, "max_regression_score_drop": 5.0 }

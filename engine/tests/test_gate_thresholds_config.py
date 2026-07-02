@@ -1,6 +1,9 @@
 import json
+import math
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from corpus_studio.cli import app
@@ -56,6 +59,39 @@ def test_non_object_json_falls_back(tmp_path: Path):
     assert load_gate_thresholds(tmp_path) == GateThresholds()
 
 
+def test_bom_prefixed_file_is_honored(tmp_path: Path):
+    # Notepad / PowerShell save UTF-8 with a BOM; the override must still apply.
+    (tmp_path / GATE_THRESHOLDS_FILENAME).write_bytes(
+        b"\xef\xbb\xbf" + json.dumps({"max_exact_duplicates": 3}).encode("utf-8")
+    )
+    assert load_gate_thresholds(tmp_path).max_exact_duplicates == 3
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"max_exact_duplicates": -5},  # negative would invert the duplicate gate
+        {"max_regression_score_drop": -2.0},  # negative would invert the regression gate
+        {"min_eval_pass_rate": 5.0},  # a fraction > 1 makes the gate impossible to pass
+        {"min_eval_average_score": float("nan")},  # NaN silently disables the score gate
+    ],
+)
+def test_out_of_range_override_falls_back_to_defaults(tmp_path: Path, override: dict):
+    # json.dumps emits bare NaN (valid to Python's json.loads); either way the
+    # loader must reject a semantically-broken value and keep strict defaults.
+    (tmp_path / GATE_THRESHOLDS_FILENAME).write_text(json.dumps(override), encoding="utf-8")
+    assert load_gate_thresholds(tmp_path) == GateThresholds()
+
+
+def test_direct_construction_rejects_bad_values():
+    with pytest.raises(ValidationError):
+        GateThresholds(max_exact_duplicates=-1)
+    with pytest.raises(ValidationError):
+        GateThresholds(max_regression_score_drop=math.nan)
+    with pytest.raises(ValidationError):
+        GateThresholds(min_eval_pass_rate=1.5)
+
+
 # --- CLI: show + end-to-end verdict flip -------------------------------------
 
 def test_cli_gate_thresholds_shows_effective(tmp_path: Path):
@@ -63,6 +99,35 @@ def test_cli_gate_thresholds_shows_effective(tmp_path: Path):
     result = runner.invoke(app, ["gate-thresholds", str(tmp_path)])
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["max_low_information"] == 25
+
+
+def test_gate_run_without_project_dir_warns_when_config_present(tmp_path: Path):
+    # A config sits next to the input but --project-dir is omitted: the override
+    # must NOT be applied (verdict stays at strict defaults) and a stderr note must
+    # surface the ignored file so it does not fail invisibly.
+    rows = tmp_path / "rows.jsonl"
+    row = {"instruction": "Explain recursion clearly.", "output": "A function calls itself on subproblems."}
+    _write_rows(rows, [row, row])  # exact duplicate -> block under defaults
+    _write_thresholds(tmp_path, {"block_exact_duplicates": False})
+
+    result = runner.invoke(app, ["gate-run", str(rows), "instruction"])
+    assert result.exit_code == 0, result.output
+    # The note goes to stderr; the JSON report stays clean on stdout (safe to redirect).
+    assert json.loads(result.stdout)["overall_status"] == "block"  # override NOT applied
+    assert "not applied" in result.stderr.lower()
+
+
+def test_report_records_effective_thresholds(tmp_path: Path):
+    rows = tmp_path / "rows.jsonl"
+    row = {"instruction": "Explain recursion clearly.", "output": "A function calls itself on subproblems."}
+    _write_rows(rows, [row, row])
+    _write_thresholds(tmp_path, {"block_exact_duplicates": False})
+
+    result = runner.invoke(app, ["gate-run", str(rows), "instruction", "--project-dir", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.output)
+    # The saved verdict carries the thresholds that produced it (reproducible).
+    assert report["thresholds"]["block_exact_duplicates"] is False
 
 
 def test_project_threshold_flips_gate_verdict(tmp_path: Path):
