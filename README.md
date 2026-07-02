@@ -14,58 +14,66 @@ It is designed to be a one-stop shop for authoring, importing, cleaning, validat
 - retrieval/embedding datasets
 - evaluation datasets
 
-Corpus Studio is not just a JSONL editor. It is a writing-first dataset IDE.
-The long-term direction is a full dataset-to-model workflow: create datasets,
-validate them, test them against models, export them, and eventually generate
-training configs and launch local adapter jobs.
+Corpus Studio is not just a JSONL editor. It is a writing-first dataset IDE
+covering the full dataset-to-model workflow: create datasets, validate them,
+clean and measure them, test them against local models, export them, generate
+training configs, launch your installed trainer with live logs and
+checkpoints, and measure the before/after improvement.
 
 ## Current Status
 
-Corpus Studio now has a working local dataset loop and first-pass lab surfaces:
+Corpus Studio covers the full local loop from authoring to launching a
+training run of your own installed trainer:
 
-- create a dataset project from the WPF desktop app
-- choose a built-in schema
-- author a JSON example
-- validate it through the Python engine with selectable issue navigation
-- save it to the local project
-- preview and import JSONL rows with failed-row reporting
-- review quarantined import rows and retry them in the editor
-- run quality checks for empty rows, duplicates, and low-information examples
-- record project-level quality history
-- triage synthetic-pattern quality issues into a prepared AI Assist rewrite flow
-- generate train/validation/test split files with saved ratios, seed, and tiny-split warnings
-- export validated JSONL
-- generate an inspectable dataset card summarizing metadata, schema, splits,
-  quality checks, and the latest evaluation run
-- run Evaluation Lab samples against configured Ollama or OpenAI-compatible
-  local endpoints
-- check backend health before model-backed runs
-- refresh local model pickers from running backends
-- reload saved evaluation reports
-- compare two saved evaluation reports for score, failure, weak-tag, and
-  row-level deltas
-- rerun saved evaluation configurations as regression checks using stored
-  backend, model, limit, score threshold, timeout, and schema settings
-- inspect Evaluation summaries by tag, failure reason, and score band
-- review failed evaluation examples, load failed rows back into Writing Studio
-  for explicit edits, add manual scores/notes, and prepare AI Assist rewrite
-  triage
-- track reviewed edits per failed example, versioned per example and
-  auto-reconciled to resolved or still-failing on the next re-test
-- drill into results by status, tag, failure reason, and score band, and save
-  named per-project failure filters for repeated review passes
-- run review-first AI Assist passes without automatically accepting generated
-  rows
-- manage an AI Assist review queue with filters, search, sorting, saved views,
-  bulk triage, and undo
-- save and resume prepared AI Assist rewrite batches after app restart
-- review preference-pair contrast and prepare preference judge passes
-- export inspectable Training Lab config files without launching trainers, with
-  schema/format/target compatibility warnings
+**Author & validate**
+- create projects from built-in schema templates with pre-filled examples
+- author and validate examples through the Python engine (required fields,
+  types, list element types, enums, numeric bounds, nested object shapes,
+  chat message structure) with selectable issue navigation
+- preview/import JSONL with failed-row quarantine, review, and retry
+- full Unicode support end to end (CJK/Cyrillic/accented text round-trips
+  correctly between the desktop and engine)
 
-The next phase is hardening these surfaces into a dependable v0.2/v0.3
-workflow. Corpus Studio still does not launch local training jobs, manage CUDA
-or PyTorch, run checkpoints, or publish datasets automatically.
+**Clean & measure**
+- quality report: empty rows, exact + normalized duplicates, low-information
+  rows, synthetic-pattern warnings with near-duplicate clustering,
+  PII/secret detection (emails, SSNs, private keys, AWS/API keys, JWTs,
+  Luhn-valid cards — masked samples), token-length outliers, and
+  category-imbalance warnings, with project-level quality history
+- leakage-checked train/validation/test splits (exact and near-duplicate rows
+  shared across splits are reported before they inflate eval scores)
+- export with an optional cleaning pass (dedupe / drop low-information) that
+  writes a removal manifest; verbatim exports warn when duplicates remain
+- preference exports to DPO/KTO/reward with a pair-integrity gate
+  (identical/empty/low-contrast pairs reported, `--drop-degenerate` opt-in)
+- an inspectable dataset card summarizing metadata, schema, splits, quality,
+  and the latest evaluation
+
+**Evaluate**
+- Evaluation Lab runs against local Ollama or OpenAI-compatible endpoints with
+  health checks, model discovery, report history, two-report comparison,
+  regression reruns, tag/failure/score-band summaries, failed-row edit loops,
+  manual scoring, and saved failure filters
+- multi-model benchmark: run one dataset across several models and rank them,
+  with per-model deltas and the examples every model failed
+- review-first AI Assist Lab with a persistent accept/reject queue, saved
+  views, bulk triage with undo, and resumable rewrite batches
+
+**Train (v0.5 launcher, complete)**
+- training config export for axolotl / TRL / Unsloth / Hugging Face /
+  LLaMA-Factory with compatibility warnings, a real token budget
+  (tokens-per-epoch after truncation, over-length counts), and the exact
+  launch command per target
+- in-app launch of your installed trainer (explicit confirmation showing the
+  exact command, no shell), live log streaming, and a Stop that kills the
+  process tree
+- checkpoint tracking during and after runs, resume-from-latest for targets
+  with a CLI resume flag, and before/after evaluation comparison against the
+  baseline captured at launch
+
+Corpus Studio orchestrates your installed trainer — it never bundles CUDA,
+PyTorch, or trainer packages, never hides the command it runs, and does not
+publish datasets automatically.
 
 ## License
 
@@ -137,5 +145,7 @@ For dataset card output, see [`docs/DATASET_CARD.md`](docs/DATASET_CARD.md).
 For the staged labs, see [`docs/EVALUATION_LAB.md`](docs/EVALUATION_LAB.md),
 [`docs/AI_ASSIST_LAB.md`](docs/AI_ASSIST_LAB.md), and
 [`docs/TRAINING_LAB.md`](docs/TRAINING_LAB.md).
+For the training launcher architecture, see
+[`docs/TRAINING_LAUNCHER_DESIGN.md`](docs/TRAINING_LAUNCHER_DESIGN.md).
 For public-release hygiene and known non-features, see
 [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md).
