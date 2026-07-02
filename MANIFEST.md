@@ -59,6 +59,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/TrainingCheckpointsResult.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/TrainingCompatibilityResult.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/TrainingConfigExportResult.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/TrainingRunRecord.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ValidationIssueNavigationItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ValidationReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/PythonEngineService.cs`
@@ -79,6 +80,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/ProviderPolicyViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ReviewedFixServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingCheckpointsViewModelTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/TrainingRunRegistryTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingComparisonViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingLaunchViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingProcessRunnerTests.cs`
@@ -185,6 +187,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/training/launch.py`
 - `engine/corpus_studio/training/config_templates.py`
 - `engine/corpus_studio/training/estimators.py`
+- `engine/corpus_studio/training/run_registry.py`
 - `engine/corpus_studio/tokenization/__init__.py`
 - `engine/corpus_studio/tokenization/estimate.py`
 - `engine/corpus_studio/validators/__init__.py`
@@ -216,6 +219,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_quality_length_and_imbalance.py`
 - `engine/tests/test_quality_pii.py`
 - `engine/tests/test_quality_unicode.py`
+- `engine/tests/test_run_registry.py`
 - `engine/tests/test_schema_examples.py`
 - `engine/tests/test_schema_field_constraints.py`
 - `engine/tests/test_schema_nested_and_bounds.py`

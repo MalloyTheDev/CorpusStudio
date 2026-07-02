@@ -1660,8 +1660,13 @@
                                 <Button AutomationProperties.AutomationId="CompareTrainingBaselineButton"
                                         Content="Compare vs baseline"
                                         ToolTip="Compare the newest evaluation report against the baseline captured at launch"
-                                        Margin="0,0,12,0"
+                                        Margin="0,0,8,0"
                                         Click="CompareTrainingBaselineButton_Click" />
+                                <Button AutomationProperties.AutomationId="RefreshTrainingRunsButton"
+                                        Content="Run history"
+                                        ToolTip="Show durable records of past training runs for this project"
+                                        Margin="0,0,12,0"
+                                        Click="RefreshTrainingRunsButton_Click" />
                                 <TextBlock Text="Status:"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
@@ -1692,14 +1697,30 @@
                                          TextWrapping="NoWrap"
                                          VerticalScrollBarVisibility="Auto"
                                          HorizontalScrollBarVisibility="Auto" />
-                                <TextBox Grid.Column="1"
-                                         AutomationProperties.AutomationId="TrainingComparisonSummaryTextBox"
-                                         Text="{Binding TrainingComparisonSummary, Mode=OneWay}"
-                                         Margin="12,0,0,0"
-                                         IsReadOnly="True"
-                                         AcceptsReturn="True"
-                                         TextWrapping="Wrap"
-                                         VerticalScrollBarVisibility="Auto" />
+                                <Grid Grid.Column="1" Margin="12,0,0,0">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <TextBox Grid.Row="0"
+                                             AutomationProperties.AutomationId="TrainingComparisonSummaryTextBox"
+                                             Text="{Binding TrainingComparisonSummary, Mode=OneWay}"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto" />
+                                    <TextBox Grid.Row="1"
+                                             AutomationProperties.AutomationId="TrainingRunHistoryTextBox"
+                                             Text="{Binding TrainingRunHistorySummary, Mode=OneWay}"
+                                             Margin="0,8,0,0"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             FontFamily="Consolas"
+                                             FontSize="11"
+                                             TextWrapping="NoWrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             HorizontalScrollBarVisibility="Auto" />
+                                </Grid>
                             </Grid>
                         </Grid>
                     </TabItem>

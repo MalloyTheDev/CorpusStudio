@@ -31,7 +31,8 @@ public sealed class TrainingProcessRunner
         IReadOnlyList<string> argv,
         string? workingDirectory,
         Action<string> onOutputLine,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        Action<int, DateTime?>? onStarted = null
     )
     {
         if (argv is null || argv.Count == 0)
@@ -109,6 +110,25 @@ public sealed class TrainingProcessRunner
         _currentProcess = process;
         try
         {
+            try
+            {
+                DateTime? startedAt = null;
+                try
+                {
+                    startedAt = process.StartTime;
+                }
+                catch
+                {
+                    // StartTime can be inaccessible; pid-only liveness is the fallback.
+                }
+
+                onStarted?.Invoke(process.Id, startedAt);
+            }
+            catch
+            {
+                // A recording callback must never break the run.
+            }
+
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 

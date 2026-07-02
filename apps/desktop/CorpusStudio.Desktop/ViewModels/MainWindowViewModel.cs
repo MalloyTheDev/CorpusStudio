@@ -113,6 +113,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _trainingLaunchWorkingDirectory = string.Empty;
     private string _trainingOutputDirectory = string.Empty;
     private string _trainingConfigPath = string.Empty;
+    private IReadOnlyList<string> _trainingCheckpointNames = [];
+    private string _trainingRunHistorySummary = "Refresh to see past training runs recorded for this project.";
     private string _trainingCheckpointsSummary =
         "Checkpoints appear here after a training run writes them.";
     private IReadOnlyList<string> _trainingResumeArgv = [];
@@ -1222,6 +1224,47 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         AppendTrainingRunLog($"[error] {message}");
     }
 
+    public string TrainingRunHistorySummary
+    {
+        get => _trainingRunHistorySummary;
+        private set => SetField(ref _trainingRunHistorySummary, value);
+    }
+
+    public void SetTrainingRunHistoryError(string message)
+    {
+        TrainingRunHistorySummary = $"Run history could not load.{Environment.NewLine}{message}";
+    }
+
+    /// <summary>Format the durable run registry (newest first). Reconciliation of
+    /// stuck `running` records happens in the service before this is called.</summary>
+    public void ApplyTrainingRunHistory(IReadOnlyList<TrainingRunRecord> records)
+    {
+        if (records.Count == 0)
+        {
+            TrainingRunHistorySummary = "No training runs recorded yet.";
+            return;
+        }
+
+        var lines = new List<string> { $"Training runs ({records.Count}, newest first):", string.Empty };
+        foreach (var record in records)
+        {
+            lines.Add($"[{record.Status}] {record.RunId} — {record.BaseModel} ({record.Target})");
+            var bits = new List<string>
+            {
+                $"{record.Checkpoints?.Count ?? 0} checkpoint(s)",
+                string.IsNullOrWhiteSpace(record.BeforeEvalPath) ? "before-eval –" : "before-eval ✓",
+                string.IsNullOrWhiteSpace(record.AfterEvalPath) ? "after-eval –" : "after-eval ✓",
+            };
+            if (record.ExitCode is { } exit)
+            {
+                bits.Add($"exit {exit}");
+            }
+            lines.Add("   " + string.Join("; ", bits));
+        }
+
+        TrainingRunHistorySummary = string.Join(Environment.NewLine, lines);
+    }
+
     /// <summary>Where the trainer writes checkpoints (from the last config export).</summary>
     public string TrainingOutputDirectory => _trainingOutputDirectory;
 
@@ -1304,8 +1347,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             + BuildEvaluationReportComparison(after, _trainingBaselineReport);
     }
 
+    public IReadOnlyList<string> TrainingCheckpointNames => _trainingCheckpointNames;
+
     public void ApplyTrainingCheckpoints(TrainingCheckpointsResult result)
     {
+        _trainingCheckpointNames = result.Checkpoints.ToArray();
         if (result.Checkpoints.Count == 0)
         {
             TrainingCheckpointsSummary = "No checkpoints found yet.";
