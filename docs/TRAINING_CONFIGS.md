@@ -3,13 +3,18 @@
 Training config export is the v0.4 Training Lab feature for turning a clean,
 split, evaluated dataset into config files for established training tools.
 
-Current MVP status: Corpus Studio can generate a first-pass config from the
-engine `training-config` command and from the desktop Training tab. The export
-path writes an inspectable file and returns a JSON summary; it does not launch
-training.
+Current status: Corpus Studio generates a config from the engine
+`training-config` command and the desktop Training tab. The export path writes
+an inspectable file and returns a JSON summary that now also includes a real
+token budget, a rough VRAM planning estimate, a LoRA rank/alpha suggestion, and
+the exact per-target launch command. As of v0.5 the desktop can also launch the
+user's installed trainer from that command (with explicit confirmation), stream
+logs, stop it, track checkpoints, resume, and compare before/after evaluations —
+see [`TRAINING_LAUNCHER_DESIGN.md`](TRAINING_LAUNCHER_DESIGN.md).
 
-Corpus Studio should generate configs before it launches trainers. This keeps
-v0.4 safer and gives users inspectable files they can run manually.
+Configs are always generated before any launch, and the exact command is always
+shown and confirmed first, so users keep inspectable files they can also run
+manually.
 
 ## Config Targets
 
