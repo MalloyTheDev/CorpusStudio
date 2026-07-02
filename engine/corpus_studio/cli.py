@@ -1565,27 +1565,49 @@ def dataset_version_create(
     stamp_run: Optional[str] = typer.Option(
         None, "--stamp-run", help="Also write source_snapshot_id=this version onto the given run."
     ),
+    store_rows: bool = typer.Option(
+        True,
+        "--store-rows/--no-store-rows",
+        help="Store row bodies in a content-addressed store so this version can be diffed (default: on).",
+    ),
 ):
     """Capture a dataset version: fingerprint + row count of examples.jsonl with pinned lineage links.
 
-    Reads examples.jsonl and writes only under dataset_versions/. It never moves,
-    copies, or deletes the dataset or any weight file.
+    With row storage (the default) it also records each row in a content-addressed
+    store plus an ordered manifest, so the version can later be diffed. Reads
+    examples.jsonl and writes only under dataset_versions/; it never moves, copies,
+    or deletes the dataset or any weight file.
     """
 
     from datetime import datetime, timezone
 
+    from corpus_studio.versions.row_store import ROW_MANIFEST_ALGO
     from corpus_studio.versions.version_registry import (
         DatasetVersionRecord,
-        fingerprint_dataset,
+        capture_dataset,
         mint_version_id,
+        save_row_manifest,
         save_version_record,
     )
 
     examples_path = project_dir / "examples.jsonl"
-    fingerprint, row_count = fingerprint_dataset(examples_path)
-    if fingerprint is None:
+    capture = capture_dataset(examples_path, project_dir, store_rows=store_rows)
+    rows_stored = capture.rows_stored
+    if capture.content_fingerprint is None:
         typer.echo(
             "Note: examples.jsonl is missing or unreadable; recording a version without a fingerprint.",
+            err=True,
+        )
+    elif store_rows and not rows_stored:
+        # Readable dataset, but the row store could not be written: record a
+        # fingerprint-only version rather than falsely claiming it is diffable.
+        typer.echo(
+            "Note: the row store could not be written; recording a fingerprint-only version (not diffable).",
+            err=True,
+        )
+    elif rows_stored and capture.row_count > 0:
+        typer.echo(
+            f"Stored {capture.row_count} row(s) ({capture.new_rows_stored} new) to the row store.",
             err=True,
         )
 
@@ -1606,13 +1628,21 @@ def dataset_version_create(
         updated_at=now_iso,
         label=label,
         trigger=trigger,
-        row_count=row_count,
-        content_fingerprint=fingerprint,
+        row_count=capture.row_count,
+        content_fingerprint=capture.content_fingerprint,
         source_run_ids=list(link_run or []),
         artifact_ids=list(link_artifact or []),
         eval_report_path=eval_report_path,
         gate_report_path=gate_report_path or _newest_dataset_gate_report(project_dir),
+        rows_stored=rows_stored,
+        stored_row_count=capture.row_count if rows_stored else 0,
+        row_manifest_algo=ROW_MANIFEST_ALGO if rows_stored else None,
     )
+
+    # Write the ordered manifest (references the store) before the record; the
+    # record save below is the commit point.
+    if rows_stored:
+        save_row_manifest(project_dir, version_id, capture.row_ids)
 
     run_to_stamp = None
     if stamp_run is not None:
@@ -1752,6 +1782,69 @@ def dataset_version_show(
         typer.echo(card.model_dump_json(indent=2))
     else:
         typer.echo(render_version_card_markdown(card))
+
+
+@app.command("dataset-version-diff")
+def dataset_version_diff(
+    project_dir: Path,
+    version_id: str = typer.Option(..., "--version-id", help="Base version."),
+    other: str = typer.Option(..., "--other", help="Other version to compare against the base."),
+    samples: int = typer.Option(5, "--samples", help="Sample added/removed rows to show."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the DatasetVersionDiff as JSON."),
+):
+    """Diff two dataset versions by their stored row manifests (read-only).
+
+    Reports added/removed/common rows as multisets. Requires both versions to
+    have been captured with row storage (``dataset-version-create --store-rows``,
+    the default); a version without stored rows cannot be diffed. Never touches
+    examples.jsonl.
+    """
+
+    from corpus_studio.versions.row_store import load_rows_by_id
+    from corpus_studio.versions.version_diff import (
+        diff_manifests,
+        render_dataset_version_diff_markdown,
+    )
+    from corpus_studio.versions.version_registry import (
+        load_row_manifest,
+        load_version_record,
+        record_path,
+    )
+
+    def manifest_or_exit(vid: str) -> list[str]:
+        path = record_path(project_dir, vid)
+        if not path.exists():
+            typer.echo(f"No dataset version '{vid}'.", err=True)
+            raise typer.Exit(code=1)
+        try:
+            record = load_version_record(path)
+        except Exception as exc:  # noqa: BLE001 - a corrupt record degrades cleanly.
+            typer.echo(f"Version '{vid}' could not be read (corrupt record).", err=True)
+            raise typer.Exit(code=1) from exc
+        manifest = load_row_manifest(project_dir, vid)
+        if not record.rows_stored or manifest is None:
+            typer.echo(
+                f"Version '{vid}' has no stored rows; recapture it with row storage "
+                "(dataset-version-create --store-rows) to diff.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        return manifest
+
+    base_ids = manifest_or_exit(version_id)
+    other_ids = manifest_or_exit(other)
+    diff = diff_manifests(base_ids, other_ids, version_id, other)
+
+    if as_json:
+        typer.echo(diff.model_dump_json(indent=2))
+        return
+
+    limit = max(samples, 0)
+    wanted = set(diff.added_row_ids[:limit]) | set(diff.removed_row_ids[:limit])
+    rows = load_rows_by_id(project_dir, wanted) if wanted else {}
+    sample_added = [rows[rid] for rid in diff.added_row_ids[:limit] if rid in rows]
+    sample_removed = [rows[rid] for rid in diff.removed_row_ids[:limit] if rid in rows]
+    typer.echo(render_dataset_version_diff_markdown(diff, sample_added, sample_removed))
 
 
 def _utc_now_iso() -> str:

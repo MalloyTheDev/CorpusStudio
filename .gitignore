@@ -55,3 +55,6 @@ exports/*
 # Logs
 logs/
 *.log
+
+# pytest temp artifacts (basetemp)
+.pytmp/

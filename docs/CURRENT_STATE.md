@@ -138,9 +138,15 @@ Last reconciled: 2026-07-02 (v1.0.0 engine slice landed).
   integrity badge (matches/drifted/unreadable), an opt-in **Capture version**
   button, and **View card**. Capture and listing go through the engine, so the
   desktop never recomputes the fingerprint (integrity is verified, not guessed).
-- Deferred: auto-capture after import/append commit, stable row identity + a
-  content-addressed row store (v1.0.2), version diff (v1.0.3), and
-  restore-to-version (v1.0.4).
+- Stable per-row identity + a content-addressed, deduped row store
+  (`dataset_versions/row_store.jsonl`) with a per-version ordered manifest,
+  captured in one pass with the fingerprint. `dataset-version-diff` compares two
+  versions (multiset added/removed/common + sample rows). Storing rows is the
+  default (`--no-store-rows` opts out; cost is surfaced, not silent). Rows are
+  stored canonically, so diff/restore normalize key order (not byte-identical).
+- Deferred: desktop surfacing of diff, auto-capture after import/append commit,
+  restore-to-version (rewrites `examples.jsonl`), reorder detection, store GC,
+  and a normalized row identity.
 
 ## Not built yet (future roadmap)
 

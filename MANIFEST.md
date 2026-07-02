@@ -197,6 +197,8 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/versions/__init__.py`
 - `engine/corpus_studio/versions/version_registry.py`
 - `engine/corpus_studio/versions/version_card.py`
+- `engine/corpus_studio/versions/row_store.py`
+- `engine/corpus_studio/versions/version_diff.py`
 - `engine/corpus_studio/tokenization/__init__.py`
 - `engine/corpus_studio/tokenization/estimate.py`
 - `engine/corpus_studio/validators/__init__.py`
@@ -234,6 +236,8 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_run_registry.py`
 - `engine/tests/test_version_registry.py`
 - `engine/tests/test_version_card.py`
+- `engine/tests/test_row_store.py`
+- `engine/tests/test_version_diff.py`
 - `engine/tests/test_weight_card_and_promote_gate.py`
 - `engine/tests/test_schema_examples.py`
 - `engine/tests/test_schema_field_constraints.py`

@@ -67,6 +67,10 @@ python -m corpus_studio.cli dataset-version-list <project-dir>
 
 # Render the live version card (Markdown, or --json for the resolved card)
 python -m corpus_studio.cli dataset-version-show <project-dir> --version-id <id> [--json]
+
+# Diff two versions (added/removed/common rows; needs both captured with rows)
+python -m corpus_studio.cli dataset-version-diff <project-dir> \
+  --version-id <base> --other <other> [--samples 5] [--json]
 ```
 
 `dataset-version-create` computes the fingerprint + row count from the project's
@@ -74,6 +78,38 @@ python -m corpus_studio.cli dataset-version-show <project-dir> --version-id <id>
 (deterministic — it never *runs* a gate), and with `--stamp-run` writes
 `source_snapshot_id=<version_id>` onto that run so the dataset→run link closes in
 both directions.
+
+## Row store, manifests, and diff (v1.0.2)
+
+By default `dataset-version-create` also stores the version's **row bodies** so it
+can later be diffed (and, in a future slice, restored):
+
+- **Content-addressed store** — `dataset_versions/row_store.jsonl`, one line per
+  *unique* row (`{"row_id": <sha256>, "row": <canonical>}`). `row_id` is the
+  SHA-256 of the same `exact_row_signature` used for identity, so identical rows
+  across versions are stored once. It is line-inspectable and only grows (no GC
+  of orphaned blobs in this slice).
+- **Ordered manifest** — a per-version sidecar `dataset_versions/<version_id>.rows`
+  (one `row_id` per line, in order). The record carries `rows_stored`,
+  `stored_row_count`, and `row_manifest_algo` (`sha256-exact-v1`, versioned).
+- **Single-pass capture** — the fingerprint, the ordered manifest, and the store
+  writes all come from **one** read of `examples.jsonl`, so they can never desync.
+- **Cost is surfaced, not silent** — the first capture duplicates the dataset into
+  the store; capture prints the stored/new row counts, and `--no-store-rows` opts
+  out (that version then can't be diffed, `rows_stored=false`).
+
+**`dataset-version-diff`** compares two versions' manifests as **multisets** (so
+duplicate rows count) and reports added / removed / common, with sample row
+bodies pulled from the store. Because identity is the *canonical* signature, a
+pure reordering or a key-order/whitespace-only change is **not** a diff.
+
+> **Canonical caveat:** the store holds the canonical row (sorted keys, compact),
+> so diff — and a future restore — reconstruct the same rows *in order with keys
+> normalized*, not a byte-identical file. Semantic content is preserved.
+
+A version captured before v1.0.2 (or with `--no-store-rows`) has no manifest;
+`dataset-version-diff` refuses it with a clear "recapture with row storage"
+message rather than guessing.
 
 ## Hard boundaries
 
@@ -97,10 +133,17 @@ optional label), and **View card** (the rendered version card). Both capture and
 list go **through the engine** (`dataset-version-create` / `-list`), so the
 desktop never recomputes the fingerprint and integrity is verified, not guessed.
 
+**Implemented (v1.0.2, engine):** stable per-row identity (`row_id`), a
+content-addressed deduped row store (`versions/row_store.py`), a per-version
+ordered manifest captured single-pass with the fingerprint
+(`versions/version_registry.py`), and a read-only `dataset-version-diff`
+(`versions/version_diff.py`, multiset added/removed/common + sample rows).
+
 **Deferred:**
+- Desktop surfacing of diff (a follow-up desktop slice).
 - Auto-capture after an import/append commit (a `trigger` other than `manual`).
-- Stable per-row identity + a content-addressed row store (v1.0.2) — the
-  prerequisite for the below.
-- Version **diff** (added/removed/modified/moved rows) (v1.0.3).
-- **Restore-to-version** — the only operation that rewrites `examples.jsonl`,
-  deferred last so it respects the append-only write contract (v1.0.4).
+- **Restore-to-version** — reconstruct `examples.jsonl` from a manifest + the
+  store; the only operation that rewrites the dataset, so it is deferred last to
+  respect the append-only write contract.
+- Reorder/"moved" detection in diff, GC of orphaned store blobs, and a
+  `normalized` (near-duplicate) row identity (guarded by `row_signature_kind`).

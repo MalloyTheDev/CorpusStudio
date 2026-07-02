@@ -14,14 +14,17 @@ from corpus_studio.training.run_registry import (
 )
 from corpus_studio.versions.version_registry import (
     DatasetVersionRecord,
+    capture_dataset,
     compute_content_fingerprint,
     current_integrity,
     fingerprint_dataset,
     integrity_from_fingerprints,
     list_version_records,
+    load_row_manifest,
     load_version_record,
     record_path,
     registry_dir,
+    save_row_manifest,
     save_version_record,
 )
 
@@ -100,6 +103,95 @@ def test_empty_file_has_stable_fingerprint(tmp_path: Path):
     fingerprint, count = fingerprint_dataset(path)
     assert count == 0
     assert fingerprint == hashlib.sha256(b"").hexdigest()
+
+
+# --- v1.0.2 capture (single pass) --------------------------------------------
+
+def test_capture_fingerprint_matches_fingerprint_dataset(tmp_path: Path):
+    path = _write_examples(tmp_path, ROWS + [ROWS[0]])  # a duplicate row
+    capture = capture_dataset(path, tmp_path, store_rows=True)
+    # Single-pass capture must produce the exact same fingerprint as the streaming
+    # fingerprint_dataset (they share the identity primitive and ordering).
+    assert capture.content_fingerprint == fingerprint_dataset(path)[0]
+    assert capture.row_count == 3
+    assert len(capture.row_ids) == 3  # manifest is ordered, one id per row
+    assert capture.new_rows_stored == 2  # the duplicate is stored once
+
+
+def test_capture_missing_file_stores_nothing(tmp_path: Path):
+    capture = capture_dataset(tmp_path / "examples.jsonl", tmp_path, store_rows=True)
+    assert capture.content_fingerprint is None
+    assert capture.row_count == 0 and capture.row_ids == [] and capture.new_rows_stored == 0
+    assert not (registry_dir(tmp_path) / "row_store.jsonl").exists()
+
+
+def test_capture_no_store_rows_skips_store(tmp_path: Path):
+    path = _write_examples(tmp_path, ROWS)
+    capture = capture_dataset(path, tmp_path, store_rows=False)
+    assert capture.content_fingerprint is not None
+    assert capture.rows_stored is False
+    assert capture.new_rows_stored == 0
+    assert not (registry_dir(tmp_path) / "row_store.jsonl").exists()
+
+
+def _store_text(project: Path) -> str:
+    store = registry_dir(project) / "row_store.jsonl"
+    return store.read_text(encoding="utf-8") if store.exists() else ""
+
+
+def test_capture_rolls_back_store_on_malformed_line(tmp_path: Path):
+    # A valid row then a torn line: the dataset is unreadable, and the row already
+    # read must NOT be left orphaned in the store ("failed capture stores nothing").
+    path = tmp_path / "examples.jsonl"
+    path.write_text(json.dumps(ROWS[0]) + "\n" + "{ torn line\n", encoding="utf-8")
+    capture = capture_dataset(path, tmp_path, store_rows=True)
+    assert capture.content_fingerprint is None
+    assert capture.rows_stored is False
+    assert _store_text(tmp_path) == ""  # rolled back
+
+
+def test_capture_store_failure_keeps_fingerprint(tmp_path: Path, monkeypatch):
+    # A store I/O failure on a READABLE dataset must keep the real fingerprint
+    # (rows_stored=False), not masquerade as an unreadable dataset.
+    import corpus_studio.versions.row_store as rs
+
+    path = _write_examples(tmp_path, ROWS)
+
+    def boom(*args, **kwargs):
+        raise OSError("read-only store")
+
+    monkeypatch.setattr(rs, "store_line", boom)
+    capture = capture_dataset(path, tmp_path, store_rows=True)
+    assert capture.content_fingerprint == fingerprint_dataset(path)[0]  # parity preserved
+    assert capture.rows_stored is False
+    assert capture.new_rows_stored == 0
+    assert _store_text(tmp_path) == ""  # partial store rolled back
+
+
+def test_row_manifest_round_trip_and_absent(tmp_path: Path):
+    save_row_manifest(tmp_path, "20260101T000000-1", ["aa", "bb", "aa"])
+    assert load_row_manifest(tmp_path, "20260101T000000-1") == ["aa", "bb", "aa"]
+    assert load_row_manifest(tmp_path, "no-such-version") is None  # absent -> None
+
+
+def test_old_record_without_row_store_fields_loads(tmp_path: Path):
+    # A pre-v1.0.2 record JSON must still load, with row-store fields defaulted.
+    path = tmp_path / "old.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version_id": "20260101T000000-1",
+                "created_at": "t",
+                "updated_at": "t",
+                "content_fingerprint": "abc",
+            }
+        ),
+        encoding="utf-8",
+    )
+    record = load_version_record(path)
+    assert record.rows_stored is False
+    assert record.stored_row_count == 0
+    assert record.row_manifest_algo is None
 
 
 # --- record storage ----------------------------------------------------------
