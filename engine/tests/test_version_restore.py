@@ -156,6 +156,37 @@ def test_cli_restore_refuses_corrupt_record(tmp_path: Path):
     assert result.exit_code == 1 and "corrupt record" in result.stderr.lower()
 
 
+def test_cli_restore_unwritable_output_exits_clean(tmp_path: Path):
+    # A parent path component that is a FILE makes mkdir fail; restore must degrade
+    # to a clean exit-1 message, not a raw traceback.
+    _write_examples(tmp_path, ROWS)
+    vid = _create(tmp_path)["version_id"]
+    blocker = tmp_path / "afile.txt"
+    blocker.write_text("x", encoding="utf-8")
+    out = blocker / "sub" / "o.jsonl"  # blocker is a file, not a dir
+    result = runner.invoke(
+        app, ["dataset-version-restore", str(tmp_path), "--version-id", vid, "--output", str(out)]
+    )
+    assert result.exit_code == 1
+    assert "could not write" in result.stderr.lower()
+
+
+def test_cli_restore_does_not_clobber_sibling_tmp(tmp_path: Path):
+    # The temp is a unique mkstemp name, so a real file at the predictable
+    # "<output>.tmp" sibling is never overwritten.
+    _write_examples(tmp_path, ROWS)
+    created = _create(tmp_path)
+    sibling = tmp_path / "o.jsonl.tmp"
+    sibling.write_text("PRECIOUS", encoding="utf-8")
+    out = tmp_path / "o.jsonl"
+    result = runner.invoke(
+        app, ["dataset-version-restore", str(tmp_path), "--version-id", created["version_id"], "--output", str(out)]
+    )
+    assert result.exit_code == 0, result.output
+    assert sibling.read_text(encoding="utf-8") == "PRECIOUS"  # untouched
+    assert fingerprint_dataset(out)[0] == created["content_fingerprint"]
+
+
 def test_cli_restore_no_verify_still_faithful(tmp_path: Path):
     _write_examples(tmp_path, ROWS)
     created = _create(tmp_path)

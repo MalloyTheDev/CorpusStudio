@@ -1949,12 +1949,26 @@ def dataset_version_restore(
             )
             raise typer.Exit(code=1)
 
-    # Atomic write: a temp file beside --output, then os.replace.
-    output.parent.mkdir(parents=True, exist_ok=True)
+    # Atomic write: a UNIQUE temp file beside --output (mkstemp is exclusive, so it
+    # can't clobber a real sibling or race a concurrent restore), then os.replace.
+    # Guarded so a write/replace failure (locked/read-only target, bad parent path)
+    # degrades to a clean exit-1 and never leaves a dangling temp.
+    import tempfile
+
     content = ("\n".join(lines) + "\n") if lines else ""
-    tmp = output.with_suffix(output.suffix + ".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    os.replace(tmp, output)
+    tmp_path: Optional[Path] = None
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=str(output.parent), prefix=output.name + ".", suffix=".tmp")
+        os.close(fd)
+        tmp_path = Path(tmp_name)
+        tmp_path.write_text(content, encoding="utf-8")
+        os.replace(tmp_path, output)
+    except OSError as exc:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+        typer.echo(f"Could not write '{output}': {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
     result = RestoreResult(
         version_id=version_id,
