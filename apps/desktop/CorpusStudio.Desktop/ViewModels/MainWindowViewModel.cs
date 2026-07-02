@@ -101,6 +101,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         "Generate a training config after validation, splits, and evaluation checks.";
     private string _trainingConfigPreview = "Training config preview appears here.";
     private string _trainingLaunchCommand = string.Empty;
+    private IReadOnlyList<string> _trainingLaunchArgv = [];
+    private string _trainingLaunchWorkingDirectory = string.Empty;
+    private readonly List<string> _trainingRunLines = [];
+    private int _trainingRunId;
+    private string _trainingRunLog = "Launch training after generating a config; live logs appear here.";
+    private string _trainingRunStatus = "Idle";
+    private bool _isTrainingRunning;
     private string _datasetCardSummary =
         "Generate a dataset card to summarize metadata, schema, splits, quality, and evaluation.";
     private string _datasetCardPreview = "Dataset card preview appears here.";
@@ -889,6 +896,101 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _trainingLaunchCommand;
         private set => SetField(ref _trainingLaunchCommand, value);
+    }
+
+    public string TrainingRunLog
+    {
+        get => _trainingRunLog;
+        private set => SetField(ref _trainingRunLog, value);
+    }
+
+    public string TrainingRunStatus
+    {
+        get => _trainingRunStatus;
+        private set => SetField(ref _trainingRunStatus, value);
+    }
+
+    public bool IsTrainingRunning
+    {
+        get => _isTrainingRunning;
+        private set
+        {
+            if (SetField(ref _isTrainingRunning, value))
+            {
+                OnPropertyChanged(nameof(CanLaunchTraining));
+            }
+        }
+    }
+
+    /// <summary>Whether a run can be launched (a config was generated and none is running).</summary>
+    public bool CanLaunchTraining => !_isTrainingRunning && _trainingLaunchArgv.Count > 0;
+
+    /// <summary>The structured command to spawn (empty until a config is generated).</summary>
+    public IReadOnlyList<string> TrainingLaunchArgv => _trainingLaunchArgv;
+
+    public string TrainingLaunchWorkingDirectory => _trainingLaunchWorkingDirectory;
+
+    public const int TrainingLogMaxLines = 2000;
+
+    /// <summary>Start a run and return its id; log appends are tagged with this
+    /// id so a prior (cancelled) run's late output cannot contaminate this one.</summary>
+    public int BeginTrainingRun()
+    {
+        _trainingRunLines.Clear();
+        TrainingRunLog = string.Empty;
+        TrainingRunStatus = "Running...";
+        IsTrainingRunning = true;
+        return ++_trainingRunId;
+    }
+
+    public void AppendTrainingRunLog(string line)
+    {
+        _trainingRunLines.Add(line);
+        TrimAndPublishTrainingLog();
+    }
+
+    /// <summary>Append a batch of streamed lines for a specific run. Lines tagged
+    /// with a stale run id (from a cancelled run) are dropped.</summary>
+    public void AppendTrainingRunLogBatch(int runId, IReadOnlyList<string> lines)
+    {
+        if (runId != _trainingRunId || lines.Count == 0)
+        {
+            return;
+        }
+
+        _trainingRunLines.AddRange(lines);
+        TrimAndPublishTrainingLog();
+    }
+
+    private void TrimAndPublishTrainingLog()
+    {
+        if (_trainingRunLines.Count > TrainingLogMaxLines)
+        {
+            _trainingRunLines.RemoveRange(0, _trainingRunLines.Count - TrainingLogMaxLines);
+        }
+
+        TrainingRunLog = string.Join(Environment.NewLine, _trainingRunLines);
+    }
+
+    public void CompleteTrainingRun(int exitCode)
+    {
+        IsTrainingRunning = false;
+        TrainingRunStatus = exitCode == 0
+            ? "Completed (exit 0)"
+            : $"Failed (exit {exitCode})";
+    }
+
+    public void SetTrainingRunCancelled()
+    {
+        IsTrainingRunning = false;
+        TrainingRunStatus = "Cancelled";
+    }
+
+    public void SetTrainingRunError(string message)
+    {
+        IsTrainingRunning = false;
+        TrainingRunStatus = "Error";
+        AppendTrainingRunLog($"[error] {message}");
     }
 
     public string DatasetCardSummary
@@ -2488,6 +2590,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         if (result.Launch is { } launch && !string.IsNullOrWhiteSpace(launch.Command))
         {
             TrainingLaunchCommand = launch.Command;
+            _trainingLaunchArgv = launch.Argv.ToArray();
+            _trainingLaunchWorkingDirectory = string.IsNullOrWhiteSpace(result.OutputPath)
+                ? string.Empty
+                : (System.IO.Path.GetDirectoryName(result.OutputPath) ?? string.Empty);
             lines.Add("");
             lines.Add("Launch command (review before running):");
             lines.Add($"  {launch.Command}");
@@ -2503,7 +2609,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         else
         {
             TrainingLaunchCommand = string.Empty;
+            _trainingLaunchArgv = [];
+            _trainingLaunchWorkingDirectory = string.Empty;
         }
+
+        OnPropertyChanged(nameof(CanLaunchTraining));
 
         if (result.Warnings.Count > 0)
         {
@@ -3369,6 +3479,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         return true;
+    }
+
+    private void OnPropertyChanged(string propertyName)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
     private static string FormatIssue(ValidationIssue issue)

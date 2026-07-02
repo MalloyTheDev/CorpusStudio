@@ -1512,6 +1512,8 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="320" />
@@ -1627,6 +1629,42 @@
                                      FontFamily="Consolas"
                                      FontSize="13"
                                      TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     HorizontalScrollBarVisibility="Auto" />
+
+                            <WrapPanel Grid.Row="3"
+                                       Grid.ColumnSpan="2"
+                                       VerticalAlignment="Center"
+                                       Margin="0,10,0,6">
+                                <Button Style="{StaticResource PrimaryButtonStyle}"
+                                        AutomationProperties.AutomationId="LaunchTrainingButton"
+                                        Content="Launch _Training"
+                                        IsEnabled="{Binding CanLaunchTraining, Mode=OneWay}"
+                                        Margin="0,0,8,0"
+                                        Click="LaunchTrainingButton_Click" />
+                                <Button AutomationProperties.AutomationId="StopTrainingButton"
+                                        Content="Stop"
+                                        IsEnabled="{Binding IsTrainingRunning, Mode=OneWay}"
+                                        Margin="0,0,12,0"
+                                        Click="StopTrainingButton_Click" />
+                                <TextBlock Text="Status:"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <TextBlock AutomationProperties.AutomationId="TrainingRunStatusTextBlock"
+                                           Text="{Binding TrainingRunStatus, Mode=OneWay}"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center" />
+                            </WrapPanel>
+
+                            <TextBox Grid.Row="4"
+                                     Grid.ColumnSpan="2"
+                                     AutomationProperties.AutomationId="TrainingRunLogTextBox"
+                                     Text="{Binding TrainingRunLog, Mode=OneWay}"
+                                     IsReadOnly="True"
+                                     AcceptsReturn="True"
+                                     FontFamily="Consolas"
+                                     FontSize="12"
+                                     TextWrapping="NoWrap"
                                      VerticalScrollBarVisibility="Auto"
                                      HorizontalScrollBarVisibility="Auto" />
                         </Grid>

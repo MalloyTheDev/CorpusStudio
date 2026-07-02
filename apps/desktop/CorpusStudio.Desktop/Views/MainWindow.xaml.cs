@@ -1,7 +1,11 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Globalization;
+using System.Threading;
 using System.Windows.Input;
+using System.Windows.Threading;
 using Microsoft.Win32;
 
 using CorpusStudio.Desktop.Models;
@@ -16,11 +20,16 @@ public partial class MainWindow : Window
 
     private readonly PythonEngineService _engineService = new();
     private readonly List<IReadOnlyDictionary<string, string>> _aiAssistBulkUndoStack = [];
+    private readonly TrainingProcessRunner _trainingRunner = new();
+    private CancellationTokenSource? _trainingRunCts;
+    private readonly ConcurrentQueue<string> _trainingLogQueue = new();
+    private bool _trainingCancelRequested;
 
     public MainWindow()
     {
         InitializeComponent();
         Loaded += MainWindow_Loaded;
+        Closing += MainWindow_Closing;
     }
 
     private MainWindowViewModel ViewModel => (MainWindowViewModel)DataContext;
@@ -1455,6 +1464,148 @@ public partial class MainWindow : Window
     private void CompareEvaluationReportsButton_Click(object sender, RoutedEventArgs e)
     {
         ViewModel.CompareSelectedEvaluationReports();
+    }
+
+    private async void LaunchTrainingButton_Click(object sender, RoutedEventArgs e)
+    {
+        var argv = ViewModel.TrainingLaunchArgv;
+        if (argv.Count == 0)
+        {
+            MessageBox.Show(
+                this,
+                "Generate a training config first — the launch command is produced with it.",
+                "Corpus Studio",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information
+            );
+            return;
+        }
+
+        if (ViewModel.IsTrainingRunning)
+        {
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            this,
+            "This runs the trainer on your machine (it can use significant CPU/GPU for a long "
+                + "time) with your installed tools. Corpus Studio only launches the command below "
+                + "and streams its output.\n\n"
+                + ViewModel.TrainingLaunchCommand
+                + "\n\nRun it now?",
+            "Launch training",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning
+        );
+        if (confirm != MessageBoxResult.OK)
+        {
+            return;
+        }
+
+        var workingDirectory = ViewModel.TrainingLaunchWorkingDirectory;
+        var cts = new CancellationTokenSource();
+        _trainingRunCts = cts;
+        _trainingCancelRequested = false;
+        while (_trainingLogQueue.TryDequeue(out _)) { } // discard any residual lines
+        var runId = ViewModel.BeginTrainingRun();
+
+        // Coalesce log lines: background reader threads enqueue, and a timer flushes
+        // to the UI at a fixed rate so a chatty trainer can't flood the dispatcher.
+        var logTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(150),
+        };
+        logTimer.Tick += (_, _) => FlushTrainingLogQueue(runId);
+        logTimer.Start();
+
+        try
+        {
+            var exitCode = await _trainingRunner.RunAsync(
+                argv,
+                workingDirectory,
+                _trainingLogQueue.Enqueue,
+                cts.Token
+            );
+
+            FlushTrainingLogQueue(runId);
+            if (_trainingCancelRequested)
+            {
+                ViewModel.SetTrainingRunCancelled();
+            }
+            else
+            {
+                ViewModel.CompleteTrainingRun(exitCode);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            FlushTrainingLogQueue(runId);
+            ViewModel.SetTrainingRunCancelled();
+        }
+        catch (Exception ex)
+        {
+            FlushTrainingLogQueue(runId);
+            ViewModel.SetTrainingRunError(ex.Message);
+        }
+        finally
+        {
+            logTimer.Stop();
+            if (ReferenceEquals(_trainingRunCts, cts))
+            {
+                _trainingRunCts = null;
+            }
+
+            cts.Dispose();
+        }
+    }
+
+    private void FlushTrainingLogQueue(int runId)
+    {
+        if (_trainingLogQueue.IsEmpty)
+        {
+            return;
+        }
+
+        var batch = new List<string>();
+        while (_trainingLogQueue.TryDequeue(out var line))
+        {
+            batch.Add(line);
+        }
+
+        ViewModel.AppendTrainingRunLogBatch(runId, batch);
+    }
+
+    private void StopTrainingButton_Click(object sender, RoutedEventArgs e)
+    {
+        _trainingCancelRequested = true;
+        _trainingRunCts?.Cancel();
+    }
+
+    private void MainWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        if (!ViewModel.IsTrainingRunning)
+        {
+            return;
+        }
+
+        var result = MessageBox.Show(
+            this,
+            "A training run is in progress. Closing Corpus Studio will stop it. Close anyway?",
+            "Training in progress",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning
+        );
+        if (result != MessageBoxResult.OK)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        // Best-effort: cancel the run and synchronously kill the trainer tree so it
+        // is not orphaned when the app exits.
+        _trainingCancelRequested = true;
+        _trainingRunCts?.Cancel();
+        _trainingRunner.TryKillCurrent();
     }
 
     private void CopyLaunchCommandButton_Click(object sender, RoutedEventArgs e)

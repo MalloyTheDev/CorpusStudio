@@ -40,6 +40,12 @@ public sealed class TrainingLaunchPlan
     [JsonPropertyName("resume_supported")]
     public bool ResumeSupported { get; init; }
 
+    [JsonPropertyName("argv")]
+    public List<string> Argv { get; init; } = [];
+
+    [JsonPropertyName("resume_argv")]
+    public List<string> ResumeArgv { get; init; } = [];
+
     [JsonPropertyName("dependencies")]
     public List<string> Dependencies { get; init; } = [];
 
