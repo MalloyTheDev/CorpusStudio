@@ -150,12 +150,20 @@ Out of scope:
 Goal: launch local LoRA or adapter jobs with enough safety and visibility to be
 useful.
 
+Current status (v0.5.0, guided): the engine emits the exact launch command per
+target plus the resume variant and required dependencies (`launch` in the
+`training-config` output, copyable from the desktop), and `training-checkpoints`
+lists checkpoints in an output directory and builds a resume command for the
+latest one. Corpus Studio does not run the trainer itself yet; in-app launch and
+the log viewer would require live process streaming (see
+docs on the training launcher scope).
+
 Scope:
 
-- local command preview
+- local command preview (done, guided)
 - training log viewer
-- checkpoint tracking
-- resume training
+- checkpoint tracking (checkpoint listing done; live tracking planned)
+- resume training (resume command done; in-app resume planned)
 - stop/cancel support
 - before/after eval comparison
 

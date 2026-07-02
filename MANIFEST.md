@@ -70,6 +70,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/ImportCommitServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ProjectSearchViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ReviewedFixServiceTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/TrainingLaunchViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TempProjectDirectory.cs`
 - `apps/desktop/CorpusStudio.Desktop.sln`
 - `apps/desktop/CorpusStudio.Desktop.sln.README.md`
@@ -153,6 +154,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/storage/project.py`
 - `engine/corpus_studio/training/__init__.py`
 - `engine/corpus_studio/training/compatibility.py`
+- `engine/corpus_studio/training/launch.py`
 - `engine/corpus_studio/training/config_templates.py`
 - `engine/corpus_studio/training/estimators.py`
 - `engine/corpus_studio/tokenization/__init__.py`
@@ -189,6 +191,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_tokenization.py`
 - `engine/tests/test_training_compatibility.py`
 - `engine/tests/test_training_config_template.py`
+- `engine/tests/test_training_launch.py`
 - `engine/tests/test_training_token_budget.py`
 - `examples/datasets/chat/train.jsonl`
 - `examples/datasets/code/train.jsonl`

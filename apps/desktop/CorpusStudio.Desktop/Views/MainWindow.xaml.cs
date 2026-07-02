@@ -1457,6 +1457,30 @@ public partial class MainWindow : Window
         ViewModel.CompareSelectedEvaluationReports();
     }
 
+    private void CopyLaunchCommandButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(ViewModel.TrainingLaunchCommand))
+        {
+            MessageBox.Show(
+                this,
+                "Generate a training config first — the launch command is produced with it.",
+                "Corpus Studio",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information
+            );
+            return;
+        }
+
+        try
+        {
+            Clipboard.SetText(ViewModel.TrainingLaunchCommand);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetTrainingConfigError($"Could not copy the launch command: {ex.Message}");
+        }
+    }
+
     private async void GenerateTrainingConfigButton_Click(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))

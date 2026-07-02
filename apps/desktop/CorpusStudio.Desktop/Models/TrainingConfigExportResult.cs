@@ -19,8 +19,32 @@ public sealed class TrainingConfigExportResult
     [JsonPropertyName("token_budget")]
     public TokenBudgetEstimate? TokenBudget { get; init; }
 
+    [JsonPropertyName("launch")]
+    public TrainingLaunchPlan? Launch { get; init; }
+
     [JsonPropertyName("warnings")]
     public List<string> Warnings { get; init; } = [];
+}
+
+public sealed class TrainingLaunchPlan
+{
+    [JsonPropertyName("target")]
+    public string Target { get; init; } = string.Empty;
+
+    [JsonPropertyName("command")]
+    public string Command { get; init; } = string.Empty;
+
+    [JsonPropertyName("resume_command")]
+    public string ResumeCommand { get; init; } = string.Empty;
+
+    [JsonPropertyName("resume_supported")]
+    public bool ResumeSupported { get; init; }
+
+    [JsonPropertyName("dependencies")]
+    public List<string> Dependencies { get; init; } = [];
+
+    [JsonPropertyName("notes")]
+    public List<string> Notes { get; init; } = [];
 }
 
 public sealed class TokenBudgetEstimate

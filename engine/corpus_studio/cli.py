@@ -50,6 +50,11 @@ from corpus_studio.storage.index import (
 from corpus_studio.storage.project import DatasetProject, create_project
 from corpus_studio.training.compatibility import training_compatibility_warnings
 from corpus_studio.training.estimators import build_training_token_budget
+from corpus_studio.training.launch import (
+    build_launch_plan,
+    find_checkpoints,
+    latest_checkpoint,
+)
 from corpus_studio.training.config_templates import (
     build_lora_config_template,
     normalize_training_config_target,
@@ -623,6 +628,7 @@ def training_config(
     output_path.write_text(config_text, encoding="utf-8")
 
     token_budget = build_training_token_budget(list(read_jsonl(input_path)), sequence_len)
+    launch_plan = build_launch_plan(normalized_target, str(output_path))
 
     compatibility_warnings = training_compatibility_warnings(
         schema_id=schema,
@@ -652,8 +658,45 @@ def training_config(
                 "config": template.to_training_dict(),
                 "config_text": config_text,
                 "token_budget": token_budget.model_dump(),
+                "launch": launch_plan.model_dump(),
                 "warnings": warnings,
                 "compatibility_warnings": compatibility_warnings,
+            },
+            indent=2,
+        )
+    )
+
+
+@app.command("training-checkpoints")
+def training_checkpoints(
+    output_dir: Path,
+    target: str = typer.Option("axolotl_yaml", "--target", help="Training config target."),
+    config_path: Optional[Path] = typer.Option(
+        None, "--config-path", help="Rendered config to build a resume command for."
+    ),
+):
+    """List training checkpoints in an output directory and build a resume command."""
+
+    normalized_target = normalize_training_config_target(target)
+    checkpoints = find_checkpoints(output_dir)
+    latest = latest_checkpoint(output_dir)
+
+    resume_command = None
+    if config_path is not None:
+        plan = build_launch_plan(
+            normalized_target,
+            str(config_path),
+            resume_checkpoint=str(output_dir / latest) if latest else None,
+        )
+        resume_command = plan.resume_command
+
+    typer.echo(
+        json.dumps(
+            {
+                "output_dir": str(output_dir),
+                "checkpoints": checkpoints,
+                "latest_checkpoint": latest,
+                "resume_command": resume_command,
             },
             indent=2,
         )

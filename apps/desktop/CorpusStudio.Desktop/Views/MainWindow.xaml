@@ -1554,6 +1554,10 @@
                                         Content="Generate Config"
                                         Width="132"
                                         Click="GenerateTrainingConfigButton_Click" />
+                                <Button AutomationProperties.AutomationId="CopyLaunchCommandButton"
+                                        Content="Copy launch command"
+                                        Margin="8,0,0,0"
+                                        Click="CopyLaunchCommandButton_Click" />
                             </WrapPanel>
 
                             <WrapPanel Grid.Row="1"
