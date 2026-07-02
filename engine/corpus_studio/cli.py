@@ -928,6 +928,7 @@ def artifact_gate(
 ):
     """Promote-gate an artifact (integrity + source-run regression) and save it."""
 
+    from corpus_studio.gates.models import load_gate_thresholds
     from corpus_studio.gates.runner import run_artifact_gate, save_gate_report
 
     try:
@@ -936,7 +937,10 @@ def artifact_gate(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
-    report = run_artifact_gate(artifact, integrity, run, load_report, generated_at=_utc_now_iso())
+    report = run_artifact_gate(
+        artifact, integrity, run, load_report,
+        thresholds=load_gate_thresholds(project_dir), generated_at=_utc_now_iso(),
+    )
     save_gate_report(project_dir, report)
     typer.echo(report.model_dump_json(indent=2))
 
@@ -967,7 +971,11 @@ def training_run_gate_command(
         except (ValidationError, json.JSONDecodeError, OSError):
             return None
 
-    report = run_training_run_gate(record, load_report, generated_at=_utc_now_iso())
+    from corpus_studio.gates.models import load_gate_thresholds
+
+    report = run_training_run_gate(
+        record, load_report, thresholds=load_gate_thresholds(project_dir), generated_at=_utc_now_iso()
+    )
     save_gate_report(project_dir, report)
     typer.echo(report.model_dump_json(indent=2))
 
@@ -1454,6 +1462,19 @@ def provider_approve(
     )
 
 
+@app.command("gate-thresholds")
+def gate_thresholds(project_dir: Path):
+    """Show the effective gate thresholds for a project.
+
+    Defaults merged with any project-local gate_thresholds.json. Edit that file
+    (create it with these keys) to customize how gates block/warn.
+    """
+
+    from corpus_studio.gates.models import load_gate_thresholds
+
+    typer.echo(load_gate_thresholds(project_dir).model_dump_json(indent=2))
+
+
 @app.command("gate-run")
 def gate_run(
     input_path: Path,
@@ -1468,13 +1489,27 @@ def gate_run(
         typer.echo("Unsupported gate scope. Use dataset or export.", err=True)
         raise typer.Exit(code=1)
 
+    from corpus_studio.gates.models import gate_thresholds_path, load_gate_thresholds
+
+    thresholds = load_gate_thresholds(project_dir) if project_dir is not None else None
+    if project_dir is None and gate_thresholds_path(input_path.parent).exists():
+        typer.echo(
+            "Note: a gate_thresholds.json sits next to the input but was NOT applied. "
+            "Pass --project-dir to use project thresholds.",
+            err=True,
+        )
+
     try:
         rows = list(read_jsonl(input_path))
         generated_at = _utc_now_iso()
         if normalized == "dataset":
-            report = run_dataset_gates(rows, schema, target=str(input_path), generated_at=generated_at)
+            report = run_dataset_gates(
+                rows, schema, thresholds=thresholds, target=str(input_path), generated_at=generated_at
+            )
         else:
-            report = run_export_gates(rows, schema, target=str(input_path), generated_at=generated_at)
+            report = run_export_gates(
+                rows, schema, thresholds=thresholds, target=str(input_path), generated_at=generated_at
+            )
     except (ValueError, json.JSONDecodeError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc

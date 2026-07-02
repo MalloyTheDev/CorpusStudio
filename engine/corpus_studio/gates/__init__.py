@@ -12,6 +12,7 @@ from corpus_studio.gates.models import (
     GateScope,
     GateStatus,
     GateThresholds,
+    load_gate_thresholds,
 )
 from corpus_studio.gates.runner import (
     run_artifact_gate,
@@ -28,6 +29,7 @@ __all__ = [
     "GateScope",
     "GateStatus",
     "GateThresholds",
+    "load_gate_thresholds",
     "run_artifact_gate",
     "run_dataset_gates",
     "run_evaluation_gate",

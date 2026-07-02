@@ -62,7 +62,7 @@ def run_dataset_gates(
         quality_gate(quality, thresholds, GateScope.DATASET),
         pii_gate(quality, thresholds, GateScope.DATASET),
     ]
-    return GateReport.build(GateScope.DATASET, target, results, generated_at)
+    return GateReport.build(GateScope.DATASET, target, results, generated_at, thresholds=thresholds)
 
 
 def run_export_gates(
@@ -88,7 +88,7 @@ def run_export_gates(
         pii_gate(quality, export_thresholds, GateScope.EXPORT),
         quality_gate(quality, export_thresholds, GateScope.EXPORT),
     ]
-    return GateReport.build(GateScope.EXPORT, target, results, generated_at)
+    return GateReport.build(GateScope.EXPORT, target, results, generated_at, thresholds=export_thresholds)
 
 
 def run_split_gate(
@@ -116,6 +116,7 @@ def run_evaluation_gate(
         target,
         [eval_score_gate(report, thresholds, GateScope.EVALUATION_REPORT)],
         generated_at,
+        thresholds=thresholds,
     )
 
 
@@ -142,7 +143,9 @@ def run_training_run_gate(
     thresholds = thresholds or GateThresholds()
     before, after, provenance_ok = _regression_inputs(record, load_report)
     result = regression_gate(before, after, thresholds, provenance_ok, GateScope.TRAINING_RUN)
-    return GateReport.build(GateScope.TRAINING_RUN, record.run_id, [result], generated_at)
+    return GateReport.build(
+        GateScope.TRAINING_RUN, record.run_id, [result], generated_at, thresholds=thresholds
+    )
 
 
 def _regression_inputs(
@@ -203,7 +206,9 @@ def run_artifact_gate(
             regression_gate(before, after, thresholds, provenance_ok, GateScope.MODEL_ARTIFACT)
         )
 
-    return GateReport.build(GateScope.MODEL_ARTIFACT, artifact.artifact_id, results, generated_at)
+    return GateReport.build(
+        GateScope.MODEL_ARTIFACT, artifact.artifact_id, results, generated_at, thresholds=thresholds
+    )
 
 
 def save_gate_report(project_dir: Path | str, report: GateReport) -> Path:
