@@ -58,3 +58,4 @@ logs/
 
 # pytest temp artifacts (basetemp)
 .pytmp/
+.pytest_tmp/

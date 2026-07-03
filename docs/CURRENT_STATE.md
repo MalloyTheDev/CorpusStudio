@@ -3,7 +3,7 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-07-02 (v1.0.0 engine slice landed).
+Last reconciled: 2026-07-03 (through v1.2 — AI Assist candidate gating, PR #57).
 
 ## What works today (implemented and tested)
 
@@ -37,33 +37,97 @@ Last reconciled: 2026-07-02 (v1.0.0 engine slice landed).
 - Preference exports (DPO/KTO/reward) with a pair-integrity gate.
 - Dataset card summarizing metadata, schema, splits, quality, and evaluation.
 
+**Govern & gate**
+- Role-based provider/model capability policy, enforced **in the engine** (not
+  just the UI): OpenAI/Anthropic evaluator-only by default; Ollama/local
+  generation only when explicitly approved via project-local
+  `provider_policy_overrides.json`; OpenRouter route-aware. CLI `provider-policy`
+  / `provider-approve`; surfaced by a **Provider Generation Policy** panel in the
+  desktop Settings tab (which providers may generate, approve/revoke a local
+  model). See [`PROVIDER_POLICY.md`](PROVIDER_POLICY.md).
+- A gate runner producing serializable pass/warn/block reports over the existing
+  schema, quality, leakage, PII, and evaluation logic (no new detection).
+  CLI `gate-run`; the export gate blocks on schema/PII failures. Per-project
+  thresholds via `gate_thresholds.json` (fail-closed, BOM-tolerant; each report
+  records the effective thresholds); `gate-thresholds` prints them. Surfaced by a
+  **Run Gates** button in the desktop Quality tab. See [`GATES.md`](GATES.md).
+
 **Evaluate & assist**
 - Evaluation Lab against local Ollama or OpenAI-compatible endpoints: health
   checks, model discovery, report history, two-report comparison, regression
   reruns, tag/failure/score-band summaries, failed-row edit loops, manual
   scoring, saved failure filters.
-- Multi-model benchmark: one dataset across several models, ranked, with
-  per-model deltas and the examples every model failed.
+- Multi-model benchmark (`benchmark`): one dataset across several models, ranked,
+  with per-model deltas and the examples every model failed.
+- Model Arena (`arena-run`): run a prompt suite across several models side by
+  side; responses are comparison artifacts, not trainable rows. Optional
+  evaluator-only judging (`--judge-model`) scores each response and picks a
+  winner (per-model win counts + average judge score); judging is an evaluator
+  activity, so OpenAI/Anthropic are permitted as the judge. Saved reports under
+  `arena_reports/`. A desktop **Arena** tab surfaces prompts + model list +
+  optional judge with side-by-side responses.
 - Review-first AI Assist Lab: persistent accept/reject queue, saved views, bulk
   triage with undo, resumable rewrite batches. AI Assist output is always
   `review_required` and never auto-accepted. Generated candidate rows are run
   through the existing dataset gate runner (schema/quality/PII) before review and
   the verdict is attached as `candidate_gate` — a pre-review signal only: a clean
   gate is not approval, a block does not auto-reject, and provider policy is still
-  enforced before generation.
+  enforced before generation. See [`AI_ASSIST_LAB.md`](AI_ASSIST_LAB.md).
 
-**Train (v0.5 launcher — complete)**
+**Train & track**
 - Training config export for axolotl / TRL / Unsloth / Hugging Face /
   LLaMA-Factory with compatibility warnings, a real token budget
   (tokens-per-epoch after truncation, over-length counts), a rough arithmetic
-  VRAM planning estimate (never inspects hardware), and a LoRA rank/alpha
-  suggestion.
+  VRAM planning estimate (never inspects hardware), a LoRA rank/alpha suggestion,
+  and the exact launch command.
 - In-app launch of the user's installed trainer with explicit confirmation of
   the exact argv (no shell), live log streaming, and a Stop that kills the
   process tree.
 - Checkpoint tracking during and after runs, resume-from-latest for targets
   with a CLI resume flag, and before/after evaluation comparison against the
   baseline captured at launch.
+- A durable **training run registry** under `training_runs/` (`training-run-list`
+  / `training-run-update`): launch metadata (argv, config, output dir), status
+  lifecycle, pid, exit code, checkpoints, before-eval link. The desktop writes
+  records directly; a run left `running` whose process is gone reconciles to
+  `interrupted` on load. A read-only run history shows past runs in the Training
+  tab. A `training_run` **regression gate** (`training-run-gate`) blocks when the
+  trained model regressed vs the baseline and warns with "unverified linkage"
+  when the after-eval targeted the base model. Surfaced by a "Gate run" button.
+- A durable **model artifact registry** under `model_artifacts/`
+  (`artifact-register`/`-list`/`-update`): the adapters/checkpoints a run produced,
+  referenced by path (never moved). Base model + eval resolve live through the
+  source `run_id`, not stored. **Path integrity** is re-checked on load — a record
+  flags `missing` or `modified` if the weights change on disk. A live weight card
+  (`artifact-card`, never stored) and a `model_artifact` **promote gate**
+  (`artifact-gate`) that blocks "keep" when the artifact is `modified`/`missing`
+  or the source run regressed. A desktop **Artifacts** tab registers from a run
+  and keeps/rejects (promote-gated — a block refuses the keep).
+
+**Version & restore**
+- Durable dataset version records under `dataset_versions/` (`dataset-version-create`
+  / `-list` / `-show`): each pins the dataset's identity — `row_count` + a
+  streaming SHA-256 `content_fingerprint` over the ordered per-row exact
+  signatures — plus links to source training runs, model artifacts, an evaluation
+  report, and a dataset gate report. Nothing derivable is stored; scores/integrity/
+  gate status resolve live in a version card. Live drift detection reports
+  `matches` / `drifted` / `unreadable`, so a version can never silently
+  misrepresent a changed dataset.
+- A content-addressed, deduped **row store** (`dataset_versions/row_store.jsonl`)
+  with a per-version ordered manifest, captured in one pass with the fingerprint.
+  `dataset-version-diff` compares two versions (multiset added/removed/common +
+  sample rows). `dataset-version-restore` reconstructs a version's rows to an
+  `--output` file, verified against the recorded fingerprint (all-or-nothing,
+  atomic, overwrite-safe). The engine **refuses to write `examples.jsonl`** — the
+  dataset has one writer (the desktop).
+- A desktop **Versions** tab: read-only history with a live integrity badge, an
+  opt-in **Capture version** button, **View card**, a **diff view** ("Set diff
+  base" → "Diff base → selected"), and **Restore this version** (in-place). The
+  desktop in-place restore first captures the current dataset as an undo version
+  and *refuses* if that undo isn't a genuine recovery point (rows couldn't be
+  stored); then the engine reconstructs the selected version to a verified temp and
+  the desktop atomically swaps it onto `examples.jsonl`. Any failure before the
+  swap leaves the dataset untouched. See [`VERSIONING.md`](VERSIONING.md).
 
 ## Hard boundaries (by design)
 
@@ -72,108 +136,23 @@ Last reconciled: 2026-07-02 (v1.0.0 engine slice landed).
   distributed training, or custom training loops.
 - Trainer launches show the exact argv, require explicit confirmation, use no
   shell, and write inspectable run metadata. No hidden trainer behavior.
+- The engine never moves, copies, or deletes the user's weight files or
+  `examples.jsonl` (reference paths only; the desktop is the single writer of
+  `examples.jsonl`).
 - No silent cloud behavior, publishing, dataset upload, or auto-acceptance of
-  AI-generated dataset rows.
-
-## In progress — v0.6 (Provider Policy + Gate Foundation)
-
-- Role-based provider/model capability policy, enforced in the engine:
-  OpenAI/Anthropic evaluator-only by default; Ollama/local generation only when
-  explicitly approved; OpenRouter route-aware. Surfaced by a **Provider
-  Generation Policy** panel in the desktop Settings tab (shows which providers
-  may generate, and approve/revoke a local model). See
-  [`PROVIDER_POLICY.md`](PROVIDER_POLICY.md).
-- A gate runner producing serializable pass/warn/block reports over existing
-  schema, quality, leakage, PII, and evaluation logic, surfaced by a **Run Gates**
-  button in the desktop Quality tab (overall status + per-gate pass/warn/block
-  with repair hints). See [`GATES.md`](GATES.md).
-
-## In progress — v0.7 (Model Chat Lab / Arena)
-
-- Run a prompt suite across several models and capture responses side by side
-  (engine `arena-run` → `ArenaReport`). Responses are comparison artifacts, not
-  trainable rows.
-- Optional evaluator-only judging (`--judge-model`): a judge scores each
-  candidate and picks a winner, aggregated into per-model win counts and average
-  judge scores. Judging is an evaluator activity, so OpenAI/Anthropic are
-  permitted as the judge (enforced via provider policy).
-- Saved comparison reports: `arena-run --project-dir` persists the report under
-  project-local `arena_reports/`.
-- A desktop **Arena** tab: enter prompts (one per line) + a model list (+ an
-  optional judge), Run, and see side-by-side responses per prompt with per-model
-  win/score summary and the judge's winner marked.
-
-## In progress — v0.8 (Training Run Registry)
-
-- Durable, inspectable training run records under `training_runs/`: launch
-  metadata (argv, config, output dir), status lifecycle, pid, exit code,
-  checkpoints, and the before-eval link. The desktop writes records directly;
-  a run left `running` whose process is gone reconciles to `interrupted` on
-  load. A read-only run history shows past runs in the Training tab.
-- A `training_run` **regression gate** (`training-run-gate`): blocks when the
-  trained model regressed vs the baseline, and warns with "unverified linkage"
-  when the after-eval targeted the base model (provenance via the record's
-  `after_eval_model`). Surfaced by a "Gate run" button in the Training tab.
-
-## In progress — v0.9 (Model Artifact / Weight Registry)
-
-- Durable model artifact records under `model_artifacts/` (adapters/checkpoints
-  a run produced) with keep/reject status, referenced by path (never moved).
-  Base model + eval are resolved live through the source `run_id`, not stored.
-  **Path integrity** is re-checked on load — a record flags `missing` or
-  `modified` if the weights change on disk. A desktop Artifacts tab registers
-  from a run and keeps/rejects.
-- A weight card rendered live (`artifact-card`, never stored) with base model +
-  eval resolved through the run and the "unverified linkage" caveat, and a
-  `model_artifact` **promote gate** (`artifact-gate`) that blocks "keep" when the
-  artifact is `modified`/`missing` or the source run regressed. Keep in the
-  desktop is promote-gated — a block refuses the keep.
-
-## In progress — v1.0 (Dataset Version History & Lineage)
-
-- Durable dataset version records under `dataset_versions/` (engine): each pins
-  the dataset's identity — `row_count` + a streaming SHA-256 `content_fingerprint`
-  over the ordered per-row exact signatures (the same signature primitive used by
-  cleaning/quality/leakage) — plus links to source training runs, model
-  artifacts, an evaluation report, and a dataset gate report. Nothing derivable
-  is stored; scores/integrity/gate status resolve live in a version card.
-- Live drift detection: listing and the card recompute the current
-  `examples.jsonl` fingerprint and report `matches` / `drifted` / `unreadable`,
-  so a version can never silently misrepresent a changed dataset. The card leads
-  with a warning when drifted or a link is missing.
-- CLI `dataset-version-create` / `dataset-version-list` / `dataset-version-show`;
-  `--stamp-run` writes the dataset→run back-link (`source_snapshot_id`). The
-  engine only reads `examples.jsonl` and writes under `dataset_versions/` — it
-  never moves/copies/deletes the dataset. See [`VERSIONING.md`](VERSIONING.md).
-- A desktop **Versions** tab surfaces the history: a read-only list with a live
-  integrity badge (matches/drifted/unreadable), an opt-in **Capture version**
-  button, **View card**, and **Restore this version** (in-place). Capture and
-  listing go through the engine, so the desktop never recomputes the fingerprint
-  (integrity is verified, not guessed).
-- **In-place restore** (desktop): a confirmed "Restore this version" first
-  captures the current dataset as an undo version, and *refuses* if that undo
-  isn't a genuine recovery point (rows couldn't be stored); then the engine
-  reconstructs the selected version to a verified temp and the desktop atomically
-  swaps it onto `examples.jsonl`. Any failure before the swap leaves the dataset
-  untouched. The engine still never writes `examples.jsonl` — the desktop does.
-- Stable per-row identity + a content-addressed, deduped row store
-  (`dataset_versions/row_store.jsonl`) with a per-version ordered manifest,
-  captured in one pass with the fingerprint. `dataset-version-diff` compares two
-  versions (multiset added/removed/common + sample rows). Storing rows is the
-  default (`--no-store-rows` opts out; cost is surfaced, not silent). Rows are
-  stored canonically, so diff/restore normalize key order (not byte-identical).
-- `dataset-version-restore` reconstructs a version's rows from the store to an
-  `--output` file, verified against the recorded fingerprint (all-or-nothing,
-  overwrite-safe, atomic). The engine **refuses to write `examples.jsonl`** — the
-  dataset has one writer (the desktop); in-place restore is deferred to the desktop.
-- A desktop **diff view**: "Set diff base" pins a version, then "Diff base →
-  selected" renders `dataset-version-diff` (added/removed/common + samples) in the
-  detail pane (read-only; the engine owns the diff).
-- Deferred: auto-capture after import commit, reorder detection, store GC, and a
-  normalized row identity.
+  AI-generated dataset rows. Provider permissions are enforced in the engine, not
+  just the UI.
 
 ## Not built yet (future roadmap)
 
-Dataset Version diff & restore (v1.0.2+), Dataset Debt Dashboard (v1.1),
-Approved Provider Generation into a review queue (v1.2), Evaluation Suites &
-Chat Gates (v1.3).
+- **v1.2.1 — desktop surfacing of the AI Assist candidate gate.** The engine
+  attaches `candidate_gate` to AI Assist results (v1.2), but the desktop does not
+  yet display the verdict or add a confirm-on-block affordance. (In progress next.)
+- **Dashboard debt grade badge** (auto-run debt on project open) and **debt trend
+  over time** (grade/items across quality history).
+- **Auto-capture** of a dataset version after an import commit, dataset-version
+  **reorder detection**, row-store **GC** (must never prune manifest-referenced
+  rows), and a normalized row identity.
+- **v1.3 — Evaluation Suites & Chat Gates.**
+- Smaller deferrals: PII auto-redaction; a per-project gate-threshold editor in
+  the desktop; per-element object shapes for lists-of-objects in the validator.
