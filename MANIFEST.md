@@ -82,6 +82,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceExplorerService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceDocumentService.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/MainWindowViewModel.cs`
+- `apps/desktop/CorpusStudio.Desktop/ViewModels/StartCenterViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml`
@@ -110,6 +111,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingRunViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceFoundationTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceSystemTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceViewLayerTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TempProjectDirectory.cs`
 - `apps/desktop/CorpusStudio.Desktop.sln`
 - `apps/desktop/CorpusStudio.Desktop.sln.README.md`
