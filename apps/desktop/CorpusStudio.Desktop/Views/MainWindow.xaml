@@ -25,8 +25,8 @@
         <SolidColorBrush x:Key="ControlBackgroundBrush" Color="#F8FAFC" />
 
         <Style TargetType="{x:Type Button}">
-            <Setter Property="MinHeight" Value="30" />
-            <Setter Property="Padding" Value="10,5" />
+            <Setter Property="MinHeight" Value="34" />
+            <Setter Property="Padding" Value="12,7" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Foreground" Value="#102033" />
             <Setter Property="Background" Value="#F8FAFC" />
@@ -68,13 +68,13 @@
             <Setter Property="Background" Value="{StaticResource ControlBackgroundBrush}" />
             <Setter Property="BorderBrush" Value="#CAD5E3" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="7,5" />
+            <Setter Property="Padding" Value="9,7" />
             <Setter Property="SelectionBrush" Value="#BBD3FF" />
         </Style>
 
         <Style TargetType="{x:Type ComboBox}">
-            <Setter Property="MinHeight" Value="30" />
-            <Setter Property="Padding" Value="6,4" />
+            <Setter Property="MinHeight" Value="34" />
+            <Setter Property="Padding" Value="8,6" />
             <Setter Property="Background" Value="{StaticResource ControlBackgroundBrush}" />
             <Setter Property="BorderBrush" Value="#CAD5E3" />
         </Style>
@@ -83,7 +83,7 @@
             <Setter Property="Background" Value="{StaticResource ControlBackgroundBrush}" />
             <Setter Property="BorderBrush" Value="#CAD5E3" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="4" />
+            <Setter Property="Padding" Value="6" />
         </Style>
 
         <Style TargetType="{x:Type TabControl}">
@@ -92,8 +92,8 @@
         </Style>
 
         <Style TargetType="{x:Type TabItem}">
-            <Setter Property="Padding" Value="12,7" />
-            <Setter Property="Margin" Value="0,0,4,5" />
+            <Setter Property="Padding" Value="13,8" />
+            <Setter Property="Margin" Value="0,0,6,8" />
             <Setter Property="Foreground" Value="#64748B" />
             <Setter Property="FontSize" Value="12.5" />
             <Setter Property="Template">
@@ -134,15 +134,15 @@
             <Setter Property="BorderBrush" Value="#C7D7FE" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="12" />
-            <Setter Property="Padding" Value="9,4" />
-            <Setter Property="Margin" Value="0,0,6,6" />
+            <Setter Property="Padding" Value="11,6" />
+            <Setter Property="Margin" Value="0,0,8,8" />
         </Style>
 
         <SolidColorBrush x:Key="HeadingTextBrush" Color="#0F172A" />
 
         <Style x:Key="PrimaryButtonStyle" TargetType="{x:Type Button}">
-            <Setter Property="MinHeight" Value="30" />
-            <Setter Property="Padding" Value="14,5" />
+            <Setter Property="MinHeight" Value="34" />
+            <Setter Property="Padding" Value="16,7" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Foreground" Value="#FFFFFF" />
             <Setter Property="FontWeight" Value="SemiBold" />
@@ -185,7 +185,7 @@
             <Setter Property="FontSize" Value="13" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Foreground" Value="{StaticResource HeadingTextBrush}" />
-            <Setter Property="Margin" Value="0,0,0,6" />
+            <Setter Property="Margin" Value="0,0,0,9" />
         </Style>
 
         <Style x:Key="CaptionTextStyle" TargetType="{x:Type TextBlock}">
@@ -657,34 +657,34 @@
                 Background="{StaticResource SidebarBrush}"
                 BorderBrush="#1F2937"
                 BorderThickness="0,0,1,0"
-                Padding="18">
+                Padding="20,22">
             <StackPanel>
                 <TextBlock Text="Corpus Studio"
                            FontSize="24"
                            FontWeight="Bold"
                            Foreground="#F8FAFC" />
                 <TextBlock Text="Dataset Creation Studio"
-                           Margin="0,4,0,24"
+                           Margin="0,5,0,28"
                            Foreground="#CBD5E1" />
 
                 <Button Style="{StaticResource PrimaryButtonStyle}"
                         AutomationProperties.AutomationId="NewDatasetProjectButton"
                         Content="New Dataset Project"
-                        Margin="0,0,0,8"
+                        Margin="0,0,0,10"
                         Click="NewDatasetProjectButton_Click" />
                 <Button AutomationProperties.AutomationId="ImportDatasetButton"
                         Content="Import Dataset"
-                        Margin="0,0,0,8"
+                        Margin="0,0,0,10"
                         Click="ImportDatasetButton_Click" />
                 <Button AutomationProperties.AutomationId="ExportCenterButton"
                         Content="Export Center"
-                        Margin="0,0,0,24"
+                        Margin="0,0,0,28"
                         Click="ExportCenterButton_Click" />
 
                 <TextBlock Text="Projects"
                            FontWeight="Bold"
                            Foreground="#E2E8F0"
-                           Margin="0,0,0,8" />
+                           Margin="0,0,0,10" />
                 <TextBox AutomationProperties.AutomationId="ProjectSearchTextBox"
                          Text="{Binding ProjectSearch, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                          ToolTip="Filter projects by name, id, or schema"
@@ -708,7 +708,7 @@
         </Border>
 
         <Border Grid.Column="1"
-                Padding="20"
+                Padding="26,24"
                 Background="{StaticResource AppBackgroundBrush}">
             <Grid>
                 <Grid.RowDefinitions>
@@ -721,9 +721,9 @@
                         Background="{StaticResource PanelBrush}"
                         BorderBrush="{StaticResource PanelBorderBrush}"
                         BorderThickness="1"
-                        CornerRadius="8"
-                        Padding="16"
-                        Margin="0,0,0,14">
+                        CornerRadius="10"
+                        Padding="22,20"
+                        Margin="0,0,0,18">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -2567,9 +2567,12 @@
                 Background="{StaticResource PanelBrush}"
                 BorderBrush="{StaticResource PanelBorderBrush}"
                 BorderThickness="1,0,0,0"
-                Padding="18">
+                Padding="22,20">
             <ScrollViewer VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled">
+            <!-- Right panel: extra vertical rhythm so the stacked sections (Validation /
+                 Quality / Gates / Synthetic / History / Debt trend / Export) don't read as a
+                 single dense wall. Section headers get top margin via StackPanel spacing below. -->
             <StackPanel>
                 <TextBlock Text="Validation"
                            FontSize="18"
@@ -2601,7 +2604,8 @@
                 <TextBlock Text="Quality"
                            FontSize="18"
                            FontWeight="Bold"
-                           Foreground="#0F172A" />
+                           Foreground="#0F172A"
+                           Margin="0,22,0,0" />
                 <TextBox AutomationProperties.AutomationId="QualitySummaryTextBox"
                          Text="{Binding QualitySummary, Mode=OneWay}"
                          Margin="0,8,0,8"
@@ -2616,7 +2620,8 @@
                         Click="RunQualityButton_Click" />
                 <TextBlock Text="Gates"
                            FontWeight="SemiBold"
-                           Foreground="#334155" />
+                           Foreground="#334155"
+                           Margin="0,18,0,0" />
                 <TextBox AutomationProperties.AutomationId="GateSummaryTextBox"
                          Text="{Binding GateSummary, Mode=OneWay}"
                          Margin="0,8,0,8"
@@ -2633,7 +2638,8 @@
                         Click="RunGatesButton_Click" />
                 <TextBlock Text="Synthetic Triage"
                            FontWeight="SemiBold"
-                           Foreground="#334155" />
+                           Foreground="#334155"
+                           Margin="0,18,0,0" />
                 <Grid Margin="0,8,0,8">
                     <ListBox x:Name="SyntheticPatternIssuesListBox"
                              AutomationProperties.AutomationId="SyntheticPatternIssuesListBox"
@@ -2659,7 +2665,8 @@
                         Click="PrepareSyntheticBatchRewriteButton_Click" />
                 <TextBlock Text="History"
                            FontWeight="SemiBold"
-                           Foreground="#334155" />
+                           Foreground="#334155"
+                           Margin="0,18,0,0" />
                 <TextBox AutomationProperties.AutomationId="QualityHistoryTextBox"
                          Text="{Binding QualityHistorySummary, Mode=OneWay}"
                          Margin="0,8,0,12"
@@ -2669,7 +2676,7 @@
                          VerticalScrollBarVisibility="Auto" />
 
                 <!-- Debt trend mini-chart (v1.2.9): quality issue rate per run over time. -->
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                <StackPanel Orientation="Horizontal" Margin="0,18,0,4">
                     <TextBlock Text="Debt trend" FontWeight="SemiBold" Foreground="#334155"
                                VerticalAlignment="Center" />
                     <TextBlock Text="{Binding DebtTrendDirection}" FontWeight="SemiBold" FontSize="12"
@@ -2706,7 +2713,8 @@
                 <TextBlock Text="Export"
                            FontSize="18"
                            FontWeight="Bold"
-                           Foreground="#0F172A" />
+                           Foreground="#0F172A"
+                           Margin="0,24,0,0" />
                 <Button AutomationProperties.AutomationId="ValidateButton"
                         Content="_Validate"
                         Margin="0,8,0,8"
