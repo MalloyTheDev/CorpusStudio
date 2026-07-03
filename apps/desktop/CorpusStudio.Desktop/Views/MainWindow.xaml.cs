@@ -90,6 +90,9 @@ public partial class MainWindow : Window
         MessageBox.Show(this, "This panel is on the Workspace roadmap and isn't wired up yet.",
             "Coming soon", MessageBoxButton.OK, MessageBoxImage.Information);
 
+    private void ProblemsButton_Click(object sender, RoutedEventArgs e) =>
+        ViewModel.ToggleProblemsPanel();
+
     private async void StartNewProject_Click(object sender, RoutedEventArgs e) =>
         await LaunchNewProjectWizardAsync();
 

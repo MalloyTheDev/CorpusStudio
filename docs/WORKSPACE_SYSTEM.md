@@ -147,13 +147,27 @@ services and models — **no change to the existing project flow**:
 The **Start Center, New Project wizard, Open/Initialize flow, VS Code-style
 Explorer view, and editor/viewer tabs** are fully specified by an interactive
 design prototype (`Corpus Studio Workspace.dc.html`) and are wired to these
-services in the view layer as the next step.
+services in the view layer.
+
+**View-layer polish (shipped).** Explorer file-type chips (`ChipLabel`) and an
+active-document tab highlight; a single unified New Project path (both the Start
+Center and the Studio sidebar open the same workspace wizard).
+
+**Problems panel (shipped, v1.2.6).** A bottom-docked panel, toggled from the
+activity bar (with a block+warn count badge), that surfaces the latest dataset
+**gate** findings (schema / quality / PII-secrets / leakage) as a scannable,
+block-first list with per-finding fix hints. It reuses the existing engine
+`gate-run` — no new detection — and runs gates on demand from the panel. It is a
+**pre-export signal, not approval**: passes are counted but never shown as
+problems, a clean gate is labelled "not approval", and nothing is auto-fixed.
+`Models/ProblemItem` is the pure projection of a `GateResult`; the panel and the
+Studio gates tab share `ApplyGateReport` so they can never disagree.
 
 ## Roadmap (documented, not yet built)
 
-- **Problems panel** (schema errors, invalid rows, missing/unreferenced assets,
-  split leakage, PII/secrets, stale reports) and **Output / Logs panel** (engine,
-  validation, export, evaluation, AI Assist, training logs).
+- **Output / Logs panel** (engine, validation, export, evaluation, AI Assist,
+  training logs), and Problems-panel growth beyond gates (invalid-row jump-to,
+  missing/unreferenced assets, stale reports, resizable/dockable panel).
 - **Command Palette**, **Quick Open** (Ctrl+P), workspace **search**.
 - **Dataset indexing** (row counts, line offsets, fingerprints, asset references),
   **schema-aware `examples.jsonl` row grid**, large-file **virtualized viewer**.

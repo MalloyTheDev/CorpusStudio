@@ -68,4 +68,121 @@ public sealed class GateReportViewModelTests
         Assert.Contains("Gates could not run", vm.GateSummary);
         Assert.Contains("engine exploded", vm.GateSummary);
     }
+
+    // ---- Problems panel (v1.2.6) -------------------------------------------------
+
+    [Theory]
+    [InlineData("block", "⛔", 0, "#DC2626")]
+    [InlineData("warn", "⚠", 1, "#D97706")]
+    [InlineData("pass", "✅", 2, "#16A34A")]
+    [InlineData("weird", "•", 2, "#64748B")]
+    public void ProblemItem_FromGateResult_MapsSeverity(string status, string icon, int rank, string color)
+    {
+        var item = ProblemItem.FromGateResult(
+            new GateResult { Name = "n", Status = status, Message = "m" });
+        Assert.Equal(icon, item.SeverityIcon);
+        Assert.Equal(rank, item.SeverityRank);
+        Assert.Equal(color, item.SeverityColor);
+    }
+
+    [Theory]
+    [InlineData("block", true)]
+    [InlineData("warn", true)]
+    [InlineData("pass", false)]
+    [InlineData("", false)]
+    [InlineData("unknown", false)]
+    public void ProblemItem_IsProblem_OnlyBlockAndWarn(string status, bool expected) =>
+        Assert.Equal(expected, ProblemItem.IsProblem(new GateResult { Status = status }));
+
+    [Fact]
+    public void ProblemItem_HasFix_TracksRepairPresence()
+    {
+        Assert.True(ProblemItem.FromGateResult(new GateResult { Status = "warn", Repair = "do x" }).HasFix);
+        Assert.False(ProblemItem.FromGateResult(new GateResult { Status = "warn", Repair = null }).HasFix);
+    }
+
+    [Fact]
+    public void ApplyGateReport_PopulatesProblems_BlockFirst_PassesExcluded()
+    {
+        var vm = new MainWindowViewModel();
+        vm.ApplyGateReport(Report(
+            "block",
+            new GateResult { Name = "Schema", Status = "pass", Message = "ok" },
+            new GateResult { Name = "Quality", Status = "warn", Message = "thin coverage" },
+            new GateResult { Name = "PII", Status = "block", Message = "found api_key", Repair = "remove keys" }
+        ));
+
+        // Passes are not problems; block sorts before warn.
+        Assert.Equal(2, vm.Problems.Count);
+        Assert.Equal("PII", vm.Problems[0].Name);
+        Assert.Equal("Quality", vm.Problems[1].Name);
+        Assert.False(vm.IsNoProblems);
+
+        // Badge = block+warn count, coloured red because a block exists.
+        Assert.Equal("2", vm.ProblemsBadge);
+        Assert.True(vm.HasProblemsBadge);
+        Assert.Equal("#DC2626", vm.ProblemsBadgeColor);
+        Assert.Contains("2 problems", vm.ProblemsSummary);
+        Assert.Contains("1 block", vm.ProblemsSummary);
+        Assert.Contains("1 passed", vm.ProblemsSummary);
+    }
+
+    [Fact]
+    public void ApplyGateReport_WarnOnly_BadgeIsAmber()
+    {
+        var vm = new MainWindowViewModel();
+        vm.ApplyGateReport(Report(
+            "warn",
+            new GateResult { Name = "Quality", Status = "warn", Message = "thin" }
+        ));
+
+        Assert.Equal("1", vm.ProblemsBadge);
+        Assert.Equal("#D97706", vm.ProblemsBadgeColor);
+        Assert.Contains("1 problem ", vm.ProblemsSummary); // singular, trailing space
+    }
+
+    [Fact]
+    public void ApplyGateReport_CleanReport_NoProblems_NoBadge()
+    {
+        var vm = new MainWindowViewModel();
+        vm.ApplyGateReport(Report(
+            "pass",
+            new GateResult { Name = "Schema", Status = "pass", Message = "ok" },
+            new GateResult { Name = "PII", Status = "pass", Message = "clean" }
+        ));
+
+        Assert.Empty(vm.Problems);
+        Assert.True(vm.IsNoProblems);
+        Assert.Equal(string.Empty, vm.ProblemsBadge);
+        Assert.False(vm.HasProblemsBadge);
+        Assert.Contains("No problems", vm.ProblemsSummary);
+        Assert.Contains("all 2 checks passed", vm.ProblemsSummary);
+        Assert.Contains("not approval", vm.ProblemsSummary); // clean gate != approved
+    }
+
+    [Fact]
+    public void ResetProblems_ClearsListBadgeAndSummary()
+    {
+        var vm = new MainWindowViewModel();
+        vm.ApplyGateReport(Report("block",
+            new GateResult { Name = "PII", Status = "block", Message = "x" }));
+        Assert.NotEmpty(vm.Problems);
+
+        vm.ResetProblems();
+        Assert.Empty(vm.Problems);
+        Assert.True(vm.IsNoProblems);
+        Assert.Equal(string.Empty, vm.ProblemsBadge);
+        Assert.Contains("Run gates", vm.ProblemsSummary);
+    }
+
+    [Fact]
+    public void ToggleProblemsPanel_FlipsVisibility()
+    {
+        var vm = new MainWindowViewModel();
+        Assert.False(vm.ProblemsPanelVisible);
+        vm.ToggleProblemsPanel();
+        Assert.True(vm.ProblemsPanelVisible);
+        vm.ToggleProblemsPanel();
+        Assert.False(vm.ProblemsPanelVisible);
+    }
 }

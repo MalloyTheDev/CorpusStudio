@@ -369,9 +369,17 @@
                             <Path Data="M11,4 A7,7 0 1 0 11.001,4 M16.5,16.5 L21,21"
                                   Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" Fill="Transparent" Width="18" Height="18" Stretch="Uniform" />
                         </Button>
-                        <Button Click="ActivityRoadmapButton_Click" ToolTip="Problems — coming soon" Style="{StaticResource ActivityButtonStyle}" Opacity="0.6" Margin="0,2">
-                            <Path Data="M12,3 L21,20 H3 Z M12,9 V14 M12,17 H12.01"
-                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" Fill="Transparent" Width="18" Height="18" Stretch="Uniform" />
+                        <Button x:Name="ProblemsButton" Click="ProblemsButton_Click" ToolTip="Problems (dataset gate findings)" Style="{StaticResource ActivityButtonStyle}" Margin="0,2">
+                            <Grid Width="24" Height="24">
+                                <Path Data="M12,3 L21,20 H3 Z M12,9 V14 M12,17 H12.01"
+                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" Fill="Transparent" Width="18" Height="18" Stretch="Uniform" />
+                                <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-4,0"
+                                        Background="{Binding ProblemsBadgeColor}" CornerRadius="7" MinWidth="14" Height="14" Padding="3,0"
+                                        Visibility="{Binding HasProblemsBadge, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="{Binding ProblemsBadge}" Foreground="White" FontSize="9" FontWeight="SemiBold"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                            </Grid>
                         </Button>
                         <Button Click="ActivityRoadmapButton_Click" ToolTip="Output / Logs — coming soon" Style="{StaticResource ActivityButtonStyle}" Opacity="0.6" Margin="0,2">
                             <Path Data="M4,7 H20 M4,12 H20 M4,17 H14"
@@ -2640,6 +2648,69 @@
             </Border>
         </Border>
                 </Grid>
+
+                <!-- PROBLEMS PANEL — bottom-docked gate findings (v1.2.6). Overlays the bottom
+                     of whichever view is active; toggled from the activity-bar Problems button. -->
+                <Border VerticalAlignment="Bottom" Height="248" Background="#FFFFFF"
+                        BorderBrush="#E2E8F0" BorderThickness="0,1,0,0" Panel.ZIndex="50"
+                        Visibility="{Binding ProblemsPanelVisible, Converter={StaticResource BoolToVis}}">
+                    <DockPanel>
+                        <!-- header -->
+                        <Border DockPanel.Dock="Top" Height="38" Background="#F8FAFC"
+                                BorderBrush="#EEF2F7" BorderThickness="0,0,0,1">
+                            <Grid Margin="14,0">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="PROBLEMS" FontSize="11" FontWeight="Bold"
+                                               Foreground="#64748B" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding ProblemsSummary}" FontSize="11.5" Foreground="#475569"
+                                               Margin="14,0,0,0" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <Button Content="Run gates" Click="RunGatesButton_Click" Padding="12,5" Margin="0,0,8,0"
+                                            IsEnabled="{Binding HasActiveProject}" />
+                                    <Button Click="ProblemsButton_Click" ToolTip="Close panel" Style="{StaticResource ExplorerIconStyle}">
+                                        <Path Data="M5,5 L15,15 M15,5 L5,15" Stroke="#64748B" StrokeThickness="1.6"
+                                              Width="14" Height="14" Stretch="Uniform" />
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                        <!-- empty state (no problems / gates not run) -->
+                        <TextBlock DockPanel.Dock="Top" Margin="16,16" TextWrapping="Wrap" Foreground="#64748B" FontSize="12.5"
+                                   Visibility="{Binding IsNoProblems, Converter={StaticResource BoolToVis}}"
+                                   Text="No problems to show. Run gates to check this dataset — any schema, quality, PII, or leakage findings appear here. A clean gate means all checks passed; it is not approval." />
+                        <!-- findings list (block-first) -->
+                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                      Visibility="{Binding IsNoProblems, Converter={StaticResource InverseBoolToVis}}">
+                            <ItemsControl ItemsSource="{Binding Problems}" Margin="0,4">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Padding="14,7" BorderBrush="#F1F5F9" BorderThickness="0,0,0,1">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="{Binding SeverityIcon}" FontSize="13"
+                                                           Margin="0,0,10,0" VerticalAlignment="Top" />
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12.5"
+                                                               Foreground="{Binding SeverityColor}" />
+                                                    <TextBlock Text="{Binding Message}" FontSize="12" Foreground="#334155"
+                                                               TextWrapping="Wrap" Margin="0,1,0,0" />
+                                                    <TextBlock FontSize="11.5" Foreground="#2563EB" TextWrapping="Wrap" Margin="0,2,0,0"
+                                                               Visibility="{Binding HasFix, Converter={StaticResource BoolToVis}}">
+                                                        <Run Text="fix:" FontWeight="SemiBold" /><Run Text=" " /><Run Text="{Binding Fix}" />
+                                                    </TextBlock>
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Border>
             </Grid>
         </Grid>
 

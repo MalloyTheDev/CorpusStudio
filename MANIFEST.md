@@ -50,6 +50,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/LabBackendSettings.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/PreferenceExportResult.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/PreferenceReviewItem.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/ProblemItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ProjectIndexModels.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ProviderPolicyItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/QualityHistoryEntry.cs`
@@ -150,6 +151,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/decisions/0003-python-engine-csharp-desktop.md`
 - `docs/schemas/README.md`
 - `docs/screenshots/desktop-v1.2.png`
+- `docs/screenshots/problems-panel.png`
 - `docs/screenshots/workspace-explorer.png`
 - `docs/screenshots/workspace-wizard.png`
 - `engine/README.md`
