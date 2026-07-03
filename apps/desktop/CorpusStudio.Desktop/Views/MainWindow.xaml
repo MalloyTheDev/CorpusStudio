@@ -2497,6 +2497,8 @@
                 BorderBrush="{StaticResource PanelBorderBrush}"
                 BorderThickness="1,0,0,0"
                 Padding="18">
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
             <StackPanel>
                 <TextBlock Text="Validation"
                            FontSize="18"
@@ -2589,11 +2591,46 @@
                            Foreground="#334155" />
                 <TextBox AutomationProperties.AutomationId="QualityHistoryTextBox"
                          Text="{Binding QualityHistorySummary, Mode=OneWay}"
-                         Margin="0,8,0,24"
+                         Margin="0,8,0,12"
                          MinHeight="72"
                          IsReadOnly="True"
                          TextWrapping="Wrap"
                          VerticalScrollBarVisibility="Auto" />
+
+                <!-- Debt trend mini-chart (v1.2.9): quality issue rate per run over time. -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <TextBlock Text="Debt trend" FontWeight="SemiBold" Foreground="#334155"
+                               VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding DebtTrendDirection}" FontWeight="SemiBold" FontSize="12"
+                               Foreground="{Binding DebtTrendDirectionColor}" Margin="10,0,0,0"
+                               VerticalAlignment="Center"
+                               Visibility="{Binding HasDebtTrend, Converter={StaticResource BoolToVis}}" />
+                </StackPanel>
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                              HorizontalAlignment="Left" MaxWidth="520"
+                              Visibility="{Binding HasDebtTrendPoints, Converter={StaticResource BoolToVis}}">
+                    <Border Height="64" Background="#F8FAFC" BorderBrush="#EEF2F7" BorderThickness="1"
+                            CornerRadius="6" Padding="8,4">
+                        <ItemsControl AutomationProperties.AutomationId="DebtTrendChart"
+                                      ItemsSource="{Binding DebtTrend}" VerticalAlignment="Bottom">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Width="14" Height="{Binding BarHeight}" Margin="0,0,4,0"
+                                            VerticalAlignment="Bottom" Background="{Binding BarColor}"
+                                            CornerRadius="2,2,0,0" ToolTip="{Binding Tooltip}" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Border>
+                </ScrollViewer>
+                <TextBlock Text="{Binding DebtTrendSummary}"
+                           Style="{StaticResource CaptionTextStyle}"
+                           TextWrapping="Wrap" Margin="0,6,0,24" />
 
                 <TextBlock Text="Export"
                            FontSize="18"
@@ -2641,6 +2678,7 @@
                          HorizontalScrollBarVisibility="Auto"
                          VerticalScrollBarVisibility="Auto" />
             </StackPanel>
+            </ScrollViewer>
         </Border>
         <Border Grid.ColumnSpan="3"
                 Panel.ZIndex="100"
