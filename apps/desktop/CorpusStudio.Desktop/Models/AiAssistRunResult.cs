@@ -33,4 +33,11 @@ public sealed class AiAssistRunResult
 
     [JsonPropertyName("validation_errors")]
     public List<string> ValidationErrors { get; init; } = [];
+
+    // The pre-review gate over the AI-generated candidate rows (schema/quality/PII),
+    // attached by the engine (v1.2). A signal only — never approval. Null when the
+    // run produced no gate-able candidate rows, or on older engine payloads that
+    // predate the field (System.Text.Json leaves it null rather than failing).
+    [JsonPropertyName("candidate_gate")]
+    public GateReport? CandidateGate { get; init; }
 }

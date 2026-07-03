@@ -1319,12 +1319,23 @@
                                          TextWrapping="Wrap"
                                          VerticalScrollBarVisibility="Auto" />
 
-                                <TextBlock Grid.Row="1"
-                                           AutomationProperties.AutomationId="AiAssistQueueSummaryTextBlock"
-                                           Text="{Binding AiAssistQueueSummary, Mode=OneWay}"
-                                           FontWeight="SemiBold"
-                                           Margin="0,8,0,4"
-                                           TextWrapping="Wrap" />
+                                <StackPanel Grid.Row="1" Margin="0,8,0,4">
+                                    <TextBlock AutomationProperties.AutomationId="AiAssistQueueSummaryTextBlock"
+                                               Text="{Binding AiAssistQueueSummary, Mode=OneWay}"
+                                               FontWeight="SemiBold"
+                                               TextWrapping="Wrap" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                        <TextBlock Text="Candidate gate:"
+                                                   Margin="0,0,6,0" />
+                                        <!-- Colored gate verdict; hex string -> Brush conversion,
+                                             same idiom as the Debt tab's DebtGradeColor. Neutral gray
+                                             for null/unknown/not-run (never green). -->
+                                        <TextBlock AutomationProperties.AutomationId="AiAssistCandidateGateStatusTextBlock"
+                                                   Text="{Binding AiAssistCandidateGateStatus, Mode=OneWay}"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{Binding AiAssistCandidateGateColor, Mode=OneWay}" />
+                                    </StackPanel>
+                                </StackPanel>
 
                                 <WrapPanel Grid.Row="2"
                                            Margin="0,0,0,6">
