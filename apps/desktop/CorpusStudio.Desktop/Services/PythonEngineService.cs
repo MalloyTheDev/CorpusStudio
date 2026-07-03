@@ -1456,6 +1456,12 @@ public sealed class PythonEngineService
     public async Task<DebtReport> GetDatasetDebtAsync(string projectPath)
     {
         var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+        if (!File.Exists(examplesPath))
+        {
+            // No dataset on disk yet: report "no rows to assess" (N/A), matching the
+            // engine's empty-dataset contract, instead of surfacing a raw file error.
+            return new DebtReport { HasData = false, Grade = "N/A", ExampleCount = 0, Items = [] };
+        }
         var output = await RunEngineCommandAsync("dataset-debt", examplesPath, "--json");
         return ParseDebtReport(output);
     }

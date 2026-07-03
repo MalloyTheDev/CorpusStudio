@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text.Json.Serialization;
 
 namespace CorpusStudio.Desktop.Models;
@@ -79,7 +80,9 @@ public sealed class DebtDisplayItem
     /// <summary>Rate as a percentage where the engine gave one (rate is null for
     /// presence-based debts like secrets/PII and imbalance), else a raw count.</summary>
     public string Measure => Item.Rate.HasValue
-        ? $"{Item.Rate.Value * 100:0.0}% ({Item.Count})"
+        // Invariant culture: a percentage must render "60.0%", never "60,0%" on a
+        // comma-decimal locale (matches the convention in SplitSettings).
+        ? string.Format(CultureInfo.InvariantCulture, "{0:0.0}% ({1})", Item.Rate.Value * 100, Item.Count)
         : $"count {Item.Count}";
 
     public string DisplayName =>

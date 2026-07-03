@@ -1418,13 +1418,19 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         DebtSummary = !report.HasData
             ? "No rows to assess (grade N/A). Add examples, then run a debt check."
             : report.Items.Count == 0
-                ? "Grade A — no debt detected. This dataset is clean by the current checks."
+                ? $"Grade {report.Grade} — no debt detected. This dataset is clean by the current checks."
                 : $"Grade {report.Grade}: {report.Items.Count} item(s), highest-severity first. "
                   + "Fix the top items before training.";
     }
 
     public void SetDebtError(string message)
     {
+        // A failed check must never sit under a confident colored grade — collapse the
+        // verdict to the neutral unknown state (the honesty invariant).
+        DebtItems.Clear();
+        DebtGrade = "—";
+        DebtGradeColor = DebtNeutralGray;
+        DebtStale = false;
         DebtSummary = $"Debt check failed.{Environment.NewLine}{message}";
     }
 

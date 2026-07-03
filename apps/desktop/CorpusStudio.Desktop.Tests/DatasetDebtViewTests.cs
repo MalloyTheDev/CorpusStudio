@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Threading.Tasks;
 using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.Services;
 using CorpusStudio.Desktop.ViewModels;
@@ -133,6 +135,48 @@ public sealed class DatasetDebtViewTests
         Assert.Empty(vm.DebtItems);
         Assert.False(vm.DebtStale);
         Assert.DoesNotContain("changed", vm.DebtSummary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // --- audit fixes -------------------------------------------------------
+
+    [Fact]
+    public void SetDebtError_CollapsesGradeToNeutral()
+    {
+        // A failed check must not leave a confident colored grade on screen.
+        var vm = new MainWindowViewModel();
+        vm.ApplyDebtReport(Report("A", true));  // big green A shown
+        vm.SetDebtError("python not found");
+        Assert.Equal("—", vm.DebtGrade);
+        Assert.Equal("#64748B", vm.DebtGradeColor);  // gray, not green
+        Assert.Empty(vm.DebtItems);
+        Assert.Contains("failed", vm.DebtSummary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Measure_UsesInvariantCulture()
+    {
+        var original = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("de-DE");  // comma decimal
+            var item = new DebtDisplayItem(Item("high", "exact_duplicates", 6, 0.6));
+            Assert.Equal("60.0% (6)", item.Measure);  // never "60,0%"
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+        }
+    }
+
+    [Fact]
+    public async Task GetDatasetDebtAsync_MissingExamples_ReturnsNa()
+    {
+        // A project with no examples.jsonl degrades to N/A (no engine call, no raw error).
+        using var dir = new TempProjectDirectory();
+        var report = await new PythonEngineService().GetDatasetDebtAsync(dir.Path);
+        Assert.False(report.HasData);
+        Assert.Equal("N/A", report.Grade);
+        Assert.Empty(report.Items);
     }
 
     [Fact]
