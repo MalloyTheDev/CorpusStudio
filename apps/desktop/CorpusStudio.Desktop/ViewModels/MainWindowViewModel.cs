@@ -8,6 +8,16 @@ using CorpusStudio.Desktop.Models;
 
 namespace CorpusStudio.Desktop.ViewModels;
 
+/// <summary>Which top-level view the workspace shell shows (v1.2.4 Workspace System).
+/// StartCenter is a full-window screen (no activity bar); Files and Studio sit behind the
+/// activity bar. Studio is the existing 14-tab app, preserved intact.</summary>
+public enum WorkspaceShellMode
+{
+    StartCenter,
+    Files,
+    Studio,
+}
+
 public sealed class MainWindowViewModel : INotifyPropertyChanged
 {
     private string _activeProjectTitle = "New Dataset Project";
@@ -186,6 +196,45 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _selectedExampleJson = "Saved examples appear here after a project is selected.";
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    // ---- Workspace shell (v1.2.4 view layer) -------------------------------------
+    // Default is Studio, so the app opens exactly as today (plus the activity bar);
+    // the Start Center is reachable via the activity-bar brand button.
+    private WorkspaceShellMode _shellMode = WorkspaceShellMode.Studio;
+
+    /// <summary>The Start Center's own view-model (Recent Workspaces). Kept separate from
+    /// this class per the workspace design.</summary>
+    public StartCenterViewModel StartCenter { get; } = new();
+
+    public WorkspaceShellMode ShellMode
+    {
+        get => _shellMode;
+        private set
+        {
+            if (SetField(ref _shellMode, value))
+            {
+                OnPropertyChanged(nameof(IsStartCenter));
+                OnPropertyChanged(nameof(IsFiles));
+                OnPropertyChanged(nameof(IsStudio));
+            }
+        }
+    }
+
+    public bool IsStartCenter => _shellMode == WorkspaceShellMode.StartCenter;
+    public bool IsFiles => _shellMode == WorkspaceShellMode.Files;
+    public bool IsStudio => _shellMode == WorkspaceShellMode.Studio;
+
+    /// <summary>Show the full-window Start Center (refreshes the recent list first so a
+    /// workspace opened elsewhere and any missing-path flags are current).</summary>
+    public void ShowStartCenter()
+    {
+        StartCenter.Refresh();
+        ShellMode = WorkspaceShellMode.StartCenter;
+    }
+
+    public void ShowFiles() => ShellMode = WorkspaceShellMode.Files;
+
+    public void ShowStudio() => ShellMode = WorkspaceShellMode.Studio;
 
     public ObservableCollection<DatasetProjectListItem> Projects { get; } = [];
 

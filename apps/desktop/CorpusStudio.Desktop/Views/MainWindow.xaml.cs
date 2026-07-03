@@ -93,6 +93,8 @@ public partial class MainWindow : Window
             var createdPath = await CreateProjectAsync(dialog.ProjectRequest);
             Mouse.OverrideCursor = null;
 
+            RecordRecentWorkspace(createdPath, dialog.ProjectRequest.Name, dialog.ProjectRequest.SchemaId);
+
             ViewModel.AddProject(
                 dialog.ProjectRequest.ProjectId,
                 dialog.ProjectRequest.Name,
@@ -121,6 +123,94 @@ public partial class MainWindow : Window
             MessageBox.Show(this, ex.Message, "Corpus Studio", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
+
+    // ---- Workspace shell + Start Center (v1.2.4 view layer) ----------------------
+
+    private void ActivityHomeButton_Click(object sender, RoutedEventArgs e) => ViewModel.ShowStartCenter();
+
+    private void ActivityFilesButton_Click(object sender, RoutedEventArgs e) => ViewModel.ShowFiles();
+
+    private void ActivityStudioButton_Click(object sender, RoutedEventArgs e) => ViewModel.ShowStudio();
+
+    private void ActivitySettingsButton_Click(object sender, RoutedEventArgs e) => ViewModel.ShowStudio();
+
+    private void ActivityRoadmapButton_Click(object sender, RoutedEventArgs e) =>
+        MessageBox.Show(this, "This panel is on the Workspace roadmap and isn't wired up yet.",
+            "Coming soon", MessageBoxButton.OK, MessageBoxImage.Information);
+
+    private void StartNewProject_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel.ShowStudio();
+        NewDatasetProjectButton_Click(sender, e);
+    }
+
+    private void StartOpenFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog { Title = "Open dataset workspace folder" };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        var folder = dialog.FolderName;
+        string? schemaId = null;
+        var manifest = new WorkspaceManifestService().Read(folder);
+        if (manifest.Ok)
+        {
+            schemaId = manifest.Manifest!.SchemaId;
+        }
+
+        RecordRecentWorkspace(folder, System.IO.Path.GetFileName(folder.TrimEnd('/', '\\')), schemaId);
+        ViewModel.ShowStartCenter();
+        MessageBox.Show(
+            this,
+            $"Added to Recent Workspaces:\n{folder}\n\nLoading a workspace into the Studio tabs arrives in the next slice.",
+            "Workspace",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+    }
+
+    private void StartImport_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel.ShowStudio();
+        MessageBox.Show(
+            this,
+            "Import runs from the Studio view (Examples / Quarantine). A Start Center import entry is on the roadmap.",
+            "Import",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+    }
+
+    private void RecentOpen_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is RecentWorkspaceDisplayItem item)
+        {
+            RecordRecentWorkspace(item.Path, item.Name, item.SchemaId);
+            ViewModel.ShowStudio();
+        }
+    }
+
+    private void RecentPin_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true; // don't also trigger the card's open click
+        if ((sender as FrameworkElement)?.DataContext is RecentWorkspaceDisplayItem item)
+        {
+            ViewModel.StartCenter.SetPinned(item.Path, !item.IsPinned);
+        }
+    }
+
+    private void RecentRemove_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if ((sender as FrameworkElement)?.DataContext is RecentWorkspaceDisplayItem item)
+        {
+            ViewModel.StartCenter.Remove(item.Path);
+        }
+    }
+
+    private void RecordRecentWorkspace(string path, string name, string? schemaId) =>
+        ViewModel.StartCenter.RecordOpened(
+            path, name, schemaId, DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
 
     private async Task<string> CreateProjectAsync(NewProjectRequest request)
     {
