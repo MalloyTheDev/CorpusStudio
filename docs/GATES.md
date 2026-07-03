@@ -76,7 +76,9 @@ live weight card (never stored) carrying the same provenance caveat.
 verbatim — no new detection. It is a *pre-review signal, not a decision*:
 `review_required` stays true, a clean gate is not approval, and a block does not
 auto-reject (the candidate is preserved for the human, block-first). `candidate_gate`
-is `null` when a run proposes no rows. Provider policy is enforced *before* the
+is `null` when a run proposes no gate-able (JSON-object) rows; a batch that proposed
+content but no object rows still surfaces those via `validation_errors` plus an
+explicit "gate not run" warning. Provider policy is enforced *before* the
 provider call, so the gate step can never run on a generation a forbidden provider
 was not allowed to perform. See [`AI_ASSIST_LAB.md`](AI_ASSIST_LAB.md).
 

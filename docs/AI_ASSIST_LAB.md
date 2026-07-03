@@ -139,8 +139,10 @@ engine runs the **existing dataset gate runner** (`run_dataset_gates`) over the
 generated candidate rows and attaches the resulting `GateReport` to the result as
 `candidate_gate`. This closes the constraint's
 `generate -> validate -> quality -> gates -> human review` chain: the candidates
-now carry a schema/quality/PII/leakage `pass`/`warn`/`block` verdict **before**
-they reach the human review queue.
+now carry a schema/quality/PII `pass`/`warn`/`block` verdict **before**
+they reach the human review queue. (The dataset gate runner runs the
+input-present, schema, quality, and PII gates; cross-split leakage is a
+split-scope gate and is not part of candidate gating.)
 
 This is a **signal, not a decision**. It adds no new detection (it reuses the
 gate runner verbatim) and it changes nothing about acceptance:
@@ -150,8 +152,12 @@ gate runner verbatim) and it changes nothing about acceptance:
 - A **block** (e.g. a leaked key or secret in generated content) does *not*
   auto-reject: the candidate is still preserved for the human to see and reject.
   The gate leads with the block so it is impossible to miss.
-- `candidate_gate` is `null` when the run produced no candidate rows (there is
-  nothing to gate — never a fake pass).
+- `candidate_gate` is `null` when the run produced no gate-able candidate rows
+  (no JSON-object rows — nothing to gate, never a fake pass). If the model
+  proposed content but no line was a JSON object, the rows can't be gated by the
+  dataset runner; they are still surfaced via `validation_errors` and the result
+  carries an explicit "candidate gate not run" warning, so a null gate is never
+  silent.
 
 Policy is still enforced **first**: `authorize_action` runs before the provider
 is ever called, so an evaluator-only provider is blocked from a generating action

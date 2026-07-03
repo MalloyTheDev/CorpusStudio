@@ -141,6 +141,35 @@ def test_duplicate_heavy_candidate_batch_surfaces_quality_gate():
     assert result.review_required is True
 
 
+def test_proposed_non_object_rows_skip_gate_but_warn_loudly():
+    # The model proposes content, but no line is a JSON object (a bare array + a
+    # bare string). run_dataset_gates only gates object rows, so candidate_gate is
+    # None here — but the state must not be silent: the malformed content is still
+    # in suggested_jsonl + validation_errors, and the result carries an explicit
+    # "candidate gate not run" warning. review_required is still True.
+    class NonObjectBackend:
+        def generate(self, request):
+            return BackendGenerateResponse(
+                text=json.dumps(
+                    {
+                        "summary": "Proposed malformed rows.",
+                        "suggested_jsonl": "[1, 2, 3]\n\"a bare string\"",
+                        "tags": [],
+                        "warnings": [],
+                    }
+                ),
+                model_name="fake-model",
+            )
+
+    result = _run([], action="draft-example", backend=NonObjectBackend())
+
+    assert result.suggested_jsonl.strip() != ""  # content is preserved for the human
+    assert result.candidate_gate is None  # nothing gate-able (no object rows)
+    assert result.validation_errors  # the non-object lines are flagged
+    assert any("candidate gate not run" in warning for warning in result.warnings)
+    assert result.review_required is True
+
+
 def test_policy_denied_provider_raises_before_any_gating():
     # OpenAI is evaluator-only by default: it may not run a trainable-generating
     # action. authorize_action must raise BEFORE the provider is called, so the

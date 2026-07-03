@@ -43,10 +43,13 @@ class AiAssistResult(BaseModel):
     suggested_jsonl: str = ""
     warnings: list[str] = Field(default_factory=list)
     validation_errors: list[str] = Field(default_factory=list)
-    # A pre-review safety signal: the schema/quality/PII/leakage gate run over the
+    # A pre-review safety signal: the schema/quality/PII gate run over the
     # GENERATED candidate rows. It INFORMS the human reviewer — it is NOT approval,
     # and ``review_required`` stays True regardless of the verdict (nothing is
-    # auto-accepted or auto-rejected). ``None`` when the run produced no candidate rows.
+    # auto-accepted or auto-rejected). ``None`` when the run produced no gate-able
+    # candidate rows (no JSON-object rows). Malformed non-object candidate lines
+    # cannot be gated by the dataset gate runner; they are still surfaced through
+    # ``validation_errors`` and flagged in ``warnings`` so a null gate is never silent.
     candidate_gate: GateReport | None = None
 
 
@@ -135,16 +138,25 @@ def run_ai_assist(
         *_preference_strength_warnings(candidate_rows, schema_id, "suggested row"),
     ]
 
-    # Gate the GENERATED candidates (schema/quality/PII/leakage) before human review —
+    # Gate the GENERATED candidates (schema/quality/PII) before human review —
     # a pre-review safety signal, never approval. review_required is untouched and
-    # nothing is auto-accepted/auto-rejected. Reuses the existing gate runner. Policy
-    # was already enforced by authorize_action above, so this cannot run on a
-    # generation a forbidden provider was not allowed to perform.
+    # nothing is auto-accepted/auto-rejected. Reuses the existing dataset gate runner
+    # verbatim (no new detection). Policy was already enforced by authorize_action
+    # above, so this cannot run on a generation a forbidden provider was not allowed
+    # to perform. The runner operates on JSON-object rows, so the gate is None when
+    # there are none to gate; a batch that proposed content but no object rows gets an
+    # explicit "gate not run" warning below so a null gate is never silently absent.
     candidate_gate = (
         run_dataset_gates(candidate_rows, schema_id, target="ai_assist_candidates")
         if candidate_rows
         else None
     )
+    gate_skipped_warnings: list[str] = []
+    if candidate_gate is None and suggested_jsonl.strip():
+        gate_skipped_warnings.append(
+            "candidate gate not run: the model proposed content but no line was a "
+            "JSON object to gate; see validation errors."
+        )
 
     return AiAssistResult(
         schema_id=schema_id,
@@ -157,6 +169,7 @@ def run_ai_assist(
             *parse_warnings,
             *synthetic_warnings,
             *preference_warnings,
+            *gate_skipped_warnings,
         ],
         validation_errors=validation_errors,
         candidate_gate=candidate_gate,
