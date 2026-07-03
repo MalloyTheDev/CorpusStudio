@@ -201,7 +201,8 @@ For what is implemented today, see [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.
 and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 For hands-on setup, see [`docs/DEVELOPMENT_SETUP.md`](docs/DEVELOPMENT_SETUP.md).
-For copyable row formats, see [`docs/SCHEMA_EXAMPLES.md`](docs/SCHEMA_EXAMPLES.md).
+For copyable row formats, see [`docs/SCHEMA_SYSTEM.md`](docs/SCHEMA_SYSTEM.md) and
+the per-schema reference in [`docs/schemas/`](docs/schemas/README.md).
 For dataset card output, see [`docs/DATASET_CARD.md`](docs/DATASET_CARD.md).
 For provider generation policy and gates, see
 [`docs/PROVIDER_POLICY.md`](docs/PROVIDER_POLICY.md) and
@@ -210,8 +211,8 @@ For dataset version history (capture/diff/restore) and the debt ledger, see
 [`docs/VERSIONING.md`](docs/VERSIONING.md) and [`docs/DEBT.md`](docs/DEBT.md).
 For the staged labs, see [`docs/EVALUATION_LAB.md`](docs/EVALUATION_LAB.md),
 [`docs/AI_ASSIST_LAB.md`](docs/AI_ASSIST_LAB.md), and
-[`docs/TRAINING_LAB.md`](docs/TRAINING_LAB.md).
-For the training launcher architecture, see
-[`docs/TRAINING_LAUNCHER_DESIGN.md`](docs/TRAINING_LAUNCHER_DESIGN.md).
+[`docs/TRAINING.md`](docs/TRAINING.md) (config export, launcher architecture,
+run tracking).
+For dataset task walkthroughs, see [`docs/WORKFLOWS.md`](docs/WORKFLOWS.md).
 For public-release hygiene and known non-features, see
 [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md).
