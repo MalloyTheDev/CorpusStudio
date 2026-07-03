@@ -28,6 +28,15 @@ public sealed class OpenWorkspaceDocument : INotifyPropertyChanged
         set { if (_statusMessage != value) { _statusMessage = value; OnChanged(); } }
     }
 
+    private bool _isActive;
+    /// <summary>True when this document is the selected tab. Drives the active-tab highlight;
+    /// set by the explorer view-model so exactly one open document is active.</summary>
+    public bool IsActive
+    {
+        get => _isActive;
+        set { if (_isActive != value) { _isActive = value; OnChanged(); } }
+    }
+
     private string _originalContent = string.Empty;
     private string _textContent = string.Empty;
 

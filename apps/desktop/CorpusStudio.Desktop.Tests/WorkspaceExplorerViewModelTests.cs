@@ -211,4 +211,56 @@ public sealed class WorkspaceExplorerViewModelTests : IDisposable
         Assert.Empty(vm.OpenDocuments);
         Assert.True(vm.IsNoDocument);
     }
+
+    // ---- Polish (v1.2.5): chip label + active-tab flag ---------------------------
+
+    [Theory]
+    [InlineData(".jsonl", "JSONL")]
+    [InlineData(".md", "MD")]
+    [InlineData(".JSON", "JSON")]
+    [InlineData("", "")]
+    public void TreeNode_ChipLabel_UppercasesWithoutDot(string extension, string expected)
+    {
+        Assert.Equal(expected, new WorkspaceTreeNode { Extension = extension }.ChipLabel);
+    }
+
+    [Fact]
+    public void ActiveDocument_ExactlyOneTabIsActive()
+    {
+        var root = NewWorkspace();
+        File.WriteAllText(Path.Combine(root, "a.txt"), "a");
+        File.WriteAllText(Path.Combine(root, "b.txt"), "b");
+        var vm = Vm(root);
+
+        vm.OpenNode(FileNode("a.txt"));
+        var a = vm.ActiveDocument!;
+        vm.OpenNode(FileNode("b.txt"));
+        var b = vm.ActiveDocument!;
+
+        Assert.False(a.IsActive);
+        Assert.True(b.IsActive);
+        Assert.Single(vm.OpenDocuments, d => d.IsActive);
+
+        vm.ActiveDocument = a;               // switch back
+        Assert.True(a.IsActive);
+        Assert.False(b.IsActive);
+        Assert.Single(vm.OpenDocuments, d => d.IsActive);
+    }
+
+    [Fact]
+    public void ClosingActive_ReactivatedNeighbour_BecomesActive()
+    {
+        var root = NewWorkspace();
+        File.WriteAllText(Path.Combine(root, "a.txt"), "a");
+        File.WriteAllText(Path.Combine(root, "b.txt"), "b");
+        var vm = Vm(root);
+
+        vm.OpenNode(FileNode("a.txt"));
+        var a = vm.ActiveDocument!;
+        vm.OpenNode(FileNode("b.txt"));
+
+        vm.CloseDocument(vm.ActiveDocument!);   // close b (active)
+        Assert.Same(a, vm.ActiveDocument);
+        Assert.True(a.IsActive);
+    }
 }
