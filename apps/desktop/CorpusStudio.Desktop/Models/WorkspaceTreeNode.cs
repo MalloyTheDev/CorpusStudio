@@ -37,4 +37,21 @@ public sealed class WorkspaceTreeNode
     /// <summary>True for the dataset's core files (examples.jsonl and the manifest), so the
     /// single-writer rule can be surfaced distinctly in the UI.</summary>
     public bool IsDatasetCoreFile { get; init; }
+
+    /// <summary>Short uppercase tag for the file chip (e.g. "JSONL", "MD"); empty for
+    /// directories and extensionless files. Derived from <see cref="Extension"/>.</summary>
+    public string ChipLabel
+    {
+        get
+        {
+            var trimmed = (Extension ?? string.Empty).TrimStart('.');
+            if (trimmed.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            var upper = trimmed.ToUpperInvariant();
+            return upper.Length <= 5 ? upper : upper[..5];
+        }
+    }
 }

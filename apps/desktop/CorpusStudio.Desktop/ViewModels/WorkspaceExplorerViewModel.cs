@@ -60,8 +60,20 @@ public sealed class WorkspaceExplorerViewModel : INotifyPropertyChanged
         get => _activeDocument;
         set
         {
+            var previous = _activeDocument;
             if (SetField(ref _activeDocument, value))
             {
+                // Exactly one tab is active: clear the old, set the new.
+                if (previous is not null)
+                {
+                    previous.IsActive = false;
+                }
+
+                if (value is not null)
+                {
+                    value.IsActive = true;
+                }
+
                 RebuildMetadataRows();
                 OnChanged(nameof(IsNoDocument));
                 OnChanged(nameof(IsTextDocument));

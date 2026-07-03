@@ -451,7 +451,7 @@
                                                   Visibility="{Binding IsDirectory, Converter={StaticResource BoolToVis}}" />
                                             <Border Width="22" Height="14" CornerRadius="3" Background="#EEF4FF" VerticalAlignment="Center"
                                                     Visibility="{Binding IsDirectory, Converter={StaticResource InverseBoolToVis}}">
-                                                <TextBlock Text="{Binding Extension}" FontSize="7.5" FontWeight="Bold" Foreground="#1D4ED8" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding ChipLabel}" FontSize="7.5" FontWeight="Bold" Foreground="#1D4ED8" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                             </Border>
                                             <TextBlock Text="{Binding Name}" FontSize="12.5" Foreground="#334155" VerticalAlignment="Center" Margin="6,0,0,0" />
                                             <Ellipse Width="6" Height="6" Fill="#F59E0B" VerticalAlignment="Center" Margin="6,0,0,0" ToolTip="Generated · opens read-only"
@@ -481,20 +481,29 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="0,0,1,0" Cursor="Hand"
-                                                    MouseLeftButtonDown="DocTab_Click" Padding="13,0,8,0">
-                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                                    <TextBlock Text="{Binding DisplayName}" FontSize="12.5" Foreground="#0F172A" VerticalAlignment="Center" />
-                                                    <Path Data="M5,11 H19 V20 H5 Z M8,11 V8 A4,4 0 0 1 16,8 V11" Stroke="#94A3B8" StrokeThickness="1.5" Fill="Transparent" Width="11" Height="11" Stretch="Uniform" Margin="6,0,0,0" VerticalAlignment="Center"
-                                                          Visibility="{Binding IsReadOnly, Converter={StaticResource BoolToVis}}" />
-                                                    <Border MouseLeftButtonDown="DocTabClose_Click" Width="18" Height="18" CornerRadius="4" Background="Transparent" Margin="6,0,0,0" Cursor="Hand">
-                                                        <Grid>
-                                                            <Ellipse Width="8" Height="8" Fill="#2563EB" Visibility="{Binding IsDirty, Converter={StaticResource BoolToVis}}" />
-                                                            <TextBlock Text="✕" FontSize="11" Foreground="#64748B" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding IsDirty, Converter={StaticResource InverseBoolToVis}}" />
-                                                        </Grid>
-                                                    </Border>
-                                                </StackPanel>
-                                            </Border>
+                                            <Grid>
+                                                <Border x:Name="Tab" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="0,0,1,0" Cursor="Hand"
+                                                        MouseLeftButtonDown="DocTab_Click" Padding="13,0,8,0">
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding DisplayName}" FontSize="12.5" Foreground="#0F172A" VerticalAlignment="Center" />
+                                                        <Path Data="M5,11 H19 V20 H5 Z M8,11 V8 A4,4 0 0 1 16,8 V11" Stroke="#94A3B8" StrokeThickness="1.5" Fill="Transparent" Width="11" Height="11" Stretch="Uniform" Margin="6,0,0,0" VerticalAlignment="Center"
+                                                              Visibility="{Binding IsReadOnly, Converter={StaticResource BoolToVis}}" />
+                                                        <Border MouseLeftButtonDown="DocTabClose_Click" Width="18" Height="18" CornerRadius="4" Background="Transparent" Margin="6,0,0,0" Cursor="Hand">
+                                                            <Grid>
+                                                                <Ellipse Width="8" Height="8" Fill="#2563EB" Visibility="{Binding IsDirty, Converter={StaticResource BoolToVis}}" />
+                                                                <TextBlock Text="✕" FontSize="11" Foreground="#64748B" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding IsDirty, Converter={StaticResource InverseBoolToVis}}" />
+                                                            </Grid>
+                                                        </Border>
+                                                    </StackPanel>
+                                                </Border>
+                                                <Border x:Name="Accent" Height="2" VerticalAlignment="Top" Background="#2563EB" Visibility="Collapsed" />
+                                            </Grid>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                                    <Setter TargetName="Tab" Property="Background" Value="#FFFFFF" />
+                                                    <Setter TargetName="Accent" Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </DataTemplate.Triggers>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
