@@ -270,7 +270,7 @@ public sealed class WorkspaceWizardViewModel : INotifyPropertyChanged
         }
     }
 
-    /// <summary>Mirror of NewProjectWindow.Slugify: lowercase, non-alphanumeric → '_',
+    /// <summary>Slugify a project name into an id: lowercase, non-alphanumeric → '_',
     /// collapse runs, trimmed.</summary>
     private static string Slugify(string value)
     {

@@ -48,7 +48,6 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/ModelArtifactRecord.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ImportPreviewReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/LabBackendSettings.cs`
-- `apps/desktop/CorpusStudio.Desktop/Models/NewProjectRequest.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/PreferenceExportResult.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/PreferenceReviewItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ProjectIndexModels.cs`
@@ -88,8 +87,6 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/WorkspaceWizardViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml.cs`
-- `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml`
-- `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/WorkspaceWizardWindow.xaml`
 - `apps/desktop/CorpusStudio.Desktop/Views/WorkspaceWizardWindow.xaml.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/AiAssistCandidateGateTests.cs`

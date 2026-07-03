@@ -1979,17 +1979,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ProjectIndexSummary = $"Project index update failed.{Environment.NewLine}{message}";
     }
 
-    public void ApplyNewProjectTemplate(string exampleText)
-    {
-        if (string.IsNullOrWhiteSpace(exampleText))
-        {
-            return;
-        }
-
-        DraftText = exampleText;
-        ValidationSummary = "Loaded the schema's example row. Edit the values, then Save Example.";
-    }
-
     public bool IsBusy
     {
         get => _isBusy;

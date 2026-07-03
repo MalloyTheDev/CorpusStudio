@@ -71,58 +71,10 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void NewDatasetProjectButton_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            var schemas = await _engineService.GetSchemasAsync();
-            Mouse.OverrideCursor = null;
-
-            var dialog = new NewProjectWindow(schemas)
-            {
-                Owner = this
-            };
-
-            if (dialog.ShowDialog() != true || dialog.ProjectRequest is null)
-            {
-                return;
-            }
-
-            Mouse.OverrideCursor = Cursors.Wait;
-            var createdPath = await CreateProjectAsync(dialog.ProjectRequest);
-            Mouse.OverrideCursor = null;
-
-            RecordRecentWorkspace(createdPath, dialog.ProjectRequest.Name, dialog.ProjectRequest.SchemaId);
-
-            ViewModel.AddProject(
-                dialog.ProjectRequest.ProjectId,
-                dialog.ProjectRequest.Name,
-                dialog.ProjectRequest.SchemaId,
-                dialog.ProjectRequest.SchemaName,
-                createdPath
-            );
-            ViewModel.SetExamples(_engineService.LoadExamples(createdPath));
-            ViewModel.SetImportQuarantineItems(_engineService.LoadImportQuarantineItems(createdPath));
-            await RefreshQualityAsync(recordHistory: false);
-
-            var template = schemas.FirstOrDefault(schema => schema.Id == dialog.ProjectRequest.SchemaId);
-            ViewModel.ApplyNewProjectTemplate(template?.ExampleText ?? string.Empty);
-
-            MessageBox.Show(
-                this,
-                $"Created project at:\n{createdPath}",
-                "Project Created",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information
-            );
-        }
-        catch (Exception ex)
-        {
-            Mouse.OverrideCursor = null;
-            MessageBox.Show(this, ex.Message, "Corpus Studio", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
+    // The Studio-sidebar "New Dataset Project" button and the Start Center both open the
+    // single workspace wizard (v1.2.5 unification) — one creation UX, one on-disk result.
+    private async void NewDatasetProjectButton_Click(object sender, RoutedEventArgs e) =>
+        await LaunchNewProjectWizardAsync();
 
     // ---- Workspace shell + Start Center (v1.2.4 view layer) ----------------------
 
@@ -138,7 +90,13 @@ public partial class MainWindow : Window
         MessageBox.Show(this, "This panel is on the Workspace roadmap and isn't wired up yet.",
             "Coming soon", MessageBoxButton.OK, MessageBoxImage.Information);
 
-    private async void StartNewProject_Click(object sender, RoutedEventArgs e)
+    private async void StartNewProject_Click(object sender, RoutedEventArgs e) =>
+        await LaunchNewProjectWizardAsync();
+
+    /// <summary>Shared New Project flow used by both the Start Center and the Studio sidebar:
+    /// run the workspace wizard, and on success open the scaffolded folder as the active
+    /// workspace. There is intentionally only one creation path.</summary>
+    private async Task LaunchNewProjectWizardAsync()
     {
         try
         {
@@ -566,15 +524,6 @@ public partial class MainWindow : Window
         return dialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(input.Text)
             ? input.Text.Trim()
             : null;
-    }
-
-    private async Task<string> CreateProjectAsync(NewProjectRequest request)
-    {
-        return (await _engineService.CreateProjectAsync(
-            request.ProjectId,
-            request.Name,
-            request.SchemaId
-        )).Trim();
     }
 
     private async void ImportDatasetButton_Click(object sender, RoutedEventArgs e)
