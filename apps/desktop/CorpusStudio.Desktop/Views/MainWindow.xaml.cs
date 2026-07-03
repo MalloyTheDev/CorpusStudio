@@ -30,7 +30,13 @@ public partial class MainWindow : Window
         InitializeComponent();
         Loaded += MainWindow_Loaded;
         Closing += MainWindow_Closing;
+        // Record every engine CLI invocation in the Output / Logs panel. The event fires on a
+        // background thread, so marshal onto the dispatcher before touching the view-model.
+        _engineService.CommandCompleted += OnEngineCommandCompleted;
     }
+
+    private void OnEngineCommandCompleted(object? sender, EngineLogEntry entry) =>
+        Dispatcher.BeginInvoke(() => ViewModel.AppendEngineLog(entry));
 
     private MainWindowViewModel ViewModel => (MainWindowViewModel)DataContext;
 
@@ -92,6 +98,12 @@ public partial class MainWindow : Window
 
     private void ProblemsButton_Click(object sender, RoutedEventArgs e) =>
         ViewModel.ToggleProblemsPanel();
+
+    private void OutputButton_Click(object sender, RoutedEventArgs e) =>
+        ViewModel.ToggleOutputPanel();
+
+    private void ClearOutputButton_Click(object sender, RoutedEventArgs e) =>
+        ViewModel.ClearOutputLog();
 
     private async void StartNewProject_Click(object sender, RoutedEventArgs e) =>
         await LaunchNewProjectWizardAsync();

@@ -32,6 +32,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _problemsSummary = "Run gates to check this dataset for problems.";
     private string _problemsBadge = string.Empty;
     private string _problemsBadgeColor = GateReport.StatusColor(null);
+    private bool _outputPanelVisible;
     private string _arenaPromptsInput = string.Empty;
     private string _arenaModelsInput = string.Empty;
     private string _arenaJudgeModelInput = string.Empty;
@@ -490,6 +491,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             if (SetField(ref _problemsPanelVisible, value))
             {
                 OnPropertyChanged(nameof(IsNoProblems));
+                // Problems and Output share the bottom dock — only one is ever open.
+                if (value)
+                {
+                    OutputPanelVisible = false;
+                }
             }
         }
     }
@@ -566,6 +572,74 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ProblemsBadgeColor = GateReport.StatusColor(null);
         ProblemsSummary = "Run gates to check this dataset for problems.";
         OnPropertyChanged(nameof(IsNoProblems));
+    }
+
+    // ---- Workspace Output / Logs panel (v1.2.7) ----------------------------------
+    // An "Output channel" recording engine CLI activity (verb, outcome, duration, stderr on
+    // failure). Ephemeral in-memory ring buffer; shares the bottom dock with Problems.
+
+    /// <summary>Cap on retained log lines — a diagnostic tail, not a full history.</summary>
+    public const int MaxOutputLogEntries = 200;
+
+    /// <summary>Engine command log, newest last. Bounded to <see cref="MaxOutputLogEntries"/>.</summary>
+    public ObservableCollection<EngineLogEntry> OutputLog { get; } = [];
+
+    public bool OutputPanelVisible
+    {
+        get => _outputPanelVisible;
+        private set
+        {
+            if (SetField(ref _outputPanelVisible, value))
+            {
+                OnPropertyChanged(nameof(IsNoOutput));
+                if (value)
+                {
+                    ProblemsPanelVisible = false;
+                }
+            }
+        }
+    }
+
+    public bool IsNoOutput => OutputLog.Count == 0;
+
+    public bool HasOutput => OutputLog.Count > 0;
+
+    public string OutputSummary => OutputLog.Count == 0
+        ? "Engine activity will appear here as you run commands."
+        : $"{OutputLog.Count} engine command{(OutputLog.Count == 1 ? string.Empty : "s")} this session"
+          + (OutputLog.Count >= MaxOutputLogEntries ? " (oldest trimmed)" : string.Empty);
+
+    public void ToggleOutputPanel() => OutputPanelVisible = !OutputPanelVisible;
+
+    public void ShowOutputPanel() => OutputPanelVisible = true;
+
+    /// <summary>Append one engine-invocation log line, trimming the oldest past the cap. Must be
+    /// called on the UI thread (the service raises its event on a background thread; the view
+    /// marshals it).</summary>
+    public void AppendEngineLog(EngineLogEntry entry)
+    {
+        if (entry is null)
+        {
+            return;
+        }
+
+        OutputLog.Add(entry);
+        while (OutputLog.Count > MaxOutputLogEntries)
+        {
+            OutputLog.RemoveAt(0);
+        }
+
+        OnPropertyChanged(nameof(IsNoOutput));
+        OnPropertyChanged(nameof(HasOutput));
+        OnPropertyChanged(nameof(OutputSummary));
+    }
+
+    public void ClearOutputLog()
+    {
+        OutputLog.Clear();
+        OnPropertyChanged(nameof(IsNoOutput));
+        OnPropertyChanged(nameof(HasOutput));
+        OnPropertyChanged(nameof(OutputSummary));
     }
 
     public string ProviderPolicySummary

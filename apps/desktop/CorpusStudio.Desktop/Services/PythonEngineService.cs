@@ -23,6 +23,12 @@ public sealed class PythonEngineService
 
     private CancellationTokenSource? _currentRunCts;
 
+    /// <summary>Raised after every engine CLI invocation completes (success, failure, or
+    /// cancellation) so the Output / Logs panel can record engine activity (v1.2.7). Fires on a
+    /// background thread — subscribers must marshal to the UI thread. Never carries secrets
+    /// (API keys travel via the environment, not argv).</summary>
+    public event EventHandler<EngineLogEntry>? CommandCompleted;
+
     /// <summary>Cancel the engine command currently running, if any, killing its
     /// process tree. Backs the desktop Cancel affordance for long local runs.</summary>
     public void CancelRunningEngineCommand() => _currentRunCts?.Cancel();
@@ -2527,6 +2533,7 @@ public sealed class PythonEngineService
 
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();
+        var stopwatch = Stopwatch.StartNew();
 
         try
         {
@@ -2546,6 +2553,8 @@ public sealed class PythonEngineService
                 // Process may have exited between the HasExited check and Kill.
             }
 
+            stopwatch.Stop();
+            EmitCommandLog(arguments, exitCode: -1, stopwatch.ElapsedMilliseconds, stderr: null, cancelled: true);
             throw new OperationCanceledException("The engine command was cancelled.");
         }
         finally
@@ -2558,8 +2567,32 @@ public sealed class PythonEngineService
 
         var output = await outputTask;
         var error = await errorTask;
+        stopwatch.Stop();
+        EmitCommandLog(arguments, process.ExitCode, stopwatch.ElapsedMilliseconds, error, cancelled: false);
 
         return new EngineProcessResult(process.ExitCode, output, error);
+    }
+
+    /// <summary>Raise <see cref="CommandCompleted"/> for one engine invocation. Best-effort:
+    /// a throwing subscriber must never break the engine call, so failures are swallowed.</summary>
+    private void EmitCommandLog(string[] arguments, int exitCode, long durationMs, string? stderr, bool cancelled)
+    {
+        var handler = CommandCompleted;
+        if (handler is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var timestamp = DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+            var entry = EngineLogEntry.FromInvocation(arguments, exitCode, durationMs, stderr, timestamp, cancelled);
+            handler(this, entry);
+        }
+        catch
+        {
+            // The Output panel is a diagnostic convenience; it must never affect engine calls.
+        }
     }
 
     private static string WriteDraftToTempJsonl(string draftText)

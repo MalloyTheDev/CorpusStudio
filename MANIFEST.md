@@ -33,6 +33,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/DatasetProjectListItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/DatasetSchema.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/DesktopSettings.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/EngineLogEntry.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/EvaluationExampleResult.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/EvaluationFailureFilter.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/EvaluationReport.cs`
@@ -103,6 +104,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/EvaluationFailureFilterServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/GateReportViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ImportCommitServiceTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/OutputLogViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ProjectSearchViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ProviderPolicyViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ReviewedFixServiceTests.cs`
@@ -151,6 +153,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/decisions/0003-python-engine-csharp-desktop.md`
 - `docs/schemas/README.md`
 - `docs/screenshots/desktop-v1.2.png`
+- `docs/screenshots/output-panel.png`
 - `docs/screenshots/problems-panel.png`
 - `docs/screenshots/workspace-explorer.png`
 - `docs/screenshots/workspace-wizard.png`
