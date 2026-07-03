@@ -43,6 +43,13 @@ public sealed class AiAssistReviewQueueItem
     [JsonPropertyName("validation_errors")]
     public List<string> ValidationErrors { get; init; } = [];
 
+    // The pre-review candidate gate captured at generation time (v1.2.1). Persisted
+    // so a reviewer returning to this queued item still sees the verdict. Null on
+    // items saved before this field existed -> rendered as "no gate recorded", never
+    // a fake pass.
+    [JsonPropertyName("candidate_gate")]
+    public GateReport? CandidateGate { get; init; }
+
     [JsonIgnore]
     public string DisplayName => $"{CreatedAt:yyyy-MM-dd HH:mm} | {Action} | {Model} | {ReviewState}";
 
@@ -68,6 +75,11 @@ public sealed class AiAssistReviewQueueItem
                 lines.Add("Suggested JSONL:");
                 lines.Add(SuggestedJsonl.TrimEnd());
             }
+
+            lines.Add("");
+            lines.Add(GateReport.RenderCandidateGate(
+                CandidateGate,
+                !string.IsNullOrWhiteSpace(SuggestedJsonl)));
 
             if (Warnings.Count > 0)
             {
@@ -108,6 +120,7 @@ public sealed class AiAssistReviewQueueItem
             SuggestedJsonl = result.SuggestedJsonl,
             Warnings = result.Warnings,
             ValidationErrors = result.ValidationErrors,
+            CandidateGate = result.CandidateGate,
         };
     }
 }

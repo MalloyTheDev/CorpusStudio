@@ -85,6 +85,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _aiAssistDiffSummary =
         "Select a queued AI Assist review to compare source and suggestion.";
     private string _aiAssistSuggestionJsonl = string.Empty;
+    // The candidate gate for the current fresh run (before a queue item is selected).
+    // When a queue item is selected, its persisted gate takes precedence (see
+    // ActiveAiAssistCandidateGate). Never means "approved".
+    private GateReport? _aiAssistCandidateGate;
+    private string _aiAssistCandidateGateStatus = "—";
+    private string _aiAssistCandidateGateColor = "#64748B";  // neutral gray until a run/selection sets it
     private string _aiAssistQueueSummary = "AI Assist review queue appears after suggestions are generated.";
     private string _aiAssistQueueFilter = "All";
     private string _aiAssistQueueSearch = string.Empty;
@@ -953,6 +959,34 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         private set => SetField(ref _aiAssistDiffSummary, value);
     }
 
+    /// <summary>Short candidate-gate status label for the AI Assist tab header
+    /// (e.g. "PASS", "BLOCK", "not run", "n/a", "—"). Informational — never approval.</summary>
+    public string AiAssistCandidateGateStatus
+    {
+        get => _aiAssistCandidateGateStatus;
+        private set => SetField(ref _aiAssistCandidateGateStatus, value);
+    }
+
+    /// <summary>Foreground hex for the candidate-gate status label. Neutral gray for
+    /// null/unknown/"not run"/"n/a" — never green (see GateReport.StatusColor).</summary>
+    public string AiAssistCandidateGateColor
+    {
+        get => _aiAssistCandidateGateColor;
+        private set => SetField(ref _aiAssistCandidateGateColor, value);
+    }
+
+    /// <summary>The gate that applies to the suggestion that would move to the draft:
+    /// the selected queue item's persisted gate, else the current run's gate. Mirrors
+    /// the same fallback MoveAiAssistSuggestionToDraft uses.</summary>
+    private GateReport? ActiveAiAssistCandidateGate =>
+        SelectedAiAssistReviewQueueItem?.CandidateGate ?? _aiAssistCandidateGate;
+
+    /// <summary>True only when the active candidate gate BLOCKS. Drives the
+    /// confirm-on-block prompt before the suggestion is moved to the draft. Pure —
+    /// the gate only informs; the human still decides (never auto-rejected).</summary>
+    public bool SelectedAiAssistCandidateGateBlocks =>
+        string.Equals(ActiveAiAssistCandidateGate?.OverallStatus, "block", StringComparison.OrdinalIgnoreCase);
+
     public AiAssistReviewQueueItem? SelectedAiAssistReviewQueueItem
     {
         get => _selectedAiAssistReviewQueueItem;
@@ -963,6 +997,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 if (value is null)
                 {
                     ClearAiAssistComparison();
+                    // No item selected: the header reverts to the current fresh-run gate
+                    // (ActiveAiAssistCandidateGate falls back to it), so the block-confirm
+                    // and label stay consistent with what would move to the draft.
+                    ApplyCandidateGateStatus(
+                        _aiAssistCandidateGate,
+                        !string.IsNullOrWhiteSpace(_aiAssistSuggestionJsonl));
                 }
                 else
                 {
@@ -2798,9 +2838,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public void ApplyAiAssistRunResult(AiAssistRunResult result)
     {
         _aiAssistSuggestionJsonl = result.SuggestedJsonl;
-        var suggestionStatus = string.IsNullOrWhiteSpace(result.SuggestedJsonl)
-            ? "none"
-            : "available for review";
+        _aiAssistCandidateGate = result.CandidateGate;
+        var hasSuggestedContent = !string.IsNullOrWhiteSpace(result.SuggestedJsonl);
+        ApplyCandidateGateStatus(result.CandidateGate, hasSuggestedContent);
+        var suggestionStatus = hasSuggestedContent
+            ? "available for review"
+            : "none";
         AiAssistSummary = string.Join(
             Environment.NewLine,
             [
@@ -2809,6 +2852,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 $"Review state: {result.ReviewState}",
                 $"Review required: {(result.ReviewRequired ? "yes" : "no")}",
                 $"Suggested JSONL: {suggestionStatus}",
+                $"Candidate gate: {AiAssistCandidateGateStatus}",
                 $"Warnings: {result.Warnings.Count}",
                 $"Validation errors: {result.ValidationErrors.Count}",
             ]
@@ -2826,6 +2870,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             lines.Add("Suggested JSONL:");
             lines.Add(result.SuggestedJsonl.TrimEnd());
         }
+
+        lines.Add("");
+        lines.Add(GateReport.RenderCandidateGate(result.CandidateGate, hasSuggestedContent));
 
         if (result.Warnings.Count > 0)
         {
@@ -2849,6 +2896,23 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         AiAssistDiffSummary = string.IsNullOrWhiteSpace(result.SuggestedJsonl)
             ? "No suggested JSONL to compare."
             : "Suggested JSONL is available for side-by-side review after queue selection.";
+    }
+
+    // Sets the short candidate-gate status label + color for the tab header, honest
+    // across the three states: a real gate -> its status; content but no gate ->
+    // "not run"; nothing to gate -> "n/a". Never green for null/unknown.
+    private void ApplyCandidateGateStatus(GateReport? gate, bool hasSuggestedContent)
+    {
+        if (gate is not null)
+        {
+            AiAssistCandidateGateStatus = (gate.OverallStatus ?? string.Empty).ToUpperInvariant();
+            AiAssistCandidateGateColor = GateReport.StatusColor(gate.OverallStatus);
+        }
+        else
+        {
+            AiAssistCandidateGateStatus = hasSuggestedContent ? "not run" : "n/a";
+            AiAssistCandidateGateColor = GateReport.StatusColor(null);
+        }
     }
 
     public void SetAiAssistReviewQueue(IEnumerable<AiAssistReviewQueueItem> items)
@@ -3182,13 +3246,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public void ApplyAiAssistReviewQueueItem(AiAssistReviewQueueItem item)
     {
         _aiAssistSuggestionJsonl = item.SuggestedJsonl;
+        var hasSuggestedContent = !string.IsNullOrWhiteSpace(item.SuggestedJsonl);
+        ApplyCandidateGateStatus(item.CandidateGate, hasSuggestedContent);
         AiAssistSummary = string.Join(
             Environment.NewLine,
             [
                 $"Action: {item.Action}",
                 $"Model: {item.Model}",
                 $"Review state: {item.ReviewState}",
-                $"Suggested JSONL: {(string.IsNullOrWhiteSpace(item.SuggestedJsonl) ? "none" : "available for review")}",
+                $"Suggested JSONL: {(hasSuggestedContent ? "available for review" : "none")}",
+                $"Candidate gate: {AiAssistCandidateGateStatus}",
                 $"Warnings: {item.Warnings.Count}",
                 $"Validation errors: {item.ValidationErrors.Count}",
             ]
