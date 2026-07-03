@@ -68,11 +68,19 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/RecentWorkspaceRecord.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceFileKind.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceProjectManifest.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceTemplateDefinition.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceTreeNode.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/OpenWorkspaceDocument.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceFileMetadata.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/PythonEngineService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/RecentWorkspaceService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/TrainingProcessRunner.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceManifestService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspacePathSafety.cs`
+- `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceLayout.cs`
+- `apps/desktop/CorpusStudio.Desktop/Services/ProjectTemplateService.cs`
+- `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceExplorerService.cs`
+- `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceDocumentService.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/MainWindowViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml.cs`
@@ -101,6 +109,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingProcessRunnerTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingRunViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceFoundationTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceSystemTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TempProjectDirectory.cs`
 - `apps/desktop/CorpusStudio.Desktop.sln`
 - `apps/desktop/CorpusStudio.Desktop.sln.README.md`
