@@ -381,7 +381,7 @@
                                 </Border>
                             </Grid>
                         </Button>
-                        <Button Click="ActivityRoadmapButton_Click" ToolTip="Output / Logs — coming soon" Style="{StaticResource ActivityButtonStyle}" Opacity="0.6" Margin="0,2">
+                        <Button x:Name="OutputButton" Click="OutputButton_Click" ToolTip="Output / Logs (engine activity)" Style="{StaticResource ActivityButtonStyle}" Margin="0,2">
                             <Path Data="M4,7 H20 M4,12 H20 M4,17 H14"
                                   Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" Width="18" Height="18" Stretch="Uniform" />
                         </Button>
@@ -2704,6 +2704,69 @@
                                                     </TextBlock>
                                                 </StackPanel>
                                             </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Border>
+
+                <!-- OUTPUT / LOGS PANEL — bottom-docked engine activity (v1.2.7). Shares the dock
+                     with Problems (only one open at a time); toggled from the activity bar. -->
+                <Border VerticalAlignment="Bottom" Height="248" Background="#FFFFFF"
+                        BorderBrush="#E2E8F0" BorderThickness="0,1,0,0" Panel.ZIndex="50"
+                        Visibility="{Binding OutputPanelVisible, Converter={StaticResource BoolToVis}}">
+                    <DockPanel>
+                        <!-- header -->
+                        <Border DockPanel.Dock="Top" Height="38" Background="#F8FAFC"
+                                BorderBrush="#EEF2F7" BorderThickness="0,0,0,1">
+                            <Grid Margin="14,0">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="OUTPUT" FontSize="11" FontWeight="Bold"
+                                               Foreground="#64748B" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding OutputSummary}" FontSize="11.5" Foreground="#475569"
+                                               Margin="14,0,0,0" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <Button Content="Clear" Click="ClearOutputButton_Click" Padding="12,5" Margin="0,0,8,0"
+                                            IsEnabled="{Binding HasOutput}" />
+                                    <Button Click="OutputButton_Click" ToolTip="Close panel" Style="{StaticResource ExplorerIconStyle}">
+                                        <Path Data="M5,5 L15,15 M15,5 L5,15" Stroke="#64748B" StrokeThickness="1.6"
+                                              Width="14" Height="14" Stretch="Uniform" />
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                        <!-- empty state -->
+                        <TextBlock DockPanel.Dock="Top" Margin="16,16" TextWrapping="Wrap" Foreground="#64748B" FontSize="12.5"
+                                   Visibility="{Binding IsNoOutput, Converter={StaticResource BoolToVis}}"
+                                   Text="No engine activity yet. Each command the app runs (validate, quality, gates, export, evaluation, AI Assist, …) is logged here with its outcome and timing. Local diagnostics only — nothing is sent anywhere." />
+                        <!-- log list (newest last) -->
+                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                      Visibility="{Binding IsNoOutput, Converter={StaticResource InverseBoolToVis}}">
+                            <ItemsControl ItemsSource="{Binding OutputLog}" Margin="0,4">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Padding="14,5" BorderBrush="#F1F5F9" BorderThickness="0,0,0,1">
+                                            <StackPanel>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding Timestamp}" FontFamily="Consolas" FontSize="11"
+                                                               Foreground="#94A3B8" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                                    <TextBlock Text="{Binding StatusIcon}" FontSize="12" Foreground="{Binding StatusColor}"
+                                                               VerticalAlignment="Center" Margin="0,0,8,0" />
+                                                    <TextBlock Text="{Binding Command}" FontFamily="Consolas" FontSize="12" FontWeight="SemiBold"
+                                                               Foreground="#1E293B" VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding ArgsSummary}" FontFamily="Consolas" FontSize="11.5"
+                                                               Foreground="#64748B" VerticalAlignment="Center" Margin="8,0,0,0"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding DurationLabel}" FontSize="11" Foreground="#94A3B8"
+                                                               VerticalAlignment="Center" Margin="10,0,0,0" />
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding Detail}" FontFamily="Consolas" FontSize="11" Foreground="#B91C1C"
+                                                           TextWrapping="Wrap" Margin="34,2,0,0"
+                                                           Visibility="{Binding HasDetail, Converter={StaticResource BoolToVis}}" />
+                                            </StackPanel>
                                         </Border>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>

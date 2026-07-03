@@ -163,11 +163,20 @@ problems, a clean gate is labelled "not approval", and nothing is auto-fixed.
 `Models/ProblemItem` is the pure projection of a `GateResult`; the panel and the
 Studio gates tab share `ApplyGateReport` so they can never disagree.
 
+**Output / Logs panel (shipped, v1.2.7).** The second bottom-docked panel (shares
+the dock with Problems — only one open at a time), an "Output channel" that records
+every engine CLI invocation: verb, argument summary, outcome (✓/✕/⊘), duration, and
+the stderr tail on failure. `PythonEngineService` raises `CommandCompleted` at its
+single process choke point; the view marshals it onto the UI thread into a bounded
+in-memory ring buffer (`Models/EngineLogEntry`, cap 200). Ephemeral and local-only —
+nothing is persisted or sent anywhere; API keys travel via the environment, not argv,
+so the log carries no secrets.
+
 ## Roadmap (documented, not yet built)
 
-- **Output / Logs panel** (engine, validation, export, evaluation, AI Assist,
-  training logs), and Problems-panel growth beyond gates (invalid-row jump-to,
-  missing/unreferenced assets, stale reports, resizable/dockable panel).
+- Problems-panel growth beyond gates (invalid-row jump-to, missing/unreferenced
+  assets, stale reports); resizable/dockable bottom panels; an Output-panel filter
+  and surfacing of the training-run stream alongside CLI activity.
 - **Command Palette**, **Quick Open** (Ctrl+P), workspace **search**.
 - **Dataset indexing** (row counts, line offsets, fingerprints, asset references),
   **schema-aware `examples.jsonl` row grid**, large-file **virtualized viewer**.
