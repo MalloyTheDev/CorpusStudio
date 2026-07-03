@@ -138,10 +138,29 @@ public partial class MainWindow : Window
         MessageBox.Show(this, "This panel is on the Workspace roadmap and isn't wired up yet.",
             "Coming soon", MessageBoxButton.OK, MessageBoxImage.Information);
 
-    private void StartNewProject_Click(object sender, RoutedEventArgs e)
+    private async void StartNewProject_Click(object sender, RoutedEventArgs e)
     {
-        ViewModel.ShowStudio();
-        NewDatasetProjectButton_Click(sender, e);
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            var schemas = await _engineService.GetSchemasAsync();
+            Mouse.OverrideCursor = null;
+
+            var wizard = new WorkspaceWizardWindow(schemas) { Owner = this };
+            if (wizard.ShowDialog() == true && wizard.Result is not null)
+            {
+                await OpenWorkspaceFolder(wizard.Result.Folder);
+            }
+        }
+        catch (Exception ex)
+        {
+            Mouse.OverrideCursor = null;
+            MessageBox.Show(this, ex.Message, "New Project", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
     }
 
     private async void StartOpenFolder_Click(object sender, RoutedEventArgs e)
