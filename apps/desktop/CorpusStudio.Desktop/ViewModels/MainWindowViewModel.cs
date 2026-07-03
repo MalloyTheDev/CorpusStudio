@@ -28,6 +28,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _validationSummary = "Create a project to start validation.";
     private string _qualitySummary = "Create or select a project to run quality checks.";
     private string _gateSummary = "Run gates to check whether this dataset may move forward.";
+    private bool _problemsPanelVisible;
+    private string _problemsSummary = "Run gates to check this dataset for problems.";
+    private string _problemsBadge = string.Empty;
+    private string _problemsBadgeColor = GateReport.StatusColor(null);
     private string _arenaPromptsInput = string.Empty;
     private string _arenaModelsInput = string.Empty;
     private string _arenaJudgeModelInput = string.Empty;
@@ -469,6 +473,101 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         private set => SetField(ref _gateSummary, value);
     }
 
+    // ---- Workspace Problems panel (v1.2.6) ---------------------------------------
+    // A structured, workspace-level view of the latest gate findings (block/warn only),
+    // populated by ApplyGateReport. The panel surfaces problems; it never approves or
+    // auto-fixes anything — the human still reviews and decides.
+
+    /// <summary>The latest gate findings that are actual problems (block/warn), block-first.
+    /// Passes are not problems and are reported only in the summary line.</summary>
+    public ObservableCollection<ProblemItem> Problems { get; } = [];
+
+    public bool ProblemsPanelVisible
+    {
+        get => _problemsPanelVisible;
+        private set
+        {
+            if (SetField(ref _problemsPanelVisible, value))
+            {
+                OnPropertyChanged(nameof(IsNoProblems));
+            }
+        }
+    }
+
+    /// <summary>True when the panel is open but has no problems to show (empty state).</summary>
+    public bool IsNoProblems => Problems.Count == 0;
+
+    public string ProblemsSummary
+    {
+        get => _problemsSummary;
+        private set => SetField(ref _problemsSummary, value);
+    }
+
+    /// <summary>Activity-bar badge text — the count of problems (block+warn), or empty when
+    /// there are none / gates have not run.</summary>
+    public string ProblemsBadge
+    {
+        get => _problemsBadge;
+        private set
+        {
+            if (SetField(ref _problemsBadge, value))
+            {
+                OnPropertyChanged(nameof(HasProblemsBadge));
+            }
+        }
+    }
+
+    public bool HasProblemsBadge => !string.IsNullOrEmpty(_problemsBadge);
+
+    /// <summary>Badge colour: red when any block, amber when only warns (see StatusColor).</summary>
+    public string ProblemsBadgeColor
+    {
+        get => _problemsBadgeColor;
+        private set => SetField(ref _problemsBadgeColor, value);
+    }
+
+    public void ToggleProblemsPanel() => ProblemsPanelVisible = !ProblemsPanelVisible;
+
+    public void ShowProblemsPanel() => ProblemsPanelVisible = true;
+
+    /// <summary>Rebuild the Problems panel + activity-bar badge from a gate report. Blocks and
+    /// warns become rows (block-first); passes are counted in the summary only. Kept in sync
+    /// with GateSummary so the panel and the Studio gates tab never diverge.</summary>
+    private void ApplyProblemsFromGateReport(GateReport report)
+    {
+        Problems.Clear();
+        var rows = report.Results
+            .Where(ProblemItem.IsProblem)
+            .Select(ProblemItem.FromGateResult)
+            .OrderBy(p => p.SeverityRank);
+        foreach (var row in rows)
+        {
+            Problems.Add(row);
+        }
+
+        var problemCount = report.BlockCount + report.WarnCount;
+        ProblemsBadge = problemCount > 0 ? problemCount.ToString(CultureInfo.InvariantCulture) : string.Empty;
+        ProblemsBadgeColor = GateReport.StatusColor(report.BlockCount > 0 ? "block" : "warn");
+
+        ProblemsSummary = problemCount == 0
+            ? $"No problems — all {report.PassCount} checks passed. A clean gate is not approval; you still review before export."
+            : $"{problemCount} problem{(problemCount == 1 ? string.Empty : "s")} "
+              + $"({report.BlockCount} block, {report.WarnCount} warn) · {report.PassCount} passed.";
+
+        OnPropertyChanged(nameof(IsNoProblems));
+    }
+
+    /// <summary>Reset the Problems panel to its empty state (e.g. on project switch), so stale
+    /// findings from a previous project are never shown against the new one.</summary>
+    public void ResetProblems()
+    {
+        Problems.Clear();
+        ProblemsBadge = string.Empty;
+        ProblemsBadgeColor = GateReport.StatusColor(null);
+        ProblemsSummary = "Run gates to check this dataset for problems.";
+        OnPropertyChanged(nameof(IsNoProblems));
+    }
+
     public string ProviderPolicySummary
     {
         get => _providerPolicySummary;
@@ -672,6 +771,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         GateSummary = string.Join(Environment.NewLine, lines);
+        ApplyProblemsFromGateReport(report);
     }
 
     public string QualityHistorySummary
@@ -2116,6 +2216,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         // Clear the candidate-gate verdict last so a prior project's gate can't linger in
         // the header or fire a spurious block-confirm in the new (gate-less) project.
         ResetCandidateGateState();
+        // Likewise clear the Problems panel so a previous project's gate findings are never
+        // shown against the newly selected (not-yet-gated) project.
+        ResetProblems();
         TrainingFormat = project.SchemaId;
         TrainingSummary = "Generate a training config after validation, splits, and evaluation checks.";
         TrainingConfigPreview = "Training config preview appears here.";
