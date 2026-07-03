@@ -56,6 +56,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/ProjectIndexModels.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ProviderPolicyItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/QualityHistoryEntry.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/QualityMetric.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/QualityReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ReviewedFixRecord.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/SavedExampleItem.cs`
@@ -109,6 +110,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/OutputLogViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ProjectSearchViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ProviderPolicyViewModelTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/QualityMetricTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ReviewedFixServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingCheckpointsViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingRunRegistryTests.cs`

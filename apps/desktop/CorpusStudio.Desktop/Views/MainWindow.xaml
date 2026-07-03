@@ -2606,17 +2606,56 @@
                            FontWeight="Bold"
                            Foreground="#0F172A"
                            Margin="0,22,0,0" />
+                <!-- Structured quality metrics (v1.2.12). Before a run (or on error) the panel
+                     falls back to the QualitySummary text; after a run it shows a PII-aware status
+                     banner, the count rows, and the optional flagged-row detail. -->
                 <TextBox AutomationProperties.AutomationId="QualitySummaryTextBox"
                          Text="{Binding QualitySummary, Mode=OneWay}"
                          Margin="0,8,0,8"
-                         MinHeight="96"
+                         MinHeight="72"
                          IsReadOnly="True"
                          TextWrapping="Wrap"
-                         VerticalScrollBarVisibility="Auto" />
+                         VerticalScrollBarVisibility="Auto"
+                         Visibility="{Binding HasQualityMetrics, Converter={StaticResource InverseBoolToVis}}" />
+                <StackPanel Margin="0,10,0,8"
+                            Visibility="{Binding HasQualityMetrics, Converter={StaticResource BoolToVis}}">
+                    <Border Background="{Binding QualityStatusBackground}" CornerRadius="7"
+                            Padding="11,8" Margin="0,0,0,10">
+                        <TextBlock AutomationProperties.AutomationId="QualityStatusTextBlock"
+                                   Text="{Binding QualityStatusLine}" Foreground="{Binding QualityStatusColor}"
+                                   FontWeight="SemiBold" FontSize="12" TextWrapping="Wrap" />
+                    </Border>
+                    <ItemsControl AutomationProperties.AutomationId="QualityMetricsList"
+                                  ItemsSource="{Binding QualityMetrics}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,3">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="18" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{Binding Label}" FontSize="12.5"
+                                               Foreground="#334155" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Value}" FontSize="12.5"
+                                               FontWeight="SemiBold" Foreground="{Binding StatusColor}"
+                                               VerticalAlignment="Center" Margin="0,0,8,0" />
+                                    <TextBlock Grid.Column="2" Text="{Binding StatusIcon}" FontSize="12"
+                                               Foreground="{Binding StatusColor}" VerticalAlignment="Center"
+                                               TextAlignment="Center" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBox Text="{Binding QualityDetail, Mode=OneWay}"
+                             Margin="0,10,0,0" MaxHeight="150" IsReadOnly="True" TextWrapping="Wrap"
+                             FontSize="11.5" VerticalScrollBarVisibility="Auto"
+                             Visibility="{Binding HasQualityDetail, Converter={StaticResource BoolToVis}}" />
+                </StackPanel>
                 <Button Style="{StaticResource PrimaryButtonStyle}"
                         AutomationProperties.AutomationId="RunQualityButton"
                         Content="Run _Quality"
-                        Margin="0,0,0,8"
+                        Margin="0,4,0,8"
                         Click="RunQualityButton_Click" />
                 <TextBlock Text="Gates"
                            FontWeight="SemiBold"
