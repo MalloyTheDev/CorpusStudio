@@ -212,6 +212,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/validators/results.py`
 - `engine/pyproject.toml`
 - `engine/tests/test_ai_assist.py`
+- `engine/tests/test_ai_assist_candidate_gate.py`
 - `engine/tests/test_arena.py`
 - `engine/tests/test_basic_validator.py`
 - `engine/tests/test_benchmark.py`

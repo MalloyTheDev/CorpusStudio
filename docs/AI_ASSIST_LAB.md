@@ -125,11 +125,44 @@ they do not mutate accepted data.
 
 ```text
 AI drafts or reviews example
+-> engine gates the generated candidate rows (schema/quality/PII) as a pre-review signal
 -> human accepts/edits/rejects
 -> validator checks schema
 -> quality engine scores sample
 -> example enters dataset
 ```
+
+## Candidate gate (pre-review safety signal)
+
+When a run produces suggested rows (e.g. `draft-example`, `rewrite-output`), the
+engine runs the **existing dataset gate runner** (`run_dataset_gates`) over the
+generated candidate rows and attaches the resulting `GateReport` to the result as
+`candidate_gate`. This closes the constraint's
+`generate -> validate -> quality -> gates -> human review` chain: the candidates
+now carry a schema/quality/PII `pass`/`warn`/`block` verdict **before**
+they reach the human review queue. (The dataset gate runner runs the
+input-present, schema, quality, and PII gates; cross-split leakage is a
+split-scope gate and is not part of candidate gating.)
+
+This is a **signal, not a decision**. It adds no new detection (it reuses the
+gate runner verbatim) and it changes nothing about acceptance:
+
+- `review_required` stays `true` regardless of the gate verdict.
+- A **clean** gate is *not* approval — the human still reviews.
+- A **block** (e.g. a leaked key or secret in generated content) does *not*
+  auto-reject: the candidate is still preserved for the human to see and reject.
+  The gate leads with the block so it is impossible to miss.
+- `candidate_gate` is `null` when the run produced no gate-able candidate rows
+  (no JSON-object rows — nothing to gate, never a fake pass). If the model
+  proposed content but no line was a JSON object, the rows can't be gated by the
+  dataset runner; they are still surfaced via `validation_errors` and the result
+  carries an explicit "candidate gate not run" warning, so a null gate is never
+  silent.
+
+Policy is still enforced **first**: `authorize_action` runs before the provider
+is ever called, so an evaluator-only provider is blocked from a generating action
+before any generation or gating can occur. The gate step cannot bypass provider
+policy.
 
 ## Implementation Notes
 
@@ -167,9 +200,22 @@ Current result shape:
   "model_output": "{...raw model response...}",
   "suggested_jsonl": "{\"instruction\":\"...\",\"output\":\"...\"}\n",
   "warnings": [],
-  "validation_errors": []
+  "validation_errors": [],
+  "candidate_gate": {
+    "scope": "dataset",
+    "target": "ai_assist_candidates",
+    "overall_status": "pass",
+    "pass_count": 4,
+    "warn_count": 0,
+    "block_count": 0,
+    "results": []
+  }
 }
 ```
+
+`candidate_gate` is the gate report over the generated candidate rows, or `null`
+when the run proposed no rows. It informs review; it never approves or
+auto-accepts (see **Candidate gate** above).
 
 Current desktop queue item shape adds local review metadata around that result:
 
@@ -219,6 +265,8 @@ already be running.
 
 - Do not automatically accept generated rows.
 - Do not bypass schema validation.
+- Gate generated candidates before review, but never let the gate decide: a
+  clean gate is not approval and a block does not auto-reject — the human decides.
 - Do not use cloud providers unless the user configures them.
 - Do not assume generated data is licensed or correct.
 - Do not train on examples marked rejected or review-only.

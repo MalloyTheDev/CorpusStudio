@@ -67,6 +67,21 @@ source run; otherwise **passes**. In the desktop Artifacts tab, "Keep" runs this
 gate first and a block refuses the keep. The companion `artifact-card` renders a
 live weight card (never stored) carrying the same provenance caveat.
 
+## AI Assist candidate gate (ai_assist_candidates)
+
+`run_ai_assist` runs `run_dataset_gates` over the **generated candidate rows**
+(`target="ai_assist_candidates"`) and attaches the `GateReport` to its result as
+`candidate_gate`, so an AI-generated batch carries a schema/quality/PII verdict
+**before** it reaches the human review queue. This reuses the dataset gate runner
+verbatim — no new detection. It is a *pre-review signal, not a decision*:
+`review_required` stays true, a clean gate is not approval, and a block does not
+auto-reject (the candidate is preserved for the human, block-first). `candidate_gate`
+is `null` when a run proposes no gate-able (JSON-object) rows; a batch that proposed
+content but no object rows still surfaces those via `validation_errors` plus an
+explicit "gate not run" warning. Provider policy is enforced *before* the
+provider call, so the gate step can never run on a generation a forbidden provider
+was not allowed to perform. See [`AI_ASSIST_LAB.md`](AI_ASSIST_LAB.md).
+
 ## Per-project thresholds
 
 Gate thresholds default to the values in `GateThresholds`, but a project can

@@ -46,7 +46,11 @@ Last reconciled: 2026-07-02 (v1.0.0 engine slice landed).
   per-model deltas and the examples every model failed.
 - Review-first AI Assist Lab: persistent accept/reject queue, saved views, bulk
   triage with undo, resumable rewrite batches. AI Assist output is always
-  `review_required` and never auto-accepted.
+  `review_required` and never auto-accepted. Generated candidate rows are run
+  through the existing dataset gate runner (schema/quality/PII) before review and
+  the verdict is attached as `candidate_gate` — a pre-review signal only: a clean
+  gate is not approval, a block does not auto-reject, and provider policy is still
+  enforced before generation.
 
 **Train (v0.5 launcher — complete)**
 - Training config export for axolotl / TRL / Unsloth / Hugging Face /
