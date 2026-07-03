@@ -78,6 +78,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml`
 - `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/AiAssistCandidateGateTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/AiAssistRewriteBatchServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ArenaViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ArtifactRegistryTests.cs`
