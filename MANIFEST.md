@@ -152,10 +152,12 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/decisions/0002-schema-driven-editor.md`
 - `docs/decisions/0003-python-engine-csharp-desktop.md`
 - `docs/schemas/README.md`
-- `docs/screenshots/desktop-v1.2.png`
+- `docs/screenshots/dataset-debt.png`
 - `docs/screenshots/output-panel.png`
 - `docs/screenshots/problems-panel.png`
+- `docs/screenshots/studio-dashboard.png`
 - `docs/screenshots/workspace-explorer.png`
+- `docs/screenshots/workspace-start-center.png`
 - `docs/screenshots/workspace-wizard.png`
 - `engine/README.md`
 - `engine/corpus_studio/__init__.py`

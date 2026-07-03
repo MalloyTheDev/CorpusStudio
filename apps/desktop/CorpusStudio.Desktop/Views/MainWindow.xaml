@@ -717,13 +717,36 @@
                                 </Border>
                             </WrapPanel>
                         </StackPanel>
-                        <Border Grid.Column="1"
-                                Background="#ECFDF5"
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top" Margin="16,0,0,0">
+                        <!-- Dataset debt grade badge (v1.2.8). At-a-glance grade in the header;
+                             passive (reflects the last debt check, invalidates on dataset change,
+                             never auto-runs); click opens the Debt tab to run / see the ledger. -->
+                        <Button Click="GoToDebtTab_Click" ToolTip="Dataset debt grade — click for the debt ledger"
+                                Cursor="Hand" Background="Transparent" BorderThickness="0" Padding="0" Margin="0,0,10,0"
+                                VerticalAlignment="Top">
+                            <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1"
+                                    CornerRadius="8" Padding="12,8">
+                                <StackPanel>
+                                    <TextBlock Text="Dataset debt" FontWeight="SemiBold" FontSize="11"
+                                               Foreground="#475569" HorizontalAlignment="Center" />
+                                    <Border Width="34" Height="34" CornerRadius="8" Margin="0,5,0,0"
+                                            Background="{Binding DebtGradeColor, Mode=OneWay}" HorizontalAlignment="Center">
+                                        <TextBlock AutomationProperties.AutomationId="DashboardDebtGradeBadge"
+                                                   Text="{Binding DebtGrade, Mode=OneWay}"
+                                                   Foreground="White" FontSize="17" FontWeight="Bold"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <TextBlock Text="stale" FontSize="9" FontWeight="SemiBold" Foreground="#D97706"
+                                               HorizontalAlignment="Center" Margin="0,3,0,0"
+                                               Visibility="{Binding DebtStale, Converter={StaticResource BoolToVis}}" />
+                                </StackPanel>
+                            </Border>
+                        </Button>
+                        <Border Background="#ECFDF5"
                                 BorderBrush="#BBF7D0"
                                 BorderThickness="1"
                                 CornerRadius="8"
                                 Padding="12,8"
-                                Margin="16,0,0,0"
                                 VerticalAlignment="Top">
                             <StackPanel>
                                 <TextBlock Text="Local-first"
@@ -733,6 +756,7 @@
                                            Foreground="#166534" />
                             </StackPanel>
                         </Border>
+                        </StackPanel>
                     </Grid>
                 </Border>
 
@@ -2349,7 +2373,7 @@
                             </Grid>
                         </Grid>
                     </TabItem>
-                    <TabItem Header="Debt">
+                    <TabItem x:Name="DebtTab" Header="Debt">
                         <Grid Margin="8">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
