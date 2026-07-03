@@ -76,6 +76,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Services/RecentWorkspaceService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/TrainingProcessRunner.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceManifestService.cs`
+- `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceOpenRouting.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspacePathSafety.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceLayout.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/ProjectTemplateService.cs`
@@ -114,6 +115,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceSystemTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceViewLayerTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceExplorerViewModelTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceOpenRoutingTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TempProjectDirectory.cs`
 - `apps/desktop/CorpusStudio.Desktop.sln`
 - `apps/desktop/CorpusStudio.Desktop.sln.README.md`
