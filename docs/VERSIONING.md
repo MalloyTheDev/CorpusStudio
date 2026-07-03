@@ -182,8 +182,12 @@ beside `examples.jsonl` and the desktop atomically swaps it in. Any failure
 before the swap leaves the dataset untouched; the engine still never writes
 `examples.jsonl`. The undo version stays in the history, so restoring it reverts.
 
+**Implemented (desktop diff view):** the Versions tab can compare two versions —
+"Set diff base" pins the selected version, then "Diff base → selected" renders the
+engine's `dataset-version-diff` (added/removed/common + sample rows) in the detail
+pane. Read-only; the engine owns the diff (it refuses a version without stored rows).
+
 **Deferred:**
-- Desktop surfacing of diff; auto-capture after an import/append commit; restore
-  straight to stdout.
+- Auto-capture after an import/append commit; restore straight to stdout.
 - Reorder/"moved" detection in diff, GC of orphaned store blobs (which must never
   prune rows referenced by a manifest), and a `normalized` row identity.

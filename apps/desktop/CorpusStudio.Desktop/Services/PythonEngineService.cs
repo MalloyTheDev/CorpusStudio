@@ -1441,6 +1441,15 @@ public sealed class PythonEngineService
         return await RunEngineCommandAsync("dataset-version-show", projectPath, "--version-id", versionId);
     }
 
+    /// <summary>Render a diff (added/removed/common + sample rows) between two versions,
+    /// via the engine (<c>dataset-version-diff</c>). Read-only; needs both versions to have
+    /// stored rows — the engine refuses (throws) otherwise, which the caller surfaces.</summary>
+    public async Task<string> GetDatasetVersionDiffAsync(string projectPath, string baseVersionId, string otherVersionId)
+    {
+        return await RunEngineCommandAsync(
+            "dataset-version-diff", projectPath, "--version-id", baseVersionId, "--other", otherVersionId);
+    }
+
     /// <summary>Parse a <c>dataset-version-list</c> payload into display rows. Pure/static
     /// so the JSON contract (including the live <c>current_integrity</c> annotation) is
     /// unit-testable without spawning the engine.</summary>

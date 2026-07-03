@@ -76,6 +76,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/ArtifactRegistryTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/DatasetVersionRegistryTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/DatasetVersionRestoreTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/DatasetVersionDiffViewTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/BenchmarkViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/CorpusStudio.Desktop.Tests.csproj`
 - `apps/desktop/CorpusStudio.Desktop.Tests/EvaluationFailureFilterServiceTests.cs`

@@ -155,8 +155,11 @@ Last reconciled: 2026-07-02 (v1.0.0 engine slice landed).
   `--output` file, verified against the recorded fingerprint (all-or-nothing,
   overwrite-safe, atomic). The engine **refuses to write `examples.jsonl`** — the
   dataset has one writer (the desktop); in-place restore is deferred to the desktop.
-- Deferred: desktop diff surfacing, auto-capture after import commit, reorder
-  detection, store GC, and a normalized row identity.
+- A desktop **diff view**: "Set diff base" pins a version, then "Diff base →
+  selected" renders `dataset-version-diff` (added/removed/common + samples) in the
+  detail pane (read-only; the engine owns the diff).
+- Deferred: auto-capture after import commit, reorder detection, store GC, and a
+  normalized row identity.
 
 ## Not built yet (future roadmap)
 

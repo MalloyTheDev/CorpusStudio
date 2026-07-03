@@ -125,6 +125,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         "Select a version and View card to see its lineage (runs, artifacts, evals) and integrity.";
     private string _datasetVersionLabel = string.Empty;
     private DatasetVersionDisplayItem? _selectedDatasetVersion;
+    private string _datasetDiffBaseId = string.Empty;
+    private string _datasetDiffBaseLabel = "No diff base pinned.";
     private string _trainingCheckpointsSummary =
         "Checkpoints appear here after a training run writes them.";
     private IReadOnlyList<string> _trainingResumeArgv = [];
@@ -1339,6 +1341,31 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         set => SetField(ref _selectedDatasetVersion, value);
     }
 
+    /// <summary>The version pinned as the diff base (empty until "Set diff base").</summary>
+    public string DatasetDiffBaseId
+    {
+        get => _datasetDiffBaseId;
+        private set => SetField(ref _datasetDiffBaseId, value);
+    }
+
+    /// <summary>Persistent, always-visible indicator of the pinned diff base, so the
+    /// user never loses track of which version the next diff uses as its base.</summary>
+    public string DatasetDiffBaseLabel
+    {
+        get => _datasetDiffBaseLabel;
+        private set => SetField(ref _datasetDiffBaseLabel, value);
+    }
+
+    /// <summary>Pin a version as the base for the next diff, and prompt the next step.</summary>
+    public void SetDatasetDiffBase(DatasetVersionDisplayItem version)
+    {
+        DatasetDiffBaseId = version.Record.VersionId;
+        DatasetDiffBaseLabel = $"Diff base: {version.Record.VersionId}";
+        SetDatasetVersionDetail(
+            $"Diff base set to {version.Record.VersionId}. "
+            + "Select another version and click 'Diff base → selected'.");
+    }
+
     public string DatasetVersionSummary
     {
         get => _datasetVersionSummary;
@@ -1903,6 +1930,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         SelectedPreferenceReviewItem = null;
         PreferenceContrastFilter = "All";
         ClearPreferenceReview();
+        // Dataset-version state is per-project: clear the list, selection, and any
+        // pinned diff base so nothing leaks across a project switch. LoadProjectAsync
+        // eagerly refreshes the new project's versions.
+        DatasetVersions.Clear();
+        SelectedDatasetVersion = null;
+        DatasetDiffBaseId = string.Empty;
+        DatasetDiffBaseLabel = "No diff base pinned.";
+        DatasetVersionSummary =
+            "Refresh to see dataset versions, or capture the current dataset as a version.";
+        DatasetVersionDetail =
+            "Select a version and View card to see its lineage (runs, artifacts, evals) and integrity.";
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasActiveProject)));
     }
 
