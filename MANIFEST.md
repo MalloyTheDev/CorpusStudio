@@ -46,6 +46,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/GateReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/DatasetVersionRecord.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/DebtReport.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/DebtTrendPoint.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ModelArtifactRecord.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ImportPreviewReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/LabBackendSettings.cs`
@@ -96,6 +97,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/ArenaViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ArtifactRegistryTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/DatasetDebtViewTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/DebtTrendTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/DatasetVersionRegistryTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/DatasetVersionRestoreTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/DatasetVersionDiffViewTests.cs`
@@ -153,6 +155,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/decisions/0003-python-engine-csharp-desktop.md`
 - `docs/schemas/README.md`
 - `docs/screenshots/dataset-debt.png`
+- `docs/screenshots/debt-trend.png`
 - `docs/screenshots/output-panel.png`
 - `docs/screenshots/problems-panel.png`
 - `docs/screenshots/studio-dashboard.png`

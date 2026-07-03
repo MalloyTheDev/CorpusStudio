@@ -41,6 +41,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _providerPolicySummary =
         "Provider generation policy: refresh to see which providers may create trainable rows.";
     private string _qualityHistorySummary = "Quality history appears after quality checks run.";
+    private bool _hasDebtTrend;
+    private string _debtTrendDirection = string.Empty;
+    private string _debtTrendDirectionColor = "#64748B";
+    private string _debtTrendSummary = "Run quality checks to build a debt trend.";
     private string _qualityTriageSummary = "Synthetic quality issues appear here after quality checks run.";
     private string _splitSummary = "Create or select a project to generate train, validation, and test splits.";
     private string _preferencePromptText = "Select a saved preference example to inspect the prompt.";
@@ -852,6 +856,67 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _qualityHistorySummary;
         private set => SetField(ref _qualityHistorySummary, value);
+    }
+
+    // ---- Debt trend (v1.2.9) -----------------------------------------------------
+    // A mini-chart of the quality issue rate across recorded quality runs, built from the
+    // existing quality history (nothing new persisted). Not the A-F grade: presence-based
+    // PII/secrets aren't in the history, so only the issue-rate trend is honest to plot.
+
+    /// <summary>Ordered oldest → newest bars for the debt-trend mini-chart.</summary>
+    public ObservableCollection<DebtTrendPoint> DebtTrend { get; } = [];
+
+    /// <summary>True when there is at least one bar to draw (chart visibility).</summary>
+    public bool HasDebtTrendPoints => DebtTrend.Count > 0;
+
+    /// <summary>True when there are ≥2 runs — enough to state a direction.</summary>
+    public bool HasDebtTrend
+    {
+        get => _hasDebtTrend;
+        private set => SetField(ref _hasDebtTrend, value);
+    }
+
+    public string DebtTrendDirection
+    {
+        get => _debtTrendDirection;
+        private set => SetField(ref _debtTrendDirection, value);
+    }
+
+    public string DebtTrendDirectionColor
+    {
+        get => _debtTrendDirectionColor;
+        private set => SetField(ref _debtTrendDirectionColor, value);
+    }
+
+    public string DebtTrendSummary
+    {
+        get => _debtTrendSummary;
+        private set => SetField(ref _debtTrendSummary, value);
+    }
+
+    private void ApplyDebtTrend(IReadOnlyList<QualityHistoryEntry> history)
+    {
+        var result = Models.DebtTrend.Build(history);
+        DebtTrend.Clear();
+        foreach (var point in result.Points)
+        {
+            DebtTrend.Add(point);
+        }
+        HasDebtTrend = result.HasTrend;
+        DebtTrendDirection = result.Direction;
+        DebtTrendDirectionColor = result.DirectionColor;
+        DebtTrendSummary = result.Summary;
+        OnPropertyChanged(nameof(HasDebtTrendPoints));
+    }
+
+    private void ResetDebtTrend()
+    {
+        DebtTrend.Clear();
+        HasDebtTrend = false;
+        DebtTrendDirection = string.Empty;
+        DebtTrendDirectionColor = "#64748B";
+        DebtTrendSummary = "Run quality checks to build a debt trend.";
+        OnPropertyChanged(nameof(HasDebtTrendPoints));
     }
 
     public string QualityTriageSummary
@@ -2256,6 +2321,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ClearValidationIssues();
         QualitySummary = "Quality checks will appear after examples are added.";
         QualityHistorySummary = "Quality history appears after quality checks run.";
+        ResetDebtTrend();
         QualityTriageSummary = "Synthetic quality issues appear here after quality checks run.";
         SyntheticPatternIssues.Clear();
         SelectedSyntheticPatternIssue = null;
@@ -3901,6 +3967,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     private void ApplyQualityHistory(IReadOnlyList<QualityHistoryEntry> history)
     {
+        ApplyDebtTrend(history);
+
         if (history.Count == 0)
         {
             QualityHistorySummary = "No quality history has been recorded yet.";

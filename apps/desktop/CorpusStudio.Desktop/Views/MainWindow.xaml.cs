@@ -3698,7 +3698,9 @@ public partial class MainWindow : Window
                 _engineService.SaveQualityHistoryEntry(ViewModel.ActiveProjectPath, report);
             }
 
-            var history = _engineService.LoadQualityHistory(ViewModel.ActiveProjectPath);
+            // Load a wider window than the 5-line text summary uses so the debt-trend chart
+            // has enough points; the summary still shows only its most recent few internally.
+            var history = _engineService.LoadQualityHistory(ViewModel.ActiveProjectPath, maxEntries: 30);
             ViewModel.ApplyQualityReport(report, history);
         }
         catch (Exception ex)

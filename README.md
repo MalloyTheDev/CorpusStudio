@@ -209,6 +209,13 @@ invocation (verb, outcome, duration, stderr on failure) for at-a-glance diagnost
 ranks them, and grades the dataset (A–F) so you know what to fix first; secrets/PII
 are graded by presence, not rate.
 
+![Corpus Studio debt trend mini-chart](docs/screenshots/debt-trend.png)
+
+**8 · Debt trend** — a mini-chart of the quality **issue rate** (issues ÷ rows) across
+recorded quality runs, with an improving/worsening/stable verdict. Presence-based
+PII/secrets are graded live in the Debt tab, not trended here, so the trend never
+fabricates a grade it can't stand behind.
+
 ## Core Local Loop
 
 Build a local desktop app that supports:
