@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json;
 using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.ViewModels;
@@ -244,6 +245,75 @@ public sealed class AiAssistCandidateGateTests
         Assert.Equal("not run", vm.AiAssistCandidateGateStatus);
         Assert.Equal("#64748B", vm.AiAssistCandidateGateColor);
         Assert.Contains("not run", vm.AiAssistReviewText);
+    }
+
+    // ---- Audit fixes: renderer honesty for unknown status, and stale-gate resets ----
+
+    [Fact]
+    public void RenderCandidateGate_UnknownOrEmptyStatus_IsNeverGreenPass()
+    {
+        // Empty status (older persisted item / malformed payload) -> neutral, never ✅.
+        var empty = GateReport.RenderCandidateGate(
+            new GateReport
+            {
+                OverallStatus = "",
+                Results = new[] { new GateResult { GateId = "x", Name = "X", Status = "error", Message = "m" } },
+            },
+            hasSuggestedContent: true);
+        Assert.DoesNotContain("✅", empty);
+        Assert.Contains("UNKNOWN", empty);
+        Assert.Contains("[?]", empty);          // unknown per-result mark, not [PASS]
+        Assert.DoesNotContain("[PASS]", empty);
+
+        // An unrecognized status likewise never earns the green check.
+        var weird = GateReport.RenderCandidateGate(
+            Gate("weird", new GateResult { GateId = "x", Name = "X", Status = "weird", Message = "m" }),
+            hasSuggestedContent: true);
+        Assert.DoesNotContain("✅", weird);
+    }
+
+    [Fact]
+    public void SetAiAssistError_ResetsGateHeaderAndBlocks()
+    {
+        var vm = new MainWindowViewModel();
+        vm.ApplyAiAssistRunResult(RunResult("block"));
+        Assert.True(vm.SelectedAiAssistCandidateGateBlocks);
+
+        vm.SetAiAssistError("engine boom");
+
+        // A failed run must not keep the previous run's verdict (was a persistent green
+        // PASS / red BLOCK before the fix).
+        Assert.Equal("—", vm.AiAssistCandidateGateStatus);
+        Assert.Equal("#64748B", vm.AiAssistCandidateGateColor);
+        Assert.False(vm.SelectedAiAssistCandidateGateBlocks);
+    }
+
+    [Fact]
+    public void SetAiAssistInProgress_ResetsGateHeader()
+    {
+        var vm = new MainWindowViewModel();
+        vm.ApplyAiAssistRunResult(RunResult("block"));
+
+        vm.SetAiAssistInProgress();
+
+        Assert.Equal("—", vm.AiAssistCandidateGateStatus);
+        Assert.Equal("#64748B", vm.AiAssistCandidateGateColor);
+        Assert.False(vm.SelectedAiAssistCandidateGateBlocks);
+    }
+
+    [Fact]
+    public void SelectProject_ResetsGateHeaderAndBlocks()
+    {
+        var vm = new MainWindowViewModel();
+        vm.ApplyAiAssistRunResult(RunResult("block"));
+        Assert.True(vm.SelectedAiAssistCandidateGateBlocks);
+
+        // Switching to a fresh project must not carry the prior project's verdict.
+        var project = new DatasetProject("b", "Beta", "instruction", new DateTime(2026, 1, 1), new DateTime(2026, 1, 1));
+        vm.SelectProject(new DatasetProjectListItem(project, "C:/projects/b"));
+
+        Assert.Equal("—", vm.AiAssistCandidateGateStatus);
+        Assert.False(vm.SelectedAiAssistCandidateGateBlocks);
     }
 
     private static AiAssistRunResult RunResult(string overall)

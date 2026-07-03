@@ -42,16 +42,22 @@ public sealed class GateReport
         }
 
         var status = gate.OverallStatus ?? string.Empty;
+        // Only an explicit "pass" earns the green check. An unknown/empty status — an
+        // older persisted queue item, a future engine status, or a malformed payload —
+        // gets a neutral marker so it can never read as a fake pass (mirrors StatusColor,
+        // whose catch-all is neutral gray, never green).
         var icon = status.ToLowerInvariant() switch
         {
             "block" => "⛔",
             "warn" => "⚠",
-            _ => "✅",
+            "pass" => "✅",
+            _ => "•",
         };
+        var displayStatus = string.IsNullOrWhiteSpace(status) ? "UNKNOWN" : status.ToUpperInvariant();
 
         var lines = new List<string>
         {
-            $"{icon} Candidate gate: {status.ToUpperInvariant()} "
+            $"{icon} Candidate gate: {displayStatus} "
             + $"({gate.PassCount} pass, {gate.WarnCount} warn, {gate.BlockCount} block)",
             "— a pre-review signal, not approval; you still review, validate, and save "
             + "(verdict is on the generated candidate, before your edits).",
@@ -63,7 +69,8 @@ public sealed class GateReport
             {
                 "block" => "[BLOCK]",
                 "warn" => "[WARN]",
-                _ => "[PASS]",
+                "pass" => "[PASS]",
+                _ => "[?]",
             };
             lines.Add($"{mark} {result.Name}: {result.Message}");
             if (!string.Equals(result.Status, "pass", StringComparison.OrdinalIgnoreCase)

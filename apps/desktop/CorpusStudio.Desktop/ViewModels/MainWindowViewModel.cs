@@ -2057,6 +2057,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         _allAiAssistReviewQueue.Clear();
         AiAssistReviewQueue.Clear();
         SelectedAiAssistReviewQueueItem = null;
+        // Clear the candidate-gate verdict last so a prior project's gate can't linger in
+        // the header or fire a spurious block-confirm in the new (gate-less) project.
+        ResetCandidateGateState();
         TrainingFormat = project.SchemaId;
         TrainingSummary = "Generate a training config after validation, splits, and evaluation checks.";
         TrainingConfigPreview = "Training config preview appears here.";
@@ -2830,6 +2833,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         );
         AiAssistReviewText = "Waiting for local model response.";
         _aiAssistSuggestionJsonl = string.Empty;
+        ResetCandidateGateState();  // the prior run's verdict must not linger during a new run
         AiAssistSourceDraftText = "Current draft is being sent to AI Assist.";
         AiAssistSuggestedJsonlText = "Waiting for suggested JSONL.";
         AiAssistDiffSummary = "Comparison will appear after the review is queued.";
@@ -2913,6 +2917,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             AiAssistCandidateGateStatus = hasSuggestedContent ? "not run" : "n/a";
             AiAssistCandidateGateColor = GateReport.StatusColor(null);
         }
+    }
+
+    // Revert the candidate-gate state to the neutral initial state (no current verdict).
+    // Called whenever there is no meaningful current gate to show — a new run starting, a
+    // run that failed, or a project switch — so a prior run's/project's verdict can never
+    // linger in the header (or trigger a spurious block-confirm via ActiveAiAssistCandidateGate).
+    private void ResetCandidateGateState()
+    {
+        _aiAssistCandidateGate = null;
+        AiAssistCandidateGateStatus = "—";
+        AiAssistCandidateGateColor = GateReport.StatusColor(null);
     }
 
     public void SetAiAssistReviewQueue(IEnumerable<AiAssistReviewQueueItem> items)
@@ -3308,6 +3323,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ReportError(message);
         AiAssistReviewText = "No AI Assist suggestion was produced.";
         _aiAssistSuggestionJsonl = string.Empty;
+        ResetCandidateGateState();  // a failed run must not keep the previous run's verdict
         ClearAiAssistComparison(
             "No source draft was compared.",
             "No suggested JSONL was produced.",
