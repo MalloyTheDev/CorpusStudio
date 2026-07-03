@@ -277,7 +277,11 @@ def project_index_rebuild(
 @app.command()
 def quality(path: Path):
     """Build a basic quality report for a JSONL file."""
-    rows = list(read_jsonl(path))
+    try:
+        rows = list(read_jsonl(path))
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
     report = build_basic_quality_report(rows)
     typer.echo(report.model_dump_json(indent=2))
 

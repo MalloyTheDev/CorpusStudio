@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from corpus_studio.exporters.jsonl_exporter import export_jsonl, write_jsonl
 from corpus_studio.importers.jsonl_importer import read_jsonl
 
@@ -8,6 +10,15 @@ def test_read_jsonl_skips_blank_lines_and_parses(tmp_path: Path):
     path = tmp_path / "rows.jsonl"
     path.write_text('{"a": 1}\n\n   \n{"a": 2}\n', encoding="utf-8")
     assert list(read_jsonl(path)) == [{"a": 1}, {"a": 2}]
+
+
+def test_read_jsonl_rejects_non_object_line(tmp_path: Path):
+    # A dataset row must be a JSON object; a list/scalar/null line is malformed
+    # input and must raise a ValueError (not yield a non-dict that crashes later).
+    path = tmp_path / "rows.jsonl"
+    path.write_text('{"a": 1}\n[1, 2, 3]\n', encoding="utf-8")
+    with pytest.raises(ValueError):
+        list(read_jsonl(path))
 
 
 def test_read_jsonl_tolerates_utf8_bom(tmp_path: Path):

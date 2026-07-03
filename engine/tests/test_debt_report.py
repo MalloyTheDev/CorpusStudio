@@ -174,3 +174,12 @@ def test_cli_dataset_debt_end_to_end(tmp_path: Path):
 def test_cli_dataset_debt_bad_path_exits_1(tmp_path: Path):
     result = runner.invoke(app, ["dataset-debt", str(tmp_path / "nope.jsonl")])
     assert result.exit_code == 1
+
+
+def test_cli_dataset_debt_non_object_line_exits_clean(tmp_path: Path):
+    # A non-object JSONL line must exit 1 with a message, not a raw AttributeError.
+    path = tmp_path / "examples.jsonl"
+    path.write_text('{"instruction": "ok", "output": "1"}\n[1, 2, 3]\n', encoding="utf-8")
+    result = runner.invoke(app, ["dataset-debt", str(path)])
+    assert result.exit_code == 1
+    assert "expected a json object" in result.stderr.lower()
