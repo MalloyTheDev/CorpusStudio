@@ -282,6 +282,33 @@ def quality(path: Path):
     typer.echo(report.model_dump_json(indent=2))
 
 
+@app.command("dataset-debt")
+def dataset_debt(
+    path: Path,
+    as_json: bool = typer.Option(False, "--json", help="Emit the DebtReport as JSON."),
+):
+    """Summarize a dataset's outstanding quality debt as a prioritized, graded ledger.
+
+    Reuses the quality report (no new detection): it normalizes each signal by
+    dataset size, ranks the debts, and grades the dataset so you know what to fix
+    first. Secrets/PII are graded by presence, never by rate.
+    """
+
+    from corpus_studio.reporting.debt_report import build_debt_report, render_debt_report_markdown
+
+    try:
+        rows = list(read_jsonl(path))
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    report = build_debt_report(build_basic_quality_report(rows))
+    if as_json:
+        typer.echo(report.model_dump_json(indent=2))
+    else:
+        typer.echo(render_debt_report_markdown(report))
+
+
 @app.command("import-preview")
 def import_preview(path: Path, schema: str):
     """Preview a JSONL import and report accepted/rejected rows."""

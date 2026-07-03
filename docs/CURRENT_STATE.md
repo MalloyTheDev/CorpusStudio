@@ -23,6 +23,11 @@ Last reconciled: 2026-07-02 (v1.0.0 engine slice landed).
   detection (emails, SSNs, private keys, AWS/API keys, JWTs, Luhn-valid cards —
   masked samples), token-length outliers, and category-imbalance warnings, with
   project-level quality history.
+- Dataset **debt** ledger (`dataset-debt`): the quality signals, normalized by
+  dataset size, ranked by severity, and graded A–F so you know what to fix first.
+  Secrets/PII are graded by *presence* (a single leaked key is critical),
+  everything else by rate; each item carries a concrete remediation. See
+  [`DEBT.md`](DEBT.md).
 - Leakage-checked splits: `detect_split_leakage` reports exact and
   near-duplicate rows shared across train/validation/test.
 - Export with an optional cleaning pass (dedupe / drop low-information) that
