@@ -35,8 +35,18 @@ public partial class MainWindow : Window
         _engineService.CommandCompleted += OnEngineCommandCompleted;
     }
 
-    private void OnEngineCommandCompleted(object? sender, EngineLogEntry entry) =>
-        Dispatcher.BeginInvoke(() => ViewModel.AppendEngineLog(entry));
+    private void OnEngineCommandCompleted(object? sender, EngineLogEntry entry)
+    {
+        // The event fires on a background thread; marshal onto the dispatcher. Null-safe on the
+        // deferred call because DataContext may be gone during teardown (the EmitCommandLog
+        // try/catch only guards the synchronous BeginInvoke, not this lambda's later execution).
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(() => (DataContext as MainWindowViewModel)?.AppendEngineLog(entry));
+    }
 
     private MainWindowViewModel ViewModel => (MainWindowViewModel)DataContext;
 
