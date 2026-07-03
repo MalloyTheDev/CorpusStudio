@@ -160,26 +160,54 @@ CorpusStudio
 
 ## Desktop preview
 
-![Corpus Studio Start Center](docs/screenshots/desktop-v1.2.png)
+A walk through the workspace, front to back. An IDE-style activity bar toggles
+between the **Start Center**, the file **Explorer**, and the classic **Studio**
+(the 14-tab dashboard), with **Problems** and **Output** panels docked at the
+bottom. See [`docs/WORKSPACE_SYSTEM.md`](docs/WORKSPACE_SYSTEM.md).
 
-The **Start Center** — a dataset is a workspace, not just rows. Create a new
+![Corpus Studio Start Center](docs/screenshots/workspace-start-center.png)
+
+**1 · Start Center** — a dataset is a workspace, not just rows. Create a new
 project from a template, open an existing folder (Corpus Studio never mutates your
-files without asking), or jump back into a recent workspace. An IDE-style activity
-bar toggles between this, the file **Explorer**, and the classic **Studio** (the
-14-tab dashboard: Writing Studio, Examples, Preference Review, Quarantine, Splits,
-Evaluation, AI Assist, Training, Arena, Artifacts, Versions, Debt, and Settings).
-
-![Corpus Studio workspace explorer](docs/screenshots/workspace-explorer.png)
-
-The **Universal Workspace Explorer**: a VS Code-style file tree (generated reports
-flagged and opened read-only) with document tabs, four viewers, and a metadata
-panel. `examples.jsonl` opens with a single-writer caution and is never mutated
-except by an explicit save. See [`docs/WORKSPACE_SYSTEM.md`](docs/WORKSPACE_SYSTEM.md).
+files without asking), or jump back into a recent workspace. Missing folders are
+flagged, never silently dropped.
 
 ![Corpus Studio new project wizard](docs/screenshots/workspace-wizard.png)
 
-The **New Project wizard**: pick a schema and a template and see a live preview of
-the exact folder structure that will be scaffolded before anything is written.
+**2 · New Project wizard** — pick a schema and a template and see a live preview of
+the exact folder structure that will be scaffolded before anything is written. Both
+the Start Center and the Studio sidebar open this one wizard.
+
+![Corpus Studio workspace explorer](docs/screenshots/workspace-explorer.png)
+
+**3 · Universal Workspace Explorer** — a VS Code-style file tree (generated reports
+flagged and opened read-only) with file-type chips, document tabs, four viewers, and
+a metadata panel. `examples.jsonl` opens with a single-writer caution and is never
+mutated except by an explicit save.
+
+![Corpus Studio Studio dashboard with the dataset-debt grade badge](docs/screenshots/studio-dashboard.png)
+
+**4 · Studio dashboard** — the project overview with quick actions and a glanceable
+**dataset-debt grade badge** in the header (click it for the full ledger). The grade
+reflects the last debt check and marks itself stale when the dataset changes — it
+never auto-runs or shows a stale grade as current.
+
+![Corpus Studio Problems panel](docs/screenshots/problems-panel.png)
+
+**5 · Problems panel** — the dataset's gate findings (schema, quality, PII/secrets,
+leakage) as a scannable, block-first list with fix hints and an activity-bar count
+badge. A clean gate is a pre-export signal, **not approval** — you still review.
+
+![Corpus Studio Output panel](docs/screenshots/output-panel.png)
+
+**6 · Output / Logs panel** — an ephemeral, local-only record of every engine CLI
+invocation (verb, outcome, duration, stderr on failure) for at-a-glance diagnostics.
+
+![Corpus Studio dataset debt ledger](docs/screenshots/dataset-debt.png)
+
+**7 · Dataset Debt** — the engine normalizes the quality signals by dataset size,
+ranks them, and grades the dataset (A–F) so you know what to fix first; secrets/PII
+are graded by presence, not rate.
 
 ## Core Local Loop
 

@@ -607,6 +607,12 @@ public partial class MainWindow : Window
         TrainingTab.IsSelected = true;
     }
 
+    private void GoToDebtTab_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel.ShowStudio();
+        DebtTab.IsSelected = true;
+    }
+
     private async void CheckTrainingCompatibilityButton_Click(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveSchemaId))
