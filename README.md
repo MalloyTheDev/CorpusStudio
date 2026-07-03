@@ -97,7 +97,11 @@ a training run of your own installed trainer:
   saved comparison reports
 - review-first AI Assist Lab with a persistent accept/reject queue, saved
   views, bulk triage with undo, and resumable rewrite batches — every AI
-  suggestion is review-required and never auto-accepted
+  suggestion is review-required and never auto-accepted. AI-generated candidate
+  rows are run through the dataset gate runner (schema/quality/PII) before review
+  and carry a `candidate_gate` verdict — a pre-review signal only: a clean gate is
+  not approval, a block does not auto-reject, and provider policy is enforced
+  before generation
 
 **Train & track**
 - training config export for axolotl / TRL / Unsloth / Hugging Face /

@@ -40,7 +40,7 @@ These are the paths a first-time user exercises; capture output as evidence.
 
 ## 4. Screenshots
 
-- [ ] Refresh `docs/screenshots/desktop-v0.1.png` (or add a new versioned image)
+- [ ] Refresh `docs/screenshots/desktop-v1.1.png` (or add a new versioned image)
       so the README preview matches the current UI.
 - [ ] Capture the Evaluation tab showing drilldown filters, reviewed fixes, and
       report history if they changed.
@@ -59,15 +59,22 @@ These are the paths a first-time user exercises; capture output as evidence.
 
 ## 6. Known non-features (state them plainly)
 
-Corpus Studio deliberately does **not** do these yet. Keep this list in the
-release notes so expectations are set:
+Corpus Studio deliberately does **not** do these. Keep this list in the release
+notes so expectations are set:
 
-- No training launcher — Training Lab exports inspectable configs only.
-- No cloud/hosted-provider orchestration or credential management; local
-  backends (Ollama, OpenAI-compatible) only.
-- No multi-model benchmark suites.
+- No embedded training framework — Corpus Studio launches the user's installed
+  trainer (with explicit confirmation of the exact argv) but bundles no
+  CUDA/PyTorch/Transformers and runs no training itself.
+- No cloud/hosted-provider *generation* or credential management: local backends
+  (Ollama, OpenAI-compatible) do the generating; OpenAI/Anthropic are
+  evaluator-only and only when the user configures them. Nothing is called on its
+  own, and no dataset is uploaded/published.
 - AI Assist is review-first: suggestions require human accept/reject and are
-  never auto-applied to a dataset.
+  never auto-applied to a dataset. Generated candidates are gated before review,
+  but the gate only informs — it never auto-accepts or auto-rejects.
+- The desktop does not yet surface the AI Assist `candidate_gate` verdict
+  (v1.2.1), and there is no Dashboard debt badge or debt trend view yet.
+- No Evaluation Suites or Chat Gates yet (v1.3).
 - The SQLite project index is an optional cache; JSON/JSONL remain the source of
   truth and the app works without it.
 - Evaluation runs are single-project, single-run; no streaming progress.

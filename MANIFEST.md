@@ -104,6 +104,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/DATASET_CARD.md`
 - `docs/DATA_MODEL.md`
 - `docs/DATASET_TESTING_WORKFLOW.md`
+- `docs/DEBT.md`
 - `docs/DEVELOPMENT_SETUP.md`
 - `docs/EVALUATION_LAB.md`
 - `docs/EXPORT_FORMATS.md`
@@ -136,7 +137,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/schemas/preference.md`
 - `docs/schemas/raw_text.md`
 - `docs/schemas/retrieval.md`
-- `docs/screenshots/desktop-v0.1.png`
+- `docs/screenshots/desktop-v1.1.png`
 - `docs/workflows/create_instruction_dataset.md`
 - `docs/workflows/create_preference_dataset.md`
 - `docs/workflows/create_pretraining_corpus.md`

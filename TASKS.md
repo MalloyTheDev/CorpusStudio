@@ -1,5 +1,11 @@
 # Initial Build Tasks
 
+This is the completed board for the initial build (through the v0.4 milestone);
+every item is done. It is kept as a historical record and is **not** the live
+plan. For what is shipped today see [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md),
+and for staged milestones (through v1.2 and beyond) see
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
+
 ## Repo setup
 
 - [x] Initialize Git repository.

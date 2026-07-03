@@ -6,14 +6,20 @@ staged so v0.1 remains focused and usable.
 
 ## Current Checkpoint
 
-The repository now has a runnable WPF desktop app backed by the Python engine.
-The local dataset loop, import quarantine, quality reports, split generation,
-JSONL export, Evaluation Lab MVP, AI Assist Lab MVP, and Training Lab config
-export MVP are present. The app remains local-first and file-backed.
+The repository has a runnable WPF desktop app backed by the Python engine, and
+the full local dataset-to-model loop is shipped end to end: authoring/validation,
+import quarantine, quality reports + a graded debt ledger, leakage-checked splits,
+JSONL/preference export, Evaluation Lab, multi-model benchmark, Model Arena,
+review-first AI Assist (with pre-review candidate gating), a governed provider
+policy + gate runner, the local training launcher (in-app launch, live logs,
+checkpoints, resume, before/after eval), a training run registry + regression
+gate, a model artifact registry + weight card + promote gate, and dataset version
+history (capture/card/diff/restore) — all local-first and file-backed. See
+[`CURRENT_STATE.md`](CURRENT_STATE.md) for the authoritative feature list.
 
-The next roadmap work is hardening, not expanding into full trainer
-orchestration. Local training launch, trainer logs, checkpoint tracking, CUDA,
-PyTorch, Transformers, and cloud publishing remain outside the current app.
+Milestones v0.1–v1.2 are complete. CUDA, PyTorch, Transformers, and cloud
+publishing remain deliberately outside the app — Corpus Studio orchestrates the
+user's installed trainer, it does not embed a training framework.
 
 ## v0.1 - Dataset Creation Studio
 
@@ -184,26 +190,30 @@ Out of scope:
 Goal: enforce, in the engine, who may generate trainable data, and gate whether
 data/exports/evaluations may move forward.
 
-Scope (in progress):
+Scope (done):
 
 - Role-based provider/model capability policy enforced in the engine
   (OpenAI/Anthropic evaluator-only; Ollama/local generation only when approved;
   OpenRouter route-aware). See `PROVIDER_POLICY.md`.
 - Project-local, inspectable provider approval overrides.
 - Gate runner with serializable pass/warn/block reports over the existing
-  schema, quality, leakage, PII, and evaluation logic. See `GATES.md`.
+  schema, quality, leakage, PII, and evaluation logic, plus per-project
+  thresholds. See `GATES.md`.
+- Desktop surfacing: a **Provider Generation Policy** panel (Settings) and a
+  **Run Gates** button (Quality tab).
 - `docs/CURRENT_STATE.md` as the single source of truth.
 
-Out of scope (future):
+Delivered later, as planned:
 
-- Real hosted-provider API clients; approved-generation review-queue pipeline
-  (v1.2); regression gate (needs the v0.8 run registry); desktop surfacing.
+- The regression gate landed with the v0.8 run registry; approved-generation
+  candidate gating landed in v1.2. Real hosted-provider API clients remain out
+  of scope (evaluator-only providers are configured, not embedded).
 
 ## v0.7 - Model Chat Lab / Arena
 
 Goal: compare models side by side on prompt suites, with evaluator-only judging.
 
-Scope (in progress):
+Scope (done):
 
 - Run a prompt suite across several models and capture responses side by side
   (engine `arena-run`, `ArenaReport`). Responses are comparison artifacts, not
@@ -290,10 +300,49 @@ Scope:
 - Evaluation Lab
 - AI Assist Lab
 - Training Lab
-- version history — **v1.0.0 (engine) shipped**: dataset version registry with a
-  content fingerprint, live drift detection, lineage links, and a version card
-  (`dataset-version-create/-list/-show`). Deferred: desktop surfacing (v1.0.1),
-  row identity + content store (v1.0.2), diff (v1.0.3), restore (v1.0.4). See
-  [VERSIONING.md](VERSIONING.md).
+- version history — **complete (v1.0.0–v1.0.3, engine + desktop)**: dataset
+  version registry with a content fingerprint, live drift detection, lineage
+  links, and a version card (`dataset-version-create/-list/-show`); a
+  content-addressed row store with per-version manifests; `dataset-version-diff`
+  and `dataset-version-restore`; and a desktop **Versions** tab with capture, view
+  card, diff view, and in-place restore. See [VERSIONING.md](VERSIONING.md).
 - full documentation
 - examples for all built-in schemas
+
+## v1.1 - Dataset Debt Ledger
+
+Goal: turn the raw quality report into a prioritized, graded "what do I fix
+first?" answer.
+
+Scope (done):
+
+- Engine `dataset-debt`: quality signals normalized by dataset size, ranked by
+  severity, graded A–F, each with a remediation. Secrets/PII graded by presence
+  (a single leaked key is critical), everything else by rate. See
+  [DEBT.md](DEBT.md).
+- A desktop **Debt** tab (color-coded grade + ranked remediation list) whose
+  grade invalidates the moment the dataset changes.
+
+Deferred: a Dashboard grade badge (auto-run on open), trend over time, and
+folding gate results into the ledger.
+
+## v1.2 - Approved Provider Generation (candidate gating)
+
+Goal: close the `generate → validate → quality → gates → human review` chain for
+AI-generated candidates.
+
+Scope (done, engine):
+
+- `run_ai_assist` runs the existing dataset gate runner (schema/quality/PII) over
+  the generated candidate rows and attaches the verdict as `candidate_gate` — a
+  pre-review signal only. `review_required` stays true; a clean gate is not
+  approval; a block does not auto-reject; provider policy is enforced before
+  generation. See [AI_ASSIST_LAB.md](AI_ASSIST_LAB.md).
+
+Deferred: **v1.2.1** desktop surfacing of `candidate_gate` + a confirm-on-block
+affordance; a candidate-vs-existing novelty/contamination check; bulk
+generate-N-from-spec.
+
+## v1.3 - Evaluation Suites & Chat Gates
+
+Not started. Reusable evaluation suites and chat-scope gates.
