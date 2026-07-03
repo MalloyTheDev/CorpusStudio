@@ -1954,6 +1954,56 @@
                             </Grid>
                         </Grid>
                     </TabItem>
+                    <TabItem Header="Debt">
+                        <Grid Margin="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <StackPanel Grid.Row="0">
+                                <TextBlock Text="Dataset Debt"
+                                           FontSize="18"
+                                           FontWeight="Bold"
+                                           Foreground="#0F172A" />
+                                <TextBlock Text="Debt normalizes the quality signals by dataset size, ranks them, and grades the dataset so you know what to fix first. Secrets/PII are graded by presence, not rate. Re-run after changing the dataset."
+                                           Foreground="#475569"
+                                           TextWrapping="Wrap"
+                                           Margin="0,4,0,8" />
+                            </StackPanel>
+                            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8" VerticalAlignment="Center">
+                                <TextBlock Text="Grade"
+                                           Foreground="#64748B"
+                                           VerticalAlignment="Bottom"
+                                           Margin="0,0,10,6" />
+                                <TextBlock AutomationProperties.AutomationId="DebtGradeTextBlock"
+                                           Text="{Binding DebtGrade, Mode=OneWay}"
+                                           Foreground="{Binding DebtGradeColor, Mode=OneWay}"
+                                           FontSize="40"
+                                           FontWeight="Bold" />
+                            </StackPanel>
+                            <StackPanel Grid.Row="2">
+                                <TextBlock AutomationProperties.AutomationId="DebtSummaryTextBlock"
+                                           Text="{Binding DebtSummary, Mode=OneWay}"
+                                           Foreground="#334155"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,8" />
+                                <Button AutomationProperties.AutomationId="RunDatasetDebtButton"
+                                        Content="Run debt check"
+                                        ToolTip="Assess the current dataset's debt (via the engine) and grade it"
+                                        HorizontalAlignment="Left"
+                                        Margin="0,0,0,8"
+                                        Click="RunDatasetDebtButton_Click" />
+                            </StackPanel>
+                            <ListBox Grid.Row="3"
+                                     AutomationProperties.AutomationId="DebtItemsListBox"
+                                     ItemsSource="{Binding DebtItems}"
+                                     DisplayMemberPath="DisplayName"
+                                     FontFamily="Consolas"
+                                     FontSize="12" />
+                        </Grid>
+                    </TabItem>
                     <TabItem Header="Settings">
                         <StackPanel Margin="8">
                             <TextBox Text="{Binding SettingsSummary, Mode=OneWay}"

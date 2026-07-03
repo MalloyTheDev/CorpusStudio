@@ -26,8 +26,10 @@ Last reconciled: 2026-07-02 (v1.0.0 engine slice landed).
 - Dataset **debt** ledger (`dataset-debt`): the quality signals, normalized by
   dataset size, ranked by severity, and graded A–F so you know what to fix first.
   Secrets/PII are graded by *presence* (a single leaked key is critical),
-  everything else by rate; each item carries a concrete remediation. See
-  [`DEBT.md`](DEBT.md).
+  everything else by rate; each item carries a concrete remediation. Surfaced in a
+  desktop **Debt** tab (color-coded grade + ranked remediation list) whose grade
+  invalidates the moment the dataset changes, so it never shows a stale verdict.
+  See [`DEBT.md`](DEBT.md).
 - Leakage-checked splits: `detect_split_leakage` reports exact and
   near-duplicate rows shared across train/validation/test.
 - Export with an optional cleaning pass (dedupe / drop low-information) that
