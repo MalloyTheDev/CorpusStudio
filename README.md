@@ -176,6 +176,11 @@ flagged and opened read-only) with document tabs, four viewers, and a metadata
 panel. `examples.jsonl` opens with a single-writer caution and is never mutated
 except by an explicit save. See [`docs/WORKSPACE_SYSTEM.md`](docs/WORKSPACE_SYSTEM.md).
 
+![Corpus Studio new project wizard](docs/screenshots/workspace-wizard.png)
+
+The **New Project wizard**: pick a schema and a template and see a live preview of
+the exact folder structure that will be scaffolded before anything is written.
+
 ## Core Local Loop
 
 Build a local desktop app that supports:

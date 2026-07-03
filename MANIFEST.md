@@ -85,10 +85,13 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/MainWindowViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/StartCenterViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/WorkspaceExplorerViewModel.cs`
+- `apps/desktop/CorpusStudio.Desktop/ViewModels/WorkspaceWizardViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml`
 - `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml.cs`
+- `apps/desktop/CorpusStudio.Desktop/Views/WorkspaceWizardWindow.xaml`
+- `apps/desktop/CorpusStudio.Desktop/Views/WorkspaceWizardWindow.xaml.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/AiAssistCandidateGateTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/AiAssistRewriteBatchServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ArenaViewModelTests.cs`
@@ -116,6 +119,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceViewLayerTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceExplorerViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceOpenRoutingTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceWizardViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TempProjectDirectory.cs`
 - `apps/desktop/CorpusStudio.Desktop.sln`
 - `apps/desktop/CorpusStudio.Desktop.sln.README.md`
@@ -150,6 +154,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/schemas/README.md`
 - `docs/screenshots/desktop-v1.2.png`
 - `docs/screenshots/workspace-explorer.png`
+- `docs/screenshots/workspace-wizard.png`
 - `engine/README.md`
 - `engine/corpus_studio/__init__.py`
 - `engine/corpus_studio/ai_assist/__init__.py`
