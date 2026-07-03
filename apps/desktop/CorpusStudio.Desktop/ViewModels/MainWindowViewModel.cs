@@ -206,6 +206,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// this class per the workspace design.</summary>
     public StartCenterViewModel StartCenter { get; } = new();
 
+    /// <summary>The Universal Workspace Explorer's own view-model (file tree + documents).
+    /// Operates on the active project's folder.</summary>
+    public WorkspaceExplorerViewModel Explorer { get; } = new();
+
     public WorkspaceShellMode ShellMode
     {
         get => _shellMode;
@@ -232,7 +236,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ShellMode = WorkspaceShellMode.StartCenter;
     }
 
-    public void ShowFiles() => ShellMode = WorkspaceShellMode.Files;
+    public void ShowFiles()
+    {
+        // Point the explorer at the active project's folder (built lazily here so we don't
+        // touch disk on every project select). Unchanged root keeps the tree + open tabs.
+        if (HasActiveProject)
+        {
+            Explorer.SetWorkspaceRoot(ActiveProjectPath, ActiveProjectTitle);
+        }
+        else
+        {
+            Explorer.Reset();
+        }
+
+        ShellMode = WorkspaceShellMode.Files;
+    }
 
     public void ShowStudio() => ShellMode = WorkspaceShellMode.Studio;
 
@@ -2135,6 +2153,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         // Debt is per-project and per-dataset — reset to the neutral default so a fresh
         // project reads "run a debt check", never a leaked grade or a "dataset changed" note.
         ResetDebtState();
+        // Clear the Explorer so a project switch can't show the previous project's tree or
+        // open document tabs; ShowFiles rebuilds it lazily for the new project.
+        Explorer.Reset();
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasActiveProject)));
     }
 

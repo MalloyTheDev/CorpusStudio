@@ -212,6 +212,198 @@ public partial class MainWindow : Window
         ViewModel.StartCenter.RecordOpened(
             path, name, schemaId, DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
 
+    // ---- Universal Workspace Explorer (v1.2.4 view layer, slice 3b) ---------------
+
+    private void ExplorerTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+    {
+        if (e.NewValue is WorkspaceTreeNode node)
+        {
+            ViewModel.Explorer.OpenNode(node);
+        }
+    }
+
+    private void DocTab_Click(object sender, MouseButtonEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is OpenWorkspaceDocument doc)
+        {
+            ViewModel.Explorer.ActiveDocument = doc;
+        }
+    }
+
+    private void DocTabClose_Click(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true; // don't also select the tab
+        if ((sender as FrameworkElement)?.DataContext is not OpenWorkspaceDocument doc)
+        {
+            return;
+        }
+
+        if (doc.IsDirty)
+        {
+            var choice = MessageBox.Show(
+                this,
+                $"{doc.DisplayName} has unsaved changes. Close without saving?",
+                "Unsaved changes",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            if (choice != MessageBoxResult.Yes)
+            {
+                return;
+            }
+        }
+
+        ViewModel.Explorer.CloseDocument(doc);
+    }
+
+    private void ExplorerNewFile_Click(object sender, RoutedEventArgs e)
+    {
+        if (!EnsureWorkspace())
+        {
+            return;
+        }
+
+        var relative = PromptForRelativePath("New File", "New file path (relative to the workspace root):");
+        if (relative is null)
+        {
+            return;
+        }
+
+        var error = ViewModel.Explorer.CreateFile(relative);
+        if (error is not null)
+        {
+            MessageBox.Show(this, error, "New File", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void ExplorerNewFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (!EnsureWorkspace())
+        {
+            return;
+        }
+
+        var relative = PromptForRelativePath("New Folder", "New folder path (relative to the workspace root):");
+        if (relative is null)
+        {
+            return;
+        }
+
+        var error = ViewModel.Explorer.CreateFolder(relative);
+        if (error is not null)
+        {
+            MessageBox.Show(this, error, "New Folder", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void ExplorerRefresh_Click(object sender, RoutedEventArgs e) => ViewModel.Explorer.RefreshTree();
+
+    private void ExplorerCollapseAll_Click(object sender, RoutedEventArgs e) => ViewModel.Explorer.CollapseAll();
+
+    private void ExplorerSave_Click(object sender, RoutedEventArgs e)
+    {
+        var error = ViewModel.Explorer.SaveActiveDocument();
+        if (error is not null)
+        {
+            MessageBox.Show(this, error, "Save", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void ExplorerReveal_Click(object sender, RoutedEventArgs e)
+    {
+        var doc = ViewModel.Explorer.ActiveDocument;
+        if (doc is null || string.IsNullOrEmpty(doc.FullPath))
+        {
+            return;
+        }
+
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                "explorer.exe", $"/select,\"{doc.FullPath}\"")
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Reveal", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void ExplorerCopyPath_Click(object sender, RoutedEventArgs e)
+    {
+        var relative = ViewModel.Explorer.ActiveRelPath;
+        if (string.IsNullOrEmpty(relative))
+        {
+            return;
+        }
+
+        try
+        {
+            Clipboard.SetText(relative);
+        }
+        catch (Exception)
+        {
+            // Clipboard can be transiently locked by another app; ignore.
+        }
+    }
+
+    private bool EnsureWorkspace()
+    {
+        if (ViewModel.Explorer.HasWorkspace)
+        {
+            return true;
+        }
+
+        MessageBox.Show(
+            this,
+            "Open or create a project first (from the Studio Dashboard or the Start Center).",
+            "No workspace",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+        return false;
+    }
+
+    /// <summary>Minimal single-line text prompt (no dependency on VisualBasic). Returns the
+    /// trimmed input, or null if cancelled or empty.</summary>
+    private string? PromptForRelativePath(string title, string prompt)
+    {
+        var input = new TextBox { MinWidth = 340, Margin = new Thickness(0, 8, 0, 0) };
+        var ok = new Button { Content = "Create", IsDefault = true, MinWidth = 84, Margin = new Thickness(0, 0, 8, 0) };
+        var cancel = new Button { Content = "Cancel", IsCancel = true, MinWidth = 84 };
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 14, 0, 0),
+        };
+        buttons.Children.Add(ok);
+        buttons.Children.Add(cancel);
+
+        var panel = new StackPanel { Margin = new Thickness(18) };
+        panel.Children.Add(new TextBlock { Text = prompt, TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(input);
+        panel.Children.Add(buttons);
+
+        var dialog = new Window
+        {
+            Title = title,
+            Content = panel,
+            Owner = this,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+        };
+        ok.Click += (_, _) => dialog.DialogResult = true;
+        dialog.Loaded += (_, _) => input.Focus();
+
+        return dialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(input.Text)
+            ? input.Text.Trim()
+            : null;
+    }
+
     private async Task<string> CreateProjectAsync(NewProjectRequest request)
     {
         return (await _engineService.CreateProjectAsync(
