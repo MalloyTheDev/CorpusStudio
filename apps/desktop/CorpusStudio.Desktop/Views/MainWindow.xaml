@@ -306,6 +306,31 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- Explorer sidebar header icon buttons -->
+        <Style x:Key="ExplorerIconStyle" TargetType="{x:Type Button}">
+            <Setter Property="Width" Value="26" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#475569" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border x:Name="ExplorerIconBorder" Background="{TemplateBinding Background}" CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ExplorerIconBorder" Property="Background" Value="#EEF4FF" />
+                                <Setter Property="Foreground" Value="#2563EB" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid Background="{StaticResource AppBackgroundBrush}">
@@ -359,14 +384,205 @@
             <!-- content: Studio (existing app) or Files (placeholder) -->
             <Grid Grid.Column="1">
 
-                <!-- FILES placeholder — the Universal Explorer arrives in the next slice -->
-                <Border Visibility="{Binding IsFiles, Converter={StaticResource BoolToVis}}" Background="{StaticResource AppBackgroundBrush}">
-                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                        <TextBlock Text="Files / Explorer" FontSize="18" FontWeight="SemiBold" Foreground="#0F172A" HorizontalAlignment="Center" />
-                        <TextBlock Text="The Universal Workspace Explorer arrives in the next slice." Foreground="{StaticResource MutedTextBrush}" Margin="0,6,0,0" HorizontalAlignment="Center" />
-                        <Button Content="Back to Studio" Click="ActivityStudioButton_Click" Margin="0,16,0,0" HorizontalAlignment="Center" Padding="14,6" />
-                    </StackPanel>
-                </Border>
+                <!-- FILES VIEW — Universal Workspace Explorer -->
+                <Grid Visibility="{Binding IsFiles, Converter={StaticResource BoolToVis}}" Background="{StaticResource AppBackgroundBrush}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="266" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- explorer sidebar -->
+                    <Border Grid.Column="0" Background="#FBFCFE" BorderBrush="#E2E8F0" BorderThickness="0,0,1,0">
+                        <DockPanel>
+                            <!-- header -->
+                            <Grid DockPanel.Dock="Top" Margin="12,11,8,8">
+                                <TextBlock Text="EXPLORER" FontSize="11" FontWeight="Bold" Foreground="#64748B" VerticalAlignment="Center" />
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <Button ToolTip="New File" Click="ExplorerNewFile_Click" Style="{StaticResource ExplorerIconStyle}">
+                                        <Path Data="M14,3 H7 A2,2 0 0 0 5,5 V19 A2,2 0 0 0 7,21 H17 A2,2 0 0 0 19,19 V8 Z M14,3 V8 H19 M12,12 V17 M9.5,14.5 H14.5" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7" Fill="Transparent" Width="15" Height="15" Stretch="Uniform" />
+                                    </Button>
+                                    <Button ToolTip="New Folder" Click="ExplorerNewFolder_Click" Style="{StaticResource ExplorerIconStyle}">
+                                        <Path Data="M3,7 A2,2 0 0 1 5,5 H9 L11,7 H19 A2,2 0 0 1 21,9 V17 A2,2 0 0 1 19,19 H5 A2,2 0 0 1 3,17 Z M12,11 V16 M9.5,13.5 H14.5" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7" Fill="Transparent" Width="15" Height="15" Stretch="Uniform" />
+                                    </Button>
+                                    <Button ToolTip="Refresh" Click="ExplorerRefresh_Click" Style="{StaticResource ExplorerIconStyle}">
+                                        <Path Data="M21,12 A9,9 0 1 1 18,5.3 L21,8 M21,3 V8 H16" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7" Fill="Transparent" Width="15" Height="15" Stretch="Uniform" />
+                                    </Button>
+                                    <Button ToolTip="Collapse all" Click="ExplorerCollapseAll_Click" Style="{StaticResource ExplorerIconStyle}">
+                                        <Path Data="M9,4 V9 H4 M15,20 V15 H20 M20,4 L15,9 M4,20 L9,15" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7" Fill="Transparent" Width="15" Height="15" Stretch="Uniform" />
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- workspace root row -->
+                            <Border DockPanel.Dock="Top" BorderBrush="#EEF2F7" BorderThickness="0,0,0,1" Padding="12,2,12,8">
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Width="20" Height="20" CornerRadius="5" Margin="0,0,7,0">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                <GradientStop Color="#2563EB" Offset="0" />
+                                                <GradientStop Color="#1D4ED8" Offset="1" />
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                        <TextBlock Text="C" Foreground="White" FontWeight="Bold" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <TextBlock Text="{Binding Explorer.WorkspaceName}" FontSize="12" FontWeight="Bold" Foreground="#0F172A" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                            </Border>
+
+                            <!-- status bar -->
+                            <Border DockPanel.Dock="Bottom" BorderBrush="#EEF2F7" BorderThickness="0,1,0,0" Padding="12,7">
+                                <TextBlock Text="{Binding Explorer.ExplorerStatus}" FontSize="11" Foreground="#94A3B8" TextTrimming="CharacterEllipsis" />
+                            </Border>
+
+                            <!-- tree -->
+                            <TreeView x:Name="ExplorerTree" ItemsSource="{Binding Explorer.RootNode.Children}"
+                                      SelectedItemChanged="ExplorerTree_SelectedItemChanged"
+                                      BorderThickness="0" Background="Transparent" Padding="4">
+                                <TreeView.ItemContainerStyle>
+                                    <Style TargetType="{x:Type TreeViewItem}">
+                                        <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                                    </Style>
+                                </TreeView.ItemContainerStyle>
+                                <TreeView.ItemTemplate>
+                                    <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                        <StackPanel Orientation="Horizontal" Height="22">
+                                            <Path Data="M3,7 A1,1 0 0 1 4,6 H8 L10,8 H20 A1,1 0 0 1 21,9 V17 A1,1 0 0 1 20,18 H4 A1,1 0 0 1 3,17 Z"
+                                                  Stroke="#94A3B8" StrokeThickness="1.3" Fill="#EEF2F7" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
+                                                  Visibility="{Binding IsDirectory, Converter={StaticResource BoolToVis}}" />
+                                            <Border Width="22" Height="14" CornerRadius="3" Background="#EEF4FF" VerticalAlignment="Center"
+                                                    Visibility="{Binding IsDirectory, Converter={StaticResource InverseBoolToVis}}">
+                                                <TextBlock Text="{Binding Extension}" FontSize="7.5" FontWeight="Bold" Foreground="#1D4ED8" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                            <TextBlock Text="{Binding Name}" FontSize="12.5" Foreground="#334155" VerticalAlignment="Center" Margin="6,0,0,0" />
+                                            <Ellipse Width="6" Height="6" Fill="#F59E0B" VerticalAlignment="Center" Margin="6,0,0,0" ToolTip="Generated · opens read-only"
+                                                     Visibility="{Binding IsGeneratedArtifact, Converter={StaticResource BoolToVis}}" />
+                                        </StackPanel>
+                                    </HierarchicalDataTemplate>
+                                </TreeView.ItemTemplate>
+                            </TreeView>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- editor column -->
+                    <Grid Grid.Column="1" Background="#FFFFFF">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <!-- document tabs -->
+                        <Border Grid.Row="0" Height="38" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="0,0,0,1">
+                            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                                <ItemsControl ItemsSource="{Binding Explorer.OpenDocuments}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="0,0,1,0" Cursor="Hand"
+                                                    MouseLeftButtonDown="DocTab_Click" Padding="13,0,8,0">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding DisplayName}" FontSize="12.5" Foreground="#0F172A" VerticalAlignment="Center" />
+                                                    <Path Data="M5,11 H19 V20 H5 Z M8,11 V8 A4,4 0 0 1 16,8 V11" Stroke="#94A3B8" StrokeThickness="1.5" Fill="Transparent" Width="11" Height="11" Stretch="Uniform" Margin="6,0,0,0" VerticalAlignment="Center"
+                                                          Visibility="{Binding IsReadOnly, Converter={StaticResource BoolToVis}}" />
+                                                    <Border MouseLeftButtonDown="DocTabClose_Click" Width="18" Height="18" CornerRadius="4" Background="Transparent" Margin="6,0,0,0" Cursor="Hand">
+                                                        <Grid>
+                                                            <Ellipse Width="8" Height="8" Fill="#2563EB" Visibility="{Binding IsDirty, Converter={StaticResource BoolToVis}}" />
+                                                            <TextBlock Text="✕" FontSize="11" Foreground="#64748B" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding IsDirty, Converter={StaticResource InverseBoolToVis}}" />
+                                                        </Grid>
+                                                    </Border>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Border>
+
+                        <!-- editor toolbar -->
+                        <Border Grid.Row="1" Height="40" Background="#FBFCFE" BorderBrush="#EEF2F7" BorderThickness="0,0,0,1">
+                            <Grid Margin="14,0">
+                                <TextBlock Text="{Binding Explorer.ActiveRelPath}" FontFamily="Consolas" FontSize="11" Foreground="#94A3B8" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <Border Background="#FFF7ED" BorderBrush="#FED7AA" BorderThickness="1" CornerRadius="11" Padding="9,2" Margin="0,0,8,0" VerticalAlignment="Center"
+                                            Visibility="{Binding Explorer.ActiveDocument.IsReadOnly, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
+                                        <TextBlock Text="Read-only" Foreground="#9A3412" FontSize="10.5" FontWeight="SemiBold" />
+                                    </Border>
+                                    <Button Content="Reveal" Click="ExplorerReveal_Click" Height="28" Padding="10,0" Margin="0,0,8,0" />
+                                    <Button Content="Copy path" Click="ExplorerCopyPath_Click" Height="28" Padding="10,0" Margin="0,0,8,0" />
+                                    <Button Content="Save" Click="ExplorerSave_Click" Height="28" Padding="13,0"
+                                            IsEnabled="{Binding Explorer.ActiveDocument.IsDirty, FallbackValue=False}" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- examples.jsonl caution -->
+                        <Border Grid.Row="2" Background="#FFFBEB" BorderBrush="#FDE68A" BorderThickness="0,0,0,1" Padding="14,8"
+                                Visibility="{Binding Explorer.IsExamplesFile, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Foreground="#92400E" FontSize="12" TextWrapping="Wrap"
+                                       Text="This is the dataset's single source of rows. The desktop is its only writer — edits here are explicit and never auto-formatted. Use Writing Studio / Import for row-level changes." />
+                        </Border>
+
+                        <!-- viewer + metadata -->
+                        <Grid Grid.Row="3">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="240" />
+                            </Grid.ColumnDefinitions>
+
+                            <Grid Grid.Column="0">
+                                <!-- text / report -->
+                                <TextBox Visibility="{Binding Explorer.IsTextDocument, Converter={StaticResource BoolToVis}}"
+                                         Text="{Binding Explorer.ActiveDocument.TextContent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}"
+                                         IsReadOnly="{Binding Explorer.ActiveDocument.IsReadOnly, FallbackValue=True}"
+                                         FontFamily="Consolas" FontSize="13" AcceptsReturn="True" AcceptsTab="True" TextWrapping="NoWrap"
+                                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                                         BorderThickness="0" Padding="14" Background="#FFFFFF" />
+                                <!-- image -->
+                                <Grid Visibility="{Binding Explorer.IsImageDocument, Converter={StaticResource BoolToVis}}" Background="#F1F5F9">
+                                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <Border BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="8" MaxWidth="480">
+                                            <Image Source="{Binding Explorer.ActiveDocument.ImagePreviewPath}" Stretch="Uniform" MaxHeight="320" />
+                                        </Border>
+                                        <TextBlock Text="Preview only — opening an image never creates a dataset row." Foreground="#64748B" FontSize="11" Margin="0,12,0,0" HorizontalAlignment="Center" />
+                                    </StackPanel>
+                                </Grid>
+                                <!-- binary / unknown -->
+                                <Grid Visibility="{Binding Explorer.IsBinaryDocument, Converter={StaticResource BoolToVis}}" Background="#F8FAFC">
+                                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="360">
+                                        <TextBlock Text="Binary file — no text preview" FontWeight="SemiBold" Foreground="#334155" HorizontalAlignment="Center" />
+                                        <TextBlock Text="Weight/artifact files are referenced by path and never modified by Corpus Studio. See metadata on the right." Foreground="#64748B" FontSize="12" Margin="0,5,0,0" TextWrapping="Wrap" TextAlignment="Center" />
+                                    </StackPanel>
+                                </Grid>
+                                <!-- empty -->
+                                <TextBlock Visibility="{Binding Explorer.IsNoDocument, Converter={StaticResource BoolToVis}}"
+                                           Text="Select a file in the Explorer to open it." Foreground="#94A3B8" FontSize="13"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- metadata panel -->
+                            <Border Grid.Column="1" Background="#FBFCFE" BorderBrush="#EEF2F7" BorderThickness="1,0,0,0" Padding="14">
+                                <StackPanel>
+                                    <TextBlock Text="SELECTED FILE" FontSize="11" FontWeight="Bold" Foreground="#64748B" Margin="0,0,0,10" />
+                                    <ItemsControl ItemsSource="{Binding Explorer.MetadataRows}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="0,0,0,11">
+                                                    <TextBlock Text="{Binding Key}" FontSize="10.5" Foreground="#94A3B8" />
+                                                    <TextBlock Text="{Binding Value}" FontSize="12" Foreground="#334155" TextWrapping="Wrap" Margin="0,2,0,0" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock Text="Select a file to see its details." Foreground="#94A3B8" FontSize="11" TextWrapping="Wrap"
+                                               Visibility="{Binding Explorer.IsNoDocument, Converter={StaticResource BoolToVis}}" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </Grid>
 
                 <!-- STUDIO = the existing 14-tab app, preserved intact -->
                 <Grid Visibility="{Binding IsStudio, Converter={StaticResource BoolToVis}}" Background="{StaticResource AppBackgroundBrush}">

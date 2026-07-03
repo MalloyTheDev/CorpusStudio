@@ -144,30 +144,13 @@ public partial class MainWindow : Window
         NewDatasetProjectButton_Click(sender, e);
     }
 
-    private void StartOpenFolder_Click(object sender, RoutedEventArgs e)
+    private async void StartOpenFolder_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog { Title = "Open dataset workspace folder" };
-        if (dialog.ShowDialog(this) != true)
+        if (dialog.ShowDialog(this) == true)
         {
-            return;
+            await RouteOpenFolder(dialog.FolderName);
         }
-
-        var folder = dialog.FolderName;
-        string? schemaId = null;
-        var manifest = new WorkspaceManifestService().Read(folder);
-        if (manifest.Ok)
-        {
-            schemaId = manifest.Manifest!.SchemaId;
-        }
-
-        RecordRecentWorkspace(folder, System.IO.Path.GetFileName(folder.TrimEnd('/', '\\')), schemaId);
-        ViewModel.ShowStartCenter();
-        MessageBox.Show(
-            this,
-            $"Added to Recent Workspaces:\n{folder}\n\nLoading a workspace into the Studio tabs arrives in the next slice.",
-            "Workspace",
-            MessageBoxButton.OK,
-            MessageBoxImage.Information);
     }
 
     private void StartImport_Click(object sender, RoutedEventArgs e)
@@ -181,13 +164,31 @@ public partial class MainWindow : Window
             MessageBoxImage.Information);
     }
 
-    private void RecentOpen_Click(object sender, RoutedEventArgs e)
+    private async void RecentOpen_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is RecentWorkspaceDisplayItem item)
+        if ((sender as FrameworkElement)?.DataContext is not RecentWorkspaceDisplayItem item)
         {
-            RecordRecentWorkspace(item.Path, item.Name, item.SchemaId);
-            ViewModel.ShowStudio();
+            return;
         }
+
+        if (!System.IO.Directory.Exists(item.Path))
+        {
+            var choice = MessageBox.Show(
+                this,
+                $"'{item.Path}' no longer exists. Remove it from Recent Workspaces?",
+                "Missing workspace",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            if (choice == MessageBoxResult.Yes)
+            {
+                ViewModel.StartCenter.Remove(item.Path);
+            }
+
+            return;
+        }
+
+        await RouteOpenFolder(item.Path);
     }
 
     private void RecentPin_Click(object sender, RoutedEventArgs e)
@@ -211,6 +212,342 @@ public partial class MainWindow : Window
     private void RecordRecentWorkspace(string path, string name, string? schemaId) =>
         ViewModel.StartCenter.RecordOpened(
             path, name, schemaId, DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
+
+    // ---- Open / Initialize a folder as the active workspace (slice 3c) ------------
+
+    /// <summary>Route an Open-Folder request through the four cases (see the prototype):
+    /// open a manifest workspace; offer to initialize a dataset folder; offer to create in
+    /// an empty folder; or refuse a random folder without mutating anything.</summary>
+    private async Task RouteOpenFolder(string folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder) || !System.IO.Directory.Exists(folder))
+        {
+            MessageBox.Show(this, "That folder no longer exists.", "Open Folder", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        switch (WorkspaceOpenRouting.Inspect(folder, new WorkspaceManifestService()))
+        {
+            case WorkspaceOpenAction.OpenManifest:
+                await OpenWorkspaceFolder(folder);
+                break;
+
+            case WorkspaceOpenAction.OfferInitializeDataset:
+                if (ConfirmOpen($"'{FolderDisplayName(folder)}' looks like a dataset but has no Corpus Studio metadata.\n\nInitialize it? This adds a .corpus/project.json manifest; your existing rows are left untouched."))
+                {
+                    await InitializeAndOpen(folder);
+                }
+
+                break;
+
+            case WorkspaceOpenAction.OfferCreateEmpty:
+                if (ConfirmOpen($"'{FolderDisplayName(folder)}' is empty.\n\nCreate a new Corpus Studio workspace here?"))
+                {
+                    await InitializeAndOpen(folder);
+                }
+
+                break;
+
+            default:
+                MessageBox.Show(
+                    this,
+                    "This folder isn't a Corpus Studio workspace and doesn't contain a dataset. Use Import to bring rows in, or pick another folder. Nothing was changed.",
+                    "Open Folder",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                break;
+        }
+    }
+
+    /// <summary>Open <paramref name="folder"/> as the active workspace: reuse or add a
+    /// project pointing at it, load its examples/quarantine/quality, record it to Recent,
+    /// and land in the Explorer. The engine only ever reads from this path.</summary>
+    private async Task OpenWorkspaceFolder(string folder)
+    {
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+
+            var manifest = new WorkspaceManifestService().Read(folder);
+            var (projectId, name, schemaId) =
+                WorkspaceOpenRouting.DeriveOpenArgs(manifest.Manifest, FolderDisplayName(folder));
+
+            var existing = ViewModel.Projects.FirstOrDefault(p => SamePath(p.ProjectPath, folder));
+            if (existing is not null)
+            {
+                ViewModel.SelectProject(existing, schemaId);
+            }
+            else
+            {
+                ViewModel.AddProject(projectId, name, schemaId, schemaId, folder);
+            }
+
+            ViewModel.SetExamples(_engineService.LoadExamples(folder));
+            ViewModel.SetImportQuarantineItems(_engineService.LoadImportQuarantineItems(folder));
+            Mouse.OverrideCursor = null;
+            await RefreshQualityAsync(recordHistory: false);
+
+            RecordRecentWorkspace(folder, name, schemaId);
+            ViewModel.ShowFiles();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Open Workspace", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
+    }
+
+    /// <summary>Write the workspace manifest into a folder (empty template — nothing but the
+    /// manifest, existing files untouched) and open it.</summary>
+    private async Task InitializeAndOpen(string folder)
+    {
+        var name = FolderDisplayName(folder);
+        const string schema = WorkspaceOpenRouting.DefaultSchemaId;
+        try
+        {
+            var templates = new ProjectTemplateService();
+            var plan = templates.BuildPlan("empty", schema, name, name);
+            var manifest = new WorkspaceProjectManifest
+            {
+                ProjectId = name,
+                Name = name,
+                SchemaId = schema,
+                TemplateId = "empty",
+                CreatedAt = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
+            };
+
+            var result = templates.Scaffold(folder, plan, manifest, allowNonEmpty: true);
+            if (!result.Ok)
+            {
+                MessageBox.Show(this, result.Error, "Initialize Workspace", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            await OpenWorkspaceFolder(folder);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Initialize Workspace", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private bool ConfirmOpen(string message) =>
+        MessageBox.Show(this, message, "Open Folder", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No)
+        == MessageBoxResult.Yes;
+
+    private static string FolderDisplayName(string folder)
+    {
+        var name = System.IO.Path.GetFileName(folder.TrimEnd('/', '\\'));
+        return string.IsNullOrWhiteSpace(name) ? "workspace" : name;
+    }
+
+    private static bool SamePath(string? left, string? right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+        {
+            return false;
+        }
+
+        return string.Equals(
+            left.Replace('/', '\\').TrimEnd('\\'),
+            right.Replace('/', '\\').TrimEnd('\\'),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ---- Universal Workspace Explorer (v1.2.4 view layer, slice 3b) ---------------
+
+    private void ExplorerTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+    {
+        if (e.NewValue is WorkspaceTreeNode node)
+        {
+            ViewModel.Explorer.OpenNode(node);
+        }
+    }
+
+    private void DocTab_Click(object sender, MouseButtonEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is OpenWorkspaceDocument doc)
+        {
+            ViewModel.Explorer.ActiveDocument = doc;
+        }
+    }
+
+    private void DocTabClose_Click(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true; // don't also select the tab
+        if ((sender as FrameworkElement)?.DataContext is not OpenWorkspaceDocument doc)
+        {
+            return;
+        }
+
+        if (doc.IsDirty)
+        {
+            var choice = MessageBox.Show(
+                this,
+                $"{doc.DisplayName} has unsaved changes. Close without saving?",
+                "Unsaved changes",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            if (choice != MessageBoxResult.Yes)
+            {
+                return;
+            }
+        }
+
+        ViewModel.Explorer.CloseDocument(doc);
+    }
+
+    private void ExplorerNewFile_Click(object sender, RoutedEventArgs e)
+    {
+        if (!EnsureWorkspace())
+        {
+            return;
+        }
+
+        var relative = PromptForRelativePath("New File", "New file path (relative to the workspace root):");
+        if (relative is null)
+        {
+            return;
+        }
+
+        var error = ViewModel.Explorer.CreateFile(relative);
+        if (error is not null)
+        {
+            MessageBox.Show(this, error, "New File", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void ExplorerNewFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (!EnsureWorkspace())
+        {
+            return;
+        }
+
+        var relative = PromptForRelativePath("New Folder", "New folder path (relative to the workspace root):");
+        if (relative is null)
+        {
+            return;
+        }
+
+        var error = ViewModel.Explorer.CreateFolder(relative);
+        if (error is not null)
+        {
+            MessageBox.Show(this, error, "New Folder", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void ExplorerRefresh_Click(object sender, RoutedEventArgs e) => ViewModel.Explorer.RefreshTree();
+
+    private void ExplorerCollapseAll_Click(object sender, RoutedEventArgs e) => ViewModel.Explorer.CollapseAll();
+
+    private void ExplorerSave_Click(object sender, RoutedEventArgs e)
+    {
+        var error = ViewModel.Explorer.SaveActiveDocument();
+        if (error is not null)
+        {
+            MessageBox.Show(this, error, "Save", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void ExplorerReveal_Click(object sender, RoutedEventArgs e)
+    {
+        var doc = ViewModel.Explorer.ActiveDocument;
+        if (doc is null || string.IsNullOrEmpty(doc.FullPath))
+        {
+            return;
+        }
+
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                "explorer.exe", $"/select,\"{doc.FullPath}\"")
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Reveal", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void ExplorerCopyPath_Click(object sender, RoutedEventArgs e)
+    {
+        var relative = ViewModel.Explorer.ActiveRelPath;
+        if (string.IsNullOrEmpty(relative))
+        {
+            return;
+        }
+
+        try
+        {
+            Clipboard.SetText(relative);
+        }
+        catch (Exception)
+        {
+            // Clipboard can be transiently locked by another app; ignore.
+        }
+    }
+
+    private bool EnsureWorkspace()
+    {
+        if (ViewModel.Explorer.HasWorkspace)
+        {
+            return true;
+        }
+
+        MessageBox.Show(
+            this,
+            "Open or create a project first (from the Studio Dashboard or the Start Center).",
+            "No workspace",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+        return false;
+    }
+
+    /// <summary>Minimal single-line text prompt (no dependency on VisualBasic). Returns the
+    /// trimmed input, or null if cancelled or empty.</summary>
+    private string? PromptForRelativePath(string title, string prompt)
+    {
+        var input = new TextBox { MinWidth = 340, Margin = new Thickness(0, 8, 0, 0) };
+        var ok = new Button { Content = "Create", IsDefault = true, MinWidth = 84, Margin = new Thickness(0, 0, 8, 0) };
+        var cancel = new Button { Content = "Cancel", IsCancel = true, MinWidth = 84 };
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 14, 0, 0),
+        };
+        buttons.Children.Add(ok);
+        buttons.Children.Add(cancel);
+
+        var panel = new StackPanel { Margin = new Thickness(18) };
+        panel.Children.Add(new TextBlock { Text = prompt, TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(input);
+        panel.Children.Add(buttons);
+
+        var dialog = new Window
+        {
+            Title = title,
+            Content = panel,
+            Owner = this,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+        };
+        ok.Click += (_, _) => dialog.DialogResult = true;
+        dialog.Loaded += (_, _) => input.Focus();
+
+        return dialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(input.Text)
+            ? input.Text.Trim()
+            : null;
+    }
 
     private async Task<string> CreateProjectAsync(NewProjectRequest request)
     {

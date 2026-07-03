@@ -76,6 +76,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Services/RecentWorkspaceService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/TrainingProcessRunner.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceManifestService.cs`
+- `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceOpenRouting.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspacePathSafety.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceLayout.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/ProjectTemplateService.cs`
@@ -83,6 +84,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceDocumentService.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/MainWindowViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/StartCenterViewModel.cs`
+- `apps/desktop/CorpusStudio.Desktop/ViewModels/WorkspaceExplorerViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml`
@@ -112,6 +114,8 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceFoundationTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceSystemTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceViewLayerTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceExplorerViewModelTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceOpenRoutingTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TempProjectDirectory.cs`
 - `apps/desktop/CorpusStudio.Desktop.sln`
 - `apps/desktop/CorpusStudio.Desktop.sln.README.md`
@@ -144,7 +148,8 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/decisions/0002-schema-driven-editor.md`
 - `docs/decisions/0003-python-engine-csharp-desktop.md`
 - `docs/schemas/README.md`
-- `docs/screenshots/desktop-v1.1.png`
+- `docs/screenshots/desktop-v1.2.png`
+- `docs/screenshots/workspace-explorer.png`
 - `engine/README.md`
 - `engine/corpus_studio/__init__.py`
 - `engine/corpus_studio/ai_assist/__init__.py`

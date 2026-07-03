@@ -40,7 +40,7 @@ These are the paths a first-time user exercises; capture output as evidence.
 
 ## 4. Screenshots
 
-- [ ] Refresh `docs/screenshots/desktop-v1.1.png` (or add a new versioned image)
+- [ ] Refresh `docs/screenshots/desktop-v1.2.png` (or add a new versioned image)
       so the README preview matches the current UI.
 - [ ] Capture the Evaluation tab showing drilldown filters, reviewed fixes, and
       report history if they changed.

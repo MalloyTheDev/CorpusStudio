@@ -160,11 +160,21 @@ CorpusStudio
 
 ## Desktop preview
 
-![Corpus Studio desktop](docs/screenshots/desktop-v1.1.png)
+![Corpus Studio Start Center](docs/screenshots/desktop-v1.2.png)
 
-The dashboard, with the workflow stage strip, quality and gate panels, and tabs
-for Writing Studio, Examples, Preference Review, Quarantine, Splits, Evaluation,
-AI Assist, Training, Arena, Artifacts, Versions, Debt, and Settings.
+The **Start Center** — a dataset is a workspace, not just rows. Create a new
+project from a template, open an existing folder (Corpus Studio never mutates your
+files without asking), or jump back into a recent workspace. An IDE-style activity
+bar toggles between this, the file **Explorer**, and the classic **Studio** (the
+14-tab dashboard: Writing Studio, Examples, Preference Review, Quarantine, Splits,
+Evaluation, AI Assist, Training, Arena, Artifacts, Versions, Debt, and Settings).
+
+![Corpus Studio workspace explorer](docs/screenshots/workspace-explorer.png)
+
+The **Universal Workspace Explorer**: a VS Code-style file tree (generated reports
+flagged and opened read-only) with document tabs, four viewers, and a metadata
+panel. `examples.jsonl` opens with a single-writer caution and is never mutated
+except by an explicit save. See [`docs/WORKSPACE_SYSTEM.md`](docs/WORKSPACE_SYSTEM.md).
 
 ## Core Local Loop
 
