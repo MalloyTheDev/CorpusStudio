@@ -70,7 +70,14 @@ python -m corpus_studio.cli dataset-debt <examples.jsonl> [--json]
 `DebtReport`, `build_debt_report`, `render_debt_report_markdown`) and the
 `dataset-debt` CLI, reusing `build_basic_quality_report`.
 
-**Deferred:** desktop surfacing (a Debt tab / dashboard); **trend over time**
+**Implemented (v1.1, desktop):** a **Debt** tab with a prominent color-coded grade
+(F/critical red; N/A neutral gray — never green), a "Run debt check" button, and
+the ranked, severity-badged remediation ledger. Everything goes through the engine;
+the desktop only parses and colors. The grade **invalidates the moment the dataset
+changes** (any edit/import/restore) and is cleared on project switch, so it can
+never show a stale verdict.
+
+**Deferred:** a Dashboard grade badge (auto-run on open); **trend over time**
 (is debt growing or shrinking, via quality history); folding gate results into the
 ledger; remediation *actions* (the ledger recommends fixes, it does not apply
 them); and any opaque numeric score (a grade is deliberately used instead).

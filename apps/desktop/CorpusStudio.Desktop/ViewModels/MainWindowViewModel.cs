@@ -127,6 +127,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private DatasetVersionDisplayItem? _selectedDatasetVersion;
     private string _datasetDiffBaseId = string.Empty;
     private string _datasetDiffBaseLabel = "No diff base pinned.";
+    private string _debtGrade = "—";
+    private string _debtGradeColor = "#64748B";
+    private string _debtSummary = "Run a debt check to grade the current dataset.";
+    private bool _debtStale;
     private string _trainingCheckpointsSummary =
         "Checkpoints appear here after a training run writes them.";
     private IReadOnlyList<string> _trainingResumeArgv = [];
@@ -1366,6 +1370,95 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             + "Select another version and click 'Diff base → selected'.");
     }
 
+    // --- Dataset debt (v1.1) -------------------------------------------------
+
+    private const string DebtNeutralGray = "#64748B";
+    private const string DebtDefaultSummary = "Run a debt check to grade the current dataset.";
+
+    public ObservableCollection<DebtDisplayItem> DebtItems { get; } = [];
+
+    /// <summary>The last computed grade, or "—" when unknown/stale.</summary>
+    public string DebtGrade
+    {
+        get => _debtGrade;
+        private set => SetField(ref _debtGrade, value);
+    }
+
+    /// <summary>Foreground hex for the grade header (gray when unknown; never green for N/A).</summary>
+    public string DebtGradeColor
+    {
+        get => _debtGradeColor;
+        private set => SetField(ref _debtGradeColor, value);
+    }
+
+    public string DebtSummary
+    {
+        get => _debtSummary;
+        private set => SetField(ref _debtSummary, value);
+    }
+
+    /// <summary>True when the dataset changed since the last debt check (grade is stale).</summary>
+    public bool DebtStale
+    {
+        get => _debtStale;
+        private set => SetField(ref _debtStale, value);
+    }
+
+    /// <summary>Show a fresh debt result (grade + ranked ledger + honest summary).</summary>
+    public void ApplyDebtReport(DebtReport report)
+    {
+        DebtItems.Clear();
+        foreach (var item in report.Items)
+        {
+            DebtItems.Add(new DebtDisplayItem(item));
+        }
+        DebtGrade = report.Grade;
+        DebtGradeColor = DebtReport.GradeColor(report.Grade);
+        DebtStale = false;
+        DebtSummary = !report.HasData
+            ? "No rows to assess (grade N/A). Add examples, then run a debt check."
+            : report.Items.Count == 0
+                ? "Grade A — no debt detected. This dataset is clean by the current checks."
+                : $"Grade {report.Grade}: {report.Items.Count} item(s), highest-severity first. "
+                  + "Fix the top items before training.";
+    }
+
+    public void SetDebtError(string message)
+    {
+        DebtSummary = $"Debt check failed.{Environment.NewLine}{message}";
+    }
+
+    /// <summary>Invalidate the debt grade because the dataset changed. If a grade was
+    /// actually shown, say so (stale); otherwise fall back to the neutral default, so a
+    /// fresh project reads as "run a debt check", not a scary "the dataset changed".</summary>
+    public void InvalidateDebt()
+    {
+        var hadGrade = DebtItems.Count > 0 || DebtGrade != "—";
+        DebtItems.Clear();
+        DebtGrade = "—";
+        DebtGradeColor = DebtNeutralGray;
+        if (hadGrade)
+        {
+            DebtStale = true;
+            DebtSummary = "The dataset changed — run a debt check to re-grade it.";
+        }
+        else
+        {
+            DebtStale = false;
+            DebtSummary = DebtDefaultSummary;
+        }
+    }
+
+    /// <summary>Reset debt to the clean per-project default (used on project switch).</summary>
+    private void ResetDebtState()
+    {
+        DebtItems.Clear();
+        DebtGrade = "—";
+        DebtGradeColor = DebtNeutralGray;
+        DebtStale = false;
+        DebtSummary = DebtDefaultSummary;
+    }
+
     public string DatasetVersionSummary
     {
         get => _datasetVersionSummary;
@@ -1941,6 +2034,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             "Refresh to see dataset versions, or capture the current dataset as a version.";
         DatasetVersionDetail =
             "Select a version and View card to see its lineage (runs, artifacts, evals) and integrity.";
+        // Debt is per-project and per-dataset — reset to the neutral default so a fresh
+        // project reads "run a debt check", never a leaked grade or a "dataset changed" note.
+        ResetDebtState();
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasActiveProject)));
     }
 
@@ -1998,6 +2094,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         QualitySummary = Examples.Count == 0
             ? "No saved examples yet. Quality checks will run after examples are added."
             : $"{Examples.Count} saved example(s). Run quality checks to inspect duplicates and empty rows.";
+        // The dataset changed: any prior debt grade is now stale. Invalidate it so the
+        // Debt tab can never show a verdict that no longer matches the data.
+        InvalidateDebt();
     }
 
     public void SetQualityInProgress()

@@ -2264,6 +2264,35 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void RunDatasetDebtButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetDebtError("Create or select a dataset project first.");
+            return;
+        }
+
+        var projectPath = ViewModel.ActiveProjectPath;
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Assessing dataset debt...");
+
+            // Read-only: the engine computes and grades; the desktop parses and colors.
+            var report = await _engineService.GetDatasetDebtAsync(projectPath);
+            ViewModel.ApplyDebtReport(report);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetDebtError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
+        }
+    }
+
     private void RefreshTrainingRunsButton_Click(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))

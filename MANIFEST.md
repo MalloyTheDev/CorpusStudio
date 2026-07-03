@@ -44,6 +44,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/ArenaReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/GateReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/DatasetVersionRecord.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/DebtReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ModelArtifactRecord.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ImportPreviewReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/LabBackendSettings.cs`
@@ -74,6 +75,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/AiAssistRewriteBatchServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ArenaViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ArtifactRegistryTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/DatasetDebtViewTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/DatasetVersionRegistryTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/DatasetVersionRestoreTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/DatasetVersionDiffViewTests.cs`

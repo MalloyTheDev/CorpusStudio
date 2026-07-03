@@ -1450,6 +1450,23 @@ public sealed class PythonEngineService
             "dataset-version-diff", projectPath, "--version-id", baseVersionId, "--other", otherVersionId);
     }
 
+    /// <summary>Assess the current dataset's debt via the engine (<c>dataset-debt --json</c>):
+    /// the quality signals, normalized by dataset size, ranked, and graded. The engine owns
+    /// all computation — the desktop only parses and colors.</summary>
+    public async Task<DebtReport> GetDatasetDebtAsync(string projectPath)
+    {
+        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+        var output = await RunEngineCommandAsync("dataset-debt", examplesPath, "--json");
+        return ParseDebtReport(output);
+    }
+
+    /// <summary>Parse a <c>dataset-debt --json</c> DebtReport. Pure/static for testability.</summary>
+    public static DebtReport ParseDebtReport(string json)
+    {
+        return JsonSerializer.Deserialize<DebtReport>(json, JsonOptions)
+            ?? throw new InvalidOperationException("Engine returned no debt report.");
+    }
+
     /// <summary>Parse a <c>dataset-version-list</c> payload into display rows. Pure/static
     /// so the JSON contract (including the live <c>current_integrity</c> annotation) is
     /// unit-testable without spawning the engine.</summary>
