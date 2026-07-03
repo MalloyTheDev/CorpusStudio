@@ -16,10 +16,11 @@ It is designed to be a one-stop shop for authoring, importing, cleaning, validat
 
 Corpus Studio is not just a JSONL editor. It is a writing-first dataset IDE
 covering the full dataset-to-model workflow: create datasets, validate them,
-clean and measure them, run pass/warn/block gates, generate or rewrite
-candidates only with policy-approved providers under human review, test and
-compare models, export them, generate training configs, launch your installed
-trainer with live logs and checkpoints, track every run, and measure the
+clean and measure them, grade their outstanding debt, run pass/warn/block gates,
+generate or rewrite candidates only with policy-approved providers under human
+review, test and compare models, export them, version/diff/restore the dataset,
+generate training configs, launch your installed trainer with live logs and
+checkpoints, track every run and the model artifacts it produces, and measure the
 before/after improvement.
 
 The single source of truth for what is implemented today is
@@ -54,6 +55,24 @@ a training run of your own installed trainer:
   (identical/empty/low-contrast pairs reported, `--drop-degenerate` opt-in)
 - an inspectable dataset card summarizing metadata, schema, splits, quality,
   and the latest evaluation
+- a graded **dataset debt** ledger: the quality signals normalized by dataset
+  size, ranked by severity, and graded A–F so you know what to fix first
+  (secrets/PII are graded by presence — a single leaked key is critical), each
+  with a concrete remediation, surfaced in a desktop Debt tab whose grade
+  invalidates the moment the dataset changes. See [`docs/DEBT.md`](docs/DEBT.md)
+
+**Version & restore**
+- durable dataset version history: capture the dataset's identity at a moment in
+  time (a streaming content fingerprint + row count) with pinned links to the
+  runs, artifacts, and evaluations from that state; live drift detection reports
+  whether the current dataset still matches a version (matches / drifted /
+  unreadable), and a live version card renders the lineage
+- compare two versions (added / removed / common rows) and **restore** a
+  version's exact rows. In the desktop, an in-place restore captures the current
+  dataset as an undo point first, atomically swaps in the restored rows, and
+  refuses if a safe undo could not be captured. The engine never writes
+  `examples.jsonl` — the desktop is the single writer. See
+  [`docs/VERSIONING.md`](docs/VERSIONING.md)
 
 **Govern & gate**
 - role-based provider policy enforced **in the engine** (not just the UI):
@@ -95,6 +114,11 @@ a training run of your own installed trainer:
   dir, status, pid, checkpoints, before-eval link) under `training_runs/`, a
   force-closed run reconciles to `interrupted` on load, and a read-only run
   history browses past runs
+- a durable model artifact registry: the adapters/checkpoints a run produced are
+  tracked by referenced path (never moved), with path-integrity re-checked on
+  load (`modified`/`missing` if the weights change on disk), a live weight card,
+  and a promote gate that refuses to keep a modified/missing or regressed
+  artifact
 
 Corpus Studio orchestrates your installed trainer — it never bundles CUDA,
 PyTorch, or trainer packages, never hides the command it runs, enforces who may
@@ -132,11 +156,11 @@ CorpusStudio
 
 ## Desktop preview
 
-![Corpus Studio desktop](docs/screenshots/desktop-v0.8.png)
+![Corpus Studio desktop](docs/screenshots/desktop-v1.1.png)
 
 The dashboard, with the workflow stage strip, quality and gate panels, and tabs
 for Writing Studio, Examples, Preference Review, Quarantine, Splits, Evaluation,
-AI Assist, Training, Arena, and Settings.
+AI Assist, Training, Arena, Artifacts, Versions, Debt, and Settings.
 
 ## Core Local Loop
 
@@ -178,6 +202,8 @@ For dataset card output, see [`docs/DATASET_CARD.md`](docs/DATASET_CARD.md).
 For provider generation policy and gates, see
 [`docs/PROVIDER_POLICY.md`](docs/PROVIDER_POLICY.md) and
 [`docs/GATES.md`](docs/GATES.md).
+For dataset version history (capture/diff/restore) and the debt ledger, see
+[`docs/VERSIONING.md`](docs/VERSIONING.md) and [`docs/DEBT.md`](docs/DEBT.md).
 For the staged labs, see [`docs/EVALUATION_LAB.md`](docs/EVALUATION_LAB.md),
 [`docs/AI_ASSIST_LAB.md`](docs/AI_ASSIST_LAB.md), and
 [`docs/TRAINING_LAB.md`](docs/TRAINING_LAB.md).
