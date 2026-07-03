@@ -1884,6 +1884,12 @@
                                            Foreground="#334155"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,8" />
+                                <TextBlock AutomationProperties.AutomationId="DatasetDiffBaseTextBlock"
+                                           Text="{Binding DatasetDiffBaseLabel, Mode=OneWay}"
+                                           Foreground="#64748B"
+                                           FontStyle="Italic"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,8" />
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                     <TextBlock Text="Label (optional):"
                                                VerticalAlignment="Center"
@@ -1909,6 +1915,16 @@
                                         ToolTip="Overwrite the current dataset with this version (your current dataset is captured first so you can undo)"
                                         Margin="0,0,8,0"
                                         Click="RestoreDatasetVersionButton_Click" />
+                                <Button AutomationProperties.AutomationId="SetDiffBaseButton"
+                                        Content="Set diff base"
+                                        ToolTip="Pin the selected version as the base for a diff"
+                                        Margin="0,0,8,0"
+                                        Click="SetDiffBaseButton_Click" />
+                                <Button AutomationProperties.AutomationId="DiffVersionsButton"
+                                        Content="Diff base → selected"
+                                        ToolTip="Compare the pinned base version to the selected version (added/removed/common rows)"
+                                        Margin="0,0,8,0"
+                                        Click="DiffVersionsButton_Click" />
                                 <Button AutomationProperties.AutomationId="RefreshDatasetVersionsButton"
                                         Content="Refresh"
                                         Click="RefreshDatasetVersionsButton_Click" />

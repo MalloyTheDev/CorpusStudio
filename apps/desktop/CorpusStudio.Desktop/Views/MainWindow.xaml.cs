@@ -2186,6 +2186,60 @@ public partial class MainWindow : Window
         }
     }
 
+    private void SetDiffBaseButton_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = ViewModel.SelectedDatasetVersion;
+        if (selected is null)
+        {
+            ViewModel.SetDatasetVersionError("Select a version to set as the diff base.");
+            return;
+        }
+        ViewModel.SetDatasetDiffBase(selected);
+    }
+
+    private async void DiffVersionsButton_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = ViewModel.SelectedDatasetVersion;
+        if (selected is null)
+        {
+            ViewModel.SetDatasetVersionError("Select a version to diff against the base.");
+            return;
+        }
+        if (string.IsNullOrEmpty(ViewModel.DatasetDiffBaseId))
+        {
+            ViewModel.SetDatasetVersionError("Set a diff base first (select a version and click 'Set diff base').");
+            return;
+        }
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetDatasetVersionError("Create or select a dataset project first.");
+            return;
+        }
+
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Diffing versions...");
+
+            // Read-only: the engine compares the two versions' stored manifests and
+            // refuses (throws) if either lacks stored rows.
+            var markdown = await _engineService.GetDatasetVersionDiffAsync(
+                ViewModel.ActiveProjectPath, ViewModel.DatasetDiffBaseId, selected.Record.VersionId);
+            ViewModel.SetDatasetVersionDetail(markdown);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetDatasetVersionError(ex.Message);
+            // Replace any prior successful diff so a failure never leaves a stale result.
+            ViewModel.SetDatasetVersionDetail("Diff failed: " + ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
+        }
+    }
+
     private async void RefreshDatasetVersionsButton_Click(object sender, RoutedEventArgs e)
     {
         await RefreshDatasetVersionsAsync();
@@ -3150,6 +3204,7 @@ public partial class MainWindow : Window
         ViewModel.SetEvaluationReportHistory(
             _engineService.LoadEvaluationReportHistory(project.ProjectPath)
         );
+        await RefreshDatasetVersionsAsync();
         await RefreshQualityAsync(recordHistory: false);
     }
 
