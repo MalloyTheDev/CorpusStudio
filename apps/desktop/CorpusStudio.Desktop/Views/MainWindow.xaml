@@ -92,17 +92,20 @@
         </Style>
 
         <Style TargetType="{x:Type TabItem}">
-            <Setter Property="Padding" Value="12,8" />
-            <Setter Property="Margin" Value="0,0,4,0" />
-            <Setter Property="Foreground" Value="#475569" />
+            <Setter Property="Padding" Value="12,7" />
+            <Setter Property="Margin" Value="0,0,4,5" />
+            <Setter Property="Foreground" Value="#64748B" />
+            <Setter Property="FontSize" Value="12.5" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type TabItem}">
+                        <!-- Flat by default so a 14-tab strip reads as a light segmented control,
+                             not a wall of boxes; the selected tab lifts to a white pill. -->
                         <Border x:Name="TabBorder"
-                                Background="#E8EEF6"
-                                BorderBrush="#D2DCE9"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
                                 BorderThickness="1"
-                                CornerRadius="6,6,0,0"
+                                CornerRadius="8"
                                 Padding="{TemplateBinding Padding}">
                             <ContentPresenter ContentSource="Header"
                                               HorizontalAlignment="Center"
@@ -110,10 +113,15 @@
                                               RecognizesAccessKey="True" />
                         </Border>
                         <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="#E7EEF8" />
+                                <Setter Property="Foreground" Value="#334155" />
+                            </Trigger>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter TargetName="TabBorder" Property="Background" Value="{StaticResource PanelBrush}" />
-                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource PanelBorderBrush}" />
-                                <Setter Property="Foreground" Value="#0F172A" />
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="#DCE5F0" />
+                                <Setter Property="Foreground" Value="#1D4ED8" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -192,6 +200,42 @@
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="Padding" Value="14" />
+        </Style>
+
+        <!-- Dashboard (v1.2.10) — roomier, softer cards + a bigger section header + a large
+             metric value, so the overview reads as a calm dashboard instead of dense boxes. -->
+        <Style x:Key="DashboardCardStyle" TargetType="{x:Type Border}">
+            <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+            <Setter Property="BorderBrush" Value="#E6EDF5" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="18" />
+            <Setter Property="Effect">
+                <Setter.Value>
+                    <DropShadowEffect Color="#1E293B" BlurRadius="16" ShadowDepth="2"
+                                      Direction="270" Opacity="0.07" />
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="DashboardSectionHeaderStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Foreground" Value="{StaticResource HeadingTextBrush}" />
+            <Setter Property="Margin" Value="2,0,0,12" />
+        </Style>
+
+        <Style x:Key="DashboardCardLabelStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="#334155" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="DashboardMetricStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="FontSize" Value="32" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Foreground" Value="{StaticResource HeadingTextBrush}" />
         </Style>
 
         <Style x:Key="FilterGroupBorderStyle" TargetType="{x:Type Border}">
@@ -799,94 +843,121 @@
                     <TabItem x:Name="DashboardTab" Header="Dashboard">
                         <ScrollViewer VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled"
-                                      Padding="8">
+                                      Padding="22,20,18,20">
                             <StackPanel>
                                 <TextBlock Text="Quick actions"
-                                           Style="{StaticResource SectionHeaderTextStyle}" />
-                                <WrapPanel Margin="0,0,0,16">
+                                           Style="{StaticResource DashboardSectionHeaderStyle}" />
+                                <WrapPanel Margin="0,0,0,26">
                                     <Button Style="{StaticResource PrimaryButtonStyle}"
                                             AutomationProperties.AutomationId="DashboardAuthorButton"
                                             Content="Author examples"
-                                            Width="140" Margin="0,0,8,8"
+                                            Width="150" MinHeight="38" Margin="0,0,10,10"
                                             Click="GoToWritingStudioButton_Click" />
                                     <Button AutomationProperties.AutomationId="DashboardRunQualityButton"
                                             Content="Run quality"
-                                            Width="120" Margin="0,0,8,8"
+                                            Width="132" MinHeight="38" Margin="0,0,10,10"
                                             Click="RunQualityButton_Click" />
                                     <Button AutomationProperties.AutomationId="DashboardSplitsButton"
                                             Content="Generate splits"
-                                            Width="128" Margin="0,0,8,8"
+                                            Width="132" MinHeight="38" Margin="0,0,10,10"
                                             Click="GoToSplitsButton_Click" />
                                     <Button AutomationProperties.AutomationId="DashboardEvaluationButton"
                                             Content="Run evaluation"
-                                            Width="128" Margin="0,0,8,8"
+                                            Width="132" MinHeight="38" Margin="0,0,10,10"
                                             Click="GoToEvaluationButton_Click" />
                                     <Button AutomationProperties.AutomationId="DashboardTrainingButton"
                                             Content="Training config"
-                                            Width="128" Margin="0,0,8,8"
+                                            Width="132" MinHeight="38" Margin="0,0,10,10"
                                             Click="GoToTrainingButton_Click" />
                                     <Button AutomationProperties.AutomationId="DashboardNewProjectButton"
                                             Content="New project"
-                                            Width="120" Margin="0,0,8,8"
+                                            Width="132" MinHeight="38" Margin="0,0,10,10"
                                             Click="NewDatasetProjectButton_Click" />
                                 </WrapPanel>
 
                                 <TextBlock Text="Project overview"
-                                           Style="{StaticResource SectionHeaderTextStyle}" />
-                                <WrapPanel>
-                                    <Border Style="{StaticResource CardBorderStyle}"
-                                            Width="332" Margin="0,0,12,12" VerticalAlignment="Top">
+                                           Style="{StaticResource DashboardSectionHeaderStyle}"
+                                           Margin="2,2,0,12" />
+                                <StackPanel>
+                                    <!-- Dataset -->
+                                    <Border Style="{StaticResource DashboardCardStyle}"
+                                            Margin="0,0,0,14">
                                         <StackPanel>
-                                            <TextBlock Text="Dataset"
-                                                       Style="{StaticResource SectionHeaderTextStyle}" />
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                                                <Border Width="34" Height="34" CornerRadius="9" Background="#EFF6FF">
+                                                    <Path Data="M12,3 L21,8 L12,13 L3,8 Z M3,12 L12,17 L21,12 M3,16 L12,21 L21,16"
+                                                          Stroke="#2563EB" StrokeThickness="1.5" Fill="Transparent"
+                                                          Width="18" Height="18" Stretch="Uniform"
+                                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Border>
+                                                <TextBlock Text="Dataset" Style="{StaticResource DashboardCardLabelStyle}" Margin="11,0,0,0" />
+                                            </StackPanel>
                                             <StackPanel Orientation="Horizontal">
                                                 <TextBlock Text="{Binding Examples.Count, Mode=OneWay}"
-                                                           FontSize="26" FontWeight="Bold"
-                                                           Foreground="{StaticResource HeadingTextBrush}" />
+                                                           Style="{StaticResource DashboardMetricStyle}" />
                                                 <TextBlock Text="saved examples"
                                                            Style="{StaticResource CaptionTextStyle}"
-                                                           VerticalAlignment="Bottom"
-                                                           Margin="8,0,0,4" />
+                                                           VerticalAlignment="Bottom" Margin="9,0,0,6" />
                                             </StackPanel>
                                             <TextBlock Text="{Binding ActiveSchemaDescription, Mode=OneWay}"
-                                                       Style="{StaticResource CaptionTextStyle}"
-                                                       Margin="0,8,0,0" />
-                                            <TextBlock Text="{Binding QualityHistorySummary, Mode=OneWay}"
-                                                       Style="{StaticResource CaptionTextStyle}"
-                                                       Margin="0,8,0,0" />
+                                                       Style="{StaticResource CaptionTextStyle}" Margin="0,10,0,0" />
                                         </StackPanel>
                                     </Border>
 
-                                    <Border Style="{StaticResource CardBorderStyle}"
-                                            Width="332" Margin="0,0,12,12" VerticalAlignment="Top">
+                                    <!-- Quality -->
+                                    <Border Style="{StaticResource DashboardCardStyle}"
+                                            Margin="0,0,0,14">
                                         <StackPanel>
-                                            <TextBlock Text="Quality"
-                                                       Style="{StaticResource SectionHeaderTextStyle}" />
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                                                <Border Width="34" Height="34" CornerRadius="9" Background="#ECFDF5">
+                                                    <Path Data="M12,3 L20,6 V11 C20,16 16,20 12,21 C8,20 4,16 4,11 V6 Z M9,11.5 L11,13.5 L15,9.5"
+                                                          Stroke="#16A34A" StrokeThickness="1.5" Fill="Transparent"
+                                                          Width="18" Height="18" Stretch="Uniform"
+                                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Border>
+                                                <TextBlock Text="Quality" Style="{StaticResource DashboardCardLabelStyle}" Margin="11,0,0,0" />
+                                            </StackPanel>
                                             <TextBlock Text="{Binding QualitySummary, Mode=OneWay}"
                                                        Style="{StaticResource CaptionTextStyle}" />
                                         </StackPanel>
                                     </Border>
 
-                                    <Border Style="{StaticResource CardBorderStyle}"
-                                            Width="332" Margin="0,0,12,12" VerticalAlignment="Top">
+                                    <!-- Splits -->
+                                    <Border Style="{StaticResource DashboardCardStyle}"
+                                            Margin="0,0,0,14">
                                         <StackPanel>
-                                            <TextBlock Text="Splits"
-                                                       Style="{StaticResource SectionHeaderTextStyle}" />
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                                                <Border Width="34" Height="34" CornerRadius="9" Background="#F5F3FF">
+                                                    <Path Data="M4,6 H20 V18 H4 Z M11,6 V18 M15.5,6 V18"
+                                                          Stroke="#7C3AED" StrokeThickness="1.5" Fill="Transparent"
+                                                          Width="18" Height="18" Stretch="Uniform"
+                                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Border>
+                                                <TextBlock Text="Splits" Style="{StaticResource DashboardCardLabelStyle}" Margin="11,0,0,0" />
+                                            </StackPanel>
                                             <TextBlock Text="{Binding SplitSummary, Mode=OneWay}"
                                                        Style="{StaticResource CaptionTextStyle}" />
                                         </StackPanel>
                                     </Border>
 
-                                    <Border Style="{StaticResource CardBorderStyle}"
-                                            Width="332" Margin="0,0,12,12" VerticalAlignment="Top">
+                                    <!-- Evaluation -->
+                                    <Border Style="{StaticResource DashboardCardStyle}"
+                                            Margin="0,0,0,14">
                                         <StackPanel>
-                                            <TextBlock Text="Evaluation"
-                                                       Style="{StaticResource SectionHeaderTextStyle}" />
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                                                <Border Width="34" Height="34" CornerRadius="9" Background="#FFF7ED">
+                                                    <Path Data="M5,20 V11 M11,20 V5 M17,20 V14 M4,20 H20"
+                                                          Stroke="#EA580C" StrokeThickness="1.6" Fill="Transparent"
+                                                          Width="18" Height="18" Stretch="Uniform"
+                                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Border>
+                                                <TextBlock Text="Evaluation" Style="{StaticResource DashboardCardLabelStyle}" Margin="11,0,0,0" />
+                                            </StackPanel>
                                             <TextBlock Text="{Binding EvaluationSummary, Mode=OneWay}"
                                                        Style="{StaticResource CaptionTextStyle}" />
                                         </StackPanel>
                                     </Border>
-                                </WrapPanel>
+                                </StackPanel>
                             </StackPanel>
                         </ScrollViewer>
                     </TabItem>
