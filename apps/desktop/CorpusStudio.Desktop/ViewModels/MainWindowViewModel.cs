@@ -27,6 +27,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         "Choose a schema, write examples, validate rows, and export model-ready JSONL.";
     private string _validationSummary = "Create a project to start validation.";
     private string _qualitySummary = "Create or select a project to run quality checks.";
+    private bool _hasQualityMetrics;
+    private string _qualityStatusLine = string.Empty;
+    private string _qualityStatusColor = "#64748B";
+    private string _qualityStatusBackground = "#F1F5F9";
+    private string _qualityDetail = string.Empty;
+    private bool _hasQualityDetail;
     private string _gateSummary = "Run gates to check whether this dataset may move forward.";
     private bool _problemsPanelVisible;
     private string _problemsSummary = "Run gates to check this dataset for problems.";
@@ -470,6 +476,63 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _qualitySummary;
         private set => SetField(ref _qualitySummary, value);
+    }
+
+    // ---- Quality metric grid (v1.2.12) -------------------------------------------
+    // A structured view of the core quality counts for the right panel, replacing the text
+    // blob. QualitySummary (the full text) is still built for the dashboard card. The status
+    // banner is PII-aware (unlike the legacy `health` line, which ignores PII).
+
+    /// <summary>The core quality counts as scannable rows (Examples + the six issue metrics).</summary>
+    public ObservableCollection<QualityMetric> QualityMetrics { get; } = [];
+
+    public bool HasQualityMetrics
+    {
+        get => _hasQualityMetrics;
+        private set => SetField(ref _hasQualityMetrics, value);
+    }
+
+    public string QualityStatusLine
+    {
+        get => _qualityStatusLine;
+        private set => SetField(ref _qualityStatusLine, value);
+    }
+
+    public string QualityStatusColor
+    {
+        get => _qualityStatusColor;
+        private set => SetField(ref _qualityStatusColor, value);
+    }
+
+    public string QualityStatusBackground
+    {
+        get => _qualityStatusBackground;
+        private set => SetField(ref _qualityStatusBackground, value);
+    }
+
+    /// <summary>The optional flagged-row detail (PII findings, token outliers, category
+    /// imbalance, synthetic clusters/samples) — empty when the dataset is clean.</summary>
+    public string QualityDetail
+    {
+        get => _qualityDetail;
+        private set => SetField(ref _qualityDetail, value);
+    }
+
+    public bool HasQualityDetail
+    {
+        get => _hasQualityDetail;
+        private set => SetField(ref _hasQualityDetail, value);
+    }
+
+    private void ResetQualityMetrics()
+    {
+        QualityMetrics.Clear();
+        HasQualityMetrics = false;
+        QualityStatusLine = string.Empty;
+        QualityStatusColor = "#64748B";
+        QualityStatusBackground = "#F1F5F9";
+        QualityDetail = string.Empty;
+        HasQualityDetail = false;
     }
 
     public string GateSummary
@@ -2320,6 +2383,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ValidationSummary = "No validation has run yet.";
         ClearValidationIssues();
         QualitySummary = "Quality checks will appear after examples are added.";
+        ResetQualityMetrics();
         QualityHistorySummary = "Quality history appears after quality checks run.";
         ResetDebtTrend();
         QualityTriageSummary = "Synthetic quality issues appear here after quality checks run.";
@@ -2453,6 +2517,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public void SetQualityInProgress()
     {
         QualitySummary = "Running quality checks...";
+        ResetQualityMetrics();
         QualityTriageSummary = "Refreshing synthetic quality triage...";
     }
 
@@ -2469,7 +2534,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             ? "No basic quality issues found."
             : "Review the flagged rows before export.";
 
-        var lines = new List<string>
+        var coreLines = new List<string>
         {
                 $"Examples: {report.ExampleCount}",
                 $"Empty rows: {report.EmptyRowCount}",
@@ -2480,6 +2545,64 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 $"Possible PII / secrets: {report.PiiFindingCount}",
                 $"Status: {health}",
         };
+
+        // The optional flagged-row sections (shared by the full-text summary and the panel's
+        // detail block) so QualitySummary stays byte-identical for the dashboard card.
+        var detailLines = BuildQualityDetailLines(report);
+
+        QualitySummary = string.Join(Environment.NewLine, coreLines.Concat(detailLines));
+
+        // Structured metric grid + PII-aware status banner for the right panel.
+        BuildQualityMetrics(report);
+        QualityDetail = string.Join(Environment.NewLine, detailLines).Trim();
+        HasQualityDetail = QualityDetail.Length > 0;
+
+        SetSyntheticPatternIssues(report.SyntheticPatternIssues);
+
+        ApplyQualityHistory(history ?? []);
+    }
+
+    /// <summary>Build the structured Quality metric rows (Examples + the six issue counts) and
+    /// the status banner. The banner is PII-aware: any PII/secret finding is a red problem, even
+    /// though the legacy `health` line — kept for QualitySummary — does not weigh PII.</summary>
+    private void BuildQualityMetrics(QualityReport report)
+    {
+        QualityMetrics.Clear();
+        QualityMetrics.Add(QualityMetric.Info("Examples", report.ExampleCount));
+        QualityMetrics.Add(QualityMetric.Issue("Empty rows", report.EmptyRowCount));
+        QualityMetrics.Add(QualityMetric.Issue("Exact duplicates", report.DuplicateExactCount));
+        QualityMetrics.Add(QualityMetric.Issue("Normalized duplicates", report.DuplicateNormalizedCount));
+        QualityMetrics.Add(QualityMetric.Issue("Low-information rows", report.LowInformationCount));
+        QualityMetrics.Add(QualityMetric.Issue("Synthetic pattern warnings", report.SyntheticPatternCount));
+        QualityMetrics.Add(QualityMetric.Issue("Possible PII / secrets", report.PiiFindingCount, severe: true));
+        HasQualityMetrics = true;
+
+        var coreIssues = report.EmptyRowCount + report.DuplicateExactCount + report.DuplicateNormalizedCount
+                         + report.LowInformationCount + report.SyntheticPatternCount;
+
+        if (report.PiiFindingCount > 0)
+        {
+            QualityStatusLine = "Possible PII / secrets detected — review before export.";
+            QualityStatusColor = "#B91C1C";
+            QualityStatusBackground = "#FEF2F2";
+        }
+        else if (coreIssues > 0)
+        {
+            QualityStatusLine = "Review the flagged rows before export.";
+            QualityStatusColor = "#B45309";
+            QualityStatusBackground = "#FFFBEB";
+        }
+        else
+        {
+            QualityStatusLine = "No basic quality issues found.";
+            QualityStatusColor = "#15803D";
+            QualityStatusBackground = "#ECFDF5";
+        }
+    }
+
+    private List<string> BuildQualityDetailLines(QualityReport report)
+    {
+        var lines = new List<string>();
 
         if (report.PiiFindingCount > 0)
         {
@@ -2524,15 +2647,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             lines.AddRange(report.SyntheticPatternWarnings.Take(3).Select(warning => $"- {warning}"));
         }
 
-        QualitySummary = string.Join(Environment.NewLine, lines);
-        SetSyntheticPatternIssues(report.SyntheticPatternIssues);
-
-        ApplyQualityHistory(history ?? []);
+        return lines;
     }
 
     public void SetQualityError(string message)
     {
         QualitySummary = $"Quality checks could not run.{Environment.NewLine}{message}";
+        ResetQualityMetrics();
         QualityTriageSummary = "Synthetic quality triage could not be refreshed.";
         ReportError(message);
     }
