@@ -65,13 +65,20 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/TrainingRunRecord.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ValidationIssueNavigationItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ValidationReport.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/RecentWorkspaceRecord.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceFileKind.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceProjectManifest.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/PythonEngineService.cs`
+- `apps/desktop/CorpusStudio.Desktop/Services/RecentWorkspaceService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/TrainingProcessRunner.cs`
+- `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceManifestService.cs`
+- `apps/desktop/CorpusStudio.Desktop/Services/WorkspacePathSafety.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/MainWindowViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml`
 - `apps/desktop/CorpusStudio.Desktop/Views/NewProjectWindow.xaml.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/AiAssistCandidateGateTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/AiAssistRewriteBatchServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ArenaViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ArtifactRegistryTests.cs`
@@ -93,6 +100,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingLaunchViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingProcessRunnerTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingRunViewModelTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceFoundationTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TempProjectDirectory.cs`
 - `apps/desktop/CorpusStudio.Desktop.sln`
 - `apps/desktop/CorpusStudio.Desktop.sln.README.md`
@@ -120,6 +128,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/TRAINING.md`
 - `docs/VERSIONING.md`
 - `docs/WORKFLOWS.md`
+- `docs/WORKSPACE_SYSTEM.md`
 - `docs/decisions/0001-local-first.md`
 - `docs/decisions/0002-schema-driven-editor.md`
 - `docs/decisions/0003-python-engine-csharp-desktop.md`
