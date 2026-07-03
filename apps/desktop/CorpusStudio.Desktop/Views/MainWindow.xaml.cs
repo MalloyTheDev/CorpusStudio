@@ -1304,6 +1304,16 @@ public partial class MainWindow : Window
 
     private void UseAiAssistSuggestionButton_Click(object sender, RoutedEventArgs e)
     {
+        // Confirm-on-block: the pre-review candidate gate only INFORMS — a block never
+        // auto-rejects, but the human should not pull a blocked candidate into the draft
+        // by accident. Confirm-then-allow (never refuse); moving to the draft is not
+        // acceptance. Covers both the queue-item and fresh-run paths (the VM checks the
+        // active gate: selected queue item's gate, else the current run's gate).
+        if (ViewModel.SelectedAiAssistCandidateGateBlocks && !ConfirmMoveBlockedCandidate())
+        {
+            return;
+        }
+
         if (ViewModel.SelectedAiAssistReviewQueueItem is null
             || string.IsNullOrWhiteSpace(ViewModel.SelectedAiAssistReviewQueueItem.SuggestedJsonl))
         {
@@ -1327,6 +1337,22 @@ public partial class MainWindow : Window
             DraftTextBox.Focus();
             DraftTextBox.Select(0, DraftTextBox.Text.Length);
         }));
+    }
+
+    // Confirm-then-allow prompt when moving a gate-BLOCKED candidate into the draft.
+    // Default button is No; a "Yes" only moves it to Writing Studio (still not accepted —
+    // the human validates and saves). Never refuses outright.
+    private bool ConfirmMoveBlockedCandidate()
+    {
+        return MessageBox.Show(
+            this,
+            "This generated candidate was BLOCKED by the pre-review gate "
+            + "(schema / quality / PII). Moving it to Writing Studio does not accept it — "
+            + "you still validate and save. Move anyway?",
+            "Candidate gate: BLOCK",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No) == MessageBoxResult.Yes;
     }
 
     private void AcceptAiAssistReviewButton_Click(object sender, RoutedEventArgs e)
