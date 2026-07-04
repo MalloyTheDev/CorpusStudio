@@ -11,6 +11,7 @@ using Microsoft.Win32;
 using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.Services;
 using CorpusStudio.Desktop.ViewModels;
+using CorpusStudio.Desktop.ViewModels.Tabs;
 
 namespace CorpusStudio.Desktop.Views;
 
@@ -950,15 +951,15 @@ public partial class MainWindow : Window
 
     private async void RunArenaButton_Click(object sender, RoutedEventArgs e)
     {
-        var models = MainWindowViewModel.ParseModelList(ViewModel.ArenaModelsInput);
-        if (string.IsNullOrWhiteSpace(ViewModel.ArenaPromptsInput))
+        var models = ArenaViewModel.ParseModelList(ViewModel.Arena.ArenaModelsInput);
+        if (string.IsNullOrWhiteSpace(ViewModel.Arena.ArenaPromptsInput))
         {
-            ViewModel.SetArenaError("Enter at least one prompt (one per line).");
+            ViewModel.Arena.SetArenaError("Enter at least one prompt (one per line).");
             return;
         }
         if (models.Count == 0)
         {
-            ViewModel.SetArenaError("Enter at least one model (comma or newline separated).");
+            ViewModel.Arena.SetArenaError("Enter at least one model (comma or newline separated).");
             return;
         }
 
@@ -966,22 +967,22 @@ public partial class MainWindow : Window
         {
             Mouse.OverrideCursor = Cursors.Wait;
             ViewModel.SetBusy("Running arena...");
-            ViewModel.SetArenaInProgress();
-            var judge = string.IsNullOrWhiteSpace(ViewModel.ArenaJudgeModelInput)
+            ViewModel.Arena.SetArenaInProgress();
+            var judge = string.IsNullOrWhiteSpace(ViewModel.Arena.ArenaJudgeModelInput)
                 ? null
-                : ViewModel.ArenaJudgeModelInput.Trim();
+                : ViewModel.Arena.ArenaJudgeModelInput.Trim();
             var projectPath = ViewModel.HasActiveProject ? ViewModel.ActiveProjectPath : null;
             var report = await _engineService.RunArenaAsync(
-                ViewModel.ArenaPromptsInput,
+                ViewModel.Arena.ArenaPromptsInput,
                 models,
                 judge,
                 projectPath
             );
-            ViewModel.ApplyArenaReport(report);
+            ViewModel.Arena.ApplyArenaReport(report);
         }
         catch (Exception ex)
         {
-            ViewModel.SetArenaError(ex.Message);
+            ViewModel.Arena.SetArenaError(ex.Message);
         }
         finally
         {

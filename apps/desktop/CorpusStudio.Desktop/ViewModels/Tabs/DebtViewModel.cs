@@ -1,7 +1,5 @@
 using System;
 using System.Collections.ObjectModel;
-using System.ComponentModel;
-using System.Runtime.CompilerServices;
 using CorpusStudio.Desktop.Models;
 
 namespace CorpusStudio.Desktop.ViewModels.Tabs;
@@ -9,7 +7,7 @@ namespace CorpusStudio.Desktop.ViewModels.Tabs;
 /// <summary>Concrete Dataset Debt tab view-model (backlog #4 decomposition proof). Behaviour is
 /// moved verbatim from the shell; honesty invariants unchanged (N/A / stale is neutral gray, never
 /// green; a failed check collapses to neutral; a fresh project reads "run a debt check").</summary>
-public sealed class DebtViewModel : IDebtViewModel
+public sealed class DebtViewModel : ViewModelBase, IDebtViewModel
 {
     private const string NeutralGray = "#64748B";
     private const string DefaultSummary = "Run a debt check to grade the current dataset.";
@@ -97,19 +95,5 @@ public sealed class DebtViewModel : IDebtViewModel
         DebtGradeColor = NeutralGray;
         DebtStale = false;
         DebtSummary = DefaultSummary;
-    }
-
-    public event PropertyChangedEventHandler? PropertyChanged;
-
-    private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
-    {
-        if (EqualityComparer<T>.Default.Equals(field, value))
-        {
-            return false;
-        }
-
-        field = value;
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        return true;
     }
 }

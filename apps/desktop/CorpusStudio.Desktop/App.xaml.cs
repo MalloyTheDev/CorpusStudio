@@ -38,6 +38,7 @@ public partial class App : Application
     private static void ConfigureServices(IServiceCollection services)
     {
         services.AddTransient<IDebtViewModel, DebtViewModel>();
+        services.AddTransient<IArenaViewModel, ArenaViewModel>();
         services.AddTransient<MainWindowViewModel>();
     }
 
