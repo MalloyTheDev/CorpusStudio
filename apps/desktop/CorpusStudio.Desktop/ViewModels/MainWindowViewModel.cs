@@ -2267,6 +2267,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Examples.Clear();
         ImportQuarantineItems.Clear();
         SelectedImportQuarantineItem = null;
+        _pendingRetryItem = null;
         SelectedExample = null;
         _allPreferenceReviewItems.Clear();
         PreferenceReviewItems.Clear();
@@ -3917,12 +3918,26 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             ?? "No rejected import rows are in quarantine for this project.";
     }
 
+    private ImportQuarantineItem? _pendingRetryItem;
+
     public void RetrySelectedImportQuarantineItem()
     {
         if (SelectedImportQuarantineItem is not null)
         {
             DraftText = SelectedImportQuarantineItem.Raw;
+            // Remember which quarantine row is being repaired so a successful save can
+            // remove it (otherwise the record orphans in quarantine forever).
+            _pendingRetryItem = SelectedImportQuarantineItem;
         }
+    }
+
+    /// <summary>The quarantine item currently being repaired (set by Retry), consumed once by
+    /// a successful save so its record can be cleared. Null when no retry is in flight.</summary>
+    public ImportQuarantineItem? TakePendingRetryItem()
+    {
+        var item = _pendingRetryItem;
+        _pendingRetryItem = null;
+        return item;
     }
 
     private void ApplyQualityHistory(IReadOnlyList<QualityHistoryEntry> history)

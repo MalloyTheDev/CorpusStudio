@@ -95,6 +95,110 @@ public sealed class PythonEngineService
         WriteAllTextAtomic(path, existing + content, encoding);
     }
 
+    /// <summary>A canonical, order-independent identity for a JSON row (object keys sorted,
+    /// compact), so re-importing the same rows is idempotent. Mirrors the engine's
+    /// exact_row_signature (json.dumps sort_keys) in spirit; used only for desktop-side dedupe,
+    /// so it need only be internally consistent. Returns null for an unparseable line.</summary>
+    private static string? CanonicalRowSignature(string jsonLine)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(jsonLine);
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                WriteCanonical(document.RootElement, writer);
+            }
+            return Encoding.UTF8.GetString(stream.ToArray());
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static void WriteCanonical(JsonElement element, Utf8JsonWriter writer)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (var property in element.EnumerateObject().OrderBy(p => p.Name, StringComparer.Ordinal))
+                {
+                    writer.WritePropertyName(property.Name);
+                    WriteCanonical(property.Value, writer);
+                }
+                writer.WriteEndObject();
+                break;
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in element.EnumerateArray())
+                {
+                    WriteCanonical(item, writer);
+                }
+                writer.WriteEndArray();
+                break;
+            default:
+                element.WriteTo(writer);
+                break;
+        }
+    }
+
+    /// <summary>Remove a single quarantine entry after its row was repaired and saved, so a
+    /// retried row doesn't orphan in quarantine. Rewrites the entry's *_rejected.jsonl atomically
+    /// without the matching line, and deletes the file when it becomes empty.</summary>
+    public void RemoveImportQuarantineItem(ImportQuarantineItem item)
+    {
+        if (string.IsNullOrEmpty(item.QuarantinePath) || !File.Exists(item.QuarantinePath))
+        {
+            return;
+        }
+
+        var kept = new List<string>();
+        var removed = false;
+        foreach (var rawLine in File.ReadLines(item.QuarantinePath, Encoding.UTF8))
+        {
+            if (string.IsNullOrWhiteSpace(rawLine))
+            {
+                continue;
+            }
+            if (!removed && MatchesQuarantineEntry(rawLine, item))
+            {
+                removed = true; // drop exactly one matching entry
+                continue;
+            }
+            kept.Add(rawLine);
+        }
+
+        if (kept.Count == 0)
+        {
+            File.Delete(item.QuarantinePath);
+        }
+        else
+        {
+            WriteAllTextAtomic(
+                item.QuarantinePath,
+                string.Join(Environment.NewLine, kept) + Environment.NewLine,
+                encoding: Utf8NoBom);
+        }
+    }
+
+    private static bool MatchesQuarantineEntry(string rawLine, ImportQuarantineItem item)
+    {
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<ImportQuarantineItem>(rawLine, JsonOptions);
+            return parsed is not null
+                && parsed.RowNumber == item.RowNumber
+                && parsed.SourcePath == item.SourcePath
+                && parsed.Raw == item.Raw;
+        }
+        catch (JsonException)
+        {
+            return false; // keep unparseable lines
+        }
+    }
+
     private string _repositoryRoot = string.Empty;
     private string _engineDirectory = string.Empty;
     private string _pythonExecutable = "python";
@@ -1769,7 +1873,29 @@ public sealed class PythonEngineService
         var failedRowNumbers = report.FailedRows
             .Select(row => row.RowNumber)
             .ToHashSet();
+
+        // Seed the seen-set with the rows already in the dataset so a re-import (or a row
+        // already present) doesn't append a duplicate — the commit is idempotent.
+        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        if (File.Exists(examplesPath))
+        {
+            foreach (var existingLine in File.ReadLines(examplesPath, Encoding.UTF8))
+            {
+                if (string.IsNullOrWhiteSpace(existingLine))
+                {
+                    continue;
+                }
+                var existingSignature = CanonicalRowSignature(existingLine);
+                if (existingSignature is not null)
+                {
+                    seen.Add(existingSignature);
+                }
+            }
+        }
+
         var rows = new List<string>();
+        var skippedDuplicates = 0;
         var rowNumber = 0;
         foreach (var rawLine in File.ReadLines(importPath, Encoding.UTF8))
         {
@@ -1785,7 +1911,16 @@ public sealed class PythonEngineService
             }
 
             using var document = JsonDocument.Parse(rawLine);
-            rows.Add(JsonSerializer.Serialize(document.RootElement));
+            var serialized = JsonSerializer.Serialize(document.RootElement);
+            var signature = CanonicalRowSignature(serialized);
+            // seen.Add returns false when the signature is already present (in the dataset or
+            // earlier in this batch) — skip it and count it as a duplicate.
+            if (signature is not null && !seen.Add(signature))
+            {
+                skippedDuplicates++;
+                continue;
+            }
+            rows.Add(serialized);
         }
 
         var quarantinePath = report.FailedRows.Count == 0
@@ -1794,7 +1929,6 @@ public sealed class PythonEngineService
 
         if (rows.Count > 0)
         {
-            var examplesPath = Path.Combine(projectPath, "examples.jsonl");
             Directory.CreateDirectory(projectPath);
             var jsonl = string.Join(Environment.NewLine, rows) + Environment.NewLine;
             AppendAllTextAtomic(examplesPath, jsonl, Utf8NoBom);
@@ -1803,7 +1937,8 @@ public sealed class PythonEngineService
         return new ImportCommitResult(
             rows.Count,
             report.FailedRows.Count,
-            quarantinePath
+            quarantinePath,
+            skippedDuplicates
         );
     }
 
