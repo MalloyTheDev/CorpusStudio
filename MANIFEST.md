@@ -109,6 +109,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/AiAssistRewriteBatchServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ArenaViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ArtifactRegistryTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/AtomicAppendTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/DatasetDebtViewTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/DebtTrendTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/DatasetVersionRegistryTests.cs`

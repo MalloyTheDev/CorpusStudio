@@ -85,6 +85,16 @@ public sealed class PythonEngineService
         }
     }
 
+    /// <summary>Append text atomically: read the current file, append, and write the whole
+    /// file back through the temp+File.Replace swap (<see cref="WriteAllTextAtomic"/>), so a
+    /// crash mid-append cannot tear the last line of the live dataset. Rewrites the whole file —
+    /// acceptable for these low-frequency, user-initiated dataset writes.</summary>
+    private static void AppendAllTextAtomic(string path, string content, Encoding encoding)
+    {
+        var existing = File.Exists(path) ? File.ReadAllText(path, encoding) : string.Empty;
+        WriteAllTextAtomic(path, existing + content, encoding);
+    }
+
     private string _repositoryRoot = string.Empty;
     private string _engineDirectory = string.Empty;
     private string _pythonExecutable = "python";
@@ -1729,7 +1739,7 @@ public sealed class PythonEngineService
 
         var examplesPath = Path.Combine(projectPath, "examples.jsonl");
         Directory.CreateDirectory(projectPath);
-        File.AppendAllText(examplesPath, jsonl, encoding: Utf8NoBom);
+        AppendAllTextAtomic(examplesPath, jsonl, Utf8NoBom);
         return rowCount;
     }
 
@@ -1770,7 +1780,7 @@ public sealed class PythonEngineService
             var examplesPath = Path.Combine(projectPath, "examples.jsonl");
             Directory.CreateDirectory(projectPath);
             var jsonl = string.Join(Environment.NewLine, rows) + Environment.NewLine;
-            File.AppendAllText(examplesPath, jsonl, encoding: Utf8NoBom);
+            AppendAllTextAtomic(examplesPath, jsonl, Utf8NoBom);
         }
 
         return new ImportCommitResult(
