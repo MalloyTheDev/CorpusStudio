@@ -199,6 +199,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/exporters/jsonl_exporter.py`
 - `engine/corpus_studio/exporters/preference_exporter.py`
 - `engine/corpus_studio/importers/__init__.py`
+- `engine/corpus_studio/importers/hf_hub.py`
 - `engine/corpus_studio/importers/jsonl_importer.py`
 - `engine/corpus_studio/importers/jsonl_preview.py`
 - `engine/corpus_studio/importers/text_importer.py`
@@ -264,6 +265,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_gate_cli.py`
 - `engine/tests/test_gate_thresholds_config.py`
 - `engine/tests/test_gates.py`
+- `engine/tests/test_hf_hub.py`
 - `engine/tests/test_import_preview.py`
 - `engine/tests/test_importers.py`
 - `engine/tests/test_input_hardening.py`
