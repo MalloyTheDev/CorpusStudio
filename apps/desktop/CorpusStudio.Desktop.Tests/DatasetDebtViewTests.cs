@@ -69,34 +69,34 @@ public sealed class DatasetDebtViewTests
     public void ApplyDebtReport_CriticalIsGradeFRedAndListed()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyDebtReport(Report("F", true, Item("critical", "secrets", 1, null)));
-        Assert.Equal("F", vm.DebtGrade);
-        Assert.Equal("#DC2626", vm.DebtGradeColor);
-        Assert.Single(vm.DebtItems);
-        Assert.False(vm.DebtStale);
-        Assert.Contains("Grade F", vm.DebtSummary);
+        vm.Debt.ApplyDebtReport(Report("F", true, Item("critical", "secrets", 1, null)));
+        Assert.Equal("F", vm.Debt.DebtGrade);
+        Assert.Equal("#DC2626", vm.Debt.DebtGradeColor);
+        Assert.Single(vm.Debt.DebtItems);
+        Assert.False(vm.Debt.DebtStale);
+        Assert.Contains("Grade F", vm.Debt.DebtSummary);
     }
 
     [Fact]
     public void ApplyDebtReport_CleanIsGradeANoDebt()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyDebtReport(Report("A", true));
-        Assert.Equal("A", vm.DebtGrade);
-        Assert.Equal("#16A34A", vm.DebtGradeColor);
-        Assert.Empty(vm.DebtItems);
-        Assert.Contains("no debt", vm.DebtSummary, StringComparison.OrdinalIgnoreCase);
+        vm.Debt.ApplyDebtReport(Report("A", true));
+        Assert.Equal("A", vm.Debt.DebtGrade);
+        Assert.Equal("#16A34A", vm.Debt.DebtGradeColor);
+        Assert.Empty(vm.Debt.DebtItems);
+        Assert.Contains("no debt", vm.Debt.DebtSummary, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void ApplyDebtReport_EmptyIsNaNotClean()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyDebtReport(Report("N/A", false));
-        Assert.Equal("N/A", vm.DebtGrade);
-        Assert.NotEqual("#16A34A", vm.DebtGradeColor);  // never green
-        Assert.Contains("No rows to assess", vm.DebtSummary);
-        Assert.DoesNotContain("no debt", vm.DebtSummary, StringComparison.OrdinalIgnoreCase);
+        vm.Debt.ApplyDebtReport(Report("N/A", false));
+        Assert.Equal("N/A", vm.Debt.DebtGrade);
+        Assert.NotEqual("#16A34A", vm.Debt.DebtGradeColor);  // never green
+        Assert.Contains("No rows to assess", vm.Debt.DebtSummary);
+        Assert.DoesNotContain("no debt", vm.Debt.DebtSummary, StringComparison.OrdinalIgnoreCase);
     }
 
     // --- the non-negotiable honesty rule: invalidate on dataset change -----
@@ -105,36 +105,36 @@ public sealed class DatasetDebtViewTests
     public void SetExamples_InvalidatesAPriorDebtGrade()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyDebtReport(Report("F", true, Item()));
-        Assert.Equal("F", vm.DebtGrade);
+        vm.Debt.ApplyDebtReport(Report("F", true, Item()));
+        Assert.Equal("F", vm.Debt.DebtGrade);
 
         vm.SetExamples(new List<SavedExampleItem>());  // the dataset changed
 
-        Assert.Equal("—", vm.DebtGrade);
-        Assert.Empty(vm.DebtItems);
-        Assert.True(vm.DebtStale);
-        Assert.Contains("changed", vm.DebtSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("—", vm.Debt.DebtGrade);
+        Assert.Empty(vm.Debt.DebtItems);
+        Assert.True(vm.Debt.DebtStale);
+        Assert.Contains("changed", vm.Debt.DebtSummary, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void InvalidateDebt_WithoutPriorGrade_IsNeutralNotScary()
     {
         var vm = new MainWindowViewModel();
-        vm.InvalidateDebt();  // no grade was ever shown
-        Assert.False(vm.DebtStale);
-        Assert.DoesNotContain("changed", vm.DebtSummary, StringComparison.OrdinalIgnoreCase);
+        vm.Debt.InvalidateDebt();  // no grade was ever shown
+        Assert.False(vm.Debt.DebtStale);
+        Assert.DoesNotContain("changed", vm.Debt.DebtSummary, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void SelectProject_ClearsDebtToNeutralDefault()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyDebtReport(Report("F", true, Item()));
+        vm.Debt.ApplyDebtReport(Report("F", true, Item()));
         vm.SelectProject(Project("other"));
-        Assert.Equal("—", vm.DebtGrade);
-        Assert.Empty(vm.DebtItems);
-        Assert.False(vm.DebtStale);
-        Assert.DoesNotContain("changed", vm.DebtSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("—", vm.Debt.DebtGrade);
+        Assert.Empty(vm.Debt.DebtItems);
+        Assert.False(vm.Debt.DebtStale);
+        Assert.DoesNotContain("changed", vm.Debt.DebtSummary, StringComparison.OrdinalIgnoreCase);
     }
 
     // --- audit fixes -------------------------------------------------------
@@ -144,12 +144,12 @@ public sealed class DatasetDebtViewTests
     {
         // A failed check must not leave a confident colored grade on screen.
         var vm = new MainWindowViewModel();
-        vm.ApplyDebtReport(Report("A", true));  // big green A shown
-        vm.SetDebtError("python not found");
-        Assert.Equal("—", vm.DebtGrade);
-        Assert.Equal("#64748B", vm.DebtGradeColor);  // gray, not green
-        Assert.Empty(vm.DebtItems);
-        Assert.Contains("failed", vm.DebtSummary, StringComparison.OrdinalIgnoreCase);
+        vm.Debt.ApplyDebtReport(Report("A", true));  // big green A shown
+        vm.Debt.SetDebtError("python not found");
+        Assert.Equal("—", vm.Debt.DebtGrade);
+        Assert.Equal("#64748B", vm.Debt.DebtGradeColor);  // gray, not green
+        Assert.Empty(vm.Debt.DebtItems);
+        Assert.Contains("failed", vm.Debt.DebtSummary, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -185,11 +185,11 @@ public sealed class DatasetDebtViewTests
         // LoadProjectAsync order: SelectProject (resets debt) then SetExamples
         // (invalidates, but no grade is shown post-reset, so it stays neutral).
         var vm = new MainWindowViewModel();
-        vm.ApplyDebtReport(Report("F", true, Item()));   // a grade from the prior project
+        vm.Debt.ApplyDebtReport(Report("F", true, Item()));   // a grade from the prior project
         vm.SelectProject(Project("other"));
         vm.SetExamples(new List<SavedExampleItem>());
-        Assert.Equal("—", vm.DebtGrade);
-        Assert.False(vm.DebtStale);
-        Assert.DoesNotContain("changed", vm.DebtSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("—", vm.Debt.DebtGrade);
+        Assert.False(vm.Debt.DebtStale);
+        Assert.DoesNotContain("changed", vm.Debt.DebtSummary, StringComparison.OrdinalIgnoreCase);
     }
 }

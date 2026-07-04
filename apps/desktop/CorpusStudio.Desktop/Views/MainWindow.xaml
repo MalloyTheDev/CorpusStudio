@@ -10,9 +10,8 @@
         MinWidth="960"
         UseLayoutRounding="True"
         TextOptions.TextFormattingMode="Display">
-    <Window.DataContext>
-        <vm:MainWindowViewModel />
-    </Window.DataContext>
+    <!-- DataContext is injected by the DI container in App.OnStartup (backlog #4) so the shell
+         view-model can compose child per-tab view-models via constructor injection. -->
 
     <Window.Resources>
         <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F4F7FB" />
@@ -835,15 +834,15 @@
                                     <TextBlock Text="Dataset debt" FontWeight="SemiBold" FontSize="11"
                                                Foreground="#475569" HorizontalAlignment="Center" />
                                     <Border Width="34" Height="34" CornerRadius="8" Margin="0,5,0,0"
-                                            Background="{Binding DebtGradeColor, Mode=OneWay}" HorizontalAlignment="Center">
+                                            Background="{Binding Debt.DebtGradeColor, Mode=OneWay}" HorizontalAlignment="Center">
                                         <TextBlock AutomationProperties.AutomationId="DashboardDebtGradeBadge"
-                                                   Text="{Binding DebtGrade, Mode=OneWay}"
+                                                   Text="{Binding Debt.DebtGrade, Mode=OneWay}"
                                                    Foreground="White" FontSize="17" FontWeight="Bold"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     </Border>
                                     <TextBlock Text="stale" FontSize="9" FontWeight="SemiBold" Foreground="#D97706"
                                                HorizontalAlignment="Center" Margin="0,3,0,0"
-                                               Visibility="{Binding DebtStale, Converter={StaticResource BoolToVis}}" />
+                                               Visibility="{Binding Debt.DebtStale, Converter={StaticResource BoolToVis}}" />
                                 </StackPanel>
                             </Border>
                         </Button>
@@ -2529,14 +2528,14 @@
                                            VerticalAlignment="Bottom"
                                            Margin="0,0,10,6" />
                                 <TextBlock AutomationProperties.AutomationId="DebtGradeTextBlock"
-                                           Text="{Binding DebtGrade, Mode=OneWay}"
-                                           Foreground="{Binding DebtGradeColor, Mode=OneWay}"
+                                           Text="{Binding Debt.DebtGrade, Mode=OneWay}"
+                                           Foreground="{Binding Debt.DebtGradeColor, Mode=OneWay}"
                                            FontSize="40"
                                            FontWeight="Bold" />
                             </StackPanel>
                             <StackPanel Grid.Row="2">
                                 <TextBlock AutomationProperties.AutomationId="DebtSummaryTextBlock"
-                                           Text="{Binding DebtSummary, Mode=OneWay}"
+                                           Text="{Binding Debt.DebtSummary, Mode=OneWay}"
                                            Foreground="#334155"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,8" />
@@ -2549,7 +2548,7 @@
                             </StackPanel>
                             <ListBox Grid.Row="3"
                                      AutomationProperties.AutomationId="DebtItemsListBox"
-                                     ItemsSource="{Binding DebtItems}"
+                                     ItemsSource="{Binding Debt.DebtItems}"
                                      DisplayMemberPath="DisplayName"
                                      FontFamily="Consolas"
                                      FontSize="12" />
