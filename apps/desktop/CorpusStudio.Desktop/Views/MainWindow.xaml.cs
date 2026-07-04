@@ -1099,6 +1099,33 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void RunChatGatesButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetGateError("Create or select a dataset project before running gates.");
+            return;
+        }
+
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Running chat gates...");
+            ViewModel.SetGateInProgress();
+            var report = await _engineService.RunChatGatesAsync(ViewModel.ActiveProjectPath);
+            ViewModel.ApplyGateReport(report);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetGateError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
+        }
+    }
+
     private async void RefreshProviderPoliciesButton_Click(object sender, RoutedEventArgs e)
     {
         await RefreshProviderPoliciesAsync();

@@ -1140,6 +1140,23 @@ public sealed class PythonEngineService
             ?? throw new InvalidOperationException("The Python engine returned an invalid gate report.");
     }
 
+    /// <summary>Run the chat-structure gates (chat_suite scope) over the project's dataset —
+    /// conversation sequence checks the row validator can't see. Returns a GateReport shown
+    /// through the same gate/Problems surface as dataset gates.</summary>
+    public async Task<GateReport> RunChatGatesAsync(string projectPath)
+    {
+        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+        if (!File.Exists(examplesPath))
+        {
+            throw new FileNotFoundException("Project examples file was not found.", examplesPath);
+        }
+
+        var output = await RunEngineCommandAsync(
+            "chat-gate", examplesPath, "--schema", "chat", "--project-dir", projectPath);
+        return JsonSerializer.Deserialize<GateReport>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid gate report.");
+    }
+
     // ---- Evaluation Suites (v1.3 M2) --------------------------------------------------
 
     /// <summary>List the registered evaluation suites under the project's evaluation_suites/.</summary>
