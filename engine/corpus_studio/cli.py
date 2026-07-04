@@ -3,7 +3,7 @@ import json
 import os
 import sqlite3
 import sys
-from typing import Optional
+from typing import Any, Optional
 
 import typer
 from pydantic import ValidationError
@@ -1581,7 +1581,27 @@ def arena_run(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
-    report = run_arena(prompts, model_backends, limit=limit, generated_at=_utc_now_iso())
+    # Resolve a policy per generation model (arena responses are non-trainable, so this
+    # authorizes each as an EVALUATION participant) and gate the run — a provider blocked from
+    # the evaluator role cannot generate arena responses.
+    gen_provider = infer_provider_id(backend, base_url)
+    gen_overrides = load_overrides(input_path.parent)
+    gen_policies: dict[str, Any] = {
+        model: resolve_policy(
+            gen_provider,
+            model_id=model,
+            route_id=(model if gen_provider == "openrouter" else None),
+            overrides=gen_overrides,
+        )
+        for model in unique_models
+    }
+    try:
+        report = run_arena(
+            prompts, model_backends, limit=limit, generated_at=_utc_now_iso(), policies=gen_policies
+        )
+    except ProviderPolicyError as exc:
+        typer.echo(f"Provider policy blocked arena generation: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
 
     if judge_model is not None:
         judge_provider = infer_provider_id(judge_backend, judge_base_url)
