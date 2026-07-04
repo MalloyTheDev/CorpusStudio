@@ -8,6 +8,7 @@ from typing import Any
 from corpus_studio.arena.models import ArenaPrompt, ArenaReport, ArenaResponse, build_arena_report
 from corpus_studio.importers.jsonl_importer import read_jsonl
 from corpus_studio.model_backends.base import BackendGenerateRequest, ModelBackend
+from corpus_studio.model_backends.retry import BACKEND_ERROR_TYPES, format_backend_error
 
 
 def load_prompt_suite(path: Path) -> list[ArenaPrompt]:
@@ -59,10 +60,22 @@ def run_arena(
     responses: list[ArenaResponse] = []
     for model, backend in model_backends:
         for prompt in selected:
-            response = backend.generate(_request_for(prompt))
-            responses.append(
-                ArenaResponse(prompt_id=prompt.id, model=model, text=response.text)
-            )
+            try:
+                response = backend.generate(_request_for(prompt))
+                responses.append(
+                    ArenaResponse(prompt_id=prompt.id, model=model, text=response.text)
+                )
+            except BACKEND_ERROR_TYPES as exc:
+                # Isolate one model/prompt failure: record it and keep going so a
+                # single outage never discards the whole comparison.
+                responses.append(
+                    ArenaResponse(
+                        prompt_id=prompt.id,
+                        model=model,
+                        text="",
+                        error=format_backend_error(exc),
+                    )
+                )
 
     models = [model for model, _ in model_backends]
     return build_arena_report(selected, models, responses, generated_at)

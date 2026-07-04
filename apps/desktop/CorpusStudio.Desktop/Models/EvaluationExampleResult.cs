@@ -28,6 +28,11 @@ public sealed class EvaluationExampleResult
     [JsonPropertyName("notes")]
     public string? Notes { get; init; }
 
+    /// <summary>Set when the backend call for this example failed after retries;
+    /// the example is recorded as a scored-0 failure instead of aborting the run.</summary>
+    [JsonPropertyName("error")]
+    public string? Error { get; init; }
+
     [JsonPropertyName("manual_score")]
     public double? ManualScore { get; set; }
 
@@ -38,7 +43,7 @@ public sealed class EvaluationExampleResult
     {
         get
         {
-            var status = Passed ? "pass" : "fail";
+            var status = string.IsNullOrEmpty(Error) ? (Passed ? "pass" : "fail") : "error";
             var manual = ManualScore is null ? "unscored" : $"manual {ManualScore:0.##}";
             return $"{ExampleId} | {status} | auto {Score:0.##} | {manual}";
         }
@@ -50,6 +55,7 @@ public sealed class EvaluationExampleResult
             $"Example: {ExampleId}",
             $"Auto score: {Score:0.##}",
             $"Passed: {(Passed ? "yes" : "no")}",
+            .. string.IsNullOrEmpty(Error) ? Array.Empty<string>() : new[] { $"Backend error: {Error}" },
             $"Tags: {(Tags.Count == 0 ? "none" : string.Join(", ", Tags))}",
             "",
             "Prompt:",

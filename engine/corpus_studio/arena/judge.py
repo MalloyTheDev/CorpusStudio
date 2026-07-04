@@ -18,6 +18,7 @@ from corpus_studio.arena.models import (
     build_model_summaries,
 )
 from corpus_studio.model_backends.base import BackendGenerateRequest, ModelBackend
+from corpus_studio.model_backends.retry import BACKEND_ERROR_TYPES, format_backend_error
 from corpus_studio.providers.policy import ProviderPolicy, authorize_evaluation
 
 
@@ -98,13 +99,24 @@ def judge_arena(
         candidates = {
             r.model: r.text for r in report.responses if r.prompt_id == prompt.id
         }
-        response = judge_backend.generate(
-            BackendGenerateRequest(
-                prompt=build_judge_prompt(prompt.prompt, candidates),
-                temperature=0.0,
+        try:
+            response = judge_backend.generate(
+                BackendGenerateRequest(
+                    prompt=build_judge_prompt(prompt.prompt, candidates),
+                    temperature=0.0,
+                )
             )
-        )
-        judgments.append(parse_judgment(prompt.id, candidates, response.text))
+            judgments.append(parse_judgment(prompt.id, candidates, response.text))
+        except BACKEND_ERROR_TYPES as exc:
+            # A judge outage on one prompt records an unparsed judgment (no winner)
+            # rather than aborting judging for every other prompt.
+            judgments.append(
+                ArenaJudgment(
+                    prompt_id=prompt.id,
+                    rationale=f"judge error: {format_backend_error(exc)}",
+                    parsed=False,
+                )
+            )
 
     return report.model_copy(
         update={

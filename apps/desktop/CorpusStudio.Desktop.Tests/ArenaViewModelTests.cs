@@ -96,4 +96,36 @@ public sealed class ArenaViewModelTests
         Assert.Contains("Arena could not run", vm.ArenaSummary);
         Assert.Contains("engine not found", vm.ArenaSummary);
     }
+
+    [Fact]
+    public void ApplyArenaReport_BackendError_ShownPerResponseAndInSummary()
+    {
+        var report = new ArenaReport
+        {
+            PromptCount = 1,
+            Models = ["alpha", "beta"],
+            Prompts = [new ArenaPromptItem { Id = "p1", Prompt = "Explain recursion." }],
+            Responses =
+            [
+                new ArenaResponse { PromptId = "p1", Model = "alpha", Text = "A function calls itself." },
+                new ArenaResponse { PromptId = "p1", Model = "beta", Text = "", Error = "HTTP 503 Service Unavailable" },
+            ],
+            ModelSummaries =
+            [
+                new ArenaModelSummary { Model = "alpha", ResponseCount = 1 },
+                new ArenaModelSummary { Model = "beta", ResponseCount = 1, ErrorCount = 1 },
+            ],
+        };
+
+        var vm = new ArenaViewModel();
+        vm.ApplyArenaReport(report);
+
+        // The failed model's response shows the error, not a blank "(empty response)".
+        Assert.Contains("backend error: HTTP 503 Service Unavailable", vm.ArenaSummary);
+        Assert.DoesNotContain("(empty response)", vm.ArenaSummary);
+        // The per-model summary line surfaces the error count.
+        Assert.Contains("1 error(s)", vm.ArenaSummary);
+        // The healthy model still shows its answer.
+        Assert.Contains("A function calls itself.", vm.ArenaSummary);
+    }
 }

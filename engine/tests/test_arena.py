@@ -60,6 +60,45 @@ def test_limit_caps_prompts():
 def test_empty_responses_are_counted():
     report = run_arena([PROMPTS[0]], [("silent", EchoBackend("silent"))])
     assert report.model_summaries[0].empty_response_count == 1
+    assert report.model_summaries[0].error_count == 0
+
+
+class BoomBackend:
+    """Always fails with a transient backend error."""
+
+    def generate(self, request):
+        from urllib.error import URLError
+
+        raise URLError("connection refused")
+
+
+def test_run_arena_isolates_a_failing_model_from_the_batch():
+    # One model is down; the other must still be fully compared and the failure
+    # recorded, never aborting the run.
+    report = run_arena(PROMPTS, [("good", EchoBackend("good")), ("down", BoomBackend())])
+    assert len(report.responses) == 4  # still 2 prompts x 2 models
+
+    good = [r for r in report.responses if r.model == "good"]
+    down = [r for r in report.responses if r.model == "down"]
+    assert all(r.error is None and r.text for r in good)
+    assert all(r.error and r.text == "" for r in down)
+
+    summaries = {s.model: s for s in report.model_summaries}
+    assert summaries["good"].error_count == 0
+    assert summaries["down"].error_count == 2
+    assert summaries["down"].empty_response_count == 0  # errored != legitimately empty
+
+
+def test_errored_response_is_distinct_from_empty_response():
+    report = run_arena(
+        [PROMPTS[0]],
+        [("silent", EchoBackend("silent")), ("down", BoomBackend())],
+    )
+    summaries = {s.model: s for s in report.model_summaries}
+    assert summaries["silent"].empty_response_count == 1
+    assert summaries["silent"].error_count == 0
+    assert summaries["down"].error_count == 1
+    assert summaries["down"].empty_response_count == 0
 
 
 def test_responses_for_prompt_keys_by_model():
@@ -162,6 +201,15 @@ def test_judge_arena_aggregates_wins_and_scores():
     assert summary["a"].win_count == 2  # judge always picks 'a'
     assert summary["a"].average_judge_score == 90.0
     assert summary["b"].win_count == 0
+
+
+def test_judge_arena_isolates_a_judge_failure_per_prompt():
+    # A judge outage records an unparsed judgment per prompt instead of aborting.
+    report = run_arena(PROMPTS, [("a", EchoBackend("a")), ("b", EchoBackend("b"))])
+    judged = judge_arena(report, BoomBackend(), "judge")
+    assert len(judged.judgments) == 2
+    assert all(not j.parsed and "judge error" in j.rationale for j in judged.judgments)
+    assert all(s.win_count == 0 for s in judged.model_summaries)
 
 
 def test_judge_arena_blocks_non_evaluator_policy():

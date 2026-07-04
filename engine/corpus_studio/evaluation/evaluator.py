@@ -10,6 +10,7 @@ from corpus_studio.evaluation.reports import (
 from corpus_studio.evaluation.scoring import score_text_overlap
 from corpus_studio.evaluation.scorers import KeywordOverlapScorer, Scorer
 from corpus_studio.model_backends.base import BackendGenerateRequest, ModelBackend
+from corpus_studio.model_backends.retry import BACKEND_ERROR_TYPES, format_backend_error
 
 
 class EvaluationRunConfig(BaseModel):
@@ -133,12 +134,31 @@ def run_evaluation(
     selected_examples = examples[:limit] if limit is not None else examples
     results: list[EvaluationExampleResult] = []
     for example in selected_examples:
-        response = backend.generate(
-            BackendGenerateRequest(
-                prompt=example.prompt if not example.messages else None,
-                messages=example.messages,
+        try:
+            response = backend.generate(
+                BackendGenerateRequest(
+                    prompt=example.prompt if not example.messages else None,
+                    messages=example.messages,
+                )
             )
-        )
+        except BACKEND_ERROR_TYPES as exc:
+            # Isolate one example's backend failure: record it as a scored-0
+            # failure so the run finishes and the rest of the dataset is scored.
+            results.append(
+                EvaluationExampleResult(
+                    example_id=example.example_id,
+                    prompt=example.prompt,
+                    expected_output=example.expected_output,
+                    model_output="",
+                    score=0.0,
+                    passed=False,
+                    tags=example.tags or config.tags,
+                    notes="backend_error",
+                    error=format_backend_error(exc),
+                )
+            )
+            continue
+
         scored = active_scorer.score(example.prompt, example.expected_output, response.text)
         results.append(
             EvaluationExampleResult(

@@ -5,6 +5,7 @@ providers. The adapter only performs network calls when methods are invoked.
 """
 from collections.abc import Callable, Iterator, Sequence
 import json
+import time
 from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -14,6 +15,7 @@ from corpus_studio.model_backends.base import (
     BackendGenerateResponse,
     ModelBackendConfig,
 )
+from corpus_studio.model_backends.retry import RetryPolicy, call_with_retry
 
 UrlOpen = Callable[..., Any]
 
@@ -37,12 +39,22 @@ def default_openai_compatible_config(
 class OpenAICompatibleBackend:
     """Small adapter for OpenAI-compatible chat completions endpoints."""
 
-    def __init__(self, config: ModelBackendConfig, opener: UrlOpen = urlopen):
+    def __init__(
+        self,
+        config: ModelBackendConfig,
+        opener: UrlOpen = urlopen,
+        retry_policy: RetryPolicy | None = None,
+        sleep: Callable[[float], Any] = time.sleep,
+    ):
         self.config = config
         self._opener = opener
+        # Generation retries transient failures; probes (health/model-list) stay
+        # single-attempt so an unreachable server fails fast for the UI.
+        self._retry_policy = retry_policy or RetryPolicy()
+        self._sleep = sleep
 
-    def list_models(self) -> Sequence[str]:
-        payload = self._request_json("GET", "/models")
+    def list_models(self, retry_policy: RetryPolicy | None = None) -> Sequence[str]:
+        payload = self._request_json("GET", "/models", retry_policy=retry_policy)
         return [
             str(model["id"])
             for model in payload.get("data", [])
@@ -78,7 +90,8 @@ class OpenAICompatibleBackend:
 
     def health_check(self) -> bool:
         try:
-            self.list_models()
+            # A health probe should fail fast, not sit through backoff retries.
+            self.list_models(retry_policy=RetryPolicy.single())
             return True
         except (OSError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
             return False
@@ -88,20 +101,20 @@ class OpenAICompatibleBackend:
         method: str,
         path: str,
         payload: dict[str, Any] | None = None,
+        retry_policy: RetryPolicy | None = None,
     ) -> dict[str, Any]:
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if self.config.api_key_optional:
             headers["Authorization"] = f"Bearer {self.config.api_key_optional}"
+        url = _join_url(self.config.base_url, path)
 
-        request = Request(
-            _join_url(self.config.base_url, path),
-            data=data,
-            method=method,
-            headers=headers,
-        )
-        with self._opener(request, timeout=self.config.timeout_seconds) as response:
-            return json.loads(response.read().decode("utf-8"))
+        def _do() -> dict[str, Any]:
+            request = Request(url, data=data, method=method, headers=headers)
+            with self._opener(request, timeout=self.config.timeout_seconds) as response:
+                return json.loads(response.read().decode("utf-8"))
+
+        return call_with_retry(_do, retry_policy or self._retry_policy, sleep=self._sleep)
 
 
 def _join_url(base_url: str, path: str) -> str:

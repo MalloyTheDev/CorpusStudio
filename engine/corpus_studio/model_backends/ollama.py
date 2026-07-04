@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Iterator, Sequence
 import json
+import time
 from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -11,6 +12,7 @@ from corpus_studio.model_backends.base import (
     BackendGenerateResponse,
     ModelBackendConfig,
 )
+from corpus_studio.model_backends.retry import RetryPolicy, call_with_retry
 
 UrlOpen = Callable[..., Any]
 
@@ -33,12 +35,22 @@ class OllamaBackend:
     inject a fake opener so no real Ollama process is required.
     """
 
-    def __init__(self, config: ModelBackendConfig, opener: UrlOpen = urlopen):
+    def __init__(
+        self,
+        config: ModelBackendConfig,
+        opener: UrlOpen = urlopen,
+        retry_policy: RetryPolicy | None = None,
+        sleep: Callable[[float], Any] = time.sleep,
+    ):
         self.config = config
         self._opener = opener
+        # Generation retries transient failures; probes (health/model-list) stay
+        # single-attempt so an unreachable server fails fast for the UI.
+        self._retry_policy = retry_policy or RetryPolicy()
+        self._sleep = sleep
 
-    def list_models(self) -> Sequence[str]:
-        payload = self._request_json("GET", "/api/tags")
+    def list_models(self, retry_policy: RetryPolicy | None = None) -> Sequence[str]:
+        payload = self._request_json("GET", "/api/tags", retry_policy=retry_policy)
         return [
             str(model["name"])
             for model in payload.get("models", [])
@@ -82,7 +94,8 @@ class OllamaBackend:
 
     def health_check(self) -> bool:
         try:
-            self.list_models()
+            # A health probe should fail fast, not sit through backoff retries.
+            self.list_models(retry_policy=RetryPolicy.single())
             return True
         except (OSError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
             return False
@@ -92,16 +105,22 @@ class OllamaBackend:
         method: str,
         path: str,
         payload: dict[str, Any] | None = None,
+        retry_policy: RetryPolicy | None = None,
     ) -> dict[str, Any]:
         data = None if payload is None else json.dumps(payload).encode("utf-8")
-        request = Request(
-            _join_url(self.config.base_url, path),
-            data=data,
-            method=method,
-            headers={"Content-Type": "application/json"},
-        )
-        with self._opener(request, timeout=self.config.timeout_seconds) as response:
-            return json.loads(response.read().decode("utf-8"))
+        url = _join_url(self.config.base_url, path)
+
+        def _do() -> dict[str, Any]:
+            request = Request(
+                url,
+                data=data,
+                method=method,
+                headers={"Content-Type": "application/json"},
+            )
+            with self._opener(request, timeout=self.config.timeout_seconds) as response:
+                return json.loads(response.read().decode("utf-8"))
+
+        return call_with_retry(_do, retry_policy or self._retry_policy, sleep=self._sleep)
 
     def _options(self, request: BackendGenerateRequest) -> dict[str, Any]:
         return {

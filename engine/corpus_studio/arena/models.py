@@ -15,6 +15,10 @@ class ArenaResponse(BaseModel):
     prompt_id: str
     model: str
     text: str
+    # Set when the backend call for this prompt/model failed (after retries). The
+    # response is recorded with empty text so one model's outage never aborts the
+    # whole arena run; the error is surfaced instead of silently dropped.
+    error: str | None = None
 
 
 class ArenaJudgment(BaseModel):
@@ -31,6 +35,9 @@ class ArenaModelSummary(BaseModel):
     model: str
     response_count: int
     empty_response_count: int
+    # Responses that failed with a backend error (distinct from a model that
+    # legitimately returned empty text).
+    error_count: int = 0
     win_count: int = 0
     average_judge_score: float | None = None
 
@@ -66,8 +73,11 @@ def build_model_summaries(
                 model=model,
                 response_count=sum(1 for r in responses if r.model == model),
                 empty_response_count=sum(
-                    1 for r in responses if r.model == model and not r.text.strip()
+                    1
+                    for r in responses
+                    if r.model == model and not r.error and not r.text.strip()
                 ),
+                error_count=sum(1 for r in responses if r.model == model and r.error),
                 win_count=sum(1 for judgment in judgments if judgment.winner == model),
                 average_judge_score=round(sum(model_scores) / len(model_scores), 2)
                 if model_scores
