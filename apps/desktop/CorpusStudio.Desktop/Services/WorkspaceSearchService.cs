@@ -93,12 +93,17 @@ public sealed class WorkspaceSearchService
                     }
 
                     fileHadMatch = true;
+                    var display = Trim(line);
+                    var (before, matchText, after) = SplitHighlight(display, query, comparison);
                     matches.Add(new WorkspaceSearchMatch
                     {
                         RelativePath = file.RelativePath,
                         FullPath = file.FullPath,
                         LineNumber = lineNumber,
-                        LineText = Trim(line),
+                        LineText = display,
+                        BeforeMatch = before,
+                        MatchText = matchText,
+                        AfterMatch = after,
                     });
                     if (matches.Count >= MaxResults)
                     {
@@ -131,6 +136,20 @@ public sealed class WorkspaceSearchService
     {
         var trimmed = line.Trim();
         return trimmed.Length > MaxLineLength ? trimmed[..MaxLineLength] + "…" : trimmed;
+    }
+
+    /// <summary>Split the display line around the first match so the view can highlight it.
+    /// If the match landed outside the truncated window, the whole line is "before" and the
+    /// match segment is empty (no highlight, still shown).</summary>
+    private static (string before, string match, string after) SplitHighlight(
+        string display, string query, StringComparison comparison)
+    {
+        var index = display.IndexOf(query, comparison);
+        if (index < 0)
+        {
+            return (display, string.Empty, string.Empty);
+        }
+        return (display[..index], display.Substring(index, query.Length), display[(index + query.Length)..]);
     }
 
     private static void CollectTextFiles(WorkspaceTreeNode node, List<WorkspaceTreeNode> into)

@@ -12,6 +12,13 @@ public sealed class WorkspaceSearchMatch
     /// <summary>The matching line, trimmed and length-capped for display.</summary>
     public string LineText { get; init; } = string.Empty;
 
+    // The display line split around the (first) match so the view can bold/highlight it.
+    // BeforeMatch + MatchText + AfterMatch == LineText; MatchText is empty when the match
+    // fell outside the truncated display window.
+    public string BeforeMatch { get; init; } = string.Empty;
+    public string MatchText { get; init; } = string.Empty;
+    public string AfterMatch { get; init; } = string.Empty;
+
     /// <summary>Compact list label, e.g. <c>reports/q.json:12</c>.</summary>
     public string Location => $"{RelativePath}:{LineNumber}";
 }

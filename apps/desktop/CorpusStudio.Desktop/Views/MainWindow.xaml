@@ -3058,7 +3058,7 @@
                                    Text="Type a term and press Enter to find it across this workspace's text files (datasets, reports, docs, configs). Binaries, oversize files, and build/VCS folders are skipped. Double-click a result to open the file." />
                         <!-- results list; double-click opens the file in the Explorer -->
                         <ListBox x:Name="SearchResultsList" ItemsSource="{Binding Search.Results}"
-                                 MouseDoubleClick="SearchResult_DoubleClick"
+                                 MouseDoubleClick="SearchResult_DoubleClick" KeyDown="SearchResultsList_KeyDown"
                                  BorderThickness="0" Background="Transparent" Margin="0,2"
                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
                                  Visibility="{Binding Search.HasResults, Converter={StaticResource BoolToVis}}">
@@ -3067,8 +3067,8 @@
                                     <StackPanel Margin="4,3">
                                         <TextBlock Text="{Binding Location}" FontFamily="Consolas" FontSize="11.5"
                                                    FontWeight="SemiBold" Foreground="#2563EB" />
-                                        <TextBlock Text="{Binding LineText}" FontFamily="Consolas" FontSize="11.5"
-                                                   Foreground="#334155" TextTrimming="CharacterEllipsis" Margin="0,1,0,0" />
+                                        <TextBlock FontFamily="Consolas" FontSize="11.5" Foreground="#334155"
+                                                   TextTrimming="CharacterEllipsis" Margin="0,1,0,0"><Run Text="{Binding BeforeMatch}" /><Run Text="{Binding MatchText}" FontWeight="Bold" Foreground="#B45309" Background="#FEF3C7" /><Run Text="{Binding AfterMatch}" /></TextBlock>
                                     </StackPanel>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
