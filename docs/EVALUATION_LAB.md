@@ -1,27 +1,22 @@
 # Evaluation Lab
 
-Evaluation Lab is the staged Corpus Studio workspace for testing datasets by
-running prompts through selected models and comparing the model responses with
-expected outputs, rubrics, or human scores.
+Evaluation Lab tests datasets by running prompts through selected models and
+comparing the responses with expected outputs, rubrics, or human scores — building
+on the dataset-creation loop without turning Corpus Studio into a trainer.
 
-Evaluation Lab is the v0.2 lab surface. It should build on the dataset
-creation loop without turning Corpus Studio into a trainer.
-
-Current status: Corpus Studio has an MVP `eval-run` CLI command that can
-explicitly run instruction or chat JSONL through Ollama or an OpenAI-compatible
-local endpoint and export a JSON report. The WPF desktop app also has a
-first-pass Evaluation tab that collects backend settings, runs the same engine
-command, displays the JSON report, and checks backend health through the engine
-`backend-health` command. It also reloads saved JSON reports from the desktop
-history list, compares two saved reports for score/failure/tag/example deltas,
-stores repeatable `run_settings`, reruns saved configurations as regression
-checks, blocks runs when the pre-run backend health check fails, filters
-example review to failed rows, and saves manual per-example scores and notes
-back into report JSON. A selected failed row can be loaded back into Writing
-Studio as the current saved JSON row for explicit edit, validation, save, and
-rerun. A selected failed example can also be prepared as a Writing Studio draft
-with an AI Assist `rewrite-output` triage instruction. Multi-model comparison,
-richer score summaries, and benchmark suites remain planned.
+The engine `eval-run` command runs instruction or chat JSONL through Ollama or an
+OpenAI-compatible local endpoint and exports a JSON report. The desktop Evaluation
+tab collects backend settings, runs the same command, checks backend health, and
+displays the report; it reloads saved reports from a history list, compares two
+reports (score/failure/tag/example deltas), stores repeatable `run_settings`,
+reruns saved configurations as regression checks, blocks runs when the pre-run
+health check fails, filters review to failed rows, and saves manual per-example
+scores/notes back into the report JSON. A failed row can be loaded into Writing
+Studio for edit/validate/save/rerun, or prepared as a draft with an AI Assist
+`rewrite-output` triage instruction. A separate multi-model `benchmark` command
+ranks several models on one dataset. The default automatic score is
+keyword-overlap recall — a lexical proxy, **not** a quality judgment; an opt-in
+LLM-judge scorer (`--judge-model`) scores each answer 0–100 with a rationale.
 
 ## Purpose
 
@@ -82,46 +77,18 @@ The first version should favor human-readable evidence over clever automation.
 Scores are useful, but the user needs to see the prompt, expected answer, model
 answer, tags, and failure notes.
 
-## v0.2 MVP Scope and Status
+## Scope
 
-The v0.2 MVP includes:
+Evaluation runs locally through the model-backend abstraction (Ollama /
+OpenAI-compatible); no CUDA or heavyweight ML libraries live inside Corpus Studio.
+Runs are one dataset at a time, for instruction and chat data, with JSON report
+export — no training launcher, no cloud-only requirement.
 
-- Ollama backend through the engine MVP CLI
-- OpenAI-compatible local HTTP endpoint through the engine MVP CLI
-- desktop Evaluation tab that launches the engine run and displays report JSON
-- backend health check command and desktop button
-- saved report history and reload UI
-- comparison for two saved reports
-- regression rerun button using saved report `run_settings`
-- manual per-example score and notes persistence
-- report summaries by tag, failure reason, and score band
-- one dataset run at a time
-- instruction and chat dataset support
-- simple scoring interface
-- JSON evaluation report export
-- no training launcher
-- no cloud-only requirement
-
-Still to harden:
-
-- add versioned reviewed-fix tracking and in-place row replacement options
-
-The MVP runs locally and should continue to work without CUDA or heavyweight ML
-libraries inside Corpus Studio itself. Model execution belongs behind the model
-backend abstraction.
-
-## Future Scope
-
-Future Evaluation Lab versions can add:
-
-- multiple model comparison
-- regression testing
-- named benchmark suites
-- rubric-based grading
-- judge-model evaluation
-- checkpoint comparison
-- interactive per-tag drilldowns and saved filters
-- prompt template versioning
+Already shipped: multi-model comparison (`benchmark`), regression reruns,
+report summaries by tag/failure/score-band, saved failure drilldowns, versioned
+reviewed-fix tracking, and an opt-in judge-model scorer. Genuinely future:
+rubric-based grading, checkpoint comparison, prompt-template versioning, and the
+v1.3 Evaluation Suites.
 - cost and token accounting
 - failed-example review queues
 

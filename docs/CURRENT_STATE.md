@@ -3,11 +3,13 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-07-03 (through v1.2.15 + deep-review Tiers 1 and 2 — PR #91:
-the Workspace shell, desktop polish, the LLM-judge evaluation scorer, a crash-safe /
-distributable build, the god-object decomposition (Debt + Arena tabs extracted), a
-unified JSONL reader, backend retry + per-item error isolation, and off-thread
-document opens).
+Last reconciled: 2026-07-04 (through v1.2.15, plus the deep bug/security audit —
+19 fixes across data integrity, gate/policy hardening, and quality/split
+correctness, PRs #104–118 — and the CI dependency refresh, PRs #94–101). Earlier
+milestones: the Workspace shell, desktop polish, the LLM-judge evaluation scorer,
+a crash-safe / distributable build, the god-object decomposition (Debt + Arena
+tabs extracted), a unified JSONL reader, backend retry + per-item error
+isolation, and off-thread document opens.
 
 ## What works today (implemented and tested)
 
@@ -218,11 +220,10 @@ document opens).
 - **Finish the evaluation judge in the UI** — a desktop Evaluation-tab "Judge model"
   field wiring the engine's `--judge-model` scorer through `PythonEngineService`.
 - **v1.3 — Evaluation Suites & Chat Gates.**
-- **Hugging Face Hub import *and* export** (the biggest ecosystem gap).
 - **A real tokenizer** (transformers/tokenizers) so token-budget / VRAM numbers are
   exact rather than heuristic.
 - **HF export/push** (upload/publishing) — see the hard boundary above; it stays a
-  deliberate non-goal for now.
+  deliberate non-goal for now. (Read-only Hub *import* already ships.)
 - **Continue the view-model decomposition** beyond the Debt and Arena tabs; eventually
   an **Avalonia** port for macOS/Linux (see `CROSS_PLATFORM_ASSESSMENT.md`).
 - **Auto-capture** of a dataset version after an import commit, dataset-version
@@ -230,4 +231,5 @@ document opens).
   rows), and a normalized row identity.
 - Smaller deferrals: PII auto-redaction; a per-project gate-threshold editor in
   the desktop; per-element object shapes for lists-of-objects in the validator; an
-  app icon; CI hardening (ruff/mypy/coverage, dependabot/CodeQL).
+  app icon. (CI hardening — ruff, mypy, pytest gate, dependabot, and CodeQL — is
+  in place.)

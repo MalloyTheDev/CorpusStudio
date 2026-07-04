@@ -191,8 +191,10 @@ The Training Lab MVP uses the same desktop-to-engine boundary:
 Desktop Training tab -> Python training-config CLI -> training templates -> rendered config file
 ```
 
-The command writes inspectable config files only. Launchers, trainer process
-management, logs, checkpoints, and resume controls remain future v0.5 work.
+The `training-config` command writes inspectable config files only. In-app trainer
+launch (exact argv, no shell), live log streaming, checkpoint tracking, and
+resume-from-latest are separate shipped features — the config generator never
+runs a trainer itself. See [`TRAINING.md`](TRAINING.md).
 
 ## Design rule
 

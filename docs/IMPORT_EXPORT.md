@@ -125,18 +125,19 @@ One JSON object per line.
 
 ### Planned dataset exports
 
+Shipped: preference exports (DPO/KTO/reward), the dataset card, and training
+config templates for the major targets (Axolotl / TRL / Unsloth / HF /
+LLaMA-Factory). Still planned:
+
 - CSV
 - Parquet
 - Alpaca
 - ShareGPT
 - ChatML-like
-- DPO
 - Hugging Face dataset folder
-- dataset card
-- richer target-specific training config templates
 
-Training Lab now has a first-pass config export path, but dataset format
-exports and full target-specific compatibility checks remain staged work.
+Full target-specific compatibility checks beyond the current config warnings
+remain staged work.
 
 ### Export rule
 

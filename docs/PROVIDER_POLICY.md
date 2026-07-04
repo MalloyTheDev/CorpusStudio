@@ -79,8 +79,9 @@ python -m corpus_studio.cli provider-policy --provider ollama \
 Revoke with `--revoke`. Approving an evaluator-only provider (OpenAI/Anthropic)
 is refused (exit code 2).
 
-## Not in v0.6
+## Not implemented
 
-Real OpenAI/Anthropic/OpenRouter API clients, and an approved-generation →
-review-queue pipeline (v1.2). Policy is enforced regardless of whether a given
-transport is implemented.
+Real OpenAI/Anthropic/OpenRouter API clients — policy is enforced regardless of
+whether a given transport is implemented (evaluator-only providers are configured,
+not embedded). The approved-generation → review-queue pipeline shipped in v1.2 as
+candidate gating; see [`AI_ASSIST_LAB.md`](AI_ASSIST_LAB.md).
