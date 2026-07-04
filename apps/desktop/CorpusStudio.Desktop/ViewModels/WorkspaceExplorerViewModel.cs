@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
 using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.Services;
 
@@ -179,18 +180,18 @@ public sealed class WorkspaceExplorerViewModel : INotifyPropertyChanged
     // ---- Documents ---------------------------------------------------------------
 
     /// <summary>Open a file node in a document tab (re-activating an already-open tab).
-    /// Directories and a null node are ignored.</summary>
-    public void OpenNode(WorkspaceTreeNode? node)
+    /// Directories and a null node are ignored. The file read happens off the UI thread.</summary>
+    public async Task OpenNodeAsync(WorkspaceTreeNode? node)
     {
         if (node is null || node.IsDirectory || !HasWorkspace)
         {
             return;
         }
 
-        OpenByRelativePath(node.RelativePath);
+        await OpenByRelativePathAsync(node.RelativePath);
     }
 
-    private void OpenByRelativePath(string relativePath)
+    private async Task OpenByRelativePathAsync(string relativePath)
     {
         var existing = OpenDocuments.FirstOrDefault(d => SamePath(d.RelativePath, relativePath));
         if (existing is not null)
@@ -199,7 +200,9 @@ public sealed class WorkspaceExplorerViewModel : INotifyPropertyChanged
             return;
         }
 
-        var result = _documents.Open(_workspaceRoot!, relativePath);
+        // Read/classify/metadata run on the thread pool; the continuation resumes on the
+        // caller's context (the UI thread in the app) to mutate the bound collections.
+        var result = await _documents.OpenAsync(_workspaceRoot!, relativePath);
         if (!result.Ok || result.Document is null)
         {
             ExplorerStatus = result.Error ?? "Could not open the file.";
@@ -212,7 +215,7 @@ public sealed class WorkspaceExplorerViewModel : INotifyPropertyChanged
 
     /// <summary>Create a file inside the workspace and open it. Returns an error string
     /// (never throws for expected problems); null on success.</summary>
-    public string? CreateFile(string relativePath)
+    public async Task<string?> CreateFileAsync(string relativePath)
     {
         if (!HasWorkspace)
         {
@@ -226,7 +229,7 @@ public sealed class WorkspaceExplorerViewModel : INotifyPropertyChanged
         }
 
         RefreshTree();
-        OpenByRelativePath(result.RelativePath);
+        await OpenByRelativePathAsync(result.RelativePath);
         return null;
     }
 
