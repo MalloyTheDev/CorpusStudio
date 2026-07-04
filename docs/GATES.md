@@ -87,12 +87,20 @@ was not allowed to perform. See [`AI_ASSIST_LAB.md`](AI_ASSIST_LAB.md).
 Gate thresholds default to the values in `GateThresholds`, but a project can
 override any of them by writing a `gate_thresholds.json` in the project
 directory. Overrides are **partial** (unlisted keys keep their default) and
-**fail-closed**: unknown keys are ignored, and an unreadable/invalid file — or
-any single value that is out of range, negative, or non-finite (`NaN`/`inf`) —
-falls back to the strict defaults rather than silently disabling or inverting a
-gate. Every field is bounded (counts and scores are non-negative; the pass-rate
-is a fraction in `[0, 1]`), and the file is read as UTF-8 **with a tolerated
-BOM**, so overrides saved by Notepad or PowerShell still apply.
+**fail-closed** per key: unknown keys are ignored, and any single value that is
+out of range, negative, or non-finite (`NaN`/`inf`) falls back to *that key's*
+strict default while the file's other valid overrides still apply — one bad key
+never silently discards the rest. A file that is entirely unreadable, not JSON,
+or not a JSON object falls back to the strict defaults wholesale. Every field is
+bounded (counts and scores are non-negative; the pass-rate is a fraction in
+`[0, 1]`), and the file is read as UTF-8 **with a tolerated BOM**, so overrides
+saved by Notepad or PowerShell still apply.
+
+Near-duplicate and low-information rows **warn** by default. To make either a
+hard block for a project, set `block_normalized_duplicates` / `block_low_information`
+to `true` (mirroring `block_exact_duplicates`). These block only at dataset/row
+scope; the **export** gate always warns on quality counts (it has a dedicated
+cleaning pass) and blocks only on empty input, schema, or PII.
 
 `training-run-gate` and `artifact-gate` (which always take a project directory)
 load the file automatically. `gate-run` applies it **only when you pass

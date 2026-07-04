@@ -280,10 +280,12 @@ Scope:
 - v0.9.0 (done): a `ModelArtifactRecord` under `model_artifacts/` with
   keep/reject status, referencing the source `run_id` (base model + eval are
   resolved live through the run, never stored). The headline feature is **path
-  integrity**: a cheap fingerprint (size + mtime of a key descriptor file, never
-  a hash of weight bytes) is captured at register time and re-checked on load,
+  integrity**: at register time both a cheap size+mtime fingerprint (descriptor +
+  weight files) and a byte-exact SHA-256 of the weight bytes are captured. On load
+  the list re-checks the cheap fingerprint (fast); the weight card and promote gate
+  re-check the SHA-256 (byte-exact, catches even a size/mtime-preserving swap),
   flagging `missing` or `modified` so a record can never quietly point at
-  deleted/overwritten weights. Idempotent register (same run+path → one record).
+  deleted/overwritten/altered weights. Idempotent register (same run+path → one record).
   Engine `artifact-register`/`artifact-list`/`artifact-update`; a desktop
   Artifacts tab (register-from-run, keep/reject, integrity badge).
 - v0.9.1 (done): a weight card rendered live (`artifact-card`, never stored, so

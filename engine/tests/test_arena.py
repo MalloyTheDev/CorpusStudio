@@ -106,6 +106,23 @@ def test_responses_for_prompt_keys_by_model():
     assert responses_for_prompt(report, "p1") == {"a": "a:plain", "b": "b:plain"}
 
 
+def test_run_arena_blocks_a_provider_that_cannot_evaluate():
+    # Arena generation is an evaluation-typed activity; a provider blocked from the evaluator
+    # role cannot participate, and the block ABORTS the run (no partial report smuggled out).
+    from corpus_studio.providers.policy import ProviderPolicy, ProviderRole
+
+    blocked = ProviderPolicy(provider_id="x", blocked_roles=[ProviderRole.EVALUATOR])
+    with pytest.raises(ProviderPolicyError):
+        run_arena(PROMPTS, [("a", EchoBackend("a"))], policies={"a": blocked})
+
+
+def test_run_arena_allows_an_evaluator_capable_policy():
+    # Local providers (ollama) can evaluate by default -> real arena usage is unaffected.
+    policy = resolve_policy("ollama", model_id="a")
+    report = run_arena(PROMPTS, [("a", EchoBackend("a"))], policies={"a": policy})
+    assert len(report.responses) == 2  # 2 prompts x 1 model, generated normally
+
+
 def test_build_arena_report_is_pure():
     from corpus_studio.arena.models import ArenaResponse
 

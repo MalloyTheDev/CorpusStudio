@@ -1,7 +1,23 @@
 import json
 
+import pytest
+
 from corpus_studio.ai_assist.assistant import build_ai_assist_prompt, run_ai_assist
 from corpus_studio.model_backends.base import BackendGenerateResponse
+from corpus_studio.providers.policy import (
+    ProviderPolicy,
+    ProviderPolicyError,
+    ProviderRole,
+)
+
+# A generation-approved local provider for the trainable (draft-example) path, which now
+# fails closed without an explicit approved policy.
+_APPROVED = ProviderPolicy(
+    provider_id="local",
+    allowed_roles=[ProviderRole.TRAINABLE_OUTPUT_GENERATOR],
+    outputs_trainable=True,
+    user_approved_generation=True,
+)
 
 
 def test_ai_assist_prompt_marks_dataset_rows_as_untrusted():
@@ -46,6 +62,7 @@ def test_ai_assist_result_keeps_model_suggestion_review_only():
     result = run_ai_assist(
         schema_id="instruction",
         action="draft-example",
+        policy=_APPROVED,
         rows=[
             {
                 "instruction": "Explain a loop.",
@@ -90,6 +107,7 @@ def test_ai_assist_flags_repetitive_synthetic_patterns():
     result = run_ai_assist(
         schema_id="instruction",
         action="draft-example",
+        policy=_APPROVED,
         rows=[examples[0]],
         backend=FakeBackend(),
         model="fake-model",
@@ -130,3 +148,39 @@ def test_ai_assist_flags_weak_preference_pair_strength():
 
     assert any("preference strength" in warning for warning in result.warnings)
     assert any("identical chosen and rejected" in warning for warning in result.warnings)
+
+
+def test_trainable_action_without_a_policy_fails_closed():
+    # A trainable-generating action with NO resolved policy must be refused — the guarantee
+    # cannot be voided by a caller that forgets to pass a policy. The provider is never called.
+    class _Backend:
+        def generate(self, request):
+            raise AssertionError("the provider must never be called when policy is missing")
+
+    with pytest.raises(ProviderPolicyError, match="fail-closed"):
+        run_ai_assist(
+            schema_id="instruction",
+            action="draft-example",
+            rows=[{"instruction": "x", "input": "", "output": "y"}],
+            backend=_Backend(),
+            model="m",
+            policy=None,
+        )
+
+
+def test_evaluator_action_without_a_policy_is_still_permitted():
+    # Evaluator actions create no trainable data, so a missing policy does not block them
+    # (the CLI always resolves one; this only guards the low-risk library path).
+    class _Backend:
+        def generate(self, request):
+            return BackendGenerateResponse(text='{"suggested_jsonl": ""}', model_name="m")
+
+    result = run_ai_assist(
+        schema_id="instruction",
+        action="review",
+        rows=[{"instruction": "x", "input": "", "output": "y"}],
+        backend=_Backend(),
+        model="m",
+        policy=None,
+    )
+    assert result.review_required is True
