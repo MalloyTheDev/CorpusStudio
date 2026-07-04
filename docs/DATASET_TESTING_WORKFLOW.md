@@ -3,9 +3,8 @@
 This workflow describes how Corpus Studio should move from dataset authoring to
 evaluation and later training preparation.
 
-The workflow is practical enough to become a UI sequence, but implementation
-should remain staged. v0.1 stays focused on dataset creation, validation,
-splitting, and export.
+The workflow maps to the shipped UI sequence: authoring and validation, then
+splitting and export, then evaluation and training preparation.
 
 Current MVP coverage: the desktop app covers the active-project version of
 steps 4 through 8. Users can enter local backend settings, refresh local model
@@ -14,8 +13,8 @@ JSON report, reload saved reports from history, compare two saved reports,
 rerun saved configurations as regression checks, save manual per-example scores
 and notes, inspect tag/failure-reason/score-band summaries, filter failed
 examples, load failed rows back into Writing Studio for explicit edits, and
-prepare AI Assist triage. Steps 9 and 10 now have a basic edit/save/rerun loop;
-richer versioned replacement and unresolved-failure tracking remain planned.
+prepare AI Assist triage. Steps 9 and 10 have an edit/save/rerun loop with
+versioned reviewed-fix tracking and re-test resolution status.
 
 ## End-to-End Flow
 

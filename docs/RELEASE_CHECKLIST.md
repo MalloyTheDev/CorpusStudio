@@ -73,8 +73,6 @@ notes so expectations are set:
 - AI Assist is review-first: suggestions require human accept/reject and are
   never auto-applied to a dataset. Generated candidates are gated before review,
   but the gate only informs — it never auto-accepts or auto-rejects.
-- The desktop does not yet surface the AI Assist `candidate_gate` verdict
-  (v1.2.1), and there is no Dashboard debt badge or debt trend view yet.
 - No Evaluation Suites or Chat Gates yet (v1.3).
 - The SQLite project index is an optional cache; JSON/JSONL remain the source of
   truth and the app works without it.

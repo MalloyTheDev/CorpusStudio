@@ -1,42 +1,29 @@
 # AI Assist Lab
 
-AI Assist Lab is the staged Corpus Studio workspace for using models to help
-review, rewrite, tag, and draft dataset examples.
+AI Assist Lab uses models to help review, rewrite, tag, and draft dataset
+examples — review-first by design. AI should assist authors, not blindly generate
+rows into the dataset; human accept/reject remains required, and output is always
+`review_required`.
 
-AI should assist dataset authors. It should not blindly generate garbage and
-push it into the dataset. Human review remains required.
-
-AI Assist Lab is the v0.3 lab surface. It comes after the dataset authoring and
-evaluation loops, and it must stay review-first.
-
-Current MVP status: Corpus Studio has a review-first `ai-assist` engine command
-and a desktop AI Assist tab. The tab sends the current draft through a selected
-local model backend, displays the model response and any suggested JSONL, and
-lets the user move that suggestion into Writing Studio for editing, validation,
-and explicit save. It can also check backend health through the engine
-`backend-health` command and list available local models through the engine
-`model-list` command. It persists review queue items in the project folder
-with `review_required`, `accepted`, and `rejected` states. Queue selection shows
-the stored source draft beside the suggested JSONL with a compact comparison
-summary. The desktop action control uses schema-aware presets, and the engine
-adds first-pass warnings for repetitive synthetic patterns and weak preference
-pairs. The queue can be filtered by review state and bulk-mark visible reviews
-accepted or rejected. It also supports text search, simple sorting, saved queue
-views for repeated triage passes, and undo for recent bulk triage actions. It
-does not directly mutate accepted examples. The Quality panel can also send a
-selected synthetic-pattern issue into a prepared `rewrite-output` AI Assist
-workflow by loading the first affected row into the draft and copying the repair
-guidance into the instruction. It can also prepare a batch rewrite draft for
-the affected rows across the current structured synthetic issues and persist
-that prepared batch in `ai_assist_rewrite_batches.json` for resume after app
-restart. Preference
-projects also have a first-pass
-Preference Review tab that shows prompt/chosen/rejected/reason fields side by
-side, ranks pairs by weak/moderate/strong contrast, filters the queue by
-contrast strength, and prepares the `judge-preference-strength` AI Assist
-action for the selected pair. The visible preference ranking can be exported as
-an inspectable JSON artifact for DPO or reward-model review, and the visible
-queue can be prepared as a batch judge pass.
+The engine `ai-assist` command and the desktop AI Assist tab send the current
+draft through a selected local model backend and return the response plus any
+suggested JSONL, which the user can move into Writing Studio to edit, validate,
+and explicitly save. The tab checks backend health and lists local models,
+persists a review queue (`review_required` / `accepted` / `rejected`) in the
+project folder, shows the source draft beside the suggestion with a comparison
+summary, uses schema-aware action presets, and adds warnings for repetitive
+synthetic patterns and weak preference pairs. The queue supports state filters,
+text search, sorting, saved views, bulk accept/reject, and undo — and never
+mutates accepted examples directly. Generated candidate rows are run through the
+dataset gate runner (schema/quality/PII) before review and the verdict is attached
+as `candidate_gate` — a pre-review signal only: a clean gate is not approval, a
+block does not auto-reject, and provider policy is still enforced before
+generation. The Quality panel can send a synthetic-pattern issue into a prepared
+`rewrite-output` workflow (a single row, or a batch persisted in
+`ai_assist_rewrite_batches.json` for resume after restart). Preference projects add
+a Preference Review tab: prompt/chosen/rejected/reason side by side, ranked by
+weak/moderate/strong contrast, with a `judge-preference-strength` action and JSON
+export for DPO or reward-model review.
 
 ## Product Role
 
