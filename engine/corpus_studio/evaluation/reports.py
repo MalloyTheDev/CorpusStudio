@@ -16,6 +16,10 @@ class EvaluationExampleResult(BaseModel):
     notes: str | None = None
     # Judge rationale for the automatic score (llm_judge only; None for keyword overlap).
     rationale: str | None = None
+    # Set when the backend call for this example failed (after retries). The
+    # example is recorded as a scored-0 failure with notes="backend_error" so one
+    # bad call never aborts the run; the error detail is surfaced here.
+    error: str | None = None
     manual_score: float | None = None
     manual_notes: str | None = None
 

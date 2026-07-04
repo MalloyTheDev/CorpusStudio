@@ -216,6 +216,14 @@ recorded quality runs, with an improving/worsening/stable verdict. Presence-base
 PII/secrets are graded live in the Debt tab, not trended here, so the trend never
 fabricates a grade it can't stand behind.
 
+![Corpus Studio Model Arena surviving a backend outage](docs/screenshots/arena-resilience.png)
+
+**9 · Resilient model runs** — the Model Arena (and Evaluation) keep going when a
+provider fails. Transient errors (429 / 5xx / dropped connections) are retried with
+backoff; a model that stays down is recorded as a per-response **backend error**
+instead of aborting the whole comparison — here `mistral:7b` returned a 503 while
+`llama3.1:8b` was still fully compared and judged.
+
 ## Core Local Loop
 
 Build a local desktop app that supports:

@@ -146,3 +146,42 @@ def test_run_evaluation_defaults_to_keyword_overlap_metric():
     )
     assert report.metric == "keyword_overlap"
     assert report.results[0].rationale is None
+
+
+class FlakyModelBackend:
+    """Fails on the second example only, then works again."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def generate(self, request):
+        from urllib.error import URLError
+
+        self.calls += 1
+        if self.calls == 2:
+            raise URLError("connection reset")
+        return BackendGenerateResponse(text="X is Y.", model_name="fake-local")
+
+
+def test_run_evaluation_isolates_a_backend_failure_per_example():
+    rows = [
+        {"instruction": "Explain A.", "input": "", "output": "A is 1."},
+        {"instruction": "Explain B.", "input": "", "output": "B is 2."},
+        {"instruction": "Explain C.", "input": "", "output": "C is 3."},
+    ]
+    examples = extract_evaluation_examples(rows, "instruction")
+    report = run_evaluation(
+        EvaluationRunConfig(dataset="d", model="fake-local", schema_id="instruction"),
+        examples,
+        FlakyModelBackend(),
+    )
+
+    # Every example is accounted for; the failure did not abort the run.
+    assert report.examples_tested == 3
+    failed = [r for r in report.results if r.notes == "backend_error"]
+    assert len(failed) == 1
+    assert failed[0].error and "URLError" in failed[0].error
+    assert failed[0].score == 0.0 and failed[0].passed is False
+    assert failed[0].model_output == ""
+    # The failure surfaces as a distinct reason in the report summary.
+    assert any(s.reason == "backend_error" for s in report.failure_reason_summary)

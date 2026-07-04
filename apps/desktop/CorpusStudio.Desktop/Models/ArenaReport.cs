@@ -49,6 +49,11 @@ public sealed class ArenaResponse
 
     [JsonPropertyName("text")]
     public string Text { get; init; } = string.Empty;
+
+    /// <summary>Set when this prompt/model call failed after retries; the batch
+    /// records the failure instead of aborting.</summary>
+    [JsonPropertyName("error")]
+    public string? Error { get; init; }
 }
 
 public sealed class ArenaModelSummary
@@ -61,6 +66,11 @@ public sealed class ArenaModelSummary
 
     [JsonPropertyName("empty_response_count")]
     public int EmptyResponseCount { get; init; }
+
+    /// <summary>Responses that failed with a backend error (distinct from a model
+    /// that legitimately returned empty text).</summary>
+    [JsonPropertyName("error_count")]
+    public int ErrorCount { get; init; }
 
     [JsonPropertyName("win_count")]
     public int WinCount { get; init; }

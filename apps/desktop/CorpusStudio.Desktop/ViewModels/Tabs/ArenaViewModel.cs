@@ -93,6 +93,10 @@ public sealed class ArenaViewModel : ViewModelBase, IArenaViewModel
             {
                 parts.Add($"{summary.EmptyResponseCount} empty");
             }
+            if (summary.ErrorCount > 0)
+            {
+                parts.Add($"⚠ {summary.ErrorCount} error(s)");
+            }
             lines.Add($"  {summary.Model} — {string.Join(", ", parts)}");
         }
 
@@ -105,7 +109,10 @@ public sealed class ArenaViewModel : ViewModelBase, IArenaViewModel
             {
                 var win = judgment is not null && judgment.Winner == response.Model ? "🏆 " : "   ";
                 lines.Add($"  {win}{response.Model}:");
-                lines.Add(IndentBlock(string.IsNullOrWhiteSpace(response.Text) ? "(empty response)" : response.Text));
+                var body = !string.IsNullOrWhiteSpace(response.Error)
+                    ? $"⚠ (backend error: {SingleLine(response.Error)})"
+                    : string.IsNullOrWhiteSpace(response.Text) ? "(empty response)" : response.Text;
+                lines.Add(IndentBlock(body));
             }
 
             if (judged && judgment is not null)

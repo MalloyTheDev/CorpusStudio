@@ -165,6 +165,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/decisions/0002-schema-driven-editor.md`
 - `docs/decisions/0003-python-engine-csharp-desktop.md`
 - `docs/schemas/README.md`
+- `docs/screenshots/arena-resilience.png`
 - `docs/screenshots/dataset-debt.png`
 - `docs/screenshots/debt-trend.png`
 - `docs/screenshots/output-panel.png`
@@ -203,6 +204,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/model_backends/base.py`
 - `engine/corpus_studio/model_backends/ollama.py`
 - `engine/corpus_studio/model_backends/openai_compatible.py`
+- `engine/corpus_studio/model_backends/retry.py`
 - `engine/corpus_studio/quality/__init__.py`
 - `engine/corpus_studio/gates/__init__.py`
 - `engine/corpus_studio/gates/basic_gates.py`
@@ -247,6 +249,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_ai_assist.py`
 - `engine/tests/test_ai_assist_candidate_gate.py`
 - `engine/tests/test_arena.py`
+- `engine/tests/test_backend_retry.py`
 - `engine/tests/test_basic_validator.py`
 - `engine/tests/test_benchmark.py`
 - `engine/tests/test_cleaners.py`
