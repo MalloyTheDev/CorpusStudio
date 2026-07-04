@@ -342,3 +342,130 @@ def eval_score_gate(
         if status == GateStatus.PASS
         else "Improve or filter failing examples, or retrain, before promoting this model.",
     )
+
+
+# --- chat conversation structure (v1.3 chat gates) ---------------------------
+# Sequence-level faults only; per-message shape (role validity, non-empty content)
+# is the validator's job and is NOT re-checked here.
+
+_CHAT_MALFORMED_FAULTS = ("assistant_first", "no_assistant", "no_user", "dangling_user")
+
+_CHAT_FAULT_LABELS = {
+    "assistant_first": "start with an assistant turn",
+    "no_assistant": "have no assistant turn",
+    "no_user": "have no user turn",
+    "dangling_user": "end on a user turn",
+    "consecutive_same_role": "repeat a role back-to-back",
+    "system_misplaced": "misplace the system message",
+    "too_few_turns": "have too few turns",
+    "too_many_turns": "have too many turns",
+}
+
+
+def _conversation_faults(messages: list, thresholds: GateThresholds) -> set[str]:
+    """Sequence-level structural faults in one conversation. Defensive: tolerates malformed
+    individual messages (non-dict / missing role) without raising — their shape is the
+    validator's concern, reported separately by the schema gate."""
+
+    roles = [message.get("role") if isinstance(message, dict) else None for message in messages]
+    faults: set[str] = set()
+
+    count = len(messages)
+    if count < thresholds.min_chat_turns:
+        faults.add("too_few_turns")
+    if thresholds.max_chat_turns > 0 and count > thresholds.max_chat_turns:
+        faults.add("too_many_turns")
+
+    system_positions = [index for index, role in enumerate(roles) if role == "system"]
+    if len(system_positions) > 1 or any(index != 0 for index in system_positions):
+        faults.add("system_misplaced")
+
+    non_system_roles = [role for role in roles if role != "system"]
+    if non_system_roles and non_system_roles[0] == "assistant":
+        faults.add("assistant_first")
+
+    if "assistant" not in roles:
+        faults.add("no_assistant")
+    if "user" not in roles:
+        faults.add("no_user")
+
+    if roles and roles[-1] == "user":
+        faults.add("dangling_user")
+
+    for previous, current in zip(roles, roles[1:]):
+        if previous is not None and previous == current:
+            faults.add("consecutive_same_role")
+            break
+
+    return faults
+
+
+def chat_structure_gate(
+    rows: list[dict],
+    thresholds: GateThresholds,
+    scope: GateScope = GateScope.CHAT_SUITE,
+    messages_field: str = "messages",
+) -> GateResult:
+    """Gate the CONVERSATION-SEQUENCE structure of a chat dataset (not its semantic quality).
+    Rows without a ``messages`` list are skipped (a missing/typed-wrong field is the schema
+    gate's job), never counted as a fake pass."""
+
+    conversations = 0
+    fault_rows: dict[str, list[int]] = {}
+    affected: set[int] = set()
+
+    for row_number, row in enumerate(rows, start=1):
+        messages = row.get(messages_field) if isinstance(row, dict) else None
+        if not isinstance(messages, list):
+            continue
+        conversations += 1
+        for fault in _conversation_faults(messages, thresholds):
+            fault_rows.setdefault(fault, []).append(row_number)
+            affected.add(row_number)
+
+    if conversations == 0:
+        return GateResult(
+            gate_id="chat_structure",
+            name="Chat conversation structure",
+            scope=scope,
+            status=GateStatus.WARN,
+            observed="no conversations found",
+            expected=f"rows with a '{messages_field}' list to check",
+            message=f"No '{messages_field}' conversations found to check — nothing was gated.",
+            repair="Run this on a chat dataset whose rows carry a messages list.",
+        )
+
+    if not fault_rows:
+        return GateResult(
+            gate_id="chat_structure",
+            name="Chat conversation structure",
+            scope=scope,
+            status=GateStatus.PASS,
+            observed=f"{conversations} conversation(s) checked",
+            expected="well-formed conversation structure",
+            message=f"All {conversations} conversation(s) are well-formed (structure only, not quality).",
+        )
+
+    parts = [
+        f"{len(rows_with_fault)} {_CHAT_FAULT_LABELS[fault]}"
+        for fault, rows_with_fault in sorted(fault_rows.items())
+    ]
+    has_malformed = any(fault in fault_rows for fault in _CHAT_MALFORMED_FAULTS)
+    status = (
+        GateStatus.BLOCK if (has_malformed and thresholds.block_chat_malformed) else GateStatus.WARN
+    )
+    return GateResult(
+        gate_id="chat_structure",
+        name="Chat conversation structure",
+        scope=scope,
+        status=status,
+        observed="; ".join(parts),
+        expected="well-formed conversation structure",
+        affected=[str(row) for row in sorted(affected)],
+        message="Conversation-structure issues (structure only, not quality): "
+        + "; ".join(parts)
+        + ".",
+        repair="Fix the flagged conversations: after any system message start with a user turn, "
+        "don't repeat a role back-to-back, include both a user and an assistant turn, and end "
+        "on an assistant turn.",
+    )

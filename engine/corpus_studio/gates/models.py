@@ -73,6 +73,9 @@ class GateThresholds(BaseModel):
     min_eval_average_score: float = Field(default=70.0, ge=0.0, allow_inf_nan=False)
     min_eval_pass_rate: float = Field(default=0.5, ge=0.0, le=1.0, allow_inf_nan=False)  # fraction that must pass
     max_regression_score_drop: float = Field(default=2.0, ge=0.0, allow_inf_nan=False)  # block if avg drops more than this
+    min_chat_turns: int = Field(default=2, ge=0)  # min messages per conversation (structure gate)
+    max_chat_turns: int = Field(default=0, ge=0)  # max messages per conversation; 0 = no maximum
+    block_chat_malformed: bool = False  # BLOCK (True) vs WARN on training-breaking chat structure
 
 
 class GateReport(BaseModel):

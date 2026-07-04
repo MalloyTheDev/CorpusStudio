@@ -66,6 +66,12 @@ isolation, and off-thread document opens.
   thresholds via `gate_thresholds.json` (fail-closed, BOM-tolerant; each report
   records the effective thresholds); `gate-thresholds` prints them. Surfaced by a
   **Run Gates** button in the desktop Quality tab. See [`GATES.md`](GATES.md).
+- **Chat gates** (`chat-gate`, `chat_suite` scope): gate a chat dataset's
+  conversation *structure* — assistant-not-first, role alternation (tool-aware),
+  both-parties-present, no dangling user turn, system placement, turn-count bounds
+  — separate from the per-message shape the validator already enforces. Advisory
+  by default (warns); `block_chat_malformed` makes training-breaking faults block.
+  Verdicts structure, not semantic quality. (Engine + CLI; no desktop surface yet.)
 
 **Evaluate & assist**
 - Evaluation Lab against local Ollama or OpenAI-compatible endpoints: health

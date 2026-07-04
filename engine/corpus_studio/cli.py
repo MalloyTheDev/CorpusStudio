@@ -13,6 +13,7 @@ from corpus_studio.arena.judge import judge_arena
 from corpus_studio.arena.runner import load_prompt_suite, run_arena
 from corpus_studio.arena.storage import save_arena_report
 from corpus_studio.gates.runner import (
+    run_chat_gates,
     run_dataset_gates,
     run_export_gates,
     save_gate_report,
@@ -1754,6 +1755,42 @@ def gate_run(
             report = run_export_gates(
                 rows, schema, thresholds=thresholds, target=str(input_path), generated_at=generated_at
             )
+    except (ValueError, json.JSONDecodeError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    if project_dir is not None:
+        save_gate_report(project_dir, report)
+
+    typer.echo(report.model_dump_json(indent=2))
+
+
+@app.command("chat-gate")
+def chat_gate(
+    input_path: Path,
+    schema: str = typer.Option("chat", "--schema", help="Schema id for per-message validation."),
+    project_dir: Optional[Path] = typer.Option(None, "--project-dir", help="Write report under gate_reports/ and apply project thresholds."),
+):
+    """Gate a chat dataset's conversation structure (chat_suite scope). Advisory: prints a
+    pass/warn/block report over input presence, per-message schema, and conversation-sequence
+    structure. Verdicts structure, not semantic quality; exit code stays 0 (the verdict is in
+    the report)."""
+
+    from corpus_studio.gates.models import gate_thresholds_path, load_gate_thresholds
+
+    thresholds = load_gate_thresholds(project_dir) if project_dir is not None else None
+    if project_dir is None and gate_thresholds_path(input_path.parent).exists():
+        typer.echo(
+            "Note: a gate_thresholds.json sits next to the input but was NOT applied. "
+            "Pass --project-dir to use project thresholds.",
+            err=True,
+        )
+
+    try:
+        rows = list(read_jsonl(input_path))
+        report = run_chat_gates(
+            rows, schema, thresholds=thresholds, target=str(input_path), generated_at=_utc_now_iso()
+        )
     except (ValueError, json.JSONDecodeError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
