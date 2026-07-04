@@ -14,8 +14,15 @@ review-first AI Assist (with pre-review candidate gating), a governed provider
 policy + gate runner, the local training launcher (in-app launch, live logs,
 checkpoints, resume, before/after eval), a training run registry + regression
 gate, a model artifact registry + weight card + promote gate, and dataset version
-history (capture/card/diff/restore) — all local-first and file-backed. See
-[`CURRENT_STATE.md`](CURRENT_STATE.md) for the authoritative feature list.
+history (capture/card/diff/restore) — all local-first and file-backed.
+
+On top of that loop, v1.2.1–v1.2.15 added an **IDE-like workspace shell** (Start
+Center, Universal Explorer, Problems + Output panels, one New Project wizard) and
+desktop polish; and a deep-review pass shipped an **opt-in LLM-judge evaluation
+scorer**, a **crash-safe / self-contained distributable** build, an **Avalonia
+cross-platform assessment**, and the **start of the view-model decomposition** (per-tab
+VMs behind interfaces + DI). See [`CURRENT_STATE.md`](CURRENT_STATE.md) for the
+authoritative feature list.
 
 Milestones v0.1–v1.2 are complete. CUDA, PyTorch, Transformers, and cloud
 publishing remain deliberately outside the app — Corpus Studio orchestrates the

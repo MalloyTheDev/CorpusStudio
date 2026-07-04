@@ -3,7 +3,9 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-07-03 (through v1.2 — AI Assist candidate gating, PR #57).
+Last reconciled: 2026-07-03 (through v1.2.15 + deep-review Tier 1 — PR #86: the
+Workspace shell, desktop polish, the LLM-judge evaluation scorer, a crash-safe /
+distributable build, and the start of the god-object decomposition).
 
 ## What works today (implemented and tested)
 
@@ -56,10 +58,13 @@ Last reconciled: 2026-07-03 (through v1.2 — AI Assist candidate gating, PR #57
 - Evaluation Lab against local Ollama or OpenAI-compatible endpoints: health
   checks, model discovery, report history, two-report comparison, regression
   reruns, tag/failure/score-band summaries, failed-row edit loops, manual
-  scoring, saved failure filters. The automatic score is **keyword-overlap recall**
-  (`metric: "keyword_overlap"`) — a lexical proxy, **not** a quality judgment; manual
-  scoring is the trustworthy path and a judge-model scorer (`llm_judge`) is the planned
-  real automatic scorer (see `docs/EVALUATION_LAB.md`).
+  scoring, saved failure filters. The default automatic score is **keyword-overlap
+  recall** (`metric: "keyword_overlap"`) — a lexical proxy, **not** a quality judgment.
+  An opt-in **LLM-judge scorer** (`eval-run --judge-model …`, `metric: "llm_judge"`)
+  scores each answer 0–100 with a rationale, reusing the evaluator-only judge (provider
+  policy enforced; no judge configured ⇒ no cloud call). Manual scoring stays the
+  human-trustworthy path. See `docs/EVALUATION_LAB.md`. *(Judge scorer: engine + CLI;
+  the desktop Evaluation-tab field is a pending follow-up.)*
 - Multi-model benchmark (`benchmark`): one dataset across several models, ranked
   by the same keyword-overlap score, with per-model deltas and the examples every
   model failed.
@@ -134,6 +139,39 @@ Last reconciled: 2026-07-03 (through v1.2 — AI Assist candidate gating, PR #57
   the desktop atomically swaps it onto `examples.jsonl`. Any failure before the
   swap leaves the dataset untouched. See [`VERSIONING.md`](VERSIONING.md).
 
+**Workspace shell & desktop (v1.2.1–v1.2.15)**
+- An **IDE-like workspace shell** with an activity bar: a **Start Center** (recent
+  workspaces registry, a New Project wizard with a live folder-structure preview,
+  open/initialize an existing folder — manifest-primary via `.corpus/project.json`),
+  a **Universal Explorer** (VS Code-style file tree with file-type chips + an
+  active-tab highlight, document tabs, text/JSON/image/binary viewers, a metadata
+  panel; generated reports open read-only; `examples.jsonl` carries a single-writer
+  caution), and the classic 14-tab **Studio**. Both New Project entry points open the
+  one wizard. See [`WORKSPACE_SYSTEM.md`](WORKSPACE_SYSTEM.md).
+- Two bottom-docked panels (mutually exclusive), toggled from the activity bar: a
+  **Problems** panel (the dataset gate findings as a block-first list with fix hints
+  and a count badge) and an **Output / Logs** panel (an ephemeral, local-only record of
+  every engine CLI invocation — verb, outcome, duration, stderr on failure).
+- Studio desktop refinements: a glanceable **dataset-debt grade badge** in the
+  dashboard header (never auto-runs, marks itself stale on dataset change), a **debt
+  trend** mini-chart (quality issue rate over recorded runs — labelled a lexical proxy,
+  not the A–F grade), a **structured Quality metric grid** (PII-aware status banner +
+  coloured rows, replacing the old text blob), a dark-themed **Projects** list, and the
+  desktop surfacing of the **AI Assist candidate gate** (verdict + confirm-on-block).
+
+**Distributable & crash-safe (v1.2.15)**
+- A global exception handler (dialog + crash log at `%LOCALAPPDATA%/CorpusStudio/`)
+  instead of silent process death; the engine service **never throws from its
+  constructor** — a missing engine shows an in-app **"Python engine not found" setup
+  screen** (locate the folder / set `CORPUS_STUDIO_ENGINE_DIR` / retry) rather than
+  crashing. A **self-contained single-file** Windows publish profile
+  (`dotnet publish -p:PublishProfile=win-x64`) needs no installed .NET runtime (the
+  Python engine remains a runtime prerequisite). App + engine are versioned together.
+- Architecture: the desktop view-model is being decomposed from a single god-object
+  into per-tab view-models behind interfaces, composed via a DI container
+  (`Microsoft.Extensions.DependencyInjection`); the **Debt** tab is the first extracted
+  (see [`CROSS_PLATFORM_ASSESSMENT.md`](CROSS_PLATFORM_ASSESSMENT.md), which relies on it).
+
 ## Hard boundaries (by design)
 
 - Corpus Studio orchestrates the user's installed tools; it is **not** a deep
@@ -150,14 +188,22 @@ Last reconciled: 2026-07-03 (through v1.2 — AI Assist candidate gating, PR #57
 
 ## Not built yet (future roadmap)
 
-- **v1.2.1 — desktop surfacing of the AI Assist candidate gate.** The engine
-  attaches `candidate_gate` to AI Assist results (v1.2), but the desktop does not
-  yet display the verdict or add a confirm-on-block affordance. (In progress next.)
-- **Dashboard debt grade badge** (auto-run debt on project open) and **debt trend
-  over time** (grade/items across quality history).
+- **Finish the evaluation judge in the UI** — a desktop Evaluation-tab "Judge model"
+  field wiring the engine's `--judge-model` scorer through `PythonEngineService`.
+- **v1.3 — Evaluation Suites & Chat Gates.**
+- **Hugging Face Hub import *and* export** (the biggest ecosystem gap).
+- **A real tokenizer** (transformers/tokenizers) so token-budget / VRAM numbers are
+  exact rather than heuristic.
+- **Data-path robustness:** unify malformed-JSONL handling (the importer currently
+  crashes on the first bad line while preview tolerates it), stream large datasets
+  instead of loading them fully, and move sync file I/O off the UI thread.
+- **Backend resilience:** retries/backoff, 429/5xx handling, and per-item error
+  isolation so one failed model call doesn't kill an eval/arena batch.
+- **Continue the view-model decomposition** beyond the Debt tab; eventually an
+  **Avalonia** port for macOS/Linux (see `CROSS_PLATFORM_ASSESSMENT.md`).
 - **Auto-capture** of a dataset version after an import commit, dataset-version
   **reorder detection**, row-store **GC** (must never prune manifest-referenced
   rows), and a normalized row identity.
-- **v1.3 — Evaluation Suites & Chat Gates.**
 - Smaller deferrals: PII auto-redaction; a per-project gate-threshold editor in
-  the desktop; per-element object shapes for lists-of-objects in the validator.
+  the desktop; per-element object shapes for lists-of-objects in the validator; an
+  app icon; CI hardening (ruff/mypy/coverage, dependabot/CodeQL).

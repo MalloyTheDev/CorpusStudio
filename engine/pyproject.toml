@@ -1,6 +1,7 @@
 [project]
 name = "corpus-studio-engine"
-version = "0.1.0"
+# Versioned together with the desktop app (apps/desktop/Directory.Build.props).
+version = "1.2.15"
 description = "Dataset engine for Corpus Studio"
 readme = "README.md"
 requires-python = ">=3.11"
