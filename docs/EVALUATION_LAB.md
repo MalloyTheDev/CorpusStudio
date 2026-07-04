@@ -167,11 +167,29 @@ python -m corpus_studio.cli eval-run examples\datasets\instruction\train.jsonl i
 ```
 
 The CLI validates the dataset first, extracts instruction/chat prompts, calls
-the selected local backend, scores model output with the current lightweight
-overlap scorer, and writes the serializable evaluation report with a
-`run_settings` object plus derived `tag_summary`,
-`failure_reason_summary`, and `score_band_summary` arrays. This command
-requires the chosen local backend to already be running.
+the selected local backend, scores model output, and writes the serializable
+evaluation report with a `metric` field, a `run_settings` object, plus derived
+`tag_summary`, `failure_reason_summary`, and `score_band_summary` arrays. This
+command requires the chosen local backend to already be running.
+
+### Scoring metric (read this)
+
+The default automatic score (`metric: "keyword_overlap"`) is **keyword-overlap
+recall**: the fraction of the expected output's words that appear in the model
+output (case-folded, whitespace-split). It is a **lexical proxy, not a quality
+judgment** — a model that echoes the expected keywords plus noise scores 100, and a
+correct paraphrase using synonyms scores low. It also drives the benchmark ranking
+and the training-regression / eval-score gates, so treat those as keyword-overlap
+signals, not quality verdicts.
+
+Trustworthy scoring comes from two places:
+
+- **Manual scoring** — per-example `manual_score` / `manual_notes` (`average_manual_score`
+  on the report). Always available.
+- **Judge-model scoring** (`metric: "llm_judge"`, planned/opt-in) — reuses the
+  evaluator-only judge (`arena/judge.py`, provider-policy enforced) to score 0–100 with a
+  rationale, using a local or explicitly-approved evaluator model. This is the real
+  automatic scorer; keyword overlap remains the offline/no-judge default.
 
 ## Current Desktop MVP
 

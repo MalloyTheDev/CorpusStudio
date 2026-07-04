@@ -10,6 +10,13 @@ public sealed class EvaluationReport
     [JsonPropertyName("model")]
     public string Model { get; init; } = string.Empty;
 
+    /// <summary>Which scorer produced the automatic <see cref="AverageScore"/>:
+    /// "keyword_overlap" (a lexical recall heuristic — not a quality judgment) or
+    /// "llm_judge". Surfaced so the score is never shown as a quality number without
+    /// naming what it measures.</summary>
+    [JsonPropertyName("metric")]
+    public string Metric { get; init; } = "keyword_overlap";
+
     [JsonPropertyName("examples_tested")]
     public int ExamplesTested { get; init; }
 

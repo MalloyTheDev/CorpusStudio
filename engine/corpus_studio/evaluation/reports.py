@@ -61,6 +61,11 @@ class EvaluationReport(BaseModel):
 
     dataset: str
     model: str
+    # Which scorer produced the automatic `score`/`average_score` values. The default
+    # "keyword_overlap" is a lexical recall heuristic (not a semantic/quality judgment);
+    # "llm_judge" is the opt-in judge-model scorer. Surfaced so reports, gates, and the UI
+    # never present the number as a quality score without saying what it measures.
+    metric: str = "keyword_overlap"
     examples_tested: int
     average_score: float
     failed_examples: int
@@ -82,6 +87,7 @@ class EvaluationReport(BaseModel):
         model: str,
         results: list[EvaluationExampleResult],
         run_settings: EvaluationRunSettings | None = None,
+        metric: str = "keyword_overlap",
     ) -> "EvaluationReport":
         """Create a report summary from per-example results."""
 
@@ -100,6 +106,7 @@ class EvaluationReport(BaseModel):
         return cls(
             dataset=dataset,
             model=model,
+            metric=metric,
             examples_tested=examples_tested,
             average_score=average_score,
             failed_examples=len(failed_results),
