@@ -56,6 +56,10 @@ public sealed class WorkspaceExplorerViewModel : INotifyPropertyChanged
 
     public ObservableCollection<OpenWorkspaceDocument> OpenDocuments { get; } = new();
 
+    /// <summary>Whether any open document has unsaved edits — used to warn before a project
+    /// switch or app close discards them.</summary>
+    public bool HasDirtyDocuments => OpenDocuments.Any(document => document.IsDirty);
+
     public OpenWorkspaceDocument? ActiveDocument
     {
         get => _activeDocument;
