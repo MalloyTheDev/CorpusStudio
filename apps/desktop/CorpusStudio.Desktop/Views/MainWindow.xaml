@@ -2835,6 +2835,12 @@
                         ToolTip="Check whether this dataset passes the schema, quality, and PII gates"
                         Margin="0,0,0,8"
                         Click="RunGatesButton_Click" />
+                <Button AutomationProperties.AutomationId="RunChatGatesButton"
+                        Content="Run chat gates"
+                        ToolTip="Check conversation structure (role alternation, dangling turns, system placement…) — chat datasets only"
+                        Margin="0,0,0,8"
+                        Visibility="{Binding IsChatProject, Converter={StaticResource BoolToVis}}"
+                        Click="RunChatGatesButton_Click" />
                 <TextBlock Text="Synthetic Triage"
                            FontWeight="SemiBold"
                            Foreground="#334155"

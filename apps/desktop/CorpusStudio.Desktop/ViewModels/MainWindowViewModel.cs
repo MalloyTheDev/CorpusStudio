@@ -438,8 +438,18 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public string ActiveSchemaId
     {
         get => _activeSchemaId;
-        private set => SetField(ref _activeSchemaId, value);
+        private set
+        {
+            if (SetField(ref _activeSchemaId, value))
+            {
+                OnPropertyChanged(nameof(IsChatProject));
+            }
+        }
     }
+
+    /// <summary>True when the active project is a chat dataset — the point where the chat
+    /// conversation-structure gates apply.</summary>
+    public bool IsChatProject => ActiveSchemaId == "chat";
 
     public string? ActiveProjectPath
     {

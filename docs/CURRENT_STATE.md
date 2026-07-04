@@ -71,7 +71,8 @@ isolation, and off-thread document opens.
   both-parties-present, no dangling user turn, system placement, turn-count bounds
   — separate from the per-message shape the validator already enforces. Advisory
   by default (warns); `block_chat_malformed` makes training-breaking faults block.
-  Verdicts structure, not semantic quality. (Engine + CLI; no desktop surface yet.)
+  Verdicts structure, not semantic quality. Surfaced by a **Run chat gates** button in
+  the desktop Quality tab (shown for chat datasets), reusing the gate/Problems display.
 
 **Evaluate & assist**
 - Evaluation Lab against local Ollama or OpenAI-compatible endpoints: health
