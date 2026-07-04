@@ -1,7 +1,7 @@
-import json
 from pathlib import Path
 from typing import Any
 
+from corpus_studio.importers.jsonl_importer import iter_jsonl
 from corpus_studio.schemas.base import DatasetSchema, SchemaField
 from corpus_studio.schemas.registry import load_builtin_schema
 from corpus_studio.validators.results import ValidationIssue, ValidationReport
@@ -229,25 +229,14 @@ def validate_jsonl_row(
 def validate_jsonl_file(path: Path, schema_id: str) -> ValidationReport:
     report = ValidationReport(valid=True, schema_id=schema_id)
 
-    with path.open("r", encoding="utf-8-sig") as f:
-        for row_number, line in enumerate(f, start=1):
-            if not line.strip():
-                continue
+    for parsed in iter_jsonl(path):
+        report.checked_rows += 1
 
-            report.checked_rows += 1
+        if parsed.error is not None:
+            report.errors.append(_issue(parsed.error, parsed.line_number))
+            continue
 
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError as exc:
-                report.errors.append(
-                    _issue(
-                        f"Invalid JSON: {exc}",
-                        row_number,
-                    )
-                )
-                continue
-
-            report.errors.extend(validate_jsonl_row(row, schema_id, row_number))
+        report.errors.extend(validate_jsonl_row(parsed.value, schema_id, parsed.line_number))
 
     report.valid = len(report.errors) == 0
     return report

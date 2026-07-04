@@ -1,9 +1,8 @@
-import json
 from pathlib import Path
-from typing import Any
 
 from pydantic import BaseModel, Field
 
+from corpus_studio.importers.jsonl_importer import iter_jsonl
 from corpus_studio.validators.basic_validator import validate_jsonl_row
 from corpus_studio.validators.results import ValidationIssue
 
@@ -31,38 +30,33 @@ def preview_jsonl_import(path: Path, schema_id: str) -> ImportPreviewReport:
         path=str(path),
     )
 
-    with path.open("r", encoding="utf-8-sig") as f:
-        for row_number, line in enumerate(f, start=1):
-            if not line.strip():
-                continue
+    for parsed in iter_jsonl(path):
+        row_number = parsed.line_number
+        report.total_rows += 1
+        errors: list[ValidationIssue]
 
-            report.total_rows += 1
-            errors: list[ValidationIssue]
-
-            try:
-                row: Any = json.loads(line)
-            except json.JSONDecodeError as exc:
-                errors = [
-                    ValidationIssue(
-                        level="error",
-                        message=f"Invalid JSON: {exc}",
-                        row_number=row_number,
-                    )
-                ]
-            else:
-                errors = validate_jsonl_row(row, schema_id, row_number)
-
-            if errors:
-                report.failed_rows.append(
-                    ImportFailure(
-                        row_number=row_number,
-                        raw_preview=line.strip()[:240],
-                        errors=errors,
-                    )
+        if parsed.error is not None:
+            errors = [
+                ValidationIssue(
+                    level="error",
+                    message=parsed.error,
+                    row_number=row_number,
                 )
-                continue
+            ]
+        else:
+            errors = validate_jsonl_row(parsed.value, schema_id, row_number)
 
-            report.accepted_rows += 1
+        if errors:
+            report.failed_rows.append(
+                ImportFailure(
+                    row_number=row_number,
+                    raw_preview=parsed.raw.strip()[:240],
+                    errors=errors,
+                )
+            )
+            continue
+
+        report.accepted_rows += 1
 
     report.rejected_rows = len(report.failed_rows)
     report.valid = report.rejected_rows == 0
