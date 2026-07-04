@@ -115,6 +115,21 @@ public sealed class WorkspaceExplorerViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task ActiveDocumentIsDatasetFile_OnlyForThisProjectsExamplesJsonl()
+    {
+        var root = NewWorkspace();  // contains examples.jsonl + README.md
+        var vm = Vm(root);
+
+        await vm.OpenNodeAsync(FileNode("examples.jsonl"));
+        Assert.True(vm.ActiveDocumentIsDatasetFile(root));                   // saving this = dataset change
+        Assert.False(vm.ActiveDocumentIsDatasetFile("C:/some/other/proj"));  // a different project's dataset
+        Assert.False(vm.ActiveDocumentIsDatasetFile(null));                  // guard
+
+        await vm.OpenNodeAsync(FileNode("README.md"));
+        Assert.False(vm.ActiveDocumentIsDatasetFile(root));                  // a non-dataset file
+    }
+
+    [Fact]
     public async Task CreateFile_InsideRoot_Opens_And_RefusesTraversal()
     {
         var root = NewWorkspace();
