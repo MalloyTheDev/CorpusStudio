@@ -3,9 +3,11 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-07-03 (through v1.2.15 + deep-review Tier 1 — PR #86: the
-Workspace shell, desktop polish, the LLM-judge evaluation scorer, a crash-safe /
-distributable build, and the start of the god-object decomposition).
+Last reconciled: 2026-07-03 (through v1.2.15 + deep-review Tiers 1 and 2 — PR #91:
+the Workspace shell, desktop polish, the LLM-judge evaluation scorer, a crash-safe /
+distributable build, the god-object decomposition (Debt + Arena tabs extracted), a
+unified JSONL reader, backend retry + per-item error isolation, and off-thread
+document opens).
 
 ## What works today (implemented and tested)
 
@@ -159,7 +161,7 @@ distributable build, and the start of the god-object decomposition).
   coloured rows, replacing the old text blob), a dark-themed **Projects** list, and the
   desktop surfacing of the **AI Assist candidate gate** (verdict + confirm-on-block).
 
-**Distributable & crash-safe (v1.2.15)**
+**Distributable, resilient & crash-safe (v1.2.15)**
 - A global exception handler (dialog + crash log at `%LOCALAPPDATA%/CorpusStudio/`)
   instead of silent process death; the engine service **never throws from its
   constructor** — a missing engine shows an in-app **"Python engine not found" setup
@@ -167,10 +169,22 @@ distributable build, and the start of the god-object decomposition).
   crashing. A **self-contained single-file** Windows publish profile
   (`dotnet publish -p:PublishProfile=win-x64`) needs no installed .NET runtime (the
   Python engine remains a runtime prerequisite). App + engine are versioned together.
+- **Backend resilience:** local/OpenAI-compatible HTTP calls retry transient
+  failures (HTTP 429/5xx + connection errors) with bounded exponential backoff and
+  **fail fast on other 4xx**; health/model-list probes stay single-attempt. Each
+  arena/evaluation/judge batch **isolates per-item failures** — one model's outage is
+  recorded as a per-response backend error (surfaced in the Arena view) and the run
+  finishes for every other model instead of aborting.
+- **Data path:** one shared streaming JSONL reader backs strict reads, import
+  preview, and file validation, so encoding (BOM-tolerant), blank-line skipping, and
+  malformed-line handling can't drift; a declared-but-optional `orjson` accelerates
+  the hot path when present with a stdlib fallback. Opening a document in the Explorer
+  runs the read **off the UI thread** so a large file never stalls the window.
 - Architecture: the desktop view-model is being decomposed from a single god-object
   into per-tab view-models behind interfaces, composed via a DI container
-  (`Microsoft.Extensions.DependencyInjection`); the **Debt** tab is the first extracted
-  (see [`CROSS_PLATFORM_ASSESSMENT.md`](CROSS_PLATFORM_ASSESSMENT.md), which relies on it).
+  (`Microsoft.Extensions.DependencyInjection`); a shared `ViewModelBase` and the
+  **Debt** and **Arena** tabs are extracted so far (see
+  [`CROSS_PLATFORM_ASSESSMENT.md`](CROSS_PLATFORM_ASSESSMENT.md), which relies on it).
 
 ## Hard boundaries (by design)
 
@@ -194,13 +208,8 @@ distributable build, and the start of the god-object decomposition).
 - **Hugging Face Hub import *and* export** (the biggest ecosystem gap).
 - **A real tokenizer** (transformers/tokenizers) so token-budget / VRAM numbers are
   exact rather than heuristic.
-- **Data-path robustness:** unify malformed-JSONL handling (the importer currently
-  crashes on the first bad line while preview tolerates it), stream large datasets
-  instead of loading them fully, and move sync file I/O off the UI thread.
-- **Backend resilience:** retries/backoff, 429/5xx handling, and per-item error
-  isolation so one failed model call doesn't kill an eval/arena batch.
-- **Continue the view-model decomposition** beyond the Debt tab; eventually an
-  **Avalonia** port for macOS/Linux (see `CROSS_PLATFORM_ASSESSMENT.md`).
+- **Continue the view-model decomposition** beyond the Debt and Arena tabs; eventually
+  an **Avalonia** port for macOS/Linux (see `CROSS_PLATFORM_ASSESSMENT.md`).
 - **Auto-capture** of a dataset version after an import commit, dataset-version
   **reorder detection**, row-store **GC** (must never prune manifest-referenced
   rows), and a normalized row identity.

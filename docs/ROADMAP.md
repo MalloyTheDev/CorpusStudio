@@ -18,11 +18,14 @@ history (capture/card/diff/restore) — all local-first and file-backed.
 
 On top of that loop, v1.2.1–v1.2.15 added an **IDE-like workspace shell** (Start
 Center, Universal Explorer, Problems + Output panels, one New Project wizard) and
-desktop polish; and a deep-review pass shipped an **opt-in LLM-judge evaluation
-scorer**, a **crash-safe / self-contained distributable** build, an **Avalonia
-cross-platform assessment**, and the **start of the view-model decomposition** (per-tab
-VMs behind interfaces + DI). See [`CURRENT_STATE.md`](CURRENT_STATE.md) for the
-authoritative feature list.
+desktop polish; and a deep-review pass (Tiers 1–2) shipped an **opt-in LLM-judge
+evaluation scorer**, a **crash-safe / self-contained distributable** build, an
+**Avalonia cross-platform assessment**, the **view-model decomposition** so far (a
+shared `ViewModelBase` + the Debt and Arena tabs extracted behind interfaces + DI), a
+**unified streaming JSONL reader** (soft-`orjson` accelerated, off-thread document
+opens), and **backend resilience** (retry/backoff + per-item error isolation so one
+failed model call never aborts an eval/arena batch). See
+[`CURRENT_STATE.md`](CURRENT_STATE.md) for the authoritative feature list.
 
 Milestones v0.1–v1.2 are complete. CUDA, PyTorch, Transformers, and cloud
 publishing remain deliberately outside the app — Corpus Studio orchestrates the
