@@ -146,11 +146,13 @@ def test_split_command_warns_for_tiny_validation_and_test_splits(tmp_path: Path)
 
     assert result.exit_code == 0
     report = json.loads(result.output)
-    assert report["validation"] == 0
-    assert report["test"] == 1
+    # 3 rows at 0.9/0.05: train gets 2, and validation is guaranteed a row rather than being
+    # silently floored to empty (item 14) — which leaves the test split empty here instead.
+    assert report["validation"] == 1
+    assert report["test"] == 0
     assert report["warnings"] == [
-        "Validation split has no rows. Add examples or adjust split ratios before using it.",
-        "Test split has only 1 row. Add examples or adjust split ratios before relying on scores.",
+        "Validation split has only 1 row. Add examples or adjust split ratios before relying on scores.",
+        "Test split has no rows. Add examples or adjust split ratios before using it.",
     ]
     assert (output_dir / "validation.jsonl").exists()
     assert (output_dir / "test.jsonl").exists()

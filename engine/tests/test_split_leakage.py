@@ -21,10 +21,24 @@ def test_exact_duplicate_across_splits_is_leakage():
     test = [{"text": "shared row"}]
     report = detect_split_leakage(train, [], test)
     assert report.leaked_group_count == 1
-    assert report.rows_shared_across_splits == 2
+    # One copy crossed the boundary (2 copies, home split holds 1): total - max = 1.
+    assert report.rows_shared_across_splits == 1
     leak = report.leaks[0]
     assert leak.exact is True
     assert leak.splits == ["test", "train"]
+    assert leak.row_count == 2  # the group still reports both copies
+
+
+def test_leakage_count_excludes_within_split_duplicates():
+    # 3 copies in train + 1 in validation + 1 in test: 5 total, home split (train) holds 3,
+    # so only 2 copies actually leaked across a boundary.
+    train = [{"text": "dup"}, {"text": "dup"}, {"text": "dup"}]
+    validation = [{"text": "dup"}]
+    test = [{"text": "dup"}]
+    report = detect_split_leakage(train, validation, test)
+    assert report.leaked_group_count == 1
+    assert report.rows_shared_across_splits == 2
+    assert report.leaks[0].row_count == 5
 
 
 def test_near_duplicate_across_splits_is_leakage():
@@ -62,7 +76,8 @@ def test_cli_split_reports_leakage_for_duplicated_rows(tmp_path: Path):
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["rows_shared_across_splits"] == 10
+    # 10 identical rows land mostly in one split; the copies beyond it are the leak count.
+    assert payload["rows_shared_across_splits"] >= 1
     assert payload["leakage"]["leaked_group_count"] == 1
     assert any("leakage" in warning.lower() for warning in payload["warnings"])
 

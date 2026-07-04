@@ -50,6 +50,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/DebtReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/DebtTrendPoint.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ModelArtifactRecord.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/HfImport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ImportPreviewReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/LabBackendSettings.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/PreferenceExportResult.cs`
@@ -88,6 +89,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Services/ProjectTemplateService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceExplorerService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceDocumentService.cs`
+- `apps/desktop/CorpusStudio.Desktop/ViewModels/HfImportViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/MainWindowViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/StartCenterViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/Tabs/ArenaViewModel.cs`
@@ -97,6 +99,8 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/ViewModelBase.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/WorkspaceExplorerViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/WorkspaceWizardViewModel.cs`
+- `apps/desktop/CorpusStudio.Desktop/Views/HfImportWindow.xaml`
+- `apps/desktop/CorpusStudio.Desktop/Views/HfImportWindow.xaml.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/WorkspaceWizardWindow.xaml`
@@ -105,6 +109,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/AiAssistRewriteBatchServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ArenaViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ArtifactRegistryTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/AtomicAppendTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/DatasetDebtViewTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/DebtTrendTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/DatasetVersionRegistryTests.cs`
@@ -114,7 +119,9 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/CorpusStudio.Desktop.Tests.csproj`
 - `apps/desktop/CorpusStudio.Desktop.Tests/EvaluationFailureFilterServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/GateReportViewModelTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/HfImportViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ImportCommitServiceTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/ImportDedupeAndQuarantineTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/OutputLogViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ProjectSearchViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ProviderPolicyViewModelTests.cs`
@@ -127,6 +134,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingLaunchViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingProcessRunnerTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingRunViewModelTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/UnsavedWorkTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceFoundationTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceSystemTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceViewLayerTests.cs`
@@ -170,6 +178,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/screenshots/arena-resilience.png`
 - `docs/screenshots/dataset-debt.png`
 - `docs/screenshots/debt-trend.png`
+- `docs/screenshots/hf-import.png`
 - `docs/screenshots/output-panel.png`
 - `docs/screenshots/problems-panel.png`
 - `docs/screenshots/studio-dashboard.png`
@@ -199,6 +208,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/exporters/jsonl_exporter.py`
 - `engine/corpus_studio/exporters/preference_exporter.py`
 - `engine/corpus_studio/importers/__init__.py`
+- `engine/corpus_studio/importers/hf_hub.py`
 - `engine/corpus_studio/importers/jsonl_importer.py`
 - `engine/corpus_studio/importers/jsonl_preview.py`
 - `engine/corpus_studio/importers/text_importer.py`
@@ -264,6 +274,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_gate_cli.py`
 - `engine/tests/test_gate_thresholds_config.py`
 - `engine/tests/test_gates.py`
+- `engine/tests/test_hf_hub.py`
 - `engine/tests/test_import_preview.py`
 - `engine/tests/test_importers.py`
 - `engine/tests/test_input_hardening.py`

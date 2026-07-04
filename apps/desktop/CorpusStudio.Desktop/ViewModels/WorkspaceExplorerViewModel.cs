@@ -56,6 +56,10 @@ public sealed class WorkspaceExplorerViewModel : INotifyPropertyChanged
 
     public ObservableCollection<OpenWorkspaceDocument> OpenDocuments { get; } = new();
 
+    /// <summary>Whether any open document has unsaved edits — used to warn before a project
+    /// switch or app close discards them.</summary>
+    public bool HasDirtyDocuments => OpenDocuments.Any(document => document.IsDirty);
+
     public OpenWorkspaceDocument? ActiveDocument
     {
         get => _activeDocument;
@@ -260,6 +264,21 @@ public sealed class WorkspaceExplorerViewModel : INotifyPropertyChanged
         }
 
         return _documents.Save(_activeDocument);
+    }
+
+    /// <summary>Whether the active document is the given project's examples.jsonl. Saving it
+    /// through the editor is a dataset change, so the caller must invalidate the debt grade and
+    /// re-check version integrity (otherwise those badges keep asserting a stale verdict).</summary>
+    public bool ActiveDocumentIsDatasetFile(string? projectPath)
+    {
+        if (_activeDocument is null
+            || string.IsNullOrWhiteSpace(_activeDocument.FullPath)
+            || string.IsNullOrWhiteSpace(projectPath))
+        {
+            return false;
+        }
+
+        return SamePath(_activeDocument.FullPath, System.IO.Path.Combine(projectPath, "examples.jsonl"));
     }
 
     /// <summary>Close a document tab, re-activating a neighbour when the active tab closed.

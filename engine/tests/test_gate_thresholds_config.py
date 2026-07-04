@@ -92,6 +92,79 @@ def test_direct_construction_rejects_bad_values():
         GateThresholds(min_eval_pass_rate=1.5)
 
 
+# --- item 13: one bad key must not discard the other valid overrides ----------
+
+def test_mixed_valid_and_invalid_overrides_keeps_valid_ones(tmp_path: Path):
+    # max_low_information is valid; max_exact_duplicates=-5 is out of range. The bad key
+    # must drop to its strict default WITHOUT discarding the valid override too.
+    _write_thresholds(tmp_path, {"max_low_information": 25, "max_exact_duplicates": -5})
+    thresholds = load_gate_thresholds(tmp_path)
+    assert thresholds.max_low_information == 25   # valid override kept
+    assert thresholds.max_exact_duplicates == 0   # invalid dropped to strict default
+
+
+def test_all_valid_overrides_still_apply_after_salvage_path(tmp_path: Path):
+    # A file mixing a valid and an invalid key still applies every good key.
+    _write_thresholds(
+        tmp_path,
+        {"block_exact_duplicates": False, "min_eval_pass_rate": 5.0, "max_normalized_duplicates": 7},
+    )
+    thresholds = load_gate_thresholds(tmp_path)
+    assert thresholds.block_exact_duplicates is False   # kept
+    assert thresholds.max_normalized_duplicates == 7    # kept
+    assert thresholds.min_eval_pass_rate == 0.5         # invalid (>1) -> strict default
+
+
+# --- item 15d: opt-in block knobs for near-dup / low-information --------------
+
+def test_block_normalized_duplicates_flag_blocks_dataset_gate():
+    from corpus_studio.gates.basic_gates import quality_gate
+    from corpus_studio.gates.models import GateScope, GateStatus
+    from corpus_studio.quality.basic_quality import build_basic_quality_report
+
+    rows = [
+        {"instruction": "Explain recursion clearly.", "output": "A function calls itself on subproblems."},
+        {"instruction": "explain  recursion  clearly.", "output": "a function calls itself on subproblems."},
+    ]
+    quality = build_basic_quality_report(rows)
+    assert quality.duplicate_normalized_count >= 1 and quality.duplicate_exact_count == 0
+
+    assert quality_gate(quality, GateThresholds(), GateScope.DATASET).status == GateStatus.WARN
+    blocked = quality_gate(
+        quality, GateThresholds(block_normalized_duplicates=True), GateScope.DATASET
+    )
+    assert blocked.status == GateStatus.BLOCK
+
+
+def test_block_low_information_flag_blocks_dataset_gate():
+    from corpus_studio.gates.basic_gates import quality_gate
+    from corpus_studio.gates.models import GateScope, GateStatus
+    from corpus_studio.quality.basic_quality import build_basic_quality_report
+
+    quality = build_basic_quality_report([{"instruction": "hi", "output": "ok"}])
+    assert quality.low_information_count >= 1
+
+    assert quality_gate(quality, GateThresholds(), GateScope.DATASET).status == GateStatus.WARN
+    blocked = quality_gate(quality, GateThresholds(block_low_information=True), GateScope.DATASET)
+    assert blocked.status == GateStatus.BLOCK
+
+
+def test_export_gate_never_blocks_on_near_dup_even_when_flag_set():
+    # Even with block_normalized_duplicates opted in, export warns on quality counts —
+    # export blocks only on empty/schema/PII (it has a dedicated cleaning pass).
+    from corpus_studio.gates.models import GateStatus
+    from corpus_studio.gates.runner import run_export_gates
+
+    rows = [
+        {"instruction": "Explain recursion clearly.", "output": "A function calls itself on subproblems."},
+        {"instruction": "explain  recursion  clearly.", "output": "a function calls itself on subproblems."},
+    ]
+    report = run_export_gates(
+        rows, "instruction", thresholds=GateThresholds(block_normalized_duplicates=True)
+    )
+    assert report.overall_status == GateStatus.WARN  # near-dup warns, does not block export
+
+
 # --- CLI: show + end-to-end verdict flip -------------------------------------
 
 def test_cli_gate_thresholds_shows_effective(tmp_path: Path):

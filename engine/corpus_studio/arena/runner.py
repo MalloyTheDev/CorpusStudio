@@ -9,6 +9,7 @@ from corpus_studio.arena.models import ArenaPrompt, ArenaReport, ArenaResponse, 
 from corpus_studio.importers.jsonl_importer import read_jsonl
 from corpus_studio.model_backends.base import BackendGenerateRequest, ModelBackend
 from corpus_studio.model_backends.retry import BACKEND_ERROR_TYPES, format_backend_error
+from corpus_studio.providers.policy import ProviderPolicy, authorize_evaluation
 
 
 def load_prompt_suite(path: Path) -> list[ArenaPrompt]:
@@ -53,12 +54,23 @@ def run_arena(
     model_backends: list[tuple[str, ModelBackend]],
     limit: int | None = None,
     generated_at: str | None = None,
+    policies: dict[str, ProviderPolicy | None] | None = None,
 ) -> ArenaReport:
-    """Run each prompt through each model and collect responses side by side."""
+    """Run each prompt through each model and collect responses side by side.
+
+    Arena responses are non-trainable comparison artifacts, so each generation backend is
+    authorized for EVALUATION (not trainable generation) when a policy is supplied: a provider
+    explicitly blocked from the evaluator role cannot participate. A policy block raises
+    ``ProviderPolicyError`` and aborts the run — it is a permission error, not a transient
+    failure to isolate.
+    """
 
     selected = prompts[:limit] if limit is not None else prompts
     responses: list[ArenaResponse] = []
     for model, backend in model_backends:
+        policy = policies.get(model) if policies is not None else None
+        if policy is not None:
+            authorize_evaluation(policy)  # arena is a comparison/evaluation activity
         for prompt in selected:
             try:
                 response = backend.generate(_request_for(prompt))

@@ -18,6 +18,15 @@ document opens).
   nested object shapes, and chat message structure, with selectable issue
   navigation in the desktop.
 - JSONL import preview with failed-row quarantine, review, and retry.
+- **Hugging Face Hub dataset import** (read-only, public): `hf-inspect` /
+  `hf-import` fetch rows via the public datasets-server JSON API (stdlib urllib,
+  no `datasets`/`huggingface_hub` dependency), map columns to a schema, and write
+  a *staging* JSONL that flows through the normal import-preview/quarantine path —
+  the engine never writes `examples.jsonl`, gated/private datasets are refused, and
+  the dataset license is surfaced with a "not assumed training-licensed" caveat. A
+  desktop **Import from Hugging Face** dialog (inspect → pick config/split → map
+  columns to the project schema → stage) drives it end to end through that same
+  preview flow. See [`IMPORT_EXPORT.md`](IMPORT_EXPORT.md).
 - Full Unicode correctness end to end: NFKC-aware tokenization and UTF-8 stdio
   so CJK/Cyrillic/accented text round-trips between the desktop and engine.
 
@@ -109,8 +118,12 @@ document opens).
 - A durable **model artifact registry** under `model_artifacts/`
   (`artifact-register`/`-list`/`-update`): the adapters/checkpoints a run produced,
   referenced by path (never moved). Base model + eval resolve live through the
-  source `run_id`, not stored. **Path integrity** is re-checked on load — a record
-  flags `missing` or `modified` if the weights change on disk. A live weight card
+  source `run_id`, not stored. **Path integrity** is re-checked on load and flags
+  `missing` or `modified` if the weights change on disk: the artifact **list** uses a
+  cheap size+mtime check over the weight files + descriptor (fast to glance), while the
+  **weight card and promote gate** — the points where a decision is made — do a
+  **byte-exact SHA-256** of the weight bytes, so even a size/mtime-preserving swap is
+  caught. A live weight card
   (`artifact-card`, never stored) and a `model_artifact` **promote gate**
   (`artifact-gate`) that blocks "keep" when the artifact is `modified`/`missing`
   or the source run regressed. A desktop **Artifacts** tab registers from a run
@@ -208,6 +221,8 @@ document opens).
 - **Hugging Face Hub import *and* export** (the biggest ecosystem gap).
 - **A real tokenizer** (transformers/tokenizers) so token-budget / VRAM numbers are
   exact rather than heuristic.
+- **HF export/push** (upload/publishing) — see the hard boundary above; it stays a
+  deliberate non-goal for now.
 - **Continue the view-model decomposition** beyond the Debt and Arena tabs; eventually
   an **Avalonia** port for macOS/Linux (see `CROSS_PLATFORM_ASSESSMENT.md`).
 - **Auto-capture** of a dataset version after an import commit, dataset-version
