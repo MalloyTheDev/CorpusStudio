@@ -40,6 +40,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _problemsBadge = string.Empty;
     private string _problemsBadgeColor = GateReport.StatusColor(null);
     private bool _outputPanelVisible;
+    private bool _searchPanelVisible;
     private string _providerPolicySummary =
         "Provider generation policy: refresh to see which providers may create trainable rows.";
     private string _qualityHistorySummary = "Quality history appears after quality checks run.";
@@ -216,6 +217,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// <summary>The Universal Workspace Explorer's own view-model (file tree + documents).
     /// Operates on the active project's folder.</summary>
     public WorkspaceExplorerViewModel Explorer { get; } = new();
+
+    /// <summary>The workspace content-search ("find in files") view-model. Shares the active
+    /// project's folder as its search root.</summary>
+    public WorkspaceSearchViewModel Search { get; } = new();
 
     /// <summary>Extracted per-tab view-models (backlog #4). Injected by DI; the parameterless
     /// ctor supplies defaults so existing `new MainWindowViewModel()` call sites keep working.</summary>
@@ -639,10 +644,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             if (SetField(ref _problemsPanelVisible, value))
             {
                 OnPropertyChanged(nameof(IsNoProblems));
-                // Problems and Output share the bottom dock — only one is ever open.
+                // Problems, Output, and Search share the bottom dock — only one is ever open.
                 if (value)
                 {
                     OutputPanelVisible = false;
+                    SearchPanelVisible = false;
                 }
             }
         }
@@ -743,6 +749,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 if (value)
                 {
                     ProblemsPanelVisible = false;
+                    SearchPanelVisible = false;
                 }
             }
         }
@@ -760,6 +767,34 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public void ToggleOutputPanel() => OutputPanelVisible = !OutputPanelVisible;
 
     public void ShowOutputPanel() => OutputPanelVisible = true;
+
+    /// <summary>Workspace content-search panel — the third mutually-exclusive bottom-dock panel.</summary>
+    public bool SearchPanelVisible
+    {
+        get => _searchPanelVisible;
+        private set
+        {
+            if (SetField(ref _searchPanelVisible, value) && value)
+            {
+                ProblemsPanelVisible = false;
+                OutputPanelVisible = false;
+            }
+        }
+    }
+
+    /// <summary>Open (or toggle) the Search panel, pointing it at the active project's folder
+    /// so results reflect the current workspace.</summary>
+    public void ToggleSearchPanel()
+    {
+        Search.SetWorkspaceRoot(HasActiveProject ? ActiveProjectPath : null);
+        SearchPanelVisible = !SearchPanelVisible;
+    }
+
+    public void ShowSearchPanel()
+    {
+        Search.SetWorkspaceRoot(HasActiveProject ? ActiveProjectPath : null);
+        SearchPanelVisible = true;
+    }
 
     /// <summary>Append one engine-invocation log line, trimming the oldest past the cap. Must be
     /// called on the UI thread (the service raises its event on a background thread; the view
@@ -2329,6 +2364,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         // Clear the Explorer so a project switch can't show the previous project's tree or
         // open document tabs; ShowFiles rebuilds it lazily for the new project.
         Explorer.Reset();
+        // Drop stale search results/root so they can't leak across a project switch.
+        Search.SetWorkspaceRoot(null);
         // Reset the Writing Studio draft to the new project's schema template. Without this, an
         // unsaved draft typed against the previous project would be written into THIS project's
         // examples.jsonl on the next save (a cross-project data leak).

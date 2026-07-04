@@ -166,9 +166,40 @@ public partial class MainWindow : Window
 
     private void ActivitySettingsButton_Click(object sender, RoutedEventArgs e) => ViewModel.ShowStudio();
 
-    private void ActivityRoadmapButton_Click(object sender, RoutedEventArgs e) =>
-        MessageBox.Show(this, "This panel is on the Workspace roadmap and isn't wired up yet.",
-            "Coming soon", MessageBoxButton.OK, MessageBoxImage.Information);
+    private void ActivitySearchButton_Click(object sender, RoutedEventArgs e) =>
+        ViewModel.ToggleSearchPanel();
+
+    private void SearchCloseButton_Click(object sender, RoutedEventArgs e) =>
+        ViewModel.ToggleSearchPanel();
+
+    private async void SearchRunButton_Click(object sender, RoutedEventArgs e) =>
+        await ViewModel.Search.RunAsync();
+
+    private async void SearchQueryBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            e.Handled = true;
+            await ViewModel.Search.RunAsync();
+        }
+    }
+
+    /// <summary>Open the double-clicked search result in the Explorer (switching to the Files
+    /// view so the document tab is visible). Reuses the Explorer's node-open path.</summary>
+    private async void SearchResult_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (SearchResultsList.SelectedItem is not WorkspaceSearchMatch match)
+        {
+            return;
+        }
+
+        ViewModel.ShowFiles(); // sets the Explorer root + shows the Files view
+        await ViewModel.Explorer.OpenNodeAsync(new WorkspaceTreeNode
+        {
+            RelativePath = match.RelativePath,
+            IsDirectory = false,
+        });
+    }
 
     private void ProblemsButton_Click(object sender, RoutedEventArgs e) =>
         ViewModel.ToggleProblemsPanel();
