@@ -703,6 +703,10 @@
                         Content="Import Dataset"
                         Margin="0,0,0,10"
                         Click="ImportDatasetButton_Click" />
+                <Button AutomationProperties.AutomationId="ImportFromHuggingFaceButton"
+                        Content="Import from Hugging Face"
+                        Margin="0,0,0,10"
+                        Click="ImportFromHuggingFaceButton_Click" />
                 <Button AutomationProperties.AutomationId="ExportCenterButton"
                         Content="Export Center"
                         Margin="0,0,0,28"

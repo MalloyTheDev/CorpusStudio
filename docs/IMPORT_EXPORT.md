@@ -61,7 +61,10 @@ Studio.
 
 Import rows from a **public** Hugging Face dataset without pulling in the
 `datasets` / `huggingface_hub` libraries — the engine calls the public
-**datasets-server** JSON API with the standard library only.
+**datasets-server** JSON API with the standard library only. The desktop surfaces
+this as an **Import from Hugging Face** dialog (Studio sidebar) that inspects the
+dataset, shows its license, lets you map columns to the project schema, and runs
+the staged rows through the normal import preview; the CLI below is the same path.
 
 - `hf-inspect <dataset_id>` lists the dataset's configs/splits, sample columns,
   and **license**, so you can decide whether the data may be used for training

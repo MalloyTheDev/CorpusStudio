@@ -23,8 +23,10 @@ document opens).
   no `datasets`/`huggingface_hub` dependency), map columns to a schema, and write
   a *staging* JSONL that flows through the normal import-preview/quarantine path —
   the engine never writes `examples.jsonl`, gated/private datasets are refused, and
-  the dataset license is surfaced with a "not assumed training-licensed" caveat.
-  See [`IMPORT_EXPORT.md`](IMPORT_EXPORT.md).
+  the dataset license is surfaced with a "not assumed training-licensed" caveat. A
+  desktop **Import from Hugging Face** dialog (inspect → pick config/split → map
+  columns to the project schema → stage) drives it end to end through that same
+  preview flow. See [`IMPORT_EXPORT.md`](IMPORT_EXPORT.md).
 - Full Unicode correctness end to end: NFKC-aware tokenization and UTF-8 stdio
   so CJK/Cyrillic/accented text round-trips between the desktop and engine.
 
@@ -215,9 +217,8 @@ document opens).
 - **Hugging Face Hub import *and* export** (the biggest ecosystem gap).
 - **A real tokenizer** (transformers/tokenizers) so token-budget / VRAM numbers are
   exact rather than heuristic.
-- **Hugging Face import in the desktop** (a dialog over the shipped `hf-import`
-  engine command) and **HF export/push** (upload/publishing — see the hard
-  boundary above; it stays a deliberate non-goal for now).
+- **HF export/push** (upload/publishing) — see the hard boundary above; it stays a
+  deliberate non-goal for now.
 - **Continue the view-model decomposition** beyond the Debt and Arena tabs; eventually
   an **Avalonia** port for macOS/Linux (see `CROSS_PLATFORM_ASSESSMENT.md`).
 - **Auto-capture** of a dataset version after an import commit, dataset-version

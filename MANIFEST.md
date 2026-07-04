@@ -50,6 +50,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/DebtReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/DebtTrendPoint.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ModelArtifactRecord.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/HfImport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ImportPreviewReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/LabBackendSettings.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/PreferenceExportResult.cs`
@@ -88,6 +89,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Services/ProjectTemplateService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceExplorerService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceDocumentService.cs`
+- `apps/desktop/CorpusStudio.Desktop/ViewModels/HfImportViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/MainWindowViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/StartCenterViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/Tabs/ArenaViewModel.cs`
@@ -97,6 +99,8 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/ViewModelBase.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/WorkspaceExplorerViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/WorkspaceWizardViewModel.cs`
+- `apps/desktop/CorpusStudio.Desktop/Views/HfImportWindow.xaml`
+- `apps/desktop/CorpusStudio.Desktop/Views/HfImportWindow.xaml.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/WorkspaceWizardWindow.xaml`
@@ -114,6 +118,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/CorpusStudio.Desktop.Tests.csproj`
 - `apps/desktop/CorpusStudio.Desktop.Tests/EvaluationFailureFilterServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/GateReportViewModelTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/HfImportViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ImportCommitServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/OutputLogViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ProjectSearchViewModelTests.cs`
@@ -170,6 +175,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/screenshots/arena-resilience.png`
 - `docs/screenshots/dataset-debt.png`
 - `docs/screenshots/debt-trend.png`
+- `docs/screenshots/hf-import.png`
 - `docs/screenshots/output-panel.png`
 - `docs/screenshots/problems-panel.png`
 - `docs/screenshots/studio-dashboard.png`
