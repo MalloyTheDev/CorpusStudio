@@ -35,6 +35,7 @@ from corpus_studio.evaluation.evaluator import (
     extract_evaluation_examples,
     run_evaluation,
 )
+from corpus_studio.evaluation.scorers import LlmJudgeScorer
 from corpus_studio.exporters.cleaning import clean_rows
 from corpus_studio.exporters.jsonl_exporter import export_jsonl, write_jsonl
 from corpus_studio.exporters.preference_exporter import (
@@ -405,8 +406,22 @@ def eval_run(
     limit: Optional[int] = typer.Option(None, "--limit", help="Maximum examples to run."),
     score_threshold: float = typer.Option(70.0, "--score-threshold"),
     timeout_seconds: int = typer.Option(120, "--timeout-seconds"),
+    judge_model: Optional[str] = typer.Option(
+        None,
+        "--judge-model",
+        help="Evaluator model that scores each answer 0-100 (metric=llm_judge). "
+        "Omit to use the offline keyword-overlap score.",
+    ),
+    judge_backend: str = typer.Option("ollama", "--judge-backend", help="Judge backend."),
+    judge_base_url: Optional[str] = typer.Option(None, "--judge-base-url", help="Judge provider base URL."),
+    judge_api_key: Optional[str] = typer.Option(None, "--judge-api-key", help="Judge API key."),
 ):
-    """Run an Evaluation Lab MVP pass against a local model backend."""
+    """Run an Evaluation Lab pass against a local model backend.
+
+    The automatic score is keyword-overlap recall (a lexical proxy, not a quality
+    judgment) unless ``--judge-model`` selects an evaluator model to score 0-100 with a
+    rationale. The judge provider must be evaluator-authorized by provider policy.
+    """
 
     validation_report = validate_jsonl_file(input_path, schema)
     _exit_if_invalid(validation_report)
@@ -425,6 +440,33 @@ def eval_run(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
+    scorer = None
+    if judge_model is not None:
+        judge_provider = infer_provider_id(judge_backend, judge_base_url)
+        judge_route = judge_model if judge_provider == "openrouter" else None
+        judge_policy = resolve_policy(
+            judge_provider,
+            model_id=judge_model,
+            route_id=judge_route,
+            overrides=load_overrides(input_path.parent),
+        )
+        try:
+            judge_client = _build_backend(
+                backend=judge_backend,
+                model=judge_model,
+                base_url=judge_base_url,
+                api_key=judge_api_key,
+                timeout_seconds=timeout_seconds,
+            )
+            # Constructing the scorer authorizes the judge for evaluation (fail fast).
+            scorer = LlmJudgeScorer(judge_client, judge_model, policy=judge_policy)
+        except ProviderPolicyError as exc:
+            typer.echo(f"Provider policy blocked judging: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+
     report = run_evaluation(
         EvaluationRunConfig(
             dataset=input_path.stem,
@@ -440,6 +482,7 @@ def eval_run(
         examples,
         backend_client,
         limit=limit,
+        scorer=scorer,
     )
     payload = report.model_dump_json(indent=2)
     if output_path is not None:

@@ -180,6 +180,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/evaluation/benchmark.py`
 - `engine/corpus_studio/evaluation/evaluator.py`
 - `engine/corpus_studio/evaluation/reports.py`
+- `engine/corpus_studio/evaluation/scorers.py`
 - `engine/corpus_studio/evaluation/scoring.py`
 - `engine/corpus_studio/exporters/__init__.py`
 - `engine/corpus_studio/exporters/cleaning.py`
@@ -243,6 +244,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_cli.py`
 - `engine/tests/test_dataset_card.py`
 - `engine/tests/test_evaluation_report.py`
+- `engine/tests/test_evaluation_scorers.py`
 - `engine/tests/test_export_cleaning.py`
 - `engine/tests/test_gate_cli.py`
 - `engine/tests/test_gate_thresholds_config.py`

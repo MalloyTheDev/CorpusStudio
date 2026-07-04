@@ -14,6 +14,8 @@ class EvaluationExampleResult(BaseModel):
     passed: bool
     tags: list[str] = Field(default_factory=list)
     notes: str | None = None
+    # Judge rationale for the automatic score (llm_judge only; None for keyword overlap).
+    rationale: str | None = None
     manual_score: float | None = None
     manual_notes: str | None = None
 
