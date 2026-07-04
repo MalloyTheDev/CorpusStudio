@@ -118,8 +118,12 @@ document opens).
 - A durable **model artifact registry** under `model_artifacts/`
   (`artifact-register`/`-list`/`-update`): the adapters/checkpoints a run produced,
   referenced by path (never moved). Base model + eval resolve live through the
-  source `run_id`, not stored. **Path integrity** is re-checked on load — a record
-  flags `missing` or `modified` if the weights change on disk. A live weight card
+  source `run_id`, not stored. **Path integrity** is re-checked on load and flags
+  `missing` or `modified` if the weights change on disk: the artifact **list** uses a
+  cheap size+mtime check over the weight files + descriptor (fast to glance), while the
+  **weight card and promote gate** — the points where a decision is made — do a
+  **byte-exact SHA-256** of the weight bytes, so even a size/mtime-preserving swap is
+  caught. A live weight card
   (`artifact-card`, never stored) and a `model_artifact` **promote gate**
   (`artifact-gate`) that blocks "keep" when the artifact is `modified`/`missing`
   or the source run regressed. A desktop **Artifacts** tab registers from a run

@@ -1046,7 +1046,7 @@ def _load_artifact_context(project_dir: Path, artifact_id: str):
 
     from corpus_studio.evaluation.reports import EvaluationReport
     from corpus_studio.training.artifact_registry import (
-        artifact_integrity,
+        artifact_content_integrity,
         artifact_path,
         load_artifact_record,
     )
@@ -1056,7 +1056,9 @@ def _load_artifact_context(project_dir: Path, artifact_id: str):
     if not path.exists():
         raise FileNotFoundError(f"No artifact '{artifact_id}'.")
     artifact = load_artifact_record(path)
-    integrity = artifact_integrity(artifact)
+    # Byte-exact integrity here: the weight card and the promote gate are the decision points,
+    # so they read the weight bytes. The artifact LIST stays on the cheap size+mtime check.
+    integrity = artifact_content_integrity(artifact)
 
     run = None
     run_path = record_path(project_dir, artifact.run_id)
