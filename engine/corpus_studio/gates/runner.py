@@ -217,6 +217,68 @@ def run_artifact_gate(
     )
 
 
+class PromoteBlockedError(Exception):
+    """Raised when the promote gate blocks keeping an artifact. Carries the gate report."""
+
+    def __init__(self, report: GateReport):
+        self.report = report
+        super().__init__("Promote gate blocked keeping this artifact.")
+
+
+def promote_artifact(
+    project_dir: Path,
+    artifact_id: str,
+    now: str = "",
+    thresholds: GateThresholds | None = None,
+) -> tuple[Any, GateReport]:
+    """Keep (promote) an artifact ONLY when the promote gate passes — the single, authoritative
+    enforcement point so every caller (CLI, desktop, script) is gated, not just the UI.
+
+    Loads byte-exact integrity + the source run + its eval reports, runs the promote gate, and
+    raises :class:`PromoteBlockedError` (carrying the report) on a BLOCK instead of writing
+    ``kept``. Returns ``(updated_record, gate_report)`` on success.
+    """
+
+    from corpus_studio.training.artifact_registry import (
+        artifact_content_integrity,
+        artifact_path,
+        load_artifact_record,
+        update_artifact_status,
+    )
+    from corpus_studio.training.run_registry import load_run_record, record_path
+
+    path = artifact_path(project_dir, artifact_id)
+    if not path.exists():
+        raise ValueError(f"No artifact '{artifact_id}'.")
+    artifact = load_artifact_record(path)
+    integrity = artifact_content_integrity(artifact)  # byte-exact at the enforcement point
+
+    run = None
+    run_path = record_path(project_dir, artifact.run_id)
+    if run_path.exists():
+        try:
+            run = load_run_record(run_path)
+        except Exception:  # noqa: BLE001 - a corrupt run record just means no regression context
+            run = None
+
+    def load_report(report_path: str) -> EvaluationReport | None:
+        try:
+            return EvaluationReport.model_validate_json(
+                Path(report_path).read_text(encoding="utf-8")
+            )
+        except Exception:  # noqa: BLE001 - a missing/corrupt report is simply "no link"
+            return None
+
+    report = run_artifact_gate(
+        artifact, integrity, run, load_report, thresholds=thresholds, generated_at=now
+    )
+    if report.overall_status == GateStatus.BLOCK:
+        raise PromoteBlockedError(report)
+
+    updated = update_artifact_status(project_dir, artifact_id, "kept", now=now)
+    return updated, report
+
+
 def save_gate_report(project_dir: Path | str, report: GateReport) -> Path:
     """Write a gate report to gate_reports/<scope>-<target>.json (atomic).
 

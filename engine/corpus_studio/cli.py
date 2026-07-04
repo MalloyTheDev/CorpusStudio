@@ -1028,9 +1028,38 @@ def artifact_update(
     artifact_id: str = typer.Option(..., "--artifact-id"),
     status: str = typer.Option(..., "--status", help="candidate | kept | rejected."),
 ):
-    """Update an artifact's keep/reject status."""
+    """Update an artifact's keep/reject status.
+
+    A transition to ``kept`` is PROMOTE-GATED in the engine (integrity + source-run
+    regression), so no caller — CLI, desktop, or script — can promote a modified/missing or
+    regressed artifact by bypassing the UI. ``candidate``/``rejected`` are ungated.
+    """
 
     from corpus_studio.training.artifact_registry import update_artifact_status
+
+    if status == "kept":
+        from corpus_studio.gates.models import GateStatus, load_gate_thresholds
+        from corpus_studio.gates.runner import PromoteBlockedError, promote_artifact
+
+        try:
+            record, _report = promote_artifact(
+                project_dir,
+                artifact_id,
+                now=_utc_now_iso(),
+                thresholds=load_gate_thresholds(project_dir),
+            )
+        except PromoteBlockedError as exc:
+            typer.echo("Promote gate blocked keeping this artifact:", err=True)
+            for result in exc.report.results:
+                if result.status == GateStatus.BLOCK:
+                    typer.echo(f"  [{result.name}] {result.message}", err=True)
+            raise typer.Exit(code=2) from exc
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+
+        typer.echo(record.model_dump_json(indent=2))
+        return
 
     try:
         record = update_artifact_status(project_dir, artifact_id, status, now=_utc_now_iso())

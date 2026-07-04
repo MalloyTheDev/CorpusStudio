@@ -217,6 +217,48 @@ def test_cli_register_list_update(tmp_path: Path):
     assert json.loads(upd.output)["status"] == "kept"
 
 
+def test_cli_artifact_update_kept_is_promote_gated(tmp_path: Path):
+    # Engine-level enforcement: a MODIFIED artifact cannot be kept via the CLI, which used to
+    # bypass the gate entirely (the desktop gated, but a script did not).
+    _make_run(tmp_path)
+    adapter = _adapter_dir(tmp_path)
+    reg = runner.invoke(
+        app, ["artifact-register", str(tmp_path), "--run-id", "20260702T180000-a", "--path", str(adapter)]
+    )
+    artifact_id = json.loads(reg.output)["artifact_id"]
+
+    # Tamper with the weights after register -> byte-exact integrity is 'modified'.
+    (adapter / "adapter_model.safetensors").write_text("tampered weights", encoding="utf-8")
+
+    upd = runner.invoke(
+        app, ["artifact-update", str(tmp_path), "--artifact-id", artifact_id, "--status", "kept"]
+    )
+    assert upd.exit_code == 2
+    assert "blocked" in upd.output.lower()
+
+    # Status must be unchanged (still candidate) — the block refused the write.
+    listed = runner.invoke(app, ["artifact-list", str(tmp_path)])
+    assert json.loads(listed.output)["artifacts"][0]["status"] == "candidate"
+
+
+def test_cli_artifact_update_rejected_stays_ungated(tmp_path: Path):
+    # candidate/rejected transitions stay ungated — reject does not need the promote gate,
+    # even for a modified artifact.
+    _make_run(tmp_path)
+    adapter = _adapter_dir(tmp_path)
+    reg = runner.invoke(
+        app, ["artifact-register", str(tmp_path), "--run-id", "20260702T180000-a", "--path", str(adapter)]
+    )
+    artifact_id = json.loads(reg.output)["artifact_id"]
+    (adapter / "adapter_model.safetensors").write_text("tampered", encoding="utf-8")
+
+    upd = runner.invoke(
+        app, ["artifact-update", str(tmp_path), "--artifact-id", artifact_id, "--status", "rejected"]
+    )
+    assert upd.exit_code == 0
+    assert json.loads(upd.output)["status"] == "rejected"
+
+
 def test_cli_register_rejects_unknown_run(tmp_path: Path):
     result = runner.invoke(app, ["artifact-register", str(tmp_path), "--run-id", "ghost", "--path", str(tmp_path)])
     assert result.exit_code == 1
