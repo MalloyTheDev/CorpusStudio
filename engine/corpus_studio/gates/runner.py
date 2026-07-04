@@ -13,6 +13,7 @@ from collections.abc import Callable
 
 from corpus_studio.gates.basic_gates import (
     artifact_integrity_gate,
+    chat_structure_gate,
     eval_score_gate,
     input_present_gate,
     leakage_gate,
@@ -62,6 +63,27 @@ def run_dataset_gates(
         pii_gate(quality, thresholds, GateScope.DATASET),
     ]
     return GateReport.build(GateScope.DATASET, target, results, generated_at, thresholds=thresholds)
+
+
+def run_chat_gates(
+    rows: list[dict[str, Any]],
+    schema_id: str = "chat",
+    thresholds: GateThresholds | None = None,
+    target: str = "chat",
+    generated_at: str | None = None,
+) -> GateReport:
+    """Chat-suite gate: is a chat dataset structurally sound to train on? Combines input
+    presence, per-message schema validation, and conversation-SEQUENCE structure. Verdicts
+    structure, never semantic quality."""
+
+    thresholds = thresholds or GateThresholds()
+    validation = _validate_rows(rows, schema_id)
+    results = [
+        input_present_gate(len(rows), GateScope.CHAT_SUITE, block_when_empty=True),
+        schema_gate(validation, GateScope.CHAT_SUITE),
+        chat_structure_gate(rows, thresholds, GateScope.CHAT_SUITE),
+    ]
+    return GateReport.build(GateScope.CHAT_SUITE, target, results, generated_at, thresholds=thresholds)
 
 
 def run_export_gates(

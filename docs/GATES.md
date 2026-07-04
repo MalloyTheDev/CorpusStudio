@@ -82,6 +82,31 @@ explicit "gate not run" warning. Provider policy is enforced *before* the
 provider call, so the gate step can never run on a generation a forbidden provider
 was not allowed to perform. See [`AI_ASSIST_LAB.md`](AI_ASSIST_LAB.md).
 
+## Chat gates (chat_suite scope)
+
+`chat-gate <path> [--schema chat] [--project-dir <p>]` gates a chat dataset's
+**conversation structure** — the sequence-level shape the per-row validator can't
+see. It runs input-present + per-message schema validation + a `chat_structure`
+gate over each row's `messages` list, and reports at `chat_suite` scope. It
+verdicts **structure, not semantic quality** — it never claims a conversation is
+*good*, only *well-formed*.
+
+The `chat_structure` gate flags conversations that: start with an assistant turn
+(after any system), have no user or no assistant turn, end on a user turn
+(dangling), repeat a role back-to-back (tool-aware — `user→assistant→tool→assistant`
+is fine), have more than one system message or a system message not at the start,
+or fall outside the turn-count bounds. The per-message shape (valid role, non-empty
+content) is **not** re-checked here — that is the schema/validator's job.
+
+Everything **warns** by default (schema validation already blocks truly-invalid
+chat). Set `block_chat_malformed: true` to make the training-breaking faults
+(assistant-first, no-user, no-assistant, dangling-user) a hard **block**; the
+stylistic ones (role repetition, system placement, turn count) stay warnings.
+`chat-gate` is **advisory** — it prints/saves the report but exits `0`; the verdict
+is in the report. Rows without a `messages` list are skipped (a missing field is the
+schema gate's concern), and a dataset with no conversations warns rather than
+faking a pass.
+
 ## Per-project thresholds
 
 Gate thresholds default to the values in `GateThresholds`, but a project can
@@ -101,6 +126,11 @@ hard block for a project, set `block_normalized_duplicates` / `block_low_informa
 to `true` (mirroring `block_exact_duplicates`). These block only at dataset/row
 scope; the **export** gate always warns on quality counts (it has a dedicated
 cleaning pass) and blocks only on empty input, schema, or PII.
+
+Chat structure (chat_suite scope) has three thresholds: `min_chat_turns` (default
+2) and `max_chat_turns` (default 0 = no maximum) bound the message count, and
+`block_chat_malformed` (default `false`) turns the training-breaking faults into
+blocks as described above.
 
 `training-run-gate` and `artifact-gate` (which always take a project directory)
 load the file automatically. `gate-run` applies it **only when you pass
