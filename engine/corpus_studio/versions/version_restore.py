@@ -75,3 +75,45 @@ def reconstruct_and_verify(
 
     matches = expected_fingerprint is not None and computed == expected_fingerprint
     return lines, computed, matches, missing_ids
+
+
+def reconstruct_version_lines(project_dir: Any, version_id: str) -> list[str]:
+    """Reconstruct + VERIFY a stored dataset version's rows as canonical JSONL lines.
+
+    Raises FileNotFoundError (no such version) or ValueError (corrupt record, no stored
+    rows, missing rows, or fingerprint mismatch) — the reconstruction is all-or-nothing.
+    Reused by both `dataset-version-restore` (via the CLI) and version-pinned suite cases,
+    so a pinned case evaluates the *verified* version, not a mutable path.
+    """
+
+    from pathlib import Path
+
+    from corpus_studio.versions.row_store import load_rows_by_id
+    from corpus_studio.versions.version_registry import (
+        load_row_manifest,
+        load_version_record,
+        record_path,
+    )
+
+    project = Path(project_dir)
+    path = record_path(project, version_id)
+    if not path.exists():
+        raise FileNotFoundError(f"No dataset version '{version_id}'.")
+
+    record = load_version_record(path)
+    manifest = load_row_manifest(project, version_id)
+    if not record.rows_stored or manifest is None:
+        raise ValueError(
+            f"Version '{version_id}' has no stored rows; recapture with "
+            "dataset-version-create --store-rows to pin it."
+        )
+
+    rows_by_id = load_rows_by_id(project, set(manifest))
+    lines, _computed, matches, missing_ids = reconstruct_and_verify(
+        manifest, rows_by_id, record.content_fingerprint
+    )
+    if missing_ids:
+        raise ValueError(f"Version '{version_id}' is missing {len(missing_ids)} row(s) from the store.")
+    if not matches:
+        raise ValueError(f"Version '{version_id}' failed fingerprint verification.")
+    return lines

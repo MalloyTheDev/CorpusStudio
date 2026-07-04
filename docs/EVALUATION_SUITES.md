@@ -36,6 +36,13 @@ run + evaluation gate; it adds no new scoring.
 }
 ```
 
+A case sources its dataset from **exactly one** of `dataset_path` (a file — mutable, may
+drift between runs) or **`version_id`** (a pinned dataset version). A pinned case
+reconstructs and **verifies** that version at run time (needs `--project-dir`) and
+evaluates the verified rows — true reproducibility, and the report echoes the
+`version_id` it ran. A pinned version that is unknown or unverifiable makes just that
+case an isolated `error` (the rest of the suite still runs).
+
 Each **case** is one dataset × model × metric × pass bars. `metric` is `keyword_overlap`
 (a lexical proxy, the default) or `llm_judge` (needs a `judge_model`; the judge must be
 evaluator-authorized by [provider policy](PROVIDER_POLICY.md), enforced in the engine).

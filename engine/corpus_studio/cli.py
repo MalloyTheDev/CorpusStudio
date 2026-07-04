@@ -3,6 +3,7 @@ import json
 import os
 import sqlite3
 import sys
+import tempfile
 from typing import Any, Optional
 
 import typer
@@ -600,12 +601,33 @@ def eval_run(
     typer.echo(payload)
 
 
-def _evaluate_suite_case(case: "SuiteCase") -> "EvaluationReport":
-    """Run one suite case through the SAME policy-enforced eval path as ``eval-run``
-    (backend + optional evaluator-only judge scorer). Raises on failure; the suite runner
-    isolates that into the case's ERROR status."""
+def _evaluate_suite_case(case: "SuiteCase", project_dir: "Optional[Path]" = None) -> "EvaluationReport":
+    """Run one suite case. A path case evaluates its dataset_path directly; a version-pinned
+    case reconstructs + VERIFIES that dataset version to a temp file first (needs project_dir),
+    then evaluates that. Raises on any failure; the suite runner isolates it into ERROR."""
 
-    dataset_path = Path(case.dataset_path)
+    if case.version_id:
+        if project_dir is None:
+            raise ValueError(f"Case '{case.name}' pins a version but no --project-dir was given.")
+        from corpus_studio.versions.version_restore import reconstruct_version_lines
+
+        lines = reconstruct_version_lines(project_dir, case.version_id)  # raises on missing/verify-fail
+        handle, tmp_name = tempfile.mkstemp(suffix=".jsonl", prefix=f"suite-{case.name}-")
+        tmp_path = Path(tmp_name)
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as stream:
+                stream.write("\n".join(lines) + "\n")
+            return _evaluate_suite_dataset(case, tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    return _evaluate_suite_dataset(case, Path(case.dataset_path or ""))
+
+
+def _evaluate_suite_dataset(case: "SuiteCase", dataset_path: Path) -> "EvaluationReport":
+    """Evaluate a case against a concrete dataset file — the SAME policy-enforced eval path as
+    ``eval-run`` (backend + optional evaluator-only judge scorer)."""
+
     validation = validate_jsonl_file(dataset_path, case.schema_id)
     if not validation.valid:
         raise ValueError(f"Case '{case.name}': dataset failed {case.schema_id} validation.")
@@ -737,7 +759,11 @@ def suite_run(
         f"Running {len(definition.cases)} case(s) — each is a live backend evaluation.",
         err=True,
     )
-    report = run_suite(definition, _evaluate_suite_case, generated_at=_utc_now_iso())
+    report = run_suite(
+        definition,
+        lambda case: _evaluate_suite_case(case, project_dir),
+        generated_at=_utc_now_iso(),
+    )
 
     if project_dir is not None:
         save_suite_report(project_dir, report)
