@@ -74,6 +74,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/RecentWorkspaceRecord.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceFileKind.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceProjectManifest.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceSearchResult.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceTemplateDefinition.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceTreeNode.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/OpenWorkspaceDocument.cs`
@@ -88,6 +89,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceLayout.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/ProjectTemplateService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceExplorerService.cs`
+- `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceSearchService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceDocumentService.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/HfImportViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/MainWindowViewModel.cs`
@@ -98,6 +100,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/Tabs/IDebtViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/ViewModelBase.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/WorkspaceExplorerViewModel.cs`
+- `apps/desktop/CorpusStudio.Desktop/ViewModels/WorkspaceSearchViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/WorkspaceWizardViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/HfImportWindow.xaml`
 - `apps/desktop/CorpusStudio.Desktop/Views/HfImportWindow.xaml.cs`
@@ -139,6 +142,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceSystemTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceViewLayerTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceExplorerViewModelTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceSearchTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceOpenRoutingTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceWizardViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TempProjectDirectory.cs`
@@ -287,6 +291,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_provider_policy.py`
 - `engine/tests/test_quality_clustering.py`
 - `engine/tests/test_quality_length_and_imbalance.py`
+- `engine/tests/test_quality_near_dup_and_synthetic.py`
 - `engine/tests/test_quality_pii.py`
 - `engine/tests/test_quality_unicode.py`
 - `engine/tests/test_artifact_registry.py`

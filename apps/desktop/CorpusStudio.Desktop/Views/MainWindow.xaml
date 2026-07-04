@@ -436,7 +436,7 @@
                                   Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7" Fill="Transparent" Width="20" Height="20" Stretch="Uniform" />
                         </Button>
                         <Border Width="22" Height="1" Background="#1F2937" Margin="0,8" />
-                        <Button Click="ActivityRoadmapButton_Click" ToolTip="Search — coming soon" Style="{StaticResource ActivityButtonStyle}" Opacity="0.6" Margin="0,2">
+                        <Button x:Name="SearchButton" Click="ActivitySearchButton_Click" ToolTip="Search (find in files)" Style="{StaticResource ActivityButtonStyle}" Margin="0,2">
                             <Path Data="M11,4 A7,7 0 1 0 11.001,4 M16.5,16.5 L21,21"
                                   Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" Fill="Transparent" Width="18" Height="18" Stretch="Uniform" />
                         </Button>
@@ -3016,6 +3016,63 @@
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                         </ScrollViewer>
+                    </DockPanel>
+                </Border>
+
+                <!-- SEARCH PANEL — bottom-docked workspace content search ("find in files").
+                     Shares the dock with Problems/Output (only one open); toggled from the
+                     activity-bar Search button. Double-click a result to open the file. -->
+                <Border VerticalAlignment="Bottom" Height="248" Background="#FFFFFF"
+                        BorderBrush="#E2E8F0" BorderThickness="0,1,0,0" Panel.ZIndex="50"
+                        Visibility="{Binding SearchPanelVisible, Converter={StaticResource BoolToVis}}">
+                    <DockPanel>
+                        <!-- header: query box + case toggle + run + close -->
+                        <Border DockPanel.Dock="Top" Height="44" Background="#F8FAFC"
+                                BorderBrush="#EEF2F7" BorderThickness="0,0,0,1">
+                            <Grid Margin="14,0">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="SEARCH" FontSize="11" FontWeight="Bold"
+                                               Foreground="#64748B" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                    <TextBox x:Name="SearchQueryBox" Width="280" Height="26" VerticalContentAlignment="Center"
+                                             AutomationProperties.AutomationId="WorkspaceSearchTextBox"
+                                             Text="{Binding Search.Query, UpdateSourceTrigger=PropertyChanged}"
+                                             KeyDown="SearchQueryBox_KeyDown" Padding="6,0" />
+                                    <CheckBox Content="Aa" ToolTip="Match case" VerticalAlignment="Center" Margin="10,0,0,0"
+                                              IsChecked="{Binding Search.CaseSensitive}" />
+                                    <Button Content="Search" Click="SearchRunButton_Click" Padding="12,4" Margin="10,0,0,0"
+                                            IsEnabled="{Binding HasActiveProject}" />
+                                    <TextBlock Text="{Binding Search.Status}" FontSize="11.5" Foreground="#475569"
+                                               Margin="14,0,0,0" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis" MaxWidth="360" />
+                                </StackPanel>
+                                <Button HorizontalAlignment="Right" VerticalAlignment="Center"
+                                        Click="SearchCloseButton_Click" ToolTip="Close panel" Style="{StaticResource ExplorerIconStyle}">
+                                    <Path Data="M5,5 L15,15 M15,5 L5,15" Stroke="#64748B" StrokeThickness="1.6"
+                                          Width="14" Height="14" Stretch="Uniform" />
+                                </Button>
+                            </Grid>
+                        </Border>
+                        <!-- empty state -->
+                        <TextBlock DockPanel.Dock="Top" Margin="16,16" TextWrapping="Wrap" Foreground="#64748B" FontSize="12.5"
+                                   Visibility="{Binding Search.HasResults, Converter={StaticResource InverseBoolToVis}}"
+                                   Text="Type a term and press Enter to find it across this workspace's text files (datasets, reports, docs, configs). Binaries, oversize files, and build/VCS folders are skipped. Double-click a result to open the file." />
+                        <!-- results list; double-click opens the file in the Explorer -->
+                        <ListBox x:Name="SearchResultsList" ItemsSource="{Binding Search.Results}"
+                                 MouseDoubleClick="SearchResult_DoubleClick"
+                                 BorderThickness="0" Background="Transparent" Margin="0,2"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 Visibility="{Binding Search.HasResults, Converter={StaticResource BoolToVis}}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="4,3">
+                                        <TextBlock Text="{Binding Location}" FontFamily="Consolas" FontSize="11.5"
+                                                   FontWeight="SemiBold" Foreground="#2563EB" />
+                                        <TextBlock Text="{Binding LineText}" FontFamily="Consolas" FontSize="11.5"
+                                                   Foreground="#334155" TextTrimming="CharacterEllipsis" Margin="0,1,0,0" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
                     </DockPanel>
                 </Border>
             </Grid>
