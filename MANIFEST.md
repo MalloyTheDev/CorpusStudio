@@ -134,6 +134,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingLaunchViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingProcessRunnerTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingRunViewModelTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/UnsavedWorkTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceFoundationTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceSystemTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceViewLayerTests.cs`

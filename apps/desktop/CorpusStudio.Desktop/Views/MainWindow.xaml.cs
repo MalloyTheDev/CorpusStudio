@@ -968,6 +968,7 @@ public partial class MainWindow : Window
             );
 
             ViewModel.SetExamples(_engineService.LoadExamples(ViewModel.ActiveProjectPath));
+            ViewModel.MarkDraftClean(); // the draft is now persisted — no longer unsaved work
 
             // If this save repaired a quarantined row, clear that record so it doesn't orphan.
             var retried = ViewModel.TakePendingRetryItem();
@@ -2982,6 +2983,24 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
+        if (ViewModel.HasUnsavedWork)
+        {
+            var unsavedChoice = MessageBox.Show(
+                this,
+                "You have unsaved changes (an edited draft or open documents). "
+                + "Close Corpus Studio and discard them?",
+                "Unsaved changes",
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Warning,
+                MessageBoxResult.Cancel
+            );
+            if (unsavedChoice != MessageBoxResult.OK)
+            {
+                e.Cancel = true;
+                return;
+            }
+        }
+
         if (!ViewModel.IsTrainingRunning)
         {
             return;
@@ -3807,12 +3826,41 @@ public partial class MainWindow : Window
         return true;
     }
 
+    private bool _suppressProjectSelectionChange;
+
     private async void ProjectsListBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
-        if (ViewModel.SelectedProject is not null)
+        if (_suppressProjectSelectionChange || ViewModel.SelectedProject is null)
         {
-            await LoadProjectAsync(ViewModel.SelectedProject);
+            return;
         }
+
+        // Guard unsaved work before the switch discards it (the switch resets the draft and
+        // clears open documents). On cancel, revert the selection to the previous project.
+        if (ViewModel.HasUnsavedWork)
+        {
+            var choice = MessageBox.Show(
+                this,
+                "You have unsaved changes (an edited draft or open documents). "
+                + "Switch projects and discard them?",
+                "Unsaved changes",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No
+            );
+            if (choice != MessageBoxResult.Yes)
+            {
+                var previous = e.RemovedItems.Count > 0
+                    ? e.RemovedItems[0] as DatasetProjectListItem
+                    : null;
+                _suppressProjectSelectionChange = true;
+                ViewModel.SelectedProject = previous; // reverts the ListBox; re-fire is suppressed
+                _suppressProjectSelectionChange = false;
+                return;
+            }
+        }
+
+        await LoadProjectAsync(ViewModel.SelectedProject);
     }
 
     private async Task LoadProjectAsync(DatasetProjectListItem project)
