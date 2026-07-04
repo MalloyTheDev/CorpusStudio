@@ -67,6 +67,7 @@ from corpus_studio.reporting.dataset_card import (
     render_dataset_card_markdown,
 )
 from corpus_studio.evaluation.reports import EvaluationReport
+from corpus_studio.suites.models import SuiteCase
 from corpus_studio.schemas.registry import list_builtin_schemas, load_builtin_schema, repository_root
 from corpus_studio.splitters.leakage import detect_split_leakage
 from corpus_studio.splitters.random_splitter import random_split
@@ -597,6 +598,99 @@ def eval_run(
         output_path.write_text(payload + "\n", encoding="utf-8")
 
     typer.echo(payload)
+
+
+def _evaluate_suite_case(case: "SuiteCase") -> "EvaluationReport":
+    """Run one suite case through the SAME policy-enforced eval path as ``eval-run``
+    (backend + optional evaluator-only judge scorer). Raises on failure; the suite runner
+    isolates that into the case's ERROR status."""
+
+    dataset_path = Path(case.dataset_path)
+    validation = validate_jsonl_file(dataset_path, case.schema_id)
+    if not validation.valid:
+        raise ValueError(f"Case '{case.name}': dataset failed {case.schema_id} validation.")
+
+    rows = list(read_jsonl(dataset_path))
+    examples = extract_evaluation_examples(rows, case.schema_id)
+    backend_client = _build_backend(
+        backend=case.backend,
+        model=case.model,
+        base_url=case.base_url,
+        api_key=None,
+        timeout_seconds=120,
+    )
+
+    scorer = None
+    if case.metric == "llm_judge":
+        judge_provider = infer_provider_id(case.judge_backend, case.judge_base_url)
+        judge_route = case.judge_model if judge_provider == "openrouter" else None
+        judge_policy = resolve_policy(
+            judge_provider,
+            model_id=case.judge_model,
+            route_id=judge_route,
+            overrides=load_overrides(dataset_path.parent),
+        )
+        judge_client = _build_backend(
+            backend=case.judge_backend,
+            model=case.judge_model or "",
+            base_url=case.judge_base_url,
+            api_key=None,
+            timeout_seconds=120,
+        )
+        scorer = LlmJudgeScorer(judge_client, case.judge_model or "", policy=judge_policy)
+
+    return run_evaluation(
+        EvaluationRunConfig(
+            dataset=dataset_path.stem,
+            model=case.model,
+            schema_id=case.schema_id,
+            dataset_path=str(dataset_path),
+            backend=case.backend,
+            base_url=case.base_url,
+            limit=case.limit,
+            score_threshold=case.min_score if case.min_score is not None else 70.0,
+            timeout_seconds=120,
+        ),
+        examples,
+        backend_client,
+        limit=case.limit,
+        scorer=scorer,
+    )
+
+
+@app.command("suite-run")
+def suite_run(
+    suite_path: Path,
+    project_dir: Optional[Path] = typer.Option(None, "--project-dir", help="Write the report under suite_reports/."),
+    strict: bool = typer.Option(False, "--strict", help="Exit 2 when the suite verdict is block (CI/release gating)."),
+):
+    """Run a file-driven evaluation suite: each case runs the existing eval + evaluation gate,
+    and the report rolls up PER METRIC with an aggregate pass/warn/block verdict. Advisory by
+    default (exit 0; the verdict is in the report); --strict exits 2 on a block. Each case is a
+    LIVE backend evaluation."""
+
+    from corpus_studio.gates.models import GateStatus
+    from corpus_studio.suites.runner import load_suite_definition, run_suite, save_suite_report
+
+    try:
+        definition = load_suite_definition(suite_path)
+    except (ValueError, json.JSONDecodeError, OSError) as exc:
+        typer.echo(f"Invalid suite definition: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(
+        f"Running {len(definition.cases)} case(s) — each is a live backend evaluation.",
+        err=True,
+    )
+    report = run_suite(definition, _evaluate_suite_case, generated_at=_utc_now_iso())
+
+    if project_dir is not None:
+        save_suite_report(project_dir, report)
+
+    typer.echo(report.model_dump_json(indent=2))
+
+    if strict and report.overall_status == GateStatus.BLOCK:
+        raise typer.Exit(code=2)
 
 
 @app.command("benchmark")

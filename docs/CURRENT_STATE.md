@@ -87,6 +87,13 @@ isolation, and off-thread document opens.
 - Multi-model benchmark (`benchmark`): one dataset across several models, ranked
   by the same keyword-overlap score, with per-model deltas and the examples every
   model failed.
+- **Evaluation suites** (`suite-run`): a file-driven, reusable set of evaluation
+  *cases* (dataset × model × metric × pass bars) run as one unit → a `SuiteReport`
+  with a **per-metric** roll-up and an aggregate pass/warn/block verdict. Reuses the
+  eval run + evaluation gate (no new scoring); per-case failure isolation; each case
+  records its dataset fingerprint; advisory by default, `--strict` exits 2 on block.
+  Never folds non-comparable metric scales. See [`EVALUATION_SUITES.md`](EVALUATION_SUITES.md).
+  (Engine + CLI; no desktop surface or suite registry yet.)
 - Model Arena (`arena-run`): run a prompt suite across several models side by
   side; responses are comparison artifacts, not trainable rows. Optional
   evaluator-only judging (`--judge-model`) scores each response and picks a
