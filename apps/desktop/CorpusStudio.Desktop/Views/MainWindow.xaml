@@ -375,6 +375,34 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- Projects list on the dark sidebar (v1.2.14): two-line cards that fit the theme,
+             replacing the harsh white box + truncated "Name (id)" rows. -->
+        <Style x:Key="SidebarProjectItemStyle" TargetType="{x:Type ListBoxItem}">
+            <Setter Property="Padding" Value="10,7" />
+            <Setter Property="Margin" Value="0,1" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Foreground" Value="#E2E8F0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ListBoxItem}">
+                        <Border x:Name="ItemBorder" Background="Transparent" CornerRadius="7"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="#1E293B" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="#1D4ED8" />
+                                <Setter Property="Foreground" Value="#FFFFFF" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid Background="{StaticResource AppBackgroundBrush}">
@@ -685,15 +713,48 @@
                            FontWeight="Bold"
                            Foreground="#E2E8F0"
                            Margin="0,0,0,10" />
-                <TextBox AutomationProperties.AutomationId="ProjectSearchTextBox"
-                         Text="{Binding ProjectSearch, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                         ToolTip="Filter projects by name, id, or schema"
-                         Margin="0,0,0,6" />
+                <Grid Margin="0,0,0,8">
+                    <TextBox x:Name="ProjectSearchBox"
+                             AutomationProperties.AutomationId="ProjectSearchTextBox"
+                             Text="{Binding ProjectSearch, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="Filter projects by name, id, or schema"
+                             Background="#0B1220" Foreground="#E2E8F0" BorderBrush="#293548"
+                             CaretBrush="#E2E8F0" Padding="9,6" />
+                    <TextBlock Text="Filter projects…" IsHitTestVisible="False"
+                               Foreground="#64748B" Margin="11,0,0,0" VerticalAlignment="Center">
+                        <TextBlock.Style>
+                            <Style TargetType="{x:Type TextBlock}">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Text, ElementName=ProjectSearchBox}" Value="">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
                 <ListBox AutomationProperties.AutomationId="ProjectsListBox"
                          ItemsSource="{Binding Projects}"
                          SelectedItem="{Binding SelectedProject, Mode=TwoWay}"
-                         DisplayMemberPath="DisplayName"
-                         SelectionChanged="ProjectsListBox_SelectionChanged" />
+                         SelectionChanged="ProjectsListBox_SelectionChanged"
+                         Background="Transparent" BorderThickness="0" Padding="0"
+                         MaxHeight="340"
+                         HorizontalContentAlignment="Stretch"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         ItemContainerStyle="{StaticResource SidebarProjectItemStyle}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel>
+                                <TextBlock Text="{Binding Name}" FontSize="12.5" FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis"
+                                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" />
+                                <TextBlock Text="{Binding SchemaId}" FontSize="10.5" Foreground="#94A3B8"
+                                           TextTrimming="CharacterEllipsis" Margin="0,1,0,0" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
 
                 <Button AutomationProperties.AutomationId="RebuildProjectIndexButton"
                         Content="Rebuild Index"
