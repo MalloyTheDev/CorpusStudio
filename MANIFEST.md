@@ -121,6 +121,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/GateReportViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/HfImportViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ImportCommitServiceTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/ImportDedupeAndQuarantineTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/OutputLogViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ProjectSearchViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ProviderPolicyViewModelTests.cs`

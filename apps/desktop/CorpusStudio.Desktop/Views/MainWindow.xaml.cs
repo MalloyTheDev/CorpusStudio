@@ -891,6 +891,11 @@ public partial class MainWindow : Window
             $"Imported {result.ImportedCount} row(s).",
         };
 
+        if (result.SkippedDuplicateCount > 0)
+        {
+            lines.Add($"Skipped {result.SkippedDuplicateCount} duplicate row(s) already in the dataset.");
+        }
+
         if (result.QuarantinedCount > 0)
         {
             lines.Add($"Quarantined {result.QuarantinedCount} rejected row(s).");
@@ -963,6 +968,16 @@ public partial class MainWindow : Window
             );
 
             ViewModel.SetExamples(_engineService.LoadExamples(ViewModel.ActiveProjectPath));
+
+            // If this save repaired a quarantined row, clear that record so it doesn't orphan.
+            var retried = ViewModel.TakePendingRetryItem();
+            if (retried is not null)
+            {
+                _engineService.RemoveImportQuarantineItem(retried);
+                ViewModel.SetImportQuarantineItems(
+                    _engineService.LoadImportQuarantineItems(ViewModel.ActiveProjectPath));
+            }
+
             await RefreshQualityAsync();
             MessageBox.Show(
                 this,
