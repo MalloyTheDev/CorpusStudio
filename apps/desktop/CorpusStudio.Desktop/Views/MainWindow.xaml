@@ -3179,5 +3179,43 @@
             </DockPanel>
         </Grid>
 
+        <!-- ENGINE NOT FOUND — setup screen (v1.2.15). Covers everything when the Python
+             engine tree can't be located, so the app never launches into a broken shell. -->
+        <Border Panel.ZIndex="200" Background="{StaticResource AppBackgroundBrush}"
+                Visibility="{Binding IsEngineUnavailable, Converter={StaticResource BoolToVis}}">
+            <Border Style="{StaticResource CardBorderStyle}" Width="560" MaxWidth="560"
+                    VerticalAlignment="Center" HorizontalAlignment="Center" Padding="30,28">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <Border Width="40" Height="40" CornerRadius="10" Background="#FEF2F2">
+                            <Path Data="M12,3 L21,20 H3 Z M12,9 V14 M12,17 H12.01" Stroke="#DC2626"
+                                  StrokeThickness="1.8" Fill="Transparent" Width="22" Height="22"
+                                  Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Text="Python engine not found" FontSize="19" FontWeight="Bold"
+                                   Foreground="#0F172A" VerticalAlignment="Center" Margin="12,0,0,0" />
+                    </StackPanel>
+                    <TextBlock TextWrapping="Wrap" Foreground="#334155" FontSize="13" Margin="0,0,0,10"
+                               Text="Corpus Studio drives a local Python engine (the engine/ folder). It couldn't be located next to the app or up the folder tree." />
+                    <Border Background="#F8FAFC" BorderBrush="#E6EDF5" BorderThickness="1" CornerRadius="8"
+                            Padding="12,9" Margin="0,0,0,14">
+                        <TextBlock Text="{Binding EngineUnavailableMessage}" TextWrapping="Wrap"
+                                   FontFamily="Consolas" FontSize="11.5" Foreground="#64748B" />
+                    </Border>
+                    <TextBlock TextWrapping="Wrap" Foreground="#475569" FontSize="12.5" Margin="0,0,0,16"
+                               Text="Locate the engine folder below, or set the CORPUS_STUDIO_ENGINE_DIR environment variable and retry. See docs/DEVELOPMENT_SETUP.md." />
+                    <StackPanel Orientation="Horizontal">
+                        <Button Style="{StaticResource PrimaryButtonStyle}"
+                                AutomationProperties.AutomationId="LocateEngineButton"
+                                Content="Locate engine folder…" Padding="16,8" Margin="0,0,10,0"
+                                Click="LocateEngineButton_Click" />
+                        <Button AutomationProperties.AutomationId="RetryEngineButton"
+                                Content="Retry" Padding="16,8"
+                                Click="RetryEngineButton_Click" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Border>
+
     </Grid>
 </Window>

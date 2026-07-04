@@ -110,6 +110,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/OutputLogViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ProjectSearchViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ProviderPolicyViewModelTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/PythonEngineServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/QualityMetricTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ReviewedFixServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingCheckpointsViewModelTests.cs`

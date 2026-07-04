@@ -225,6 +225,39 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// Operates on the active project's folder.</summary>
     public WorkspaceExplorerViewModel Explorer { get; } = new();
 
+    // ---- Engine availability (v1.2.15 distributability) --------------------------
+    // When the Python engine tree can't be found, the shell shows a setup screen instead
+    // of crashing. Set from PythonEngineService.IsEngineAvailable at startup.
+
+    private bool _isEngineUnavailable;
+    private string _engineUnavailableMessage = string.Empty;
+
+    public bool IsEngineUnavailable
+    {
+        get => _isEngineUnavailable;
+        private set => SetField(ref _isEngineUnavailable, value);
+    }
+
+    public string EngineUnavailableMessage
+    {
+        get => _engineUnavailableMessage;
+        private set => SetField(ref _engineUnavailableMessage, value);
+    }
+
+    public void SetEngineUnavailable(string? reason)
+    {
+        EngineUnavailableMessage = string.IsNullOrWhiteSpace(reason)
+            ? "The Python engine could not be found."
+            : reason!;
+        IsEngineUnavailable = true;
+    }
+
+    public void ClearEngineUnavailable()
+    {
+        IsEngineUnavailable = false;
+        EngineUnavailableMessage = string.Empty;
+    }
+
     public WorkspaceShellMode ShellMode
     {
         get => _shellMode;
