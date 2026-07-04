@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 using CorpusStudio.Desktop.Models;
 
 namespace CorpusStudio.Desktop.Services;
@@ -27,6 +28,12 @@ public sealed class WorkspaceDocumentService
 
     /// <summary>How many bytes of an over-large text file to show in the read-only preview.</summary>
     public int PreviewBytes { get; init; } = 64 * 1024;
+
+    /// <summary>Open a document off the UI thread. The read (up to <see cref="MaxEditableBytes"/>,
+    /// or a bounded preview for larger files), classification, and metadata all run on the thread
+    /// pool so a large or slow file never stalls the UI; the caller marshals the result back.</summary>
+    public Task<OpenDocumentResult> OpenAsync(string workspaceRoot, string relativePath)
+        => Task.Run(() => Open(workspaceRoot, relativePath));
 
     public OpenDocumentResult Open(string workspaceRoot, string relativePath)
     {

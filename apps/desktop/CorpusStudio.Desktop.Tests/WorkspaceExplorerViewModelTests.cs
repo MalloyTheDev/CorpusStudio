@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.ViewModels;
 using Xunit;
@@ -57,13 +58,13 @@ public sealed class WorkspaceExplorerViewModelTests : IDisposable
     }
 
     [Fact]
-    public void OpenText_LoadsContent_NotDirty_IsTextViewer()
+    public async Task OpenText_LoadsContent_NotDirty_IsTextViewer()
     {
         var root = NewWorkspace();
         File.WriteAllText(Path.Combine(root, "notes.txt"), "hello");
         var vm = Vm(root);
 
-        vm.OpenNode(FileNode("notes.txt"));
+        await vm.OpenNodeAsync(FileNode("notes.txt"));
 
         Assert.Single(vm.OpenDocuments);
         Assert.Equal("hello", vm.ActiveDocument!.TextContent);
@@ -73,23 +74,23 @@ public sealed class WorkspaceExplorerViewModelTests : IDisposable
     }
 
     [Fact]
-    public void OpenGeneratedReport_IsReadOnly()
+    public async Task OpenGeneratedReport_IsReadOnly()
     {
         var vm = Vm(NewWorkspace());
-        vm.OpenNode(FileNode("reports/quality/q.json"));
+        await vm.OpenNodeAsync(FileNode("reports/quality/q.json"));
         Assert.True(vm.ActiveDocument!.IsReadOnly);
         Assert.True(vm.IsTextDocument);   // json renders in the text viewer, read-only
     }
 
     [Fact]
-    public void DirtyTracking_ThenSave_WritesAndClears()
+    public async Task DirtyTracking_ThenSave_WritesAndClears()
     {
         var root = NewWorkspace();
         var path = Path.Combine(root, "a.txt");
         File.WriteAllText(path, "one");
         var vm = Vm(root);
 
-        vm.OpenNode(FileNode("a.txt"));
+        await vm.OpenNodeAsync(FileNode("a.txt"));
         vm.ActiveDocument!.TextContent = "one two";
         Assert.True(vm.ActiveDocument.IsDirty);
 
@@ -99,14 +100,14 @@ public sealed class WorkspaceExplorerViewModelTests : IDisposable
     }
 
     [Fact]
-    public void OpeningExamples_IsExamplesFile_Editable_NoMutation()
+    public async Task OpeningExamples_IsExamplesFile_Editable_NoMutation()
     {
         var root = NewWorkspace();
         var path = Path.Combine(root, "examples.jsonl");
         var original = File.ReadAllText(path);
         var vm = Vm(root);
 
-        vm.OpenNode(FileNode("examples.jsonl"));
+        await vm.OpenNodeAsync(FileNode("examples.jsonl"));
 
         Assert.True(vm.IsExamplesFile);
         Assert.False(vm.ActiveDocument!.IsReadOnly);       // editable, explicit-save only
@@ -114,16 +115,16 @@ public sealed class WorkspaceExplorerViewModelTests : IDisposable
     }
 
     [Fact]
-    public void CreateFile_InsideRoot_Opens_And_RefusesTraversal()
+    public async Task CreateFile_InsideRoot_Opens_And_RefusesTraversal()
     {
         var root = NewWorkspace();
         var vm = Vm(root);
 
-        Assert.Null(vm.CreateFile("sub/new.md"));
+        Assert.Null(await vm.CreateFileAsync("sub/new.md"));
         Assert.True(File.Exists(Path.Combine(root, "sub", "new.md")));
         Assert.Contains(vm.OpenDocuments, d => d.RelativePath.EndsWith("new.md"));
 
-        Assert.NotNull(vm.CreateFile("../escape.txt"));    // refused; error surfaced
+        Assert.NotNull(await vm.CreateFileAsync("../escape.txt"));    // refused; error surfaced
         Assert.False(File.Exists(Path.Combine(_tempRoot, "escape.txt")));
     }
 
@@ -136,16 +137,16 @@ public sealed class WorkspaceExplorerViewModelTests : IDisposable
     }
 
     [Fact]
-    public void CloseDocument_ReactivatesNeighbour()
+    public async Task CloseDocument_ReactivatesNeighbour()
     {
         var root = NewWorkspace();
         File.WriteAllText(Path.Combine(root, "a.txt"), "a");
         File.WriteAllText(Path.Combine(root, "b.txt"), "b");
         var vm = Vm(root);
 
-        vm.OpenNode(FileNode("a.txt"));
+        await vm.OpenNodeAsync(FileNode("a.txt"));
         var a = vm.ActiveDocument!;
-        vm.OpenNode(FileNode("b.txt"));
+        await vm.OpenNodeAsync(FileNode("b.txt"));
         Assert.Equal(2, vm.OpenDocuments.Count);
 
         vm.CloseDocument(vm.ActiveDocument!);   // close b (active)
@@ -154,12 +155,12 @@ public sealed class WorkspaceExplorerViewModelTests : IDisposable
     }
 
     [Fact]
-    public void SwitchingRoot_ClearsOpenDocuments()
+    public async Task SwitchingRoot_ClearsOpenDocuments()
     {
         var root1 = NewWorkspace();
         File.WriteAllText(Path.Combine(root1, "a.txt"), "a");
         var vm = Vm(root1);
-        vm.OpenNode(FileNode("a.txt"));
+        await vm.OpenNodeAsync(FileNode("a.txt"));
         Assert.Single(vm.OpenDocuments);
 
         vm.SetWorkspaceRoot(NewWorkspace(), "Two");
@@ -168,26 +169,26 @@ public sealed class WorkspaceExplorerViewModelTests : IDisposable
     }
 
     [Fact]
-    public void SameRoot_KeepsOpenTabs()
+    public async Task SameRoot_KeepsOpenTabs()
     {
         var root = NewWorkspace();
         File.WriteAllText(Path.Combine(root, "a.txt"), "a");
         var vm = Vm(root);
-        vm.OpenNode(FileNode("a.txt"));
+        await vm.OpenNodeAsync(FileNode("a.txt"));
 
         vm.SetWorkspaceRoot(root, "Test");   // unchanged root -> no rebuild
         Assert.Single(vm.OpenDocuments);
     }
 
     [Fact]
-    public void OpenImage_IsImageViewer_NoText()
+    public async Task OpenImage_IsImageViewer_NoText()
     {
         var root = NewWorkspace();
         Directory.CreateDirectory(Path.Combine(root, "assets"));
         File.WriteAllBytes(Path.Combine(root, "assets", "a.png"), new byte[] { 0x89, 0x50, 0x4E, 0x47 });
         var vm = Vm(root);
 
-        vm.OpenNode(FileNode("assets/a.png"));
+        await vm.OpenNodeAsync(FileNode("assets/a.png"));
         Assert.True(vm.IsImageDocument);
         Assert.False(vm.IsTextDocument);
         Assert.Equal(string.Empty, vm.ActiveDocument!.TextContent);
@@ -204,10 +205,10 @@ public sealed class WorkspaceExplorerViewModelTests : IDisposable
     }
 
     [Fact]
-    public void OpenDirectory_IsIgnored()
+    public async Task OpenDirectory_IsIgnored()
     {
         var vm = Vm(NewWorkspace());
-        vm.OpenNode(new WorkspaceTreeNode { RelativePath = "reports", IsDirectory = true });
+        await vm.OpenNodeAsync(new WorkspaceTreeNode { RelativePath = "reports", IsDirectory = true });
         Assert.Empty(vm.OpenDocuments);
         Assert.True(vm.IsNoDocument);
     }
@@ -225,16 +226,16 @@ public sealed class WorkspaceExplorerViewModelTests : IDisposable
     }
 
     [Fact]
-    public void ActiveDocument_ExactlyOneTabIsActive()
+    public async Task ActiveDocument_ExactlyOneTabIsActive()
     {
         var root = NewWorkspace();
         File.WriteAllText(Path.Combine(root, "a.txt"), "a");
         File.WriteAllText(Path.Combine(root, "b.txt"), "b");
         var vm = Vm(root);
 
-        vm.OpenNode(FileNode("a.txt"));
+        await vm.OpenNodeAsync(FileNode("a.txt"));
         var a = vm.ActiveDocument!;
-        vm.OpenNode(FileNode("b.txt"));
+        await vm.OpenNodeAsync(FileNode("b.txt"));
         var b = vm.ActiveDocument!;
 
         Assert.False(a.IsActive);
@@ -248,16 +249,16 @@ public sealed class WorkspaceExplorerViewModelTests : IDisposable
     }
 
     [Fact]
-    public void ClosingActive_ReactivatedNeighbour_BecomesActive()
+    public async Task ClosingActive_ReactivatedNeighbour_BecomesActive()
     {
         var root = NewWorkspace();
         File.WriteAllText(Path.Combine(root, "a.txt"), "a");
         File.WriteAllText(Path.Combine(root, "b.txt"), "b");
         var vm = Vm(root);
 
-        vm.OpenNode(FileNode("a.txt"));
+        await vm.OpenNodeAsync(FileNode("a.txt"));
         var a = vm.ActiveDocument!;
-        vm.OpenNode(FileNode("b.txt"));
+        await vm.OpenNodeAsync(FileNode("b.txt"));
 
         vm.CloseDocument(vm.ActiveDocument!);   // close b (active)
         Assert.Same(a, vm.ActiveDocument);

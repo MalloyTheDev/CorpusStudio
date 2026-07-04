@@ -424,11 +424,11 @@ public partial class MainWindow : Window
 
     // ---- Universal Workspace Explorer (v1.2.4 view layer, slice 3b) ---------------
 
-    private void ExplorerTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+    private async void ExplorerTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
         if (e.NewValue is WorkspaceTreeNode node)
         {
-            ViewModel.Explorer.OpenNode(node);
+            await ViewModel.Explorer.OpenNodeAsync(node);
         }
     }
 
@@ -466,7 +466,7 @@ public partial class MainWindow : Window
         ViewModel.Explorer.CloseDocument(doc);
     }
 
-    private void ExplorerNewFile_Click(object sender, RoutedEventArgs e)
+    private async void ExplorerNewFile_Click(object sender, RoutedEventArgs e)
     {
         if (!EnsureWorkspace())
         {
@@ -479,7 +479,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var error = ViewModel.Explorer.CreateFile(relative);
+        var error = await ViewModel.Explorer.CreateFileAsync(relative);
         if (error is not null)
         {
             MessageBox.Show(this, error, "New File", MessageBoxButton.OK, MessageBoxImage.Warning);
