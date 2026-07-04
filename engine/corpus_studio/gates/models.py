@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -62,8 +63,10 @@ class GateThresholds(BaseModel):
 
     max_exact_duplicates: int = Field(default=0, ge=0)  # exceeding this is a finding
     block_exact_duplicates: bool = True  # block (True) vs warn (False) on exact dups
-    max_normalized_duplicates: int = Field(default=0, ge=0)  # warn above this
-    max_low_information: int = Field(default=0, ge=0)  # warn above this
+    max_normalized_duplicates: int = Field(default=0, ge=0)  # finding above this
+    block_normalized_duplicates: bool = False  # block (True) vs warn (False) on near-dups
+    max_low_information: int = Field(default=0, ge=0)  # finding above this
+    block_low_information: bool = False  # block (True) vs warn (False) on low-info rows
     warn_synthetic_pattern_issues: int = Field(default=1, ge=0)  # warn at/above this many
     block_on_high_severity_pii: bool = True
     warn_on_medium_severity_pii: bool = True
@@ -140,5 +143,17 @@ def load_gate_thresholds(project_dir: Path | str) -> GateThresholds:
     known = {key: data[key] for key in GateThresholds.model_fields if key in data}
     try:
         return GateThresholds(**known)
-    except Exception:  # noqa: BLE001 - a bad/out-of-range value falls back to defaults.
-        return GateThresholds()
+    except Exception:  # noqa: BLE001 - fall through to per-field salvage below.
+        pass
+
+    # One bad/out-of-range value must not discard the user's other valid overrides.
+    # Validate each key on its own (against defaults, which are all valid and
+    # independent); keep the ones that pass, drop the rest to their strict default.
+    valid: dict[str, Any] = {}
+    for key, value in known.items():
+        try:
+            GateThresholds(**{key: value})
+        except Exception:  # noqa: BLE001 - this key is broken; fall back to its default.
+            continue
+        valid[key] = value
+    return GateThresholds(**valid)

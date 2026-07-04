@@ -97,7 +97,9 @@ def build_basic_quality_report(rows: list[dict]) -> QualityReport:
     normalized_duplicate_count = 0
     empty_count = 0
     low_information_count = 0
-    synthetic_pattern_issues = _synthetic_pattern_issues(rows)
+    all_synthetic_pattern_issues = _synthetic_pattern_issues(rows)
+    synthetic_pattern_count = len(all_synthetic_pattern_issues)  # true total, before display cap
+    synthetic_pattern_issues = all_synthetic_pattern_issues[:SYNTHETIC_WARNING_LIMIT]
     synthetic_pattern_warnings = [issue.message for issue in synthetic_pattern_issues]
     synthetic_pattern_clusters = cluster_synthetic_pattern_issues(synthetic_pattern_issues)
     pii_findings = _detect_pii(rows)
@@ -128,7 +130,7 @@ def build_basic_quality_report(rows: list[dict]) -> QualityReport:
         duplicate_exact_count=exact_duplicate_count,
         duplicate_normalized_count=normalized_duplicate_count,
         low_information_count=low_information_count,
-        synthetic_pattern_count=len(synthetic_pattern_issues),
+        synthetic_pattern_count=synthetic_pattern_count,
         synthetic_pattern_warnings=synthetic_pattern_warnings,
         synthetic_pattern_issues=synthetic_pattern_issues,
         synthetic_pattern_clusters=synthetic_pattern_clusters,
@@ -141,7 +143,19 @@ def build_basic_quality_report(rows: list[dict]) -> QualityReport:
     )
 
 
+# Unit separator — cannot appear in tokenized text, so it safely delimits fields.
+_FIELD_SEP = "\x1f"
+
+
 def _normalized_text_signature(value: Any) -> str:
+    if isinstance(value, dict):
+        # Field-aware: each key's token stream is scoped by the key and joined by a reserved
+        # separator, so two rows with the same combined text but a different field structure
+        # do NOT collide (which caused false near-dup drops and false split-leakage blocks).
+        return _FIELD_SEP.join(
+            f"{key}={' '.join(_tokenize_text_values(sub))}"
+            for key, sub in sorted(value.items(), key=lambda item: item[0])
+        )
     return " ".join(_tokenize_text_values(value))
 
 
@@ -193,8 +207,10 @@ def _collect_text_values(value: Any) -> list[str]:
 
 def _synthetic_pattern_issues(rows: list[dict]) -> list[SyntheticPatternIssue]:
     issues: list[SyntheticPatternIssue] = []
+    # Synthetic-pattern detection reads the flat surface text (openings/closings/phrases),
+    # NOT the field-aware dedup signature — field prefixes/separators would corrupt n-grams.
     row_texts = [
-        (row_number, _normalized_text_signature(row))
+        (row_number, " ".join(_tokenize_text_values(row)))
         for row_number, row in enumerate(rows, start=1)
     ]
     row_texts = [(row_number, text) for row_number, text in row_texts if text]
@@ -278,7 +294,9 @@ def _synthetic_pattern_issues(rows: list[dict]) -> list[SyntheticPatternIssue]:
                 )
             )
 
-    return issues[:SYNTHETIC_WARNING_LIMIT]
+    # Return the full set; the caller reports the true count and caps only the displayed
+    # sample (capping here would make synthetic_pattern_count under-report at >20 patterns).
+    return issues
 
 
 def _severity_for_repetition(repetition_count: int, rows: list[dict]) -> str:
@@ -416,6 +434,30 @@ def _luhn_valid(digits: str) -> bool:
     return total % 10 == 0
 
 
+def _looks_like_payment_card(digits: str) -> bool:
+    """Whether a Luhn-valid digit run also matches a known card brand's IIN prefix AND that
+    brand's length class. Requiring this (not just Luhn + length) stops Luhn-valid non-cards —
+    IMEIs, order/invoice numbers, GS1 codes — from false-positiving as payment cards."""
+
+    n = len(digits)
+    head4 = int(digits[:4]) if n >= 4 else 0
+    if digits[0] == "4" and n in (13, 16, 19):  # Visa
+        return True
+    if n == 16 and (digits[:2] in {"51", "52", "53", "54", "55"} or 2221 <= head4 <= 2720):  # Mastercard
+        return True
+    if n == 15 and digits[:2] in {"34", "37"}:  # American Express
+        return True
+    if n in (16, 19) and (  # Discover
+        digits[:4] == "6011" or digits[:2] == "65" or (n >= 3 and 644 <= int(digits[:3]) <= 649)
+    ):
+        return True
+    if n == 14 and (digits[:3] in {"300", "301", "302", "303", "304", "305"} or digits[:2] in {"36", "38", "39"}):
+        return True  # Diners Club
+    if 16 <= n <= 19 and 3528 <= head4 <= 3589:  # JCB
+        return True
+    return False
+
+
 def _mask_secret(text: str) -> str:
     text = text.strip()
     if len(text) <= 4:
@@ -450,7 +492,7 @@ def _detect_pii(rows: list[dict]) -> list["PiiFinding"]:
             digits
             for candidate in _PII_CC_CANDIDATE_RE.findall(text)
             for digits in [re.sub(r"[ -]", "", candidate)]
-            if 13 <= len(digits) <= 19 and _luhn_valid(digits)
+            if 13 <= len(digits) <= 19 and _luhn_valid(digits) and _looks_like_payment_card(digits)
         ]
         if credit_cards:
             _record(
@@ -548,14 +590,17 @@ def _category_imbalances(rows: list[dict]) -> list[CategoryImbalance]:
         if distinct < 2 or distinct > max_distinct:
             continue
         dominant_value, dominant_count = counter.most_common(1)[0]
-        share = dominant_count / len(values)
+        # Share is relative to the whole dataset, not just rows where the field is present —
+        # otherwise a field present in 80% of rows and dominant within that subset over-reports
+        # (e.g. dominant in 79/80 present rows = 0.99 present-share but only 0.79 dataset-share).
+        share = dominant_count / total_rows
         if share >= CATEGORY_IMBALANCE_SHARE:
             findings.append(
                 CategoryImbalance(
                     field=field,
                     dominant_value=dominant_value[:80],
                     dominant_count=dominant_count,
-                    total=len(values),
+                    total=total_rows,
                     share=round(share, 3),
                     distinct_values=distinct,
                 )

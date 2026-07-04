@@ -9,6 +9,7 @@ from corpus_studio.training.artifact_registry import (
     MISSING,
     MODIFIED,
     OK,
+    artifact_content_integrity,
     artifact_integrity,
     compute_fingerprint,
     list_artifacts,
@@ -116,6 +117,59 @@ def test_file_fingerprint_form(tmp_path: Path):
     assert fp is not None and ":" in fp and "=" not in fp
 
 
+def test_cheap_fingerprint_now_covers_weight_files(tmp_path: Path):
+    # The old fingerprint only stat'd the descriptor; a resized weight went undetected.
+    _make_run(tmp_path)
+    adapter = _adapter_dir(tmp_path)
+    record = register_artifact(tmp_path, "20260702T180000-a", str(adapter), now="t1")
+    assert artifact_integrity(record) == OK
+
+    # Overwrite the weight with different-size bytes (descriptor untouched) -> modified.
+    (adapter / "adapter_model.safetensors").write_text("different weights", encoding="utf-8")
+    assert artifact_integrity(record) == MODIFIED
+
+
+def test_content_integrity_catches_byte_swap_that_preserves_size_and_mtime(tmp_path: Path):
+    import os
+
+    _make_run(tmp_path)
+    adapter = _adapter_dir(tmp_path)  # adapter_model.safetensors = "weights" (7 bytes)
+    record = register_artifact(tmp_path, "20260702T180000-a", str(adapter), now="t1")
+    assert artifact_content_integrity(record) == OK
+
+    weight = adapter / "adapter_model.safetensors"
+    original = weight.stat()
+    # Swap in different bytes of the SAME length, then restore the original mtime — this fools
+    # the cheap size+mtime fingerprint but not the byte-exact content hash.
+    weight.write_text("XXXXXXX", encoding="utf-8")  # same 7-byte length
+    os.utime(weight, ns=(original.st_atime_ns, original.st_mtime_ns))
+
+    assert artifact_integrity(record) == OK               # cheap check is fooled
+    assert artifact_content_integrity(record) == MODIFIED  # byte-exact catches it
+
+
+def test_content_integrity_missing_when_path_gone(tmp_path: Path):
+    import shutil
+
+    _make_run(tmp_path)
+    adapter = _adapter_dir(tmp_path)
+    record = register_artifact(tmp_path, "20260702T180000-a", str(adapter), now="t1")
+    shutil.rmtree(adapter)
+    assert artifact_content_integrity(record) == MISSING
+
+
+def test_content_integrity_legacy_record_falls_back_to_cheap(tmp_path: Path):
+    # A record from before content hashing (content_hash=None) still verifies via size+mtime.
+    _make_run(tmp_path)
+    adapter = _adapter_dir(tmp_path)
+    record = register_artifact(tmp_path, "20260702T180000-a", str(adapter), now="t1")
+    legacy = record.model_copy(update={"content_hash": None})
+    assert artifact_content_integrity(legacy) == OK
+
+    (adapter / "adapter_model.safetensors").write_text("resized weights", encoding="utf-8")
+    assert artifact_content_integrity(legacy) == MODIFIED  # falls back to size+mtime
+
+
 # --- status transitions ------------------------------------------------------
 
 def test_status_transitions_and_unknown(tmp_path: Path):
@@ -161,6 +215,48 @@ def test_cli_register_list_update(tmp_path: Path):
     upd = runner.invoke(app, ["artifact-update", str(tmp_path), "--artifact-id", artifact_id, "--status", "kept"])
     assert upd.exit_code == 0
     assert json.loads(upd.output)["status"] == "kept"
+
+
+def test_cli_artifact_update_kept_is_promote_gated(tmp_path: Path):
+    # Engine-level enforcement: a MODIFIED artifact cannot be kept via the CLI, which used to
+    # bypass the gate entirely (the desktop gated, but a script did not).
+    _make_run(tmp_path)
+    adapter = _adapter_dir(tmp_path)
+    reg = runner.invoke(
+        app, ["artifact-register", str(tmp_path), "--run-id", "20260702T180000-a", "--path", str(adapter)]
+    )
+    artifact_id = json.loads(reg.output)["artifact_id"]
+
+    # Tamper with the weights after register -> byte-exact integrity is 'modified'.
+    (adapter / "adapter_model.safetensors").write_text("tampered weights", encoding="utf-8")
+
+    upd = runner.invoke(
+        app, ["artifact-update", str(tmp_path), "--artifact-id", artifact_id, "--status", "kept"]
+    )
+    assert upd.exit_code == 2
+    assert "blocked" in upd.output.lower()
+
+    # Status must be unchanged (still candidate) — the block refused the write.
+    listed = runner.invoke(app, ["artifact-list", str(tmp_path)])
+    assert json.loads(listed.output)["artifacts"][0]["status"] == "candidate"
+
+
+def test_cli_artifact_update_rejected_stays_ungated(tmp_path: Path):
+    # candidate/rejected transitions stay ungated — reject does not need the promote gate,
+    # even for a modified artifact.
+    _make_run(tmp_path)
+    adapter = _adapter_dir(tmp_path)
+    reg = runner.invoke(
+        app, ["artifact-register", str(tmp_path), "--run-id", "20260702T180000-a", "--path", str(adapter)]
+    )
+    artifact_id = json.loads(reg.output)["artifact_id"]
+    (adapter / "adapter_model.safetensors").write_text("tampered", encoding="utf-8")
+
+    upd = runner.invoke(
+        app, ["artifact-update", str(tmp_path), "--artifact-id", artifact_id, "--status", "rejected"]
+    )
+    assert upd.exit_code == 0
+    assert json.loads(upd.output)["status"] == "rejected"
 
 
 def test_cli_register_rejects_unknown_run(tmp_path: Path):
