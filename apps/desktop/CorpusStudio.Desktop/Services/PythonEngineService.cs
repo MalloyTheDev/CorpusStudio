@@ -1140,6 +1140,44 @@ public sealed class PythonEngineService
             ?? throw new InvalidOperationException("The Python engine returned an invalid gate report.");
     }
 
+    // ---- Evaluation Suites (v1.3 M2) --------------------------------------------------
+
+    /// <summary>List the registered evaluation suites under the project's evaluation_suites/.</summary>
+    public async Task<IReadOnlyList<SuiteSummary>> ListSuitesAsync(string projectPath)
+    {
+        var output = await RunEngineCommandAsync("suite-list", "--project-dir", projectPath, "--json");
+        return ParseSuiteSummaries(output);
+    }
+
+    /// <summary>Run a registered suite by name. Each case is a LIVE backend evaluation (slow).</summary>
+    public async Task<SuiteReport> RunSuiteAsync(string projectPath, string suiteName)
+    {
+        var output = await RunEngineCommandAsync("suite-run", suiteName, "--project-dir", projectPath, "--json");
+        return ParseSuiteReport(output);
+    }
+
+    /// <summary>Scaffold evaluation_suites/&lt;name&gt;.json for the user to edit (in the Files
+    /// explorer). The engine validates the name and refuses to overwrite an existing suite.</summary>
+    public Task NewSuiteAsync(string projectPath, string name) =>
+        RunEngineCommandAsync("suite-init", name, "--project-dir", projectPath);
+
+    /// <summary>Parse `suite-list --json` output. Pure/testable.</summary>
+    public static IReadOnlyList<SuiteSummary> ParseSuiteSummaries(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+        return JsonSerializer.Deserialize<List<SuiteSummary>>(json, JsonOptions) ?? [];
+    }
+
+    /// <summary>Parse `suite-run --json` output. Pure/testable.</summary>
+    public static SuiteReport ParseSuiteReport(string json)
+    {
+        return JsonSerializer.Deserialize<SuiteReport>(json, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid suite report.");
+    }
+
     public async Task<ArenaReport> RunArenaAsync(
         string promptsText,
         IReadOnlyList<string> models,
