@@ -43,6 +43,13 @@ from corpus_studio.exporters.preference_exporter import (
     drop_degenerate_pairs,
     export_preference,
 )
+from corpus_studio.importers.hf_hub import (
+    HfImportResult,
+    fetch_rows,
+    inspect_dataset,
+    map_rows,
+    suggest_mapping,
+)
 from corpus_studio.importers.jsonl_importer import read_jsonl
 from corpus_studio.importers.jsonl_preview import preview_jsonl_import
 from corpus_studio.model_backends.base import BackendHealthReport, BackendModelListReport
@@ -325,6 +332,105 @@ def import_preview(path: Path, schema: str):
 
     report = preview_jsonl_import(path, schema)
     typer.echo(report.model_dump_json(indent=2))
+
+
+@app.command("hf-inspect")
+def hf_inspect(dataset_id: str):
+    """Inspect a public Hugging Face dataset: configs/splits, columns, and license.
+
+    Read-only and public-only (no auth, no upload). Surfaces the license so you
+    can decide whether the data may be used for training BEFORE importing.
+    """
+    try:
+        inspection = inspect_dataset(dataset_id)
+    except (OSError, ValueError) as exc:
+        typer.echo(f"Could not inspect '{dataset_id}': {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(inspection.model_dump_json(indent=2))
+
+
+@app.command("hf-import")
+def hf_import(
+    dataset_id: str,
+    out: Path = typer.Option(..., "--out", help="Staging JSONL path (NEVER examples.jsonl)."),
+    schema: str = typer.Option(..., "--schema", help="Target built-in schema id."),
+    config: str = typer.Option("default", "--config", help="Dataset config name."),
+    split: str = typer.Option("train", "--split", help="Dataset split name."),
+    limit: int = typer.Option(100, "--limit", help="Maximum rows to fetch."),
+    map_: list[str] = typer.Option(
+        [],
+        "--map",
+        help="Column mapping as schema_field=hf_column (repeatable); overrides auto-detect.",
+    ),
+):
+    """Import rows from a public Hugging Face dataset into a STAGING JSONL file.
+
+    Read-only and public-only: no auth, no upload. The engine never writes
+    examples.jsonl — the staging file flows through the normal import-preview /
+    quarantine path so the desktop stays the single writer. Imported data is NOT
+    assumed to be training-licensed; the dataset license is reported.
+    """
+    # The engine must never write the dataset's single source of truth.
+    if out.name == "examples.jsonl":
+        typer.echo(
+            "Refusing to write examples.jsonl: HF import writes a staging file that the "
+            "desktop imports through preview/quarantine.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    try:
+        dataset_schema = load_builtin_schema(schema)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    if limit < 1:
+        typer.echo("--limit must be at least 1.", err=True)
+        raise typer.Exit(code=1)
+
+    # Refuse gated datasets up front (slice 1 is public-only, no auth).
+    try:
+        inspection = inspect_dataset(dataset_id)
+        if inspection.gated:
+            typer.echo(
+                f"'{dataset_id}' is gated (requires access approval); public import only.",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        page = fetch_rows(dataset_id, config, split, limit)
+    except (OSError, ValueError) as exc:
+        typer.echo(f"Could not fetch '{dataset_id}': {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    mapping = suggest_mapping(page.columns, dataset_schema)
+    for pair in map_:
+        field_name, _, column = pair.partition("=")
+        field_name, column = field_name.strip(), column.strip()
+        if not field_name or not column:
+            typer.echo(f"Invalid --map '{pair}'; expected schema_field=hf_column.", err=True)
+            raise typer.Exit(code=1)
+        mapping[field_name] = column
+
+    staged = map_rows(page.rows, mapping)
+    write_jsonl(staged, out)
+
+    schema_field_names = [field.name for field in dataset_schema.fields]
+    result = HfImportResult(
+        dataset_id=dataset_id,
+        config=config,
+        split=split,
+        schema_id=schema,
+        fetched_rows=len(staged),
+        mapping=mapping,
+        unmapped_schema_fields=[name for name in schema_field_names if name not in mapping],
+        unused_columns=[c for c in page.columns if c not in mapping.values()],
+        license=inspection.license,
+        license_note=inspection.license_note,
+        out_path=str(out),
+    )
+    typer.echo(result.model_dump_json(indent=2))
 
 
 @app.command()

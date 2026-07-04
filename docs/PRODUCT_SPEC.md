@@ -69,7 +69,8 @@ create dataset
 - automatic scraping
 - bulk synthetic generation
 - production-grade PII detection
-- Hugging Face publishing / Hub import-export
+- Hugging Face **publishing / Hub export** (upload). Read-only Hub *import* of
+  public datasets is supported — see [`CURRENT_STATE.md`](CURRENT_STATE.md).
 - PDF OCR
 - advanced multimodal annotation
 - automatic acceptance of AI-generated dataset rows

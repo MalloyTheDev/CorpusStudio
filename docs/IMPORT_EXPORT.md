@@ -13,6 +13,8 @@ The import system turns existing files into dataset examples.
 ### Supported current imports
 
 - JSONL through the desktop app and Python engine preview command
+- **Hugging Face Hub datasets** (read-only, public) via the engine
+  `hf-inspect` / `hf-import` commands — see below
 
 ### Future imports
 
@@ -24,7 +26,6 @@ The import system turns existing files into dataset examples.
 - code folders
 - image folders
 - Git repositories
-- Hugging Face datasets
 - PDFs with OCR
 
 ### Import workflow
@@ -55,6 +56,34 @@ Studio.
 - Keep rejected rows recoverable in a quarantine report.
 - Keep source metadata when possible.
 - Do not assume imported data is licensed for training.
+
+### Hugging Face Hub import (read-only)
+
+Import rows from a **public** Hugging Face dataset without pulling in the
+`datasets` / `huggingface_hub` libraries — the engine calls the public
+**datasets-server** JSON API with the standard library only.
+
+- `hf-inspect <dataset_id>` lists the dataset's configs/splits, sample columns,
+  and **license**, so you can decide whether the data may be used for training
+  and how its columns map to a Corpus Studio schema.
+- `hf-import <dataset_id> --schema <id> --out <staging.jsonl> [--config --split
+  --limit --map field=column …]` fetches rows, maps columns to schema fields
+  (exact-name matches auto-detected; `--map` overrides), and writes a **staging
+  JSONL** file. It reports the mapping, any unmapped fields / unused columns, and
+  the license with the caveat above.
+
+This stays inside the project's boundaries:
+
+- **Read-only and public-only** — no auth, no upload, no publishing. The engine
+  makes a Hub network call only when you explicitly run these commands.
+- **The engine never writes `examples.jsonl`.** `hf-import` writes a *staging*
+  file (and refuses to target `examples.jsonl`); that file flows through the
+  normal import-preview → validate → quarantine path, where the **desktop** is
+  the single writer that appends accepted rows.
+- **Gated / private datasets are refused** (they need auth — out of scope here).
+
+Pushing datasets *to* the Hub (export/publish) is deliberately **not** supported —
+see the non-goals in `PRODUCT_SPEC.md`.
 
 
 ---
