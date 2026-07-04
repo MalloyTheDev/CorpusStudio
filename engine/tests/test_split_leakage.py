@@ -51,6 +51,19 @@ def test_near_duplicate_across_splits_is_leakage():
     assert report.leaks[0].splits == ["train", "validation"]
 
 
+def test_leak_sample_is_readable_original_not_normalized_signature():
+    # The sample must show the real row text (original case, JSON), not the lowercased,
+    # field-separator-joined normalized signature used for matching.
+    train = [{"instruction": "Explain Recursion", "output": "A function calls itself"}]
+    test = [{"instruction": "explain recursion", "output": "a function calls itself"}]  # near-dup
+    report = detect_split_leakage(train, [], test)
+    assert report.leaked_group_count == 1
+    sample = report.leaks[0].sample
+    assert "Explain Recursion" in sample   # original casing preserved (not normalized)
+    assert "\x1f" not in sample            # not the field-separator signature
+    assert sample.startswith("{")          # readable JSON rendering of the original row
+
+
 def test_distinct_rows_have_no_leakage():
     train = [{"text": "alpha one"}]
     validation = [{"text": "beta two"}]

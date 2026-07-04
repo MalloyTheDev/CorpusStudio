@@ -2975,7 +2975,38 @@ public sealed class PythonEngineService
             string.Join(Environment.NewLine, entries) + Environment.NewLine,
             encoding: Utf8NoBom
         );
+        PruneQuarantineFiles(quarantineDirectory, MaxRetainedQuarantineFiles);
         return quarantinePath;
+    }
+
+    /// <summary>How many <c>*_rejected.jsonl</c> quarantine files to retain per project.
+    /// Each import with failures writes one; this bounds the directory while keeping a
+    /// generous recovery window. Recovered/emptied files are still deleted eagerly by
+    /// <see cref="RemoveImportQuarantineItem"/>; this only trims the oldest unrecovered ones.</summary>
+    public const int MaxRetainedQuarantineFiles = 50;
+
+    /// <summary>Delete the oldest quarantine files beyond <paramref name="keep"/> so the
+    /// directory cannot grow without bound across many imports. Files carry a sortable
+    /// timestamp prefix, so ordinal-descending name order is newest-first. Best-effort:
+    /// a file that cannot be deleted is left in place.</summary>
+    public static void PruneQuarantineFiles(string quarantineDirectory, int keep)
+    {
+        if (keep < 0 || !Directory.Exists(quarantineDirectory))
+        {
+            return;
+        }
+
+        var stale = Directory
+            .EnumerateFiles(quarantineDirectory, "*_rejected.jsonl")
+            .OrderByDescending(path => Path.GetFileName(path), StringComparer.Ordinal)
+            .Skip(keep)
+            .ToList();
+        foreach (var path in stale)
+        {
+            try { File.Delete(path); }
+            catch (IOException) { /* best-effort; a locked file stays */ }
+            catch (UnauthorizedAccessException) { /* best-effort */ }
+        }
     }
 
     private static string SanitizeFileNamePart(string value)

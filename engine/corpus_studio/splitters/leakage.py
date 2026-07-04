@@ -39,6 +39,16 @@ def _exact_signature(row: Any) -> str:
     return json.dumps(row, sort_keys=True, separators=(",", ":"), default=str)
 
 
+def _readable_sample(row: Any) -> str:
+    """A readable one-line rendering of an original leaked row (compact JSON, Unicode
+    preserved) so a leak report shows the real text, not its normalized signature."""
+
+    try:
+        return json.dumps(row, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return str(row)
+
+
 def detect_split_leakage(
     train: list[dict[str, Any]],
     validation: list[dict[str, Any]],
@@ -52,8 +62,10 @@ def detect_split_leakage(
             signature = normalized_text_signature(row)
             if not signature:
                 continue
+            # Keep a reference to the first original row for a readable sample; render it
+            # only for groups that actually leak (below), not once per row.
             group = groups.setdefault(
-                signature, {"splits": {}, "exact_signatures": set(), "sample": signature}
+                signature, {"splits": {}, "exact_signatures": set(), "sample_row": row}
             )
             group["splits"][split_name] = group["splits"].get(split_name, 0) + 1
             group["exact_signatures"].add(_exact_signature(row))
@@ -73,7 +85,7 @@ def detect_split_leakage(
                 splits=sorted(group["splits"].keys()),
                 row_count=total,
                 exact=len(group["exact_signatures"]) == 1,
-                sample=str(group["sample"])[:120],
+                sample=_readable_sample(group["sample_row"])[:120],
             )
         )
 

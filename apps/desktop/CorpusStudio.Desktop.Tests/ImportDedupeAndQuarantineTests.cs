@@ -172,4 +172,44 @@ public sealed class ImportDedupeAndQuarantineTests
         Assert.Same(item, vm.TakePendingRetryItem()); // repaired row is available to clear
         Assert.Null(vm.TakePendingRetryItem());        // consumed exactly once
     }
+
+    // --- bounded quarantine retention (Tier-3) ----------------------------------------
+
+    [Fact]
+    public void PruneQuarantineFiles_KeepsNewestAndDropsOldest()
+    {
+        using var project = new TempProjectDirectory();
+        var quarantineDir = Path.Combine(project.Path, "import_quarantine");
+        Directory.CreateDirectory(quarantineDir);
+
+        // 55 files with fixed-width, sortable timestamp prefixes (chronological == ordinal).
+        for (int i = 0; i < 55; i++)
+        {
+            File.WriteAllText(
+                Path.Combine(quarantineDir, $"202601{i:D2}000000_src_rejected.jsonl"), "{}\n", Utf8NoBom);
+        }
+
+        PythonEngineService.PruneQuarantineFiles(quarantineDir, 50);
+
+        var remaining = Directory.EnumerateFiles(quarantineDir, "*_rejected.jsonl")
+            .Select(Path.GetFileName)
+            .OrderBy(name => name, System.StringComparer.Ordinal)
+            .ToList();
+        Assert.Equal(50, remaining.Count);
+        Assert.Equal("20260105000000_src_rejected.jsonl", remaining.First()); // oldest 5 pruned
+        Assert.Equal("20260154000000_src_rejected.jsonl", remaining.Last());  // newest retained
+    }
+
+    [Fact]
+    public void PruneQuarantineFiles_NoOpWhenUnderLimit()
+    {
+        using var project = new TempProjectDirectory();
+        var quarantineDir = Path.Combine(project.Path, "import_quarantine");
+        Directory.CreateDirectory(quarantineDir);
+        File.WriteAllText(Path.Combine(quarantineDir, "20260101000000_a_rejected.jsonl"), "{}\n", Utf8NoBom);
+
+        PythonEngineService.PruneQuarantineFiles(quarantineDir, 50);
+
+        Assert.Single(Directory.EnumerateFiles(quarantineDir, "*_rejected.jsonl"));
+    }
 }
