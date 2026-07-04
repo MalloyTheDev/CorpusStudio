@@ -100,3 +100,50 @@ def test_cli_export_still_rejects_invalid_rows(tmp_path: Path):
     assert result.exit_code == 1
     assert "Missing required field: output" in result.output
     assert not output_path.exists()
+
+
+_SECRET_ROW = {
+    "instruction": "Store this deploy key.",
+    "output": "-----BEGIN RSA PRIVATE KEY-----\nMIIBOwIBAAJBAKj34GkxFhD\n-----END RSA PRIVATE KEY-----",
+}
+
+
+def test_cli_export_blocks_on_pii_secret_and_writes_nothing(tmp_path: Path):
+    # A private key must stop the export (the documented "export blocks on PII"
+    # guarantee) — and no deliverable file may be written.
+    input_path = tmp_path / "secret.jsonl"
+    _write(input_path, [_SECRET_ROW])
+    output_path = tmp_path / "export.jsonl"
+
+    result = runner.invoke(app, ["export", str(input_path), str(output_path), "instruction"])
+
+    assert result.exit_code == 2
+    assert "blocked" in result.output.lower()
+    assert not output_path.exists()
+
+
+def test_cli_export_blocks_on_pii_even_with_dedupe(tmp_path: Path):
+    # The gate runs BEFORE the cleaning pass, so --dedupe cannot smuggle a secret out.
+    input_path = tmp_path / "secret.jsonl"
+    _write(input_path, [_SECRET_ROW, _SECRET_ROW])
+    output_path = tmp_path / "export.jsonl"
+
+    result = runner.invoke(
+        app, ["export", str(input_path), str(output_path), "instruction", "--dedupe"]
+    )
+
+    assert result.exit_code == 2
+    assert not output_path.exists()
+    assert not output_path.with_name(output_path.name + ".cleaning_manifest.json").exists()
+
+
+def test_cli_export_clean_dataset_is_unaffected(tmp_path: Path):
+    # A dataset with no PII/secrets exports normally — the gate must not false-block.
+    input_path = tmp_path / "clean.jsonl"
+    _write(input_path, [{"instruction": "Explain variables.", "output": "A variable stores a value."}])
+    output_path = tmp_path / "export.jsonl"
+
+    result = runner.invoke(app, ["export", str(input_path), str(output_path), "instruction"])
+
+    assert result.exit_code == 0, result.output
+    assert output_path.exists()

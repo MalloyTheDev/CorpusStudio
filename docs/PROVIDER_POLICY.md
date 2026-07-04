@@ -23,7 +23,7 @@ Evaluator actions: `review`, `suggest-tags`, `judge-preference-strength`.
 | **Anthropic** | **Blocked** (evaluator-only) | Same as OpenAI. |
 | **OpenRouter** | **Route-aware** | Routes to `openai/*` and `anthropic/*` inherit the block; other routes may generate only when that exact route is approved. |
 | **Ollama** (local) | **Off until approved** | Approve a specific model (`outputs_trainable` + `user_approved_generation`). |
-| **Local OpenAI-compatible** | **Off until approved** | A `base_url` can point anywhere, so approve deliberately. |
+| **Local OpenAI-compatible** | **Off until *explicitly acknowledged*** | Host-inferred, so unverifiable (could be a local model OR a proxy fronting a frontier API). Generation approval requires `acknowledge_untrusted_endpoint` **in addition to** `outputs_trainable` + `user_approved_generation`. |
 | Unknown provider | Blocked (evaluator-only) | Safest fallback. |
 
 `requires_human_review` is always true for trainable generation. Every generated
@@ -46,9 +46,15 @@ cannot be identified from the host alone).
 
 **Safety invariants (enforced):**
 - User overrides may only set a safe key allowlist (`outputs_trainable`,
-  `user_approved_generation`, notes, display name). Role and blocking fields are
-  **not** overridable, and the frontier block is re-asserted last — so no
-  override can re-enable generation for OpenAI/Anthropic/frontier routes.
+  `user_approved_generation`, `acknowledge_untrusted_endpoint`, notes, display
+  name). Role and blocking fields are **not** overridable, and the frontier block
+  is re-asserted last — so no override can re-enable generation for
+  OpenAI/Anthropic/frontier routes.
+- A host-inferred `openai_compatible` endpoint can't generate trainable rows on
+  `user_approved_generation` alone — it also needs `acknowledge_untrusted_endpoint`
+  (a conscious "this is a trusted local model, not a frontier proxy"), so a local
+  proxy fronting a frontier API can't be silently approved to launder its outputs
+  into training data.
 - OpenRouter routes must be fully qualified (`vendor/model`). A bare, slash-less
   route id (e.g. `gpt-4o`) cannot be vetted and is treated as frontier — denied.
 - `authorize_action` is default-deny: an action that is neither a known trainable
