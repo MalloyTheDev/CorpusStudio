@@ -46,6 +46,20 @@ dotnet build apps\desktop\CorpusStudio.Desktop.sln
 .\apps\desktop\CorpusStudio.Desktop\bin\Debug\net8.0-windows\CorpusStudio.Desktop.exe
 ```
 
+### Package a standalone build
+
+A self-contained, single-file Windows build (no installed .NET runtime required):
+
+```powershell
+dotnet publish apps\desktop\CorpusStudio.Desktop\CorpusStudio.Desktop.csproj -p:PublishProfile=win-x64
+# -> apps\desktop\CorpusStudio.Desktop\bin\publish\win-x64\CorpusStudio.Desktop.exe
+```
+
+The version comes from `apps\desktop\Directory.Build.props` (single source). The standalone
+`.exe` still needs the local **Python engine** at run time — it is not bundled. If the app
+can't find the engine it shows a "Python engine not found" setup screen (locate the folder or
+set `CORPUS_STUDIO_ENGINE_DIR`) instead of crashing. Bundling a Python runtime is future work.
+
 JSONL imports are previewed against the active schema and only fully valid files
 are appended directly to the active project's `examples.jsonl`. Mixed-validity
 imports can append valid rows after confirmation and save rejected rows under

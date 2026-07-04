@@ -75,6 +75,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceTreeNode.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/OpenWorkspaceDocument.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceFileMetadata.cs`
+- `apps/desktop/CorpusStudio.Desktop/Properties/PublishProfiles/win-x64.pubxml`
 - `apps/desktop/CorpusStudio.Desktop/Services/PythonEngineService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/RecentWorkspaceService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/TrainingProcessRunner.cs`
@@ -128,6 +129,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/TempProjectDirectory.cs`
 - `apps/desktop/CorpusStudio.Desktop.sln`
 - `apps/desktop/CorpusStudio.Desktop.sln.README.md`
+- `apps/desktop/Directory.Build.props`
 - `apps/desktop/README.md`
 - `data/.gitkeep`
 - `docs/ARCHITECTURE.md`
