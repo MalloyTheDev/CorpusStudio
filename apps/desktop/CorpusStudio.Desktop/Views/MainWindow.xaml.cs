@@ -166,8 +166,15 @@ public partial class MainWindow : Window
 
     private void ActivitySettingsButton_Click(object sender, RoutedEventArgs e) => ViewModel.ShowStudio();
 
-    private void ActivitySearchButton_Click(object sender, RoutedEventArgs e) =>
+    private void ActivitySearchButton_Click(object sender, RoutedEventArgs e)
+    {
         ViewModel.ToggleSearchPanel();
+        if (ViewModel.SearchPanelVisible)
+        {
+            // Focus the query box once the panel has laid out so the user can type immediately.
+            Dispatcher.BeginInvoke(new Action(() => SearchQueryBox.Focus()), DispatcherPriority.Input);
+        }
+    }
 
     private void SearchCloseButton_Click(object sender, RoutedEventArgs e) =>
         ViewModel.ToggleSearchPanel();
@@ -184,9 +191,22 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Open the double-clicked search result in the Explorer (switching to the Files
-    /// view so the document tab is visible). Reuses the Explorer's node-open path.</summary>
-    private async void SearchResult_DoubleClick(object sender, MouseButtonEventArgs e)
+    private async void SearchResult_DoubleClick(object sender, MouseButtonEventArgs e) =>
+        await OpenSelectedSearchResultAsync();
+
+    private async void SearchResultsList_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            e.Handled = true;
+            await OpenSelectedSearchResultAsync();
+        }
+    }
+
+    /// <summary>Open the selected search result in the Explorer (switching to the Files view so
+    /// the document tab is visible). Reuses the Explorer's node-open path. Enter and double-click
+    /// both route here.</summary>
+    private async Task OpenSelectedSearchResultAsync()
     {
         if (SearchResultsList.SelectedItem is not WorkspaceSearchMatch match)
         {

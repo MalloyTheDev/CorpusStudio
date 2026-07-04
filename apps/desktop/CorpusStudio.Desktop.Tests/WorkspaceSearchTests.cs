@@ -114,6 +114,25 @@ public sealed class WorkspaceSearchTests : IDisposable
         Assert.EndsWith("…", result.Matches[0].LineText);
     }
 
+    [Fact]
+    public void Search_ComputesHighlightSegmentsAroundMatch()
+    {
+        Write("a.txt", "the quick brown fox");
+        var m = new WorkspaceSearchService().Search(_root, "quick").Matches.Single();
+        Assert.Equal("the ", m.BeforeMatch);
+        Assert.Equal("quick", m.MatchText);
+        Assert.Equal(" brown fox", m.AfterMatch);
+        Assert.Equal(m.LineText, m.BeforeMatch + m.MatchText + m.AfterMatch);
+    }
+
+    [Fact]
+    public void Search_HighlightUsesActualCasingNotTheQuery()
+    {
+        Write("a.txt", "the Quick brown fox");
+        var m = new WorkspaceSearchService().Search(_root, "quick").Matches.Single();
+        Assert.Equal("Quick", m.MatchText); // the real substring, not the query's casing
+    }
+
     // --- view-model ----------------------------------------------------------
 
     [Fact]
