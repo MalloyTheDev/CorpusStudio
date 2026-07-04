@@ -1,8 +1,9 @@
 <Project>
 
   <!-- Single source of truth for the desktop app version + product metadata (v1.2.15).
-       Applies to CorpusStudio.Desktop and its test project. Keep in step with the git tag;
-       the Python engine version (engine/pyproject.toml) is tracked separately (docs item #9). -->
+       Applies to CorpusStudio.Desktop and its test project. The desktop app and the Python
+       engine (engine/pyproject.toml) are versioned in lockstep — bump both together. -->
+
   <PropertyGroup>
     <Version>1.2.15</Version>
     <Product>Corpus Studio</Product>

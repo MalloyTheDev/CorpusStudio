@@ -107,6 +107,8 @@ Backends should own:
 - provider-specific response parsing
 - authentication header construction
 - timeout handling
+- retry with bounded backoff for transient failures (HTTP 429/5xx + connection
+  errors; other 4xx fail fast) — health/model-list probes stay single-attempt
 - health checks
 - stream parsing when enabled
 
