@@ -193,6 +193,15 @@ def artifact_integrity_gate(
     )
 
 
+def _metric_label(metric: str) -> str:
+    """Human-friendly name for an ``EvaluationReport.metric`` value."""
+
+    return {
+        "keyword_overlap": "keyword-overlap",
+        "llm_judge": "LLM-judge",
+    }.get(metric, metric)
+
+
 def regression_gate(
     before: EvaluationReport | None,
     after: EvaluationReport | None,
@@ -204,7 +213,10 @@ def regression_gate(
 
     Trust depends on provenance: if the after-eval targeted the base model (or no
     model id was linked), the comparison is not trustworthy and the gate WARNs
-    with 'unverified linkage' rather than claiming a pass/block.
+    with 'unverified linkage' rather than claiming a pass/block. The two reports
+    must also share a metric — comparing a keyword-overlap baseline against an
+    LLM-judge after-eval mixes non-comparable scales, so a metric mismatch WARNs
+    rather than trusting the delta.
     """
 
     if before is None or after is None:
@@ -221,6 +233,24 @@ def regression_gate(
             "if a report is already linked, repair or regenerate the unreadable file.",
         )
 
+    if before.metric != after.metric:
+        return GateResult(
+            gate_id="regression",
+            name="Training regression",
+            scope=scope,
+            status=GateStatus.WARN,
+            observed=f"before metric '{before.metric}', after metric '{after.metric}'",
+            expected="the baseline and trained-model evals must use the same metric",
+            message=(
+                "Cannot compare regression: the evaluations use different metrics "
+                f"(before={_metric_label(before.metric)}, after={_metric_label(after.metric)}), "
+                "so the score delta is not meaningful."
+            ),
+            repair="Re-run both evaluations with the same scorer (both keyword-overlap "
+            "or both LLM-judge) and re-link the after-eval.",
+        )
+
+    metric_label = _metric_label(after.metric)
     delta = round(after.average_score - before.average_score, 2)
     observed = (
         f"after {after.average_score:.1f} vs before {before.average_score:.1f} (Δ{delta:+.1f})"
@@ -239,7 +269,7 @@ def regression_gate(
                 status=GateStatus.BLOCK,
                 observed=observed,
                 expected="the after-eval must target the trained model, not the base model",
-                message=f"Trained model regressed (keyword-overlap score dropped {abs(delta):.1f}) AND the "
+                message=f"Trained model regressed ({metric_label} score dropped {abs(delta):.1f}) AND the "
                 "linkage is unverified — the after-eval may target the base model; do not promote.",
                 repair="Evaluate the trained adapter (not the base model), re-link, and re-check.",
             )
@@ -263,12 +293,17 @@ def regression_gate(
             status=GateStatus.BLOCK,
             observed=observed,
             expected=f"after >= before - {thresholds.max_regression_score_drop:.1f}",
-            message=f"Trained model regressed: keyword-overlap score dropped {abs(delta):.1f} "
+            message=f"Trained model regressed: {metric_label} score dropped {abs(delta):.1f} "
             f"(tolerance {thresholds.max_regression_score_drop:.1f}).",
             repair="Keep the base model, or retrain/adjust before promoting this run.",
         )
 
     trend = "improved" if delta > 0 else "held within tolerance"
+    caveat = (
+        " (Keyword overlap is a lexical proxy, not a quality judgment.)"
+        if after.metric == "keyword_overlap"
+        else ""
+    )
     return GateResult(
         gate_id="regression",
         name="Training regression",
@@ -276,8 +311,7 @@ def regression_gate(
         status=GateStatus.PASS,
         observed=observed,
         expected=f"after >= before - {thresholds.max_regression_score_drop:.1f}",
-        message=f"No regression: keyword-overlap score {trend} (Δ{delta:+.1f}). "
-        "(Keyword overlap is a lexical proxy, not a quality judgment.)",
+        message=f"No regression: {metric_label} score {trend} (Δ{delta:+.1f})." + caveat,
     )
 
 

@@ -50,6 +50,62 @@ def test_regression_warns_on_missing_link():
     assert "Cannot gate" in result.message
 
 
+# --- metric-aware comparison (Tier-3 hardening) -----------------------------
+
+def _report_metric(model: str, avg: float, metric: str) -> EvaluationReport:
+    return EvaluationReport(
+        dataset="d", model=model, examples_tested=10, average_score=avg,
+        failed_examples=1, metric=metric,
+    )
+
+
+def test_regression_warns_when_metrics_differ():
+    # A keyword-overlap baseline vs an LLM-judge after-eval are non-comparable scales;
+    # the -10 "delta" must not be trusted to block or pass.
+    result = regression_gate(
+        _report_metric("base", 80, "keyword_overlap"),
+        _report_metric("trained", 70, "llm_judge"),
+        THRESHOLDS,
+        provenance_ok=True,
+    )
+    assert result.status == GateStatus.WARN
+    assert "different metrics" in result.message
+    assert "keyword-overlap" in result.message and "LLM-judge" in result.message
+
+
+def test_regression_block_message_uses_actual_metric_label():
+    # Matching llm_judge metric with a real drop -> BLOCK, labelled LLM-judge (not the
+    # old hardcoded "keyword-overlap").
+    result = regression_gate(
+        _report_metric("base", 80, "llm_judge"),
+        _report_metric("trained", 60, "llm_judge"),
+        THRESHOLDS,
+        provenance_ok=True,
+    )
+    assert result.status == GateStatus.BLOCK
+    assert "LLM-judge score dropped" in result.message
+    assert "keyword-overlap" not in result.message
+
+
+def test_regression_pass_caveat_only_for_keyword_overlap():
+    # The lexical-proxy caveat is specific to keyword-overlap; an LLM-judge pass omits it.
+    kw = regression_gate(
+        _report_metric("b", 70, "keyword_overlap"),
+        _report_metric("t", 82, "keyword_overlap"),
+        THRESHOLDS,
+        provenance_ok=True,
+    )
+    judge = regression_gate(
+        _report_metric("b", 70, "llm_judge"),
+        _report_metric("t", 82, "llm_judge"),
+        THRESHOLDS,
+        provenance_ok=True,
+    )
+    assert kw.status == GateStatus.PASS and "lexical proxy" in kw.message
+    assert judge.status == GateStatus.PASS and "lexical proxy" not in judge.message
+    assert "LLM-judge score improved" in judge.message
+
+
 # --- runner + provenance ----------------------------------------------------
 
 def _record(**kwargs) -> TrainingRunRecord:
