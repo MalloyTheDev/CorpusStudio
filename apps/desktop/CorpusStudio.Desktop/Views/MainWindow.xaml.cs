@@ -511,12 +511,26 @@ public partial class MainWindow : Window
 
     private void ExplorerCollapseAll_Click(object sender, RoutedEventArgs e) => ViewModel.Explorer.CollapseAll();
 
-    private void ExplorerSave_Click(object sender, RoutedEventArgs e)
+    private async void ExplorerSave_Click(object sender, RoutedEventArgs e)
     {
+        // Capture the target BEFORE saving (the active doc doesn't change on save, but be safe).
+        var wasDatasetFile = ViewModel.HasActiveProject
+            && ViewModel.Explorer.ActiveDocumentIsDatasetFile(ViewModel.ActiveProjectPath);
+
         var error = ViewModel.Explorer.SaveActiveDocument();
         if (error is not null)
         {
             MessageBox.Show(this, error, "Save", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        // Editing examples.jsonl in the editor changes the dataset — reload it (which invalidates
+        // the stale debt grade) and re-check version integrity, so those badges stop asserting a
+        // verdict the edit just outdated.
+        if (wasDatasetFile && !string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetExamples(_engineService.LoadExamples(ViewModel.ActiveProjectPath));
+            await RefreshDatasetVersionsAsync();
         }
     }
 
