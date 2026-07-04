@@ -37,6 +37,8 @@ MODIFIED = "modified"
 
 # Descriptor files that identify an adapter/model directory, in priority order.
 _DESCRIPTOR_FILES = ("adapter_config.json", "config.json")
+# Weight files whose bytes ARE the model — top-level within an artifact directory.
+_WEIGHT_SUFFIXES = (".safetensors", ".bin", ".gguf", ".pt", ".pth")
 _VALID_ARTIFACT_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
@@ -48,7 +50,13 @@ class ModelArtifactRecord(BaseModel):
     path: str
     kind: str = "adapter"
     status: str = CANDIDATE
+    # Cheap size+mtime fingerprint (descriptor + weight files) — the fast path used by the
+    # artifact LIST. Catches overwrite / resize / add / remove without reading weight bytes.
     fingerprint: str | None = None
+    # sha256 over the weight file BYTES — the byte-exact check used by the promote gate and the
+    # weight card (the enforcement/decision points). None for records registered before it
+    # existed (they fall back to the cheap check).
+    content_hash: str | None = None
     notes: str = ""
 
 
@@ -74,12 +82,24 @@ def _descriptor_file(directory: Path) -> Path | None:
     return files[0] if files else None
 
 
-def compute_fingerprint(path: str) -> str | None:
-    """Cheap, deterministic fingerprint: never hashes weight bytes.
+def _weight_files(directory: Path) -> list[Path]:
+    """Top-level weight files in an artifact directory (sorted for determinism)."""
 
-    File   -> ``"size:mtime_ns"``.
-    Dir    -> ``"<descriptor-name>=size:mtime_ns"`` for its key descriptor file.
-    Returns ``None`` when nothing is readable (so integrity does not cry wolf).
+    return sorted(
+        entry
+        for entry in directory.iterdir()
+        if entry.is_file() and entry.suffix.lower() in _WEIGHT_SUFFIXES
+    )
+
+
+def compute_fingerprint(path: str) -> str | None:
+    """Cheap, deterministic fingerprint: never reads weight bytes (only ``stat``).
+
+    File -> ``"size:mtime_ns"``.
+    Dir  -> the descriptor file AND every top-level weight file as
+    ``"name=size:mtime_ns"`` joined by ``;`` — so an overwritten / resized / added /
+    removed weight is detected (a byte-swap that preserves size AND mtime is not; use
+    :func:`compute_content_hash` for that). Returns ``None`` when nothing is readable.
     """
 
     target = Path(path)
@@ -88,27 +108,89 @@ def compute_fingerprint(path: str) -> str | None:
             stat = target.stat()
             return f"{stat.st_size}:{stat.st_mtime_ns}"
         if target.is_dir():
+            parts: list[str] = []
             descriptor = _descriptor_file(target)
-            if descriptor is None:
-                return None
-            stat = descriptor.stat()
-            return f"{descriptor.name}={stat.st_size}:{stat.st_mtime_ns}"
+            if descriptor is not None:
+                stat = descriptor.stat()
+                parts.append(f"{descriptor.name}={stat.st_size}:{stat.st_mtime_ns}")
+            for weight in _weight_files(target):
+                stat = weight.stat()
+                parts.append(f"{weight.name}={stat.st_size}:{stat.st_mtime_ns}")
+            return ";".join(parts) if parts else None
     except OSError:
         return None
     return None
 
 
+def compute_content_hash(path: str) -> str | None:
+    """Byte-exact sha256 over the weight file BYTES (their names + contents).
+
+    Unlike :func:`compute_fingerprint` this READS the weights, so it detects a byte-swap
+    that preserves size and mtime. It is therefore only used at the promote gate and the
+    weight card — never on the list (which would re-read every artifact's weights on each
+    refresh). Falls back to the descriptor when a directory has no weight files. Returns
+    ``None`` when nothing is readable.
+    """
+
+    target = Path(path)
+    try:
+        if target.is_file():
+            files = [target]
+        elif target.is_dir():
+            files = _weight_files(target)
+            if not files:
+                descriptor = _descriptor_file(target)
+                files = [descriptor] if descriptor is not None else []
+        else:
+            return None
+        if not files:
+            return None
+        digest = hashlib.sha256()
+        for file in files:
+            digest.update(file.name.encode("utf-8"))
+            digest.update(b"\0")
+            with file.open("rb") as handle:
+                while True:
+                    chunk = handle.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+            digest.update(b"\0")
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
 def artifact_integrity(record: ModelArtifactRecord) -> str:
-    """Recompute integrity against current disk state (never persisted)."""
+    """Cheap integrity (size+mtime) against current disk state — used by the LIST. Fast."""
 
     if not os.path.exists(record.path):
         return MISSING
     if record.fingerprint is None:
-        return OK  # could not verify at register time; do not raise false alarms
+        return OK  # never fingerprinted at register time; do not raise a false alarm
     current = compute_fingerprint(record.path)
     if current is None:
-        return OK
+        # We HAD a fingerprint but can't compute one now (weights/descriptor gone while the
+        # path still exists) — that is a change, not "ok".
+        return MODIFIED
     return OK if current == record.fingerprint else MODIFIED
+
+
+def artifact_content_integrity(record: ModelArtifactRecord) -> str:
+    """Byte-exact integrity (reads weight bytes) — used by the promote GATE and weight CARD.
+
+    Detects even a change that preserves size and mtime. Legacy records without a stored
+    ``content_hash`` fall back to the cheap check (so they still catch size/mtime changes and
+    don't cry wolf)."""
+
+    if not os.path.exists(record.path):
+        return MISSING
+    if record.content_hash is None:
+        return artifact_integrity(record)
+    current = compute_content_hash(record.path)
+    if current is None:
+        return MODIFIED
+    return OK if current == record.content_hash else MODIFIED
 
 
 def registry_dir(project_dir: Path | str) -> Path:
@@ -177,6 +259,7 @@ def register_artifact(
         kind=kind or "adapter",
         status=status,
         fingerprint=compute_fingerprint(normalized),
+        content_hash=compute_content_hash(normalized),
         notes=keep_notes,
     )
     save_artifact_record(project_dir, record)

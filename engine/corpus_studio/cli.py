@@ -3,7 +3,7 @@ import json
 import os
 import sqlite3
 import sys
-from typing import Optional
+from typing import Any, Optional
 
 import typer
 from pydantic import ValidationError
@@ -42,6 +42,13 @@ from corpus_studio.exporters.preference_exporter import (
     analyze_preference_pairs,
     drop_degenerate_pairs,
     export_preference,
+)
+from corpus_studio.importers.hf_hub import (
+    HfImportResult,
+    fetch_rows,
+    inspect_dataset,
+    map_rows,
+    suggest_mapping,
 )
 from corpus_studio.importers.jsonl_importer import read_jsonl
 from corpus_studio.importers.jsonl_preview import preview_jsonl_import
@@ -325,6 +332,105 @@ def import_preview(path: Path, schema: str):
 
     report = preview_jsonl_import(path, schema)
     typer.echo(report.model_dump_json(indent=2))
+
+
+@app.command("hf-inspect")
+def hf_inspect(dataset_id: str):
+    """Inspect a public Hugging Face dataset: configs/splits, columns, and license.
+
+    Read-only and public-only (no auth, no upload). Surfaces the license so you
+    can decide whether the data may be used for training BEFORE importing.
+    """
+    try:
+        inspection = inspect_dataset(dataset_id)
+    except (OSError, ValueError) as exc:
+        typer.echo(f"Could not inspect '{dataset_id}': {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(inspection.model_dump_json(indent=2))
+
+
+@app.command("hf-import")
+def hf_import(
+    dataset_id: str,
+    out: Path = typer.Option(..., "--out", help="Staging JSONL path (NEVER examples.jsonl)."),
+    schema: str = typer.Option(..., "--schema", help="Target built-in schema id."),
+    config: str = typer.Option("default", "--config", help="Dataset config name."),
+    split: str = typer.Option("train", "--split", help="Dataset split name."),
+    limit: int = typer.Option(100, "--limit", help="Maximum rows to fetch."),
+    map_: list[str] = typer.Option(
+        [],
+        "--map",
+        help="Column mapping as schema_field=hf_column (repeatable); overrides auto-detect.",
+    ),
+):
+    """Import rows from a public Hugging Face dataset into a STAGING JSONL file.
+
+    Read-only and public-only: no auth, no upload. The engine never writes
+    examples.jsonl — the staging file flows through the normal import-preview /
+    quarantine path so the desktop stays the single writer. Imported data is NOT
+    assumed to be training-licensed; the dataset license is reported.
+    """
+    # The engine must never write the dataset's single source of truth.
+    if out.name == "examples.jsonl":
+        typer.echo(
+            "Refusing to write examples.jsonl: HF import writes a staging file that the "
+            "desktop imports through preview/quarantine.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    try:
+        dataset_schema = load_builtin_schema(schema)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    if limit < 1:
+        typer.echo("--limit must be at least 1.", err=True)
+        raise typer.Exit(code=1)
+
+    # Refuse gated datasets up front (slice 1 is public-only, no auth).
+    try:
+        inspection = inspect_dataset(dataset_id)
+        if inspection.gated:
+            typer.echo(
+                f"'{dataset_id}' is gated (requires access approval); public import only.",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        page = fetch_rows(dataset_id, config, split, limit)
+    except (OSError, ValueError) as exc:
+        typer.echo(f"Could not fetch '{dataset_id}': {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    mapping = suggest_mapping(page.columns, dataset_schema)
+    for pair in map_:
+        field_name, _, column = pair.partition("=")
+        field_name, column = field_name.strip(), column.strip()
+        if not field_name or not column:
+            typer.echo(f"Invalid --map '{pair}'; expected schema_field=hf_column.", err=True)
+            raise typer.Exit(code=1)
+        mapping[field_name] = column
+
+    staged = map_rows(page.rows, mapping)
+    write_jsonl(staged, out)
+
+    schema_field_names = [field.name for field in dataset_schema.fields]
+    result = HfImportResult(
+        dataset_id=dataset_id,
+        config=config,
+        split=split,
+        schema_id=schema,
+        fetched_rows=len(staged),
+        mapping=mapping,
+        unmapped_schema_fields=[name for name in schema_field_names if name not in mapping],
+        unused_columns=[c for c in page.columns if c not in mapping.values()],
+        license=inspection.license,
+        license_note=inspection.license_note,
+        out_path=str(out),
+    )
+    typer.echo(result.model_dump_json(indent=2))
 
 
 @app.command()
@@ -922,9 +1028,38 @@ def artifact_update(
     artifact_id: str = typer.Option(..., "--artifact-id"),
     status: str = typer.Option(..., "--status", help="candidate | kept | rejected."),
 ):
-    """Update an artifact's keep/reject status."""
+    """Update an artifact's keep/reject status.
+
+    A transition to ``kept`` is PROMOTE-GATED in the engine (integrity + source-run
+    regression), so no caller — CLI, desktop, or script — can promote a modified/missing or
+    regressed artifact by bypassing the UI. ``candidate``/``rejected`` are ungated.
+    """
 
     from corpus_studio.training.artifact_registry import update_artifact_status
+
+    if status == "kept":
+        from corpus_studio.gates.models import GateStatus, load_gate_thresholds
+        from corpus_studio.gates.runner import PromoteBlockedError, promote_artifact
+
+        try:
+            record, _report = promote_artifact(
+                project_dir,
+                artifact_id,
+                now=_utc_now_iso(),
+                thresholds=load_gate_thresholds(project_dir),
+            )
+        except PromoteBlockedError as exc:
+            typer.echo("Promote gate blocked keeping this artifact:", err=True)
+            for result in exc.report.results:
+                if result.status == GateStatus.BLOCK:
+                    typer.echo(f"  [{result.name}] {result.message}", err=True)
+            raise typer.Exit(code=2) from exc
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+
+        typer.echo(record.model_dump_json(indent=2))
+        return
 
     try:
         record = update_artifact_status(project_dir, artifact_id, status, now=_utc_now_iso())
@@ -940,7 +1075,7 @@ def _load_artifact_context(project_dir: Path, artifact_id: str):
 
     from corpus_studio.evaluation.reports import EvaluationReport
     from corpus_studio.training.artifact_registry import (
-        artifact_integrity,
+        artifact_content_integrity,
         artifact_path,
         load_artifact_record,
     )
@@ -950,7 +1085,9 @@ def _load_artifact_context(project_dir: Path, artifact_id: str):
     if not path.exists():
         raise FileNotFoundError(f"No artifact '{artifact_id}'.")
     artifact = load_artifact_record(path)
-    integrity = artifact_integrity(artifact)
+    # Byte-exact integrity here: the weight card and the promote gate are the decision points,
+    # so they read the weight bytes. The artifact LIST stays on the cheap size+mtime check.
+    integrity = artifact_content_integrity(artifact)
 
     run = None
     run_path = record_path(project_dir, artifact.run_id)
@@ -1322,10 +1459,23 @@ def export(
     report = validate_jsonl_file(input_path, schema)
     _exit_if_invalid(report)
 
+    # Enforce the export gate BEFORE writing the deliverable: block on PII/secrets (and
+    # empty input / schema). Quality issues (duplicates / low-information) only warn — the
+    # optional cleaning pass handles those. This is what makes "export blocks on PII" true.
+    from corpus_studio.gates.models import GateStatus
+
+    rows = list(read_jsonl(input_path))
+    export_gate = run_export_gates(rows, schema)
+    if export_gate.overall_status == GateStatus.BLOCK:
+        typer.echo("Export blocked by the export gate:", err=True)
+        for gate_result in export_gate.results:
+            if gate_result.status == GateStatus.BLOCK:
+                typer.echo(f"  [{gate_result.name}] {gate_result.message}", err=True)
+        raise typer.Exit(code=2)
+
     warnings: list[str] = []
 
     if dedupe or drop_low_information:
-        rows = list(read_jsonl(input_path))
         kept, clean_result = clean_rows(
             rows,
             dedupe=dedupe,
@@ -1354,7 +1504,7 @@ def export(
     else:
         # Verbatim copy, but still surface remaining duplicates so the quality
         # surfaces are not purely advisory when the deliverable is produced.
-        quality = build_basic_quality_report(list(read_jsonl(input_path)))
+        quality = build_basic_quality_report(rows)
         export_jsonl(input_path, output_path)
         if quality.duplicate_exact_count or quality.duplicate_normalized_count:
             warnings.append(
@@ -1431,7 +1581,27 @@ def arena_run(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
-    report = run_arena(prompts, model_backends, limit=limit, generated_at=_utc_now_iso())
+    # Resolve a policy per generation model (arena responses are non-trainable, so this
+    # authorizes each as an EVALUATION participant) and gate the run — a provider blocked from
+    # the evaluator role cannot generate arena responses.
+    gen_provider = infer_provider_id(backend, base_url)
+    gen_overrides = load_overrides(input_path.parent)
+    gen_policies: dict[str, Any] = {
+        model: resolve_policy(
+            gen_provider,
+            model_id=model,
+            route_id=(model if gen_provider == "openrouter" else None),
+            overrides=gen_overrides,
+        )
+        for model in unique_models
+    }
+    try:
+        report = run_arena(
+            prompts, model_backends, limit=limit, generated_at=_utc_now_iso(), policies=gen_policies
+        )
+    except ProviderPolicyError as exc:
+        typer.echo(f"Provider policy blocked arena generation: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
 
     if judge_model is not None:
         judge_provider = infer_provider_id(judge_backend, judge_base_url)

@@ -84,14 +84,23 @@ public sealed class DatasetVersionRestoreTests
     // --- hollow-undo safety gate (the audit's high-severity data-loss fix) --
 
     [Theory]
-    [InlineData(true, 5, true)]     // rows stored => a real, restorable undo point
-    [InlineData(true, 0, true)]     // empty but stored => fine
-    [InlineData(false, 0, true)]    // 0 rows (empty/unreadable) => nothing to lose => proceed
-    [InlineData(false, 5, false)]   // rows exist but NOT stored => hollow undo => abort the restore
-    public void IsUndoRestorable_GatesHollowUndo(bool rowsStored, int rowCount, bool expected)
+    [InlineData(true, 5, "abc", true, true)]    // rows stored => a real, restorable undo point
+    [InlineData(true, 0, "abc", true, true)]    // empty but stored => fine
+    [InlineData(false, 0, "abc", true, true)]   // genuinely empty (engine gives it a fingerprint) => nothing to lose
+    [InlineData(false, 0, null, false, true)]   // current file missing/fresh => nothing to lose
+    [InlineData(false, 0, null, true, false)]   // present-but-UNREADABLE (0 rows + null fp) => REFUSE (the fix)
+    [InlineData(false, 5, "abc", true, false)]  // rows exist but NOT stored => hollow undo => abort the restore
+    public void IsUndoRestorable_GatesHollowUndo(
+        bool rowsStored, int rowCount, string? contentFingerprint, bool currentDatasetExists, bool expected)
     {
-        var undo = new DatasetVersionRecord { VersionId = "u", RowsStored = rowsStored, RowCount = rowCount };
-        Assert.Equal(expected, PythonEngineService.IsUndoRestorable(undo));
+        var undo = new DatasetVersionRecord
+        {
+            VersionId = "u",
+            RowsStored = rowsStored,
+            RowCount = rowCount,
+            ContentFingerprint = contentFingerprint,
+        };
+        Assert.Equal(expected, PythonEngineService.IsUndoRestorable(undo, currentDatasetExists));
     }
 
     [Fact]

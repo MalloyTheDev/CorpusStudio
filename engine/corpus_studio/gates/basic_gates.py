@@ -71,10 +71,14 @@ def quality_gate(
         )
         messages.append(f"{report.duplicate_exact_count} exact duplicate row(s)")
     if report.duplicate_normalized_count > thresholds.max_normalized_duplicates:
-        statuses.append(GateStatus.WARN)
+        statuses.append(
+            GateStatus.BLOCK if thresholds.block_normalized_duplicates else GateStatus.WARN
+        )
         messages.append(f"{report.duplicate_normalized_count} near-duplicate row(s)")
     if report.low_information_count > thresholds.max_low_information:
-        statuses.append(GateStatus.WARN)
+        statuses.append(
+            GateStatus.BLOCK if thresholds.block_low_information else GateStatus.WARN
+        )
         messages.append(f"{report.low_information_count} low-information row(s)")
     if report.synthetic_pattern_count >= thresholds.warn_synthetic_pattern_issues:
         statuses.append(GateStatus.WARN)

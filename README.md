@@ -224,6 +224,14 @@ backoff; a model that stays down is recorded as a per-response **backend error**
 instead of aborting the whole comparison — here `mistral:7b` returned a 503 while
 `llama3.1:8b` was still fully compared and judged.
 
+![Corpus Studio Import from Hugging Face dialog](docs/screenshots/hf-import.png)
+
+**10 · Import from Hugging Face** — pull rows from a **public** Hub dataset (read-only,
+no auth, no upload). Inspect surfaces the **license** with a "not assumed
+training-licensed" caveat; you map the dataset's columns to the project schema, and the
+staged rows run through the normal import preview / quarantine flow — the desktop stays
+the single writer of `examples.jsonl`. Dependency-light: no `datasets` / `huggingface_hub`.
+
 ## Core Local Loop
 
 Build a local desktop app that supports:
