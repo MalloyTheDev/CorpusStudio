@@ -1471,9 +1471,21 @@ public sealed class PythonEngineService
             ?? throw new InvalidOperationException("The Python engine returned an invalid artifact record.");
     }
 
+    /// <summary>Directly set an artifact's status to <c>candidate</c> or <c>rejected</c> (both
+    /// ungated by design). Promotion to <c>kept</c> is refused here: it must go through the
+    /// gated engine path (<see cref="PromoteArtifactAsync"/> → <c>artifact-update --status kept</c>,
+    /// which runs the promote gate), so this direct C# writer can never bypass that gate.</summary>
     public ModelArtifactRecord UpdateArtifactStatus(string projectPath, string artifactId, string status)
     {
-        if (status is not ("candidate" or "kept" or "rejected"))
+        if (status == "kept")
+        {
+            throw new ArgumentException(
+                "Promoting an artifact to 'kept' must go through the gated engine path "
+                    + "(PromoteArtifactAsync), which runs the promote gate; this direct writer "
+                    + "only sets 'candidate' or 'rejected'.",
+                nameof(status));
+        }
+        if (status is not ("candidate" or "rejected"))
         {
             throw new ArgumentException($"Unknown artifact status '{status}'.", nameof(status));
         }

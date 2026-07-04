@@ -142,4 +142,49 @@ public sealed class ArtifactRegistryTests
         vm.SetArtifactDetail("# Weight Card — abc");
         Assert.Contains("Weight Card", vm.ArtifactDetail);
     }
+
+    // --- promote-gate bypass closed (Tier-3 hardening) -----------------------
+
+    [Fact]
+    public void UpdateArtifactStatus_RefusesKept_MustUseGatedPromote()
+    {
+        // Promotion to 'kept' must go through the gated engine path (PromoteArtifactAsync),
+        // never this direct C# writer — otherwise the promote gate is bypassed. The refusal
+        // happens before any filesystem access, so a dummy path is fine.
+        var service = new PythonEngineService();
+        var ex = Assert.Throws<System.ArgumentException>(
+            () => service.UpdateArtifactStatus("any-project", "any-id", "kept"));
+        Assert.Contains("PromoteArtifactAsync", ex.Message);
+    }
+
+    [Fact]
+    public void UpdateArtifactStatus_RejectsUnknownStatus()
+    {
+        var service = new PythonEngineService();
+        Assert.Throws<System.ArgumentException>(
+            () => service.UpdateArtifactStatus("any-project", "any-id", "bogus"));
+    }
+
+    [Fact]
+    public void UpdateArtifactStatus_StillWritesRejected()
+    {
+        var project = Path.Combine(Path.GetTempPath(), "cs-artifact-" + System.Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(project, "model_artifacts"));
+        try
+        {
+            var record = Record(status: "candidate");
+            var file = Path.Combine(project, "model_artifacts", record.ArtifactId + ".json");
+            File.WriteAllText(file, System.Text.Json.JsonSerializer.Serialize(record));
+
+            var updated = new PythonEngineService().UpdateArtifactStatus(project, record.ArtifactId, "rejected");
+            Assert.Equal("rejected", updated.Status);
+
+            var onDisk = System.Text.Json.JsonSerializer.Deserialize<ModelArtifactRecord>(File.ReadAllText(file));
+            Assert.Equal("rejected", onDisk!.Status);
+        }
+        finally
+        {
+            try { Directory.Delete(project, recursive: true); } catch (IOException) { }
+        }
+    }
 }
