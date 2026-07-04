@@ -1663,11 +1663,25 @@ public sealed class PythonEngineService
     /// A "successful" capture (no exception) is NOT enough: the engine records a
     /// fingerprint-only version with <c>rows_stored=false</c> (exit 0) when the row store
     /// can't be written, and such a version cannot be restored. It is safe to proceed only
-    /// when the undo actually stored its rows, OR the current dataset had nothing to
-    /// preserve (0 rows — empty or unreadable).</summary>
-    public static bool IsUndoRestorable(DatasetVersionRecord undo)
+    /// when the undo actually stored its rows, OR there was genuinely nothing to preserve.
+    /// <para>"Nothing to preserve" is NOT simply <c>RowCount == 0</c>: a present-but-UNREADABLE
+    /// dataset also reports 0 rows (the engine returns a hollow capture with a NULL fingerprint),
+    /// and restoring over it would overwrite recoverable bytes with no way back. So a 0-row undo
+    /// is safe only when the current file is absent, or genuinely empty — which the engine
+    /// records with a real content fingerprint (a null fingerprint means "couldn't read").</para></summary>
+    public static bool IsUndoRestorable(DatasetVersionRecord undo, bool currentDatasetExists)
     {
-        return undo.RowsStored || undo.RowCount == 0;
+        if (undo.RowsStored)
+        {
+            return true;
+        }
+        if (!currentDatasetExists)
+        {
+            return true; // nothing on disk to lose (missing / fresh project)
+        }
+        // File exists: allow only when it is GENUINELY empty (fingerprint present), never when
+        // it is present-but-unreadable (0 rows + null fingerprint).
+        return undo.RowCount == 0 && undo.ContentFingerprint is not null;
     }
 
     /// <summary>Restore a version in place — the app's highest-stakes write. The ordering
@@ -1689,17 +1703,20 @@ public sealed class PythonEngineService
 
         // A non-throwing capture is not proof of a usable undo: the engine records a
         // fingerprint-only version (rows_stored=false, exit 0) when the row store can't be
-        // written. Overwriting the dataset after that would destroy it with no way back, so
-        // refuse when the current dataset had rows but they were not stored.
-        if (!IsUndoRestorable(undo))
+        // written OR when the current dataset was present-but-unreadable. Overwriting the
+        // dataset after that would destroy recoverable bytes with no way back, so refuse
+        // unless the undo is genuinely restorable (or there was nothing to preserve).
+        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+        if (!IsUndoRestorable(undo, File.Exists(examplesPath)))
         {
             throw new InvalidOperationException(
-                $"Refusing to restore: the current dataset ({undo.RowCount} rows) could not be captured for "
-                + "undo (the row store could not be written — likely low disk space or a locked project). "
-                + "Free space or unlock the project and retry. Your dataset was not changed.");
+                "Refusing to restore: the current dataset could not be safely captured for undo — "
+                + "it is present but unreadable/corrupted, or the row store could not be written "
+                + "(low disk space or a locked project). Restoring now would overwrite it with no way "
+                + "back. Fix or remove the current examples.jsonl, or free space/unlock the project, "
+                + "and retry. Your dataset was not changed.");
         }
 
-        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
         string? tempPath = null;
         try
         {
