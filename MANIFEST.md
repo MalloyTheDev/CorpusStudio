@@ -161,6 +161,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/DEBT.md`
 - `docs/DEVELOPMENT_SETUP.md`
 - `docs/EVALUATION_LAB.md`
+- `docs/EVALUATION_SUITES.md`
 - `docs/GATES.md`
 - `docs/IMPORT_EXPORT.md`
 - `docs/LOCAL_FIRST.md`
@@ -240,6 +241,9 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/splitters/__init__.py`
 - `engine/corpus_studio/splitters/leakage.py`
 - `engine/corpus_studio/splitters/random_splitter.py`
+- `engine/corpus_studio/suites/__init__.py`
+- `engine/corpus_studio/suites/models.py`
+- `engine/corpus_studio/suites/runner.py`
 - `engine/corpus_studio/storage/__init__.py`
 - `engine/corpus_studio/storage/index.py`
 - `engine/corpus_studio/storage/project.py`
@@ -274,6 +278,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_e2e_cli_smoke.py`
 - `engine/tests/test_evaluation_report.py`
 - `engine/tests/test_evaluation_scorers.py`
+- `engine/tests/test_evaluation_suites.py`
 - `engine/tests/test_chat_gates.py`
 - `engine/tests/test_export_cleaning.py`
 - `engine/tests/test_gate_cli.py`
