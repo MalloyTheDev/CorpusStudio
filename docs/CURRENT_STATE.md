@@ -56,9 +56,13 @@ Last reconciled: 2026-07-03 (through v1.2 — AI Assist candidate gating, PR #57
 - Evaluation Lab against local Ollama or OpenAI-compatible endpoints: health
   checks, model discovery, report history, two-report comparison, regression
   reruns, tag/failure/score-band summaries, failed-row edit loops, manual
-  scoring, saved failure filters.
-- Multi-model benchmark (`benchmark`): one dataset across several models, ranked,
-  with per-model deltas and the examples every model failed.
+  scoring, saved failure filters. The automatic score is **keyword-overlap recall**
+  (`metric: "keyword_overlap"`) — a lexical proxy, **not** a quality judgment; manual
+  scoring is the trustworthy path and a judge-model scorer (`llm_judge`) is the planned
+  real automatic scorer (see `docs/EVALUATION_LAB.md`).
+- Multi-model benchmark (`benchmark`): one dataset across several models, ranked
+  by the same keyword-overlap score, with per-model deltas and the examples every
+  model failed.
 - Model Arena (`arena-run`): run a prompt suite across several models side by
   side; responses are comparison artifacts, not trainable rows. Optional
   evaluator-only judging (`--judge-model`) scores each response and picks a
@@ -92,8 +96,9 @@ Last reconciled: 2026-07-03 (through v1.2 — AI Assist candidate gating, PR #57
   records directly; a run left `running` whose process is gone reconciles to
   `interrupted` on load. A read-only run history shows past runs in the Training
   tab. A `training_run` **regression gate** (`training-run-gate`) blocks when the
-  trained model regressed vs the baseline and warns with "unverified linkage"
-  when the after-eval targeted the base model. Surfaced by a "Gate run" button.
+  trained model's **keyword-overlap score** dropped vs the baseline (a lexical proxy,
+  not a quality verdict) and warns with "unverified linkage" when the after-eval
+  targeted the base model. Surfaced by a "Gate run" button.
 - A durable **model artifact registry** under `model_artifacts/`
   (`artifact-register`/`-list`/`-update`): the adapters/checkpoints a run produced,
   referenced by path (never moved). Base model + eval resolve live through the

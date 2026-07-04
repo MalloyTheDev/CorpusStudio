@@ -3041,6 +3041,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             [
                 $"Dataset: {result.Report.Dataset}",
                 $"Model: {result.Report.Model}",
+                $"Scoring: {DescribeEvaluationMetric(result.Report.Metric)}",
                 $"Examples tested: {result.Report.ExamplesTested}",
                 $"Average score: {result.Report.AverageScore:0.##}",
                 $"Failed examples: {result.Report.FailedExamples}",
@@ -4799,6 +4800,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         return $"{report.ManuallyScoredExamples} example(s), average {report.AverageManualScore:0.##}";
     }
+
+    /// <summary>Describe the evaluation metric honestly so the score is never read as a
+    /// quality judgment when it is only lexical overlap.</summary>
+    private static string DescribeEvaluationMetric(string? metric) => (metric ?? "keyword_overlap") switch
+    {
+        "llm_judge" => "LLM judge (0-100 quality + rationale)",
+        "keyword_overlap" => "keyword overlap (recall) — a lexical proxy, NOT a quality judgment; "
+            + "confirm with manual scores",
+        _ => metric!,
+    };
 
     private static string FormatTagSummary(EvaluationReport report)
     {

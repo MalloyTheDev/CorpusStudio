@@ -26,11 +26,15 @@ def test_evaluation_report_serializes_cleanly():
         dataset="coding_tutor_v0.1",
         model="qwen2.5-coder:7b",
         results=[result],
+        metric="keyword_overlap",
     )
 
     payload = json.loads(report.model_dump_json())
 
     assert payload["dataset"] == "coding_tutor_v0.1"
+    # The metric defaults to keyword_overlap and is surfaced so the score is never
+    # presented as a quality judgment without saying what it measures.
+    assert payload["metric"] == "keyword_overlap"
     assert payload["examples_tested"] == 1
     assert payload["average_score"] == 80.0
     assert payload["manually_scored_examples"] == 1

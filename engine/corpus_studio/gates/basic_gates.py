@@ -235,8 +235,8 @@ def regression_gate(
                 status=GateStatus.BLOCK,
                 observed=observed,
                 expected="the after-eval must target the trained model, not the base model",
-                message=f"Trained model regressed (score dropped {abs(delta):.1f}) AND the linkage "
-                "is unverified — the after-eval may target the base model; do not promote.",
+                message=f"Trained model regressed (keyword-overlap score dropped {abs(delta):.1f}) AND the "
+                "linkage is unverified — the after-eval may target the base model; do not promote.",
                 repair="Evaluate the trained adapter (not the base model), re-link, and re-check.",
             )
         return GateResult(
@@ -259,7 +259,7 @@ def regression_gate(
             status=GateStatus.BLOCK,
             observed=observed,
             expected=f"after >= before - {thresholds.max_regression_score_drop:.1f}",
-            message=f"Trained model regressed: average score dropped {abs(delta):.1f} "
+            message=f"Trained model regressed: keyword-overlap score dropped {abs(delta):.1f} "
             f"(tolerance {thresholds.max_regression_score_drop:.1f}).",
             repair="Keep the base model, or retrain/adjust before promoting this run.",
         )
@@ -272,7 +272,8 @@ def regression_gate(
         status=GateStatus.PASS,
         observed=observed,
         expected=f"after >= before - {thresholds.max_regression_score_drop:.1f}",
-        message=f"No regression: average score {trend} (Δ{delta:+.1f}).",
+        message=f"No regression: keyword-overlap score {trend} (Δ{delta:+.1f}). "
+        "(Keyword overlap is a lexical proxy, not a quality judgment.)",
     )
 
 
@@ -291,7 +292,7 @@ def eval_score_gate(
         name="Evaluation score",
         scope=scope,
         status=status,
-        observed=f"avg {report.average_score:.1f}, pass rate {pass_rate:.0%} over {tested} example(s)",
+        observed=f"keyword-overlap avg {report.average_score:.1f}, pass rate {pass_rate:.0%} over {tested} example(s)",
         expected=(
             f"avg >= {thresholds.min_eval_average_score:.0f} and "
             f"pass rate >= {thresholds.min_eval_pass_rate:.0%}"
