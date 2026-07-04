@@ -142,7 +142,7 @@ def build_version_card(
     eval_linked = record.eval_report_path is not None
     eval_present = False
     eval_score: float | None = None
-    if eval_linked:
+    if record.eval_report_path is not None:
         report = load_eval_report(record.eval_report_path) if load_eval_report else None
         if report is None:
             warnings.append("Linked evaluation report is missing or unreadable.")
@@ -165,7 +165,7 @@ def build_version_card(
     gate_linked = record.gate_report_path is not None
     gate_present = False
     gate_status: str | None = None
-    if gate_linked:
+    if record.gate_report_path is not None:
         report = load_gate_report(record.gate_report_path) if load_gate_report else None
         if report is None:
             warnings.append("Linked gate report is missing or unreadable.")

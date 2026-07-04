@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # Python engine dependencies (pydantic / typer / orjson + dev tools).
+  - package-ecosystem: "pip"
+    directory: "/engine"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # .NET desktop app + test project NuGet packages.
+  - package-ecosystem: "nuget"
+    directory: "/apps/desktop"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # The GitHub Actions used by the CI workflows themselves.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5

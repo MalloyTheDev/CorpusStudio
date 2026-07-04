@@ -15,7 +15,6 @@ from corpus_studio.training.artifact_registry import (
     load_artifact_record,
     make_artifact_id,
     register_artifact,
-    save_artifact_record,
     update_artifact_status,
 )
 from corpus_studio.training.run_registry import TrainingRunRecord, save_run_record

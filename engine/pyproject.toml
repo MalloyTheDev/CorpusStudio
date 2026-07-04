@@ -16,7 +16,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
-    "ruff>=0.5"
+    "pytest-cov>=5.0",
+    "ruff>=0.5",
+    "mypy>=1.8"
 ]
 
 [project.scripts]
@@ -24,6 +26,13 @@ corpus-studio = "corpus_studio.cli:app"
 
 [tool.ruff]
 line-length = 100
+
+[tool.mypy]
+python_version = "3.11"
+# Third-party stubs (pydantic/typer/orjson) aren't installed in CI; type-check our
+# own package against a pragmatic baseline rather than chasing library internals.
+ignore_missing_imports = true
+files = ["corpus_studio"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

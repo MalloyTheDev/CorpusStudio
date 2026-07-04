@@ -299,7 +299,7 @@ def test_cli_create_list_show_end_to_end(tmp_path: Path):
 def test_cli_show_reflects_drift(tmp_path: Path):
     _write_examples(tmp_path, ROWS)
     created = runner.invoke(app, ["dataset-version-create", str(tmp_path)])
-    version_id = json.loads(created.stdout)["version_id"]
+    assert json.loads(created.stdout)["version_id"]
 
     _write_examples(tmp_path, list(reversed(ROWS)))  # reorder -> drift
     listed = runner.invoke(app, ["dataset-version-list", str(tmp_path)])

@@ -21,7 +21,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Run tests
+      - name: Lint (ruff)
         run: |
           cd engine
-          pytest
+          ruff check .
+
+      - name: Type check (mypy)
+        run: |
+          cd engine
+          mypy
+
+      - name: Run tests with coverage
+        run: |
+          cd engine
+          pytest --cov=corpus_studio --cov-report=term-missing

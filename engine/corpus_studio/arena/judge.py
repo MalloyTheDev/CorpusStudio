@@ -61,7 +61,8 @@ def parse_judgment(prompt_id: str, candidates: dict[str, str], text: str) -> Are
     if data is None:
         return ArenaJudgment(prompt_id=prompt_id, rationale=text.strip()[:300], parsed=False)
 
-    raw_scores = data.get("scores") if isinstance(data.get("scores"), dict) else {}
+    raw = data.get("scores")
+    raw_scores = raw if isinstance(raw, dict) else {}
     scores: dict[str, float] = {}
     for model in candidates:
         value = raw_scores.get(model)
@@ -71,7 +72,7 @@ def parse_judgment(prompt_id: str, candidates: dict[str, str], text: str) -> Are
     winner = data.get("winner")
     if not isinstance(winner, str) or winner not in candidates:
         # Fall back to the highest score when the winner is missing/invalid.
-        winner = max(scores, key=scores.get) if scores else ""
+        winner = max(scores, key=lambda model: scores[model]) if scores else ""
 
     rationale = data.get("rationale")
     return ArenaJudgment(

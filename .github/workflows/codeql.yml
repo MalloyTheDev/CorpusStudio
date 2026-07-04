@@ -1,0 +1,55 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so newly-published advisories are caught even without a push.
+    - cron: "27 4 * * 1"
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Python is interpreted — no build step needed.
+          - language: python
+            runner: ubuntu-latest
+            build-mode: none
+          # C# (WPF, net8.0-windows) must be built on Windows for CodeQL to trace it.
+          - language: csharp
+            runner: windows-latest
+            build-mode: manual
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        if: matrix.language == 'csharp'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Build (C#)
+        if: matrix.language == 'csharp'
+        run: dotnet build apps/desktop/CorpusStudio.Desktop/CorpusStudio.Desktop.csproj -c Release
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

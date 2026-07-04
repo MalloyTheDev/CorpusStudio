@@ -70,18 +70,22 @@ class ProviderPolicy(BaseModel):
 
     # Serialized so any consumer (desktop, tooling) can show the effective
     # decision without re-implementing the role logic.
-    @computed_field
+    # mypy doesn't model pydantic's @computed_field stacked on @property; the
+    # pattern is correct at runtime, so silence the known false positive.
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def generation_allowed(self) -> bool:
         return self.can_generate_trainable()
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def evaluation_allowed(self) -> bool:
         return self.can_evaluate()
 
 
-_EVALUATOR_ONLY = {
+# Typed as dict[str, Any] so it can be splatted into ProviderPolicy(**...) without
+# mypy inferring the heterogeneous literal as dict[str, object].
+_EVALUATOR_ONLY: dict[str, Any] = {
     "allowed_roles": [ProviderRole.EVALUATOR],
     "blocked_roles": [ProviderRole.TRAINABLE_OUTPUT_GENERATOR],
     "outputs_trainable": False,
