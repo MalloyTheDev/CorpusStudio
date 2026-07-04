@@ -73,11 +73,15 @@ def run_suite(
 
     results: list[SuiteCaseResult] = []
     for case in definition.cases:
-        # Honest record of WHAT ran (a case pins a mutable path); best-effort, never faked.
-        try:
-            fingerprint, _ = fingerprint_dataset(case.dataset_path)
-        except Exception:  # noqa: BLE001 - fingerprint is advisory honesty, must not abort a case
-            fingerprint = None
+        # Honest record of WHAT ran. For a path case, fingerprint the file; for a
+        # version-pinned case, the reproducibility record is version_id (echoed below) —
+        # the eval runs the version's VERIFIED reconstruction.
+        fingerprint: str | None = None
+        if case.dataset_path:
+            try:
+                fingerprint, _ = fingerprint_dataset(case.dataset_path)
+            except Exception:  # noqa: BLE001 - fingerprint is advisory honesty, must not abort a case
+                fingerprint = None
 
         thresholds = GateThresholds(
             min_eval_average_score=case.min_score if case.min_score is not None else _DEFAULT_MIN_SCORE,
@@ -92,6 +96,7 @@ def run_suite(
                     case=case.name,
                     model=case.model,
                     metric=case.metric,
+                    version_id=case.version_id,
                     dataset_fingerprint=fingerprint,
                     examples_tested=report.examples_tested,
                     average_score=report.average_score,
@@ -106,6 +111,7 @@ def run_suite(
                     case=case.name,
                     model=case.model,
                     metric=case.metric,
+                    version_id=case.version_id,
                     dataset_fingerprint=fingerprint,
                     error=str(exc) or type(exc).__name__,
                     status="error",

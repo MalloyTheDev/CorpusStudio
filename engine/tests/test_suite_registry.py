@@ -108,7 +108,7 @@ def test_cli_suite_list_empty(tmp_path: Path):
 
 
 def test_cli_suite_run_by_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(cli, "_evaluate_suite_case", lambda case: _report(avg=80))
+    monkeypatch.setattr(cli, "_evaluate_suite_case", lambda case, project_dir=None: _report(avg=80))
     runner.invoke(app, ["suite-init", "s", "--project-dir", str(tmp_path)])
     result = runner.invoke(app, ["suite-run", "s", "--project-dir", str(tmp_path)])
     assert result.exit_code == 0, result.output
@@ -125,7 +125,7 @@ def test_cli_suite_run_name_without_project_dir_exits_1(tmp_path: Path):
 
 
 def test_cli_suite_run_by_path_still_works(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(cli, "_evaluate_suite_case", lambda case: _report(avg=80))
+    monkeypatch.setattr(cli, "_evaluate_suite_case", lambda case, project_dir=None: _report(avg=80))
     suite = tmp_path / "s.json"
     suite.write_text(
         json.dumps({"name": "s", "cases": [{"name": "c", "schema": "instruction", "dataset_path": "d", "model": "m"}]}),

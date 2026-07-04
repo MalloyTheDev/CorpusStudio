@@ -30,7 +30,10 @@ class SuiteCase(BaseModel):
     # The dataset schema id (instruction/chat/…). Aliased to "schema" in the JSON;
     # the field is named schema_id to avoid shadowing pydantic's BaseModel.schema.
     schema_id: str = Field(alias="schema")
-    dataset_path: str
+    # Exactly one dataset source: a mutable path, OR a pinned dataset version_id
+    # (resolved to its VERIFIED reconstruction at run time — true reproducibility).
+    dataset_path: str | None = None
+    version_id: str | None = None
     model: str
     backend: SuiteBackend = "ollama"
     base_url: str | None = None
@@ -50,9 +53,15 @@ class SuiteCase(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _judge_required_for_llm_judge(self) -> "SuiteCase":
+    def _validate_case(self) -> "SuiteCase":
         if self.metric == "llm_judge" and not self.judge_model:
             raise ValueError(f"Case '{self.name}': metric 'llm_judge' requires a judge_model.")
+        has_path = bool(self.dataset_path)
+        has_version = bool(self.version_id)
+        if has_path == has_version:  # neither, or both
+            raise ValueError(
+                f"Case '{self.name}': set exactly one of dataset_path or version_id."
+            )
         return self
 
 
@@ -72,6 +81,7 @@ class SuiteCaseResult(BaseModel):
     case: str
     model: str
     metric: str
+    version_id: str | None = None  # the pinned version this case ran (reproducibility record)
     dataset_fingerprint: str | None = None  # content fingerprint at run time (honest record of WHAT ran)
     examples_tested: int | None = None
     average_score: float | None = None

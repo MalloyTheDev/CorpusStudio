@@ -283,6 +283,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_evaluation_scorers.py`
 - `engine/tests/test_evaluation_suites.py`
 - `engine/tests/test_suite_registry.py`
+- `engine/tests/test_suite_version_pin.py`
 - `engine/tests/test_chat_gates.py`
 - `engine/tests/test_export_cleaning.py`
 - `engine/tests/test_gate_cli.py`

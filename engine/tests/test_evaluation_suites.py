@@ -150,7 +150,7 @@ def test_save_suite_report(tmp_path: Path):
 # --- CLI (monkeypatched evaluate_case — no live backend) --------------------
 
 def test_cli_suite_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(cli, "_evaluate_suite_case", lambda case: _report(avg=80))
+    monkeypatch.setattr(cli, "_evaluate_suite_case", lambda case, project_dir=None: _report(avg=80))
     suite = tmp_path / "s.json"
     suite.write_text(
         json.dumps({"name": "s", "cases": [{"name": "c", "schema": "instruction", "dataset_path": "d", "model": "m"}]}),
@@ -165,7 +165,7 @@ def test_cli_suite_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_cli_suite_run_strict_exits_2_on_block(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(cli, "_evaluate_suite_case", lambda case: _report(avg=20))  # 20 < 70 -> block
+    monkeypatch.setattr(cli, "_evaluate_suite_case", lambda case, project_dir=None: _report(avg=20))  # 20 < 70 -> block
     suite = tmp_path / "s.json"
     suite.write_text(
         json.dumps({"name": "s", "cases": [{"name": "c", "schema": "instruction", "dataset_path": "d", "model": "m"}]}),
