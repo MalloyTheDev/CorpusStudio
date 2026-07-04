@@ -940,6 +940,54 @@ public sealed class PythonEngineService
             ?? throw new InvalidOperationException("The Python engine returned an invalid import preview.");
     }
 
+    /// <summary>Inspect a public Hugging Face dataset (configs/splits, columns, license).
+    /// Read-only; no auth or upload.</summary>
+    public async Task<HfDatasetInspection> HfInspectAsync(string datasetId)
+    {
+        var output = await RunEngineCommandAsync("hf-inspect", datasetId);
+        return JsonSerializer.Deserialize<HfDatasetInspection>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid HF inspection.");
+    }
+
+    /// <summary>Fetch + map a public Hugging Face dataset into a STAGING JSONL file (never
+    /// examples.jsonl — the caller runs the staging file through the normal import-preview
+    /// flow, so the desktop stays the single writer).</summary>
+    public async Task<HfImportResult> HfImportAsync(
+        string datasetId,
+        string schemaId,
+        string outPath,
+        string config,
+        string split,
+        int limit,
+        IReadOnlyDictionary<string, string> mapping
+    )
+    {
+        var arguments = new List<string>
+        {
+            "hf-import",
+            datasetId,
+            "--schema",
+            schemaId,
+            "--out",
+            outPath,
+            "--config",
+            config,
+            "--split",
+            split,
+            "--limit",
+            limit.ToString(CultureInfo.InvariantCulture),
+        };
+        foreach (var pair in mapping)
+        {
+            arguments.Add("--map");
+            arguments.Add($"{pair.Key}={pair.Value}");
+        }
+
+        var output = await RunEngineCommandAsync(arguments.ToArray());
+        return JsonSerializer.Deserialize<HfImportResult>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid HF import result.");
+    }
+
     public async Task<QualityReport> BuildQualityReportAsync(string projectPath)
     {
         var examplesPath = Path.Combine(projectPath, "examples.jsonl");
