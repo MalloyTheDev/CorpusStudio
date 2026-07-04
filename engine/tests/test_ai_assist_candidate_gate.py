@@ -14,7 +14,21 @@ import pytest
 from corpus_studio.ai_assist.assistant import run_ai_assist
 from corpus_studio.gates.models import GateStatus
 from corpus_studio.model_backends.base import BackendGenerateResponse
-from corpus_studio.providers.policy import ProviderPolicyError, resolve_policy
+from corpus_studio.providers.policy import (
+    ProviderPolicy,
+    ProviderPolicyError,
+    ProviderRole,
+    resolve_policy,
+)
+
+# A generation-approved local provider (also evaluator-capable, since the helper runs both
+# trainable and review actions) — the trainable path now fails closed without one.
+_APPROVED = ProviderPolicy(
+    provider_id="local",
+    allowed_roles=[ProviderRole.TRAINABLE_OUTPUT_GENERATOR, ProviderRole.EVALUATOR],
+    outputs_trainable=True,
+    user_approved_generation=True,
+)
 
 
 def _backend_returning(suggested_rows):
@@ -39,7 +53,7 @@ def _backend_returning(suggested_rows):
     return FakeBackend()
 
 
-def _run(suggested_rows, *, action="draft-example", policy=None, backend=None):
+def _run(suggested_rows, *, action="draft-example", policy=_APPROVED, backend=None):
     return run_ai_assist(
         schema_id="instruction",
         action=action,

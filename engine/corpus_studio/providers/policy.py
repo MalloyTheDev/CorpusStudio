@@ -333,29 +333,45 @@ def authorize_evaluation(policy: ProviderPolicy) -> None:
         )
 
 
-def authorize_action(policy: ProviderPolicy, action: str) -> None:
-    """Raise ``ProviderPolicyError`` if ``action`` is not permitted for ``policy``.
-
-    Trainable-generating actions require a generation-approved policy; all other
-    (evaluator/critic) actions require the evaluator role.
-    """
-
+def _policy_label(policy: ProviderPolicy) -> str:
     label = policy.provider_id
     if policy.route_id:
         label += f" route '{policy.route_id}'"
     elif policy.model_id:
         label += f" model '{policy.model_id}'"
+    return label
+
+
+def authorize_action(policy: ProviderPolicy | None, action: str) -> None:
+    """Raise ``ProviderPolicyError`` if ``action`` is not permitted for ``policy``.
+
+    Trainable-generating actions require a generation-approved policy; all other
+    (evaluator/critic) actions require the evaluator role.
+
+    A trainable action with **no policy** FAILS CLOSED: a missing policy is an
+    unverified provider, and trainable data must never be generated without an
+    explicitly approved one. Evaluator actions with no policy are permitted — they
+    create no trainable data, and the CLI always resolves a policy in practice.
+    """
 
     # Default-deny: an action that is neither a known trainable nor a known
     # evaluator action must not fall through to the permissive evaluator path.
     if action not in TRAINABLE_ACTIONS and action not in EVALUATOR_ACTIONS:
+        who = _policy_label(policy) if policy is not None else "the provider"
         raise ProviderPolicyError(
-            f"{label} was asked to run unrecognized action '{action}'; "
+            f"{who} was asked to run unrecognized action '{action}'; "
             "only explicitly categorized trainable/evaluator actions are permitted."
         )
 
     if is_trainable_action(action):
+        if policy is None:
+            raise ProviderPolicyError(
+                f"Trainable-generating action '{action}' requires an explicit, "
+                "generation-approved provider policy, but none was resolved (fail-closed). "
+                "Trainable candidates still require human review before they can be saved."
+            )
         if not policy.can_generate_trainable():
+            label = _policy_label(policy)
             if ProviderRole.TRAINABLE_OUTPUT_GENERATOR in policy.blocked_roles:
                 reason = "this provider is evaluator-only by default and is blocked from trainable generation"
             else:
@@ -367,7 +383,8 @@ def authorize_action(policy: ProviderPolicy, action: str) -> None:
                 f"{label} may not run trainable-generating action '{action}': {reason}. "
                 "Trainable candidates still require human review before they can be saved."
             )
-    elif not policy.can_evaluate():
+    elif policy is not None and not policy.can_evaluate():
         raise ProviderPolicyError(
-            f"{label} may not run evaluator action '{action}': the evaluator role is not allowed."
+            f"{_policy_label(policy)} may not run evaluator action '{action}': "
+            "the evaluator role is not allowed."
         )
