@@ -80,3 +80,26 @@ def test_findings_sorted_high_severity_first():
         [{"text": "email x@y.com and key AKIAIOSFODNN7EXAMPLE"}]
     )
     assert report.pii_findings[0].severity == "high"
+
+
+# --- item 12: Luhn-valid non-cards (IMEIs, order numbers) must not flag as cards -----
+
+def test_luhn_valid_imei_is_not_flagged_as_card():
+    # 490154203237518 is a Luhn-valid 15-digit IMEI, but matches no card brand's IIN +
+    # length (only Amex is 15 digits, and it starts 34/37) — it must not block export.
+    assert _luhn_valid("490154203237518") is True
+    report = build_basic_quality_report([{"text": "device imei 490154203237518 in logs"}])
+    assert "credit_card" not in _kinds(report)
+
+
+def test_luhn_valid_order_number_is_not_flagged_as_card():
+    # A Luhn-valid 16-digit run that starts with 12 (no brand IIN) is not a card.
+    assert _luhn_valid("1234567890123452") is True
+    report = build_basic_quality_report([{"text": "order 1234567890123452 shipped"}])
+    assert "credit_card" not in _kinds(report)
+
+
+def test_real_amex_card_still_flagged():
+    # Canonical 15-digit Amex test number (starts 37, Luhn-valid) — still detected.
+    report = build_basic_quality_report([{"text": "amex 378282246310005 on file"}])
+    assert "credit_card" in _kinds(report)

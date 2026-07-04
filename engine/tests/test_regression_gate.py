@@ -85,6 +85,20 @@ def test_run_gate_warns_when_no_after_model():
     assert report.overall_status == GateStatus.WARN  # can't verify provenance
 
 
+def test_run_gate_rejects_spoofed_after_eval_label():
+    # SPOOF: the label claims "trained-adapter" and the score improved (95 > 80), but the
+    # linked report actually evaluated the BASE model. Before the fix this passed as a
+    # trained-vs-base improvement; provenance must now be unverified.
+    reports = {"before.json": _report("base-model", 80), "after.json": _report("base-model", 95)}
+    record = _record(
+        before_eval_path="before.json",
+        after_eval_path="after.json",
+        after_eval_model="trained-adapter",  # label disagrees with the report's model
+    )
+    report = run_training_run_gate(record, lambda p: reports.get(p), THRESHOLDS)
+    assert report.overall_status == GateStatus.WARN  # provenance mismatch -> not a trusted pass
+
+
 # --- CLI --------------------------------------------------------------------
 
 def test_cli_training_run_gate(tmp_path: Path):

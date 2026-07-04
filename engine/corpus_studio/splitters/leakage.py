@@ -64,7 +64,10 @@ def detect_split_leakage(
         if len(group["splits"]) < 2:
             continue
         total = sum(group["splits"].values())
-        rows_shared += total
+        # Count only the copies that cross a split boundary — everything beyond the split
+        # that holds the most copies. Summing `total` double-counts within-split duplicates,
+        # which are not leakage (the largest split is the group's "home").
+        rows_shared += total - max(group["splits"].values())
         leaks.append(
             SplitLeakage(
                 splits=sorted(group["splits"].keys()),

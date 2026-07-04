@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Globalization;
+using System.IO;
 using System.Threading;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -510,12 +511,26 @@ public partial class MainWindow : Window
 
     private void ExplorerCollapseAll_Click(object sender, RoutedEventArgs e) => ViewModel.Explorer.CollapseAll();
 
-    private void ExplorerSave_Click(object sender, RoutedEventArgs e)
+    private async void ExplorerSave_Click(object sender, RoutedEventArgs e)
     {
+        // Capture the target BEFORE saving (the active doc doesn't change on save, but be safe).
+        var wasDatasetFile = ViewModel.HasActiveProject
+            && ViewModel.Explorer.ActiveDocumentIsDatasetFile(ViewModel.ActiveProjectPath);
+
         var error = ViewModel.Explorer.SaveActiveDocument();
         if (error is not null)
         {
             MessageBox.Show(this, error, "Save", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        // Editing examples.jsonl in the editor changes the dataset — reload it (which invalidates
+        // the stale debt grade) and re-check version integrity, so those badges stop asserting a
+        // verdict the edit just outdated.
+        if (wasDatasetFile && !string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetExamples(_engineService.LoadExamples(ViewModel.ActiveProjectPath));
+            await RefreshDatasetVersionsAsync();
         }
     }
 
@@ -642,6 +657,79 @@ public partial class MainWindow : Window
         }
 
         await PreviewAndImportJsonlAsync(dialog.FileName);
+    }
+
+    private async void ImportFromHuggingFaceButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            MessageBox.Show(
+                this,
+                "Create or select a dataset project before importing.",
+                "Corpus Studio",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information
+            );
+            return;
+        }
+
+        // Map HF columns to the ACTIVE project's schema so imported rows match the project.
+        IReadOnlyList<DatasetSchema> schemas;
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            schemas = await _engineService.GetSchemasAsync();
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetImportError(ex.Message);
+            return;
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
+
+        var schema = schemas.FirstOrDefault(s => s.Id == ViewModel.ActiveSchemaId);
+        if (schema is null)
+        {
+            MessageBox.Show(
+                this,
+                $"The active project's schema ('{ViewModel.ActiveSchemaId}') is not a built-in schema, so Hugging Face import can't map to it.",
+                "Import from Hugging Face",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information
+            );
+            return;
+        }
+
+        var dialog = new HfImportWindow(_engineService, schema.Id, schema.Name, schema.Fields) { Owner = this };
+        if (dialog.ShowDialog() != true || dialog.Result is null)
+        {
+            return;
+        }
+
+        // Hand the staging file to the SAME preview/confirm/append+quarantine flow as any
+        // JSONL import (the desktop is the single writer of examples.jsonl), then clean up.
+        var staging = dialog.Result.StagingPath;
+        try
+        {
+            await PreviewAndImportJsonlAsync(staging);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(staging))
+                {
+                    File.Delete(staging);
+                }
+            }
+            catch (IOException)
+            {
+                // best-effort temp cleanup
+            }
+        }
     }
 
     private void ExportCenterButton_Click(object sender, RoutedEventArgs e)
@@ -817,6 +905,11 @@ public partial class MainWindow : Window
             $"Imported {result.ImportedCount} row(s).",
         };
 
+        if (result.SkippedDuplicateCount > 0)
+        {
+            lines.Add($"Skipped {result.SkippedDuplicateCount} duplicate row(s) already in the dataset.");
+        }
+
         if (result.QuarantinedCount > 0)
         {
             lines.Add($"Quarantined {result.QuarantinedCount} rejected row(s).");
@@ -889,6 +982,17 @@ public partial class MainWindow : Window
             );
 
             ViewModel.SetExamples(_engineService.LoadExamples(ViewModel.ActiveProjectPath));
+            ViewModel.MarkDraftClean(); // the draft is now persisted — no longer unsaved work
+
+            // If this save repaired a quarantined row, clear that record so it doesn't orphan.
+            var retried = ViewModel.TakePendingRetryItem();
+            if (retried is not null)
+            {
+                _engineService.RemoveImportQuarantineItem(retried);
+                ViewModel.SetImportQuarantineItems(
+                    _engineService.LoadImportQuarantineItems(ViewModel.ActiveProjectPath));
+            }
+
             await RefreshQualityAsync();
             MessageBox.Show(
                 this,
@@ -2469,7 +2573,7 @@ public partial class MainWindow : Window
             Mouse.OverrideCursor = Cursors.Wait;
             ViewModel.SetBusy("Promote-gating artifact...");
 
-            // The promote gate is the enforcement point: a block refuses the keep.
+            // Preview the promote gate so the user sees the verdict/reason...
             var report = await _engineService.GateArtifactAsync(projectPath, selected.Record.ArtifactId);
             var allowed = ViewModel.ApplyPromoteGate(report);
             if (!allowed)
@@ -2477,7 +2581,9 @@ public partial class MainWindow : Window
                 return;
             }
 
-            _engineService.UpdateArtifactStatus(projectPath, selected.Record.ArtifactId, "kept");
+            // ...then write through the ENGINE, which re-enforces the gate authoritatively — the
+            // keep can never bypass it (a block throws and is surfaced below).
+            await _engineService.PromoteArtifactAsync(projectPath, selected.Record.ArtifactId);
             RefreshArtifacts();
         }
         catch (Exception ex)
@@ -2893,6 +2999,24 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
+        if (ViewModel.HasUnsavedWork)
+        {
+            var unsavedChoice = MessageBox.Show(
+                this,
+                "You have unsaved changes (an edited draft or open documents). "
+                + "Close Corpus Studio and discard them?",
+                "Unsaved changes",
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Warning,
+                MessageBoxResult.Cancel
+            );
+            if (unsavedChoice != MessageBoxResult.OK)
+            {
+                e.Cancel = true;
+                return;
+            }
+        }
+
         if (!ViewModel.IsTrainingRunning)
         {
             return;
@@ -3718,12 +3842,41 @@ public partial class MainWindow : Window
         return true;
     }
 
+    private bool _suppressProjectSelectionChange;
+
     private async void ProjectsListBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
-        if (ViewModel.SelectedProject is not null)
+        if (_suppressProjectSelectionChange || ViewModel.SelectedProject is null)
         {
-            await LoadProjectAsync(ViewModel.SelectedProject);
+            return;
         }
+
+        // Guard unsaved work before the switch discards it (the switch resets the draft and
+        // clears open documents). On cancel, revert the selection to the previous project.
+        if (ViewModel.HasUnsavedWork)
+        {
+            var choice = MessageBox.Show(
+                this,
+                "You have unsaved changes (an edited draft or open documents). "
+                + "Switch projects and discard them?",
+                "Unsaved changes",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No
+            );
+            if (choice != MessageBoxResult.Yes)
+            {
+                var previous = e.RemovedItems.Count > 0
+                    ? e.RemovedItems[0] as DatasetProjectListItem
+                    : null;
+                _suppressProjectSelectionChange = true;
+                ViewModel.SelectedProject = previous; // reverts the ListBox; re-fire is suppressed
+                _suppressProjectSelectionChange = false;
+                return;
+            }
+        }
+
+        await LoadProjectAsync(ViewModel.SelectedProject);
     }
 
     private async Task LoadProjectAsync(DatasetProjectListItem project)
