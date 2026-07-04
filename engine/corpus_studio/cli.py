@@ -658,24 +658,79 @@ def _evaluate_suite_case(case: "SuiteCase") -> "EvaluationReport":
     )
 
 
-@app.command("suite-run")
-def suite_run(
-    suite_path: Path,
-    project_dir: Optional[Path] = typer.Option(None, "--project-dir", help="Write the report under suite_reports/."),
-    strict: bool = typer.Option(False, "--strict", help="Exit 2 when the suite verdict is block (CI/release gating)."),
+@app.command("suite-init")
+def suite_init(
+    name: str,
+    project_dir: Path = typer.Option(Path("."), "--project-dir", help="Project directory (registry is evaluation_suites/)."),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing suite of this name."),
 ):
-    """Run a file-driven evaluation suite: each case runs the existing eval + evaluation gate,
-    and the report rolls up PER METRIC with an aggregate pass/warn/block verdict. Advisory by
-    default (exit 0; the verdict is in the report); --strict exits 2 on a block. Each case is a
-    LIVE backend evaluation."""
+    """Scaffold an example evaluation suite at evaluation_suites/<name>.json for you to edit."""
 
-    from corpus_studio.gates.models import GateStatus
-    from corpus_studio.suites.runner import load_suite_definition, run_suite, save_suite_report
+    from corpus_studio.suites.registry import scaffold_suite
 
     try:
-        definition = load_suite_definition(suite_path)
-    except (ValueError, json.JSONDecodeError, OSError) as exc:
-        typer.echo(f"Invalid suite definition: {exc}", err=True)
+        path = scaffold_suite(project_dir, name, force=force)
+    except (ValueError, FileExistsError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Created suite '{name}' at {path}. Edit its cases, then run: suite-run {name} --project-dir <dir>")
+
+
+@app.command("suite-list")
+def suite_list(
+    project_dir: Path = typer.Option(Path("."), "--project-dir", help="Project directory (registry is evaluation_suites/)."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the suite list as JSON."),
+):
+    """List the evaluation suites registered under evaluation_suites/."""
+
+    from corpus_studio.suites.registry import list_suite_definitions
+
+    summaries = list_suite_definitions(project_dir)
+    if as_json:
+        typer.echo(json.dumps([summary.model_dump() for summary in summaries], indent=2))
+        return
+    if not summaries:
+        typer.echo("No suites defined. Create one with: suite-init <name>")
+        return
+    for summary in summaries:
+        if summary.valid:
+            typer.echo(f"{summary.name} — {summary.case_count} case(s)")
+        else:
+            typer.echo(f"{summary.name} — invalid: {summary.error}")
+
+
+@app.command("suite-run")
+def suite_run(
+    suite: str,
+    project_dir: Optional[Path] = typer.Option(None, "--project-dir", help="Registry + report dir (evaluation_suites/, suite_reports/)."),
+    strict: bool = typer.Option(False, "--strict", help="Exit 2 when the suite verdict is block (CI/release gating)."),
+):
+    """Run an evaluation suite by file path OR by registered name. If SUITE is an existing file
+    it is loaded as a path; otherwise it is a registered suite name resolved under
+    evaluation_suites/ (requires --project-dir). Each case runs the existing eval + evaluation
+    gate and the report rolls up PER METRIC. Advisory by default; --strict exits 2 on a block.
+    Each case is a LIVE backend evaluation."""
+
+    from corpus_studio.gates.models import GateStatus
+    from corpus_studio.suites.registry import load_suite_by_name
+    from corpus_studio.suites.runner import load_suite_definition, run_suite, save_suite_report
+
+    suite_file = Path(suite)
+    try:
+        if suite_file.is_file():
+            definition = load_suite_definition(suite_file)
+        elif project_dir is None:
+            typer.echo(
+                f"'{suite}' is not a file. Pass --project-dir to run a registered suite by name, "
+                "or give a suite file path.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        else:
+            definition = load_suite_by_name(project_dir, suite)
+    except (ValueError, FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+        typer.echo(f"Cannot load suite: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
     typer.echo(

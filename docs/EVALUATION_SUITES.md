@@ -69,6 +69,31 @@ A suite **PASS** means every case cleared its threshold — **not** that the mod
 (keyword-overlap is lexical, not a quality judgment). Running a suite makes live model
 calls; it is only ever user-invoked, never automatic.
 
+## Registering suites (run by name)
+
+Suites can live in the project as first-class files under `evaluation_suites/<name>.json`
+instead of loose paths:
+
+```
+python -m corpus_studio.cli suite-init release-gate     # scaffold evaluation_suites/release-gate.json
+# …edit its cases…
+python -m corpus_studio.cli suite-list                  # release-gate — 2 case(s)
+python -m corpus_studio.cli suite-run release-gate --project-dir . --strict
+```
+
+- **`suite-init <name> [--project-dir .] [--force]`** — writes an example definition to
+  `evaluation_suites/<name>.json` for you to edit. **Refuses to overwrite** an existing
+  suite unless `--force`.
+- **`suite-list [--project-dir .] [--json]`** — lists registered suites (name + case
+  count). A malformed file is shown as `invalid`, never crashing the listing.
+- **`suite-run <suite>`** takes a **file path** (as before) **or** a registered **name**:
+  if the argument isn't an existing file it's resolved to `evaluation_suites/<name>.json`
+  (needs `--project-dir`); an unknown name exits `1`.
+
+The suite `name` is validated (`letters, digits, . _ -`) and the filename stem is the
+registry key, so a name can never escape `evaluation_suites/`. There is no edit/delete
+command — edit the JSON directly, or `rm` the file.
+
 ## Not in M1
 
 No suite registry / list / history, no desktop surface, no trend over time, no

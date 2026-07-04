@@ -243,6 +243,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/splitters/random_splitter.py`
 - `engine/corpus_studio/suites/__init__.py`
 - `engine/corpus_studio/suites/models.py`
+- `engine/corpus_studio/suites/registry.py`
 - `engine/corpus_studio/suites/runner.py`
 - `engine/corpus_studio/storage/__init__.py`
 - `engine/corpus_studio/storage/index.py`
@@ -279,6 +280,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_evaluation_report.py`
 - `engine/tests/test_evaluation_scorers.py`
 - `engine/tests/test_evaluation_suites.py`
+- `engine/tests/test_suite_registry.py`
 - `engine/tests/test_chat_gates.py`
 - `engine/tests/test_export_cleaning.py`
 - `engine/tests/test_gate_cli.py`
