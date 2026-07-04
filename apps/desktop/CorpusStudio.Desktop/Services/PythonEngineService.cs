@@ -1460,6 +1460,17 @@ public sealed class PythonEngineService
             ?? throw new InvalidOperationException("The Python engine returned an invalid gate report.");
     }
 
+    /// <summary>Promote (keep) an artifact through the ENGINE, which enforces the promote gate
+    /// on the status write — so a keep can't bypass integrity/regression checks. Throws (with the
+    /// gate's message) when the engine blocks the promotion.</summary>
+    public async Task<ModelArtifactRecord> PromoteArtifactAsync(string projectPath, string artifactId)
+    {
+        var output = await RunEngineCommandAsync(
+            "artifact-update", projectPath, "--artifact-id", artifactId, "--status", "kept");
+        return JsonSerializer.Deserialize<ModelArtifactRecord>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid artifact record.");
+    }
+
     public ModelArtifactRecord UpdateArtifactStatus(string projectPath, string artifactId, string status)
     {
         if (status is not ("candidate" or "kept" or "rejected"))

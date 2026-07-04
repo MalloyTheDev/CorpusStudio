@@ -2559,7 +2559,7 @@ public partial class MainWindow : Window
             Mouse.OverrideCursor = Cursors.Wait;
             ViewModel.SetBusy("Promote-gating artifact...");
 
-            // The promote gate is the enforcement point: a block refuses the keep.
+            // Preview the promote gate so the user sees the verdict/reason...
             var report = await _engineService.GateArtifactAsync(projectPath, selected.Record.ArtifactId);
             var allowed = ViewModel.ApplyPromoteGate(report);
             if (!allowed)
@@ -2567,7 +2567,9 @@ public partial class MainWindow : Window
                 return;
             }
 
-            _engineService.UpdateArtifactStatus(projectPath, selected.Record.ArtifactId, "kept");
+            // ...then write through the ENGINE, which re-enforces the gate authoritatively — the
+            // keep can never bypass it (a block throws and is surfaced below).
+            await _engineService.PromoteArtifactAsync(projectPath, selected.Record.ArtifactId);
             RefreshArtifacts();
         }
         catch (Exception ex)
