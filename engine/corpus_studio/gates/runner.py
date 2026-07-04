@@ -153,7 +153,9 @@ def _regression_inputs(
     """Resolve (before, after, provenance_ok) for a run's linked eval reports.
 
     Provenance holds only when the after-eval declared a model that is not the
-    base model — so a base-vs-base comparison is not trusted.
+    base model AND the recorded ``after_eval_model`` label matches the linked
+    report's own ``model`` — so a base-vs-base comparison, or an after-eval report
+    that actually evaluated a different model than the label claims, is not trusted.
     """
 
     before = load_report(run.before_eval_path) if run.before_eval_path else None
@@ -166,6 +168,11 @@ def _regression_inputs(
             provenance_ok = False  # base model unrecorded -> can't verify the target
         elif run.after_eval_model == run.base_model:
             provenance_ok = False  # after-eval targeted the base model
+        elif run.after_eval_model != after.model:
+            # The operator-supplied label disagrees with the model the linked report
+            # actually evaluated — the "trained-vs-base" claim cannot be trusted (a
+            # base-vs-base eval could be relabeled as the trained model to spoof a pass).
+            provenance_ok = False
     return before, after, provenance_ok
 
 
