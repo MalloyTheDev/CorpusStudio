@@ -78,7 +78,15 @@ def run_export_gates(
     """
 
     base = thresholds or GateThresholds()
-    export_thresholds = base.model_copy(update={"block_exact_duplicates": False})
+    # Export blocks only on empty/schema/PII; quality counts warn regardless of the
+    # project's dataset-scope block knobs (the export command has a cleaning pass).
+    export_thresholds = base.model_copy(
+        update={
+            "block_exact_duplicates": False,
+            "block_normalized_duplicates": False,
+            "block_low_information": False,
+        }
+    )
     validation = _validate_rows(rows, schema_id)
     quality = build_basic_quality_report(rows)
     results = [
