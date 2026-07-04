@@ -12,7 +12,11 @@ from corpus_studio.providers.overrides import (
     load_overrides,
     revoke_generation,
 )
-from corpus_studio.providers.policy import ProviderPolicyError, resolve_policy
+from corpus_studio.providers.policy import (
+    ProviderPolicyError,
+    authorize_action,
+    resolve_policy,
+)
 
 runner = CliRunner()
 
@@ -133,3 +137,52 @@ def test_cli_ai_assist_blocks_openai_generation(tmp_path: Path):
     )
     # Blocked by policy before any provider call (exit code 2), no network used.
     assert result.exit_code == 2
+
+
+# --- item 9c: host-inferred openai_compatible needs an explicit acknowledgment -----------
+
+_OAI_COMPAT_KEY = "openai_compatible/model:local-model"
+
+
+def test_openai_compatible_generation_needs_explicit_acknowledgment():
+    # user_approved_generation is NOT enough for an unverifiable OpenAI-compatible endpoint
+    # (it could front a frontier API): generation stays blocked without the acknowledgment.
+    no_ack = resolve_policy(
+        "openai_compatible",
+        model_id="local-model",
+        overrides={_OAI_COMPAT_KEY: {"outputs_trainable": True, "user_approved_generation": True}},
+    )
+    assert no_ack.can_generate_trainable() is False
+
+    acknowledged = resolve_policy(
+        "openai_compatible",
+        model_id="local-model",
+        overrides={
+            _OAI_COMPAT_KEY: {
+                "outputs_trainable": True,
+                "user_approved_generation": True,
+                "acknowledge_untrusted_endpoint": True,
+            }
+        },
+    )
+    assert acknowledged.can_generate_trainable() is True
+
+
+def test_openai_compatible_without_ack_refuses_draft_with_actionable_message():
+    policy = resolve_policy(
+        "openai_compatible",
+        model_id="local-model",
+        overrides={_OAI_COMPAT_KEY: {"outputs_trainable": True, "user_approved_generation": True}},
+    )
+    with pytest.raises(ProviderPolicyError, match="acknowledge_untrusted_endpoint"):
+        authorize_action(policy, "draft-example")
+
+
+def test_ollama_generation_does_not_need_the_acknowledgment():
+    # Ollama is a specific known local runtime, not an arbitrary endpoint — approval unchanged.
+    approved = resolve_policy(
+        "ollama",
+        model_id="llama3",
+        overrides={"ollama/model:llama3": {"outputs_trainable": True, "user_approved_generation": True}},
+    )
+    assert approved.can_generate_trainable() is True

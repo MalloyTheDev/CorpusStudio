@@ -52,6 +52,11 @@ class ProviderPolicy(BaseModel):
     safety_notes: str = ""
     default_policy_source: str = "builtin"
     user_approved_generation: bool = False
+    # A host-inferred ``openai_compatible`` endpoint is unverifiable — it could be a trusted
+    # local model OR a proxy fronting a frontier API. Generation approval for it additionally
+    # requires this explicit acknowledgment (vouching it is a trusted local model), so a
+    # frontier proxy can't be silently approved to launder outputs into training data.
+    acknowledge_untrusted_endpoint: bool = False
 
     def can_generate_trainable(self) -> bool:
         """True only when this policy is explicitly cleared to generate trainable rows."""
@@ -60,7 +65,12 @@ class ProviderPolicy(BaseModel):
             return False
         if ProviderRole.TRAINABLE_OUTPUT_GENERATOR not in self.allowed_roles:
             return False
-        return self.outputs_trainable and self.user_approved_generation
+        if not (self.outputs_trainable and self.user_approved_generation):
+            return False
+        # An unverifiable OpenAI-compatible endpoint needs the extra explicit acknowledgment.
+        if self.provider_id == "openai_compatible" and not self.acknowledge_untrusted_endpoint:
+            return False
+        return True
 
     def can_evaluate(self) -> bool:
         return (
@@ -210,6 +220,7 @@ _OVERRIDE_ALLOWED_KEYS = frozenset(
     {
         "outputs_trainable",
         "user_approved_generation",
+        "acknowledge_untrusted_endpoint",
         "license_or_terms_note",
         "safety_notes",
         "display_name",
@@ -374,6 +385,18 @@ def authorize_action(policy: ProviderPolicy | None, action: str) -> None:
             label = _policy_label(policy)
             if ProviderRole.TRAINABLE_OUTPUT_GENERATOR in policy.blocked_roles:
                 reason = "this provider is evaluator-only by default and is blocked from trainable generation"
+            elif (
+                policy.provider_id == "openai_compatible"
+                and policy.outputs_trainable
+                and policy.user_approved_generation
+                and not policy.acknowledge_untrusted_endpoint
+            ):
+                reason = (
+                    "this is a host-inferred OpenAI-compatible endpoint, which could be a "
+                    "trusted local model OR a proxy fronting a frontier API; set "
+                    "'acknowledge_untrusted_endpoint: true' in the override to vouch it is a "
+                    "trusted local model before generating trainable rows"
+                )
             else:
                 reason = (
                     "this model is not generation-approved; approve it explicitly "
