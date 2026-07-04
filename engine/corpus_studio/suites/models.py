@@ -97,3 +97,13 @@ class SuiteReport(BaseModel):
     per_metric: list[SuiteMetricRollup] = Field(default_factory=list)  # per-metric roll-up, never folded
     overall_status: GateStatus = GateStatus.PASS  # worst per-case; an errored case blocks the suite
     summary: str = ""
+
+
+class SuiteSummary(BaseModel):
+    """One row in `suite-list`: a registered suite's filename-stem key + case count. A
+    malformed registry file is surfaced as valid=False with an error, never a crash."""
+
+    name: str  # the registry key = the filename stem
+    case_count: int = 0
+    valid: bool = True
+    error: str | None = None
