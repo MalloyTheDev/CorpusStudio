@@ -85,17 +85,80 @@ public sealed class PythonEngineService
         }
     }
 
-    private readonly string _repositoryRoot;
-    private readonly string _engineDirectory;
-    private readonly string _pythonExecutable;
-    private readonly IReadOnlyDictionary<string, string> _localEnvironment;
+    private string _repositoryRoot = string.Empty;
+    private string _engineDirectory = string.Empty;
+    private string _pythonExecutable = "python";
+    private IReadOnlyDictionary<string, string> _localEnvironment = new Dictionary<string, string>();
+
+    /// <summary>Whether the Python engine tree was located. When false, engine calls are
+    /// refused with a clear message instead of crashing, and the desktop shows a setup
+    /// screen. Never throws from the constructor (a missing engine is an expected,
+    /// recoverable state for a distributed build).</summary>
+    public bool IsEngineAvailable { get; private set; }
+
+    /// <summary>Why the engine is unavailable (null when available).</summary>
+    public string? EngineUnavailableReason { get; private set; }
 
     public PythonEngineService()
     {
-        _repositoryRoot = FindRepositoryRoot();
+        TryReinitialize();
+    }
+
+    /// <summary>Re-run the default engine resolution (repo-root walk + CORPUS_STUDIO_ENGINE_DIR).
+    /// Sets <see cref="IsEngineAvailable"/> and returns the result. Used at startup and by the
+    /// setup screen's Retry.</summary>
+    public bool TryReinitialize()
+    {
+        try
+        {
+            _repositoryRoot = FindRepositoryRoot();
+            _localEnvironment = LoadLocalEnvironment(_repositoryRoot);
+            _engineDirectory = ResolveEngineDirectory(_repositoryRoot, _localEnvironment);
+            _pythonExecutable = ResolvePythonExecutable(_engineDirectory);
+            IsEngineAvailable = true;
+            EngineUnavailableReason = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            IsEngineAvailable = false;
+            EngineUnavailableReason = ex.Message;
+            return false;
+        }
+    }
+
+    /// <summary>Point the service at a user-picked folder — either the engine directory itself
+    /// (contains <c>corpus_studio/cli.py</c>) or a repo root containing <c>engine/</c>. Flips
+    /// <see cref="IsEngineAvailable"/> to true on success.</summary>
+    public bool TryLocateEngine(string candidateDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(candidateDirectory) || !Directory.Exists(candidateDirectory))
+        {
+            return false;
+        }
+
+        string? engineDir = null;
+        if (File.Exists(Path.Combine(candidateDirectory, "corpus_studio", "cli.py")))
+        {
+            engineDir = candidateDirectory;
+        }
+        else if (File.Exists(Path.Combine(candidateDirectory, "engine", "corpus_studio", "cli.py")))
+        {
+            engineDir = Path.Combine(candidateDirectory, "engine");
+        }
+
+        if (engineDir is null)
+        {
+            return false;
+        }
+
+        _engineDirectory = engineDir;
+        _repositoryRoot = Directory.GetParent(engineDir)?.FullName ?? engineDir;
         _localEnvironment = LoadLocalEnvironment(_repositoryRoot);
-        _engineDirectory = ResolveEngineDirectory(_repositoryRoot, _localEnvironment);
         _pythonExecutable = ResolvePythonExecutable(_engineDirectory);
+        IsEngineAvailable = true;
+        EngineUnavailableReason = null;
+        return true;
     }
 
     public async Task<IReadOnlyList<DatasetSchema>> GetSchemasAsync()
@@ -2489,6 +2552,13 @@ public sealed class PythonEngineService
         params string[] arguments
     )
     {
+        if (!IsEngineAvailable)
+        {
+            throw new InvalidOperationException(
+                "The Python engine is not available. "
+                + (EngineUnavailableReason ?? "Locate the engine folder to continue."));
+        }
+
         var startInfo = new ProcessStartInfo
         {
             FileName = _pythonExecutable,
