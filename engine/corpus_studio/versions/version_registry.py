@@ -347,6 +347,7 @@ def capture_dataset(
                 existing.add(rid)
                 try:
                     if store_handle is None:
+                        assert store_target is not None  # store_rows guarantees a target
                         store_target.parent.mkdir(parents=True, exist_ok=True)
                         store_handle = store_target.open("a", encoding="utf-8")
                     store_handle.write(store_line(rid, row))

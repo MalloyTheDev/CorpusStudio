@@ -6,6 +6,8 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `.env.example`
 - `.github/ISSUE_TEMPLATE/bug_report.md`
 - `.github/ISSUE_TEMPLATE/feature_request.md`
+- `.github/dependabot.yml`
+- `.github/workflows/codeql.yml`
 - `.github/workflows/desktop-tests.yml`
 - `.github/workflows/engine-tests.yml`
 - `.gitignore`
@@ -255,6 +257,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_cleaners.py`
 - `engine/tests/test_cli.py`
 - `engine/tests/test_dataset_card.py`
+- `engine/tests/test_e2e_cli_smoke.py`
 - `engine/tests/test_evaluation_report.py`
 - `engine/tests/test_evaluation_scorers.py`
 - `engine/tests/test_export_cleaning.py`

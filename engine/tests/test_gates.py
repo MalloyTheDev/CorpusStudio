@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from corpus_studio.evaluation.reports import EvaluationExampleResult, EvaluationReport
-from corpus_studio.gates.models import GateReport, GateScope, GateStatus, GateThresholds
+from corpus_studio.gates.models import GateScope, GateStatus, GateThresholds
 from corpus_studio.gates.runner import (
     load_gate_report,
     run_dataset_gates,
