@@ -2417,6 +2417,102 @@
                             </Grid>
                         </Grid>
                     </TabItem>
+                    <TabItem x:Name="SuitesTab" Header="Suites">
+                        <Grid Margin="16,14">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <StackPanel Grid.Row="0">
+                                <TextBlock Text="Evaluation Suites" FontSize="18" FontWeight="Bold" Foreground="#0F172A" />
+                                <TextBlock Text="Run a reusable set of evaluation cases as one unit. Create a suite, edit its cases in Files, then Run — each case is a live backend evaluation. Verdicts case structure + score thresholds, not model quality."
+                                           Foreground="#475569" TextWrapping="Wrap" Margin="0,4,0,8" />
+                                <TextBlock AutomationProperties.AutomationId="SuitesStatusTextBlock"
+                                           Text="{Binding SuitesStatus, Mode=OneWay}" Foreground="#334155"
+                                           TextWrapping="Wrap" Margin="0,0,0,8" />
+                            </StackPanel>
+                            <WrapPanel Grid.Row="1" Margin="0,0,0,8" VerticalAlignment="Center">
+                                <TextBox x:Name="NewSuiteNameBox" Width="180" Height="30" VerticalContentAlignment="Center"
+                                         AutomationProperties.AutomationId="NewSuiteNameTextBox" Padding="6,0" Margin="0,0,8,0" />
+                                <Button AutomationProperties.AutomationId="NewSuiteButton" Content="New"
+                                        ToolTip="Scaffold evaluation_suites/&lt;name&gt;.json — then edit it in Files"
+                                        Margin="0,0,8,0" Click="NewSuiteButton_Click" />
+                                <Button AutomationProperties.AutomationId="RunSuiteButton" Content="Run"
+                                        ToolTip="Run the selected suite (live backend evaluations)"
+                                        IsEnabled="{Binding CanRunSuite}" Margin="0,0,8,0" Click="RunSuiteButton_Click" />
+                                <Button AutomationProperties.AutomationId="RefreshSuitesButton" Content="Refresh"
+                                        Click="RefreshSuitesButton_Click" />
+                            </WrapPanel>
+                            <Grid Grid.Row="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="0.9*" />
+                                    <ColumnDefinition Width="1.1*" />
+                                </Grid.ColumnDefinitions>
+                                <ListBox Grid.Column="0"
+                                         AutomationProperties.AutomationId="SuitesListBox"
+                                         ItemsSource="{Binding Suites}"
+                                         SelectedItem="{Binding SelectedSuite, Mode=TwoWay}"
+                                         DisplayMemberPath="DisplayLabel"
+                                         FontFamily="Consolas" FontSize="12" />
+                                <!-- report panel -->
+                                <Grid Grid.Column="1" Margin="12,0,0,0">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <!-- overall verdict badge -->
+                                    <StackPanel Grid.Row="0" Orientation="Horizontal"
+                                                Visibility="{Binding HasSuiteReport, Converter={StaticResource BoolToVis}}">
+                                        <Border Background="{Binding SuiteOverallColor}" CornerRadius="4" Padding="10,3">
+                                            <TextBlock Text="{Binding SuiteOverallStatus}" Foreground="White" FontWeight="Bold" FontSize="12" />
+                                        </Border>
+                                        <TextBlock Text="{Binding SuiteReportSummary}" Foreground="#334155"
+                                                   VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <!-- empty / not-run-yet state -->
+                                    <TextBlock Grid.Row="0" Text="{Binding SuiteReportSummary}" Foreground="#64748B"
+                                               TextWrapping="Wrap"
+                                               Visibility="{Binding HasSuiteReport, Converter={StaticResource InverseBoolToVis}}" />
+                                    <!-- per-metric roll-up -->
+                                    <TextBlock Grid.Row="1" Text="Per metric" FontWeight="SemiBold" Foreground="#64748B"
+                                               FontSize="11" Margin="0,10,0,3"
+                                               Visibility="{Binding HasSuiteReport, Converter={StaticResource BoolToVis}}" />
+                                    <ItemsControl Grid.Row="2" ItemsSource="{Binding SuiteMetricRows}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding DisplayLabel}" FontFamily="Consolas"
+                                                           FontSize="12" Foreground="#334155" Margin="0,1" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <!-- per-case rows -->
+                                    <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" Margin="0,8,0,0">
+                                        <ItemsControl ItemsSource="{Binding SuiteCaseRows}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="#F1F5F9" BorderThickness="0,0,0,1" Padding="0,4">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <Border Background="{Binding StatusColor}" CornerRadius="3" Padding="5,1" Margin="0,0,8,0" VerticalAlignment="Center">
+                                                                <TextBlock Text="{Binding Status}" Foreground="White" FontSize="10" />
+                                                            </Border>
+                                                            <TextBlock Text="{Binding CaseLine}" FontFamily="Consolas" FontSize="12"
+                                                                       Foreground="#1E293B" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                    <TextBlock Grid.Row="4" Text="{Binding SuiteHonestyNote}" Foreground="#94A3B8"
+                                               FontSize="11" FontStyle="Italic" TextWrapping="Wrap" Margin="0,8,0,0" />
+                                </Grid>
+                            </Grid>
+                        </Grid>
+                    </TabItem>
                     <TabItem Header="Versions">
                         <Grid Margin="16,14">
                             <Grid.RowDefinitions>

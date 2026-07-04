@@ -1146,6 +1146,87 @@ public partial class MainWindow : Window
         }
     }
 
+    // ---- Evaluation Suites tab (v1.3 M2) ---------------------------------------------
+
+    private async void RefreshSuitesButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetSuitesError("Create or select a dataset project first.");
+            return;
+        }
+        try
+        {
+            ViewModel.IsSuitesBusy = true;
+            ViewModel.ApplySuites(await _engineService.ListSuitesAsync(ViewModel.ActiveProjectPath));
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetSuitesError(ex.Message);
+        }
+        finally
+        {
+            ViewModel.IsSuitesBusy = false;
+        }
+    }
+
+    private async void NewSuiteButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.SetSuitesError("Create or select a dataset project first.");
+            return;
+        }
+        var name = NewSuiteNameBox.Text?.Trim() ?? string.Empty;
+        if (name.Length == 0)
+        {
+            ViewModel.SetSuitesError("Enter a suite name to create.");
+            return;
+        }
+        try
+        {
+            ViewModel.IsSuitesBusy = true;
+            await _engineService.NewSuiteAsync(ViewModel.ActiveProjectPath, name);
+            NewSuiteNameBox.Clear();
+            ViewModel.ApplySuites(await _engineService.ListSuitesAsync(ViewModel.ActiveProjectPath));
+            ViewModel.SetSuitesError($"Created suite '{name}'. Open evaluation_suites/{name}.json in Files to edit its cases.");
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetSuitesError(ex.Message);
+        }
+        finally
+        {
+            ViewModel.IsSuitesBusy = false;
+        }
+    }
+
+    private async void RunSuiteButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.CanRunSuite || ViewModel.SelectedSuite is not { } suite
+            || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            return;
+        }
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.IsSuitesBusy = true;
+            ViewModel.SetBusy($"Running suite '{suite.Name}' (live backend evaluations)...");
+            ViewModel.ApplySuiteReport(await _engineService.RunSuiteAsync(ViewModel.ActiveProjectPath, suite.Name));
+        }
+        catch (Exception ex)
+        {
+            ViewModel.SetSuitesError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            ViewModel.IsSuitesBusy = false;
+            ViewModel.ClearBusy();
+        }
+    }
+
     private async Task RefreshProviderPoliciesAsync()
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))

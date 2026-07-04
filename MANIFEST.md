@@ -72,6 +72,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/ValidationIssueNavigationItem.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/ValidationReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/RecentWorkspaceRecord.cs`
+- `apps/desktop/CorpusStudio.Desktop/Models/SuiteReport.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceFileKind.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceProjectManifest.cs`
 - `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceSearchResult.cs`
@@ -142,6 +143,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceSystemTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceViewLayerTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceExplorerViewModelTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/SuitesTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceSearchTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceOpenRoutingTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceWizardViewModelTests.cs`
