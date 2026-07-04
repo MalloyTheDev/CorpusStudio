@@ -1428,10 +1428,23 @@ def export(
     report = validate_jsonl_file(input_path, schema)
     _exit_if_invalid(report)
 
+    # Enforce the export gate BEFORE writing the deliverable: block on PII/secrets (and
+    # empty input / schema). Quality issues (duplicates / low-information) only warn — the
+    # optional cleaning pass handles those. This is what makes "export blocks on PII" true.
+    from corpus_studio.gates.models import GateStatus
+
+    rows = list(read_jsonl(input_path))
+    export_gate = run_export_gates(rows, schema)
+    if export_gate.overall_status == GateStatus.BLOCK:
+        typer.echo("Export blocked by the export gate:", err=True)
+        for gate_result in export_gate.results:
+            if gate_result.status == GateStatus.BLOCK:
+                typer.echo(f"  [{gate_result.name}] {gate_result.message}", err=True)
+        raise typer.Exit(code=2)
+
     warnings: list[str] = []
 
     if dedupe or drop_low_information:
-        rows = list(read_jsonl(input_path))
         kept, clean_result = clean_rows(
             rows,
             dedupe=dedupe,
@@ -1460,7 +1473,7 @@ def export(
     else:
         # Verbatim copy, but still surface remaining duplicates so the quality
         # surfaces are not purely advisory when the deliverable is produced.
-        quality = build_basic_quality_report(list(read_jsonl(input_path)))
+        quality = build_basic_quality_report(rows)
         export_jsonl(input_path, output_path)
         if quality.duplicate_exact_count or quality.duplicate_normalized_count:
             warnings.append(
