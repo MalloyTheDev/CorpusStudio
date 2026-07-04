@@ -365,6 +365,49 @@ def test_eval_run_command_uses_backend_and_writes_report_without_real_network(
     assert written_report == report
 
 
+def test_eval_run_with_judge_model_uses_llm_judge_metric(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    input_path = tmp_path / "instruction.jsonl"
+    write_rows(
+        input_path,
+        [{"instruction": "Explain variables.", "input": "", "output": "A variable stores a value."}],
+    )
+
+    class AnswerBackend:
+        def generate(self, request):
+            return BackendGenerateResponse(text="A named box holding a value.", model_name="fake-model")
+
+    class JudgeBackend:
+        def generate(self, request):
+            return BackendGenerateResponse(
+                text='{"score": 88, "rationale": "equivalent meaning"}', model_name="judge-model"
+            )
+
+    # The judge and the model-under-test resolve to different fake backends by model name.
+    monkeypatch.setattr(
+        cli,
+        "_build_backend",
+        lambda **kw: JudgeBackend() if kw.get("model") == "judge-model" else AnswerBackend(),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "eval-run", str(input_path), "instruction",
+            "--model", "fake-model",
+            "--judge-model", "judge-model",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.output)
+    assert report["metric"] == "llm_judge"
+    assert report["average_score"] == 88.0
+    assert report["results"][0]["rationale"] == "equivalent meaning"
+
+
 def test_ai_assist_command_uses_backend_and_returns_review_required_suggestion(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -186,10 +186,14 @@ Trustworthy scoring comes from two places:
 
 - **Manual scoring** — per-example `manual_score` / `manual_notes` (`average_manual_score`
   on the report). Always available.
-- **Judge-model scoring** (`metric: "llm_judge"`, planned/opt-in) — reuses the
-  evaluator-only judge (`arena/judge.py`, provider-policy enforced) to score 0–100 with a
-  rationale, using a local or explicitly-approved evaluator model. This is the real
-  automatic scorer; keyword overlap remains the offline/no-judge default.
+- **Judge-model scoring** (`metric: "llm_judge"`) — opt-in via
+  `eval-run --judge-model <model> [--judge-backend … --judge-base-url … --judge-api-key …]`.
+  An evaluator model scores each answer 0–100 with a `rationale` (stored per result). The
+  judge provider must be **evaluator-authorized** by provider policy (so OpenAI/Anthropic
+  are permitted as judges, local models fine); a run with no `--judge-model` makes no cloud
+  call and stays on keyword overlap. Unparseable judge output is flagged
+  (`judge_unparseable`, score 0) rather than crashing the run. *(Engine + CLI shipped;
+  desktop Evaluation-tab wiring is a fast follow-up.)*
 
 ## Current Desktop MVP
 

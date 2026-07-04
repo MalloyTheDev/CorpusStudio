@@ -8,6 +8,7 @@ from corpus_studio.evaluation.reports import (
     EvaluationRunSettings,
 )
 from corpus_studio.evaluation.scoring import score_text_overlap
+from corpus_studio.evaluation.scorers import KeywordOverlapScorer, Scorer
 from corpus_studio.model_backends.base import BackendGenerateRequest, ModelBackend
 
 
@@ -120,9 +121,15 @@ def run_evaluation(
     examples: list[EvaluationDatasetExample],
     backend: ModelBackend,
     limit: int | None = None,
+    scorer: Scorer | None = None,
 ) -> EvaluationReport:
-    """Run examples through a backend and return a JSON-serializable report."""
+    """Run examples through a backend and return a JSON-serializable report.
 
+    ``scorer`` selects the automatic metric; it defaults to keyword-overlap recall (offline,
+    no judge). Pass an ``LlmJudgeScorer`` to score with an evaluator model instead.
+    """
+
+    active_scorer: Scorer = scorer if scorer is not None else KeywordOverlapScorer()
     selected_examples = examples[:limit] if limit is not None else examples
     results: list[EvaluationExampleResult] = []
     for example in selected_examples:
@@ -132,17 +139,18 @@ def run_evaluation(
                 messages=example.messages,
             )
         )
-        score = score_text_overlap(example.expected_output, response.text)
+        scored = active_scorer.score(example.prompt, example.expected_output, response.text)
         results.append(
             EvaluationExampleResult(
                 example_id=example.example_id,
                 prompt=example.prompt,
                 expected_output=example.expected_output,
                 model_output=response.text,
-                score=score,
-                passed=score >= config.score_threshold,
+                score=scored.score,
+                passed=scored.score >= config.score_threshold,
                 tags=example.tags or config.tags,
-                notes=_score_failure_note(score, config.score_threshold),
+                notes=_score_failure_note(scored.score, config.score_threshold),
+                rationale=scored.rationale,
             )
         )
 
@@ -151,6 +159,7 @@ def run_evaluation(
         model=config.model,
         results=results,
         run_settings=config.to_report_settings(),
+        metric=active_scorer.metric,
     )
 
 
