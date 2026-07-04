@@ -212,4 +212,21 @@ public sealed class ImportDedupeAndQuarantineTests
 
         Assert.Single(Directory.EnumerateFiles(quarantineDir, "*_rejected.jsonl"));
     }
+
+    // --- auto-capture a version after import (closes the "silent import" gap) ----------
+
+    [Fact]
+    public void ShouldAutoCapture_OnlyWhenRowsWereAdded()
+    {
+        Assert.True(new ImportCommitResult(ImportedCount: 3, QuarantinedCount: 0, QuarantinePath: null).ShouldAutoCapture);
+        // all duplicates skipped -> nothing changed -> no snapshot
+        Assert.False(new ImportCommitResult(ImportedCount: 0, QuarantinedCount: 0, QuarantinePath: null, SkippedDuplicateCount: 4).ShouldAutoCapture);
+    }
+
+    [Fact]
+    public void AutoCaptureLabel_DescribesTheImport()
+    {
+        Assert.Equal("After import (+5 rows)",
+            new ImportCommitResult(ImportedCount: 5, QuarantinedCount: 0, QuarantinePath: null).AutoCaptureLabel);
+    }
 }
