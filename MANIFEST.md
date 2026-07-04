@@ -134,6 +134,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `data/.gitkeep`
 - `docs/ARCHITECTURE.md`
 - `docs/AI_ASSIST_LAB.md`
+- `docs/CROSS_PLATFORM_ASSESSMENT.md`
 - `docs/CURRENT_STATE.md`
 - `docs/DATASET_CARD.md`
 - `docs/DATA_MODEL.md`
