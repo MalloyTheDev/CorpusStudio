@@ -2305,7 +2305,7 @@
                                            FontWeight="SemiBold"
                                            Foreground="#334155" />
                                 <TextBox AutomationProperties.AutomationId="ArenaPromptsTextBox"
-                                         Text="{Binding ArenaPromptsInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding Arena.ArenaPromptsInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                          AcceptsReturn="True"
                                          MinHeight="120"
                                          Margin="0,4,0,8"
@@ -2315,7 +2315,7 @@
                                            FontWeight="SemiBold"
                                            Foreground="#334155" />
                                 <TextBox AutomationProperties.AutomationId="ArenaModelsTextBox"
-                                         Text="{Binding ArenaModelsInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding Arena.ArenaModelsInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                          AcceptsReturn="True"
                                          MinHeight="48"
                                          Margin="0,4,0,8"
@@ -2324,7 +2324,7 @@
                                            FontWeight="SemiBold"
                                            Foreground="#334155" />
                                 <TextBox AutomationProperties.AutomationId="ArenaJudgeModelTextBox"
-                                         Text="{Binding ArenaJudgeModelInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding Arena.ArenaJudgeModelInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                          Margin="0,4,0,8"
                                          VerticalContentAlignment="Center" />
                                 <Button Style="{StaticResource PrimaryButtonStyle}"
@@ -2335,7 +2335,7 @@
 
                             <TextBox Grid.Column="1"
                                      AutomationProperties.AutomationId="ArenaSummaryTextBox"
-                                     Text="{Binding ArenaSummary, Mode=OneWay}"
+                                     Text="{Binding Arena.ArenaSummary, Mode=OneWay}"
                                      IsReadOnly="True"
                                      FontFamily="Consolas"
                                      FontSize="12"

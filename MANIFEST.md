@@ -88,8 +88,11 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceDocumentService.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/MainWindowViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/StartCenterViewModel.cs`
+- `apps/desktop/CorpusStudio.Desktop/ViewModels/Tabs/ArenaViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/Tabs/DebtViewModel.cs`
+- `apps/desktop/CorpusStudio.Desktop/ViewModels/Tabs/IArenaViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/Tabs/IDebtViewModel.cs`
+- `apps/desktop/CorpusStudio.Desktop/ViewModels/ViewModelBase.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/WorkspaceExplorerViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/ViewModels/WorkspaceWizardViewModel.cs`
 - `apps/desktop/CorpusStudio.Desktop/Views/MainWindow.xaml`

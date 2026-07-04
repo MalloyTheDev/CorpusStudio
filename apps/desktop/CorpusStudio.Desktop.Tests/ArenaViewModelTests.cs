@@ -1,5 +1,5 @@
 using CorpusStudio.Desktop.Models;
-using CorpusStudio.Desktop.ViewModels;
+using CorpusStudio.Desktop.ViewModels.Tabs;
 using Xunit;
 
 namespace CorpusStudio.Desktop.Tests;
@@ -9,14 +9,14 @@ public sealed class ArenaViewModelTests
     [Fact]
     public void ParseModelList_SplitsCommaAndNewline_TrimsAndDedupes()
     {
-        var models = MainWindowViewModel.ParseModelList("alpha, beta\nalpha\n  gamma  ");
+        var models = ArenaViewModel.ParseModelList("alpha, beta\nalpha\n  gamma  ");
         Assert.Equal(new[] { "alpha", "beta", "gamma" }, models);
     }
 
     [Fact]
     public void ParseModelList_EmptyInput_IsEmpty()
     {
-        Assert.Empty(MainWindowViewModel.ParseModelList("  ,\n , "));
+        Assert.Empty(ArenaViewModel.ParseModelList("  ,\n , "));
     }
 
     private static ArenaReport TwoModelReport(bool judged)
@@ -46,7 +46,7 @@ public sealed class ArenaViewModelTests
     [Fact]
     public void ApplyArenaReport_Unjudged_ShowsResponsesAndNoWinner()
     {
-        var vm = new MainWindowViewModel();
+        var vm = new ArenaViewModel();
         vm.ApplyArenaReport(TwoModelReport(judged: false));
 
         Assert.Contains("Arena: 2 model(s) × 1 prompt(s)", vm.ArenaSummary);
@@ -59,7 +59,7 @@ public sealed class ArenaViewModelTests
     [Fact]
     public void ApplyArenaReport_Judged_MarksWinnerAndShowsScores()
     {
-        var vm = new MainWindowViewModel();
+        var vm = new ArenaViewModel();
         vm.ApplyArenaReport(TwoModelReport(judged: true));
 
         Assert.Contains("judge: judge", vm.ArenaSummary);
@@ -71,7 +71,7 @@ public sealed class ArenaViewModelTests
     [Fact]
     public void ApplyArenaReport_UnparseableJudgment_ShownHonestly()
     {
-        var vm = new MainWindowViewModel();
+        var vm = new ArenaViewModel();
         var report = TwoModelReport(judged: true);
         var unparseable = new ArenaReport
         {
@@ -91,7 +91,7 @@ public sealed class ArenaViewModelTests
     [Fact]
     public void SetArenaError_ShowsMessage()
     {
-        var vm = new MainWindowViewModel();
+        var vm = new ArenaViewModel();
         vm.SetArenaError("engine not found");
         Assert.Contains("Arena could not run", vm.ArenaSummary);
         Assert.Contains("engine not found", vm.ArenaSummary);
