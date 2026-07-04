@@ -4,19 +4,41 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
+using CorpusStudio.Desktop.ViewModels;
+using CorpusStudio.Desktop.ViewModels.Tabs;
+using CorpusStudio.Desktop.Views;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CorpusStudio.Desktop;
 
 public partial class App : Application
 {
-    /// <summary>Install global exception handlers so an unhandled error surfaces as a dialog +
-    /// a crash log instead of a silent process death (the app previously had none).</summary>
+    /// <summary>Install global exception handlers, then compose the app from a DI container
+    /// (backlog #4) and show the main window with its injected view-model.</summary>
     protected override void OnStartup(StartupEventArgs e)
     {
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
         base.OnStartup(e);
+
+        var services = new ServiceCollection();
+        ConfigureServices(services);
+        var provider = services.BuildServiceProvider();
+
+        var window = new MainWindow
+        {
+            DataContext = provider.GetRequiredService<MainWindowViewModel>(),
+        };
+        window.Show();
+    }
+
+    /// <summary>Compose the view-model graph. Per-tab view-models are registered behind their
+    /// interfaces so the shell (and tests) depend on the contract, not the concrete class.</summary>
+    private static void ConfigureServices(IServiceCollection services)
+    {
+        services.AddTransient<IDebtViewModel, DebtViewModel>();
+        services.AddTransient<MainWindowViewModel>();
     }
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)

@@ -2782,7 +2782,7 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetDebtError("Create or select a dataset project first.");
+            ViewModel.Debt.SetDebtError("Create or select a dataset project first.");
             return;
         }
 
@@ -2794,11 +2794,11 @@ public partial class MainWindow : Window
 
             // Read-only: the engine computes and grades; the desktop parses and colors.
             var report = await _engineService.GetDatasetDebtAsync(projectPath);
-            ViewModel.ApplyDebtReport(report);
+            ViewModel.Debt.ApplyDebtReport(report);
         }
         catch (Exception ex)
         {
-            ViewModel.SetDebtError(ex.Message);
+            ViewModel.Debt.SetDebtError(ex.Message);
         }
         finally
         {
