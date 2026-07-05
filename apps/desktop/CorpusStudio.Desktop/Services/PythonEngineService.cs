@@ -47,13 +47,19 @@ public sealed class PythonEngineService
         }
 
         var tempPath = path + ".tmp-" + Guid.NewGuid().ToString("N");
-        if (encoding is null)
+        // Flush the temp file to PHYSICAL disk before the rename. File.WriteAllText only flushes
+        // to the OS cache, so a power loss after the (metadata-only) rename could leave the target
+        // pointing at a temp file whose bytes never reached the platter — an empty/partial live
+        // file. Flush(flushToDisk: true) forces FlushFileBuffers/fsync, completing the crash-safety
+        // guarantee the temp+rename dance is here to provide.
+        var enc = encoding ?? Utf8NoBom;
+        using (var stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
         {
-            File.WriteAllText(tempPath, content);
-        }
-        else
-        {
-            File.WriteAllText(tempPath, content, encoding);
+            using (var writer = new StreamWriter(stream, enc, bufferSize: 4096, leaveOpen: true))
+            {
+                writer.Write(content);
+            } // flushes buffered chars into the FileStream, leaves the stream open
+            stream.Flush(flushToDisk: true);
         }
 
         try
