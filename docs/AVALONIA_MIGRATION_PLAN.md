@@ -15,18 +15,26 @@ concrete, phased, slice-by-slice plan grounded in the current decomposition stat
   (`net8.0`) head builds the **Debt + Arena** tabs in `.axaml` over the *unchanged* view-models —
   compiled bindings validate at build time (same DI as WPF; `IsVisible`←`bool`; TwoWay text; list
   templating), so a green build is the proof. Not shipped; WPF remains the product head.
-- **Phase 2 — IN PROGRESS.** Decomposing the tabs out of `MainWindowViewModel`, one shippable slice
-  per tab behind `IXxxViewModel` + `XxxViewModel : ViewModelBase` + DI. **13 of 15 tab VMs are
-  extracted** — Debt, Arena, Settings, Versions, Artifacts, Suites, Splits, Preference Review,
-  Quarantine, Examples, Writing Studio, AI Assist, Evaluation (the last two via multi-PR splits
-  through their backend-connection sub-VMs). **Remaining: Dashboard and Training**, plus the residual
-  Quality/Validation shell logic and the Lab-settings orchestrator. The god object is down from 5,609
-  to **~2,947 lines**. Views are still WPF; the per-tab `.axaml` re-authoring (Phase 3) is pending.
+- **Phase 2 — DONE.** Decomposed every tab out of `MainWindowViewModel` into `IXxxViewModel` +
+  `XxxViewModel : ViewModelBase` + DI, one shippable slice per tab — **all 14 real tabs** (Debt, Arena,
+  Settings, Versions, Artifacts, Suites, Splits, Preference Review, Quarantine, Examples, Writing Studio,
+  AI Assist, Evaluation, Training; the last several via multi-PR splits through backend-connection
+  sub-VMs) plus the **Quality panel**. (Dashboard is a composition view over the extracted children, not
+  its own VM.) The god object dropped from **5,609 to ~2,165 lines** — what remains is legitimate shell
+  orchestration (shell mode, project list, active-project, engine-unavailable, output log).
+- **Phase 3 — DONE (structural).** Re-authored the whole app as `.axaml` on the Avalonia head over the
+  *unchanged* Core VMs: all 14 tab views + the shell chrome (activity bar, Start Center, Universal
+  Explorer, docked Problems/Output panels, the Studio hero + Quality panel), plus a `StringToBrush`
+  converter for the VMs' hex-string status colours. Compiled bindings validate every path at build time,
+  so the green build is the proof. Not shipped; WPF stays the product head. Remaining: real Explorer file
+  tree, `ICommand` conversion, and Fluent-theme styling; then Phase 4 packaging.
 
-The spike, running: an **Avalonia** head rendering the **Debt** (and Arena) tab over the *unchanged*
-`DebtViewModel` from `CorpusStudio.Core` — same view-models, same DI, cross-platform toolkit.
+The Avalonia head, running (Phase 3): the **full workspace shell** — activity bar, the Studio hero with
+the colour-coded Debt grade badge, the Projects sidebar, all 14 Studio tabs, the docked Quality panel —
+rendered over the *unchanged* `CorpusStudio.Core` view-models (same VMs, same DI, cross-platform toolkit).
+What began as a two-tab spike now binds the whole app; compiled bindings validate every path at build time.
 
-![The Avalonia spike: the Debt and Arena tabs rendered by an Avalonia head over the shared CorpusStudio.Core view-models.](screenshots/avalonia-spike.png)
+![The Avalonia head rendering the full Corpus Studio shell (activity bar, Studio hero + Debt badge, all 14 tabs, and the Quality panel) over the shared CorpusStudio.Core view-models.](screenshots/avalonia-spike.png)
 
 Ground-truth measured 2026-07-05 (Phase 2 mid-flight, after the Evaluation-core slice):
 
