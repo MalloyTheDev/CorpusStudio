@@ -21,8 +21,9 @@ On top of that loop, v1.2.1–v1.2.15 added an **IDE-like workspace shell** (Sta
 Center, Universal Explorer, Problems + Output panels, one New Project wizard) and
 desktop polish; a deep-review pass shipped an **opt-in LLM-judge evaluation
 scorer**, a **crash-safe / self-contained distributable** build, an **Avalonia
-cross-platform assessment**, the **view-model decomposition** so far (a shared
-`ViewModelBase` + the Debt and Arena tabs extracted behind interfaces + DI), a
+cross-platform assessment** and the **view-model decomposition** now in progress (a shared
+`ViewModelBase` + 13 of 15 tabs extracted behind interfaces + DI, shrinking the god object from
+~5,609 to ~2,947 lines), a
 **unified streaming JSONL reader** (soft-`orjson` accelerated, off-thread document
 opens), and **backend resilience** (retry/backoff + per-item error isolation). A
 subsequent **deep bug/security audit** hardened 19 data-integrity, gate/policy,
@@ -97,8 +98,9 @@ resulting features in full.
   non-goal for now; read-only Hub *import* already ships.
 - **Finish the Avalonia cross-platform port.** Phase 0 (platform seams + venv fix) and the
   Phase 1 spike are **done** — a shared `CorpusStudio.Core` (`net8.0`) holds the view-models
-  and an Avalonia head binds the Debt + Arena tabs over them (GO). Phase 2 decomposes the
-  remaining 13 tabs out of `MainWindowViewModel` and ports each view; then per-OS packaging.
+  and an Avalonia head binds the Debt + Arena tabs over them (GO). **Phase 2 is in progress** —
+  13 of 15 tab view-models are decomposed out of `MainWindowViewModel` (Dashboard + Training
+  remain); then each view is re-authored as `.axaml` (Phase 3) and per-OS packaging follows.
   See [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md) and
   [`CROSS_PLATFORM_ASSESSMENT.md`](CROSS_PLATFORM_ASSESSMENT.md).
 - Smaller: dataset-version reorder detection, row-store GC (never prune manifest-referenced
