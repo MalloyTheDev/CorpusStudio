@@ -95,9 +95,11 @@ resulting features in full.
   engine; the estimate is documented as a heuristic).
 - **Hugging Face Hub export/push** (upload/publishing) — stays a deliberate
   non-goal for now; read-only Hub *import* already ships.
-- **Continue the view-model decomposition** beyond the Debt and Arena tabs;
-  eventually an **Avalonia** port for macOS/Linux (see
-  [`CROSS_PLATFORM_ASSESSMENT.md`](CROSS_PLATFORM_ASSESSMENT.md)).
-- Smaller: dataset-version auto-capture after import, reorder detection, row-store
-  GC (never prune manifest-referenced rows), PII auto-redaction, and a per-project
-  gate-threshold editor in the desktop.
+- **Finish the Avalonia cross-platform port.** Phase 0 (platform seams + venv fix) and the
+  Phase 1 spike are **done** — a shared `CorpusStudio.Core` (`net8.0`) holds the view-models
+  and an Avalonia head binds the Debt + Arena tabs over them (GO). Phase 2 decomposes the
+  remaining 13 tabs out of `MainWindowViewModel` and ports each view; then per-OS packaging.
+  See [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md) and
+  [`CROSS_PLATFORM_ASSESSMENT.md`](CROSS_PLATFORM_ASSESSMENT.md).
+- Smaller: dataset-version reorder detection, row-store GC (never prune manifest-referenced
+  rows), PII auto-redaction, and a per-project gate-threshold editor in the desktop.

@@ -224,6 +224,13 @@ isolation, and off-thread document opens.
   (`Microsoft.Extensions.DependencyInjection`); a shared `ViewModelBase` and the
   **Debt** and **Arena** tabs are extracted so far (see
   [`CROSS_PLATFORM_ASSESSMENT.md`](CROSS_PLATFORM_ASSESSMENT.md), which relies on it).
+- Cross-platform (Avalonia) migration — **Phase 0 + Phase 1 spike done** (not shipped;
+  WPF stays the product head). Platform seams are behind interfaces (`IDialogService`,
+  `IFilePickerService`) with a cross-platform venv-path fix; all Models + view-models +
+  WPF-free services now live in a shared **`CorpusStudio.Core`** (`net8.0`) library; and a
+  proof **`CorpusStudio.Avalonia`** head builds the Debt + Arena tabs over those unchanged
+  view-models with compiled bindings — the GO/NO-GO spike **passed**. Next is decomposing
+  the remaining 13 tabs. See [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md).
 
 ## Hard boundaries (by design)
 
@@ -249,8 +256,10 @@ isolation, and off-thread document opens.
   engine, and the current estimate is documented as a heuristic.
 - **HF export/push** (upload/publishing) — see the hard boundary above; it stays a
   deliberate non-goal for now. (Read-only Hub *import* already ships.)
-- **Continue the view-model decomposition** beyond the Debt and Arena tabs; eventually
-  an **Avalonia** port for macOS/Linux (see `CROSS_PLATFORM_ASSESSMENT.md`).
+- **Finish the Avalonia port** — the Phase 1 spike proved the approach (Debt + Arena bind
+  in an Avalonia head over the shared `CorpusStudio.Core`); Phase 2 decomposes the remaining
+  13 tabs out of `MainWindowViewModel` and ports each view to `.axaml`. The Avalonia head is
+  not shipped yet. See `AVALONIA_MIGRATION_PLAN.md`.
 - Dataset-version **reorder detection**, row-store **GC** (must never prune
   manifest-referenced rows), and a normalized row identity. (Auto-capture after an
   import commit now ships — see above.)
