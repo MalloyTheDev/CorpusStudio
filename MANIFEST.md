@@ -112,12 +112,14 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/ArenaViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/ArtifactsViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/DebtViewModel.cs`
+- `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/EvaluationConnectionViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/ExamplesViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IAiAssistConnectionViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IAiAssistRewriteBatchesViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IArenaViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IArtifactsViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IDebtViewModel.cs`
+- `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IEvaluationConnectionViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IExamplesViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IPreferenceReviewViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IQuarantineViewModel.cs`
