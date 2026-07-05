@@ -32,26 +32,26 @@ public sealed class TrainingComparisonViewModelTests
     public void SetTrainingBaseline_Null_ExplainsNoBaseline()
     {
         var vm = new MainWindowViewModel();
-        vm.SetTrainingBaseline(null);
-        Assert.Contains("No baseline", vm.TrainingComparisonSummary);
+        vm.Training.SetTrainingBaseline(null);
+        Assert.Contains("No baseline", vm.Training.TrainingComparisonSummary);
     }
 
     [Fact]
     public void SetTrainingBaseline_CapturesAndGuides()
     {
         var vm = new MainWindowViewModel();
-        vm.SetTrainingBaseline(Item("a.json", 60, 4, Earlier));
-        Assert.NotNull(vm.TrainingBaselineReport);
-        Assert.Contains("Baseline captured", vm.TrainingComparisonSummary);
-        Assert.Contains("Compare vs baseline", vm.TrainingComparisonSummary);
+        vm.Training.SetTrainingBaseline(Item("a.json", 60, 4, Earlier));
+        Assert.NotNull(vm.Training.TrainingBaselineReport);
+        Assert.Contains("Baseline captured", vm.Training.TrainingComparisonSummary);
+        Assert.Contains("Compare vs baseline", vm.Training.TrainingComparisonSummary);
     }
 
     [Fact]
     public void Compare_WithoutBaseline_Explains()
     {
         var vm = new MainWindowViewModel();
-        vm.CompareTrainingBaseline([Item("a.json", 60, 4, Earlier)]);
-        Assert.Contains("No baseline was captured", vm.TrainingComparisonSummary);
+        vm.Training.CompareTrainingBaseline([Item("a.json", 60, 4, Earlier)]);
+        Assert.Contains("No baseline was captured", vm.Training.TrainingComparisonSummary);
     }
 
     [Fact]
@@ -59,20 +59,20 @@ public sealed class TrainingComparisonViewModelTests
     {
         var vm = new MainWindowViewModel();
         var baseline = Item("a.json", 60, 4, Earlier);
-        vm.SetTrainingBaseline(baseline);
-        vm.CompareTrainingBaseline([baseline]);
-        Assert.Contains("No post-training evaluation", vm.TrainingComparisonSummary);
+        vm.Training.SetTrainingBaseline(baseline);
+        vm.Training.CompareTrainingBaseline([baseline]);
+        Assert.Contains("No post-training evaluation", vm.Training.TrainingComparisonSummary);
     }
 
     [Fact]
     public void Compare_NewestOtherReportOlderThanBaseline_Explains()
     {
         var vm = new MainWindowViewModel();
-        vm.SetTrainingBaseline(Item("baseline.json", 60, 4, Later));
-        vm.CompareTrainingBaseline(
+        vm.Training.SetTrainingBaseline(Item("baseline.json", 60, 4, Later));
+        vm.Training.CompareTrainingBaseline(
             [Item("baseline.json", 60, 4, Later), Item("old.json", 50, 6, Earlier)]
         );
-        Assert.Contains("older than the baseline", vm.TrainingComparisonSummary);
+        Assert.Contains("older than the baseline", vm.Training.TrainingComparisonSummary);
     }
 
     [Fact]
@@ -81,14 +81,14 @@ public sealed class TrainingComparisonViewModelTests
         var vm = new MainWindowViewModel();
         var baseline = Item("before.json", 60, 4, Earlier, model: "base");
         var after = Item("after.json", 75, 1, Later, model: "trained");
-        vm.SetTrainingBaseline(baseline);
+        vm.Training.SetTrainingBaseline(baseline);
 
         // History is newest-first: after, then baseline.
-        vm.CompareTrainingBaseline([after, baseline]);
+        vm.Training.CompareTrainingBaseline([after, baseline]);
 
-        Assert.Contains("Before/after", vm.TrainingComparisonSummary);
-        Assert.Contains("trained", vm.TrainingComparisonSummary);
-        Assert.Contains("+15", vm.TrainingComparisonSummary); // average score delta
-        Assert.Contains("-3", vm.TrainingComparisonSummary); // failed examples delta
+        Assert.Contains("Before/after", vm.Training.TrainingComparisonSummary);
+        Assert.Contains("trained", vm.Training.TrainingComparisonSummary);
+        Assert.Contains("+15", vm.Training.TrainingComparisonSummary); // average score delta
+        Assert.Contains("-3", vm.Training.TrainingComparisonSummary); // failed examples delta
     }
 }

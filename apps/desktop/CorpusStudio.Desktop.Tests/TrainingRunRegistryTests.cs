@@ -62,8 +62,8 @@ public sealed class TrainingRunRegistryTests
     public void ApplyTrainingRunHistory_Empty_ShowsNone()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyTrainingRunHistory([]);
-        Assert.Contains("No training runs recorded", vm.TrainingRunHistorySummary);
+        vm.Training.ApplyTrainingRunHistory([]);
+        Assert.Contains("No training runs recorded", vm.Training.TrainingRunHistorySummary);
     }
 
     [Fact]
@@ -74,13 +74,13 @@ public sealed class TrainingRunRegistryTests
         record.Checkpoints = ["checkpoint-10", "checkpoint-20"];
         record.BeforeEvalPath = "before.json";
         record.ExitCode = 0;
-        vm.ApplyTrainingRunHistory([record]);
+        vm.Training.ApplyTrainingRunHistory([record]);
 
-        Assert.Contains("[succeeded] 20260702T183000-abc", vm.TrainingRunHistorySummary);
-        Assert.Contains("2 checkpoint(s)", vm.TrainingRunHistorySummary);
-        Assert.Contains("before-eval ✓", vm.TrainingRunHistorySummary);
-        Assert.Contains("after-eval –", vm.TrainingRunHistorySummary);
-        Assert.Contains("exit 0", vm.TrainingRunHistorySummary);
+        Assert.Contains("[succeeded] 20260702T183000-abc", vm.Training.TrainingRunHistorySummary);
+        Assert.Contains("2 checkpoint(s)", vm.Training.TrainingRunHistorySummary);
+        Assert.Contains("before-eval ✓", vm.Training.TrainingRunHistorySummary);
+        Assert.Contains("after-eval –", vm.Training.TrainingRunHistorySummary);
+        Assert.Contains("exit 0", vm.Training.TrainingRunHistorySummary);
     }
 
     [Fact]
@@ -97,53 +97,53 @@ public sealed class TrainingRunRegistryTests
         var vm = new MainWindowViewModel();
         var record = Record("20260702T183000-x", "succeeded");
         record.Checkpoints = null!; // simulates "checkpoints": null in JSON
-        vm.ApplyTrainingRunHistory([record]);
-        Assert.Contains("0 checkpoint(s)", vm.TrainingRunHistorySummary);
+        vm.Training.ApplyTrainingRunHistory([record]);
+        Assert.Contains("0 checkpoint(s)", vm.Training.TrainingRunHistorySummary);
     }
 
     [Fact]
     public void ApplyTrainingRunGate_FormatsVerdict()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyTrainingRunGate(new GateReport
+        vm.Training.ApplyTrainingRunGate(new GateReport
         {
             Scope = "training_run",
             OverallStatus = "block",
             Results = [new GateResult { GateId = "regression", Status = "block", Message = "Trained model regressed: dropped 10." }],
         });
-        Assert.Contains("Regression gate: ⛔ BLOCK", vm.TrainingRunGateSummary);
-        Assert.Contains("regressed", vm.TrainingRunGateSummary);
+        Assert.Contains("Regression gate: ⛔ BLOCK", vm.Training.TrainingRunGateSummary);
+        Assert.Contains("regressed", vm.Training.TrainingRunGateSummary);
     }
 
     [Fact]
     public void ApplyTrainingRunGate_WarnUnverified()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyTrainingRunGate(new GateReport
+        vm.Training.ApplyTrainingRunGate(new GateReport
         {
             Scope = "training_run",
             OverallStatus = "warn",
             Results = [new GateResult { GateId = "regression", Status = "warn", Message = "Unverified linkage." }],
         });
-        Assert.Contains("⚠ WARN", vm.TrainingRunGateSummary);
-        Assert.Contains("Unverified linkage", vm.TrainingRunGateSummary);
+        Assert.Contains("⚠ WARN", vm.Training.TrainingRunGateSummary);
+        Assert.Contains("Unverified linkage", vm.Training.TrainingRunGateSummary);
     }
 
     [Fact]
     public void SetTrainingRunGateError_ShowsMessage()
     {
         var vm = new MainWindowViewModel();
-        vm.SetTrainingRunGateError("engine missing");
-        Assert.Contains("Regression gate could not run", vm.TrainingRunGateSummary);
-        Assert.Contains("engine missing", vm.TrainingRunGateSummary);
+        vm.Training.SetTrainingRunGateError("engine missing");
+        Assert.Contains("Regression gate could not run", vm.Training.TrainingRunGateSummary);
+        Assert.Contains("engine missing", vm.Training.TrainingRunGateSummary);
     }
 
     [Fact]
     public void SetTrainingRunHistoryError_ShowsMessage()
     {
         var vm = new MainWindowViewModel();
-        vm.SetTrainingRunHistoryError("disk gone");
-        Assert.Contains("Run history could not load", vm.TrainingRunHistorySummary);
-        Assert.Contains("disk gone", vm.TrainingRunHistorySummary);
+        vm.Training.SetTrainingRunHistoryError("disk gone");
+        Assert.Contains("Run history could not load", vm.Training.TrainingRunHistorySummary);
+        Assert.Contains("disk gone", vm.Training.TrainingRunHistorySummary);
     }
 }

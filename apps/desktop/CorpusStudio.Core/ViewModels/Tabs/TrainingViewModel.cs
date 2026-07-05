@@ -1,0 +1,552 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using CorpusStudio.Desktop.Models;
+
+namespace CorpusStudio.Desktop.ViewModels.Tabs;
+
+/// <summary>Concrete Training tab core view-model (Avalonia Phase 2, slice 4). Behaviour moved verbatim
+/// from the shell (<c>MainWindowViewModel</c>) — the config-export inputs + preview + compatibility, the
+/// launch command / live run log / run lifecycle, the run registry + regression gate, checkpoints/resume,
+/// and the before/after baseline comparison. Holds the shared Evaluation VM so the baseline comparison can
+/// reuse its report formatter; a config-export failure surfaces via <see cref="ErrorReported"/> (the shell
+/// forwards it to its error banner). Honesty invariants intact: the VRAM/token numbers stay heuristic, the
+/// regression gate reflects the keyword-overlap delta (a lexical proxy), and launches show the exact argv.</summary>
+public sealed class TrainingViewModel : ViewModelBase, ITrainingViewModel
+{
+    private readonly IEvaluationViewModel _evaluation;
+
+    /// <summary>Raised when a training config export fails; the shell forwards it to its error banner.</summary>
+    public event Action<string>? ErrorReported;
+
+    public TrainingViewModel(IEvaluationViewModel evaluation)
+    {
+        _evaluation = evaluation;
+    }
+
+    private string _trainingTarget = "axolotl_yaml";
+
+    private string _trainingBaseModel = "Qwen/Qwen2.5-Coder-7B-Instruct";
+
+    private string _trainingFormat = "instruction";
+
+    private string _trainingSequenceLen = "4096";
+
+    private string _trainingLoraR = "16";
+
+    private string _trainingLoraAlpha = "32";
+
+    private string _trainingMicroBatchSize = "1";
+
+    private string _trainingGradientAccumulationSteps = "8";
+
+    private string _trainingLearningRate = "0.0002";
+
+    private string _trainingSummary =
+        "Generate a training config after validation, splits, and evaluation checks.";
+
+    private string _trainingConfigPreview = "Training config preview appears here.";
+
+    private string _trainingLaunchCommand = string.Empty;
+
+    private IReadOnlyList<string> _trainingLaunchArgv = [];
+
+    private string _trainingLaunchWorkingDirectory = string.Empty;
+
+    private string _trainingOutputDirectory = string.Empty;
+
+    private string _trainingConfigPath = string.Empty;
+
+    private IReadOnlyList<string> _trainingCheckpointNames = [];
+
+    private string _trainingRunHistorySummary = "Refresh to see past training runs recorded for this project.";
+
+    private string _trainingRunGateSummary = "Gate a run to check for regression vs its baseline.";
+
+    private string _trainingCheckpointsSummary =
+        "Checkpoints appear here after a training run writes them.";
+
+    private IReadOnlyList<string> _trainingResumeArgv = [];
+
+    private string _trainingResumeCommand = string.Empty;
+
+    private EvaluationReportHistoryItem? _trainingBaselineReport;
+
+    private string _trainingComparisonSummary =
+        "Run an evaluation before training to capture a baseline for before/after comparison.";
+
+    private readonly List<string> _trainingRunLines = [];
+
+    private int _trainingRunId;
+
+    private string _trainingRunLog = "Launch training after generating a config; live logs appear here.";
+
+    private string _trainingRunStatus = "Idle";
+
+    public string TrainingTarget
+    {
+        get => _trainingTarget;
+        set => SetField(ref _trainingTarget, value);
+    }
+
+    public string TrainingBaseModel
+    {
+        get => _trainingBaseModel;
+        set => SetField(ref _trainingBaseModel, value);
+    }
+
+    public string TrainingFormat
+    {
+        get => _trainingFormat;
+        set => SetField(ref _trainingFormat, value);
+    }
+
+    public string TrainingSequenceLen
+    {
+        get => _trainingSequenceLen;
+        set => SetField(ref _trainingSequenceLen, value);
+    }
+
+    public string TrainingLoraR
+    {
+        get => _trainingLoraR;
+        set => SetField(ref _trainingLoraR, value);
+    }
+
+    public string TrainingLoraAlpha
+    {
+        get => _trainingLoraAlpha;
+        set => SetField(ref _trainingLoraAlpha, value);
+    }
+
+    public string TrainingMicroBatchSize
+    {
+        get => _trainingMicroBatchSize;
+        set => SetField(ref _trainingMicroBatchSize, value);
+    }
+
+    public string TrainingGradientAccumulationSteps
+    {
+        get => _trainingGradientAccumulationSteps;
+        set => SetField(ref _trainingGradientAccumulationSteps, value);
+    }
+
+    public string TrainingLearningRate
+    {
+        get => _trainingLearningRate;
+        set => SetField(ref _trainingLearningRate, value);
+    }
+
+    public string TrainingSummary
+    {
+        get => _trainingSummary;
+        private set => SetField(ref _trainingSummary, value);
+    }
+
+    public string TrainingConfigPreview
+    {
+        get => _trainingConfigPreview;
+        private set => SetField(ref _trainingConfigPreview, value);
+    }
+
+    public string TrainingLaunchCommand
+    {
+        get => _trainingLaunchCommand;
+        private set => SetField(ref _trainingLaunchCommand, value);
+    }
+
+    public string TrainingRunLog
+    {
+        get => _trainingRunLog;
+        private set => SetField(ref _trainingRunLog, value);
+    }
+
+    public string TrainingRunStatus
+    {
+        get => _trainingRunStatus;
+        private set => SetField(ref _trainingRunStatus, value);
+    }
+
+    public IReadOnlyList<string> TrainingLaunchArgv => _trainingLaunchArgv;
+
+    public string TrainingLaunchWorkingDirectory => _trainingLaunchWorkingDirectory;
+
+    public const int TrainingLogMaxLines = 2000;
+
+    public int BeginTrainingRun()
+    {
+        _trainingRunLines.Clear();
+        TrainingRunLog = string.Empty;
+        TrainingRunStatus = "Running...";
+        IsTrainingRunning = true;
+        return ++_trainingRunId;
+    }
+
+    public void AppendTrainingRunLog(string line)
+    {
+        _trainingRunLines.Add(line);
+        TrimAndPublishTrainingLog();
+    }
+
+    public void AppendTrainingRunLogBatch(int runId, IReadOnlyList<string> lines)
+    {
+        if (runId != _trainingRunId || lines.Count == 0)
+        {
+            return;
+        }
+
+        _trainingRunLines.AddRange(lines);
+        TrimAndPublishTrainingLog();
+    }
+
+    private void TrimAndPublishTrainingLog()
+    {
+        if (_trainingRunLines.Count > TrainingLogMaxLines)
+        {
+            _trainingRunLines.RemoveRange(0, _trainingRunLines.Count - TrainingLogMaxLines);
+        }
+
+        TrainingRunLog = string.Join(Environment.NewLine, _trainingRunLines);
+    }
+
+    public void CompleteTrainingRun(int exitCode)
+    {
+        IsTrainingRunning = false;
+        TrainingRunStatus = exitCode == 0
+            ? "Completed (exit 0)"
+            : $"Failed (exit {exitCode})";
+    }
+
+    public void SetTrainingRunCancelled()
+    {
+        IsTrainingRunning = false;
+        TrainingRunStatus = "Cancelled";
+    }
+
+    public void SetTrainingRunError(string message)
+    {
+        IsTrainingRunning = false;
+        TrainingRunStatus = "Error";
+        AppendTrainingRunLog($"[error] {message}");
+    }
+
+    public string TrainingRunHistorySummary
+    {
+        get => _trainingRunHistorySummary;
+        private set => SetField(ref _trainingRunHistorySummary, value);
+    }
+
+    public string TrainingRunGateSummary
+    {
+        get => _trainingRunGateSummary;
+        private set => SetField(ref _trainingRunGateSummary, value);
+    }
+
+    public void SetTrainingRunGateError(string message)
+    {
+        TrainingRunGateSummary = $"Regression gate could not run.{Environment.NewLine}{message}";
+    }
+
+    public void ApplyTrainingRunGate(GateReport report)
+    {
+        var mark = report.OverallStatus switch
+        {
+            "block" => "⛔ BLOCK",
+            "warn" => "⚠ WARN",
+            _ => "✅ PASS",
+        };
+        var result = report.Results.Count > 0 ? report.Results[0] : null;
+        TrainingRunGateSummary = result is null
+            ? $"Regression gate: {mark}"
+            : $"Regression gate: {mark} — {result.Message}";
+    }
+
+    public void SetTrainingRunHistoryError(string message)
+    {
+        TrainingRunHistorySummary = $"Run history could not load.{Environment.NewLine}{message}";
+    }
+
+    public void ApplyTrainingRunHistory(IReadOnlyList<TrainingRunRecord> records)
+    {
+        if (records.Count == 0)
+        {
+            TrainingRunHistorySummary = "No training runs recorded yet.";
+            return;
+        }
+
+        var lines = new List<string> { $"Training runs ({records.Count}, newest first):", string.Empty };
+        foreach (var record in records)
+        {
+            lines.Add($"[{record.Status}] {record.RunId} — {record.BaseModel} ({record.Target})");
+            var bits = new List<string>
+            {
+                $"{record.Checkpoints?.Count ?? 0} checkpoint(s)",
+                string.IsNullOrWhiteSpace(record.BeforeEvalPath) ? "before-eval –" : "before-eval ✓",
+                string.IsNullOrWhiteSpace(record.AfterEvalPath) ? "after-eval –" : "after-eval ✓",
+            };
+            if (record.ExitCode is { } exit)
+            {
+                bits.Add($"exit {exit}");
+            }
+            lines.Add("   " + string.Join("; ", bits));
+        }
+
+        TrainingRunHistorySummary = string.Join(Environment.NewLine, lines);
+    }
+
+    public string TrainingOutputDirectory => _trainingOutputDirectory;
+
+    public string TrainingConfigPath => _trainingConfigPath;
+
+    public string TrainingCheckpointsSummary
+    {
+        get => _trainingCheckpointsSummary;
+        private set => SetField(ref _trainingCheckpointsSummary, value);
+    }
+
+    public string TrainingResumeCommand => _trainingResumeCommand;
+
+    public IReadOnlyList<string> TrainingResumeArgv => _trainingResumeArgv;
+
+    public string TrainingComparisonSummary
+    {
+        get => _trainingComparisonSummary;
+        private set => SetField(ref _trainingComparisonSummary, value);
+    }
+
+    public EvaluationReportHistoryItem? TrainingBaselineReport => _trainingBaselineReport;
+
+    public void SetTrainingBaseline(EvaluationReportHistoryItem? baseline)
+    {
+        _trainingBaselineReport = baseline;
+        TrainingComparisonSummary = baseline is null
+            ? "No baseline: no evaluation report existed when this run started. "
+              + "Run an evaluation before the next training run to enable before/after comparison."
+            : $"Baseline captured: {baseline.DisplayName}{Environment.NewLine}"
+              + "After training: load the trained adapter into your local backend, run an "
+              + "evaluation against it, then click Compare vs baseline.";
+    }
+
+    public void CompareTrainingBaseline(IReadOnlyList<EvaluationReportHistoryItem> history)
+    {
+        if (_trainingBaselineReport is null)
+        {
+            TrainingComparisonSummary =
+                "No baseline was captured for the last training run. Run an evaluation, "
+                + "train, then evaluate the trained model to compare.";
+            return;
+        }
+
+        var after = history.FirstOrDefault(item => !string.Equals(
+            item.ReportPath,
+            _trainingBaselineReport.ReportPath,
+            StringComparison.OrdinalIgnoreCase
+        ));
+        if (after is null)
+        {
+            TrainingComparisonSummary =
+                "No post-training evaluation found yet. Load the trained adapter into your "
+                + "local backend and run an evaluation, then compare again.";
+            return;
+        }
+
+        if (after.LastModified < _trainingBaselineReport.LastModified)
+        {
+            TrainingComparisonSummary =
+                "The newest other report is older than the baseline. Run an evaluation of "
+                + "the trained model first, then compare again.";
+            return;
+        }
+
+        TrainingComparisonSummary =
+            $"Before/after (after − before):{Environment.NewLine}"
+            + _evaluation.BuildEvaluationReportComparison(after, _trainingBaselineReport);
+    }
+
+    public IReadOnlyList<string> TrainingCheckpointNames => _trainingCheckpointNames;
+
+    public void ApplyTrainingCheckpoints(TrainingCheckpointsResult result)
+    {
+        _trainingCheckpointNames = result.Checkpoints.ToArray();
+        if (result.Checkpoints.Count == 0)
+        {
+            TrainingCheckpointsSummary = "No checkpoints found yet.";
+            _trainingResumeArgv = [];
+            _trainingResumeCommand = string.Empty;
+        }
+        else
+        {
+            TrainingCheckpointsSummary =
+                $"Checkpoints: {result.Checkpoints.Count} (latest {result.LatestCheckpoint})";
+            var resumeReady = result.ResumeSupported == true
+                && result.LatestCheckpoint is not null
+                && result.ResumeArgv is { Count: > 0 };
+            _trainingResumeArgv = resumeReady ? result.ResumeArgv!.ToArray() : [];
+            _trainingResumeCommand = resumeReady ? result.ResumeCommand ?? string.Empty : string.Empty;
+            if (!resumeReady && result.ResumeSupported == false)
+            {
+                TrainingCheckpointsSummary +=
+                    " — resume is config-driven for this target; set the checkpoint in the config.";
+            }
+        }
+
+        OnPropertyChanged(nameof(CanResumeTraining));
+    }
+
+    public void SetTrainingConfigInProgress()
+    {
+        TrainingSummary = string.Join(
+            Environment.NewLine,
+            [
+                "Generating training config...",
+                $"Target: {TrainingTarget}",
+                $"Base model: {TrainingBaseModel}",
+            ]
+        );
+        TrainingConfigPreview = "Waiting for config export.";
+    }
+
+    public void ApplyTrainingConfigExportResult(TrainingConfigExportResult result)
+    {
+        var launcherStatus = result.TrainingLauncherImplemented ? "implemented" : "not implemented";
+        var lines = new List<string>
+        {
+            $"Target: {result.Target}",
+            $"Config: {result.OutputPath}",
+            $"Training launcher: {launcherStatus}",
+        };
+
+        if (result.TokenBudget is { } budget && budget.ExampleCount > 0)
+        {
+            lines.Add("");
+            lines.Add(
+                $"Token budget ({budget.Method}): ~{budget.EstimatedTokens:N0} tokens over "
+                + $"{budget.ExampleCount} example(s), ~{budget.TokensPerEpoch:N0}/epoch at seq_len "
+                + $"{budget.SequenceLen}");
+            lines.Add(
+                $"  mean ~{budget.MeanTokensPerExample:N0}, max ~{budget.MaxTokensInExample:N0} tokens; "
+                + $"{budget.ExamplesOverSequenceLen} over seq_len");
+        }
+
+        if (result.VramEstimate is { } vram)
+        {
+            lines.Add("");
+            if (vram.ParameterCountBillions is { } paramsB)
+            {
+                lines.Add(
+                    $"VRAM (rough, {paramsB:0.#}B params): ~{vram.TotalGbFp16:0.#} GB fp16 / "
+                    + $"~{vram.TotalGbInt8:0.#} GB 8-bit / ~{vram.TotalGbInt4:0.#} GB 4-bit");
+            }
+            else
+            {
+                lines.Add("VRAM: no estimate (model size not parseable from the name).");
+            }
+        }
+
+        if (result.LoraRecommendation is { } lora)
+        {
+            lines.Add($"LoRA suggestion: r={lora.RecommendedR}, alpha={lora.RecommendedAlpha}");
+            lines.AddRange(lora.Warnings.Select(warning => $"- {warning}"));
+        }
+
+        _trainingOutputDirectory = result.TrainingOutputDirectory;
+        _trainingConfigPath = result.OutputPath;
+        _trainingResumeArgv = [];
+        _trainingResumeCommand = string.Empty;
+        TrainingCheckpointsSummary = "Refresh checkpoints after a run writes them.";
+        OnPropertyChanged(nameof(CanResumeTraining));
+
+        if (result.Launch is { } launch && !string.IsNullOrWhiteSpace(launch.Command))
+        {
+            TrainingLaunchCommand = launch.Command;
+            _trainingLaunchArgv = launch.Argv.ToArray();
+            _trainingLaunchWorkingDirectory = string.IsNullOrWhiteSpace(result.OutputPath)
+                ? string.Empty
+                : (System.IO.Path.GetDirectoryName(result.OutputPath) ?? string.Empty);
+            lines.Add("");
+            lines.Add("Launch command (review before running):");
+            lines.Add($"  {launch.Command}");
+            if (launch.ResumeSupported)
+            {
+                lines.Add($"  resume: {launch.ResumeCommand}");
+            }
+            if (launch.Dependencies.Count > 0)
+            {
+                lines.Add($"  requires: {string.Join(", ", launch.Dependencies)}");
+            }
+        }
+        else
+        {
+            TrainingLaunchCommand = string.Empty;
+            _trainingLaunchArgv = [];
+            _trainingLaunchWorkingDirectory = string.Empty;
+        }
+
+        OnPropertyChanged(nameof(CanLaunchTraining));
+
+        if (result.Warnings.Count > 0)
+        {
+            lines.Add("");
+            lines.Add("Warnings:");
+            lines.AddRange(result.Warnings.Select(warning => $"- {warning}"));
+        }
+
+        TrainingSummary = string.Join(Environment.NewLine, lines);
+        TrainingConfigPreview = result.ConfigText;
+    }
+
+    public void SetTrainingConfigError(string message)
+    {
+        TrainingSummary = $"Training config could not be generated.{Environment.NewLine}{message}";
+        TrainingConfigPreview = "No training config was generated.";
+        ErrorReported?.Invoke(message);
+    }
+
+    public void ApplyTrainingCompatibility(TrainingCompatibilityResult result)
+    {
+        if (result.Compatible)
+        {
+            TrainingSummary =
+                $"Compatible: {result.Schema} / {result.Format} → {result.Target}. "
+                + "No compatibility warnings — safe to generate.";
+            return;
+        }
+
+        TrainingSummary = string.Join(
+            Environment.NewLine,
+            new[]
+            {
+                $"Compatibility warnings for {result.Schema} / {result.Format} → {result.Target}:",
+            }.Concat(result.Warnings.Select(warning => $"- {warning}"))
+        );
+    }
+    /// <summary>Reset the config inputs/preview on a project switch (the format follows the project's
+    /// schema). Matches the shell's prior SelectProject behaviour verbatim.</summary>
+    public void Reset(string schemaId)
+    {
+        TrainingFormat = schemaId;
+        TrainingSummary = "Generate a training config after validation, splits, and evaluation checks.";
+        TrainingConfigPreview = "Training config preview appears here.";
+    }
+
+    // ---- run-state gating (missed by the first pass; moved verbatim) ----
+
+    private bool _isTrainingRunning;
+
+    public bool IsTrainingRunning
+    {
+        get => _isTrainingRunning;
+        private set
+        {
+            if (SetField(ref _isTrainingRunning, value))
+            {
+                OnPropertyChanged(nameof(CanLaunchTraining));
+                OnPropertyChanged(nameof(CanResumeTraining));
+            }
+        }
+    }
+
+    public bool CanLaunchTraining => !_isTrainingRunning && _trainingLaunchArgv.Count > 0;
+
+    public bool CanResumeTraining => !_isTrainingRunning && _trainingResumeArgv.Count > 0;
+}
