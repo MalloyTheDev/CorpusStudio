@@ -345,16 +345,27 @@ def eval_score_gate(
 
 
 # --- chat conversation structure (v1.3 chat gates) ---------------------------
-# Sequence-level faults only; per-message shape (role validity, non-empty content)
-# is the validator's job and is NOT re-checked here.
+# Sequence-level structure PLUS empty-turn detection. Per-message *shape* (role validity, the
+# content field's presence/type) stays the validator's job; but a turn whose content is
+# empty/whitespace, and a conversation that ends on a non-assistant turn, are structural defects
+# for training, so they are flagged here too (the schema gate also blocks empty content).
 
-_CHAT_MALFORMED_FAULTS = ("assistant_first", "no_assistant", "no_user", "dangling_user")
+_CHAT_MALFORMED_FAULTS = (
+    "assistant_first",
+    "no_assistant",
+    "no_user",
+    "dangling_user",
+    "dangling_system_or_tool",
+    "empty_turn",
+)
 
 _CHAT_FAULT_LABELS = {
     "assistant_first": "start with an assistant turn",
     "no_assistant": "have no assistant turn",
     "no_user": "have no user turn",
     "dangling_user": "end on a user turn",
+    "dangling_system_or_tool": "end on a system or tool turn",
+    "empty_turn": "contain an empty/whitespace turn",
     "consecutive_same_role": "repeat a role back-to-back",
     "system_misplaced": "misplace the system message",
     "too_few_turns": "have too few turns",
@@ -391,11 +402,24 @@ def _conversation_faults(messages: list, thresholds: GateThresholds) -> set[str]
 
     if roles and roles[-1] == "user":
         faults.add("dangling_user")
+    elif roles and roles[-1] in ("system", "tool"):
+        # A training conversation should end on the assistant's turn; a trailing system or tool
+        # message dangles just like a trailing user turn (no assistant target follows it).
+        faults.add("dangling_system_or_tool")
 
     for previous, current in zip(roles, roles[1:]):
         if previous is not None and previous == current:
             faults.add("consecutive_same_role")
             break
+
+    # A turn whose content is present but empty/whitespace carries no training signal — a
+    # structural defect even when the role sequence is otherwise well-formed.
+    for message in messages:
+        if isinstance(message, dict):
+            content = message.get("content")
+            if isinstance(content, str) and not content.strip():
+                faults.add("empty_turn")
+                break
 
     return faults
 
