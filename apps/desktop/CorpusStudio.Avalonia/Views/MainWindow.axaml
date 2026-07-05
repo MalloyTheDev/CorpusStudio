@@ -4,9 +4,88 @@
         xmlns:models="clr-namespace:CorpusStudio.Desktop.Models;assembly=CorpusStudio.Core"
         x:Class="CorpusStudio.Avalonia.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
-        Width="960" Height="680"
-        Title="Corpus Studio — Avalonia (Debt / Arena / Settings / Versions / Suites over the shared view-models)">
-  <TabControl Margin="8">
+        Width="1180" Height="800"
+        Title="Corpus Studio — Avalonia (full shell over the shared view-models)">
+  <Grid ColumnDefinitions="52,*">
+
+    <!-- Activity bar: mode switches + panel toggles. Minimal code-behind Click handlers call the
+         shell VM (ShowStartCenter/ShowFiles/ShowStudio/Toggle*Panel) — no ICommand yet, same as WPF. -->
+    <StackPanel Grid.Column="0" Background="#0F172A" Spacing="2">
+      <Button Content="⌂" Click="ActivityHome_Click" Background="Transparent" Foreground="White"
+              FontSize="18" Width="52" Height="44" HorizontalContentAlignment="Center"/>
+      <Button Content="🗀" Click="ActivityFiles_Click" Background="Transparent" Foreground="White"
+              FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
+      <Button Content="▦" Click="ActivityStudio_Click" Background="Transparent" Foreground="White"
+              FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
+      <Button Content="⚠" Click="ToggleProblems_Click" Background="Transparent" Foreground="White"
+              FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
+      <Button Content="≡" Click="ToggleOutput_Click" Background="Transparent" Foreground="White"
+              FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
+    </StackPanel>
+
+    <Grid Grid.Column="1" RowDefinitions="*,Auto">
+      <Panel Grid.Row="0">
+
+        <!-- Start Center mode (IsVisible←IsStartCenter): the recent-workspaces registry. -->
+        <ScrollViewer IsVisible="{Binding IsStartCenter}">
+          <StackPanel Margin="28" Spacing="10">
+            <TextBlock Text="Start a workspace" FontSize="26" FontWeight="Bold"/>
+            <TextBlock Text="{Binding StartCenter.RecentCountLabel}" Foreground="#64748B"/>
+            <ListBox ItemsSource="{Binding StartCenter.Recents}" MaxWidth="680" HorizontalAlignment="Left">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:RecentWorkspaceDisplayItem">
+                  <StackPanel Margin="0,3">
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding Path}" Foreground="#64748B" FontSize="11"/>
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- Files / Universal Explorer mode (IsVisible←IsFiles): open documents + status. -->
+        <Grid IsVisible="{Binding IsFiles}" ColumnDefinitions="300,*" Margin="12">
+          <DockPanel Grid.Column="0">
+            <TextBlock DockPanel.Dock="Top" Text="{Binding Explorer.WorkspaceName}"
+                       FontWeight="Bold" Margin="0,0,0,6"/>
+            <TextBlock DockPanel.Dock="Bottom" Text="{Binding Explorer.ExplorerStatus}"
+                       Foreground="#64748B" FontSize="11" Margin="0,6,0,0"/>
+            <ListBox ItemsSource="{Binding Explorer.OpenDocuments}"
+                     SelectedItem="{Binding Explorer.ActiveDocument}">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="models:OpenWorkspaceDocument">
+                  <TextBlock Text="{Binding DisplayName}" Margin="0,2"/>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </DockPanel>
+          <TextBox Grid.Column="1" Margin="12,0,0,0" IsReadOnly="True" AcceptsReturn="True"
+                   FontFamily="Consolas" TextWrapping="Wrap" Text="{Binding Explorer.ActiveRelPath}"/>
+        </Grid>
+
+        <!-- Studio mode (IsVisible←IsStudio): hero + projects sidebar + the 14-tab TabControl + Quality panel. -->
+        <Grid IsVisible="{Binding IsStudio}" RowDefinitions="Auto,*" ColumnDefinitions="170,*,300">
+          <Border Grid.Row="0" Grid.ColumnSpan="3" Background="#F8FAFC" Padding="14,10" Margin="0,0,0,6">
+            <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+              <TextBlock Text="{Binding ActiveProjectTitle}" FontSize="18" FontWeight="Bold" VerticalAlignment="Center"/>
+              <TextBlock Text="{Binding ActiveSchemaDescription}" Foreground="#64748B" VerticalAlignment="Center"/>
+              <Border CornerRadius="6" Padding="10,4" VerticalAlignment="Center"
+                      Background="{Binding Debt.DebtGradeColor, Converter={StaticResource StringToBrush}}">
+                <TextBlock Text="{Binding Debt.DebtGrade}" Foreground="White" FontWeight="Bold"/>
+              </Border>
+            </StackPanel>
+          </Border>
+          <ListBox Grid.Row="1" Grid.Column="0" ItemsSource="{Binding Projects}"
+                   SelectedItem="{Binding SelectedProject}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:DatasetProjectListItem">
+                <TextBlock Text="{Binding DisplayName}" Margin="0,2"/>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <TabControl Grid.Row="1" Grid.Column="1" Margin="8,0">
 
     <!-- Debt: read bindings + IsVisible bound to a bool (the Visibility→IsVisible port, proven). -->
     <TabItem Header="Debt">
@@ -358,5 +437,69 @@
       </Grid>
     </TabItem>
 
-  </TabControl>
+          </TabControl>
+
+          <!-- Quality right panel: summary + the structured metric grid (colored via the converter). -->
+          <ScrollViewer Grid.Row="1" Grid.Column="2">
+            <StackPanel Margin="10" Spacing="6">
+              <TextBlock Text="Quality" FontWeight="Bold" FontSize="16"/>
+              <TextBlock Text="{Binding Quality.QualitySummary}" TextWrapping="Wrap"/>
+              <ItemsControl ItemsSource="{Binding Quality.QualityMetrics}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="models:QualityMetric">
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,1">
+                      <TextBlock Text="{Binding Label}" Width="150"/>
+                      <TextBlock Text="{Binding Value}"
+                                 Foreground="{Binding StatusColor, Converter={StaticResource StringToBrush}}"/>
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <TextBlock Text="Debt trend" FontWeight="SemiBold" Margin="0,10,0,0"/>
+              <TextBlock Text="{Binding Quality.DebtTrendSummary}" TextWrapping="Wrap" FontSize="11"/>
+            </StackPanel>
+          </ScrollViewer>
+        </Grid>
+
+      </Panel>
+
+      <!-- Docked panels (mutually exclusive), toggled from the activity bar. -->
+      <Border Grid.Row="1" Height="180" Background="#F8FAFC" BorderBrush="#E2E8F0"
+              BorderThickness="0,1,0,0" IsVisible="{Binding ProblemsPanelVisible}">
+        <DockPanel Margin="12,8">
+          <TextBlock DockPanel.Dock="Top" Text="{Binding ProblemsSummary}" FontWeight="Bold" Margin="0,0,0,6"/>
+          <ListBox ItemsSource="{Binding Problems}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:ProblemItem">
+                <StackPanel Margin="0,2">
+                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                             Foreground="{Binding SeverityColor, Converter={StaticResource StringToBrush}}"/>
+                  <TextBlock Text="{Binding Message}" FontSize="11"/>
+                  <TextBlock Text="{Binding Fix}" FontSize="11" Foreground="#2563EB"/>
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </Border>
+      <Border Grid.Row="1" Height="180" Background="#0F172A" IsVisible="{Binding OutputPanelVisible}">
+        <DockPanel Margin="12,8">
+          <TextBlock DockPanel.Dock="Top" Text="{Binding OutputSummary}" FontWeight="Bold"
+                     Foreground="White" Margin="0,0,0,6"/>
+          <ListBox ItemsSource="{Binding OutputLog}" Background="Transparent">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:EngineLogEntry">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <TextBlock Text="{Binding Timestamp}" Foreground="#64748B" FontFamily="Consolas" FontSize="11"/>
+                  <TextBlock Text="{Binding Command}" Foreground="White" FontFamily="Consolas" FontSize="11"/>
+                  <TextBlock Text="{Binding ArgsSummary}" Foreground="#94A3B8" FontFamily="Consolas" FontSize="11"/>
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </Border>
+
+    </Grid>
+  </Grid>
 </Window>
