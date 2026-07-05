@@ -20,6 +20,13 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.8"
 ]
+# Optional exact tokenizer. The engine stays dependency-light by default (a
+# Unicode-aware heuristic estimates token counts); installing this extra lets
+# estimate_tokens use tiktoken for exact BPE counts. `pip install
+# corpus-studio-engine[tokenizer]`. See corpus_studio/tokenization/estimate.py.
+tokenizer = [
+    "tiktoken>=0.7"
+]
 
 [project.scripts]
 corpus-studio = "corpus_studio.cli:app"
