@@ -4,8 +4,8 @@
         xmlns:models="clr-namespace:CorpusStudio.Desktop.Models;assembly=CorpusStudio.Core"
         x:Class="CorpusStudio.Avalonia.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
-        Width="920" Height="640"
-        Title="Corpus Studio — Avalonia spike (Debt + Arena over the shared view-models)">
+        Width="960" Height="680"
+        Title="Corpus Studio — Avalonia (Debt / Arena / Settings / Versions / Suites over the shared view-models)">
   <TabControl Margin="8">
 
     <!-- Debt: read bindings + IsVisible bound to a bool (the Visibility→IsVisible port, proven). -->
@@ -42,6 +42,81 @@
         <TextBox Text="{Binding Arena.ArenaJudgeModelInput}"/>
         <TextBlock Text="{Binding Arena.ArenaSummary}" TextWrapping="Wrap" Margin="0,8,0,0"/>
       </StackPanel>
+    </TabItem>
+
+    <!-- Settings: two read-only summary panes (SetSettings / ApplyProviderPolicies feed them). -->
+    <TabItem Header="Settings">
+      <ScrollViewer>
+        <StackPanel Margin="20" Spacing="8">
+          <TextBlock Text="App settings" FontWeight="Bold" FontSize="16"/>
+          <TextBlock Text="{Binding Settings.SettingsSummary}" TextWrapping="Wrap" FontFamily="Consolas"/>
+          <TextBlock Text="Provider generation policy" FontWeight="Bold" FontSize="16" Margin="0,14,0,0"/>
+          <TextBlock Text="{Binding Settings.ProviderPolicySummary}" TextWrapping="Wrap" FontFamily="Consolas"/>
+        </StackPanel>
+      </ScrollViewer>
+    </TabItem>
+
+    <!-- Versions: ItemsSource + TwoWay SelectedItem + a DataTemplate item + TwoWay label input. -->
+    <TabItem Header="Versions">
+      <Grid Margin="16" ColumnDefinitions="300,*">
+        <DockPanel Grid.Column="0">
+          <TextBlock DockPanel.Dock="Top" Text="{Binding Versions.DatasetVersionSummary}"
+                     TextWrapping="Wrap" Margin="0,0,0,8"/>
+          <ListBox ItemsSource="{Binding Versions.DatasetVersions}"
+                   SelectedItem="{Binding Versions.SelectedDatasetVersion}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:DatasetVersionDisplayItem">
+                <StackPanel Margin="0,2">
+                  <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"/>
+                  <TextBlock Text="{Binding Integrity}" Foreground="#64748B" FontSize="11"/>
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+        <StackPanel Grid.Column="1" Margin="16,0,0,0" Spacing="8">
+          <TextBlock Text="Version label"/>
+          <TextBox Text="{Binding Versions.DatasetVersionLabel}"/>
+          <TextBlock Text="{Binding Versions.DatasetDiffBaseLabel}" Foreground="#64748B"/>
+          <TextBlock Text="{Binding Versions.DatasetVersionDetail}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+        </StackPanel>
+      </Grid>
+    </TabItem>
+
+    <!-- Suites: two collections + TwoWay selection + a read report pane + IsVisible on a bool. -->
+    <TabItem Header="Suites">
+      <Grid Margin="16" ColumnDefinitions="300,*">
+        <DockPanel Grid.Column="0">
+          <TextBlock DockPanel.Dock="Top" Text="{Binding Suites.SuitesStatus}"
+                     TextWrapping="Wrap" Margin="0,0,0,8"/>
+          <ListBox ItemsSource="{Binding Suites.Suites}"
+                   SelectedItem="{Binding Suites.SelectedSuite}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:SuiteSummary">
+                <TextBlock Text="{Binding DisplayLabel}" Margin="0,2"/>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+        <StackPanel Grid.Column="1" Margin="16,0,0,0" Spacing="8">
+          <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding Suites.HasSuiteReport}">
+            <TextBlock Text="Overall verdict:" FontWeight="Bold"/>
+            <TextBlock Text="{Binding Suites.SuiteOverallStatus}"/>
+          </StackPanel>
+          <TextBlock Text="{Binding Suites.SuiteReportSummary}" TextWrapping="Wrap"/>
+          <TextBlock Text="Per-metric rollup" FontWeight="SemiBold" Margin="0,8,0,0"
+                     IsVisible="{Binding Suites.HasSuiteReport}"/>
+          <ItemsControl ItemsSource="{Binding Suites.SuiteMetricRows}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="models:SuiteMetricRollup">
+                <TextBlock Text="{Binding DisplayLabel}" Margin="0,1"/>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <TextBlock Text="{Binding Suites.SuiteHonestyNote}" TextWrapping="Wrap"
+                     Foreground="#64748B" FontSize="11" Margin="0,8,0,0"/>
+        </StackPanel>
+      </Grid>
     </TabItem>
 
   </TabControl>
