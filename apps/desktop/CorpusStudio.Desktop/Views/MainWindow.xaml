@@ -1338,26 +1338,26 @@
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBox AutomationProperties.AutomationId="EvaluationBackendTextBox"
-                                         Text="{Binding EvaluationBackend, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding EvaluationConnection.EvaluationBackend, UpdateSourceTrigger=PropertyChanged}"
                                          Width="132"
                                          Margin="0,0,12,0" />
                                 <TextBlock Text="Model"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBox AutomationProperties.AutomationId="EvaluationModelTextBox"
-                                         Text="{Binding EvaluationModel, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding EvaluationConnection.EvaluationModel, UpdateSourceTrigger=PropertyChanged}"
                                          Width="172"
                                          Margin="0,0,8,0" />
                                 <ComboBox AutomationProperties.AutomationId="EvaluationModelComboBox"
-                                          ItemsSource="{Binding EvaluationAvailableModels}"
-                                          SelectedItem="{Binding EvaluationModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          ItemsSource="{Binding EvaluationConnection.EvaluationAvailableModels}"
+                                          SelectedItem="{Binding EvaluationConnection.EvaluationModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                           Width="172"
                                           Margin="0,0,12,0" />
                                 <TextBlock Text="Base URL"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBox AutomationProperties.AutomationId="EvaluationBaseUrlTextBox"
-                                         Text="{Binding EvaluationBaseUrl, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding EvaluationConnection.EvaluationBaseUrl, UpdateSourceTrigger=PropertyChanged}"
                                          Width="184"
                                          Margin="0,0,12,0" />
                                 <Button AutomationProperties.AutomationId="CheckEvaluationBackendButton"
@@ -1377,7 +1377,7 @@
                                         Margin="0,0,8,0"
                                         Click="RunEvaluationButton_Click" />
                                 <TextBlock AutomationProperties.AutomationId="EvaluationModelListSummaryTextBlock"
-                                           Text="{Binding EvaluationModelListSummary, Mode=OneWay}"
+                                           Text="{Binding EvaluationConnection.EvaluationModelListSummary, Mode=OneWay}"
                                            Width="260"
                                            TextWrapping="Wrap"
                                            VerticalAlignment="Center" />
@@ -1448,7 +1448,7 @@
                                                VerticalAlignment="Center"
                                                Margin="0,0,6,0" />
                                     <TextBox AutomationProperties.AutomationId="EvaluationTimeoutTextBox"
-                                             Text="{Binding EvaluationTimeoutSeconds, UpdateSourceTrigger=PropertyChanged}"
+                                             Text="{Binding EvaluationConnection.EvaluationTimeoutSeconds, UpdateSourceTrigger=PropertyChanged}"
                                              Width="72" />
                                 </WrapPanel>
 

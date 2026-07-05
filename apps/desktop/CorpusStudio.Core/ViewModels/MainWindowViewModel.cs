@@ -47,12 +47,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _debtTrendDirectionColor = "#64748B";
     private string _debtTrendSummary = "Run quality checks to build a debt trend.";
     private string _qualityTriageSummary = "Synthetic quality issues appear here after quality checks run.";
-    private string _evaluationBackend = "ollama";
-    private string _evaluationModel = "qwen2.5-coder:7b";
-    private string _evaluationBaseUrl = "http://localhost:11434";
     private string _evaluationLimit = "10";
     private string _evaluationScoreThreshold = "70";
-    private string _evaluationTimeoutSeconds = "120";
     private string _evaluationSummary =
         "Run a local model against this project's saved examples.";
     private string _benchmarkModelsInput = string.Empty;
@@ -73,8 +69,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _evaluationManualScore = string.Empty;
     private string _evaluationManualNotes = string.Empty;
     private string _evaluationReviewSummary = "Select an evaluation result to add a manual score or note.";
-    private string _evaluationModelListSummary =
-        "Refresh models to load running Ollama or OpenAI-compatible models.";
     private string _evaluationComparisonSummary =
         "Select two saved evaluation reports to compare score, failure, tag, and row-level changes.";
     // AI-Assist tab core (run + result panes + candidate gate + review queue + saved views)
@@ -183,6 +177,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public IAiAssistViewModel AiAssist { get; }
 
+    public IEvaluationConnectionViewModel EvaluationConnection { get; }
+
     /// <summary>Design-time / test constructor.</summary>
     public MainWindowViewModel()
         : this(
@@ -190,7 +186,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             new VersionsViewModel(), new ArtifactsViewModel(), new SuitesViewModel(),
             new SplitsViewModel(), new PreferenceReviewViewModel(), new QuarantineViewModel(),
             new ExamplesViewModel(), new WritingStudioViewModel(), new AiAssistRewriteBatchesViewModel(),
-            new AiAssistConnectionViewModel())
+            new AiAssistConnectionViewModel(), new EvaluationConnectionViewModel())
     {
     }
 
@@ -200,7 +196,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ISplitsViewModel splits, IPreferenceReviewViewModel preferenceReview,
         IQuarantineViewModel quarantine, IExamplesViewModel examples,
         IWritingStudioViewModel writingStudio, IAiAssistRewriteBatchesViewModel rewriteBatches,
-        IAiAssistConnectionViewModel aiAssistConnection)
+        IAiAssistConnectionViewModel aiAssistConnection, IEvaluationConnectionViewModel evaluationConnection)
     {
         Debt = debt;
         Arena = arena;
@@ -215,6 +211,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         WritingStudio = writingStudio;
         RewriteBatches = rewriteBatches;
         AiAssistConnection = aiAssistConnection;
+        EvaluationConnection = evaluationConnection;
         // The AI-Assist core is composed from the shared connection instance (its run reads the
         // backend/model), rather than DI-injected, so both share one AiAssistConnection.
         AiAssist = new AiAssistViewModel(aiAssistConnection);
@@ -326,8 +323,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public ObservableCollection<EvaluationReportHistoryItem> EvaluationReportHistory { get; } = [];
 
     public ObservableCollection<EvaluationExampleResult> EvaluationResults { get; } = [];
-
-    public ObservableCollection<string> EvaluationAvailableModels { get; } = [];
 
 
     public ObservableCollection<string> EvaluationResultFilterOptions { get; } =
@@ -844,24 +839,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     // ErrorReported to ReportError, pushes loaded settings, and forwards Reset() on project switch.
     // Bindings use Splits.*, code-behind ViewModel.Splits.*.
 
-    public string EvaluationBackend
-    {
-        get => _evaluationBackend;
-        set => SetField(ref _evaluationBackend, value);
-    }
-
-    public string EvaluationModel
-    {
-        get => _evaluationModel;
-        set => SetField(ref _evaluationModel, value);
-    }
-
-    public string EvaluationBaseUrl
-    {
-        get => _evaluationBaseUrl;
-        set => SetField(ref _evaluationBaseUrl, value);
-    }
-
     public string EvaluationLimit
     {
         get => _evaluationLimit;
@@ -872,12 +849,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _evaluationScoreThreshold;
         set => SetField(ref _evaluationScoreThreshold, value);
-    }
-
-    public string EvaluationTimeoutSeconds
-    {
-        get => _evaluationTimeoutSeconds;
-        set => SetField(ref _evaluationTimeoutSeconds, value);
     }
 
     public string EvaluationSummary
@@ -1057,11 +1028,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         private set => SetField(ref _evaluationReviewSummary, value);
     }
 
-    public string EvaluationModelListSummary
-    {
-        get => _evaluationModelListSummary;
-        private set => SetField(ref _evaluationModelListSummary, value);
-    }
 
 
     public ReviewedFixRecord? SelectedReviewedFix
@@ -1717,10 +1683,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             Evaluation = new ModelBackendSettings
             {
-                Backend = EvaluationBackend.Trim(),
-                Model = EvaluationModel.Trim(),
-                BaseUrl = EvaluationBaseUrl.Trim(),
-                TimeoutSeconds = ParsePositiveIntOrDefault(EvaluationTimeoutSeconds, 120),
+                Backend = EvaluationConnection.EvaluationBackend.Trim(),
+                Model = EvaluationConnection.EvaluationModel.Trim(),
+                BaseUrl = EvaluationConnection.EvaluationBaseUrl.Trim(),
+                TimeoutSeconds = ParsePositiveIntOrDefault(EvaluationConnection.EvaluationTimeoutSeconds, 120),
             },
             AiAssist = new ModelBackendSettings
             {
@@ -2135,8 +2101,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Environment.NewLine,
             [
                 "Running evaluation...",
-                $"Backend: {EvaluationBackend}",
-                $"Model: {EvaluationModel}",
+                $"Backend: {EvaluationConnection.EvaluationBackend}",
+                $"Model: {EvaluationConnection.EvaluationModel}",
             ]
         );
         EvaluationReportJson = "Waiting for local model response.";
@@ -2148,8 +2114,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Environment.NewLine,
             [
                 "Checking evaluation backend before run...",
-                $"Backend: {EvaluationBackend}",
-                $"Model: {EvaluationModel}",
+                $"Backend: {EvaluationConnection.EvaluationBackend}",
+                $"Model: {EvaluationConnection.EvaluationModel}",
             ]
         );
         EvaluationReportJson = "No evaluation report has been produced yet.";
@@ -2162,8 +2128,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Environment.NewLine,
             [
                 "Checking saved regression run settings...",
-                $"Backend: {EvaluationBackend}",
-                $"Model: {EvaluationModel}",
+                $"Backend: {EvaluationConnection.EvaluationBackend}",
+                $"Model: {EvaluationConnection.EvaluationModel}",
                 $"Threshold: {EvaluationScoreThreshold}",
             ]
         );
@@ -2177,8 +2143,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Environment.NewLine,
             [
                 "Rerunning saved evaluation configuration...",
-                $"Backend: {EvaluationBackend}",
-                $"Model: {EvaluationModel}",
+                $"Backend: {EvaluationConnection.EvaluationBackend}",
+                $"Model: {EvaluationConnection.EvaluationModel}",
                 $"Threshold: {EvaluationScoreThreshold}",
             ]
         );
@@ -2306,12 +2272,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public void ApplyEvaluationRunSettings(EvaluationRunSettings settings)
     {
-        EvaluationBackend = settings.Backend;
-        EvaluationModel = settings.Model;
-        EvaluationBaseUrl = settings.BaseUrl ?? string.Empty;
+        EvaluationConnection.EvaluationBackend = settings.Backend;
+        EvaluationConnection.EvaluationModel = settings.Model;
+        EvaluationConnection.EvaluationBaseUrl = settings.BaseUrl ?? string.Empty;
         EvaluationLimit = settings.Limit?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
         EvaluationScoreThreshold = settings.ScoreThreshold.ToString("0.##", CultureInfo.InvariantCulture);
-        EvaluationTimeoutSeconds = settings.TimeoutSeconds.ToString(CultureInfo.InvariantCulture);
+        EvaluationConnection.EvaluationTimeoutSeconds = settings.TimeoutSeconds.ToString(CultureInfo.InvariantCulture);
     }
 
     public bool CompareSelectedEvaluationReports()
@@ -2363,38 +2329,38 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Environment.NewLine,
             [
                 "Checking evaluation backend...",
-                $"Backend: {EvaluationBackend}",
-                $"Model: {EvaluationModel}",
+                $"Backend: {EvaluationConnection.EvaluationBackend}",
+                $"Model: {EvaluationConnection.EvaluationModel}",
             ]
         );
     }
 
     public void ApplyEvaluationBackendHealthReport(BackendHealthReport report)
     {
-        SetAvailableModels(EvaluationAvailableModels, report.AvailableModels);
+        SetAvailableModels(EvaluationConnection.EvaluationAvailableModels, report.AvailableModels);
         EvaluationSummary = FormatBackendHealthReport("Evaluation backend", report);
     }
 
     public void SetEvaluationModelListInProgress()
     {
-        EvaluationModelListSummary = $"Refreshing models from {EvaluationBackend}...";
+        EvaluationConnection.SetModelListSummary($"Refreshing models from {EvaluationConnection.EvaluationBackend}...");
     }
 
     public void ApplyEvaluationModelListReport(BackendModelListReport report)
     {
         ApplyModelListReport(
             report,
-            EvaluationAvailableModels,
-            EvaluationModel,
-            model => EvaluationModel = model,
-            summary => EvaluationModelListSummary = summary,
+            EvaluationConnection.EvaluationAvailableModels,
+            EvaluationConnection.EvaluationModel,
+            model => EvaluationConnection.EvaluationModel = model,
+            summary => EvaluationConnection.SetModelListSummary(summary),
             "Evaluation"
         );
     }
 
     public void SetEvaluationModelListError(string message)
     {
-        EvaluationModelListSummary = $"Evaluation model refresh failed.{Environment.NewLine}{message}";
+        EvaluationConnection.SetModelListSummary($"Evaluation model refresh failed.{Environment.NewLine}{message}");
         ReportError(message);
     }
 
@@ -3917,10 +3883,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         if (isEvaluation)
         {
-            EvaluationBackend = backend;
-            EvaluationModel = model;
-            EvaluationBaseUrl = baseUrl;
-            EvaluationTimeoutSeconds = timeoutSeconds.ToString();
+            EvaluationConnection.EvaluationBackend = backend;
+            EvaluationConnection.EvaluationModel = model;
+            EvaluationConnection.EvaluationBaseUrl = baseUrl;
+            EvaluationConnection.EvaluationTimeoutSeconds = timeoutSeconds.ToString();
             return;
         }
 

@@ -1671,10 +1671,10 @@ public partial class MainWindow : Window
     private async void CheckEvaluationBackendButton_Click(object sender, RoutedEventArgs e)
     {
         if (!TryReadBackendOptions(
-            ViewModel.EvaluationBackend,
-            ViewModel.EvaluationModel,
-            ViewModel.EvaluationBaseUrl,
-            ViewModel.EvaluationTimeoutSeconds,
+            ViewModel.EvaluationConnection.EvaluationBackend,
+            ViewModel.EvaluationConnection.EvaluationModel,
+            ViewModel.EvaluationConnection.EvaluationBaseUrl,
+            ViewModel.EvaluationConnection.EvaluationTimeoutSeconds,
             "Evaluation",
             out var backend,
             out var model,
@@ -1714,9 +1714,9 @@ public partial class MainWindow : Window
     private async void RefreshEvaluationModelsButton_Click(object sender, RoutedEventArgs e)
     {
         if (!TryReadModelListOptions(
-            ViewModel.EvaluationBackend,
-            ViewModel.EvaluationBaseUrl,
-            ViewModel.EvaluationTimeoutSeconds,
+            ViewModel.EvaluationConnection.EvaluationBackend,
+            ViewModel.EvaluationConnection.EvaluationBaseUrl,
+            ViewModel.EvaluationConnection.EvaluationTimeoutSeconds,
             "Evaluation",
             out var backend,
             out var baseUrl,
@@ -3701,11 +3701,11 @@ public partial class MainWindow : Window
         bool requireModel = true
     )
     {
-        backend = ViewModel.EvaluationBackend.Trim();
-        model = ViewModel.EvaluationModel.Trim();
-        baseUrl = string.IsNullOrWhiteSpace(ViewModel.EvaluationBaseUrl)
+        backend = ViewModel.EvaluationConnection.EvaluationBackend.Trim();
+        model = ViewModel.EvaluationConnection.EvaluationModel.Trim();
+        baseUrl = string.IsNullOrWhiteSpace(ViewModel.EvaluationConnection.EvaluationBaseUrl)
             ? null
-            : ViewModel.EvaluationBaseUrl.Trim();
+            : ViewModel.EvaluationConnection.EvaluationBaseUrl.Trim();
         limit = null;
         scoreThreshold = 0;
         timeoutSeconds = 0;
@@ -3751,7 +3751,7 @@ public partial class MainWindow : Window
         }
 
         if (!int.TryParse(
-            ViewModel.EvaluationTimeoutSeconds,
+            ViewModel.EvaluationConnection.EvaluationTimeoutSeconds,
             NumberStyles.Integer,
             CultureInfo.InvariantCulture,
             out timeoutSeconds
