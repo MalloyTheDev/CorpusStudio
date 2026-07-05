@@ -107,10 +107,12 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Core/ViewModels/HfImportViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/MainWindowViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/StartCenterViewModel.cs`
+- `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/AiAssistRewriteBatchesViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/ArenaViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/ArtifactsViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/DebtViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/ExamplesViewModel.cs`
+- `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IAiAssistRewriteBatchesViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IArenaViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IArtifactsViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IDebtViewModel.cs`

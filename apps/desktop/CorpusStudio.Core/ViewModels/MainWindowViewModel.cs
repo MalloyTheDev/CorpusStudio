@@ -105,8 +105,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _aiAssistQueueSearch = string.Empty;
     private string _aiAssistQueueSort = "Newest";
     private string _aiAssistQueueViewName = "Review View";
-    private string _aiAssistRewriteBatchSummary =
-        "Prepared rewrite batches appear here after synthetic batch triage.";
     private string _reviewedFixSummary =
         "Edited failed rows appear here so you can track which fixes were re-tested.";
     private string _aiAssistModelListSummary =
@@ -160,8 +158,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private EvaluationExampleResult? _selectedEvaluationExampleResult;
     private AiAssistReviewQueueItem? _selectedAiAssistReviewQueueItem;
     private AiAssistQueueView? _selectedAiAssistQueueView;
-    private AiAssistRewriteBatch? _selectedAiAssistRewriteBatch;
-    private AiAssistRewriteBatch? _lastPreparedAiAssistRewriteBatch;
     private ReviewedFixRecord? _selectedReviewedFix;
     private ReviewedFixRecord? _lastPreparedEvaluationFix;
     private EvaluationFailureFilter? _selectedEvaluationFailureFilter;
@@ -211,13 +207,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public IWritingStudioViewModel WritingStudio { get; }
 
+    public IAiAssistRewriteBatchesViewModel RewriteBatches { get; }
+
     /// <summary>Design-time / test constructor.</summary>
     public MainWindowViewModel()
         : this(
             new DebtViewModel(), new ArenaViewModel(), new SettingsViewModel(),
             new VersionsViewModel(), new ArtifactsViewModel(), new SuitesViewModel(),
             new SplitsViewModel(), new PreferenceReviewViewModel(), new QuarantineViewModel(),
-            new ExamplesViewModel(), new WritingStudioViewModel())
+            new ExamplesViewModel(), new WritingStudioViewModel(), new AiAssistRewriteBatchesViewModel())
     {
     }
 
@@ -226,7 +224,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         IVersionsViewModel versions, IArtifactsViewModel artifacts, ISuitesViewModel suites,
         ISplitsViewModel splits, IPreferenceReviewViewModel preferenceReview,
         IQuarantineViewModel quarantine, IExamplesViewModel examples,
-        IWritingStudioViewModel writingStudio)
+        IWritingStudioViewModel writingStudio, IAiAssistRewriteBatchesViewModel rewriteBatches)
     {
         Debt = debt;
         Arena = arena;
@@ -239,6 +237,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Quarantine = quarantine;
         Examples = examples;
         WritingStudio = writingStudio;
+        RewriteBatches = rewriteBatches;
         // A split failure surfaces in the shell's shared error banner; the tab keeps no shell
         // reference, so it raises ErrorReported and the shell forwards it to ReportError.
         Splits.ErrorReported += ReportError;
@@ -376,8 +375,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public ObservableCollection<AiAssistReviewQueueItem> AiAssistReviewQueue { get; } = [];
 
     public ObservableCollection<AiAssistQueueView> AiAssistQueueViews { get; } = [];
-
-    public ObservableCollection<AiAssistRewriteBatch> AiAssistRewriteBatches { get; } = [];
 
     public ObservableCollection<ReviewedFixRecord> ReviewedFixes { get; } = [];
 
@@ -1284,25 +1281,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         set => SetField(ref _selectedAiAssistQueueView, value);
     }
 
-    public AiAssistRewriteBatch? SelectedAiAssistRewriteBatch
-    {
-        get => _selectedAiAssistRewriteBatch;
-        set
-        {
-            if (SetField(ref _selectedAiAssistRewriteBatch, value) && value is not null)
-            {
-                AiAssistRewriteBatchSummary =
-                    $"Selected rewrite batch for rows {FormatRowNumbers(value.RowNumbers)}.";
-            }
-        }
-    }
-
-    public string AiAssistRewriteBatchSummary
-    {
-        get => _aiAssistRewriteBatchSummary;
-        private set => SetField(ref _aiAssistRewriteBatchSummary, value);
-    }
-
     public ReviewedFixRecord? SelectedReviewedFix
     {
         get => _selectedReviewedFix;
@@ -1902,11 +1880,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         AiAssistQueueViewName = "Review View";
         AiAssistQueueViews.Clear();
         SelectedAiAssistQueueView = null;
-        AiAssistRewriteBatches.Clear();
-        SelectedAiAssistRewriteBatch = null;
-        _lastPreparedAiAssistRewriteBatch = null;
-        AiAssistRewriteBatchSummary =
-            "Prepared rewrite batches appear here after synthetic batch triage.";
+        // AI-Assist rewrite batches are per-project: reset the child so nothing leaks across a switch.
+        RewriteBatches.Reset();
         ReviewedFixes.Clear();
         SelectedReviewedFix = null;
         _lastPreparedEvaluationFix = null;
@@ -2234,7 +2209,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         AiAssistInstruction = BuildSyntheticBatchRewriteInstruction(SyntheticPatternIssues, rowNumbers);
-        _lastPreparedAiAssistRewriteBatch = new AiAssistRewriteBatch
+        RewriteBatches.SetLastPrepared(new AiAssistRewriteBatch
         {
             SchemaId = ActiveSchemaId,
             Action = "rewrite-output",
@@ -2243,7 +2218,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             IssueSummary = BuildSyntheticIssueSummary(SyntheticPatternIssues),
             SourceDraft = WritingStudio.DraftText,
             Instruction = AiAssistInstruction,
-        };
+        });
         QualityTriageSummary =
             $"Prepared {affectedRows.Count} affected row(s) from {SyntheticPatternIssues.Count} synthetic issue(s) for batch rewrite.";
         return true;
@@ -2787,24 +2762,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             ?? AiAssistQueueViews.FirstOrDefault();
     }
 
-    public void SetAiAssistRewriteBatches(IEnumerable<AiAssistRewriteBatch> batches)
-    {
-        var selectedBatchId = SelectedAiAssistRewriteBatch?.BatchId;
-        AiAssistRewriteBatches.Clear();
-        foreach (var batch in batches)
-        {
-            AiAssistRewriteBatches.Add(batch);
-        }
-
-        SelectedAiAssistRewriteBatch = AiAssistRewriteBatches
-            .FirstOrDefault(batch => string.Equals(batch.BatchId, selectedBatchId, StringComparison.Ordinal))
-            ?? AiAssistRewriteBatches.FirstOrDefault();
-
-        AiAssistRewriteBatchSummary = AiAssistRewriteBatches.Count == 0
-            ? "No prepared rewrite batches are saved for this project."
-            : $"Saved rewrite batches: {AiAssistRewriteBatches.Count}. Select one to resume.";
-    }
-
     public AiAssistQueueView BuildCurrentAiAssistQueueView()
     {
         return new AiAssistQueueView
@@ -2834,50 +2791,26 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         AiAssistQueueSummary = $"AI Assist queue view loaded: {view.Name}.";
     }
 
-    public bool TryGetLastPreparedAiAssistRewriteBatch(
-        out AiAssistRewriteBatch batch,
-        out string errorMessage
-    )
-    {
-        if (_lastPreparedAiAssistRewriteBatch is null)
-        {
-            batch = new AiAssistRewriteBatch();
-            errorMessage = "Prepare a synthetic batch rewrite before saving it.";
-            return false;
-        }
-
-        batch = _lastPreparedAiAssistRewriteBatch;
-        errorMessage = string.Empty;
-        return true;
-    }
-
-    public void ApplyAiAssistRewriteBatchSaved(AiAssistRewriteBatch batch)
-    {
-        AiAssistRewriteBatchSummary =
-            $"Saved rewrite batch for rows {FormatRowNumbers(batch.RowNumbers)}.";
-    }
-
+    // ResumeAiAssistRewriteBatch stays on the shell: it loads a saved batch's source draft into the
+    // (not-yet-extracted) Writing Studio and sets the run-core action/instruction, reaching into the
+    // extracted RewriteBatches tab for the selection. Resolve fully when the AI-Assist core extracts.
     public bool ResumeAiAssistRewriteBatch()
     {
-        if (SelectedAiAssistRewriteBatch is null)
+        var selected = RewriteBatches.SelectedAiAssistRewriteBatch;
+        if (selected is null)
         {
-            AiAssistRewriteBatchSummary = "Select a saved rewrite batch before resuming.";
+            RewriteBatches.SetRewriteBatchSummary("Select a saved rewrite batch before resuming.");
             return false;
         }
 
-        WritingStudio.LoadDraft(SelectedAiAssistRewriteBatch.SourceDraft);
-        AiAssistAction = AiAssistActionPresets.Contains(SelectedAiAssistRewriteBatch.Action)
-            ? SelectedAiAssistRewriteBatch.Action
+        WritingStudio.LoadDraft(selected.SourceDraft);
+        AiAssistAction = AiAssistActionPresets.Contains(selected.Action)
+            ? selected.Action
             : "rewrite-output";
-        AiAssistInstruction = SelectedAiAssistRewriteBatch.Instruction;
-        AiAssistRewriteBatchSummary =
-            $"Resumed rewrite batch for rows {FormatRowNumbers(SelectedAiAssistRewriteBatch.RowNumbers)}.";
+        AiAssistInstruction = selected.Instruction;
+        RewriteBatches.SetRewriteBatchSummary(
+            $"Resumed rewrite batch for rows {AiAssistRewriteBatchesViewModel.FormatRowNumbers(selected.RowNumbers)}.");
         return true;
-    }
-
-    public void SetAiAssistRewriteBatchError(string message)
-    {
-        AiAssistRewriteBatchSummary = $"AI Assist rewrite batch could not be updated.{Environment.NewLine}{message}";
     }
 
     public void SetReviewedFixes(IEnumerable<ReviewedFixRecord> fixes)
@@ -4440,16 +4373,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                     return $"{severity} {kind}: {issue.Message}";
                 })
         );
-    }
-
-    private static string FormatRowNumbers(IEnumerable<int> rowNumbers)
-    {
-        var rows = rowNumbers
-            .Where(rowNumber => rowNumber > 0)
-            .Distinct()
-            .Order()
-            .ToList();
-        return rows.Count == 0 ? "none" : string.Join(", ", rows);
     }
 
     private static string BuildEvaluationFailureInstruction(EvaluationExampleResult result)

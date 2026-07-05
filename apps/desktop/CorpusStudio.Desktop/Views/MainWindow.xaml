@@ -1972,7 +1972,7 @@
                                             Margin="0,0,8,0"
                                             Click="ResumeAiAssistRewriteBatchButton_Click" />
                                     <TextBlock AutomationProperties.AutomationId="AiAssistRewriteBatchSummaryTextBlock"
-                                               Text="{Binding AiAssistRewriteBatchSummary, Mode=OneWay}"
+                                               Text="{Binding RewriteBatches.AiAssistRewriteBatchSummary, Mode=OneWay}"
                                                Width="188"
                                                TextWrapping="Wrap"
                                                VerticalAlignment="Center" />
@@ -1980,8 +1980,8 @@
 
                                 <ListBox Grid.Row="7"
                                          AutomationProperties.AutomationId="AiAssistRewriteBatchesListBox"
-                                         ItemsSource="{Binding AiAssistRewriteBatches}"
-                                         SelectedItem="{Binding SelectedAiAssistRewriteBatch, Mode=TwoWay}"
+                                         ItemsSource="{Binding RewriteBatches.AiAssistRewriteBatches}"
+                                         SelectedItem="{Binding RewriteBatches.SelectedAiAssistRewriteBatch, Mode=TwoWay}"
                                          DisplayMemberPath="DisplayName" />
                             </Grid>
 
