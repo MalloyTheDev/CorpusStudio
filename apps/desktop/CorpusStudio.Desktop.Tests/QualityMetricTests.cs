@@ -77,97 +77,97 @@ public sealed class QualityMetricTests
     public void ApplyQualityReport_Clean_SevenMetrics_GreenStatus()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyQualityReport(Report());
+        vm.Quality.ApplyQualityReport(Report());
 
-        Assert.True(vm.HasQualityMetrics);
-        Assert.Equal(7, vm.QualityMetrics.Count);
-        Assert.Equal("Examples", vm.QualityMetrics[0].Label);
-        Assert.Equal("100", vm.QualityMetrics[0].Value);
-        Assert.Equal("info", vm.QualityMetrics[0].Severity);
-        Assert.All(vm.QualityMetrics.Skip(1), m => Assert.Equal("ok", m.Severity)); // all issue counts 0
+        Assert.True(vm.Quality.HasQualityMetrics);
+        Assert.Equal(7, vm.Quality.QualityMetrics.Count);
+        Assert.Equal("Examples", vm.Quality.QualityMetrics[0].Label);
+        Assert.Equal("100", vm.Quality.QualityMetrics[0].Value);
+        Assert.Equal("info", vm.Quality.QualityMetrics[0].Severity);
+        Assert.All(vm.Quality.QualityMetrics.Skip(1), m => Assert.Equal("ok", m.Severity)); // all issue counts 0
 
-        Assert.Equal("No basic quality issues found.", vm.QualityStatusLine);
-        Assert.Equal("#15803D", vm.QualityStatusColor);
-        Assert.False(vm.HasQualityDetail);
+        Assert.Equal("No basic quality issues found.", vm.Quality.QualityStatusLine);
+        Assert.Equal("#15803D", vm.Quality.QualityStatusColor);
+        Assert.False(vm.Quality.HasQualityDetail);
     }
 
     [Fact]
     public void ApplyQualityReport_CoreIssue_AmberStatus()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyQualityReport(Report(empty: 3));
+        vm.Quality.ApplyQualityReport(Report(empty: 3));
 
-        var emptyMetric = vm.QualityMetrics.Single(m => m.Label == "Empty rows");
+        var emptyMetric = vm.Quality.QualityMetrics.Single(m => m.Label == "Empty rows");
         Assert.Equal("warn", emptyMetric.Severity);
         Assert.Equal("3", emptyMetric.Value);
 
-        Assert.Equal("Review the flagged rows before export.", vm.QualityStatusLine);
-        Assert.Equal("#B45309", vm.QualityStatusColor);
+        Assert.Equal("Review the flagged rows before export.", vm.Quality.QualityStatusLine);
+        Assert.Equal("#B45309", vm.Quality.QualityStatusColor);
     }
 
     [Fact]
     public void ApplyQualityReport_Pii_RedStatus_And_DetailPresent()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyQualityReport(Report(pii: 2));
+        vm.Quality.ApplyQualityReport(Report(pii: 2));
 
-        var piiMetric = vm.QualityMetrics.Single(m => m.Label == "Possible PII / secrets");
+        var piiMetric = vm.Quality.QualityMetrics.Single(m => m.Label == "Possible PII / secrets");
         Assert.Equal("problem", piiMetric.Severity);
         Assert.Equal("⛔", piiMetric.StatusIcon);
 
         // PII escalates the banner to red even though only PII is nonzero.
-        Assert.Contains("PII / secrets detected", vm.QualityStatusLine);
-        Assert.Equal("#B91C1C", vm.QualityStatusColor);
+        Assert.Contains("PII / secrets detected", vm.Quality.QualityStatusLine);
+        Assert.Equal("#B91C1C", vm.Quality.QualityStatusColor);
 
-        Assert.True(vm.HasQualityDetail);
-        Assert.Contains("PII / secrets detected", vm.QualityDetail);
+        Assert.True(vm.Quality.HasQualityDetail);
+        Assert.Contains("PII / secrets detected", vm.Quality.QualityDetail);
     }
 
     [Fact]
     public void ApplyQualityReport_TokenOutliers_ShowInDetailNotStatus()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyQualityReport(Report(tokenOutliers: 2));
+        vm.Quality.ApplyQualityReport(Report(tokenOutliers: 2));
 
         // Token outliers aren't a core-issue metric, so the banner stays green, but the detail
         // block surfaces them.
-        Assert.Equal("No basic quality issues found.", vm.QualityStatusLine);
-        Assert.True(vm.HasQualityDetail);
-        Assert.Contains("Token-length outliers", vm.QualityDetail);
+        Assert.Equal("No basic quality issues found.", vm.Quality.QualityStatusLine);
+        Assert.True(vm.Quality.HasQualityDetail);
+        Assert.Contains("Token-length outliers", vm.Quality.QualityDetail);
     }
 
     [Fact]
     public void ApplyQualityReport_StillBuildsQualitySummaryForDashboard()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyQualityReport(Report(examples: 42, empty: 1));
+        vm.Quality.ApplyQualityReport(Report(examples: 42, empty: 1));
 
         // The full text summary is unchanged (the dashboard card binds it).
-        Assert.Contains("Examples: 42", vm.QualitySummary);
-        Assert.Contains("Empty rows: 1", vm.QualitySummary);
-        Assert.Contains("Status:", vm.QualitySummary);
+        Assert.Contains("Examples: 42", vm.Quality.QualitySummary);
+        Assert.Contains("Empty rows: 1", vm.Quality.QualitySummary);
+        Assert.Contains("Status:", vm.Quality.QualitySummary);
     }
 
     [Fact]
     public void SetQualityError_ClearsMetrics_FallsBackToText()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyQualityReport(Report(empty: 2));
-        Assert.True(vm.HasQualityMetrics);
+        vm.Quality.ApplyQualityReport(Report(empty: 2));
+        Assert.True(vm.Quality.HasQualityMetrics);
 
-        vm.SetQualityError("engine exploded");
-        Assert.False(vm.HasQualityMetrics);
-        Assert.Empty(vm.QualityMetrics);
-        Assert.Contains("engine exploded", vm.QualitySummary);
+        vm.Quality.SetQualityError("engine exploded");
+        Assert.False(vm.Quality.HasQualityMetrics);
+        Assert.Empty(vm.Quality.QualityMetrics);
+        Assert.Contains("engine exploded", vm.Quality.QualitySummary);
     }
 
     [Fact]
     public void SetQualityInProgress_ClearsMetrics()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyQualityReport(Report());
-        vm.SetQualityInProgress();
-        Assert.False(vm.HasQualityMetrics);
-        Assert.Empty(vm.QualityMetrics);
+        vm.Quality.ApplyQualityReport(Report());
+        vm.Quality.SetQualityInProgress();
+        Assert.False(vm.Quality.HasQualityMetrics);
+        Assert.Empty(vm.Quality.QualityMetrics);
     }
 }

@@ -981,7 +981,7 @@
                                                 </Border>
                                                 <TextBlock Text="Quality" Style="{StaticResource DashboardCardLabelStyle}" Margin="11,0,0,0" />
                                             </StackPanel>
-                                            <TextBlock Text="{Binding QualitySummary, Mode=OneWay}"
+                                            <TextBlock Text="{Binding Quality.QualitySummary, Mode=OneWay}"
                                                        Style="{StaticResource CaptionTextStyle}" />
                                         </StackPanel>
                                     </Border>
@@ -2770,23 +2770,23 @@
                      falls back to the QualitySummary text; after a run it shows a PII-aware status
                      banner, the count rows, and the optional flagged-row detail. -->
                 <TextBox AutomationProperties.AutomationId="QualitySummaryTextBox"
-                         Text="{Binding QualitySummary, Mode=OneWay}"
+                         Text="{Binding Quality.QualitySummary, Mode=OneWay}"
                          Margin="0,8,0,8"
                          MinHeight="72"
                          IsReadOnly="True"
                          TextWrapping="Wrap"
                          VerticalScrollBarVisibility="Auto"
-                         Visibility="{Binding HasQualityMetrics, Converter={StaticResource InverseBoolToVis}}" />
+                         Visibility="{Binding Quality.HasQualityMetrics, Converter={StaticResource InverseBoolToVis}}" />
                 <StackPanel Margin="0,10,0,8"
-                            Visibility="{Binding HasQualityMetrics, Converter={StaticResource BoolToVis}}">
-                    <Border Background="{Binding QualityStatusBackground}" CornerRadius="7"
+                            Visibility="{Binding Quality.HasQualityMetrics, Converter={StaticResource BoolToVis}}">
+                    <Border Background="{Binding Quality.QualityStatusBackground}" CornerRadius="7"
                             Padding="11,8" Margin="0,0,0,10">
                         <TextBlock AutomationProperties.AutomationId="QualityStatusTextBlock"
-                                   Text="{Binding QualityStatusLine}" Foreground="{Binding QualityStatusColor}"
+                                   Text="{Binding Quality.QualityStatusLine}" Foreground="{Binding Quality.QualityStatusColor}"
                                    FontWeight="SemiBold" FontSize="12" TextWrapping="Wrap" />
                     </Border>
                     <ItemsControl AutomationProperties.AutomationId="QualityMetricsList"
-                                  ItemsSource="{Binding QualityMetrics}">
+                                  ItemsSource="{Binding Quality.QualityMetrics}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Grid Margin="0,3">
@@ -2807,10 +2807,10 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <TextBox Text="{Binding QualityDetail, Mode=OneWay}"
+                    <TextBox Text="{Binding Quality.QualityDetail, Mode=OneWay}"
                              Margin="0,10,0,0" MaxHeight="150" IsReadOnly="True" TextWrapping="Wrap"
                              FontSize="11.5" VerticalScrollBarVisibility="Auto"
-                             Visibility="{Binding HasQualityDetail, Converter={StaticResource BoolToVis}}" />
+                             Visibility="{Binding Quality.HasQualityDetail, Converter={StaticResource BoolToVis}}" />
                 </StackPanel>
                 <Button Style="{StaticResource PrimaryButtonStyle}"
                         AutomationProperties.AutomationId="RunQualityButton"
@@ -2848,8 +2848,8 @@
                 <Grid Margin="0,8,0,8">
                     <ListBox x:Name="SyntheticPatternIssuesListBox"
                              AutomationProperties.AutomationId="SyntheticPatternIssuesListBox"
-                             ItemsSource="{Binding SyntheticPatternIssues}"
-                             SelectedItem="{Binding SelectedSyntheticPatternIssue, Mode=TwoWay}"
+                             ItemsSource="{Binding Quality.SyntheticPatternIssues}"
+                             SelectedItem="{Binding Quality.SelectedSyntheticPatternIssue, Mode=TwoWay}"
                              DisplayMemberPath="DisplayName"
                              Height="92" />
                     <TextBlock Style="{StaticResource ListEmptyPlaceholderStyle}"
@@ -2857,7 +2857,7 @@
                                Visibility="{Binding HasItems, ElementName=SyntheticPatternIssuesListBox, Converter={StaticResource InverseBoolToVis}}" />
                 </Grid>
                 <TextBlock AutomationProperties.AutomationId="QualityTriageSummaryTextBlock"
-                           Text="{Binding QualityTriageSummary, Mode=OneWay}"
+                           Text="{Binding Quality.QualityTriageSummary, Mode=OneWay}"
                            TextWrapping="Wrap"
                            Margin="0,0,0,8" />
                 <Button AutomationProperties.AutomationId="PrepareSyntheticRewriteButton"
@@ -2873,7 +2873,7 @@
                            Foreground="#334155"
                            Margin="0,18,0,0" />
                 <TextBox AutomationProperties.AutomationId="QualityHistoryTextBox"
-                         Text="{Binding QualityHistorySummary, Mode=OneWay}"
+                         Text="{Binding Quality.QualityHistorySummary, Mode=OneWay}"
                          Margin="0,8,0,12"
                          MinHeight="72"
                          IsReadOnly="True"
@@ -2884,18 +2884,18 @@
                 <StackPanel Orientation="Horizontal" Margin="0,18,0,4">
                     <TextBlock Text="Debt trend" FontWeight="SemiBold" Foreground="#334155"
                                VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding DebtTrendDirection}" FontWeight="SemiBold" FontSize="12"
-                               Foreground="{Binding DebtTrendDirectionColor}" Margin="10,0,0,0"
+                    <TextBlock Text="{Binding Quality.DebtTrendDirection}" FontWeight="SemiBold" FontSize="12"
+                               Foreground="{Binding Quality.DebtTrendDirectionColor}" Margin="10,0,0,0"
                                VerticalAlignment="Center"
-                               Visibility="{Binding HasDebtTrend, Converter={StaticResource BoolToVis}}" />
+                               Visibility="{Binding Quality.HasDebtTrend, Converter={StaticResource BoolToVis}}" />
                 </StackPanel>
                 <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
                               HorizontalAlignment="Left" MaxWidth="520"
-                              Visibility="{Binding HasDebtTrendPoints, Converter={StaticResource BoolToVis}}">
+                              Visibility="{Binding Quality.HasDebtTrendPoints, Converter={StaticResource BoolToVis}}">
                     <Border Height="64" Background="#F8FAFC" BorderBrush="#EEF2F7" BorderThickness="1"
                             CornerRadius="6" Padding="8,4">
                         <ItemsControl AutomationProperties.AutomationId="DebtTrendChart"
-                                      ItemsSource="{Binding DebtTrend}" VerticalAlignment="Bottom">
+                                      ItemsSource="{Binding Quality.DebtTrend}" VerticalAlignment="Bottom">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <StackPanel Orientation="Horizontal" />
@@ -2911,7 +2911,7 @@
                         </ItemsControl>
                     </Border>
                 </ScrollViewer>
-                <TextBlock Text="{Binding DebtTrendSummary}"
+                <TextBlock Text="{Binding Quality.DebtTrendSummary}"
                            Style="{StaticResource CaptionTextStyle}"
                            TextWrapping="Wrap" Margin="0,6,0,24" />
 

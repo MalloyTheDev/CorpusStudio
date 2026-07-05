@@ -27,13 +27,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _activeSchemaDescription =
         "Choose a schema, write examples, validate rows, and export model-ready JSONL.";
     private string _validationSummary = "Create a project to start validation.";
-    private string _qualitySummary = "Create or select a project to run quality checks.";
-    private bool _hasQualityMetrics;
-    private string _qualityStatusLine = string.Empty;
-    private string _qualityStatusColor = "#64748B";
-    private string _qualityStatusBackground = "#F1F5F9";
-    private string _qualityDetail = string.Empty;
-    private bool _hasQualityDetail;
+    // Quality panel (report summary + metric grid + status banner + flagged-row detail + quality
+    // history + debt-trend + synthetic-issue list/triage) extracted to QualityViewModel in Phase 2
+    // (slice 5). The shell keeps the synthetic-triage AI-Assist handoffs reaching into the child.
     private string _gateSummary = "Run gates to check whether this dataset may move forward.";
     private bool _problemsPanelVisible;
     private string _problemsSummary = "Run gates to check this dataset for problems.";
@@ -41,12 +37,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _problemsBadgeColor = GateReport.StatusColor(null);
     private bool _outputPanelVisible;
     private bool _searchPanelVisible;
-    private string _qualityHistorySummary = "Quality history appears after quality checks run.";
-    private bool _hasDebtTrend;
-    private string _debtTrendDirection = string.Empty;
-    private string _debtTrendDirectionColor = "#64748B";
-    private string _debtTrendSummary = "Run quality checks to build a debt trend.";
-    private string _qualityTriageSummary = "Synthetic quality issues appear here after quality checks run.";
     // Evaluation tab core (run + report panes + per-example results + failure filters + report
     // history) extracted to EvaluationViewModel in Phase 2 (backend-cluster slice 3, PR 3b). The
     // shell keeps the bridges (health methods, eval->AiAssist/ReviewedFix, Training-baseline) reaching in.
@@ -73,7 +63,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _labSettingsSummary = "Lab backend settings can be saved per project.";
     private DatasetProjectListItem? _selectedProject;
     private ValidationIssueNavigationItem? _selectedValidationIssue;
-    private SyntheticPatternIssue? _selectedSyntheticPatternIssue;
     private ReviewedFixRecord? _selectedReviewedFix;
     private ReviewedFixRecord? _lastPreparedEvaluationFix;
 
@@ -132,6 +121,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public ITrainingViewModel Training { get; }
 
+    public IQualityViewModel Quality { get; }
+
     /// <summary>Design-time / test constructor.</summary>
     public MainWindowViewModel()
         : this(
@@ -139,7 +130,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             new VersionsViewModel(), new ArtifactsViewModel(), new SuitesViewModel(),
             new SplitsViewModel(), new PreferenceReviewViewModel(), new QuarantineViewModel(),
             new ExamplesViewModel(), new WritingStudioViewModel(), new AiAssistRewriteBatchesViewModel(),
-            new AiAssistConnectionViewModel(), new EvaluationConnectionViewModel())
+            new AiAssistConnectionViewModel(), new EvaluationConnectionViewModel(), new QualityViewModel())
     {
     }
 
@@ -149,7 +140,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ISplitsViewModel splits, IPreferenceReviewViewModel preferenceReview,
         IQuarantineViewModel quarantine, IExamplesViewModel examples,
         IWritingStudioViewModel writingStudio, IAiAssistRewriteBatchesViewModel rewriteBatches,
-        IAiAssistConnectionViewModel aiAssistConnection, IEvaluationConnectionViewModel evaluationConnection)
+        IAiAssistConnectionViewModel aiAssistConnection, IEvaluationConnectionViewModel evaluationConnection,
+        IQualityViewModel quality)
     {
         Debt = debt;
         Arena = arena;
@@ -165,6 +157,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RewriteBatches = rewriteBatches;
         AiAssistConnection = aiAssistConnection;
         EvaluationConnection = evaluationConnection;
+        Quality = quality;
         // The AI-Assist core is composed from the shared connection instance (its run reads the
         // backend/model), rather than DI-injected, so both share one AiAssistConnection.
         AiAssist = new AiAssistViewModel(aiAssistConnection);
@@ -179,6 +172,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         AiAssist.ErrorReported += ReportError;
         Evaluation.ErrorReported += ReportError;
         Training.ErrorReported += ReportError;
+        Quality.ErrorReported += ReportError;
     }
 
     // ---- Engine availability (v1.2.15 distributability) --------------------------
@@ -278,7 +272,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public ObservableCollection<ValidationIssueNavigationItem> ValidationIssues { get; } = [];
 
-    public ObservableCollection<SyntheticPatternIssue> SyntheticPatternIssues { get; } = [];
 
 
 
@@ -348,19 +341,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         set => SetField(ref _selectedValidationIssue, value);
     }
 
-    public SyntheticPatternIssue? SelectedSyntheticPatternIssue
-    {
-        get => _selectedSyntheticPatternIssue;
-        set
-        {
-            if (SetField(ref _selectedSyntheticPatternIssue, value))
-            {
-                QualityTriageSummary = value is null
-                    ? "Select a synthetic quality issue to prepare a rewrite."
-                    : FormatSyntheticTriageSummary(value);
-            }
-        }
-    }
 
     // The draft editor buffer + dirty-tracking + LoadDraft/MarkDraftClean moved to
     // WritingStudioViewModel in Phase 2 (backend-cluster slice 1). LoadDraft is the shared
@@ -379,68 +359,22 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         private set => SetField(ref _validationSummary, value);
     }
 
-    public string QualitySummary
-    {
-        get => _qualitySummary;
-        private set => SetField(ref _qualitySummary, value);
-    }
 
     // ---- Quality metric grid (v1.2.12) -------------------------------------------
     // A structured view of the core quality counts for the right panel, replacing the text
-    // blob. QualitySummary (the full text) is still built for the dashboard card. The status
+    // blob. Quality.QualitySummary (the full text) is still built for the dashboard card. The status
     // banner is PII-aware (unlike the legacy `health` line, which ignores PII).
 
     /// <summary>The core quality counts as scannable rows (Examples + the six issue metrics).</summary>
-    public ObservableCollection<QualityMetric> QualityMetrics { get; } = [];
 
-    public bool HasQualityMetrics
-    {
-        get => _hasQualityMetrics;
-        private set => SetField(ref _hasQualityMetrics, value);
-    }
 
-    public string QualityStatusLine
-    {
-        get => _qualityStatusLine;
-        private set => SetField(ref _qualityStatusLine, value);
-    }
 
-    public string QualityStatusColor
-    {
-        get => _qualityStatusColor;
-        private set => SetField(ref _qualityStatusColor, value);
-    }
 
-    public string QualityStatusBackground
-    {
-        get => _qualityStatusBackground;
-        private set => SetField(ref _qualityStatusBackground, value);
-    }
 
     /// <summary>The optional flagged-row detail (PII findings, token outliers, category
     /// imbalance, synthetic clusters/samples) — empty when the dataset is clean.</summary>
-    public string QualityDetail
-    {
-        get => _qualityDetail;
-        private set => SetField(ref _qualityDetail, value);
-    }
 
-    public bool HasQualityDetail
-    {
-        get => _hasQualityDetail;
-        private set => SetField(ref _hasQualityDetail, value);
-    }
 
-    private void ResetQualityMetrics()
-    {
-        QualityMetrics.Clear();
-        HasQualityMetrics = false;
-        QualityStatusLine = string.Empty;
-        QualityStatusColor = "#64748B";
-        QualityStatusBackground = "#F1F5F9";
-        QualityDetail = string.Empty;
-        HasQualityDetail = false;
-    }
 
     public string GateSummary
     {
@@ -696,11 +630,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ApplyProblemsFromGateReport(report);
     }
 
-    public string QualityHistorySummary
-    {
-        get => _qualityHistorySummary;
-        private set => SetField(ref _qualityHistorySummary, value);
-    }
 
     // ---- Debt trend (v1.2.9) -----------------------------------------------------
     // A mini-chart of the quality issue rate across recorded quality runs, built from the
@@ -708,66 +637,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     // PII/secrets aren't in the history, so only the issue-rate trend is honest to plot.
 
     /// <summary>Ordered oldest → newest bars for the debt-trend mini-chart.</summary>
-    public ObservableCollection<DebtTrendPoint> DebtTrend { get; } = [];
 
     /// <summary>True when there is at least one bar to draw (chart visibility).</summary>
-    public bool HasDebtTrendPoints => DebtTrend.Count > 0;
 
     /// <summary>True when there are ≥2 runs — enough to state a direction.</summary>
-    public bool HasDebtTrend
-    {
-        get => _hasDebtTrend;
-        private set => SetField(ref _hasDebtTrend, value);
-    }
 
-    public string DebtTrendDirection
-    {
-        get => _debtTrendDirection;
-        private set => SetField(ref _debtTrendDirection, value);
-    }
 
-    public string DebtTrendDirectionColor
-    {
-        get => _debtTrendDirectionColor;
-        private set => SetField(ref _debtTrendDirectionColor, value);
-    }
 
-    public string DebtTrendSummary
-    {
-        get => _debtTrendSummary;
-        private set => SetField(ref _debtTrendSummary, value);
-    }
 
-    private void ApplyDebtTrend(IReadOnlyList<QualityHistoryEntry> history)
-    {
-        var result = Models.DebtTrend.Build(history);
-        DebtTrend.Clear();
-        foreach (var point in result.Points)
-        {
-            DebtTrend.Add(point);
-        }
-        HasDebtTrend = result.HasTrend;
-        DebtTrendDirection = result.Direction;
-        DebtTrendDirectionColor = result.DirectionColor;
-        DebtTrendSummary = result.Summary;
-        OnPropertyChanged(nameof(HasDebtTrendPoints));
-    }
 
-    private void ResetDebtTrend()
-    {
-        DebtTrend.Clear();
-        HasDebtTrend = false;
-        DebtTrendDirection = string.Empty;
-        DebtTrendDirectionColor = "#64748B";
-        DebtTrendSummary = "Run quality checks to build a debt trend.";
-        OnPropertyChanged(nameof(HasDebtTrendPoints));
-    }
 
-    public string QualityTriageSummary
-    {
-        get => _qualityTriageSummary;
-        private set => SetField(ref _qualityTriageSummary, value);
-    }
 
     // Preference Review tab state + display/export logic extracted to PreferenceReviewViewModel in
     // Phase 2. The shell pushes ActiveSchemaId down, forwards SetItems(Examples) + Reset() on
@@ -1125,13 +1004,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ApplyLabSettings(project.Project.LabSettings ?? LabBackendSettings.Default);
         ValidationSummary = "No validation has run yet.";
         ClearValidationIssues();
-        QualitySummary = "Quality checks will appear after examples are added.";
-        ResetQualityMetrics();
-        QualityHistorySummary = "Quality history appears after quality checks run.";
-        ResetDebtTrend();
-        QualityTriageSummary = "Synthetic quality issues appear here after quality checks run.";
-        SyntheticPatternIssues.Clear();
-        SelectedSyntheticPatternIssue = null;
+        // Quality/debt-trend/synthetic panel state is per-project: reset the child.
+        Quality.Reset();
         Splits.Reset();
         // Evaluation run/report/result state is per-project: reset the child.
         Evaluation.Reset();
@@ -1232,7 +1106,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         Examples.SetItems(examples);
         PreferenceReview.SetItems(Examples.Items);
-        QualitySummary = Examples.Items.Count == 0
+        Quality.QualitySummary = Examples.Items.Count == 0
             ? "No saved examples yet. Quality checks will run after examples are added."
             : $"{Examples.Items.Count} saved example(s). Run quality checks to inspect duplicates and empty rows.";
         // The dataset changed: any prior debt grade is now stale. Invalidate it so the
@@ -1240,169 +1114,33 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Debt.InvalidateDebt();
     }
 
-    public void SetQualityInProgress()
-    {
-        QualitySummary = "Running quality checks...";
-        ResetQualityMetrics();
-        QualityTriageSummary = "Refreshing synthetic quality triage...";
-    }
 
-    public void ApplyQualityReport(
-        QualityReport report,
-        IReadOnlyList<QualityHistoryEntry>? history = null
-    )
-    {
-        var health = report.EmptyRowCount == 0
-            && report.DuplicateExactCount == 0
-            && report.DuplicateNormalizedCount == 0
-            && report.LowInformationCount == 0
-            && report.SyntheticPatternCount == 0
-            ? "No basic quality issues found."
-            : "Review the flagged rows before export.";
-
-        var coreLines = new List<string>
-        {
-                $"Examples: {report.ExampleCount}",
-                $"Empty rows: {report.EmptyRowCount}",
-                $"Exact duplicates: {report.DuplicateExactCount}",
-                $"Normalized duplicates: {report.DuplicateNormalizedCount}",
-                $"Low-information rows: {report.LowInformationCount} (< {report.LowInformationTokenThreshold} tokens)",
-                $"Synthetic pattern warnings: {report.SyntheticPatternCount}",
-                $"Possible PII / secrets: {report.PiiFindingCount}",
-                $"Status: {health}",
-        };
-
-        // The optional flagged-row sections (shared by the full-text summary and the panel's
-        // detail block) so QualitySummary stays byte-identical for the dashboard card.
-        var detailLines = BuildQualityDetailLines(report);
-
-        QualitySummary = string.Join(Environment.NewLine, coreLines.Concat(detailLines));
-
-        // Structured metric grid + PII-aware status banner for the right panel.
-        BuildQualityMetrics(report);
-        QualityDetail = string.Join(Environment.NewLine, detailLines).Trim();
-        HasQualityDetail = QualityDetail.Length > 0;
-
-        SetSyntheticPatternIssues(report.SyntheticPatternIssues);
-
-        ApplyQualityHistory(history ?? []);
-    }
 
     /// <summary>Build the structured Quality metric rows (Examples + the six issue counts) and
     /// the status banner. The banner is PII-aware: any PII/secret finding is a red problem, even
-    /// though the legacy `health` line — kept for QualitySummary — does not weigh PII.</summary>
-    private void BuildQualityMetrics(QualityReport report)
-    {
-        QualityMetrics.Clear();
-        QualityMetrics.Add(QualityMetric.Info("Examples", report.ExampleCount));
-        QualityMetrics.Add(QualityMetric.Issue("Empty rows", report.EmptyRowCount));
-        QualityMetrics.Add(QualityMetric.Issue("Exact duplicates", report.DuplicateExactCount));
-        QualityMetrics.Add(QualityMetric.Issue("Normalized duplicates", report.DuplicateNormalizedCount));
-        QualityMetrics.Add(QualityMetric.Issue("Low-information rows", report.LowInformationCount));
-        QualityMetrics.Add(QualityMetric.Issue("Synthetic pattern warnings", report.SyntheticPatternCount));
-        QualityMetrics.Add(QualityMetric.Issue("Possible PII / secrets", report.PiiFindingCount, severe: true));
-        HasQualityMetrics = true;
+    /// though the legacy `health` line — kept for Quality.QualitySummary — does not weigh PII.</summary>
 
-        var coreIssues = report.EmptyRowCount + report.DuplicateExactCount + report.DuplicateNormalizedCount
-                         + report.LowInformationCount + report.SyntheticPatternCount;
 
-        if (report.PiiFindingCount > 0)
-        {
-            QualityStatusLine = "Possible PII / secrets detected — review before export.";
-            QualityStatusColor = "#B91C1C";
-            QualityStatusBackground = "#FEF2F2";
-        }
-        else if (coreIssues > 0)
-        {
-            QualityStatusLine = "Review the flagged rows before export.";
-            QualityStatusColor = "#B45309";
-            QualityStatusBackground = "#FFFBEB";
-        }
-        else
-        {
-            QualityStatusLine = "No basic quality issues found.";
-            QualityStatusColor = "#15803D";
-            QualityStatusBackground = "#ECFDF5";
-        }
-    }
-
-    private List<string> BuildQualityDetailLines(QualityReport report)
-    {
-        var lines = new List<string>();
-
-        if (report.PiiFindingCount > 0)
-        {
-            lines.Add("");
-            lines.Add($"⚠ Possible PII / secrets detected ({report.PiiFindingCount} kind(s)) — review before exporting:");
-            lines.AddRange(report.PiiFindings.Take(5).Select(finding => $"- {finding.DisplayName}"));
-        }
-
-        if (report.TokenLengthOutlierCount > 0)
-        {
-            lines.Add("");
-            lines.Add($"Token-length outliers: {report.TokenLengthOutlierCount} row(s) over ~{report.TokenLengthThreshold} tokens");
-            lines.AddRange(report.TokenLengthOutliers
-                .Take(3)
-                .Select(outlier => $"- row {outlier.RowNumber}: ~{outlier.TokenCount} tokens"));
-        }
-
-        if (report.CategoryImbalances.Count > 0)
-        {
-            lines.Add("");
-            lines.Add($"Category imbalance: {report.CategoryImbalances.Count} field(s) dominated by one value");
-            lines.AddRange(report.CategoryImbalances.Take(3).Select(item => $"- {item.DisplayName}"));
-        }
-
-        if (report.SyntheticPatternClusters.Count > 0)
-        {
-            lines.Add("");
-            lines.Add($"Synthetic pattern clusters: {report.SyntheticPatternClusters.Count} (near-duplicate families)");
-            lines.AddRange(report.SyntheticPatternClusters.Take(3).Select(cluster => $"- {cluster.DisplayName}"));
-        }
-
-        if (report.SyntheticPatternIssues.Count > 0)
-        {
-            lines.Add("");
-            lines.Add("Synthetic pattern samples:");
-            lines.AddRange(report.SyntheticPatternIssues.Take(3).Select(FormatSyntheticPatternIssue));
-        }
-        else if (report.SyntheticPatternWarnings.Count > 0)
-        {
-            lines.Add("");
-            lines.Add("Synthetic pattern samples:");
-            lines.AddRange(report.SyntheticPatternWarnings.Take(3).Select(warning => $"- {warning}"));
-        }
-
-        return lines;
-    }
-
-    public void SetQualityError(string message)
-    {
-        QualitySummary = $"Quality checks could not run.{Environment.NewLine}{message}";
-        ResetQualityMetrics();
-        QualityTriageSummary = "Synthetic quality triage could not be refreshed.";
-        ReportError(message);
-    }
 
     public bool PrepareSyntheticIssueRewrite()
     {
-        if (SelectedSyntheticPatternIssue is null)
+        if (Quality.SelectedSyntheticPatternIssue is null)
         {
-            QualityTriageSummary = "Select a synthetic quality issue before preparing a rewrite.";
+            Quality.QualityTriageSummary = "Select a synthetic quality issue before preparing a rewrite.";
             return false;
         }
 
-        var rowNumber = SelectedSyntheticPatternIssue.RowNumbers.FirstOrDefault(row => row > 0);
+        var rowNumber = Quality.SelectedSyntheticPatternIssue.RowNumbers.FirstOrDefault(row => row > 0);
         if (rowNumber <= 0)
         {
-            QualityTriageSummary = "Selected synthetic quality issue does not include an affected row number.";
+            Quality.QualityTriageSummary = "Selected synthetic quality issue does not include an affected row number.";
             return false;
         }
 
         var example = Examples.Items.FirstOrDefault(item => item.RowNumber == rowNumber);
         if (example is null)
         {
-            QualityTriageSummary = $"Affected row {rowNumber} is not loaded in the Examples list.";
+            Quality.QualityTriageSummary = $"Affected row {rowNumber} is not loaded in the Examples list.";
             return false;
         }
 
@@ -1413,21 +1151,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             AiAssist.AiAssistAction = "rewrite-output";
         }
 
-        AiAssist.AiAssistInstruction = BuildSyntheticRewriteInstruction(SelectedSyntheticPatternIssue, rowNumber);
-        QualityTriageSummary =
+        AiAssist.AiAssistInstruction = BuildSyntheticRewriteInstruction(Quality.SelectedSyntheticPatternIssue, rowNumber);
+        Quality.QualityTriageSummary =
             $"Prepared row {rowNumber} for AI Assist rewrite. Review, run AI Assist, validate, and save only after editing.";
         return true;
     }
 
     public bool PrepareSyntheticBatchRewrite()
     {
-        if (SyntheticPatternIssues.Count == 0)
+        if (Quality.SyntheticPatternIssues.Count == 0)
         {
-            QualityTriageSummary = "Run quality checks with synthetic warnings before preparing a batch rewrite.";
+            Quality.QualityTriageSummary = "Run quality checks with synthetic warnings before preparing a batch rewrite.";
             return false;
         }
 
-        var rowNumbers = SyntheticPatternIssues
+        var rowNumbers = Quality.SyntheticPatternIssues
             .SelectMany(issue => issue.RowNumbers)
             .Where(rowNumber => rowNumber > 0)
             .Distinct()
@@ -1436,7 +1174,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             .ToList();
         if (rowNumbers.Count == 0)
         {
-            QualityTriageSummary = "Synthetic quality issues do not include affected row numbers.";
+            Quality.QualityTriageSummary = "Synthetic quality issues do not include affected row numbers.";
             return false;
         }
 
@@ -1447,7 +1185,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             .ToList();
         if (affectedRows.Count == 0)
         {
-            QualityTriageSummary = "Affected synthetic rows are not loaded in the Examples list.";
+            Quality.QualityTriageSummary = "Affected synthetic rows are not loaded in the Examples list.";
             return false;
         }
 
@@ -1457,19 +1195,19 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             AiAssist.AiAssistAction = "rewrite-output";
         }
 
-        AiAssist.AiAssistInstruction = BuildSyntheticBatchRewriteInstruction(SyntheticPatternIssues, rowNumbers);
+        AiAssist.AiAssistInstruction = BuildSyntheticBatchRewriteInstruction(Quality.SyntheticPatternIssues, rowNumbers);
         RewriteBatches.SetLastPrepared(new AiAssistRewriteBatch
         {
             SchemaId = ActiveSchemaId,
             Action = "rewrite-output",
             RowNumbers = rowNumbers,
-            IssueCount = SyntheticPatternIssues.Count,
-            IssueSummary = BuildSyntheticIssueSummary(SyntheticPatternIssues),
+            IssueCount = Quality.SyntheticPatternIssues.Count,
+            IssueSummary = BuildSyntheticIssueSummary(Quality.SyntheticPatternIssues),
             SourceDraft = WritingStudio.DraftText,
             Instruction = AiAssist.AiAssistInstruction,
         });
-        QualityTriageSummary =
-            $"Prepared {affectedRows.Count} affected row(s) from {SyntheticPatternIssues.Count} synthetic issue(s) for batch rewrite.";
+        Quality.QualityTriageSummary =
+            $"Prepared {affectedRows.Count} affected row(s) from {Quality.SyntheticPatternIssues.Count} synthetic issue(s) for batch rewrite.";
         return true;
     }
 
@@ -2015,35 +1753,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         return item;
     }
 
-    private void ApplyQualityHistory(IReadOnlyList<QualityHistoryEntry> history)
-    {
-        ApplyDebtTrend(history);
-
-        if (history.Count == 0)
-        {
-            QualityHistorySummary = "No quality history has been recorded yet.";
-            return;
-        }
-
-        var lines = new List<string> { "Recent quality history:" };
-        lines.AddRange(history.Take(5).Select(entry => $"- {entry.DisplayName}"));
-
-        if (history.Count >= 2)
-        {
-            var latest = history[0];
-            var previous = history[1];
-            var delta = latest.IssueCount - previous.IssueCount;
-            var trend = delta switch
-            {
-                < 0 => $"Issues improved by {Math.Abs(delta)} since previous run.",
-                > 0 => $"Issues increased by {delta} since previous run.",
-                _ => "Issues unchanged since previous run.",
-            };
-            lines.Add(trend);
-        }
-
-        QualityHistorySummary = string.Join(Environment.NewLine, lines);
-    }
 
 
 
@@ -2102,24 +1811,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         return trimmed.Length <= maxLength ? trimmed : $"{trimmed[..maxLength]}...";
     }
 
-    private void SetSyntheticPatternIssues(IReadOnlyList<SyntheticPatternIssue> issues)
-    {
-        var selected = SelectedSyntheticPatternIssue;
-        SyntheticPatternIssues.Clear();
-        foreach (var issue in issues)
-        {
-            SyntheticPatternIssues.Add(issue);
-        }
-
-        SelectedSyntheticPatternIssue = SyntheticPatternIssues
-            .FirstOrDefault(issue => IsSameSyntheticIssue(issue, selected))
-            ?? SyntheticPatternIssues.FirstOrDefault();
-
-        if (SyntheticPatternIssues.Count == 0)
-        {
-            QualityTriageSummary = "No synthetic quality issues found.";
-        }
-    }
 
 
 
@@ -2202,36 +1893,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
 
 
-    private static string FormatSyntheticPatternIssue(SyntheticPatternIssue issue)
-    {
-        var severity = string.IsNullOrWhiteSpace(issue.Severity)
-            ? "unknown"
-            : issue.Severity;
-        var message = string.IsNullOrWhiteSpace(issue.Message)
-            ? issue.Kind
-            : issue.Message;
-        var suggestion = string.IsNullOrWhiteSpace(issue.Suggestion)
-            ? "Review and rewrite affected rows before export."
-            : issue.Suggestion;
-        return $"- [{severity}] {message} Fix: {suggestion}";
-    }
 
-    private static string FormatSyntheticTriageSummary(SyntheticPatternIssue issue)
-    {
-        var rows = issue.RowNumbers.Count == 0
-            ? "unknown"
-            : string.Join(", ", issue.RowNumbers.Take(8));
-        return string.Join(
-            Environment.NewLine,
-            [
-                $"Severity: {(string.IsNullOrWhiteSpace(issue.Severity) ? "unknown" : issue.Severity)}",
-                $"Kind: {(string.IsNullOrWhiteSpace(issue.Kind) ? "synthetic_pattern" : issue.Kind)}",
-                $"Rows: {rows}",
-                issue.Message,
-                $"Repair: {issue.Suggestion}",
-            ]
-        );
-    }
 
     private static string BuildSyntheticRewriteInstruction(
         SyntheticPatternIssue issue,
@@ -2366,20 +2028,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         return JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true });
     }
 
-    private static bool IsSameSyntheticIssue(
-        SyntheticPatternIssue issue,
-        SyntheticPatternIssue? other
-    )
-    {
-        if (other is null)
-        {
-            return false;
-        }
-
-        return string.Equals(issue.Kind, other.Kind, StringComparison.Ordinal)
-            && string.Equals(issue.Message, other.Message, StringComparison.Ordinal)
-            && issue.RowNumbers.SequenceEqual(other.RowNumbers);
-    }
 
     private static string FormatBackendHealthReport(string label, BackendHealthReport report)
     {
