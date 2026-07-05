@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CorpusStudio.Desktop", "Cor
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CorpusStudio.Desktop.Tests", "CorpusStudio.Desktop.Tests\CorpusStudio.Desktop.Tests.csproj", "{CE200D11-D2A2-4AA6-8781-725403DC923C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CorpusStudio.Core", "CorpusStudio.Core\CorpusStudio.Core.csproj", "{01933972-5EDD-4A0E-8B37-A1C9F500B7AA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -41,6 +43,18 @@ Global
 		{CE200D11-D2A2-4AA6-8781-725403DC923C}.Release|x64.Build.0 = Release|Any CPU
 		{CE200D11-D2A2-4AA6-8781-725403DC923C}.Release|x86.ActiveCfg = Release|Any CPU
 		{CE200D11-D2A2-4AA6-8781-725403DC923C}.Release|x86.Build.0 = Release|Any CPU
+		{01933972-5EDD-4A0E-8B37-A1C9F500B7AA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{01933972-5EDD-4A0E-8B37-A1C9F500B7AA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{01933972-5EDD-4A0E-8B37-A1C9F500B7AA}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{01933972-5EDD-4A0E-8B37-A1C9F500B7AA}.Debug|x64.Build.0 = Debug|Any CPU
+		{01933972-5EDD-4A0E-8B37-A1C9F500B7AA}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{01933972-5EDD-4A0E-8B37-A1C9F500B7AA}.Debug|x86.Build.0 = Debug|Any CPU
+		{01933972-5EDD-4A0E-8B37-A1C9F500B7AA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{01933972-5EDD-4A0E-8B37-A1C9F500B7AA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{01933972-5EDD-4A0E-8B37-A1C9F500B7AA}.Release|x64.ActiveCfg = Release|Any CPU
+		{01933972-5EDD-4A0E-8B37-A1C9F500B7AA}.Release|x64.Build.0 = Release|Any CPU
+		{01933972-5EDD-4A0E-8B37-A1C9F500B7AA}.Release|x86.ActiveCfg = Release|Any CPU
+		{01933972-5EDD-4A0E-8B37-A1C9F500B7AA}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
