@@ -19,7 +19,7 @@ from typing import Protocol
 
 from corpus_studio.evaluation.scoring import score_text_overlap
 from corpus_studio.model_backends.base import BackendGenerateRequest, ModelBackend
-from corpus_studio.providers.policy import ProviderPolicy, authorize_evaluation
+from corpus_studio.providers.policy import ProviderPolicy, ProviderPolicyError, authorize_evaluation
 
 
 @dataclass
@@ -111,8 +111,15 @@ class LlmJudgeScorer:
         judge_model: str,
         policy: ProviderPolicy | None = None,
     ) -> None:
-        if policy is not None:
-            authorize_evaluation(policy)
+        # Fail closed: a judge with no resolved provider policy is UNAUTHORIZED. Previously a
+        # None policy silently skipped the check, so a caller that forgot to resolve one could
+        # run an un-vetted (e.g. frontier) model as a judge. Callers must pass an
+        # evaluator-authorized policy; None is treated as unauthorized, not "skip".
+        if policy is None:
+            raise ProviderPolicyError(
+                "A judge scorer requires an evaluator-authorized provider policy; none was given."
+            )
+        authorize_evaluation(policy)
         self._backend = judge_backend
         self._model = judge_model
 

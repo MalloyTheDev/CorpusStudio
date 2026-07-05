@@ -159,7 +159,30 @@ def run_evaluation(
             )
             continue
 
-        scored = active_scorer.score(example.prompt, example.expected_output, response.text)
+        try:
+            scored = active_scorer.score(example.prompt, example.expected_output, response.text)
+        except BACKEND_ERROR_TYPES as exc:
+            # BACKEND_ERROR_TYPES = (OSError, ValueError), so this also covers JSON decode
+            # errors (json.JSONDecodeError subclasses ValueError) from a judge response.
+            # Isolate a scorer failure (e.g. an LLM-judge backend outage or an unparseable
+            # judge response) to THIS row: the model output already succeeded, so keep it,
+            # record the row as a scored-0 failure, and finish the rest of the run — one bad
+            # judge call must not discard the whole evaluation. Mirrors the backend-error path.
+            results.append(
+                EvaluationExampleResult(
+                    example_id=example.example_id,
+                    prompt=example.prompt,
+                    expected_output=example.expected_output,
+                    model_output=response.text,
+                    score=0.0,
+                    passed=False,
+                    tags=example.tags or config.tags,
+                    notes="scorer_error",
+                    error=format_backend_error(exc),
+                )
+            )
+            continue
+
         results.append(
             EvaluationExampleResult(
                 example_id=example.example_id,

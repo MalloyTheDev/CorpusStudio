@@ -8,6 +8,7 @@ from corpus_studio.evaluation.evaluator import (
 from corpus_studio.evaluation.scorers import (
     KeywordOverlapScorer,
     LlmJudgeScorer,
+    ScoreResult,
     build_eval_judge_prompt,
     parse_eval_judgment,
 )
@@ -104,6 +105,54 @@ def test_llm_judge_scorer_refuses_non_evaluator_provider():
     backend = FakeJudgeBackend('{"score": 91}')
     with pytest.raises(ProviderPolicyError):
         LlmJudgeScorer(backend, "judge-model", policy=_evaluator_policy(False))
+
+
+def test_llm_judge_scorer_fails_closed_without_a_policy():
+    # A judge with no resolved policy must be rejected, not silently allowed to run an
+    # un-vetted model (previously a None policy skipped the authorization check).
+    backend = FakeJudgeBackend('{"score": 91}')
+    with pytest.raises(ProviderPolicyError):
+        LlmJudgeScorer(backend, "judge-model", policy=None)
+
+
+class _FlakyScorer:
+    """A scorer that raises a backend-style error on the Nth call (1-indexed)."""
+
+    metric = "flaky"
+
+    def __init__(self, raise_on_call: int):
+        self._raise_on_call = raise_on_call
+        self._calls = 0
+
+    def score(self, prompt: str, expected: str, actual: str):
+        self._calls += 1
+        if self._calls == self._raise_on_call:
+            raise OSError("judge backend outage")
+        return ScoreResult(score=100.0)
+
+
+def test_run_evaluation_isolates_a_scorer_failure_to_one_row():
+    # One failing judge call must degrade THAT row (score 0, scorer_error) and let the run
+    # finish, not abort the whole evaluation.
+    rows = [
+        {"instruction": "A.", "input": "", "output": "a"},
+        {"instruction": "B.", "input": "", "output": "b"},
+        {"instruction": "C.", "input": "", "output": "c"},
+    ]
+    examples = extract_evaluation_examples(rows, "instruction")
+    report = run_evaluation(
+        EvaluationRunConfig(dataset="d", model="fake-local", schema_id="instruction", score_threshold=70.0),
+        examples,
+        FakeModelBackend(),
+        scorer=_FlakyScorer(raise_on_call=2),
+    )
+    assert report.examples_tested == 3  # the run completed over all rows
+    results = report.results
+    assert results[0].score == 100.0 and results[0].passed
+    assert results[1].score == 0.0 and not results[1].passed
+    assert results[1].notes == "scorer_error"
+    assert results[1].model_output == "X means Y."  # the model output is preserved
+    assert results[2].score == 100.0 and results[2].passed  # the run kept going
 
 
 # ---- run_evaluation wiring ---------------------------------------------------

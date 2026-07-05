@@ -374,8 +374,12 @@ def hf_import(
     quarantine path so the desktop stays the single writer. Imported data is NOT
     assumed to be training-licensed; the dataset license is reported.
     """
-    # The engine must never write the dataset's single source of truth.
-    if out.name == "examples.jsonl":
+    # The engine must never write the dataset's single source of truth. Compare the basename
+    # case-insensitively (casefold, NOT os.path.normcase — which only case-folds on Windows, so
+    # it was a no-op on the Linux CI) so `--out Examples.jsonl` cannot slip past the guard on a
+    # case-insensitive filesystem (Windows/macOS). Refusing the name on a case-sensitive OS too
+    # is safe and conservative.
+    if out.name.casefold() == "examples.jsonl":
         typer.echo(
             "Refusing to write examples.jsonl: HF import writes a staging file that the "
             "desktop imports through preview/quarantine.",
@@ -1466,6 +1470,20 @@ def preference_export(
     _exit_if_invalid(report)
 
     rows = list(read_jsonl(input_path))
+
+    # Enforce the export gate BEFORE writing the deliverable, exactly as `export` does:
+    # block on high-severity PII/secrets (and empty input / schema). A private key in a
+    # preference dataset must not be exported. Quality issues only warn.
+    from corpus_studio.gates.models import GateStatus
+
+    export_gate = run_export_gates(rows, "preference")
+    if export_gate.overall_status == GateStatus.BLOCK:
+        typer.echo("Export blocked by the export gate:", err=True)
+        for gate_result in export_gate.results:
+            if gate_result.status == GateStatus.BLOCK:
+                typer.echo(f"  [{gate_result.name}] {gate_result.message}", err=True)
+        raise typer.Exit(code=2)
+
     pair_issues = analyze_preference_pairs(rows)
 
     export_rows = drop_degenerate_pairs(rows) if drop_degenerate else rows
@@ -2360,10 +2378,21 @@ def dataset_version_restore(
         )
         raise typer.Exit(code=1)
 
-    # The engine never writes the dataset — refuse to target examples.jsonl.
+    # The engine never writes the dataset — refuse to target examples.jsonl. Compare
+    # robustly: resolve() follows symlinks; os.path.samefile catches a case-insensitive
+    # or hard-linked match when the target exists; a normcase compare covers a not-yet-
+    # existing output on a case-insensitive filesystem (Windows/macOS).
     examples_path = project_dir / "examples.jsonl"
     try:
-        targets_examples = output.resolve() == examples_path.resolve()
+        resolved_output = output.resolve()
+        resolved_examples = examples_path.resolve()
+        if resolved_output.exists() and resolved_examples.exists():
+            targets_examples = os.path.samefile(resolved_output, resolved_examples)
+        else:
+            targets_examples = (
+                os.path.normcase(str(resolved_output))
+                == os.path.normcase(str(resolved_examples))
+            )
     except OSError:
         targets_examples = False
     if targets_examples:

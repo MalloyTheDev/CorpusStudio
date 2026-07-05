@@ -9,7 +9,11 @@ from corpus_studio.arena.models import ArenaPrompt, ArenaReport, ArenaResponse, 
 from corpus_studio.importers.jsonl_importer import read_jsonl
 from corpus_studio.model_backends.base import BackendGenerateRequest, ModelBackend
 from corpus_studio.model_backends.retry import BACKEND_ERROR_TYPES, format_backend_error
-from corpus_studio.providers.policy import ProviderPolicy, authorize_evaluation
+from corpus_studio.providers.policy import (
+    ProviderPolicy,
+    ProviderPolicyError,
+    authorize_evaluation,
+)
 
 
 def load_prompt_suite(path: Path) -> list[ArenaPrompt]:
@@ -59,17 +63,28 @@ def run_arena(
     """Run each prompt through each model and collect responses side by side.
 
     Arena responses are non-trainable comparison artifacts, so each generation backend is
-    authorized for EVALUATION (not trainable generation) when a policy is supplied: a provider
-    explicitly blocked from the evaluator role cannot participate. A policy block raises
-    ``ProviderPolicyError`` and aborts the run — it is a permission error, not a transient
-    failure to isolate.
+    authorized for EVALUATION (not trainable generation). When ``policies`` is supplied it must
+    cover EVERY participating model — a model with no resolved policy is unauthorized and raises
+    ``ProviderPolicyError`` (fail closed), as does a provider explicitly blocked from the
+    evaluator role. ``policies=None`` is the explicit offline/library mode with no authorization
+    layer (used by tests and local orchestration); the CLI always supplies a full policy set. A
+    policy error aborts the run — it is a permission error, not a transient failure to isolate.
     """
 
     selected = prompts[:limit] if limit is not None else prompts
     responses: list[ArenaResponse] = []
     for model, backend in model_backends:
-        policy = policies.get(model) if policies is not None else None
-        if policy is not None:
+        # When a policy set is supplied, EVERY participating model must be covered: a missing
+        # (or None) entry leaves that model unauthorized, so fail closed rather than run it
+        # unvetted. `policies is None` is the explicit offline/library mode with no
+        # authorization layer — the CLI always supplies a full policy set (see arena-run).
+        if policies is not None:
+            policy = policies.get(model)
+            if policy is None:
+                raise ProviderPolicyError(
+                    f"No provider policy resolved for arena model '{model}'; "
+                    "refusing to run it unauthorized."
+                )
             authorize_evaluation(policy)  # arena is a comparison/evaluation activity
         for prompt in selected:
             try:
