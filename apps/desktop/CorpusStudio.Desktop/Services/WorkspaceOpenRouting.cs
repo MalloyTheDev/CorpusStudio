@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using CorpusStudio.Desktop.Models;
 
 namespace CorpusStudio.Desktop.Services;
@@ -88,6 +89,16 @@ public static class WorkspaceOpenRouting
     {
         ArgumentNullException.ThrowIfNull(confirmDiscard);
         return !hasUnsavedWork || confirmDiscard();
+    }
+
+    /// <summary>Async form for the head-agnostic dialog seam (non-WPF confirms are async). Same
+    /// contract: proceed immediately when nothing is unsaved (the prompt is never awaited); else
+    /// proceed only if the awaited confirmation returns true.</summary>
+    public static async Task<bool> ShouldReplaceWorkspaceAsync(
+        bool hasUnsavedWork, Func<Task<bool>> confirmDiscard)
+    {
+        ArgumentNullException.ThrowIfNull(confirmDiscard);
+        return !hasUnsavedWork || await confirmDiscard();
     }
 
     /// <summary>Derive the (projectId, name, schemaId) used to open a folder as the active

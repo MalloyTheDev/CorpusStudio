@@ -27,6 +27,12 @@ public partial class MainWindow : Window
     private readonly ConcurrentQueue<string> _trainingLogQueue = new();
     private bool _trainingCancelRequested;
 
+    /// <summary>Head-agnostic dialog seam (set from DI in App.OnStartup; defaults to the WPF adapter
+    /// so a plain `new MainWindow()` still works). Confirm/message prompts route through this so the
+    /// logic behind them can move to shared view-models during the cross-platform port. See
+    /// docs/AVALONIA_MIGRATION_PLAN.md.</summary>
+    public IDialogService Dialogs { get; set; } = new MessageBoxDialogService();
+
     public MainWindow()
     {
         InitializeComponent();
@@ -360,7 +366,7 @@ public partial class MainWindow : Window
                 break;
 
             case WorkspaceOpenAction.OfferInitializeDataset:
-                if (ConfirmOpen($"'{FolderDisplayName(folder)}' looks like a dataset but has no Corpus Studio metadata.\n\nInitialize it? This adds a .corpus/project.json manifest; your existing rows are left untouched."))
+                if (await ConfirmOpenAsync($"'{FolderDisplayName(folder)}' looks like a dataset but has no Corpus Studio metadata.\n\nInitialize it? This adds a .corpus/project.json manifest; your existing rows are left untouched."))
                 {
                     await InitializeAndOpen(folder);
                 }
@@ -368,7 +374,7 @@ public partial class MainWindow : Window
                 break;
 
             case WorkspaceOpenAction.OfferCreateEmpty:
-                if (ConfirmOpen($"'{FolderDisplayName(folder)}' is empty.\n\nCreate a new Corpus Studio workspace here?"))
+                if (await ConfirmOpenAsync($"'{FolderDisplayName(folder)}' is empty.\n\nCreate a new Corpus Studio workspace here?"))
                 {
                     await InitializeAndOpen(folder);
                 }
@@ -395,7 +401,7 @@ public partial class MainWindow : Window
         // documents — this is the single chokepoint for every open path (Open Folder, Recent,
         // Initialize, New Project wizard), mirroring the project-switch and app-close prompts.
         // On decline, open nothing and leave the current workspace untouched.
-        if (!ConfirmDiscardUnsavedWork("Open this workspace"))
+        if (!await ConfirmDiscardUnsavedWorkAsync("Open this workspace"))
         {
             return;
         }
@@ -470,25 +476,25 @@ public partial class MainWindow : Window
         }
     }
 
-    private bool ConfirmOpen(string message) =>
-        MessageBox.Show(this, message, "Open Folder", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No)
-        == MessageBoxResult.Yes;
+    // Confirm dialogs route through the head-agnostic IDialogService (Phase 0 of the Avalonia
+    // migration): the same call ports to Avalonia by swapping the adapter, and the decision logic
+    // (ShouldReplaceWorkspace) is already a pure, tested helper. Default = the safe/negative button.
+    private Task<bool> ConfirmOpenAsync(string message) =>
+        Dialogs.ConfirmAsync(message, "Open Folder", DialogButtons.YesNo, DialogSeverity.Question);
 
     /// <summary>Prompt to discard unsaved work (an edited draft or open documents) before an
     /// action that replaces the current workspace. Returns true to proceed. A no-op returning
     /// true when there is nothing unsaved, so a clean workspace opens without a prompt. Mirrors
     /// the project-switch (ProjectsListBox_SelectionChanged) and app-close guards.</summary>
-    private bool ConfirmDiscardUnsavedWork(string actionDescription) =>
-        WorkspaceOpenRouting.ShouldReplaceWorkspace(
+    private Task<bool> ConfirmDiscardUnsavedWorkAsync(string actionDescription) =>
+        WorkspaceOpenRouting.ShouldReplaceWorkspaceAsync(
             ViewModel.HasUnsavedWork,
-            () => MessageBox.Show(
-                this,
+            () => Dialogs.ConfirmAsync(
                 "You have unsaved changes (an edited draft or open documents). "
                 + $"{actionDescription} and discard them?",
                 "Unsaved changes",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning,
-                MessageBoxResult.No) == MessageBoxResult.Yes);
+                DialogButtons.YesNo,
+                DialogSeverity.Warning));
 
     private static string FolderDisplayName(string folder)
     {

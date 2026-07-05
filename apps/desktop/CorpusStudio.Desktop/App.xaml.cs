@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
+using CorpusStudio.Desktop.Services;
 using CorpusStudio.Desktop.ViewModels;
 using CorpusStudio.Desktop.ViewModels.Tabs;
 using CorpusStudio.Desktop.Views;
@@ -29,6 +30,7 @@ public partial class App : Application
         var window = new MainWindow
         {
             DataContext = provider.GetRequiredService<MainWindowViewModel>(),
+            Dialogs = provider.GetRequiredService<IDialogService>(),
         };
         window.Show();
     }
@@ -37,6 +39,7 @@ public partial class App : Application
     /// interfaces so the shell (and tests) depend on the contract, not the concrete class.</summary>
     private static void ConfigureServices(IServiceCollection services)
     {
+        services.AddSingleton<IDialogService, MessageBoxDialogService>();
         services.AddTransient<IDebtViewModel, DebtViewModel>();
         services.AddTransient<IArenaViewModel, ArenaViewModel>();
         services.AddTransient<MainWindowViewModel>();
