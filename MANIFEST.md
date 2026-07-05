@@ -82,6 +82,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Models/WorkspaceFileMetadata.cs`
 - `apps/desktop/CorpusStudio.Desktop/Properties/PublishProfiles/win-x64.pubxml`
 - `apps/desktop/CorpusStudio.Desktop/Services/PythonEngineService.cs`
+- `apps/desktop/CorpusStudio.Desktop/Services/PythonExecutableResolver.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/RecentWorkspaceService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/TrainingProcessRunner.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/WorkspaceManifestService.cs`
@@ -131,6 +132,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/ProjectSearchViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ProviderPolicyViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/PythonEngineServiceTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/PythonExecutableResolverTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/QualityMetricTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/ReviewedFixServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TrainingCheckpointsViewModelTests.cs`
@@ -156,6 +158,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `data/.gitkeep`
 - `docs/ARCHITECTURE.md`
 - `docs/AI_ASSIST_LAB.md`
+- `docs/AVALONIA_MIGRATION_PLAN.md`
 - `docs/CROSS_PLATFORM_ASSESSMENT.md`
 - `docs/CURRENT_STATE.md`
 - `docs/DATASET_CARD.md`
