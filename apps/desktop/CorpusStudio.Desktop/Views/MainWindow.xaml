@@ -2656,7 +2656,7 @@
                     </TabItem>
                     <TabItem Header="Settings">
                         <StackPanel Margin="16,14">
-                            <TextBox Text="{Binding SettingsSummary, Mode=OneWay}"
+                            <TextBox Text="{Binding Settings.SettingsSummary, Mode=OneWay}"
                                      IsReadOnly="True"
                                      TextWrapping="Wrap"
                                      MinHeight="120"
@@ -2682,7 +2682,7 @@
                                        TextWrapping="Wrap"
                                        Margin="0,0,0,8" />
                             <TextBox AutomationProperties.AutomationId="ProviderPolicySummaryTextBox"
-                                     Text="{Binding ProviderPolicySummary, Mode=OneWay}"
+                                     Text="{Binding Settings.ProviderPolicySummary, Mode=OneWay}"
                                      IsReadOnly="True"
                                      FontFamily="Consolas"
                                      FontSize="12"

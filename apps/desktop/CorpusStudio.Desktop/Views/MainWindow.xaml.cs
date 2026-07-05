@@ -81,7 +81,7 @@ public partial class MainWindow : Window
         {
             var projects = _engineService.LoadProjects();
             ViewModel.SetProjects(projects);
-            ViewModel.SetSettings(_engineService.GetSettings());
+            ViewModel.Settings.SetSettings(_engineService.GetSettings());
 
             var firstProject = projects.FirstOrDefault();
             if (firstProject is not null)
@@ -1336,18 +1336,18 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetProviderPolicyError("Create or select a dataset project first.");
+            ViewModel.Settings.SetProviderPolicyError("Create or select a dataset project first.");
             return;
         }
 
         try
         {
             var policies = await _engineService.GetProviderPoliciesAsync(ViewModel.ActiveProjectPath);
-            ViewModel.ApplyProviderPolicies(policies);
+            ViewModel.Settings.ApplyProviderPolicies(policies);
         }
         catch (Exception ex)
         {
-            ViewModel.SetProviderPolicyError(ex.Message);
+            ViewModel.Settings.SetProviderPolicyError(ex.Message);
         }
     }
 
@@ -1365,7 +1365,7 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetProviderPolicyError("Create or select a dataset project first.");
+            ViewModel.Settings.SetProviderPolicyError("Create or select a dataset project first.");
             return;
         }
 
@@ -1374,7 +1374,7 @@ public partial class MainWindow : Window
         var model = ProviderApprovalModelTextBox.Text?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(provider) || string.IsNullOrWhiteSpace(model))
         {
-            ViewModel.SetProviderPolicyError("Choose a provider and enter a model name.");
+            ViewModel.Settings.SetProviderPolicyError("Choose a provider and enter a model name.");
             return;
         }
 
@@ -1392,7 +1392,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            ViewModel.SetProviderPolicyError(ex.Message);
+            ViewModel.Settings.SetProviderPolicyError(ex.Message);
         }
         finally
         {
