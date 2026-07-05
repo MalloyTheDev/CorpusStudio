@@ -77,7 +77,7 @@ def test_cli_version_case_reconstructs_to_temp_and_evaluates(tmp_path: Path, mon
     version_id = _make_version(tmp_path, "--store-rows")
     captured: dict = {}
 
-    def fake_eval(case, dataset_path):
+    def fake_eval(case, dataset_path, overrides_dir=None):
         captured["rows"] = Path(dataset_path).read_text(encoding="utf-8")
         return EvaluationReport(dataset="d", model="m", examples_tested=2, average_score=90.0, failed_examples=0)
 
@@ -95,6 +95,33 @@ def test_cli_version_case_reconstructs_to_temp_and_evaluates(tmp_path: Path, mon
     assert payload["cases"][0]["version_id"] == version_id
     # the temp file handed to the evaluator held the reconstructed version rows
     assert "A" in captured["rows"] and "B" in captured["rows"]
+
+
+def test_version_case_judge_overrides_come_from_project_not_temp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    # A version-pinned llm_judge case must read provider-policy overrides from the PROJECT,
+    # not the temp reconstruction dir (audit finding: load_overrides used dataset_path.parent).
+    version_id = _make_version(tmp_path, "--store-rows")
+    seen: dict = {}
+
+    def fake_load_overrides(directory):
+        seen["dir"] = str(directory)
+        return {}
+
+    monkeypatch.setattr(cli, "load_overrides", fake_load_overrides)
+    monkeypatch.setattr(cli, "_build_backend", lambda **kwargs: object())
+    monkeypatch.setattr(cli, "LlmJudgeScorer", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        cli, "run_evaluation",
+        lambda *args, **kwargs: EvaluationReport(dataset="d", model="m", examples_tested=2, average_score=80.0, failed_examples=0),
+    )
+
+    case = SuiteCase(
+        name="c", schema="instruction", version_id=version_id, model="m",
+        metric="llm_judge", judge_model="judge",
+    )
+    cli._evaluate_suite_case(case, tmp_path)
+
+    assert seen["dir"] == str(tmp_path)  # the project dir, not the system temp reconstruction dir
 
 
 def test_cli_version_case_without_project_dir_is_isolated_error(tmp_path: Path):
