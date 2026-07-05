@@ -93,7 +93,12 @@ a training run of your own installed trainer:
 - Evaluation Lab runs against local Ollama or OpenAI-compatible endpoints with
   health checks, model discovery, report history, two-report comparison,
   regression reruns, tag/failure/score-band summaries, failed-row edit loops,
-  manual scoring, and saved failure filters
+  manual scoring, and saved failure filters. The default automatic score is
+  **keyword-overlap** recall — a lexical proxy, *not* a quality judgment; for a
+  real quality signal use the opt-in **LLM-judge** scorer (`eval-run --judge-model`,
+  also selectable per suite case) or manual scoring
+- multi-model benchmark: run one dataset across several models and rank them,
+  with per-model deltas and the examples every model failed
 - multi-model benchmark: run one dataset across several models and rank them,
   with per-model deltas and the examples every model failed
 - Model Arena: run a prompt suite across several models side by side, with an
