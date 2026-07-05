@@ -3,15 +3,15 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-07-04 (through **v1.3** — Evaluation Suites & Chat Gates —
+Last reconciled: 2026-07-05 (through **v1.3** — Evaluation Suites & Chat Gates —
 plus the deep bug/security audit, 19 fixes across data integrity, gate/policy
 hardening, and quality/split correctness, PRs #104–118; a residual-audit pass
 hardening the v1.3 surface, PRs #133–142; and the CI dependency refresh, PRs
 #94–101). Earlier
 milestones: the Workspace shell, desktop polish, the LLM-judge evaluation scorer,
-a crash-safe / distributable build, the god-object decomposition (Debt + Arena
-tabs extracted), a unified JSONL reader, backend retry + per-item error
-isolation, and off-thread document opens.
+a crash-safe / distributable build, the Avalonia-prep god-object decomposition
+(now 13 of 15 tab view-models extracted), a unified JSONL reader, backend retry +
+per-item error isolation, and off-thread document opens.
 
 ## What works today (implemented and tested)
 
@@ -221,16 +221,19 @@ isolation, and off-thread document opens.
   runs the read **off the UI thread** so a large file never stalls the window.
 - Architecture: the desktop view-model is being decomposed from a single god-object
   into per-tab view-models behind interfaces, composed via a DI container
-  (`Microsoft.Extensions.DependencyInjection`); a shared `ViewModelBase` and the
-  **Debt** and **Arena** tabs are extracted so far (see
+  (`Microsoft.Extensions.DependencyInjection`) with a shared `ViewModelBase`; **13 of 15
+  tabs are extracted** (Debt, Arena, Settings, Versions, Artifacts, Suites, Splits,
+  Preference Review, Quarantine, Examples, Writing Studio, AI Assist, Evaluation), shrinking
+  `MainWindowViewModel` from ~5,609 to ~2,947 lines; **Dashboard and Training** remain (see
   [`CROSS_PLATFORM_ASSESSMENT.md`](CROSS_PLATFORM_ASSESSMENT.md), which relies on it).
-- Cross-platform (Avalonia) migration — **Phase 0 + Phase 1 spike done** (not shipped;
-  WPF stays the product head). Platform seams are behind interfaces (`IDialogService`,
-  `IFilePickerService`) with a cross-platform venv-path fix; all Models + view-models +
-  WPF-free services now live in a shared **`CorpusStudio.Core`** (`net8.0`) library; and a
-  proof **`CorpusStudio.Avalonia`** head builds the Debt + Arena tabs over those unchanged
-  view-models with compiled bindings — the GO/NO-GO spike **passed**. Next is decomposing
-  the remaining 13 tabs. See [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md).
+- Cross-platform (Avalonia) migration — **Phase 0 + Phase 1 spike done; Phase 2 in progress**
+  (not shipped; WPF stays the product head). Platform seams are behind interfaces
+  (`IDialogService`, `IFilePickerService`) with a cross-platform venv-path fix; all Models +
+  view-models + WPF-free services live in a shared **`CorpusStudio.Core`** (`net8.0`) library;
+  and a proof **`CorpusStudio.Avalonia`** head binds the Debt + Arena tabs over those unchanged
+  view-models with compiled bindings — the GO/NO-GO spike **passed**. Phase 2 (the per-tab
+  decomposition) is 13/15 done; the per-tab `.axaml` view ports (Phase 3) are pending. See
+  [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md).
 
 ## Hard boundaries (by design)
 
@@ -257,9 +260,10 @@ isolation, and off-thread document opens.
 - **HF export/push** (upload/publishing) — see the hard boundary above; it stays a
   deliberate non-goal for now. (Read-only Hub *import* already ships.)
 - **Finish the Avalonia port** — the Phase 1 spike proved the approach (Debt + Arena bind
-  in an Avalonia head over the shared `CorpusStudio.Core`); Phase 2 decomposes the remaining
-  13 tabs out of `MainWindowViewModel` and ports each view to `.axaml`. The Avalonia head is
-  not shipped yet. See `AVALONIA_MIGRATION_PLAN.md`.
+  in an Avalonia head over the shared `CorpusStudio.Core`); **Phase 2 is in progress** (13 of 15
+  tab view-models decomposed out of `MainWindowViewModel`; Dashboard + Training remain), after
+  which each view is re-authored as `.axaml` (Phase 3). The Avalonia head is not shipped yet.
+  See `AVALONIA_MIGRATION_PLAN.md`.
 - Dataset-version **reorder detection**, row-store **GC** (must never prune
   manifest-referenced rows), and a normalized row identity. (Auto-capture after an
   import commit now ships — see above.)

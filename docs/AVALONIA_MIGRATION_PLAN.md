@@ -15,26 +15,37 @@ concrete, phased, slice-by-slice plan grounded in the current decomposition stat
   (`net8.0`) head builds the **Debt + Arena** tabs in `.axaml` over the *unchanged* view-models —
   compiled bindings validate at build time (same DI as WPF; `IsVisible`←`bool`; TwoWay text; list
   templating), so a green build is the proof. Not shipped; WPF remains the product head.
-- **Phase 2 — next.** Decompose the remaining 13 tabs out of `MainWindowViewModel` and port each view.
+- **Phase 2 — IN PROGRESS.** Decomposing the tabs out of `MainWindowViewModel`, one shippable slice
+  per tab behind `IXxxViewModel` + `XxxViewModel : ViewModelBase` + DI. **13 of 15 tab VMs are
+  extracted** — Debt, Arena, Settings, Versions, Artifacts, Suites, Splits, Preference Review,
+  Quarantine, Examples, Writing Studio, AI Assist, Evaluation (the last two via multi-PR splits
+  through their backend-connection sub-VMs). **Remaining: Dashboard and Training**, plus the residual
+  Quality/Validation shell logic and the Lab-settings orchestrator. The god object is down from 5,609
+  to **~2,947 lines**. Views are still WPF; the per-tab `.axaml` re-authoring (Phase 3) is pending.
 
 The spike, running: an **Avalonia** head rendering the **Debt** (and Arena) tab over the *unchanged*
 `DebtViewModel` from `CorpusStudio.Core` — same view-models, same DI, cross-platform toolkit.
 
 ![The Avalonia spike: the Debt and Arena tabs rendered by an Avalonia head over the shared CorpusStudio.Core view-models.](screenshots/avalonia-spike.png)
 
-Ground-truth measured 2026-07-05:
+Ground-truth measured 2026-07-05 (Phase 2 mid-flight, after the Evaluation-core slice):
 
 | Fact | Value |
 |---|---|
 | Studio tabs | **15** (Dashboard, Writing Studio, Examples, Preference Review, Quarantine, Splits, Evaluation, AI Assist, Training, Arena, Artifacts, Suites, Versions, Debt, Settings) |
-| Per-tab VMs extracted | **2** — Debt, Arena (each `IXxxViewModel` + `XxxViewModel : ViewModelBase`), and both only *partially* (e.g. `DebtTrend` still lives in the god object) |
-| `MainWindowViewModel.cs` | **5,609 lines** (the god object) |
-| Code-behind `_Click` handlers | **108**, `ICommand` count: **0** |
-| DI | `App.xaml.cs` → `ServiceCollection` → `AddTransient<IDebtViewModel,…>` / `<IArenaViewModel,…>` / `<MainWindowViewModel>`; ctor injection with a parameterless design-time/test ctor |
-| WPF-only surface (from the assessment) | 3,378 XAML lines · 40 Triggers · 93 `Visibility` bindings · 42 ControlTemplates · 35 `MessageBox.Show` · 4 file dialogs |
-| Already portable | engine bridge (`Process`), 68 `.cs` in Models/Services/VMs, 0 `DllImport`, 0 third-party UI pkgs, the whole test suite |
+| Per-tab VMs extracted | **13 of 15** (each `IXxxViewModel` + `XxxViewModel : ViewModelBase`): Debt, Arena, Settings, Versions, Artifacts, Suites, Splits, Preference Review, Quarantine, Examples, Writing Studio, AI Assist, Evaluation. **Remaining: Dashboard, Training** (+ residual Quality/Validation + the Lab-settings orchestrator on the shell) |
+| `MainWindowViewModel.cs` | **~2,947 lines** (down from 5,609 at Phase-1 start) |
+| Code-behind `_Click` handlers | **108**, `ICommand` count: **0** — handlers now delegate to the extracted VMs; the command conversion is deferred to the per-tab `.axaml` port (Phase 3) |
+| DI | `App.xaml.cs` (WPF) + `App.axaml.cs` (Avalonia) → `ServiceCollection` register all 13 extracted `IXxxViewModel`s + sub-VMs + `<MainWindowViewModel>`; ctor injection with a parameterless design-time/test ctor |
+| WPF-only surface (from the assessment) | ~3,383 XAML lines · 40 Triggers · 93 `Visibility` bindings · 42 ControlTemplates · `MessageBox.Show`/file dialogs now behind `IDialogService`/`IFilePickerService` |
+| Already portable | engine bridge (`Process`), all Models/Services/VMs in `CorpusStudio.Core`, 0 `DllImport`, 0 third-party UI pkgs, the whole 492-test desktop suite |
 
 ## Critique (read before committing)
+
+> **Resolved (2026-07-05).** The inversion recommended below was adopted: the spike ran on the two
+> already-extracted tabs *first* and passed (GO). The riskiest assumption — Avalonia rebinding the
+> unchanged VMs — is now proven, so the remaining decomposition (Phase 2, 13/15 tabs done) is the
+> de-risked grunt work this section predicted. Kept as the record of why the order was chosen.
 
 **The riskiest assumption is not "can we decompose" — it's "will Avalonia actually reuse these
 VMs cleanly."** The decomposition pattern is already proven (Debt + Arena behind interfaces, DI,
@@ -87,17 +98,18 @@ Models/Services/VMs unchanged** and re-authors **only the shell + the Debt and A
   shared-VM approach holds (proceed) or it doesn't (stop / rethink).
 - *Effort:* days. *Does not ship; lives behind the WPF head.*
 
-### Phase 2 — Finish the decomposition (the gating grunt work)
-Extract the remaining ~13 tabs' logic out of `MainWindowViewModel` into per-tab VMs behind
-interfaces, following the proven Debt/Arena pattern, one shippable slice per tab. Sequence
-**simplest/most-isolated first** to build momentum and keep each slice low-risk:
-1. **Settings, Versions, Suites, Artifacts** — mostly read/act over existing services; small state.
-2. **Splits, Preference Review, Quarantine, Examples** — moderate; some editor state.
-3. **Dashboard, Writing Studio** — bind-heavy but logic-light.
-4. **Evaluation, Training, AI Assist** — the big, coupled ones; do them last with the pattern
-   fully grooved. (Also finish extracting Debt/Arena's residual state.)
+### Phase 2 — Finish the decomposition (the gating grunt work) — IN PROGRESS
+Extract each tab's logic out of `MainWindowViewModel` into per-tab VMs behind interfaces, following
+the proven Debt/Arena pattern, one shippable slice per tab. Sequenced **simplest/most-isolated
+first** to build momentum and keep each slice low-risk (✓ = extracted):
+1. ✓ **Settings, Versions, Suites, Artifacts** — mostly read/act over existing services; small state.
+2. ✓ **Splits, Preference Review, Quarantine, Examples** — moderate; some editor state.
+3. **Dashboard** (remaining), ✓ **Writing Studio** — bind-heavy but logic-light.
+4. ✓ **Evaluation, AI Assist** (each via a multi-PR split through a backend-connection sub-VM),
+   **Training** (remaining) — the big, coupled ones, done with the pattern fully grooved. (Debt/Arena's
+   residual state still to finish.)
 - Each slice: `IXxxViewModel` + `XxxViewModel : ViewModelBase` + DI registration + move the
-  code-behind handlers to VM methods/commands + tests. The existing 414-test desktop suite guards
+  code-behind handlers to VM methods + tests. The desktop suite (**492 tests** and growing) guards
   every move; add per-VM tests as logic lands in a testable seam.
 - *Effort:* the bulk — multiple weeks, but each tab is a clean, independently-reviewable PR.
 

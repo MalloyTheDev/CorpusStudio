@@ -1,10 +1,16 @@
 # Cross-Platform Assessment (Avalonia migration)
 
-**Status:** assessment only — no port has been done. This documents whether/how the
-Windows-only WPF desktop (`apps/desktop`) could become cross-platform (macOS/Linux),
-where the local trainers the app orchestrates actually run.
+**Status:** the *whether/why* record for the cross-platform move. Its recommendation was
+adopted and is now being executed — Phase 0/1 are done (seams + venv fix + the shared
+`CorpusStudio.Core` + an Avalonia spike that passed GO) and Phase 2 (the per-tab
+decomposition) is 13/15 done. For live progress see
+[`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md); this doc is kept as the original
+analysis of how the Windows-only WPF desktop (`apps/desktop`) could become cross-platform
+(macOS/Linux), where the local trainers the app orchestrates actually run.
 
-All figures below were measured against the code (not docs) on 2026-07-03.
+All figures below were measured against the code (not docs) on 2026-07-03 — a **pre-decomposition
+snapshot** (e.g. the 5,549-line god object has since dropped to ~2,947); the *analysis* holds,
+the raw counts are historical.
 
 ## TL;DR / recommendation
 
@@ -52,9 +58,9 @@ All figures below were measured against the code (not docs) on 2026-07-03.
 | `IValueConverter` | 1 | `IValueConverter` exists in Avalonia (near-identical) | Trivial |
 
 Additional portability fixes (small but real, independent of Avalonia):
-- **`ResolvePythonExecutable` is Windows-only:** `PythonEngineService.cs:2881` hardcodes
-  `.venv/Scripts/python.exe`. On macOS/Linux the venv interpreter is `.venv/bin/python`. Add a
-  platform branch (falls back to `python` on PATH today, so a venv would silently be bypassed).
+- **`ResolvePythonExecutable` was Windows-only** — it hardcoded `.venv/Scripts/python.exe` and
+  silently bypassed a POSIX `.venv/bin/python`. **Fixed in Phase 0** (`PythonExecutableResolver`
+  now checks both layouts); kept here as the original finding.
 - **103 code-behind Click handlers, 0 `ICommand`.** Avalonia supports `Click` code-behind, so
   handlers *can* port as-is — but this is the same coupling that makes #4 (decomposition) the
   precondition. Moving to per-tab VMs + commands makes the view layer thin enough to re-author.

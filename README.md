@@ -220,7 +220,7 @@ invocation (verb, outcome, duration, stderr on failure) for at-a-glance diagnost
 
 **7 · Dataset Debt** — the engine normalizes the quality signals by dataset size,
 ranks them, and grades the dataset (A–F) so you know what to fix first; secrets/PII
-are graded by presence, not rate.
+are graded by presence, not rate. See [the A–F grades side by side](docs/DEBT.md#the-grades-in-the-desktop-debt-tab).
 
 ![Corpus Studio debt trend mini-chart](docs/screenshots/debt-trend.png)
 

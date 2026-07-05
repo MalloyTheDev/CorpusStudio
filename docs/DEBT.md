@@ -57,6 +57,21 @@ Severity is **coarse and rule-based**, never a fake-precise score.
 **F** if any item is critical; else **D** if any high; else **C** if any moderate;
 else **B** if any low; else **A** (rows present, no debt).
 
+### The grades in the desktop Debt tab
+
+Each grade below is a **genuine** verdict the engine produced on a real dataset — the badge,
+the ledger, and the Quality panel all reflect the actual analysis, not a mock-up.
+
+| Grade | What triggered it |
+|---|---|
+| ![Grade A — clean](screenshots/debt-grade-a.png) | **A** — a clean dataset: no debt items. |
+| ![Grade B — a low-severity item](screenshots/debt-grade-b.png) | **B** — one low-severity signal (a token-length outlier). |
+| ![Grade C — a moderate item](screenshots/debt-grade-c.png) | **C** — an empty row at a moderate rate (4%). |
+| ![Grade D — a high-severity item](screenshots/debt-grade-d.png) | **D** — leaked **personal data** (an email address). |
+| ![Grade F — a critical item](screenshots/debt-grade-f.png) | **F** — a leaked **secret** (an API key) — presence-graded, always critical. |
+
+The grade invalidates the moment the dataset changes, so it never shows a stale verdict.
+
 ## Command
 
 ```
