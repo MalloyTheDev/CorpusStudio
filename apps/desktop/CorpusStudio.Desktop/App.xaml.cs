@@ -44,6 +44,7 @@ public partial class App : Application
         services.AddSingleton<IFilePickerService, Win32FilePickerService>();
         services.AddTransient<IDebtViewModel, DebtViewModel>();
         services.AddTransient<IArenaViewModel, ArenaViewModel>();
+        services.AddTransient<ISettingsViewModel, SettingsViewModel>();
         services.AddTransient<MainWindowViewModel>();
     }
 

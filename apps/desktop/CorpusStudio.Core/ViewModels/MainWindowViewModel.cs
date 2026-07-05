@@ -41,8 +41,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _problemsBadgeColor = GateReport.StatusColor(null);
     private bool _outputPanelVisible;
     private bool _searchPanelVisible;
-    private string _providerPolicySummary =
-        "Provider generation policy: refresh to see which providers may create trainable rows.";
     private string _qualityHistorySummary = "Quality history appears after quality checks run.";
     private bool _hasDebtTrend;
     private string _debtTrendDirection = string.Empty;
@@ -175,7 +173,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _splitSeed = "42";
     private string _selectedImportQuarantineDetail =
         "Rejected import rows appear here after a mixed import.";
-    private string _settingsSummary = "Settings load when the app starts.";
     private string _projectIndexSummary = "Projects list from local files. Rebuild the index to list from SQLite.";
     private bool _isBusy;
     private string _busyStatus = "Working...";
@@ -228,16 +225,19 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public IArenaViewModel Arena { get; }
 
+    public ISettingsViewModel Settings { get; }
+
     /// <summary>Design-time / test constructor.</summary>
     public MainWindowViewModel()
-        : this(new DebtViewModel(), new ArenaViewModel())
+        : this(new DebtViewModel(), new ArenaViewModel(), new SettingsViewModel())
     {
     }
 
-    public MainWindowViewModel(IDebtViewModel debt, IArenaViewModel arena)
+    public MainWindowViewModel(IDebtViewModel debt, IArenaViewModel arena, ISettingsViewModel settings)
     {
         Debt = debt;
         Arena = arena;
+        Settings = settings;
     }
 
     // ---- Engine availability (v1.2.15 distributability) --------------------------
@@ -835,51 +835,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(OutputSummary));
     }
 
-    public string ProviderPolicySummary
-    {
-        get => _providerPolicySummary;
-        private set => SetField(ref _providerPolicySummary, value);
-    }
-
     // Arena state + logic now live in the child Arena view-model (backlog #4). Bindings use
     // Arena.*, the code-behind uses ViewModel.Arena.* and ArenaViewModel.ParseModelList.
-
-    public void SetProviderPolicyError(string message)
-    {
-        ProviderPolicySummary = $"Provider policy action failed.{Environment.NewLine}{message}";
-    }
-
-    /// <summary>Format the provider generation policy (who may create trainable rows).</summary>
-    public void ApplyProviderPolicies(IReadOnlyList<ProviderPolicyItem> policies)
-    {
-        var lines = new List<string>
-        {
-            "Provider generation policy (who may create trainable rows):",
-            string.Empty,
-        };
-
-        foreach (var policy in policies)
-        {
-            var name = string.IsNullOrWhiteSpace(policy.DisplayName) ? policy.ProviderId : policy.DisplayName;
-            if (policy.GenerationAllowed)
-            {
-                lines.Add($"✅ {name} ({policy.ProviderKind}) — generation ALLOWED (approved)");
-            }
-            else if (policy.UserApprovedGeneration)
-            {
-                // Approved but still blocked (frontier provider): make that explicit.
-                lines.Add($"⛔ {name} ({policy.ProviderKind}) — approval ignored; evaluator-only");
-            }
-            else
-            {
-                lines.Add($"⛔ {name} ({policy.ProviderKind}) — generation blocked (evaluator-only or unapproved)");
-            }
-        }
-
-        lines.Add(string.Empty);
-        lines.Add("Approve a local model below to let AI Assist use it for generation (still review-required).");
-        ProviderPolicySummary = string.Join(Environment.NewLine, lines);
-    }
+    // Provider generation policy + general app settings now live in the child Settings
+    // view-model (Phase 2). Bindings use Settings.*, the code-behind uses ViewModel.Settings.*.
 
     public void SetGateInProgress()
     {
@@ -2284,12 +2243,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         private set => SetField(ref _selectedImportQuarantineDetail, value);
     }
 
-    public string SettingsSummary
-    {
-        get => _settingsSummary;
-        private set => SetField(ref _settingsSummary, value);
-    }
-
     public string LabSettingsSummary
     {
         get => _labSettingsSummary;
@@ -2400,20 +2353,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public void DismissError()
     {
         HasError = false;
-    }
-
-    public void SetSettings(DesktopSettings settings)
-    {
-        SettingsSummary = string.Join(
-            Environment.NewLine,
-            [
-                $"Repository: {settings.RepositoryRoot}",
-                $"Engine: {settings.EngineDirectory}",
-                $"Python: {settings.PythonExecutable}",
-                $"Projects: {settings.ProjectDirectory}",
-                $"Exports: {settings.ExportDirectory}",
-            ]
-        );
     }
 
     public void AddProject(

@@ -22,6 +22,7 @@ public partial class App : Application
             var services = new ServiceCollection();
             services.AddTransient<IDebtViewModel, DebtViewModel>();
             services.AddTransient<IArenaViewModel, ArenaViewModel>();
+            services.AddTransient<ISettingsViewModel, SettingsViewModel>();
             services.AddTransient<MainWindowViewModel>();
             var provider = services.BuildServiceProvider();
 
