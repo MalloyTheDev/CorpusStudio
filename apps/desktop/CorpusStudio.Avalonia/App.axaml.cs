@@ -30,6 +30,7 @@ public partial class App : Application
             services.AddTransient<IPreferenceReviewViewModel, PreferenceReviewViewModel>();
             services.AddTransient<IQuarantineViewModel, QuarantineViewModel>();
             services.AddTransient<IExamplesViewModel, ExamplesViewModel>();
+            services.AddTransient<IWritingStudioViewModel, WritingStudioViewModel>();
             services.AddTransient<MainWindowViewModel>();
             var provider = services.BuildServiceProvider();
 

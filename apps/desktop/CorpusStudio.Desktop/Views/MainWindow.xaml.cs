@@ -1058,7 +1058,7 @@ public partial class MainWindow : Window
             Mouse.OverrideCursor = Cursors.Wait;
             ViewModel.SetValidationInProgress();
             var report = await _engineService.ValidateDraftAsync(
-                ViewModel.DraftText,
+                ViewModel.WritingStudio.DraftText,
                 ViewModel.ActiveSchemaId
             );
 
@@ -1095,7 +1095,7 @@ public partial class MainWindow : Window
             ViewModel.SetValidationInProgress();
 
             var report = await _engineService.ValidateDraftAsync(
-                ViewModel.DraftText,
+                ViewModel.WritingStudio.DraftText,
                 ViewModel.ActiveSchemaId
             );
 
@@ -1107,11 +1107,11 @@ public partial class MainWindow : Window
 
             var savedCount = _engineService.AppendDraftToProjectExamples(
                 ViewModel.ActiveProjectPath,
-                ViewModel.DraftText
+                ViewModel.WritingStudio.DraftText
             );
 
             ViewModel.SetExamples(_engineService.LoadExamples(ViewModel.ActiveProjectPath));
-            ViewModel.MarkDraftClean(); // the draft is now persisted — no longer unsaved work
+            ViewModel.WritingStudio.MarkDraftClean(); // the draft is now persisted — no longer unsaved work
 
             // If this save repaired a quarantined row, clear that record so it doesn't orphan.
             var retried = ViewModel.TakePendingRetryItem();
@@ -2073,7 +2073,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(ViewModel.DraftText))
+        if (string.IsNullOrWhiteSpace(ViewModel.WritingStudio.DraftText))
         {
             ViewModel.SetAiAssistError("Add a draft example before running AI Assist.");
             return;
@@ -2099,7 +2099,7 @@ public partial class MainWindow : Window
             ViewModel.SetBusy("Running AI Assist...");
             ViewModel.SetAiAssistInProgress();
             var result = await _engineService.RunAiAssistAsync(
-                ViewModel.DraftText,
+                ViewModel.WritingStudio.DraftText,
                 ViewModel.ActiveSchemaId,
                 action,
                 backend,
@@ -2111,7 +2111,7 @@ public partial class MainWindow : Window
             ViewModel.ApplyAiAssistRunResult(result);
             var queuedItem = _engineService.SaveAiAssistReviewQueueItem(
                 ViewModel.ActiveProjectPath,
-                ViewModel.DraftText,
+                ViewModel.WritingStudio.DraftText,
                 result
             );
             ViewModel.SetAiAssistReviewQueue(

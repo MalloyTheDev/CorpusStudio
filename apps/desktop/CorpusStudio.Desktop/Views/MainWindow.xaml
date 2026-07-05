@@ -1048,7 +1048,7 @@
                                      AutomationProperties.AutomationId="DraftTextBox"
                                      AcceptsReturn="True"
                                      VerticalScrollBarVisibility="Auto"
-                                     Text="{Binding DraftText, UpdateSourceTrigger=PropertyChanged}"
+                                     Text="{Binding WritingStudio.DraftText, UpdateSourceTrigger=PropertyChanged}"
                                      FontFamily="Consolas"
                                      FontSize="14" />
                         </Grid>

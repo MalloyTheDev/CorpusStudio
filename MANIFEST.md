@@ -121,12 +121,14 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/ISplitsViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/ISuitesViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IVersionsViewModel.cs`
+- `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IWritingStudioViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/PreferenceReviewViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/QuarantineViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/SettingsViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/SplitsViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/SuitesViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/VersionsViewModel.cs`
+- `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/WritingStudioViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/ViewModelBase.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/WorkspaceExplorerViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/WorkspaceSearchViewModel.cs`

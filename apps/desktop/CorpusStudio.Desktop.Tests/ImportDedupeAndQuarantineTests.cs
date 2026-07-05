@@ -167,7 +167,7 @@ public sealed class ImportDedupeAndQuarantineTests
         vm.Quarantine.SelectedImportQuarantineItem = item;
 
         vm.RetrySelectedImportQuarantineItem();
-        Assert.Equal(item.Raw, vm.DraftText);
+        Assert.Equal(item.Raw, vm.WritingStudio.DraftText);
 
         Assert.Same(item, vm.TakePendingRetryItem()); // repaired row is available to clear
         Assert.Null(vm.TakePendingRetryItem());        // consumed exactly once
