@@ -39,6 +39,11 @@ public sealed class SuitesTests
     ]
     """;
 
+    private static DatasetProjectListItem Project(string id = "p1")
+        => new(
+            new DatasetProject(id, id, "instruction", new System.DateTime(2026, 1, 1), new System.DateTime(2026, 1, 1)),
+            $"C:/projects/{id}");
+
     // --- model / parse ----------------------------------------------------------------
 
     [Fact]
@@ -84,72 +89,97 @@ public sealed class SuitesTests
     public void ApplySuites_PopulatesAndSummarizes()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplySuites(PythonEngineService.ParseSuiteSummaries(ListJson));
-        Assert.Equal(2, vm.Suites.Count);
-        Assert.Contains("2 suite(s)", vm.SuitesStatus);
-        Assert.Contains("1 invalid", vm.SuitesStatus);
+        vm.Suites.ApplySuites(PythonEngineService.ParseSuiteSummaries(ListJson));
+        Assert.Equal(2, vm.Suites.Suites.Count);
+        Assert.Contains("2 suite(s)", vm.Suites.SuitesStatus);
+        Assert.Contains("1 invalid", vm.Suites.SuitesStatus);
     }
 
     [Fact]
     public void ApplySuites_EmptyShowsCreateNote()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplySuites(PythonEngineService.ParseSuiteSummaries("[]"));
-        Assert.Empty(vm.Suites);
-        Assert.Contains("No suites defined", vm.SuitesStatus);
+        vm.Suites.ApplySuites(PythonEngineService.ParseSuiteSummaries("[]"));
+        Assert.Empty(vm.Suites.Suites);
+        Assert.Contains("No suites defined", vm.Suites.SuitesStatus);
     }
 
     [Fact]
     public void ApplySuiteReport_ShowsPerMetricCasesAndOverall()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplySuiteReport(PythonEngineService.ParseSuiteReport(ReportJson));
-        Assert.True(vm.HasSuiteReport);
-        Assert.Equal(2, vm.SuiteMetricRows.Count);
-        Assert.Equal(2, vm.SuiteCaseRows.Count);
-        Assert.Equal("BLOCK", vm.SuiteOverallStatus);
-        Assert.Equal("#DC2626", vm.SuiteOverallColor);   // block -> red
-        Assert.Contains("2 case(s)", vm.SuiteReportSummary);
+        vm.Suites.ApplySuiteReport(PythonEngineService.ParseSuiteReport(ReportJson));
+        Assert.True(vm.Suites.HasSuiteReport);
+        Assert.Equal(2, vm.Suites.SuiteMetricRows.Count);
+        Assert.Equal(2, vm.Suites.SuiteCaseRows.Count);
+        Assert.Equal("BLOCK", vm.Suites.SuiteOverallStatus);
+        Assert.Equal("#DC2626", vm.Suites.SuiteOverallColor);   // block -> red
+        Assert.Contains("2 case(s)", vm.Suites.SuiteReportSummary);
     }
 
     [Fact]
     public void SetSuitesError_CollapsesToNeutralNeverGreen()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplySuiteReport(PythonEngineService.ParseSuiteReport(ReportJson));
-        vm.SetSuitesError("Engine failed.");
-        Assert.False(vm.HasSuiteReport);
-        Assert.Empty(vm.SuiteCaseRows);
-        Assert.Equal("#64748B", vm.SuiteOverallColor);   // neutral gray, not green
-        Assert.Equal("Engine failed.", vm.SuiteReportSummary);
+        vm.Suites.ApplySuiteReport(PythonEngineService.ParseSuiteReport(ReportJson));
+        vm.Suites.SetSuitesError("Engine failed.");
+        Assert.False(vm.Suites.HasSuiteReport);
+        Assert.Empty(vm.Suites.SuiteCaseRows);
+        Assert.Equal("#64748B", vm.Suites.SuiteOverallColor);   // neutral gray, not green
+        Assert.Equal("Engine failed.", vm.Suites.SuiteReportSummary);
     }
 
     [Fact]
     public void CanRunSuite_RequiresValidSelectionNotBusy()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplySuites(PythonEngineService.ParseSuiteSummaries(ListJson));
+        vm.Suites.ApplySuites(PythonEngineService.ParseSuiteSummaries(ListJson));
 
-        vm.SelectedSuite = vm.Suites.Single(s => !s.Valid);
-        Assert.False(vm.CanRunSuite);                    // invalid suite -> cannot run
+        vm.Suites.SelectedSuite = vm.Suites.Suites.Single(s => !s.Valid);
+        Assert.False(vm.Suites.CanRunSuite);                    // invalid suite -> cannot run
 
-        vm.SelectedSuite = vm.Suites.Single(s => s.Valid);
-        vm.IsSuitesBusy = true;
-        Assert.False(vm.CanRunSuite);                    // busy -> cannot run
+        vm.Suites.SelectedSuite = vm.Suites.Suites.Single(s => s.Valid);
+        vm.Suites.IsSuitesBusy = true;
+        Assert.False(vm.Suites.CanRunSuite);                    // busy -> cannot run
         // (HasActiveProject is false here with no project, so CanRunSuite stays false — the
-        //  project gate is covered by project-lifecycle tests.)
+        //  project gate is covered by SelectProject_ResetsSuitesAndSyncsRunGate.)
     }
 
     [Fact]
-    public void ResetSuites_ClearsEverything()
+    public void Reset_ClearsEverything()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplySuites(PythonEngineService.ParseSuiteSummaries(ListJson));
-        vm.ApplySuiteReport(PythonEngineService.ParseSuiteReport(ReportJson));
-        vm.ResetSuites();
-        Assert.Empty(vm.Suites);
-        Assert.Empty(vm.SuiteCaseRows);
-        Assert.False(vm.HasSuiteReport);
-        Assert.Null(vm.SelectedSuite);
+        vm.Suites.ApplySuites(PythonEngineService.ParseSuiteSummaries(ListJson));
+        vm.Suites.ApplySuiteReport(PythonEngineService.ParseSuiteReport(ReportJson));
+        vm.Suites.Reset();
+        Assert.Empty(vm.Suites.Suites);
+        Assert.Empty(vm.Suites.SuiteCaseRows);
+        Assert.False(vm.Suites.HasSuiteReport);
+        Assert.Null(vm.Suites.SelectedSuite);
+    }
+
+    // --- per-project lifecycle (Phase-2 extraction: the shell forwards Reset() and pushes
+    //     HasActiveProject down so the Run gate tracks the open project) -------------------
+
+    [Fact]
+    public void SelectProject_ResetsSuitesAndSyncsRunGate()
+    {
+        // A project switch must clear the previous project's suites/report AND push the new
+        // project-open state so CanRunSuite (the Run gate) reflects it — the cross-cutting
+        // concern introduced when the tab moved out of the shell.
+        var vm = new MainWindowViewModel();
+        vm.Suites.ApplySuites(PythonEngineService.ParseSuiteSummaries(ListJson));
+        vm.Suites.ApplySuiteReport(PythonEngineService.ParseSuiteReport(ReportJson));
+
+        vm.SelectProject(Project("p"));
+
+        Assert.Empty(vm.Suites.Suites);              // reset cleared the previous project's suites
+        Assert.False(vm.Suites.HasSuiteReport);
+        Assert.True(vm.Suites.HasActiveProject);     // project-open flag pushed down by the shell
+
+        // With a project open, a valid selected, non-busy suite can now run.
+        vm.Suites.ApplySuites(PythonEngineService.ParseSuiteSummaries(ListJson));
+        vm.Suites.SelectedSuite = vm.Suites.Suites.Single(s => s.Valid);
+        Assert.True(vm.Suites.CanRunSuite);
     }
 }

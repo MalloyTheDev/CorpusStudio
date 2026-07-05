@@ -220,23 +220,26 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public IArtifactsViewModel Artifacts { get; }
 
+    public ISuitesViewModel Suites { get; }
+
     /// <summary>Design-time / test constructor.</summary>
     public MainWindowViewModel()
         : this(
             new DebtViewModel(), new ArenaViewModel(), new SettingsViewModel(),
-            new VersionsViewModel(), new ArtifactsViewModel())
+            new VersionsViewModel(), new ArtifactsViewModel(), new SuitesViewModel())
     {
     }
 
     public MainWindowViewModel(
         IDebtViewModel debt, IArenaViewModel arena, ISettingsViewModel settings,
-        IVersionsViewModel versions, IArtifactsViewModel artifacts)
+        IVersionsViewModel versions, IArtifactsViewModel artifacts, ISuitesViewModel suites)
     {
         Debt = debt;
         Arena = arena;
         Settings = settings;
         Versions = versions;
         Artifacts = artifacts;
+        Suites = suites;
     }
 
     // ---- Engine availability (v1.2.15 distributability) --------------------------
@@ -1634,154 +1637,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     // The Artifacts tab's state + logic now live in the child Artifacts view-model; the shell only
     // forwards Reset() on project switch. Bindings use Artifacts.*, code-behind ViewModel.Artifacts.*.
 
-    // --- Evaluation suites (v1.3 M2, desktop) -------------------------------
-
-    private SuiteSummary? _selectedSuite;
-    private bool _isSuitesBusy;
-    private bool _hasSuiteReport;
-    private string _suitesStatus = "Registered suites appear here. Create one with New, then run it.";
-    private string _suiteReportSummary = "Select a suite and Run. Running makes live model calls.";
-    private string _suiteOverallStatus = string.Empty;
-    private string _suiteOverallColor = SuiteReport.ColorForStatus(null);
-
-    /// <summary>Registered evaluation suites (from `suite-list`).</summary>
-    public ObservableCollection<SuiteSummary> Suites { get; } = [];
-
-    /// <summary>The last run's per-metric roll-up (never a folded cross-metric score).</summary>
-    public ObservableCollection<SuiteMetricRollup> SuiteMetricRows { get; } = [];
-
-    /// <summary>The last run's per-case results.</summary>
-    public ObservableCollection<SuiteCaseResult> SuiteCaseRows { get; } = [];
-
-    /// <summary>Honest framing shown under the report — the verdict is not a quality judgment.</summary>
-    public string SuiteHonestyNote =>
-        "Verdicts case structure + score thresholds, not model quality. Keyword-overlap is a lexical proxy.";
-
-    public SuiteSummary? SelectedSuite
-    {
-        get => _selectedSuite;
-        set
-        {
-            if (SetField(ref _selectedSuite, value))
-            {
-                OnPropertyChanged(nameof(CanRunSuite));
-            }
-        }
-    }
-
-    public bool IsSuitesBusy
-    {
-        get => _isSuitesBusy;
-        set
-        {
-            if (SetField(ref _isSuitesBusy, value))
-            {
-                OnPropertyChanged(nameof(CanRunSuite));
-            }
-        }
-    }
-
-    /// <summary>Run is enabled for a valid selected suite when a project is open and not busy.</summary>
-    public bool CanRunSuite =>
-        HasActiveProject && !IsSuitesBusy && SelectedSuite is { Valid: true };
-
-    public bool HasSuiteReport
-    {
-        get => _hasSuiteReport;
-        private set => SetField(ref _hasSuiteReport, value);
-    }
-
-    public string SuitesStatus
-    {
-        get => _suitesStatus;
-        private set => SetField(ref _suitesStatus, value);
-    }
-
-    public string SuiteReportSummary
-    {
-        get => _suiteReportSummary;
-        private set => SetField(ref _suiteReportSummary, value);
-    }
-
-    public string SuiteOverallStatus
-    {
-        get => _suiteOverallStatus;
-        private set => SetField(ref _suiteOverallStatus, value);
-    }
-
-    public string SuiteOverallColor
-    {
-        get => _suiteOverallColor;
-        private set => SetField(ref _suiteOverallColor, value);
-    }
-
-    /// <summary>Populate the suites list (from `suite-list`), preserving selection.</summary>
-    public void ApplySuites(IReadOnlyList<SuiteSummary> summaries)
-    {
-        var selectedName = SelectedSuite?.Name;
-        Suites.Clear();
-        foreach (var summary in summaries)
-        {
-            Suites.Add(summary);
-        }
-        SelectedSuite = Suites.FirstOrDefault(s => s.Name == selectedName);
-
-        if (summaries.Count == 0)
-        {
-            SuitesStatus = "No suites defined. Create one with New, then edit it in Files.";
-            return;
-        }
-        var invalid = summaries.Count(s => !s.Valid);
-        SuitesStatus = invalid == 0
-            ? $"{summaries.Count} suite(s)."
-            : $"{summaries.Count} suite(s), {invalid} invalid.";
-    }
-
-    /// <summary>Show a run's SuiteReport — per-metric roll-up + per-case rows + overall verdict.</summary>
-    public void ApplySuiteReport(SuiteReport report)
-    {
-        SuiteMetricRows.Clear();
-        foreach (var rollup in report.PerMetric)
-        {
-            SuiteMetricRows.Add(rollup);
-        }
-        SuiteCaseRows.Clear();
-        foreach (var result in report.Cases)
-        {
-            SuiteCaseRows.Add(result);
-        }
-        SuiteOverallStatus = string.IsNullOrWhiteSpace(report.OverallStatus)
-            ? "UNKNOWN"
-            : report.OverallStatus.ToUpperInvariant();
-        SuiteOverallColor = SuiteReport.ColorForStatus(report.OverallStatus);
-        SuiteReportSummary = report.Summary;
-        HasSuiteReport = true;
-    }
-
-    /// <summary>Collapse the report to a neutral error state (never a green pass).</summary>
-    public void SetSuitesError(string message)
-    {
-        SuiteMetricRows.Clear();
-        SuiteCaseRows.Clear();
-        SuiteOverallStatus = string.Empty;
-        SuiteOverallColor = SuiteReport.ColorForStatus(null);
-        SuiteReportSummary = message;
-        HasSuiteReport = false;
-    }
-
-    /// <summary>Reset all suite state on a project switch so it can't leak across projects.</summary>
-    public void ResetSuites()
-    {
-        Suites.Clear();
-        SelectedSuite = null;
-        SuiteMetricRows.Clear();
-        SuiteCaseRows.Clear();
-        SuiteOverallStatus = string.Empty;
-        SuiteOverallColor = SuiteReport.ColorForStatus(null);
-        HasSuiteReport = false;
-        SuitesStatus = "Registered suites appear here. Create one with New, then run it.";
-        SuiteReportSummary = "Select a suite and Run. Running makes live model calls.";
-    }
+    // --- Evaluation suites (v1.3 M2; extracted to SuitesViewModel in Phase 2) ------
+    // The Suites tab's state + logic now live in the child Suites view-model; the shell forwards
+    // Reset() on project switch and pushes HasActiveProject down (CanRunSuite depends on it).
+    // Bindings use Suites.*, code-behind ViewModel.Suites.*.
 
     // --- Dataset version history (v1.0; extracted to VersionsViewModel in Phase 2) --------
     // The Versions tab's state + logic now live in the child Versions view-model; the shell only
@@ -2251,8 +2110,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Explorer.Reset();
         // Drop stale search results/root so they can't leak across a project switch.
         Search.SetWorkspaceRoot(null);
-        // Drop stale evaluation suites + report so they can't leak across a project switch.
-        ResetSuites();
+        // Drop stale evaluation suites + report so they can't leak across a project switch, then
+        // push the new project-open state so the child's CanRunSuite (the Run gate) is correct.
+        Suites.Reset();
+        Suites.HasActiveProject = HasActiveProject;
         // Reset the Writing Studio draft to the new project's schema template. Without this, an
         // unsaved draft typed against the previous project would be written into THIS project's
         // examples.jsonl on the next save (a cross-project data leak).

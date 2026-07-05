@@ -1257,21 +1257,21 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetSuitesError("Create or select a dataset project first.");
+            ViewModel.Suites.SetSuitesError("Create or select a dataset project first.");
             return;
         }
         try
         {
-            ViewModel.IsSuitesBusy = true;
-            ViewModel.ApplySuites(await _engineService.ListSuitesAsync(ViewModel.ActiveProjectPath));
+            ViewModel.Suites.IsSuitesBusy = true;
+            ViewModel.Suites.ApplySuites(await _engineService.ListSuitesAsync(ViewModel.ActiveProjectPath));
         }
         catch (Exception ex)
         {
-            ViewModel.SetSuitesError(ex.Message);
+            ViewModel.Suites.SetSuitesError(ex.Message);
         }
         finally
         {
-            ViewModel.IsSuitesBusy = false;
+            ViewModel.Suites.IsSuitesBusy = false;
         }
     }
 
@@ -1279,36 +1279,36 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetSuitesError("Create or select a dataset project first.");
+            ViewModel.Suites.SetSuitesError("Create or select a dataset project first.");
             return;
         }
         var name = NewSuiteNameBox.Text?.Trim() ?? string.Empty;
         if (name.Length == 0)
         {
-            ViewModel.SetSuitesError("Enter a suite name to create.");
+            ViewModel.Suites.SetSuitesError("Enter a suite name to create.");
             return;
         }
         try
         {
-            ViewModel.IsSuitesBusy = true;
+            ViewModel.Suites.IsSuitesBusy = true;
             await _engineService.NewSuiteAsync(ViewModel.ActiveProjectPath, name);
             NewSuiteNameBox.Clear();
-            ViewModel.ApplySuites(await _engineService.ListSuitesAsync(ViewModel.ActiveProjectPath));
-            ViewModel.SetSuitesError($"Created suite '{name}'. Open evaluation_suites/{name}.json in Files to edit its cases.");
+            ViewModel.Suites.ApplySuites(await _engineService.ListSuitesAsync(ViewModel.ActiveProjectPath));
+            ViewModel.Suites.SetSuitesError($"Created suite '{name}'. Open evaluation_suites/{name}.json in Files to edit its cases.");
         }
         catch (Exception ex)
         {
-            ViewModel.SetSuitesError(ex.Message);
+            ViewModel.Suites.SetSuitesError(ex.Message);
         }
         finally
         {
-            ViewModel.IsSuitesBusy = false;
+            ViewModel.Suites.IsSuitesBusy = false;
         }
     }
 
     private async void RunSuiteButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!ViewModel.CanRunSuite || ViewModel.SelectedSuite is not { } suite
+        if (!ViewModel.Suites.CanRunSuite || ViewModel.Suites.SelectedSuite is not { } suite
             || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
             return;
@@ -1316,18 +1316,18 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.IsSuitesBusy = true;
+            ViewModel.Suites.IsSuitesBusy = true;
             ViewModel.SetBusy($"Running suite '{suite.Name}' (live backend evaluations)...");
-            ViewModel.ApplySuiteReport(await _engineService.RunSuiteAsync(ViewModel.ActiveProjectPath, suite.Name));
+            ViewModel.Suites.ApplySuiteReport(await _engineService.RunSuiteAsync(ViewModel.ActiveProjectPath, suite.Name));
         }
         catch (Exception ex)
         {
-            ViewModel.SetSuitesError(ex.Message);
+            ViewModel.Suites.SetSuitesError(ex.Message);
         }
         finally
         {
             Mouse.OverrideCursor = null;
-            ViewModel.IsSuitesBusy = false;
+            ViewModel.Suites.IsSuitesBusy = false;
             ViewModel.ClearBusy();
         }
     }

@@ -47,6 +47,7 @@ public partial class App : Application
         services.AddTransient<ISettingsViewModel, SettingsViewModel>();
         services.AddTransient<IVersionsViewModel, VersionsViewModel>();
         services.AddTransient<IArtifactsViewModel, ArtifactsViewModel>();
+        services.AddTransient<ISuitesViewModel, SuitesViewModel>();
         services.AddTransient<MainWindowViewModel>();
     }
 
