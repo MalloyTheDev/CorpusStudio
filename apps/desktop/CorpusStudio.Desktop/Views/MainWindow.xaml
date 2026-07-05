@@ -2365,7 +2365,7 @@
                                            TextWrapping="Wrap"
                                            Margin="0,4,0,8" />
                                 <TextBlock AutomationProperties.AutomationId="ArtifactSummaryTextBlock"
-                                           Text="{Binding ArtifactSummary, Mode=OneWay}"
+                                           Text="{Binding Artifacts.ArtifactSummary, Mode=OneWay}"
                                            Foreground="#334155"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,8" />
@@ -2399,14 +2399,14 @@
                                 </Grid.ColumnDefinitions>
                                 <ListBox Grid.Column="0"
                                          AutomationProperties.AutomationId="ModelArtifactsListBox"
-                                         ItemsSource="{Binding ModelArtifacts}"
-                                         SelectedItem="{Binding SelectedModelArtifact, Mode=TwoWay}"
+                                         ItemsSource="{Binding Artifacts.ModelArtifacts}"
+                                         SelectedItem="{Binding Artifacts.SelectedModelArtifact, Mode=TwoWay}"
                                          DisplayMemberPath="DisplayName"
                                          FontFamily="Consolas"
                                          FontSize="12" />
                                 <TextBox Grid.Column="1"
                                          AutomationProperties.AutomationId="ArtifactDetailTextBox"
-                                         Text="{Binding ArtifactDetail, Mode=OneWay}"
+                                         Text="{Binding Artifacts.ArtifactDetail, Mode=OneWay}"
                                          Margin="12,0,0,0"
                                          IsReadOnly="True"
                                          AcceptsReturn="True"

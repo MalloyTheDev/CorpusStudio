@@ -142,9 +142,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private IReadOnlyList<string> _trainingCheckpointNames = [];
     private string _trainingRunHistorySummary = "Refresh to see past training runs recorded for this project.";
     private string _trainingRunGateSummary = "Gate a run to check for regression vs its baseline.";
-    private string _artifactSummary = "Register a model artifact from a completed run, then keep or reject it.";
-    private string _artifactDetail = "Select an artifact, then View card or Keep (Keep is promote-gated).";
-    private ArtifactDisplayItem? _selectedModelArtifact;
     private string _trainingCheckpointsSummary =
         "Checkpoints appear here after a training run writes them.";
     private IReadOnlyList<string> _trainingResumeArgv = [];
@@ -221,19 +218,25 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public IVersionsViewModel Versions { get; }
 
+    public IArtifactsViewModel Artifacts { get; }
+
     /// <summary>Design-time / test constructor.</summary>
     public MainWindowViewModel()
-        : this(new DebtViewModel(), new ArenaViewModel(), new SettingsViewModel(), new VersionsViewModel())
+        : this(
+            new DebtViewModel(), new ArenaViewModel(), new SettingsViewModel(),
+            new VersionsViewModel(), new ArtifactsViewModel())
     {
     }
 
     public MainWindowViewModel(
-        IDebtViewModel debt, IArenaViewModel arena, ISettingsViewModel settings, IVersionsViewModel versions)
+        IDebtViewModel debt, IArenaViewModel arena, ISettingsViewModel settings,
+        IVersionsViewModel versions, IArtifactsViewModel artifacts)
     {
         Debt = debt;
         Arena = arena;
         Settings = settings;
         Versions = versions;
+        Artifacts = artifacts;
     }
 
     // ---- Engine availability (v1.2.15 distributability) --------------------------
@@ -1627,88 +1630,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         private set => SetField(ref _trainingRunGateSummary, value);
     }
 
-    public ObservableCollection<ArtifactDisplayItem> ModelArtifacts { get; } = [];
-
-    public ArtifactDisplayItem? SelectedModelArtifact
-    {
-        get => _selectedModelArtifact;
-        set => SetField(ref _selectedModelArtifact, value);
-    }
-
-    public string ArtifactSummary
-    {
-        get => _artifactSummary;
-        private set => SetField(ref _artifactSummary, value);
-    }
-
-    public string ArtifactDetail
-    {
-        get => _artifactDetail;
-        private set => SetField(ref _artifactDetail, value);
-    }
-
-    public void SetArtifactError(string message)
-    {
-        ArtifactSummary = $"Artifact action failed.{Environment.NewLine}{message}";
-    }
-
-    /// <summary>Set the detail pane (weight card markdown or a gate verdict).</summary>
-    public void SetArtifactDetail(string text)
-    {
-        ArtifactDetail = text;
-    }
-
-    /// <summary>Format a promote-gate verdict for the detail pane. Returns whether
-    /// the keep is allowed (block => refused).</summary>
-    public bool ApplyPromoteGate(GateReport report)
-    {
-        // Drive the decision from the canonical OverallStatus (worst of results),
-        // and fail closed on anything that is not an explicit pass/warn.
-        string ReasonFor(string status) =>
-            report.Results.FirstOrDefault(r => r.Status == status)?.Message ?? string.Empty;
-
-        switch (report.OverallStatus)
-        {
-            case "block":
-                var blockReason = ReasonFor("block");
-                ArtifactDetail = "⛔ Keep blocked by the promote gate:" + Environment.NewLine
-                    + (string.IsNullOrEmpty(blockReason) ? "the artifact did not pass promotion." : blockReason);
-                return false;
-            case "warn":
-                var warnReason = ReasonFor("warn");
-                ArtifactDetail = "⚠ Kept, but the promote gate warned:" + Environment.NewLine
-                    + (string.IsNullOrEmpty(warnReason) ? "review the weight card." : warnReason)
-                    + Environment.NewLine + "View the weight card before relying on it.";
-                return true;
-            case "pass":
-                ArtifactDetail = "✅ Kept — the promote gate passed (integrity ok, no regression).";
-                return true;
-            default:
-                ArtifactDetail = $"⛔ Keep blocked: unrecognized gate status '{report.OverallStatus}'.";
-                return false;
-        }
-    }
-
-    /// <summary>Refresh the artifact list + a one-line summary (kept / flagged counts).</summary>
-    public void ApplyArtifacts(IReadOnlyList<ArtifactDisplayItem> items)
-    {
-        var selectedId = SelectedModelArtifact?.Record.ArtifactId;
-        ModelArtifacts.Clear();
-        foreach (var item in items)
-        {
-            ModelArtifacts.Add(item);
-        }
-        SelectedModelArtifact = ModelArtifacts.FirstOrDefault(i => i.Record.ArtifactId == selectedId);
-
-        if (items.Count == 0)
-        {
-            ArtifactSummary = "No artifacts registered yet. Register one from a completed run.";
-            return;
-        }
-        var kept = items.Count(i => i.Record.Status == "kept");
-        var flagged = items.Count(i => i.Integrity != "ok");
-        ArtifactSummary = $"{items.Count} artifact(s): {kept} kept, {flagged} with integrity issues (missing/modified).";
-    }
+    // --- Model artifacts (v0.9; extracted to ArtifactsViewModel in Phase 2) ------
+    // The Artifacts tab's state + logic now live in the child Artifacts view-model; the shell only
+    // forwards Reset() on project switch. Bindings use Artifacts.*, code-behind ViewModel.Artifacts.*.
 
     // --- Evaluation suites (v1.3 M2, desktop) -------------------------------
 
@@ -2313,6 +2237,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         // Dataset-version state is per-project: reset the child view-model so nothing leaks across
         // a project switch. LoadProjectAsync eagerly refreshes the new project's versions.
         Versions.Reset();
+        // Model artifacts are per-project too. The project-load path does NOT eagerly refresh the
+        // artifact list (the tab is refreshed on demand), so without this reset the previous
+        // project's artifacts, selection, and panes would linger — and a Keep/Reject would act on a
+        // stale artifact id against the newly selected project. Give the tab the same per-project
+        // guard its siblings (Debt/Versions) already have.
+        Artifacts.Reset();
         // Debt is per-project and per-dataset — reset to the neutral default so a fresh
         // project reads "run a debt check", never a leaked grade or a "dataset changed" note.
         Debt.Reset();
