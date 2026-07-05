@@ -53,9 +53,12 @@ class ProviderPolicy(BaseModel):
     default_policy_source: str = "builtin"
     user_approved_generation: bool = False
     # A host-inferred ``openai_compatible`` endpoint is unverifiable — it could be a trusted
-    # local model OR a proxy fronting a frontier API. Generation approval for it additionally
-    # requires this explicit acknowledgment (vouching it is a trusted local model), so a
-    # frontier proxy can't be silently approved to launder outputs into training data.
+    # local model OR a proxy fronting a frontier API, and the engine does NOT probe it (a proxy
+    # could spoof any probe anyway). Generation approval for it additionally requires this
+    # explicit acknowledgment — a HUMAN attestation that it is a trusted local model, not a
+    # verification the engine performed — so a frontier proxy can't be silently approved to
+    # launder outputs into training data. This flag is the speed-bump by design: it converts an
+    # unverifiable identity into a deliberate, on-the-record user decision.
     acknowledge_untrusted_endpoint: bool = False
 
     def can_generate_trainable(self) -> bool:
@@ -178,6 +181,14 @@ def infer_provider_id(backend: str | None, base_url: str | None) -> str:
     openrouter.ai maps to that provider; otherwise an OpenAI-compatible backend
     is treated as a local server. Documented as a heuristic — set an explicit
     provider_id when it matters.
+
+    Trust boundary (honest scope): identity is inferred from the URL HOSTNAME only —
+    it is not a probe and does not verify what actually answers at ``base_url``. A
+    reverse proxy on a benign-looking host can front any frontier API, and this cannot
+    tell. That is exactly why generation for a host-inferred ``openai_compatible``
+    endpoint additionally requires ``acknowledge_untrusted_endpoint`` (a human vouch,
+    see ProviderPolicy): the classification narrows the risk, the acknowledgment — not
+    this function — is what authorizes trainable generation.
     """
 
     normalized = (backend or "").replace("_", "-").lower()

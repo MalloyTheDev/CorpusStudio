@@ -186,6 +186,16 @@ def _regression_inputs(
     base model AND the recorded ``after_eval_model`` label matches the linked
     report's own ``model`` — so a base-vs-base comparison, or an after-eval report
     that actually evaluated a different model than the label claims, is not trusted.
+
+    Trust boundary (honest scope): this catches STRUCTURAL / accidental mislabeling
+    — a base-vs-base comparison, or a label that disagrees with the report's own
+    ``model`` field. It is NOT tamper-proof. The eval reports are local, user-owned
+    JSON and ``after.model`` is a self-declared field, so a user who edits their own
+    report can make provenance pass. Truly binding provenance to the scored outputs
+    would require the report to attest which model generated them (a signature or the
+    hashed generations), which the local-first engine deliberately does not collect.
+    Provenance is therefore an honesty aid against accidents, not a security control
+    against a user determined to fool their own gate.
     """
 
     before = load_report(run.before_eval_path) if run.before_eval_path else None
