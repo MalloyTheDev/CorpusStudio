@@ -617,16 +617,22 @@ def _evaluate_suite_case(case: "SuiteCase", project_dir: "Optional[Path]" = None
         try:
             with os.fdopen(handle, "w", encoding="utf-8") as stream:
                 stream.write("\n".join(lines) + "\n")
-            return _evaluate_suite_dataset(case, tmp_path)
+            # Judge overrides come from the suite's PROJECT, not the temp reconstruction dir.
+            return _evaluate_suite_dataset(case, tmp_path, project_dir)
         finally:
             tmp_path.unlink(missing_ok=True)
 
-    return _evaluate_suite_dataset(case, Path(case.dataset_path or ""))
+    dataset_path = Path(case.dataset_path or "")
+    # Provider-policy overrides live in the suite's project; fall back to the dataset's dir
+    # only when the suite was run by a bare file path with no --project-dir.
+    overrides_dir = project_dir if project_dir is not None else dataset_path.parent
+    return _evaluate_suite_dataset(case, dataset_path, overrides_dir)
 
 
-def _evaluate_suite_dataset(case: "SuiteCase", dataset_path: Path) -> "EvaluationReport":
+def _evaluate_suite_dataset(case: "SuiteCase", dataset_path: Path, overrides_dir: Path) -> "EvaluationReport":
     """Evaluate a case against a concrete dataset file — the SAME policy-enforced eval path as
-    ``eval-run`` (backend + optional evaluator-only judge scorer)."""
+    ``eval-run`` (backend + optional evaluator-only judge scorer). ``overrides_dir`` is where
+    project-local provider-policy overrides are read from (the suite's project)."""
 
     validation = validate_jsonl_file(dataset_path, case.schema_id)
     if not validation.valid:
@@ -650,7 +656,7 @@ def _evaluate_suite_dataset(case: "SuiteCase", dataset_path: Path) -> "Evaluatio
             judge_provider,
             model_id=case.judge_model,
             route_id=judge_route,
-            overrides=load_overrides(dataset_path.parent),
+            overrides=load_overrides(overrides_dir),
         )
         judge_client = _build_backend(
             backend=case.judge_backend,
