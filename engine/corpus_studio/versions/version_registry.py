@@ -273,11 +273,16 @@ class DatasetCapture(BaseModel):
     rows_stored: bool = False
 
 
-def _truncate_row_store(store_target: Path | None, size: int) -> None:
+def _truncate_row_store(store_target: Path | None, size: int | None) -> None:
     """Best-effort rollback: shrink the row store back to its pre-capture size so a
-    failed/partial capture leaves nothing new on disk (there is no GC for blobs)."""
+    failed/partial capture leaves nothing new on disk (there is no GC for blobs).
 
-    if store_target is None:
+    A ``size`` of ``None`` means the pre-capture size could not be determined, so the
+    rollback is SKIPPED: truncating to a guessed 0 would destroy every previously-stored
+    version's rows. Leaving the newly-appended (content-addressed) rows in place is safe —
+    at worst they are harmless orphan blobs the store already tolerates and never GCs."""
+
+    if store_target is None or size is None:
         return
     try:
         if store_target.exists():
@@ -316,7 +321,10 @@ def capture_dataset(
         return DatasetCapture()
 
     store_target: Path | None = None
-    store_start_size = 0
+    # 0 => no pre-existing store, so a rollback truncates the file we create back to
+    # empty. None => the store exists but its size is UNKNOWN (stat failed); rollback
+    # must then be skipped rather than guess 0 and wipe every prior version's rows.
+    store_start_size: int | None = 0
     existing: set[str] = set()
     if store_rows:
         existing = load_row_id_set(project_dir)
@@ -325,7 +333,7 @@ def capture_dataset(
             try:
                 store_start_size = store_target.stat().st_size
             except OSError:
-                store_start_size = 0
+                store_start_size = None
 
     digest = hashlib.sha256()
     row_ids: list[str] = []

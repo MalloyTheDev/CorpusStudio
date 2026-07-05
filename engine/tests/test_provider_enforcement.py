@@ -10,6 +10,7 @@ from corpus_studio.model_backends.base import BackendGenerateResponse
 from corpus_studio.providers.overrides import (
     approve_generation,
     load_overrides,
+    overrides_path,
     revoke_generation,
 )
 from corpus_studio.providers.policy import (
@@ -111,6 +112,26 @@ def test_overrides_roundtrip_and_resolve(tmp_path: Path):
 
 
 def test_overrides_missing_file_is_empty(tmp_path: Path):
+    assert load_overrides(tmp_path) == {}
+
+
+def test_overrides_drops_non_dict_entries_fail_closed(tmp_path: Path):
+    # The overrides file is user-editable JSON. A hand-edited entry whose value is not
+    # a dict must be dropped (fail-closed) rather than crash resolve_policy — which calls
+    # entry.items() — with an AttributeError on every eval/generation command.
+    overrides_path(tmp_path).write_text(
+        json.dumps({"ollama": "yes", "ollama/model:llama3": {"user_approved_generation": True}}),
+        encoding="utf-8",
+    )
+    loaded = load_overrides(tmp_path)
+    assert "ollama" not in loaded  # malformed string entry dropped
+    assert loaded["ollama/model:llama3"]["user_approved_generation"] is True  # valid entry kept
+    # resolve_policy no longer raises when a malformed sibling entry is present.
+    assert resolve_policy("ollama", overrides=loaded).can_generate_trainable() is False
+
+
+def test_overrides_non_dict_toplevel_is_empty(tmp_path: Path):
+    overrides_path(tmp_path).write_text(json.dumps(["not", "a", "dict"]), encoding="utf-8")
     assert load_overrides(tmp_path) == {}
 
 
