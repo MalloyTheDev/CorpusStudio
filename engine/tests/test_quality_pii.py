@@ -103,3 +103,20 @@ def test_real_amex_card_still_flagged():
     # Canonical 15-digit Amex test number (starts 37, Luhn-valid) — still detected.
     report = build_basic_quality_report([{"text": "amex 378282246310005 on file"}])
     assert "credit_card" in _kinds(report)
+
+
+# --- C14: UnionPay + Maestro re-added, IMEI-safe -----------------------------
+
+def test_detects_unionpay_and_maestro_cards():
+    unionpay = build_basic_quality_report([{"text": "pay 6200 0000 0000 0005 now"}])
+    assert "credit_card" in _kinds(unionpay)  # UnionPay (IIN 62, 16 digits)
+    maestro = build_basic_quality_report([{"text": "card 5000 0000 0000 0009"}])
+    assert "credit_card" in _kinds(maestro)   # Maestro (IIN 50, 16 digits)
+
+
+def test_15_digit_maestro_prefix_stays_imei_safe():
+    # A 15-digit Luhn-valid number starting 50 must NOT flag as a card: UnionPay/Maestro are
+    # constrained to 16-19 digits precisely so a 15-digit IMEI can never masquerade as one.
+    assert _luhn_valid("500000000000005") is True
+    report = build_basic_quality_report([{"text": "serial 500000000000005 logged"}])
+    assert "credit_card" not in _kinds(report)

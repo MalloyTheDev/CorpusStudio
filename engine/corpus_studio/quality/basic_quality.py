@@ -455,6 +455,14 @@ def _looks_like_payment_card(digits: str) -> bool:
         return True  # Diners Club
     if 16 <= n <= 19 and 3528 <= head4 <= 3589:  # JCB
         return True
+    # UnionPay (IIN 62) and Maestro (50, 56-59) are constrained to 16-19 digits so they can
+    # NEVER match a 15-digit IMEI — the length gap is what keeps the IMEI false positive out
+    # while still catching these real card brands (Maestro/Discover 65 and UnionPay 62 overlap,
+    # so 65 stays with Discover above; only the 50/56-59 Maestro range is added here).
+    if 16 <= n <= 19 and digits[:2] == "62":  # UnionPay
+        return True
+    if 16 <= n <= 19 and digits[:2] in {"50", "56", "57", "58", "59"}:  # Maestro
+        return True
     return False
 
 
