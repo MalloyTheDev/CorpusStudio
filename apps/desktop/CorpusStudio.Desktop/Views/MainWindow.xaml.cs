@@ -2763,7 +2763,7 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetArtifactError("Create or select a dataset project first.");
+            ViewModel.Artifacts.SetArtifactError("Create or select a dataset project first.");
             return;
         }
 
@@ -2773,12 +2773,12 @@ public partial class MainWindow : Window
             var run = _engineService.LoadTrainingRunRecords(projectPath).FirstOrDefault();
             if (run is null)
             {
-                ViewModel.SetArtifactError("No training run has been recorded yet.");
+                ViewModel.Artifacts.SetArtifactError("No training run has been recorded yet.");
                 return;
             }
             if (string.IsNullOrWhiteSpace(run.OutputDir))
             {
-                ViewModel.SetArtifactError("The latest run has no output directory to register.");
+                ViewModel.Artifacts.SetArtifactError("The latest run has no output directory to register.");
                 return;
             }
 
@@ -2787,16 +2787,16 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            ViewModel.SetArtifactError(ex.Message);
+            ViewModel.Artifacts.SetArtifactError(ex.Message);
         }
     }
 
     private async void KeepArtifactButton_Click(object sender, RoutedEventArgs e)
     {
-        var selected = ViewModel.SelectedModelArtifact;
+        var selected = ViewModel.Artifacts.SelectedModelArtifact;
         if (selected is null)
         {
-            ViewModel.SetArtifactError("Select an artifact first.");
+            ViewModel.Artifacts.SetArtifactError("Select an artifact first.");
             return;
         }
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
@@ -2812,7 +2812,7 @@ public partial class MainWindow : Window
 
             // Preview the promote gate so the user sees the verdict/reason...
             var report = await _engineService.GateArtifactAsync(projectPath, selected.Record.ArtifactId);
-            var allowed = ViewModel.ApplyPromoteGate(report);
+            var allowed = ViewModel.Artifacts.ApplyPromoteGate(report);
             if (!allowed)
             {
                 return;
@@ -2825,7 +2825,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            ViewModel.SetArtifactError(ex.Message);
+            ViewModel.Artifacts.SetArtifactError(ex.Message);
         }
         finally
         {
@@ -2836,10 +2836,10 @@ public partial class MainWindow : Window
 
     private async void ViewArtifactCardButton_Click(object sender, RoutedEventArgs e)
     {
-        var selected = ViewModel.SelectedModelArtifact;
+        var selected = ViewModel.Artifacts.SelectedModelArtifact;
         if (selected is null)
         {
-            ViewModel.SetArtifactError("Select an artifact first.");
+            ViewModel.Artifacts.SetArtifactError("Select an artifact first.");
             return;
         }
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
@@ -2852,11 +2852,11 @@ public partial class MainWindow : Window
             Mouse.OverrideCursor = Cursors.Wait;
             ViewModel.SetBusy("Rendering weight card...");
             var markdown = await _engineService.GetWeightCardAsync(ViewModel.ActiveProjectPath, selected.Record.ArtifactId);
-            ViewModel.SetArtifactDetail(markdown);
+            ViewModel.Artifacts.SetArtifactDetail(markdown);
         }
         catch (Exception ex)
         {
-            ViewModel.SetArtifactError(ex.Message);
+            ViewModel.Artifacts.SetArtifactError(ex.Message);
         }
         finally
         {
@@ -2871,10 +2871,10 @@ public partial class MainWindow : Window
 
     private void SetSelectedArtifactStatus(string status)
     {
-        var selected = ViewModel.SelectedModelArtifact;
+        var selected = ViewModel.Artifacts.SelectedModelArtifact;
         if (selected is null)
         {
-            ViewModel.SetArtifactError("Select an artifact first.");
+            ViewModel.Artifacts.SetArtifactError("Select an artifact first.");
             return;
         }
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
@@ -2889,7 +2889,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            ViewModel.SetArtifactError(ex.Message);
+            ViewModel.Artifacts.SetArtifactError(ex.Message);
         }
     }
 
@@ -2897,7 +2897,7 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetArtifactError("Create or select a dataset project first.");
+            ViewModel.Artifacts.SetArtifactError("Create or select a dataset project first.");
             return;
         }
 
@@ -2913,11 +2913,11 @@ public partial class MainWindow : Window
                     entry.Integrity,
                     runs.TryGetValue(entry.Record.RunId, out var run) ? run.BaseModel : string.Empty))
                 .ToList();
-            ViewModel.ApplyArtifacts(items);
+            ViewModel.Artifacts.ApplyArtifacts(items);
         }
         catch (Exception ex)
         {
-            ViewModel.SetArtifactError(ex.Message);
+            ViewModel.Artifacts.SetArtifactError(ex.Message);
         }
     }
 

@@ -20,6 +20,11 @@ public sealed class ArtifactRegistryTests
         Fingerprint = fingerprint,
     };
 
+    private static DatasetProjectListItem Project(string id = "p1")
+        => new(
+            new DatasetProject(id, id, "instruction", new System.DateTime(2026, 1, 1), new System.DateTime(2026, 1, 1)),
+            $"C:/projects/{id}");
+
     // --- integrity (pure, injected fingerprint) ------------------------------
 
     [Fact]
@@ -76,22 +81,22 @@ public sealed class ArtifactRegistryTests
     public void ApplyArtifacts_SummarizesKeptAndFlagged()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyArtifacts(
+        vm.Artifacts.ApplyArtifacts(
         [
             new ArtifactDisplayItem(Record(status: "kept"), "ok", "base"),
             new ArtifactDisplayItem(Record(status: "candidate"), "missing", "base"),
         ]);
-        Assert.Equal(2, vm.ModelArtifacts.Count);
-        Assert.Contains("1 kept", vm.ArtifactSummary);
-        Assert.Contains("1 with integrity issues", vm.ArtifactSummary);
+        Assert.Equal(2, vm.Artifacts.ModelArtifacts.Count);
+        Assert.Contains("1 kept", vm.Artifacts.ArtifactSummary);
+        Assert.Contains("1 with integrity issues", vm.Artifacts.ArtifactSummary);
     }
 
     [Fact]
     public void ApplyArtifacts_EmptyShowsNone()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyArtifacts([]);
-        Assert.Contains("No artifacts registered", vm.ArtifactSummary);
+        vm.Artifacts.ApplyArtifacts([]);
+        Assert.Contains("No artifacts registered", vm.Artifacts.ArtifactSummary);
     }
 
     // --- promote gate verdict (v0.9.1) ---------------------------------------
@@ -107,40 +112,63 @@ public sealed class ArtifactRegistryTests
     public void ApplyPromoteGate_BlockRefusesKeep()
     {
         var vm = new MainWindowViewModel();
-        var allowed = vm.ApplyPromoteGate(GateReport("block",
+        var allowed = vm.Artifacts.ApplyPromoteGate(GateReport("block",
             new GateResult { GateId = "integrity", Status = "block", Message = "Artifact weights are modified." }));
         Assert.False(allowed);
-        Assert.Contains("Keep blocked", vm.ArtifactDetail);
-        Assert.Contains("modified", vm.ArtifactDetail);
+        Assert.Contains("Keep blocked", vm.Artifacts.ArtifactDetail);
+        Assert.Contains("modified", vm.Artifacts.ArtifactDetail);
     }
 
     [Fact]
     public void ApplyPromoteGate_WarnAllowsKeepWithNote()
     {
         var vm = new MainWindowViewModel();
-        var allowed = vm.ApplyPromoteGate(GateReport("warn",
+        var allowed = vm.Artifacts.ApplyPromoteGate(GateReport("warn",
             new GateResult { GateId = "regression", Status = "warn", Message = "Unverified linkage." }));
         Assert.True(allowed);
-        Assert.Contains("warned", vm.ArtifactDetail);
-        Assert.Contains("Unverified linkage", vm.ArtifactDetail);
+        Assert.Contains("warned", vm.Artifacts.ArtifactDetail);
+        Assert.Contains("Unverified linkage", vm.Artifacts.ArtifactDetail);
     }
 
     [Fact]
     public void ApplyPromoteGate_PassAllowsKeep()
     {
         var vm = new MainWindowViewModel();
-        var allowed = vm.ApplyPromoteGate(GateReport("pass",
+        var allowed = vm.Artifacts.ApplyPromoteGate(GateReport("pass",
             new GateResult { GateId = "integrity", Status = "pass", Message = "ok" }));
         Assert.True(allowed);
-        Assert.Contains("promote gate passed", vm.ArtifactDetail);
+        Assert.Contains("promote gate passed", vm.Artifacts.ArtifactDetail);
     }
 
     [Fact]
     public void SetArtifactDetail_ShowsCardMarkdown()
     {
         var vm = new MainWindowViewModel();
-        vm.SetArtifactDetail("# Weight Card — abc");
-        Assert.Contains("Weight Card", vm.ArtifactDetail);
+        vm.Artifacts.SetArtifactDetail("# Weight Card — abc");
+        Assert.Contains("Weight Card", vm.Artifacts.ArtifactDetail);
+    }
+
+    // --- per-project lifecycle (Phase-2 extraction: give Artifacts the same reset
+    //     guard its siblings Debt/Versions already have) -----------------------
+
+    [Fact]
+    public void SelectProject_ClearsArtifactState()
+    {
+        // Artifacts are per-project on disk and the project-load path does not eagerly refresh
+        // the list, so a project switch must clear the tab — otherwise the previous project's
+        // artifacts/selection/panes linger and a Keep/Reject would act on a stale artifact id
+        // against the newly selected project.
+        var vm = new MainWindowViewModel();
+        vm.Artifacts.ApplyArtifacts([new ArtifactDisplayItem(Record(status: "kept"), "ok", "base")]);
+        vm.Artifacts.SelectedModelArtifact = vm.Artifacts.ModelArtifacts[0];
+        vm.Artifacts.SetArtifactDetail("# Weight Card — abc");
+
+        vm.SelectProject(Project("other"));
+
+        Assert.Empty(vm.Artifacts.ModelArtifacts);
+        Assert.Null(vm.Artifacts.SelectedModelArtifact);
+        Assert.Contains("Register a model artifact", vm.Artifacts.ArtifactSummary);
+        Assert.DoesNotContain("Weight Card", vm.Artifacts.ArtifactDetail);
     }
 
     // --- promote-gate bypass closed (Tier-3 hardening) -----------------------
