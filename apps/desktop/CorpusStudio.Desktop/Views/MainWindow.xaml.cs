@@ -912,11 +912,16 @@ public partial class MainWindow : Window
                 _engineService.LoadImportQuarantineItems(ViewModel.ActiveProjectPath!)
             );
             await RefreshQualityAsync();
-            Mouse.OverrideCursor = null;
 
+            // Snapshot the dataset change so an import is never silent. Best-effort: the import
+            // already succeeded, so a failed snapshot is a note, not a failure — never claim a
+            // snapshot that didn't happen.
+            var snapshotNote = await AutoCaptureAfterImportAsync(importResult);
+
+            Mouse.OverrideCursor = null;
             MessageBox.Show(
                 this,
-                BuildImportCompleteMessage(importResult),
+                BuildImportCompleteMessage(importResult, snapshotNote),
                 "Import Complete",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information
@@ -949,7 +954,37 @@ public partial class MainWindow : Window
         );
     }
 
-    private static string BuildImportCompleteMessage(ImportCommitResult result)
+    /// <summary>Snapshot the dataset as a version after an import that added rows, so the change
+    /// is never silent. Best-effort: the import already succeeded, so a snapshot failure returns
+    /// an honest note (never a claim that a snapshot happened) and does not fail the import.
+    /// Returns a message line, or null when nothing was captured.</summary>
+    private async Task<string?> AutoCaptureAfterImportAsync(ImportCommitResult importResult)
+    {
+        if (!importResult.ShouldAutoCapture || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            return null;
+        }
+
+        string note;
+        try
+        {
+            var version = await _engineService.CreateDatasetVersionAsync(
+                ViewModel.ActiveProjectPath!,
+                importResult.AutoCaptureLabel,
+                "import"
+            );
+            note = $"Snapshotted this import as dataset version {version.VersionId}.";
+        }
+        catch (Exception ex)
+        {
+            note = $"Note: could not snapshot this import as a dataset version ({ex.Message}).";
+        }
+
+        await RefreshDatasetVersionsAsync();
+        return note;
+    }
+
+    private static string BuildImportCompleteMessage(ImportCommitResult result, string? snapshotNote = null)
     {
         var lines = new List<string>
         {
@@ -968,6 +1003,11 @@ public partial class MainWindow : Window
             {
                 lines.Add(result.QuarantinePath);
             }
+        }
+
+        if (!string.IsNullOrWhiteSpace(snapshotNote))
+        {
+            lines.Add(snapshotNote);
         }
 
         return string.Join(Environment.NewLine, lines);
