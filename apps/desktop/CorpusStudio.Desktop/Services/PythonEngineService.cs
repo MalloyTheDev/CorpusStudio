@@ -3201,11 +3201,11 @@ public sealed class PythonEngineService
         return engineDirectory;
     }
 
-    private static string ResolvePythonExecutable(string engineDirectory)
-    {
-        var venvPython = Path.Combine(engineDirectory, ".venv", "Scripts", "python.exe");
-        return File.Exists(venvPython) ? venvPython : "python";
-    }
+    private static string ResolvePythonExecutable(string engineDirectory) =>
+        // Resolves the Windows (.venv/Scripts/python.exe) OR POSIX (.venv/bin/python) venv layout.
+        // The old code checked only the Windows path, so on macOS/Linux the venv was silently
+        // bypassed for a bare `python` on PATH. See PythonExecutableResolver.
+        PythonExecutableResolver.Resolve(engineDirectory);
 
     private string ResolveProjectRoot()
     {
