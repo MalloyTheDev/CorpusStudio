@@ -1238,8 +1238,8 @@
                             <Grid Grid.Row="0" Grid.Column="0">
                                 <ListBox x:Name="ImportQuarantineListBox"
                                          AutomationProperties.AutomationId="ImportQuarantineListBox"
-                                         ItemsSource="{Binding ImportQuarantineItems}"
-                                         SelectedItem="{Binding SelectedImportQuarantineItem, Mode=TwoWay}"
+                                         ItemsSource="{Binding Quarantine.ImportQuarantineItems}"
+                                         SelectedItem="{Binding Quarantine.SelectedImportQuarantineItem, Mode=TwoWay}"
                                          DisplayMemberPath="DisplayName" />
                                 <TextBlock Style="{StaticResource ListEmptyPlaceholderStyle}"
                                            Text="No quarantined rows. Rejected import rows appear here for repair."
@@ -1249,7 +1249,7 @@
                             <TextBox Grid.Row="0"
                                      Grid.Column="1"
                                      AutomationProperties.AutomationId="ImportQuarantineDetailTextBox"
-                                     Text="{Binding SelectedImportQuarantineDetail, Mode=OneWay}"
+                                     Text="{Binding Quarantine.SelectedImportQuarantineDetail, Mode=OneWay}"
                                      Margin="12,0,0,0"
                                      IsReadOnly="True"
                                      AcceptsReturn="True"

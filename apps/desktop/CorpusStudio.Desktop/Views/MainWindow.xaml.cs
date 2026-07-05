@@ -426,7 +426,7 @@ public partial class MainWindow : Window
             }
 
             ViewModel.SetExamples(_engineService.LoadExamples(folder));
-            ViewModel.SetImportQuarantineItems(_engineService.LoadImportQuarantineItems(folder));
+            ViewModel.Quarantine.SetItems(_engineService.LoadImportQuarantineItems(folder));
             Mouse.OverrideCursor = null;
             await RefreshQualityAsync(recordHistory: false);
 
@@ -946,7 +946,7 @@ public partial class MainWindow : Window
                 report
             );
             ViewModel.SetExamples(_engineService.LoadExamples(ViewModel.ActiveProjectPath!));
-            ViewModel.SetImportQuarantineItems(
+            ViewModel.Quarantine.SetItems(
                 _engineService.LoadImportQuarantineItems(ViewModel.ActiveProjectPath!)
             );
             await RefreshQualityAsync();
@@ -1118,7 +1118,7 @@ public partial class MainWindow : Window
             if (retried is not null)
             {
                 _engineService.RemoveImportQuarantineItem(retried);
-                ViewModel.SetImportQuarantineItems(
+                ViewModel.Quarantine.SetItems(
                     _engineService.LoadImportQuarantineItems(ViewModel.ActiveProjectPath));
             }
 
@@ -3411,7 +3411,7 @@ public partial class MainWindow : Window
 
     private void RetryQuarantineItemButton_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.SelectedImportQuarantineItem is null)
+        if (ViewModel.Quarantine.SelectedImportQuarantineItem is null)
         {
             MessageBox.Show(
                 this,
@@ -4122,7 +4122,7 @@ public partial class MainWindow : Window
         ViewModel.Splits.ApplySplitSettings(_engineService.LoadProjectSplitSettings(project.ProjectPath));
         ViewModel.ApplyLabSettings(_engineService.LoadProjectLabSettings(project.ProjectPath));
         ViewModel.SetExamples(_engineService.LoadExamples(project.ProjectPath));
-        ViewModel.SetImportQuarantineItems(_engineService.LoadImportQuarantineItems(project.ProjectPath));
+        ViewModel.Quarantine.SetItems(_engineService.LoadImportQuarantineItems(project.ProjectPath));
         ViewModel.SetAiAssistReviewQueue(_engineService.LoadAiAssistReviewQueue(project.ProjectPath));
         ViewModel.SetAiAssistQueueViews(_engineService.LoadAiAssistQueueViews(project.ProjectPath));
         ViewModel.SetAiAssistRewriteBatches(
