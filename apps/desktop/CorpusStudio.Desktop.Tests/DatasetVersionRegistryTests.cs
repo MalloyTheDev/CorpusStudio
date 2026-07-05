@@ -1,6 +1,7 @@
 using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.Services;
 using CorpusStudio.Desktop.ViewModels;
+using CorpusStudio.Desktop.ViewModels.Tabs;
 using Xunit;
 
 namespace CorpusStudio.Desktop.Tests;
@@ -90,43 +91,43 @@ public sealed class DatasetVersionRegistryTests
     public void ApplyDatasetVersions_SummarizesIntegrityCounts()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyDatasetVersions(PythonEngineService.ParseDatasetVersionList(ListJson));
-        Assert.Equal(2, vm.DatasetVersions.Count);
-        Assert.Contains("2 version(s)", vm.DatasetVersionSummary);
-        Assert.Contains("1 matching", vm.DatasetVersionSummary);
-        Assert.Contains("1 drifted", vm.DatasetVersionSummary);
+        vm.Versions.ApplyDatasetVersions(PythonEngineService.ParseDatasetVersionList(ListJson));
+        Assert.Equal(2, vm.Versions.DatasetVersions.Count);
+        Assert.Contains("2 version(s)", vm.Versions.DatasetVersionSummary);
+        Assert.Contains("1 matching", vm.Versions.DatasetVersionSummary);
+        Assert.Contains("1 drifted", vm.Versions.DatasetVersionSummary);
     }
 
     [Fact]
     public void ApplyDatasetVersions_PreservesSelectionByVersionId()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyDatasetVersions(PythonEngineService.ParseDatasetVersionList(ListJson));
-        vm.SelectedDatasetVersion = vm.DatasetVersions[1];
-        var selectedId = vm.SelectedDatasetVersion!.Record.VersionId;
+        vm.Versions.ApplyDatasetVersions(PythonEngineService.ParseDatasetVersionList(ListJson));
+        vm.Versions.SelectedDatasetVersion = vm.Versions.DatasetVersions[1];
+        var selectedId = vm.Versions.SelectedDatasetVersion!.Record.VersionId;
 
-        vm.ApplyDatasetVersions(PythonEngineService.ParseDatasetVersionList(ListJson)); // refresh
-        Assert.NotNull(vm.SelectedDatasetVersion);
-        Assert.Equal(selectedId, vm.SelectedDatasetVersion!.Record.VersionId);
+        vm.Versions.ApplyDatasetVersions(PythonEngineService.ParseDatasetVersionList(ListJson)); // refresh
+        Assert.NotNull(vm.Versions.SelectedDatasetVersion);
+        Assert.Equal(selectedId, vm.Versions.SelectedDatasetVersion!.Record.VersionId);
     }
 
     [Fact]
     public void ApplyDatasetVersions_EmptyShowsNone()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyDatasetVersions([]);
-        Assert.Contains("No versions captured", vm.DatasetVersionSummary);
-        Assert.Empty(vm.DatasetVersions);
+        vm.Versions.ApplyDatasetVersions([]);
+        Assert.Contains("No versions captured", vm.Versions.DatasetVersionSummary);
+        Assert.Empty(vm.Versions.DatasetVersions);
     }
 
     [Fact]
     public void SetDatasetVersionError_AndDetail()
     {
         var vm = new MainWindowViewModel();
-        vm.SetDatasetVersionError("boom");
-        Assert.Contains("boom", vm.DatasetVersionSummary);
-        vm.SetDatasetVersionDetail("# Dataset Version Card — v1");
-        Assert.Contains("Dataset Version Card", vm.DatasetVersionDetail);
+        vm.Versions.SetDatasetVersionError("boom");
+        Assert.Contains("boom", vm.Versions.DatasetVersionSummary);
+        vm.Versions.SetDatasetVersionDetail("# Dataset Version Card — v1");
+        Assert.Contains("Dataset Version Card", vm.Versions.DatasetVersionDetail);
     }
 
     // --- audit: honest capture confirmation ----------------------------------
@@ -135,7 +136,7 @@ public sealed class DatasetVersionRegistryTests
     public void FormatCaptureConfirmation_SuccessWhenFingerprinted()
     {
         var record = new DatasetVersionRecord { VersionId = "v1", RowCount = 12, ContentFingerprint = "abc" };
-        var text = MainWindowViewModel.FormatCaptureConfirmation(record);
+        var text = VersionsViewModel.FormatCaptureConfirmation(record);
         Assert.Contains("✅ Captured version v1", text);
         Assert.Contains("12 rows", text);
     }
@@ -146,7 +147,7 @@ public sealed class DatasetVersionRegistryTests
         // Missing/unreadable examples.jsonl -> engine records a null fingerprint that
         // is 'unreadable' forever; the confirmation must not read as a green success.
         var record = new DatasetVersionRecord { VersionId = "v1", RowCount = 0, ContentFingerprint = null };
-        var text = MainWindowViewModel.FormatCaptureConfirmation(record);
+        var text = VersionsViewModel.FormatCaptureConfirmation(record);
         Assert.DoesNotContain("✅", text);
         Assert.Contains("can never be verified", text);
     }
@@ -162,9 +163,9 @@ public sealed class DatasetVersionRegistryTests
         Assert.Contains("⛔ unreadable", item.DisplayName); // badge
 
         var vm = new MainWindowViewModel();
-        vm.ApplyDatasetVersions([item]);
+        vm.Versions.ApplyDatasetVersions([item]);
         // Buckets sum to the total: the unknown value is counted as unverifiable.
-        Assert.Contains("1 version(s)", vm.DatasetVersionSummary);
-        Assert.Contains("1 unverifiable", vm.DatasetVersionSummary);
+        Assert.Contains("1 version(s)", vm.Versions.DatasetVersionSummary);
+        Assert.Contains("1 unverifiable", vm.Versions.DatasetVersionSummary);
     }
 }

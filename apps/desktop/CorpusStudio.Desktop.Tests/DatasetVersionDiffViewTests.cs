@@ -18,35 +18,35 @@ public sealed class DatasetVersionDiffViewTests
     [Fact]
     public void DatasetDiffBaseId_DefaultsEmpty()
     {
-        Assert.Equal(string.Empty, new MainWindowViewModel().DatasetDiffBaseId);
+        Assert.Equal(string.Empty, new MainWindowViewModel().Versions.DatasetDiffBaseId);
     }
 
     [Fact]
     public void SetDatasetDiffBase_PinsBaseAndPromptsNextStep()
     {
         var vm = new MainWindowViewModel();
-        vm.SetDatasetDiffBase(Version("v-base"));
-        Assert.Equal("v-base", vm.DatasetDiffBaseId);
-        Assert.Contains("v-base", vm.DatasetVersionDetail);
-        Assert.Contains("Diff base", vm.DatasetVersionDetail);
+        vm.Versions.SetDatasetDiffBase(Version("v-base"));
+        Assert.Equal("v-base", vm.Versions.DatasetDiffBaseId);
+        Assert.Contains("v-base", vm.Versions.DatasetVersionDetail);
+        Assert.Contains("Diff base", vm.Versions.DatasetVersionDetail);
     }
 
     [Fact]
     public void SetDatasetDiffBase_Repins()
     {
         var vm = new MainWindowViewModel();
-        vm.SetDatasetDiffBase(Version("v1"));
-        vm.SetDatasetDiffBase(Version("v2"));
-        Assert.Equal("v2", vm.DatasetDiffBaseId);
+        vm.Versions.SetDatasetDiffBase(Version("v1"));
+        vm.Versions.SetDatasetDiffBase(Version("v2"));
+        Assert.Equal("v2", vm.Versions.DatasetDiffBaseId);
     }
 
     [Fact]
     public void SetDatasetDiffBase_SurfacesPersistentLabel()
     {
         var vm = new MainWindowViewModel();
-        Assert.Equal("No diff base pinned.", vm.DatasetDiffBaseLabel);
-        vm.SetDatasetDiffBase(Version("v-base"));
-        Assert.Contains("v-base", vm.DatasetDiffBaseLabel);
+        Assert.Equal("No diff base pinned.", vm.Versions.DatasetDiffBaseLabel);
+        vm.Versions.SetDatasetDiffBase(Version("v-base"));
+        Assert.Contains("v-base", vm.Versions.DatasetDiffBaseLabel);
     }
 
     [Fact]
@@ -55,15 +55,15 @@ public sealed class DatasetVersionDiffViewTests
         // The audit's high finding: version state (list, selection, pinned base) must
         // not leak across a project switch.
         var vm = new MainWindowViewModel();
-        vm.ApplyDatasetVersions(new[] { Version("v1") });
-        vm.SelectedDatasetVersion = vm.DatasetVersions[0];
-        vm.SetDatasetDiffBase(Version("v1"));
+        vm.Versions.ApplyDatasetVersions(new[] { Version("v1") });
+        vm.Versions.SelectedDatasetVersion = vm.Versions.DatasetVersions[0];
+        vm.Versions.SetDatasetDiffBase(Version("v1"));
 
         vm.SelectProject(Project("other"));
 
-        Assert.Equal(string.Empty, vm.DatasetDiffBaseId);
-        Assert.Equal("No diff base pinned.", vm.DatasetDiffBaseLabel);
-        Assert.Empty(vm.DatasetVersions);
-        Assert.Null(vm.SelectedDatasetVersion);
+        Assert.Equal(string.Empty, vm.Versions.DatasetDiffBaseId);
+        Assert.Equal("No diff base pinned.", vm.Versions.DatasetDiffBaseLabel);
+        Assert.Empty(vm.Versions.DatasetVersions);
+        Assert.Null(vm.Versions.SelectedDatasetVersion);
     }
 }
