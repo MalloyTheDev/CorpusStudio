@@ -96,7 +96,10 @@ isolation, and off-thread document opens.
   eval run + evaluation gate (no new scoring); per-case failure isolation; each case
   records its dataset fingerprint; advisory by default, `--strict` exits 2 on block.
   Never folds non-comparable metric scales. See [`EVALUATION_SUITES.md`](EVALUATION_SUITES.md).
-  (Engine + CLI; no desktop surface or suite registry yet.)
+  A per-project `evaluation_suites/` **registry** (`suite-init` / `suite-list` /
+  `suite-run` by name), a desktop **Suites** tab (list / run / view), and
+  **`version_id`-pinned cases** (a case re-evaluates the verified reconstruction of a
+  pinned dataset version) all ship; suite history/trend is still future.
 - Model Arena (`arena-run`): run a prompt suite across several models side by
   side; responses are comparison artifacts, not trainable rows. Optional
   evaluator-only judging (`--judge-model`) scores each response and picks a
@@ -171,6 +174,9 @@ isolation, and off-thread document opens.
   stored); then the engine reconstructs the selected version to a verified temp and
   the desktop atomically swaps it onto `examples.jsonl`. Any failure before the
   swap leaves the dataset untouched. See [`VERSIONING.md`](VERSIONING.md).
+- After an import commit that added rows, the desktop **auto-captures a dataset
+  version** (best-effort — an honest note if the snapshot can't be written, never a
+  fake one).
 
 **Workspace shell & desktop (v1.2.1–v1.2.15)**
 - An **IDE-like workspace shell** with an activity bar: a **Start Center** (recent
@@ -218,25 +224,6 @@ isolation, and off-thread document opens.
   (`Microsoft.Extensions.DependencyInjection`); a shared `ViewModelBase` and the
   **Debt** and **Arena** tabs are extracted so far (see
   [`CROSS_PLATFORM_ASSESSMENT.md`](CROSS_PLATFORM_ASSESSMENT.md), which relies on it).
-
-**Evaluation Suites & Chat Gates (v1.3)**
-- **Evaluation Suites** — a suite is a JSON file of named cases (dataset × model ×
-  metric × pass bars) run together, rolling up a verdict **per metric** (keyword-overlap
-  and LLM-judge scores are never folded into one number). Cases can pin a dataset
-  **`version_id`** so a suite re-evaluates the *verified* reconstruction of that version,
-  not a mutable path. Suites live in a per-project `evaluation_suites/` registry
-  (`suite-init` / `suite-list` / `suite-run` by path or name), reports save to
-  `suite_reports/`, and the desktop **Suites** tab lists, runs, and shows them (the
-  verdict is a structure/threshold check, not proof of model quality). See
-  [`EVALUATION_SUITES.md`](EVALUATION_SUITES.md).
-- **Chat Gates** — a conversation-structure gate for chat datasets (`chat-gate`, and a
-  "Run chat gates" button for chat projects): sequence-level faults (assistant-first,
-  missing user/assistant turn, dangling non-assistant turn, back-to-back roles,
-  misplaced system message, turn-count bounds, empty/whitespace turns). Advisory by
-  default; `block_chat_malformed` escalates training-breaking faults to a block. Per-message
-  shape stays the schema gate's job. See [`GATES.md`](GATES.md).
-- After an import commit, the desktop **auto-captures a dataset version** (best-effort;
-  an honest note if the snapshot can't be written, never a fake one).
 
 ## Hard boundaries (by design)
 
