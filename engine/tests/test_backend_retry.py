@@ -62,6 +62,7 @@ def test_call_with_retry_retries_transient_then_succeeds_with_backoff_schedule()
         flaky,
         RetryPolicy(max_attempts=3, base_delay_seconds=0.5, backoff_factor=2.0),
         sleep=slept.append,
+        rng=lambda: 1.0,  # pin jitter to the top of the band => the full backoff schedule
     )
     assert result == "recovered"
     assert calls["n"] == 3
@@ -108,6 +109,102 @@ def test_single_policy_never_retries_even_on_transient():
         call_with_retry(always_503, RetryPolicy.single(), sleep=slept.append)
     assert calls["n"] == 1
     assert slept == []
+
+
+def test_jitter_keeps_backoff_within_the_equal_jitter_band():
+    # Equal jitter: each sleep is in [0.5*delay, delay]. rng=0.0 -> the low edge (half).
+    slept: list[float] = []
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise _http_error(503)
+        return "ok"
+
+    call_with_retry(
+        flaky,
+        RetryPolicy(max_attempts=3, base_delay_seconds=0.5, backoff_factor=2.0),
+        sleep=slept.append,
+        rng=lambda: 0.0,
+    )
+    assert slept == [0.25, 0.5]  # half of [0.5, 1.0]
+
+
+def test_wall_clock_deadline_stops_retrying_before_the_budget_is_blown():
+    # A fake clock that advances by each sleep (mimicking real elapsed time). With a 1.5s
+    # deadline the first backoff (0.5s) fits, but the second (1.0s at elapsed 0.5) would reach
+    # exactly the budget, so the call gives up instead of sleeping past it.
+    clock = {"t": 0.0}
+    slept: list[float] = []
+    calls = {"n": 0}
+
+    def fake_now() -> float:
+        return clock["t"]
+
+    def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+        clock["t"] += seconds
+
+    def always_503():
+        calls["n"] += 1
+        raise _http_error(503)
+
+    with pytest.raises(HTTPError):
+        call_with_retry(
+            always_503,
+            RetryPolicy(max_attempts=5, base_delay_seconds=0.5, backoff_factor=2.0),
+            sleep=fake_sleep,
+            rng=lambda: 1.0,
+            now=fake_now,
+            deadline_seconds=1.5,
+        )
+    assert calls["n"] == 2  # gave up on the wall-clock budget, not the 5-attempt cap
+    assert slept == [0.5]  # only the first backoff fit inside the deadline
+
+
+def _http_error_with_retry_after(code: int, retry_after: str) -> HTTPError:
+    from email.message import Message
+
+    headers = Message()
+    headers["Retry-After"] = retry_after
+    return HTTPError(url="http://x", code=code, msg="err", hdrs=headers, fp=None)
+
+
+def test_retry_after_header_is_honored_verbatim_and_capped():
+    slept: list[float] = []
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            # 3s requested (over the 8s cap it's honored; a huge value would be capped).
+            raise _http_error_with_retry_after(429, "3")
+        return "ok"
+
+    result = call_with_retry(
+        flaky,
+        RetryPolicy(max_attempts=3, base_delay_seconds=0.5, max_delay_seconds=8.0),
+        sleep=slept.append,
+        rng=lambda: 0.0,  # would give tiny jittered delays; Retry-After overrides, no jitter
+    )
+    assert result == "ok"
+    assert slept == [3.0, 3.0]  # honored verbatim, NOT the exponential/jittered schedule
+
+
+def test_retry_after_over_cap_is_clamped_to_max_delay():
+    slept: list[float] = []
+
+    def always_429():
+        raise _http_error_with_retry_after(429, "3600")  # 1h requested
+
+    with pytest.raises(HTTPError):
+        call_with_retry(
+            always_429,
+            RetryPolicy(max_attempts=2, max_delay_seconds=8.0),
+            sleep=slept.append,
+        )
+    assert slept == [8.0]  # clamped to max_delay_seconds
 
 
 def test_delay_is_capped_at_max():
