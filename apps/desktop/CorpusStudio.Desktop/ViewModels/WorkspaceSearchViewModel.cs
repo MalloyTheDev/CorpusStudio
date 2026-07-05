@@ -13,9 +13,9 @@ namespace CorpusStudio.Desktop.ViewModels;
 /// list the view binds to. Read-only over the workspace; opening a result is the caller's job.</summary>
 public sealed class WorkspaceSearchViewModel : INotifyPropertyChanged
 {
-    private readonly WorkspaceSearchService _search;
+    private readonly IWorkspaceSearchService _search;
 
-    public WorkspaceSearchViewModel(WorkspaceSearchService? search = null)
+    public WorkspaceSearchViewModel(IWorkspaceSearchService? search = null)
     {
         _search = search ?? new WorkspaceSearchService();
     }
@@ -68,6 +68,13 @@ public sealed class WorkspaceSearchViewModel : INotifyPropertyChanged
     /// workspace clears the list rather than searching.</summary>
     public async Task RunAsync()
     {
+        // Re-entrancy guard: ignore a new run while one is already in flight (rapid Enter presses
+        // or a click during a search would otherwise race on Results and leave interleaved state).
+        if (IsSearching)
+        {
+            return;
+        }
+
         var query = _query?.Trim() ?? string.Empty;
         if (string.IsNullOrEmpty(query) || string.IsNullOrWhiteSpace(_workspaceRoot))
         {
@@ -81,17 +88,30 @@ public sealed class WorkspaceSearchViewModel : INotifyPropertyChanged
         var root = _workspaceRoot;
         var caseSensitive = _caseSensitive;
 
-        var result = await Task.Run(() => _search.Search(root, query, caseSensitive));
-
-        Results.Clear();
-        foreach (var match in result.Matches)
+        try
         {
-            Results.Add(match);
-        }
+            var result = await Task.Run(() => _search.Search(root, query, caseSensitive));
 
-        IsSearching = false;
-        Status = FormatStatus(result, query);
-        OnChanged(nameof(HasResults));
+            Results.Clear();
+            foreach (var match in result.Matches)
+            {
+                Results.Add(match);
+            }
+            Status = FormatStatus(result, query);
+        }
+        catch (System.Exception ex)
+        {
+            // The search is meant to be self-contained, but never let an unexpected failure leave
+            // the panel stuck on "Searching…" (or crash an async-void handler that awaits this):
+            // surface it and fall through to the finally that resets the busy flag.
+            Results.Clear();
+            Status = $"Search failed: {ex.Message}";
+        }
+        finally
+        {
+            IsSearching = false;
+            OnChanged(nameof(HasResults));
+        }
     }
 
     public void Clear()
