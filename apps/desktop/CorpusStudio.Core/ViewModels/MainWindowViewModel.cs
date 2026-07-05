@@ -209,13 +209,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public IExamplesViewModel Examples { get; }
 
+    public IWritingStudioViewModel WritingStudio { get; }
+
     /// <summary>Design-time / test constructor.</summary>
     public MainWindowViewModel()
         : this(
             new DebtViewModel(), new ArenaViewModel(), new SettingsViewModel(),
             new VersionsViewModel(), new ArtifactsViewModel(), new SuitesViewModel(),
             new SplitsViewModel(), new PreferenceReviewViewModel(), new QuarantineViewModel(),
-            new ExamplesViewModel())
+            new ExamplesViewModel(), new WritingStudioViewModel())
     {
     }
 
@@ -223,7 +225,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         IDebtViewModel debt, IArenaViewModel arena, ISettingsViewModel settings,
         IVersionsViewModel versions, IArtifactsViewModel artifacts, ISuitesViewModel suites,
         ISplitsViewModel splits, IPreferenceReviewViewModel preferenceReview,
-        IQuarantineViewModel quarantine, IExamplesViewModel examples)
+        IQuarantineViewModel quarantine, IExamplesViewModel examples,
+        IWritingStudioViewModel writingStudio)
     {
         Debt = debt;
         Arena = arena;
@@ -235,6 +238,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         PreferenceReview = preferenceReview;
         Quarantine = quarantine;
         Examples = examples;
+        WritingStudio = writingStudio;
         // A split failure surfaces in the shell's shared error banner; the tab keeps no shell
         // reference, so it raises ErrorReported and the shell forwards it to ReportError.
         Splits.ErrorReported += ReportError;
@@ -471,52 +475,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
-    private const string InitialDraftTemplate =
-        "{\n  \"instruction\": \"Explain what a variable is.\",\n  \"input\": \"\",\n  \"output\": \"A variable stores a value.\"\n}";
-
-    private string _draftText = InitialDraftTemplate;
-
-    // The last programmatically loaded/saved draft. The buffer is "dirty" (unsaved user edits)
-    // when DraftText diverges from this. Set via LoadDraft/MarkDraftClean so that loading a
-    // known draft (template, saved example, retried row) is not reported as unsaved work.
-    private string _draftBaseline = InitialDraftTemplate;
-
-    public string DraftText
-    {
-        get => _draftText;
-        set
-        {
-            if (SetField(ref _draftText, value))
-            {
-                OnPropertyChanged(nameof(IsDraftDirty));
-                OnPropertyChanged(nameof(HasUnsavedWork));
-            }
-        }
-    }
-
-    /// <summary>True when the editor buffer has unsaved user edits (differs from the last
-    /// loaded/saved draft).</summary>
-    public bool IsDraftDirty => !string.Equals(_draftText, _draftBaseline, StringComparison.Ordinal);
+    // The draft editor buffer + dirty-tracking + LoadDraft/MarkDraftClean moved to
+    // WritingStudioViewModel in Phase 2 (backend-cluster slice 1). LoadDraft is the shared
+    // "load text into the editor" seam; call sites use WritingStudio.LoadDraft(...). The shell keeps
+    // the aggregate HasUnsavedWork (draft OR a dirty Explorer document) and the draft-construction
+    // helpers (BuildDraftTemplate / BuildJsonArrayDraft).
 
     /// <summary>Unsaved work that a project switch or app close would silently discard: an
-    /// edited draft, or a dirty open document in the workspace explorer.</summary>
-    public bool HasUnsavedWork => IsDraftDirty || Explorer.HasDirtyDocuments;
-
-    /// <summary>Load a known draft (template, saved example, retried row) as the clean baseline,
-    /// so it is not reported as unsaved until the user edits it.</summary>
-    public void LoadDraft(string text)
-    {
-        _draftBaseline = text ?? string.Empty;
-        DraftText = text ?? string.Empty; // the setter re-raises IsDraftDirty/HasUnsavedWork
-    }
-
-    /// <summary>Mark the current draft as saved — its content becomes the clean baseline.</summary>
-    public void MarkDraftClean()
-    {
-        _draftBaseline = _draftText;
-        OnPropertyChanged(nameof(IsDraftDirty));
-        OnPropertyChanged(nameof(HasUnsavedWork));
-    }
+    /// edited draft, or a dirty open document in the workspace explorer. Read imperatively by the
+    /// switch/close guards.</summary>
+    public bool HasUnsavedWork => WritingStudio.IsDraftDirty || Explorer.HasDirtyDocuments;
 
     public string ValidationSummary
     {
@@ -1896,7 +1864,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         Projects.Add(projectItem);
         SelectProject(projectItem, schemaName);
-        LoadDraft(BuildDraftTemplate(schemaId));
+        WritingStudio.LoadDraft(BuildDraftTemplate(schemaId));
     }
 
     public void SelectProject(DatasetProjectListItem project, string? schemaName = null)
@@ -1990,7 +1958,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         // Reset the Writing Studio draft to the new project's schema template. Without this, an
         // unsaved draft typed against the previous project would be written into THIS project's
         // examples.jsonl on the next save (a cross-project data leak).
-        LoadDraft(BuildDraftTemplate(project.SchemaId));
+        WritingStudio.LoadDraft(BuildDraftTemplate(project.SchemaId));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasActiveProject)));
     }
 
@@ -2215,7 +2183,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         Examples.SelectedExample = example;
-        LoadDraft(example.Json);
+        WritingStudio.LoadDraft(example.Json);
         if (AiAssistActionPresets.Contains("rewrite-output"))
         {
             AiAssistAction = "rewrite-output";
@@ -2259,7 +2227,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return false;
         }
 
-        LoadDraft(BuildJsonArrayDraft(affectedRows.Select(row => row.Json)));
+        WritingStudio.LoadDraft(BuildJsonArrayDraft(affectedRows.Select(row => row.Json)));
         if (AiAssistActionPresets.Contains("rewrite-output"))
         {
             AiAssistAction = "rewrite-output";
@@ -2273,7 +2241,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             RowNumbers = rowNumbers,
             IssueCount = SyntheticPatternIssues.Count,
             IssueSummary = BuildSyntheticIssueSummary(SyntheticPatternIssues),
-            SourceDraft = DraftText,
+            SourceDraft = WritingStudio.DraftText,
             Instruction = AiAssistInstruction,
         };
         QualityTriageSummary =
@@ -2301,7 +2269,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return false;
         }
 
-        LoadDraft(BuildEvaluationFailureDraft(SelectedEvaluationExampleResult, ActiveSchemaId));
+        WritingStudio.LoadDraft(BuildEvaluationFailureDraft(SelectedEvaluationExampleResult, ActiveSchemaId));
         if (AiAssistActionPresets.Contains("rewrite-output"))
         {
             AiAssistAction = "rewrite-output";
@@ -2354,7 +2322,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         };
 
         Examples.SelectedExample = example;
-        LoadDraft(example.Json);
+        WritingStudio.LoadDraft(example.Json);
         ValidationSummary =
             $"Loaded evaluation failure row {rowNumber}. Validate before saving reviewed edits.";
         EvaluationReviewSummary =
@@ -2375,7 +2343,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return false;
         }
 
-        LoadDraft(selected.Json);
+        WritingStudio.LoadDraft(selected.Json);
         if (AiAssistActionPresets.Contains("judge-preference-strength"))
         {
             AiAssistAction = "judge-preference-strength";
@@ -2407,7 +2375,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return false;
         }
 
-        LoadDraft(BuildJsonArrayDraft(items.Select(item => item.Json)));
+        WritingStudio.LoadDraft(BuildJsonArrayDraft(items.Select(item => item.Json)));
         if (AiAssistActionPresets.Contains("judge-preference-strength"))
         {
             AiAssistAction = "judge-preference-strength";
@@ -2897,7 +2865,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return false;
         }
 
-        LoadDraft(SelectedAiAssistRewriteBatch.SourceDraft);
+        WritingStudio.LoadDraft(SelectedAiAssistRewriteBatch.SourceDraft);
         AiAssistAction = AiAssistActionPresets.Contains(SelectedAiAssistRewriteBatch.Action)
             ? SelectedAiAssistRewriteBatch.Action
             : "rewrite-output";
@@ -2974,7 +2942,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         Examples.SelectedExample = example;
-        LoadDraft(example.Json);
+        WritingStudio.LoadDraft(example.Json);
         ReviewedFixSummary =
             $"Reopened reviewed fix for {SelectedReviewedFix.ExampleId} (v{SelectedReviewedFix.Version}). Edit, validate, save, then rerun evaluation.";
         return true;
@@ -3254,7 +3222,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return false;
         }
 
-        LoadDraft(suggestionJsonl.TrimEnd());
+        WritingStudio.LoadDraft(suggestionJsonl.TrimEnd());
         AiAssistSummary = "AI Assist suggestion moved to Writing Studio. Validate and edit before saving.";
         return true;
     }
@@ -3521,7 +3489,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         var selected = Quarantine.SelectedImportQuarantineItem;
         if (selected is not null)
         {
-            LoadDraft(selected.Raw);
+            WritingStudio.LoadDraft(selected.Raw);
             // Remember which quarantine row is being repaired so a successful save can
             // remove it (otherwise the record orphans in quarantine forever).
             _pendingRetryItem = selected;

@@ -18,12 +18,12 @@ public sealed class UnsavedWorkTests
     public void Draft_IsCleanInitially_DirtyAfterTyping()
     {
         var vm = new MainWindowViewModel();
-        Assert.False(vm.IsDraftDirty);
+        Assert.False(vm.WritingStudio.IsDraftDirty);
         Assert.False(vm.HasUnsavedWork);
 
-        vm.DraftText = "{\"instruction\":\"typed\",\"output\":\"x\"}";
+        vm.WritingStudio.DraftText = "{\"instruction\":\"typed\",\"output\":\"x\"}";
 
-        Assert.True(vm.IsDraftDirty);
+        Assert.True(vm.WritingStudio.IsDraftDirty);
         Assert.True(vm.HasUnsavedWork);
     }
 
@@ -31,38 +31,38 @@ public sealed class UnsavedWorkTests
     public void LoadDraft_SetsCleanBaseline()
     {
         var vm = new MainWindowViewModel();
-        vm.DraftText = "dirty";
-        Assert.True(vm.IsDraftDirty);
+        vm.WritingStudio.DraftText = "dirty";
+        Assert.True(vm.WritingStudio.IsDraftDirty);
 
-        vm.LoadDraft("{\"instruction\":\"loaded\",\"output\":\"y\"}");
+        vm.WritingStudio.LoadDraft("{\"instruction\":\"loaded\",\"output\":\"y\"}");
 
-        Assert.False(vm.IsDraftDirty);            // a loaded draft is not "unsaved work"
-        Assert.Contains("loaded", vm.DraftText);
+        Assert.False(vm.WritingStudio.IsDraftDirty);            // a loaded draft is not "unsaved work"
+        Assert.Contains("loaded", vm.WritingStudio.DraftText);
     }
 
     [Fact]
     public void MarkDraftClean_ClearsDirty()
     {
         var vm = new MainWindowViewModel();
-        vm.DraftText = "edited";
-        Assert.True(vm.IsDraftDirty);
+        vm.WritingStudio.DraftText = "edited";
+        Assert.True(vm.WritingStudio.IsDraftDirty);
 
-        vm.MarkDraftClean();
+        vm.WritingStudio.MarkDraftClean();
 
-        Assert.False(vm.IsDraftDirty);
+        Assert.False(vm.WritingStudio.IsDraftDirty);
     }
 
     [Fact]
     public void SelectProject_ResetsDraft_SoItCannotLeakIntoTheNewProject()
     {
         var vm = new MainWindowViewModel();
-        vm.DraftText = "{\"instruction\":\"typed in project A\",\"output\":\"x\"}";
-        Assert.True(vm.IsDraftDirty);
+        vm.WritingStudio.DraftText = "{\"instruction\":\"typed in project A\",\"output\":\"x\"}";
+        Assert.True(vm.WritingStudio.IsDraftDirty);
 
         vm.SelectProject(Project("b"), "Instruction");
 
-        Assert.False(vm.IsDraftDirty);                              // reset to a clean template
-        Assert.DoesNotContain("typed in project A", vm.DraftText);  // A's draft did NOT carry over
+        Assert.False(vm.WritingStudio.IsDraftDirty);                              // reset to a clean template
+        Assert.DoesNotContain("typed in project A", vm.WritingStudio.DraftText);  // A's draft did NOT carry over
     }
 
     [Fact]
