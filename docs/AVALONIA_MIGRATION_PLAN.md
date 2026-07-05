@@ -2,8 +2,25 @@
 
 **Companion to [`CROSS_PLATFORM_ASSESSMENT.md`](CROSS_PLATFORM_ASSESSMENT.md).** The assessment
 answers *whether/why* (yes, eventually; Avalonia; decompose first). This document is the *how* — a
-concrete, phased, slice-by-slice plan grounded in the current decomposition state. **Planning only;
-no code has moved.**
+concrete, phased, slice-by-slice plan grounded in the current decomposition state.
+
+## Progress
+
+- **Phase 0 — DONE.** Cross-platform venv-path fix (`PythonExecutableResolver`) + the platform-seam
+  shims behind interfaces: `IDialogService` (WPF `MessageBoxDialogService`) and `IFilePickerService`
+  (WPF `Win32FilePickerService`), DI-registered, all dialogs/pickers routed through them.
+- **Phase 1 — foundation + spike DONE.** Extracted a shared **`CorpusStudio.Core`** (`net8.0`) with
+  all Models + view-models + the WPF-free services + seam interfaces (the WPF head keeps Views/`App`
+  + the two WPF adapters and references Core). Then the **spike passed (GO):** a `CorpusStudio.Avalonia`
+  (`net8.0`) head builds the **Debt + Arena** tabs in `.axaml` over the *unchanged* view-models —
+  compiled bindings validate at build time (same DI as WPF; `IsVisible`←`bool`; TwoWay text; list
+  templating), so a green build is the proof. Not shipped; WPF remains the product head.
+- **Phase 2 — next.** Decompose the remaining 13 tabs out of `MainWindowViewModel` and port each view.
+
+The spike, running: an **Avalonia** head rendering the **Debt** (and Arena) tab over the *unchanged*
+`DebtViewModel` from `CorpusStudio.Core` — same view-models, same DI, cross-platform toolkit.
+
+![The Avalonia spike: the Debt and Arena tabs rendered by an Avalonia head over the shared CorpusStudio.Core view-models.](screenshots/avalonia-spike.png)
 
 Ground-truth measured 2026-07-05:
 

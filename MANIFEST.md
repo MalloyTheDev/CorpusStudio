@@ -200,6 +200,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/decisions/0003-python-engine-csharp-desktop.md`
 - `docs/schemas/README.md`
 - `docs/screenshots/arena-resilience.png`
+- `docs/screenshots/avalonia-spike.png`
 - `docs/screenshots/dataset-debt.png`
 - `docs/screenshots/debt-trend.png`
 - `docs/screenshots/hf-import.png`

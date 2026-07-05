@@ -22,11 +22,7 @@
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="models:DebtDisplayItem">
                 <Border Padding="8" Margin="0,2" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="6">
-                  <StackPanel Orientation="Horizontal" Spacing="10">
-                    <TextBlock Text="{Binding SeverityBadge}"/>
-                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"/>
-                    <TextBlock Text="{Binding Measure}" Foreground="#64748B"/>
-                  </StackPanel>
+                  <TextBlock Text="{Binding DisplayName}" TextWrapping="Wrap"/>
                 </Border>
               </DataTemplate>
             </ItemsControl.ItemTemplate>
