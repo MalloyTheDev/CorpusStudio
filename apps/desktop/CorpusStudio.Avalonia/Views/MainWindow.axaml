@@ -13,7 +13,8 @@
       <ScrollViewer>
         <StackPanel Margin="20" Spacing="10">
           <StackPanel Orientation="Horizontal" Spacing="12">
-            <TextBlock Text="{Binding Debt.DebtGrade}" FontSize="44" FontWeight="Bold"/>
+            <TextBlock Text="{Binding Debt.DebtGrade}" FontSize="44" FontWeight="Bold"
+                       Foreground="{Binding Debt.DebtGradeColor, Converter={StaticResource StringToBrush}}"/>
             <TextBlock Text="stale" VerticalAlignment="Center" Foreground="#B45309"
                        IsVisible="{Binding Debt.DebtStale}"/>
           </StackPanel>
@@ -101,7 +102,8 @@
         <StackPanel Grid.Column="1" Margin="16,0,0,0" Spacing="8">
           <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding Suites.HasSuiteReport}">
             <TextBlock Text="Overall verdict:" FontWeight="Bold"/>
-            <TextBlock Text="{Binding Suites.SuiteOverallStatus}"/>
+            <TextBlock Text="{Binding Suites.SuiteOverallStatus}" FontWeight="Bold"
+                       Foreground="{Binding Suites.SuiteOverallColor, Converter={StaticResource StringToBrush}}"/>
           </StackPanel>
           <TextBlock Text="{Binding Suites.SuiteReportSummary}" TextWrapping="Wrap"/>
           <TextBlock Text="Per-metric rollup" FontWeight="SemiBold" Margin="0,8,0,0"
@@ -115,6 +117,86 @@
           </ItemsControl>
           <TextBlock Text="{Binding Suites.SuiteHonestyNote}" TextWrapping="Wrap"
                      Foreground="#64748B" FontSize="11" Margin="0,8,0,0"/>
+        </StackPanel>
+      </Grid>
+    </TabItem>
+
+    <!-- Splits: three TwoWay percent/seed inputs + a read summary. -->
+    <TabItem Header="Splits">
+      <StackPanel Margin="20" Spacing="8" MaxWidth="360" HorizontalAlignment="Left">
+        <TextBlock Text="Train %"/>
+        <TextBox Text="{Binding Splits.SplitTrainPercent}"/>
+        <TextBlock Text="Validation %"/>
+        <TextBox Text="{Binding Splits.SplitValidationPercent}"/>
+        <TextBlock Text="Seed"/>
+        <TextBox Text="{Binding Splits.SplitSeed}"/>
+        <TextBlock Text="{Binding Splits.SplitSummary}" TextWrapping="Wrap" Margin="0,10,0,0"/>
+      </StackPanel>
+    </TabItem>
+
+    <!-- Examples: the dataset spine — ItemsSource + TwoWay selection + a read JSON pane. -->
+    <TabItem Header="Examples">
+      <Grid Margin="16" ColumnDefinitions="300,*">
+        <ListBox Grid.Column="0" ItemsSource="{Binding Examples.Items}"
+                 SelectedItem="{Binding Examples.SelectedExample}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="models:SavedExampleItem">
+              <TextBlock Text="{Binding DisplayName}" Margin="0,2"/>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+        <TextBox Grid.Column="1" Margin="16,0,0,0" Text="{Binding Examples.SelectedExampleJson}"
+                 IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas"
+                 TextWrapping="Wrap" VerticalAlignment="Stretch"/>
+      </Grid>
+    </TabItem>
+
+    <!-- Quarantine: failed-import rows list + TwoWay selection + a read detail pane. -->
+    <TabItem Header="Quarantine">
+      <Grid Margin="16" ColumnDefinitions="300,*">
+        <ListBox Grid.Column="0" ItemsSource="{Binding Quarantine.ImportQuarantineItems}"
+                 SelectedItem="{Binding Quarantine.SelectedImportQuarantineItem}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="models:ImportQuarantineItem">
+              <StackPanel Margin="0,2">
+                <TextBlock Text="{Binding SourcePath}" FontWeight="SemiBold"/>
+                <TextBlock Text="{Binding RowNumber}" Foreground="#64748B" FontSize="11"/>
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+        <TextBox Grid.Column="1" Margin="16,0,0,0" Text="{Binding Quarantine.SelectedImportQuarantineDetail}"
+                 IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas"
+                 TextWrapping="Wrap" VerticalAlignment="Stretch"/>
+      </Grid>
+    </TabItem>
+
+    <!-- Preference Review: list + TwoWay selection + read panes + a ComboBox (ItemsSource + SelectedItem). -->
+    <TabItem Header="Preference Review">
+      <Grid Margin="16" ColumnDefinitions="300,*">
+        <DockPanel Grid.Column="0">
+          <ComboBox DockPanel.Dock="Top" Margin="0,0,0,8" HorizontalAlignment="Stretch"
+                    ItemsSource="{Binding PreferenceReview.PreferenceContrastFilterOptions}"
+                    SelectedItem="{Binding PreferenceReview.PreferenceContrastFilter}"/>
+          <ListBox ItemsSource="{Binding PreferenceReview.PreferenceReviewItems}"
+                   SelectedItem="{Binding PreferenceReview.SelectedPreferenceReviewItem}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:PreferenceReviewItem">
+                <TextBlock Text="{Binding Prompt}" TextTrimming="CharacterEllipsis" Margin="0,2"/>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+        <StackPanel Grid.Column="1" Margin="16,0,0,0" Spacing="6">
+          <TextBlock Text="{Binding PreferenceReview.PreferenceRankingSummary}" TextWrapping="Wrap"/>
+          <TextBlock Text="Prompt" FontWeight="SemiBold" Margin="0,6,0,0"/>
+          <TextBlock Text="{Binding PreferenceReview.PreferencePromptText}" TextWrapping="Wrap"/>
+          <TextBlock Text="Chosen" FontWeight="SemiBold" Margin="0,6,0,0"/>
+          <TextBlock Text="{Binding PreferenceReview.PreferenceChosenText}" TextWrapping="Wrap"/>
+          <TextBlock Text="Rejected" FontWeight="SemiBold" Margin="0,6,0,0"/>
+          <TextBlock Text="{Binding PreferenceReview.PreferenceRejectedText}" TextWrapping="Wrap"/>
+          <TextBlock Text="{Binding PreferenceReview.PreferenceReviewSummary}" TextWrapping="Wrap"
+                     Foreground="#64748B" Margin="0,8,0,0"/>
         </StackPanel>
       </Grid>
     </TabItem>
