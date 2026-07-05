@@ -53,6 +53,7 @@ public partial class App : Application
         services.AddTransient<IQuarantineViewModel, QuarantineViewModel>();
         services.AddTransient<IExamplesViewModel, ExamplesViewModel>();
         services.AddTransient<IWritingStudioViewModel, WritingStudioViewModel>();
+        services.AddTransient<IAiAssistRewriteBatchesViewModel, AiAssistRewriteBatchesViewModel>();
         services.AddTransient<MainWindowViewModel>();
     }
 

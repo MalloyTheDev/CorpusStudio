@@ -1426,15 +1426,15 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetAiAssistRewriteBatchError(
+            ViewModel.RewriteBatches.SetAiAssistRewriteBatchError(
                 "Create or select a dataset project before saving a prepared rewrite batch."
             );
             return;
         }
 
-        if (!ViewModel.TryGetLastPreparedAiAssistRewriteBatch(out var batch, out var errorMessage))
+        if (!ViewModel.RewriteBatches.TryGetLastPreparedAiAssistRewriteBatch(out var batch, out var errorMessage))
         {
-            ViewModel.SetAiAssistRewriteBatchError(errorMessage);
+            ViewModel.RewriteBatches.SetAiAssistRewriteBatchError(errorMessage);
             return;
         }
 
@@ -1444,16 +1444,16 @@ public partial class MainWindow : Window
                 ViewModel.ActiveProjectPath,
                 batch
             );
-            ViewModel.SetAiAssistRewriteBatches(
+            ViewModel.RewriteBatches.SetAiAssistRewriteBatches(
                 _engineService.LoadAiAssistRewriteBatches(ViewModel.ActiveProjectPath)
             );
-            ViewModel.SelectedAiAssistRewriteBatch = ViewModel.AiAssistRewriteBatches
+            ViewModel.RewriteBatches.SelectedAiAssistRewriteBatch = ViewModel.RewriteBatches.AiAssistRewriteBatches
                 .FirstOrDefault(item => item.BatchId == savedBatch.BatchId);
-            ViewModel.ApplyAiAssistRewriteBatchSaved(savedBatch);
+            ViewModel.RewriteBatches.ApplyAiAssistRewriteBatchSaved(savedBatch);
         }
         catch (Exception ex)
         {
-            ViewModel.SetAiAssistRewriteBatchError(ex.Message);
+            ViewModel.RewriteBatches.SetAiAssistRewriteBatchError(ex.Message);
         }
     }
 
@@ -4125,7 +4125,7 @@ public partial class MainWindow : Window
         ViewModel.Quarantine.SetItems(_engineService.LoadImportQuarantineItems(project.ProjectPath));
         ViewModel.SetAiAssistReviewQueue(_engineService.LoadAiAssistReviewQueue(project.ProjectPath));
         ViewModel.SetAiAssistQueueViews(_engineService.LoadAiAssistQueueViews(project.ProjectPath));
-        ViewModel.SetAiAssistRewriteBatches(
+        ViewModel.RewriteBatches.SetAiAssistRewriteBatches(
             _engineService.LoadAiAssistRewriteBatches(project.ProjectPath)
         );
         ViewModel.SetReviewedFixes(
