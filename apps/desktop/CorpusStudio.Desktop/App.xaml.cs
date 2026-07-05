@@ -49,6 +49,7 @@ public partial class App : Application
         services.AddTransient<IArtifactsViewModel, ArtifactsViewModel>();
         services.AddTransient<ISuitesViewModel, SuitesViewModel>();
         services.AddTransient<ISplitsViewModel, SplitsViewModel>();
+        services.AddTransient<IPreferenceReviewViewModel, PreferenceReviewViewModel>();
         services.AddTransient<MainWindowViewModel>();
     }
 

@@ -1102,7 +1102,7 @@
                             <TextBlock Grid.Row="0"
                                        Grid.ColumnSpan="3"
                                        AutomationProperties.AutomationId="PreferenceReviewSummaryTextBlock"
-                                       Text="{Binding PreferenceReviewSummary, Mode=OneWay}"
+                                       Text="{Binding PreferenceReview.PreferenceReviewSummary, Mode=OneWay}"
                                        FontWeight="SemiBold"
                                        TextWrapping="Wrap"
                                        Margin="0,0,0,8" />
@@ -1114,12 +1114,12 @@
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <ComboBox AutomationProperties.AutomationId="PreferenceContrastFilterComboBox"
-                                          ItemsSource="{Binding PreferenceContrastFilterOptions}"
-                                          SelectedItem="{Binding PreferenceContrastFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          ItemsSource="{Binding PreferenceReview.PreferenceContrastFilterOptions}"
+                                          SelectedItem="{Binding PreferenceReview.PreferenceContrastFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                           Width="112"
                                           Margin="0,0,10,0" />
                                 <TextBlock AutomationProperties.AutomationId="PreferenceRankingSummaryTextBlock"
-                                           Text="{Binding PreferenceRankingSummary, Mode=OneWay}"
+                                           Text="{Binding PreferenceReview.PreferenceRankingSummary, Mode=OneWay}"
                                            VerticalAlignment="Center"
                                            TextWrapping="Wrap" />
                             </WrapPanel>
@@ -1128,8 +1128,8 @@
                                      Grid.RowSpan="2"
                                      Grid.Column="0"
                                      AutomationProperties.AutomationId="PreferenceExamplesListBox"
-                                     ItemsSource="{Binding PreferenceReviewItems}"
-                                     SelectedItem="{Binding SelectedPreferenceReviewItem, Mode=TwoWay}"
+                                     ItemsSource="{Binding PreferenceReview.PreferenceReviewItems}"
+                                     SelectedItem="{Binding PreferenceReview.SelectedPreferenceReviewItem, Mode=TwoWay}"
                                      DisplayMemberPath="DisplayName"
                                      Margin="0,0,12,0" />
 
@@ -1142,7 +1142,7 @@
                                            Style="{StaticResource SectionHeaderTextStyle}"
                                            Margin="0,0,0,3" />
                                 <TextBox AutomationProperties.AutomationId="PreferencePromptTextBox"
-                                         Text="{Binding PreferencePromptText, Mode=OneWay}"
+                                         Text="{Binding PreferenceReview.PreferencePromptText, Mode=OneWay}"
                                          IsReadOnly="True"
                                          AcceptsReturn="True"
                                          TextWrapping="Wrap"
@@ -1157,7 +1157,7 @@
                                            Style="{StaticResource SectionHeaderTextStyle}"
                                            Margin="0,0,0,3" />
                                 <TextBox AutomationProperties.AutomationId="PreferenceChosenTextBox"
-                                         Text="{Binding PreferenceChosenText, Mode=OneWay}"
+                                         Text="{Binding PreferenceReview.PreferenceChosenText, Mode=OneWay}"
                                          IsReadOnly="True"
                                          AcceptsReturn="True"
                                          TextWrapping="Wrap"
@@ -1171,7 +1171,7 @@
                                            Style="{StaticResource SectionHeaderTextStyle}"
                                            Margin="0,0,0,3" />
                                 <TextBox AutomationProperties.AutomationId="PreferenceRejectedTextBox"
-                                         Text="{Binding PreferenceRejectedText, Mode=OneWay}"
+                                         Text="{Binding PreferenceReview.PreferenceRejectedText, Mode=OneWay}"
                                          IsReadOnly="True"
                                          AcceptsReturn="True"
                                          TextWrapping="Wrap"
@@ -1187,7 +1187,7 @@
                                            Style="{StaticResource SectionHeaderTextStyle}"
                                            Margin="0,0,0,3" />
                                 <TextBox AutomationProperties.AutomationId="PreferenceReasonTextBox"
-                                         Text="{Binding PreferenceReasonText, Mode=OneWay}"
+                                         Text="{Binding PreferenceReview.PreferenceReasonText, Mode=OneWay}"
                                          IsReadOnly="True"
                                          AcceptsReturn="True"
                                          TextWrapping="Wrap"
@@ -1213,8 +1213,8 @@
                                         Height="32"
                                         Click="ExportPreferenceRankingButton_Click" />
                                 <ComboBox AutomationProperties.AutomationId="PreferenceExportFormatComboBox"
-                                          ItemsSource="{Binding PreferenceExportFormatOptions}"
-                                          SelectedItem="{Binding PreferenceExportFormat, Mode=TwoWay}"
+                                          ItemsSource="{Binding PreferenceReview.PreferenceExportFormatOptions}"
+                                          SelectedItem="{Binding PreferenceReview.PreferenceExportFormat, Mode=TwoWay}"
                                           Height="30"
                                           Margin="0,6,0,6" />
                                 <Button AutomationProperties.AutomationId="ExportPreferenceForTrainingButton"

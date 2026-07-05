@@ -47,16 +47,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _debtTrendDirectionColor = "#64748B";
     private string _debtTrendSummary = "Run quality checks to build a debt trend.";
     private string _qualityTriageSummary = "Synthetic quality issues appear here after quality checks run.";
-    private string _preferencePromptText = "Select a saved preference example to inspect the prompt.";
-    private string _preferenceChosenText = "Chosen response appears here.";
-    private string _preferenceRejectedText = "Rejected response appears here.";
-    private string _preferenceReasonText = "Reason or preference notes appear here.";
-    private string _preferenceRankingSummary =
-        "Preference ranking appears after saved preference pairs are loaded.";
-    private string _preferenceContrastFilter = "All";
-    private string _preferenceExportFormat = "dpo";
-    private string _preferenceReviewSummary =
-        "Preference pair review is available for preference projects.";
     private string _evaluationBackend = "ollama";
     private string _evaluationModel = "qwen2.5-coder:7b";
     private string _evaluationBaseUrl = "http://localhost:11434";
@@ -166,7 +156,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _labSettingsSummary = "Lab backend settings can be saved per project.";
     private DatasetProjectListItem? _selectedProject;
     private SavedExampleItem? _selectedExample;
-    private PreferenceReviewItem? _selectedPreferenceReviewItem;
     private ValidationIssueNavigationItem? _selectedValidationIssue;
     private SyntheticPatternIssue? _selectedSyntheticPatternIssue;
     private ImportQuarantineItem? _selectedImportQuarantineItem;
@@ -181,7 +170,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private ReviewedFixRecord? _lastPreparedEvaluationFix;
     private EvaluationFailureFilter? _selectedEvaluationFailureFilter;
     private readonly List<EvaluationExampleResult> _allEvaluationResults = [];
-    private readonly List<PreferenceReviewItem> _allPreferenceReviewItems = [];
     private readonly List<AiAssistReviewQueueItem> _allAiAssistReviewQueue = [];
     private string _selectedExampleJson = "Saved examples appear here after a project is selected.";
 
@@ -220,19 +208,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public ISplitsViewModel Splits { get; }
 
+    public IPreferenceReviewViewModel PreferenceReview { get; }
+
     /// <summary>Design-time / test constructor.</summary>
     public MainWindowViewModel()
         : this(
             new DebtViewModel(), new ArenaViewModel(), new SettingsViewModel(),
             new VersionsViewModel(), new ArtifactsViewModel(), new SuitesViewModel(),
-            new SplitsViewModel())
+            new SplitsViewModel(), new PreferenceReviewViewModel())
     {
     }
 
     public MainWindowViewModel(
         IDebtViewModel debt, IArenaViewModel arena, ISettingsViewModel settings,
         IVersionsViewModel versions, IArtifactsViewModel artifacts, ISuitesViewModel suites,
-        ISplitsViewModel splits)
+        ISplitsViewModel splits, IPreferenceReviewViewModel preferenceReview)
     {
         Debt = debt;
         Arena = arena;
@@ -241,6 +231,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Artifacts = artifacts;
         Suites = suites;
         Splits = splits;
+        PreferenceReview = preferenceReview;
         // A split failure surfaces in the shell's shared error banner; the tab keeps no shell
         // reference, so it raises ErrorReported and the shell forwards it to ReportError.
         Splits.ErrorReported += ReportError;
@@ -354,22 +345,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public ObservableCollection<string> EvaluationAvailableModels { get; } = [];
 
-    public ObservableCollection<PreferenceReviewItem> PreferenceReviewItems { get; } = [];
-
-    public ObservableCollection<string> PreferenceContrastFilterOptions { get; } =
-    [
-        "All",
-        "Weak",
-        "Moderate",
-        "Strong",
-    ];
-
-    public ObservableCollection<string> PreferenceExportFormatOptions { get; } =
-    [
-        "dpo",
-        "kto",
-        "reward",
-    ];
 
     public ObservableCollection<string> EvaluationResultFilterOptions { get; } =
     [
@@ -483,17 +458,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
-    public PreferenceReviewItem? SelectedPreferenceReviewItem
-    {
-        get => _selectedPreferenceReviewItem;
-        set
-        {
-            if (SetField(ref _selectedPreferenceReviewItem, value))
-            {
-                ApplyPreferenceReviewItem(value);
-            }
-        }
-    }
 
     public ValidationIssueNavigationItem? SelectedValidationIssue
     {
@@ -964,53 +928,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         private set => SetField(ref _qualityTriageSummary, value);
     }
 
-    public string PreferencePromptText
-    {
-        get => _preferencePromptText;
-        private set => SetField(ref _preferencePromptText, value);
-    }
-
-    public string PreferenceChosenText
-    {
-        get => _preferenceChosenText;
-        private set => SetField(ref _preferenceChosenText, value);
-    }
-
-    public string PreferenceRejectedText
-    {
-        get => _preferenceRejectedText;
-        private set => SetField(ref _preferenceRejectedText, value);
-    }
-
-    public string PreferenceReasonText
-    {
-        get => _preferenceReasonText;
-        private set => SetField(ref _preferenceReasonText, value);
-    }
-
-    public string PreferenceRankingSummary
-    {
-        get => _preferenceRankingSummary;
-        private set => SetField(ref _preferenceRankingSummary, value);
-    }
-
-    public string PreferenceContrastFilter
-    {
-        get => _preferenceContrastFilter;
-        set
-        {
-            if (SetField(ref _preferenceContrastFilter, value))
-            {
-                RebuildPreferenceReviewItems();
-            }
-        }
-    }
-
-    public string PreferenceReviewSummary
-    {
-        get => _preferenceReviewSummary;
-        private set => SetField(ref _preferenceReviewSummary, value);
-    }
+    // Preference Review tab state + display/export logic extracted to PreferenceReviewViewModel in
+    // Phase 2. The shell pushes ActiveSchemaId down, forwards SetItems(Examples) + Reset() on
+    // project/example changes, and keeps the AI-Assist handoff actions (PreparePreference*JudgeReview)
+    // which reach into the child. Bindings use PreferenceReview.*, code-behind ViewModel.PreferenceReview.*.
 
 
     // Splits tab state + logic extracted to SplitsViewModel in Phase 2. The shell wires the child's
@@ -2017,6 +1938,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ActiveProjectTitle = project.Name;
         ActiveProjectPath = project.ProjectPath;
         ActiveSchemaId = project.SchemaId;
+        // The Preference Review tab is gated on the schema; push it down so the child builds/shows
+        // pairs only for a "preference" project.
+        PreferenceReview.ActiveSchemaId = ActiveSchemaId;
         ActiveSchemaDescription = $"{schemaName ?? project.SchemaId} project. Ready for examples.";
         ApplyAiAssistActionPresets(project.SchemaId);
         Splits.ApplySplitSettings(project.Project.SplitSettings ?? SplitSettings.Default);
@@ -2072,11 +1996,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         SelectedImportQuarantineItem = null;
         _pendingRetryItem = null;
         SelectedExample = null;
-        _allPreferenceReviewItems.Clear();
-        PreferenceReviewItems.Clear();
-        SelectedPreferenceReviewItem = null;
-        PreferenceContrastFilter = "All";
-        ClearPreferenceReview();
+        // Preference-review state is per-project: reset the child so nothing leaks across a switch.
+        PreferenceReview.Reset();
         // Dataset-version state is per-project: reset the child view-model so nothing leaks across
         // a project switch. LoadProjectAsync eagerly refreshes the new project's versions.
         Versions.Reset();
@@ -2155,7 +2076,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         SelectedExample = Examples.FirstOrDefault();
         SelectedExampleJson = SelectedExample?.Json
             ?? "No saved examples yet. Save a valid draft from Writing Studio.";
-        SetPreferenceReviewItems(Examples);
+        PreferenceReview.SetItems(Examples);
         QualitySummary = Examples.Count == 0
             ? "No saved examples yet. Quality checks will run after examples are added."
             : $"{Examples.Count} saved example(s). Run quality checks to inspect duplicates and empty rows.";
@@ -2478,28 +2399,33 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         return true;
     }
 
+    // Preference → AI Assist handoff. These stay on the shell (they write the not-yet-extracted AI
+    // Assist tab's state + LoadDraft); they reach into the extracted PreferenceReview tab for the
+    // selection / visible pairs and to set the review summary. Resolve this bridge when AI Assist
+    // decomposes (Phase 2 do-last cluster).
     public bool PreparePreferenceJudgeReview()
     {
-        if (SelectedPreferenceReviewItem is null)
+        var selected = PreferenceReview.SelectedPreferenceReviewItem;
+        if (selected is null)
         {
-            PreferenceReviewSummary = "Select a saved preference pair before preparing AI Assist review.";
+            PreferenceReview.SetReviewSummary("Select a saved preference pair before preparing AI Assist review.");
             return false;
         }
 
-        LoadDraft(SelectedPreferenceReviewItem.Json);
+        LoadDraft(selected.Json);
         if (AiAssistActionPresets.Contains("judge-preference-strength"))
         {
             AiAssistAction = "judge-preference-strength";
         }
 
         AiAssistInstruction = BuildPreferenceJudgeInstruction(
-            SelectedPreferenceReviewItem.RowNumber,
-            SelectedPreferenceReviewItem.Prompt,
-            SelectedPreferenceReviewItem.Chosen,
-            SelectedPreferenceReviewItem.Rejected
+            selected.RowNumber,
+            selected.Prompt,
+            selected.Chosen,
+            selected.Rejected
         );
-        PreferenceReviewSummary =
-            $"Prepared Example {SelectedPreferenceReviewItem.RowNumber} for AI Assist preference-strength review.";
+        PreferenceReview.SetReviewSummary(
+            $"Prepared Example {selected.RowNumber} for AI Assist preference-strength review.");
         return true;
     }
 
@@ -2507,14 +2433,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         if (ActiveSchemaId != "preference")
         {
-            PreferenceReviewSummary = "Preference batch review is available for preference projects.";
+            PreferenceReview.SetReviewSummary("Preference batch review is available for preference projects.");
             return false;
         }
 
-        var items = PreferenceReviewItems.ToList();
+        var items = PreferenceReview.GetVisiblePreferenceReviewItems();
         if (items.Count == 0)
         {
-            PreferenceReviewSummary = "No preference pairs match the current ranking filter.";
+            PreferenceReview.SetReviewSummary("No preference pairs match the current ranking filter.");
             return false;
         }
 
@@ -2525,52 +2451,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         AiAssistInstruction = BuildPreferenceBatchJudgeInstruction(items);
-        PreferenceReviewSummary =
-            $"Prepared {items.Count} visible preference pair(s) for AI Assist batch judging.";
+        PreferenceReview.SetReviewSummary(
+            $"Prepared {items.Count} visible preference pair(s) for AI Assist batch judging.");
         return true;
-    }
-
-    public IReadOnlyList<PreferenceReviewItem> GetVisiblePreferenceReviewItems()
-    {
-        return PreferenceReviewItems.ToList();
-    }
-
-    public void ApplyPreferenceRankingExport(string outputPath, int itemCount)
-    {
-        PreferenceReviewSummary =
-            $"Exported {itemCount} visible preference ranking item(s) for DPO review: {outputPath}";
-    }
-
-    public string PreferenceExportFormat
-    {
-        get => _preferenceExportFormat;
-        set => SetField(ref _preferenceExportFormat, value);
-    }
-
-    public void ApplyPreferenceTrainingExport(PreferenceExportResult result)
-    {
-        var lines = new List<string>
-        {
-            $"Exported {result.OutputRows} row(s) as {result.Format}: {result.OutputPath}",
-        };
-
-        if (result.DroppedDegenerate > 0)
-        {
-            lines.Add($"Dropped {result.DroppedDegenerate} degenerate pair(s).");
-        }
-
-        if (result.Warnings.Count > 0)
-        {
-            lines.Add("Warnings:");
-            lines.AddRange(result.Warnings.Select(warning => $"- {warning}"));
-        }
-
-        PreferenceReviewSummary = string.Join(Environment.NewLine, lines);
-    }
-
-    public void SetPreferenceRankingExportError(string message)
-    {
-        PreferenceReviewSummary = $"Preference ranking export failed.{Environment.NewLine}{message}";
     }
 
     public void SetEvaluationInProgress()
@@ -3849,261 +3732,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ClearEvaluationExampleSelection();
     }
 
-    private void SetPreferenceReviewItems(IEnumerable<SavedExampleItem> examples)
-    {
-        _allPreferenceReviewItems.Clear();
-        if (ActiveSchemaId == "preference")
-        {
-            foreach (var example in examples)
-            {
-                if (TryCreatePreferenceReviewItem(example, out var item))
-                {
-                    _allPreferenceReviewItems.Add(item);
-                }
-            }
-        }
-
-        RebuildPreferenceReviewItems();
-    }
-
-    private void RebuildPreferenceReviewItems()
-    {
-        var selectedRowNumber = SelectedPreferenceReviewItem?.RowNumber;
-        PreferenceReviewItems.Clear();
-        SelectedPreferenceReviewItem = null;
-
-        foreach (var item in _allPreferenceReviewItems
-            .Where(MatchesPreferenceContrastFilter)
-            .OrderBy(item => PreferenceContrastRank(item.Contrast))
-            .ThenByDescending(item => item.TokenOverlap)
-            .ThenBy(item => item.RowNumber))
-        {
-            PreferenceReviewItems.Add(item);
-        }
-
-        PreferenceRankingSummary = BuildPreferenceRankingSummary();
-        SelectedPreferenceReviewItem = PreferenceReviewItems
-            .FirstOrDefault(item => item.RowNumber == selectedRowNumber)
-            ?? PreferenceReviewItems.FirstOrDefault();
-
-        if (PreferenceReviewItems.Count == 0)
-        {
-            ClearPreferenceReview();
-        }
-    }
-
-    private bool MatchesPreferenceContrastFilter(PreferenceReviewItem item)
-    {
-        return PreferenceContrastFilter switch
-        {
-            "Weak" => item.Contrast == "weak",
-            "Moderate" => item.Contrast == "moderate",
-            "Strong" => item.Contrast == "strong",
-            _ => true,
-        };
-    }
-
-    private string BuildPreferenceRankingSummary()
-    {
-        if (ActiveSchemaId != "preference")
-        {
-            return "Preference ranking is available for preference projects.";
-        }
-
-        if (_allPreferenceReviewItems.Count == 0)
-        {
-            return "No valid preference pairs are loaded.";
-        }
-
-        var weak = _allPreferenceReviewItems.Count(item => item.Contrast == "weak");
-        var moderate = _allPreferenceReviewItems.Count(item => item.Contrast == "moderate");
-        var strong = _allPreferenceReviewItems.Count(item => item.Contrast == "strong");
-        return $"Ranking: {weak} weak, {moderate} moderate, {strong} strong. Filter: {PreferenceContrastFilter}, showing {PreferenceReviewItems.Count} of {_allPreferenceReviewItems.Count}.";
-    }
-
-    private void ApplyPreferenceReviewItem(PreferenceReviewItem? item)
-    {
-        if (item is null)
-        {
-            ClearPreferenceReview();
-            return;
-        }
-
-        if (ActiveSchemaId != "preference")
-        {
-            PreferencePromptText = "Preference review is intended for preference projects.";
-            PreferenceChosenText = "Create or select a preference project to inspect chosen responses.";
-            PreferenceRejectedText = "Create or select a preference project to inspect rejected responses.";
-            PreferenceReasonText = "No preference reason is selected.";
-            PreferenceReviewSummary = "Current project is not a preference dataset.";
-            return;
-        }
-
-        PreferencePromptText = item.Prompt;
-        PreferenceChosenText = item.Chosen;
-        PreferenceRejectedText = item.Rejected;
-        PreferenceReasonText = string.IsNullOrWhiteSpace(item.Reason)
-            ? "No reason field is present for this pair."
-            : item.Reason;
-        PreferenceReviewSummary = $"Example {item.RowNumber}. {item.ContrastSummary}";
-    }
-
-    private void ClearPreferenceReview()
-    {
-        PreferencePromptText = "Select a saved preference example to inspect the prompt.";
-        PreferenceChosenText = "Chosen response appears here.";
-        PreferenceRejectedText = "Rejected response appears here.";
-        PreferenceReasonText = "Reason or preference notes appear here.";
-        PreferenceReviewSummary = ActiveSchemaId == "preference"
-            ? "Save or select a preference pair to review chosen/rejected contrast."
-            : "Preference pair review is available for preference projects.";
-    }
-
-    private static bool TryCreatePreferenceReviewItem(
-        SavedExampleItem example,
-        out PreferenceReviewItem item
-    )
-    {
-        item = new PreferenceReviewItem();
-        if (!TryReadPreferencePair(
-            example.Json,
-            out var prompt,
-            out var chosen,
-            out var rejected,
-            out var reason,
-            out _,
-            out _
-        ))
-        {
-            return false;
-        }
-
-        var metrics = BuildPreferenceContrastMetrics(chosen, rejected);
-        item = new PreferenceReviewItem
-        {
-            RowNumber = example.RowNumber,
-            Prompt = prompt,
-            Chosen = chosen,
-            Rejected = rejected,
-            Reason = reason,
-            Json = example.Json,
-            Contrast = metrics.Contrast,
-            TokenOverlap = metrics.TokenOverlap,
-            CharacterDelta = metrics.CharacterDelta,
-        };
-        return true;
-    }
-
-    private static bool TryReadPreferencePair(
-        string json,
-        out string prompt,
-        out string chosen,
-        out string rejected,
-        out string reason,
-        out string contrastSummary,
-        out string errorMessage
-    )
-    {
-        prompt = string.Empty;
-        chosen = string.Empty;
-        rejected = string.Empty;
-        reason = string.Empty;
-        contrastSummary = string.Empty;
-        errorMessage = string.Empty;
-
-        try
-        {
-            using var document = JsonDocument.Parse(json);
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                errorMessage = "Preference row must be a JSON object.";
-                return false;
-            }
-
-            var root = document.RootElement;
-            prompt = ReadStringProperty(root, "prompt");
-            chosen = ReadStringProperty(root, "chosen");
-            rejected = ReadStringProperty(root, "rejected");
-            reason = ReadStringProperty(root, "reason");
-        }
-        catch (JsonException)
-        {
-            errorMessage = "Preference row contains invalid JSON.";
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(prompt)
-            || string.IsNullOrWhiteSpace(chosen)
-            || string.IsNullOrWhiteSpace(rejected))
-        {
-            errorMessage = "Preference row must include non-empty prompt, chosen, and rejected fields.";
-            return false;
-        }
-
-        contrastSummary = BuildPreferenceContrastSummary(chosen, rejected);
-        return true;
-    }
-
-    private static string ReadStringProperty(JsonElement root, string propertyName)
-    {
-        return root.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
-            ? value.GetString() ?? string.Empty
-            : string.Empty;
-    }
-
-    private static string BuildPreferenceContrastSummary(string chosen, string rejected)
-    {
-        var metrics = BuildPreferenceContrastMetrics(chosen, rejected);
-        var deltaText = metrics.CharacterDelta >= 0
-            ? $"+{metrics.CharacterDelta}"
-            : metrics.CharacterDelta.ToString();
-        return $"Contrast: {metrics.Contrast}. Token overlap: {metrics.TokenOverlap:P0}. Chosen/rejected character delta: {deltaText}.";
-    }
-
-    private static (string Contrast, double TokenOverlap, int CharacterDelta) BuildPreferenceContrastMetrics(
-        string chosen,
-        string rejected
-    )
-    {
-        var chosenTokens = TokenizeForPreference(chosen).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var rejectedTokens = TokenizeForPreference(rejected).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var overlap = 0.0;
-        if (chosenTokens.Count > 0 && rejectedTokens.Count > 0)
-        {
-            var shared = chosenTokens.Intersect(rejectedTokens, StringComparer.OrdinalIgnoreCase).Count();
-            overlap = shared / (double)Math.Max(chosenTokens.Count, rejectedTokens.Count);
-        }
-
-        var contrast = overlap switch
-        {
-            >= 0.9 => "weak",
-            >= 0.65 => "moderate",
-            _ => "strong",
-        };
-        return (contrast, overlap, chosen.Length - rejected.Length);
-    }
-
-    private static int PreferenceContrastRank(string contrast)
-    {
-        return contrast switch
-        {
-            "weak" => 0,
-            "moderate" => 1,
-            "strong" => 2,
-            _ => 3,
-        };
-    }
-
-    private static IEnumerable<string> TokenizeForPreference(string value)
-    {
-        return value
-            .ToLowerInvariant()
-            .Split(
-                [' ', '\r', '\n', '\t', '.', ',', ';', ':', '!', '?', '"', '\'', '(', ')', '[', ']'],
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
-            )
-            .Where(token => token.Length > 1);
-    }
+    // The Preference Review display + contrast-metric helpers moved to PreferenceReviewViewModel in
+    // Phase 2. Only the two Build*Instruction helpers remain here — they serve the shell's AI-Assist
+    // handoff actions above.
 
     private static string BuildPreferenceJudgeInstruction(
         int rowNumber,

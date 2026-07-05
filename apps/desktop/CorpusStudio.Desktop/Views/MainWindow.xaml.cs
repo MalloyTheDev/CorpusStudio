@@ -1614,13 +1614,13 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetPreferenceRankingExportError("Create or select a preference project before exporting.");
+            ViewModel.PreferenceReview.SetPreferenceRankingExportError("Create or select a preference project before exporting.");
             return;
         }
 
         if (ViewModel.ActiveSchemaId != "preference")
         {
-            ViewModel.SetPreferenceRankingExportError("Training export is available for preference projects.");
+            ViewModel.PreferenceReview.SetPreferenceRankingExportError("Training export is available for preference projects.");
             return;
         }
 
@@ -1630,13 +1630,13 @@ public partial class MainWindow : Window
             ViewModel.SetBusy("Exporting preference data...");
             var result = await _engineService.ExportPreferenceForTrainingAsync(
                 ViewModel.ActiveProjectPath,
-                ViewModel.PreferenceExportFormat
+                ViewModel.PreferenceReview.PreferenceExportFormat
             );
-            ViewModel.ApplyPreferenceTrainingExport(result);
+            ViewModel.PreferenceReview.ApplyPreferenceTrainingExport(result);
         }
         catch (Exception ex)
         {
-            ViewModel.SetPreferenceRankingExportError(ex.Message);
+            ViewModel.PreferenceReview.SetPreferenceRankingExportError(ex.Message);
         }
         finally
         {
@@ -1649,22 +1649,22 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetPreferenceRankingExportError("Create or select a preference project before exporting rankings.");
+            ViewModel.PreferenceReview.SetPreferenceRankingExportError("Create or select a preference project before exporting rankings.");
             return;
         }
 
         try
         {
-            var items = ViewModel.GetVisiblePreferenceReviewItems();
+            var items = ViewModel.PreferenceReview.GetVisiblePreferenceReviewItems();
             var outputPath = _engineService.ExportPreferenceRanking(
                 ViewModel.ActiveProjectPath,
                 items
             );
-            ViewModel.ApplyPreferenceRankingExport(outputPath, items.Count);
+            ViewModel.PreferenceReview.ApplyPreferenceRankingExport(outputPath, items.Count);
         }
         catch (Exception ex)
         {
-            ViewModel.SetPreferenceRankingExportError(ex.Message);
+            ViewModel.PreferenceReview.SetPreferenceRankingExportError(ex.Message);
         }
     }
 
