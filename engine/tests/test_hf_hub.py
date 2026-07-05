@@ -175,6 +175,20 @@ def test_hf_import_refuses_to_write_examples_jsonl(tmp_path: Path, monkeypatch):
     assert "examples.jsonl" in result.output
 
 
+def test_hf_import_refuses_case_variant_examples_jsonl(tmp_path: Path):
+    # The guard is case-insensitive so `--out Examples.jsonl` can't clobber the dataset on
+    # a case-insensitive filesystem (Windows/macOS). It fires BEFORE any network call, so no
+    # opener stub is needed.
+    result = runner.invoke(
+        app,
+        ["hf-import", "acme/set", "--out", str(tmp_path / "Examples.JSONL"),
+         "--schema", "instruction"],
+    )
+    assert result.exit_code == 2
+    assert "examples.jsonl" in result.output
+    assert not (tmp_path / "Examples.JSONL").exists()
+
+
 def test_hf_import_refuses_gated_dataset(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(hf, "urlopen", _make_opener(meta={"gated": True, "cardData": {}}))
     result = runner.invoke(

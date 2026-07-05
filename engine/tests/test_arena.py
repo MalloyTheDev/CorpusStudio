@@ -123,6 +123,19 @@ def test_run_arena_allows_an_evaluator_capable_policy():
     assert len(report.responses) == 2  # 2 prompts x 1 model, generated normally
 
 
+def test_run_arena_fails_closed_when_policy_set_omits_a_model():
+    # When a policy set IS supplied, a model missing from it is unauthorized -> fail closed
+    # (before the fix, an unlisted model silently skipped authorization). `policies=None`
+    # stays the explicit offline mode (covered by the other tests).
+    policy = resolve_policy("ollama", model_id="a")
+    with pytest.raises(ProviderPolicyError):
+        run_arena(
+            PROMPTS,
+            [("a", EchoBackend("a")), ("b", EchoBackend("b"))],
+            policies={"a": policy},  # 'b' omitted
+        )
+
+
 def test_build_arena_report_is_pure():
     from corpus_studio.arena.models import ArenaResponse
 

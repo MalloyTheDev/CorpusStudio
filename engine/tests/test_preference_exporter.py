@@ -89,3 +89,38 @@ def test_cli_preference_export_rejects_invalid_input(tmp_path: Path):
     )
     assert result.exit_code == 1
     assert not out.exists()
+
+
+def test_cli_preference_export_blocks_on_pii_secret_and_writes_nothing(tmp_path: Path):
+    # A private key in a preference dataset must stop the export (parity with `export`),
+    # writing nothing. Before the fix, preference-export had no export gate.
+    src = tmp_path / "secret.jsonl"
+    _write(
+        src,
+        [
+            {
+                "prompt": "Explain recursion.",
+                "chosen": "It calls itself.",
+                "rejected": "-----BEGIN RSA PRIVATE KEY-----\nMIIBOwIBAAJBAKj34\n-----END RSA PRIVATE KEY-----",
+            }
+        ],
+    )
+    out = tmp_path / "dpo.jsonl"
+    result = runner.invoke(
+        app, ["preference-export", str(src), "--output-path", str(out), "--format", "dpo"]
+    )
+    assert result.exit_code == 2, result.output
+    assert "Export blocked" in result.output
+    assert not out.exists()
+
+
+def test_cli_preference_export_clean_dataset_still_exports(tmp_path: Path):
+    # The gate must not false-block a clean preference dataset.
+    src = tmp_path / "clean.jsonl"
+    _write(src, ROWS)
+    out = tmp_path / "dpo.jsonl"
+    result = runner.invoke(
+        app, ["preference-export", str(src), "--output-path", str(out), "--format", "dpo"]
+    )
+    assert result.exit_code == 0, result.output
+    assert out.exists()
