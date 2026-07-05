@@ -44,6 +44,28 @@ def test_zero_user_flags():
     assert "have no user turn" in result.observed
 
 
+def test_dangling_system_or_tool_flags():
+    # A conversation should end on the assistant's turn; a trailing tool or system turn dangles.
+    tool_end = chat_structure_gate([_row("user", "assistant", "tool")], GateThresholds())
+    assert "end on a system or tool turn" in tool_end.observed
+    system_end = chat_structure_gate([_row("user", "assistant", "system")], GateThresholds())
+    assert "end on a system or tool turn" in system_end.observed
+    # ...but ending on assistant is fine.
+    ok = chat_structure_gate([_row("user", "assistant", "tool", "assistant")], GateThresholds())
+    assert "end on a system or tool turn" not in ok.observed
+
+
+def test_empty_or_whitespace_turn_flags():
+    rows = [{"messages": [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "   "},  # whitespace-only = empty turn
+    ]}]
+    result = chat_structure_gate(rows, GateThresholds())
+    assert "contain an empty/whitespace turn" in result.observed
+    # Empty turns are training-breaking, so the block flag can escalate them.
+    assert chat_structure_gate(rows, GateThresholds(block_chat_malformed=True)).status == GateStatus.BLOCK
+
+
 def test_consecutive_same_role_flags_but_tool_is_ok():
     duplicated = chat_structure_gate([_row("user", "user", "assistant")], GateThresholds())
     assert "repeat a role back-to-back" in duplicated.observed
