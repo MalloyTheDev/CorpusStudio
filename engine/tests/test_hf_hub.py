@@ -116,6 +116,20 @@ def test_fetch_rows_paginates_across_the_page_cap(monkeypatch):
     assert [r["text"] for r in page.rows] == ["a", "b", "c"]
 
 
+def test_fetch_rows_paginates_when_num_rows_total_absent(monkeypatch):
+    # The datasets-server omits num_rows_total for some datasets. It defaults to 0, which
+    # previously made pagination stop after the first page and silently truncate. End-of-data
+    # must come from the pages themselves (empty/short page), not from that field.
+    monkeypatch.setattr(hf, "_MAX_PAGE", 1)
+    pages = {
+        0: {"features": [{"name": "text"}], "rows": [{"row": {"text": "a"}}]},
+        1: {"features": [{"name": "text"}], "rows": [{"row": {"text": "b"}}]},
+        2: {"features": [{"name": "text"}], "rows": []},  # end of split
+    }
+    page = fetch_rows("acme/set", "default", "train", limit=10, opener=_make_opener(rows_by_offset=pages))
+    assert [r["text"] for r in page.rows] == ["a", "b"]  # both pages, not just the first
+
+
 def test_suggest_mapping_matches_schema_fields_by_name():
     schema = load_builtin_schema("instruction")
     mapping = suggest_mapping(["instruction", "input", "output", "text"], schema)
@@ -127,6 +141,16 @@ def test_map_rows_projects_only_mapped_fields():
     rows = [{"instruction": "Q", "input": "", "output": "A", "text": "t"}]
     mapped = map_rows(rows, {"instruction": "instruction", "output": "output"})
     assert mapped == [{"instruction": "Q", "output": "A"}]  # input/text dropped
+
+
+def test_map_rows_flattens_nested_values_to_json_strings():
+    # HF columns can hold nested structs/lists (e.g. an image dict or a chat array). A staging
+    # row must stay a flat, inspectable object, so nested values are rendered as JSON strings.
+    rows = [{"instruction": "Q", "meta": {"a": 1}, "turns": ["x", "y"]}]
+    mapped = map_rows(rows, {"instruction": "instruction", "input": "meta", "output": "turns"})
+    assert mapped[0]["instruction"] == "Q"          # scalar preserved
+    assert mapped[0]["input"] == '{"a": 1}'          # nested dict -> JSON string
+    assert mapped[0]["output"] == '["x", "y"]'       # nested list -> JSON string
 
 
 # --- CLI ----------------------------------------------------------------------
@@ -187,6 +211,21 @@ def test_hf_import_refuses_case_variant_examples_jsonl(tmp_path: Path):
     assert result.exit_code == 2
     assert "examples.jsonl" in result.output
     assert not (tmp_path / "Examples.JSONL").exists()
+
+
+def test_hf_import_refuses_limit_over_cap(tmp_path: Path):
+    # A huge --limit would buffer the whole staging page in memory; the import cap refuses it.
+    # The check fires before any network call (no opener stub needed).
+    from corpus_studio.importers.hf_hub import MAX_IMPORT_ROWS
+
+    result = runner.invoke(
+        app,
+        ["hf-import", "acme/set", "--out", str(tmp_path / "s.jsonl"),
+         "--schema", "instruction", "--limit", str(MAX_IMPORT_ROWS + 1)],
+    )
+    assert result.exit_code == 1
+    assert "cap" in result.output.lower()
+    assert not (tmp_path / "s.jsonl").exists()
 
 
 def test_hf_import_refuses_gated_dataset(tmp_path: Path, monkeypatch):

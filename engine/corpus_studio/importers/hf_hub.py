@@ -33,6 +33,11 @@ HUB_API = "https://huggingface.co/api"
 # The datasets-server caps a single /rows page at 100 rows.
 _MAX_PAGE = 100
 
+# Upper bound on a single import. The staging file is fetched fully into memory before it is
+# written, so a huge --limit would buffer an unbounded amount; import is a review-then-commit
+# staging step, not a bulk transfer, so 50k rows is a generous, memory-safe ceiling.
+MAX_IMPORT_ROWS = 50_000
+
 LICENSE_CAVEAT = (
     "Imported rows are NOT assumed to be licensed for training. Review the "
     "dataset's license and terms before using this data to train a model."
@@ -214,24 +219,33 @@ def fetch_rows(
     limit: int,
     opener: UrlOpen | None = None,
 ) -> HfRowsPage:
-    """Fetch up to ``limit`` rows, paginating across the datasets-server cap."""
+    """Fetch up to ``limit`` rows, paginating across the datasets-server cap.
+
+    End-of-data is detected by the *pages themselves* — an empty page, or a page
+    shorter than requested — NOT by ``num_rows_total``. That field is advisory and
+    the datasets-server omits it for some datasets; trusting it (it defaults to 0
+    when absent) previously stopped paging after the first page and silently
+    truncated the import. ``num_rows_total`` is now only an early-exit optimization
+    when it is actually present.
+    """
     collected: list[dict[str, Any]] = []
     columns: list[str] = []
     total = 0
     offset = 0
     while len(collected) < limit:
-        page = fetch_rows_page(
-            dataset_id, config, split, offset, min(_MAX_PAGE, limit - len(collected)), opener
-        )
+        want = min(_MAX_PAGE, limit - len(collected))
+        page = fetch_rows_page(dataset_id, config, split, offset, want, opener)
         total = page.num_rows_total
         if not columns:
             columns = page.columns
         if not page.rows:
-            break  # reached the end of the split
+            break  # empty page => reached the end of the split
         collected.extend(page.rows)
         offset += len(page.rows)
-        if offset >= total:
-            break
+        if len(page.rows) < want:
+            break  # a short page means end-of-data (robust when total is unknown/absent)
+        if total > 0 and offset >= total:
+            break  # a *known* total has been reached
     return HfRowsPage(
         dataset_id=dataset_id,
         config=config,
@@ -253,18 +267,33 @@ def suggest_mapping(columns: list[str], schema: DatasetSchema) -> dict[str, str]
     return mapping
 
 
+def _coerce_scalar(value: Any) -> Any:
+    """Basic type check for a staged value: keep JSON scalars (str/int/float/bool/None) as-is,
+    but render any nested value (a list/dict — e.g. an image struct or a chat array) as a
+    compact JSON string. This keeps the staging file flat and human-inspectable and lets the
+    downstream schema validator treat the value as text instead of choking on a nested blob."""
+
+    if value is None or isinstance(value, (str, int, float)):  # bool is a subclass of int
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def map_rows(rows: list[dict[str, Any]], mapping: dict[str, str]) -> list[dict[str, Any]]:
     """Project HF rows onto schema-field-keyed rows using ``mapping``.
 
     Only mapped fields are emitted; a column missing from a given row yields no
     key for that field (validation downstream flags a required field that ends
-    up absent).
+    up absent). Nested values are flattened to JSON strings (see ``_coerce_scalar``)
+    so a staging row is always a flat, inspectable object.
     """
     mapped: list[dict[str, Any]] = []
     for row in rows:
         projected: dict[str, Any] = {}
         for field_name, column in mapping.items():
             if column in row:
-                projected[field_name] = row[column]
+                projected[field_name] = _coerce_scalar(row[column])
         mapped.append(projected)
     return mapped

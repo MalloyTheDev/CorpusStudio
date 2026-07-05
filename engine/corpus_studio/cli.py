@@ -46,6 +46,7 @@ from corpus_studio.exporters.preference_exporter import (
     export_preference,
 )
 from corpus_studio.importers.hf_hub import (
+    MAX_IMPORT_ROWS,
     HfImportResult,
     fetch_rows,
     inspect_dataset,
@@ -373,6 +374,12 @@ def hf_import(
     examples.jsonl — the staging file flows through the normal import-preview /
     quarantine path so the desktop stays the single writer. Imported data is NOT
     assumed to be training-licensed; the dataset license is reported.
+
+    The staging file is UNTRUSTED until preview: rows are fetched from a third party
+    and written without semantic validation, then vetted (schema/quality/PII) at the
+    preview/quarantine step before any commit. --limit is capped (the page is buffered
+    in memory) and nested column values are flattened to JSON strings so a staging row
+    is always a flat, inspectable object.
     """
     # The engine must never write the dataset's single source of truth. Compare the basename
     # case-insensitively (casefold, NOT os.path.normcase — which only case-folds on Windows, so
@@ -395,6 +402,13 @@ def hf_import(
 
     if limit < 1:
         typer.echo("--limit must be at least 1.", err=True)
+        raise typer.Exit(code=1)
+    if limit > MAX_IMPORT_ROWS:
+        typer.echo(
+            f"--limit {limit} exceeds the import cap of {MAX_IMPORT_ROWS} rows; the staging file "
+            "is buffered in memory. Import in smaller batches.",
+            err=True,
+        )
         raise typer.Exit(code=1)
 
     # Refuse gated datasets up front (slice 1 is public-only, no auth).
