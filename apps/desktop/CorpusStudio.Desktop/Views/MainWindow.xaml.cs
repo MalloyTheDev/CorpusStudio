@@ -1519,7 +1519,7 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetEvaluationFailureFilterError(
+            ViewModel.Evaluation.SetEvaluationFailureFilterError(
                 "Create or select a dataset project before saving a failure filter."
             );
             return;
@@ -1529,30 +1529,30 @@ public partial class MainWindow : Window
         {
             var savedFilter = _engineService.SaveEvaluationFailureFilter(
                 ViewModel.ActiveProjectPath,
-                ViewModel.BuildCurrentEvaluationFailureFilter()
+                ViewModel.Evaluation.BuildCurrentEvaluationFailureFilter()
             );
-            ViewModel.SetEvaluationFailureFilters(
+            ViewModel.Evaluation.SetEvaluationFailureFilters(
                 _engineService.LoadEvaluationFailureFilters(ViewModel.ActiveProjectPath)
             );
-            ViewModel.SelectedEvaluationFailureFilter = ViewModel.EvaluationFailureFilters
+            ViewModel.Evaluation.SelectedEvaluationFailureFilter = ViewModel.Evaluation.EvaluationFailureFilters
                 .FirstOrDefault(item => item.Name == savedFilter.Name);
-            ViewModel.ApplyEvaluationFailureFilterSaved(savedFilter);
+            ViewModel.Evaluation.ApplyEvaluationFailureFilterSaved(savedFilter);
         }
         catch (Exception ex)
         {
-            ViewModel.SetEvaluationFailureFilterError(ex.Message);
+            ViewModel.Evaluation.SetEvaluationFailureFilterError(ex.Message);
         }
     }
 
     private void ApplyEvaluationFailureFilterButton_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.SelectedEvaluationFailureFilter is null)
+        if (ViewModel.Evaluation.SelectedEvaluationFailureFilter is null)
         {
-            ViewModel.SetEvaluationFailureFilterError("Select a saved failure filter before applying it.");
+            ViewModel.Evaluation.SetEvaluationFailureFilterError("Select a saved failure filter before applying it.");
             return;
         }
 
-        ViewModel.ApplyEvaluationFailureFilter(ViewModel.SelectedEvaluationFailureFilter);
+        ViewModel.Evaluation.ApplyEvaluationFailureFilter(ViewModel.Evaluation.SelectedEvaluationFailureFilter);
     }
 
     private void ResumeReviewedFixButton_Click(object sender, RoutedEventArgs e)
@@ -1683,7 +1683,7 @@ public partial class MainWindow : Window
             out var errorMessage
         ))
         {
-            ViewModel.SetEvaluationError(errorMessage);
+            ViewModel.Evaluation.SetEvaluationError(errorMessage);
             return;
         }
 
@@ -1702,7 +1702,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            ViewModel.SetEvaluationError(ex.Message);
+            ViewModel.Evaluation.SetEvaluationError(ex.Message);
         }
         finally
         {
@@ -1755,13 +1755,13 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetEvaluationError("Create or select a dataset project before running evaluation.");
+            ViewModel.Evaluation.SetEvaluationError("Create or select a dataset project before running evaluation.");
             return;
         }
 
         if (ViewModel.ActiveSchemaId is not ("instruction" or "chat"))
         {
-            ViewModel.SetEvaluationError("Evaluation Lab MVP supports instruction and chat projects.");
+            ViewModel.Evaluation.SetEvaluationError("Evaluation Lab MVP supports instruction and chat projects.");
             return;
         }
 
@@ -1775,7 +1775,7 @@ public partial class MainWindow : Window
             out var errorMessage
         ))
         {
-            ViewModel.SetEvaluationError(errorMessage);
+            ViewModel.Evaluation.SetEvaluationError(errorMessage);
             return;
         }
 
@@ -1783,7 +1783,7 @@ public partial class MainWindow : Window
         {
             Mouse.OverrideCursor = Cursors.Wait;
             ViewModel.SetBusy("Running evaluation...");
-            ViewModel.SetEvaluationPreflightInProgress();
+            ViewModel.Evaluation.SetEvaluationPreflightInProgress();
             var healthReport = await _engineService.CheckBackendHealthAsync(
                 backend,
                 model,
@@ -1792,11 +1792,11 @@ public partial class MainWindow : Window
             );
             if (!IsEvaluationBackendReady(healthReport))
             {
-                ViewModel.SetEvaluationError(FormatEvaluationPreflightError(healthReport));
+                ViewModel.Evaluation.SetEvaluationError(FormatEvaluationPreflightError(healthReport));
                 return;
             }
 
-            ViewModel.SetEvaluationInProgress();
+            ViewModel.Evaluation.SetEvaluationInProgress();
             var result = await _engineService.RunEvaluationAsync(
                 ViewModel.ActiveProjectPath,
                 ViewModel.ActiveSchemaId,
@@ -1807,15 +1807,15 @@ public partial class MainWindow : Window
                 scoreThreshold,
                 timeoutSeconds
             );
-            ViewModel.ApplyEvaluationRunResult(result);
-            ViewModel.SetEvaluationReportHistory(
+            ViewModel.Evaluation.ApplyEvaluationRunResult(result);
+            ViewModel.Evaluation.SetEvaluationReportHistory(
                 _engineService.LoadEvaluationReportHistory(ViewModel.ActiveProjectPath)
             );
             ReconcileReviewedFixesAfterRun(result);
         }
         catch (Exception ex)
         {
-            ViewModel.SetEvaluationError(ex.Message);
+            ViewModel.Evaluation.SetEvaluationError(ex.Message);
         }
         finally
         {
@@ -1891,39 +1891,39 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetEvaluationError("Create or select a dataset project before rerunning evaluation.");
+            ViewModel.Evaluation.SetEvaluationError("Create or select a dataset project before rerunning evaluation.");
             return;
         }
 
-        if (!ViewModel.TryGetSelectedEvaluationRunSettings(
+        if (!ViewModel.Evaluation.TryGetSelectedEvaluationRunSettings(
             out var settings,
             out var errorMessage
         ))
         {
-            ViewModel.SetEvaluationError(errorMessage);
+            ViewModel.Evaluation.SetEvaluationError(errorMessage);
             return;
         }
 
         if (settings.SchemaId is not ("instruction" or "chat"))
         {
-            ViewModel.SetEvaluationError("Evaluation regression reruns support instruction and chat reports.");
+            ViewModel.Evaluation.SetEvaluationError("Evaluation regression reruns support instruction and chat reports.");
             return;
         }
 
         if (!string.Equals(settings.SchemaId, ViewModel.ActiveSchemaId, StringComparison.OrdinalIgnoreCase))
         {
-            ViewModel.SetEvaluationError(
+            ViewModel.Evaluation.SetEvaluationError(
                 $"The selected report uses schema '{settings.SchemaId}', but the active project uses '{ViewModel.ActiveSchemaId}'."
             );
             return;
         }
 
-        var baselineReportPath = ViewModel.SelectedEvaluationReportHistoryItem?.ReportPath;
+        var baselineReportPath = ViewModel.Evaluation.SelectedEvaluationReportHistoryItem?.ReportPath;
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
             ViewModel.SetBusy("Rerunning evaluation...");
-            ViewModel.SetEvaluationRegressionRerunPreflightInProgress(settings);
+            ViewModel.Evaluation.SetEvaluationRegressionRerunPreflightInProgress(settings);
             var healthReport = await _engineService.CheckBackendHealthAsync(
                 settings.Backend,
                 settings.Model,
@@ -1932,11 +1932,11 @@ public partial class MainWindow : Window
             );
             if (!IsEvaluationBackendReady(healthReport))
             {
-                ViewModel.SetEvaluationError(FormatEvaluationPreflightError(healthReport));
+                ViewModel.Evaluation.SetEvaluationError(FormatEvaluationPreflightError(healthReport));
                 return;
             }
 
-            ViewModel.SetEvaluationRegressionRerunInProgress(settings);
+            ViewModel.Evaluation.SetEvaluationRegressionRerunInProgress(settings);
             var result = await _engineService.RunEvaluationAsync(
                 ViewModel.ActiveProjectPath,
                 settings.SchemaId,
@@ -1947,33 +1947,33 @@ public partial class MainWindow : Window
                 settings.ScoreThreshold,
                 settings.TimeoutSeconds
             );
-            ViewModel.ApplyEvaluationRunResult(result);
-            ViewModel.SetEvaluationReportHistory(
+            ViewModel.Evaluation.ApplyEvaluationRunResult(result);
+            ViewModel.Evaluation.SetEvaluationReportHistory(
                 _engineService.LoadEvaluationReportHistory(ViewModel.ActiveProjectPath)
             );
             ReconcileReviewedFixesAfterRun(result);
 
-            var newItem = ViewModel.EvaluationReportHistory
+            var newItem = ViewModel.Evaluation.EvaluationReportHistory
                 .FirstOrDefault(item => item.ReportPath == result.ReportPath);
             var baselineItem = string.IsNullOrWhiteSpace(baselineReportPath)
                 ? null
-                : ViewModel.EvaluationReportHistory
+                : ViewModel.Evaluation.EvaluationReportHistory
                     .FirstOrDefault(item => item.ReportPath == baselineReportPath);
 
             if (newItem is not null)
             {
-                ViewModel.SelectedEvaluationReportHistoryItem = newItem;
+                ViewModel.Evaluation.SelectedEvaluationReportHistoryItem = newItem;
             }
 
             if (baselineItem is not null)
             {
-                ViewModel.SecondaryEvaluationReportHistoryItem = baselineItem;
-                ViewModel.CompareSelectedEvaluationReports();
+                ViewModel.Evaluation.SecondaryEvaluationReportHistoryItem = baselineItem;
+                ViewModel.Evaluation.CompareSelectedEvaluationReports();
             }
         }
         catch (Exception ex)
         {
-            ViewModel.SetEvaluationError(ex.Message);
+            ViewModel.Evaluation.SetEvaluationError(ex.Message);
         }
         finally
         {
@@ -2412,15 +2412,15 @@ public partial class MainWindow : Window
 
     private void SaveEvaluationReviewButton_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.SelectedEvaluationReportHistoryItem is null)
+        if (ViewModel.Evaluation.SelectedEvaluationReportHistoryItem is null)
         {
-            ViewModel.SetEvaluationReviewError("Select an evaluation report before saving review notes.");
+            ViewModel.Evaluation.SetEvaluationReviewError("Select an evaluation report before saving review notes.");
             return;
         }
 
-        if (ViewModel.SelectedEvaluationExampleResult is null)
+        if (ViewModel.Evaluation.SelectedEvaluationExampleResult is null)
         {
-            ViewModel.SetEvaluationReviewError("Select an evaluation example before saving review notes.");
+            ViewModel.Evaluation.SetEvaluationReviewError("Select an evaluation example before saving review notes.");
             return;
         }
 
@@ -2430,15 +2430,15 @@ public partial class MainWindow : Window
             out var errorMessage
         ))
         {
-            ViewModel.SetEvaluationReviewError(errorMessage);
+            ViewModel.Evaluation.SetEvaluationReviewError(errorMessage);
             return;
         }
 
         try
         {
-            var exampleId = ViewModel.SelectedEvaluationExampleResult.ExampleId;
+            var exampleId = ViewModel.Evaluation.SelectedEvaluationExampleResult.ExampleId;
             var updatedItem = _engineService.SaveEvaluationManualReview(
-                ViewModel.SelectedEvaluationReportHistoryItem,
+                ViewModel.Evaluation.SelectedEvaluationReportHistoryItem,
                 exampleId,
                 manualScore,
                 manualNotes
@@ -2446,26 +2446,26 @@ public partial class MainWindow : Window
 
             if (!string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
             {
-                ViewModel.SetEvaluationReportHistory(
+                ViewModel.Evaluation.SetEvaluationReportHistory(
                     _engineService.LoadEvaluationReportHistory(ViewModel.ActiveProjectPath)
                 );
-                ViewModel.SelectedEvaluationReportHistoryItem = ViewModel.EvaluationReportHistory
+                ViewModel.Evaluation.SelectedEvaluationReportHistoryItem = ViewModel.Evaluation.EvaluationReportHistory
                     .FirstOrDefault(item => item.ReportPath == updatedItem.ReportPath);
             }
 
-            ViewModel.SelectedEvaluationExampleResult = ViewModel.EvaluationResults
+            ViewModel.Evaluation.SelectedEvaluationExampleResult = ViewModel.Evaluation.EvaluationResults
                 .FirstOrDefault(result => result.ExampleId == exampleId);
-            ViewModel.ApplySavedEvaluationManualReview(updatedItem);
+            ViewModel.Evaluation.ApplySavedEvaluationManualReview(updatedItem);
         }
         catch (Exception ex)
         {
-            ViewModel.SetEvaluationReviewError(ex.Message);
+            ViewModel.Evaluation.SetEvaluationReviewError(ex.Message);
         }
     }
 
     private void CompareEvaluationReportsButton_Click(object sender, RoutedEventArgs e)
     {
-        ViewModel.CompareSelectedEvaluationReports();
+        ViewModel.Evaluation.CompareSelectedEvaluationReports();
     }
 
     private async void LaunchTrainingButton_Click(object sender, RoutedEventArgs e)
@@ -3723,10 +3723,10 @@ public partial class MainWindow : Window
             return false;
         }
 
-        if (!string.IsNullOrWhiteSpace(ViewModel.EvaluationLimit))
+        if (!string.IsNullOrWhiteSpace(ViewModel.Evaluation.EvaluationLimit))
         {
             if (!int.TryParse(
-                ViewModel.EvaluationLimit,
+                ViewModel.Evaluation.EvaluationLimit,
                 NumberStyles.Integer,
                 CultureInfo.InvariantCulture,
                 out var parsedLimit
@@ -3740,7 +3740,7 @@ public partial class MainWindow : Window
         }
 
         if (!double.TryParse(
-            ViewModel.EvaluationScoreThreshold,
+            ViewModel.Evaluation.EvaluationScoreThreshold,
             NumberStyles.Float,
             CultureInfo.InvariantCulture,
             out scoreThreshold
@@ -3808,18 +3808,18 @@ public partial class MainWindow : Window
     )
     {
         manualScore = null;
-        manualNotes = string.IsNullOrWhiteSpace(ViewModel.EvaluationManualNotes)
+        manualNotes = string.IsNullOrWhiteSpace(ViewModel.Evaluation.EvaluationManualNotes)
             ? null
-            : ViewModel.EvaluationManualNotes.Trim();
+            : ViewModel.Evaluation.EvaluationManualNotes.Trim();
         errorMessage = string.Empty;
 
-        if (string.IsNullOrWhiteSpace(ViewModel.EvaluationManualScore))
+        if (string.IsNullOrWhiteSpace(ViewModel.Evaluation.EvaluationManualScore))
         {
             return true;
         }
 
         if (!double.TryParse(
-            ViewModel.EvaluationManualScore,
+            ViewModel.Evaluation.EvaluationManualScore,
             NumberStyles.Float,
             CultureInfo.InvariantCulture,
             out var parsedScore
@@ -4131,11 +4131,11 @@ public partial class MainWindow : Window
         ViewModel.SetReviewedFixes(
             _engineService.LoadReviewedFixes(project.ProjectPath)
         );
-        ViewModel.SetEvaluationFailureFilters(
+        ViewModel.Evaluation.SetEvaluationFailureFilters(
             _engineService.LoadEvaluationFailureFilters(project.ProjectPath)
         );
         ClearAiAssistBulkUndoStack();
-        ViewModel.SetEvaluationReportHistory(
+        ViewModel.Evaluation.SetEvaluationReportHistory(
             _engineService.LoadEvaluationReportHistory(project.ProjectPath)
         );
         await RefreshDatasetVersionsAsync();
