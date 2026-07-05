@@ -280,6 +280,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_cli.py`
 - `engine/tests/test_dataset_card.py`
 - `engine/tests/test_e2e_cli_smoke.py`
+- `engine/tests/test_e2e_pipeline.py`
 - `engine/tests/test_evaluation_report.py`
 - `engine/tests/test_evaluation_scorers.py`
 - `engine/tests/test_evaluation_suites.py`
@@ -296,6 +297,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/tests/test_input_hardening.py`
 - `engine/tests/test_model_backend_config.py`
 - `engine/tests/test_ollama_integration.py`
+- `engine/tests/test_perf_large_dataset.py`
 - `engine/tests/test_preference_exporter.py`
 - `engine/tests/test_preference_integrity.py`
 - `engine/tests/test_project_index.py`
