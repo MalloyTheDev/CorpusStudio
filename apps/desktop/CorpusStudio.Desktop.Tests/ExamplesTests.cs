@@ -78,7 +78,7 @@ public sealed class ExamplesTests
         vm.SetExamples([Example(1), Example(2)]);
 
         Assert.Equal(2, vm.Examples.Items.Count);                  // Examples tab rebuilt
-        Assert.Contains("2 saved example(s)", vm.QualitySummary);  // Quality summary updated
+        Assert.Contains("2 saved example(s)", vm.Quality.QualitySummary);  // Quality summary updated
         Assert.True(vm.Debt.DebtStale);                            // Debt grade invalidated
     }
 

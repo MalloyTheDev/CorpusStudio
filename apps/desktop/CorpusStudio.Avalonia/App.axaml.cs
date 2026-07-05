@@ -34,6 +34,7 @@ public partial class App : Application
             services.AddTransient<IAiAssistRewriteBatchesViewModel, AiAssistRewriteBatchesViewModel>();
             services.AddTransient<IAiAssistConnectionViewModel, AiAssistConnectionViewModel>();
             services.AddTransient<IEvaluationConnectionViewModel, EvaluationConnectionViewModel>();
+        services.AddTransient<IQualityViewModel, QualityViewModel>();
             services.AddTransient<MainWindowViewModel>();
             var provider = services.BuildServiceProvider();
 

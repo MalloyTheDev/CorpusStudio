@@ -4146,7 +4146,7 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetQualityError("Create or select a dataset project before running quality checks.");
+            ViewModel.Quality.SetQualityError("Create or select a dataset project before running quality checks.");
             return;
         }
 
@@ -4154,7 +4154,7 @@ public partial class MainWindow : Window
         {
             Mouse.OverrideCursor = Cursors.Wait;
             ViewModel.SetBusy("Running quality checks...");
-            ViewModel.SetQualityInProgress();
+            ViewModel.Quality.SetQualityInProgress();
             var report = await _engineService.BuildQualityReportAsync(ViewModel.ActiveProjectPath);
             if (recordHistory)
             {
@@ -4164,11 +4164,11 @@ public partial class MainWindow : Window
             // Load a wider window than the 5-line text summary uses so the debt-trend chart
             // has enough points; the summary still shows only its most recent few internally.
             var history = _engineService.LoadQualityHistory(ViewModel.ActiveProjectPath, maxEntries: 30);
-            ViewModel.ApplyQualityReport(report, history);
+            ViewModel.Quality.ApplyQualityReport(report, history);
         }
         catch (Exception ex)
         {
-            ViewModel.SetQualityError(ex.Message);
+            ViewModel.Quality.SetQualityError(ex.Message);
         }
         finally
         {
