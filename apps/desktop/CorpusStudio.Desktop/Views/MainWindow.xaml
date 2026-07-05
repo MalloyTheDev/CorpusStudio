@@ -957,7 +957,7 @@
                                                 <TextBlock Text="Dataset" Style="{StaticResource DashboardCardLabelStyle}" Margin="11,0,0,0" />
                                             </StackPanel>
                                             <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="{Binding Examples.Count, Mode=OneWay}"
+                                                <TextBlock Text="{Binding Examples.Items.Count, Mode=OneWay}"
                                                            Style="{StaticResource DashboardMetricStyle}" />
                                                 <TextBlock Text="saved examples"
                                                            Style="{StaticResource CaptionTextStyle}"
@@ -1063,8 +1063,8 @@
                             <Grid Grid.Column="0">
                                 <ListBox x:Name="ExamplesListBox"
                                          AutomationProperties.AutomationId="ExamplesListBox"
-                                         ItemsSource="{Binding Examples}"
-                                         SelectedItem="{Binding SelectedExample, Mode=TwoWay}"
+                                         ItemsSource="{Binding Examples.Items}"
+                                         SelectedItem="{Binding Examples.SelectedExample, Mode=TwoWay}"
                                          DisplayMemberPath="DisplayName" />
                                 <TextBlock Style="{StaticResource ListEmptyPlaceholderStyle}"
                                            Text="No examples yet. Author one in Writing Studio, or import a JSONL file."
@@ -1073,7 +1073,7 @@
 
                             <TextBox Grid.Column="1"
                                      AutomationProperties.AutomationId="SelectedExampleTextBox"
-                                     Text="{Binding SelectedExampleJson, Mode=OneWay}"
+                                     Text="{Binding Examples.SelectedExampleJson, Mode=OneWay}"
                                      Margin="12,0,0,0"
                                      IsReadOnly="True"
                                      AcceptsReturn="True"
