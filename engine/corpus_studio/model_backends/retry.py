@@ -13,9 +13,12 @@ instantly and can assert the backoff schedule without real waits.
 
 from __future__ import annotations
 
+import random
 import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 from typing import Any, TypeVar
 from urllib.error import HTTPError, URLError
 
@@ -54,6 +57,42 @@ class RetryPolicy:
         return min(raw, self.max_delay_seconds)
 
 
+def _apply_jitter(delay: float, rng: Callable[[], float]) -> float:
+    """Equal jitter: keep at least half the computed backoff and randomize the rest, so many
+    clients backing off the same provider don't retry in lockstep (a thundering herd). ``rng``
+    returns a value in [0, 1); with ``rng`` fixed at 1.0 this is the full delay (deterministic
+    for tests)."""
+
+    return delay * 0.5 + delay * 0.5 * rng()
+
+
+def _retry_after_seconds(exc: BaseException) -> float | None:
+    """Seconds requested by a 429/503 ``Retry-After`` header, or ``None`` if absent/unparseable.
+
+    The header is either an integer number of seconds or an HTTP date. Honoring it lets a
+    provider that knows its own rate-limit window tell us exactly when to come back.
+    """
+
+    if not isinstance(exc, HTTPError):
+        return None
+    headers = getattr(exc, "headers", None)
+    raw = headers.get("Retry-After") if headers is not None else None
+    if not raw:
+        return None
+    text = str(raw).strip()
+    if text.isdigit():
+        return float(text)
+    try:
+        when = parsedate_to_datetime(text)
+    except (TypeError, ValueError):
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+
+
 def is_transient(exc: BaseException) -> bool:
     """Whether ``exc`` is worth retrying.
 
@@ -75,6 +114,10 @@ def call_with_retry(
     policy: RetryPolicy,
     sleep: Callable[[float], Any] = time.sleep,
     on_retry: Callable[[int, BaseException, float], Any] | None = None,
+    *,
+    deadline_seconds: float | None = None,
+    rng: Callable[[], float] = random.random,
+    now: Callable[[], float] = time.monotonic,
 ) -> T:
     """Call ``fn`` with bounded backoff, retrying only transient failures.
 
@@ -82,7 +125,15 @@ def call_with_retry(
     exhausted, so the caller always sees the underlying exception (never a
     wrapped/generic one). ``on_retry(attempt, exc, delay)`` is invoked before
     each backoff sleep for observability/tests.
+
+    The backoff delay is: a provider's ``Retry-After`` (429/503) when present, capped at
+    ``max_delay_seconds`` and honored verbatim (no jitter); otherwise the exponential schedule
+    with equal jitter so concurrent clients don't retry in lockstep. ``deadline_seconds`` is an
+    optional wall-clock budget for the whole sequence — when the next backoff would exceed it the
+    call gives up and re-raises rather than sleeping past the caller's timeout. ``rng`` and
+    ``now`` are injectable so tests stay deterministic.
     """
+    start = now()
     attempt = 1
     while True:
         try:
@@ -90,7 +141,14 @@ def call_with_retry(
         except BaseException as exc:  # noqa: BLE001 - re-raised unless transient + attempts remain
             if attempt >= policy.max_attempts or not is_transient(exc):
                 raise
-            delay = policy.delay_for(attempt)
+            retry_after = _retry_after_seconds(exc)
+            if retry_after is not None:
+                delay = min(retry_after, policy.max_delay_seconds)
+            else:
+                delay = _apply_jitter(policy.delay_for(attempt), rng)
+            # Give up rather than sleep past a caller's wall-clock budget.
+            if deadline_seconds is not None and (now() - start) + delay >= deadline_seconds:
+                raise
             if on_retry is not None:
                 on_retry(attempt, exc, delay)
             sleep(delay)
