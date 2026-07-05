@@ -80,15 +80,19 @@ resulting features in full.
   the dataset gate runner over generated candidates and attaches the verdict as
   `candidate_gate` — a pre-review signal only (v1.2.1 surfaces it in the desktop
   with confirm-on-block). See [`AI_ASSIST_LAB.md`](AI_ASSIST_LAB.md).
+- **v1.3 — Evaluation Suites & Chat Gates.** Named multi-case evaluation suites with a
+  per-metric verdict and optional `version_id`-pinned cases (engine + `suite-*` CLI +
+  desktop **Suites** tab); a conversation-structure chat gate (`chat-gate` + desktop
+  button). Plus auto-capture of a dataset version after an import commit. See
+  [`EVALUATION_SUITES.md`](EVALUATION_SUITES.md) and [`GATES.md`](GATES.md).
 
 ## Next
 
-- **Finish the evaluation judge in the UI** — a desktop Evaluation-tab "Judge
-  model" field wiring the engine's `--judge-model` scorer through `PythonEngineService`.
-- **v1.3 — Evaluation Suites & Chat Gates** (not started): reusable evaluation
-  suites and chat-scope gates.
+- **Surface the LLM judge in the Evaluation tab** — the `--judge-model` scorer ships in
+  the engine and in suites, but the desktop Evaluation tab still has no judge-model field.
 - **A real tokenizer** (transformers/tokenizers) so token-budget / VRAM numbers are
-  exact rather than heuristic.
+  exact rather than heuristic — deferred on purpose (it would break the dependency-light
+  engine; the estimate is documented as a heuristic).
 - **Hugging Face Hub export/push** (upload/publishing) — stays a deliberate
   non-goal for now; read-only Hub *import* already ships.
 - **Continue the view-model decomposition** beyond the Debt and Arena tabs;

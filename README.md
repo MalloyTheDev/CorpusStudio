@@ -84,17 +84,30 @@ a training run of your own installed trainer:
   existing schema, quality, leakage, and PII/secret logic; the export gate
   blocks on schema/PII failures. Surfaced by a Run Gates button. See
   [`docs/GATES.md`](docs/GATES.md)
+- chat conversation-structure gate for chat datasets (`chat-gate`, plus a
+  Run Chat Gates button): flags assistant-first, missing/dangling turns,
+  back-to-back roles, misplaced system messages, turn-count bounds, and empty
+  turns — advisory by default, escalatable to a block
 
 **Evaluate & compare**
 - Evaluation Lab runs against local Ollama or OpenAI-compatible endpoints with
   health checks, model discovery, report history, two-report comparison,
   regression reruns, tag/failure/score-band summaries, failed-row edit loops,
-  manual scoring, and saved failure filters
+  manual scoring, and saved failure filters. The default automatic score is
+  **keyword-overlap** recall — a lexical proxy, *not* a quality judgment; for a
+  real quality signal use the opt-in **LLM-judge** scorer (`eval-run --judge-model`,
+  also selectable per suite case) or manual scoring
+- multi-model benchmark: run one dataset across several models and rank them,
+  with per-model deltas and the examples every model failed
 - multi-model benchmark: run one dataset across several models and rank them,
   with per-model deltas and the examples every model failed
 - Model Arena: run a prompt suite across several models side by side, with an
   optional evaluator-only judge that scores responses and picks a winner, and
   saved comparison reports
+- Evaluation Suites: named, reusable multi-case suites (dataset × model × metric)
+  with a per-metric verdict and optional dataset-`version_id`-pinned cases, run from
+  the `suite-*` CLI or the desktop Suites tab. See
+  [`docs/EVALUATION_SUITES.md`](docs/EVALUATION_SUITES.md)
 - review-first AI Assist Lab with a persistent accept/reject queue, saved
   views, bulk triage with undo, and resumable rewrite batches — every AI
   suggestion is review-required and never auto-accepted. AI-generated candidate
@@ -162,7 +175,7 @@ CorpusStudio
 
 A walk through the workspace, front to back. An IDE-style activity bar toggles
 between the **Start Center**, the file **Explorer**, and the classic **Studio**
-(the 14-tab dashboard), with **Problems** and **Output** panels docked at the
+(the 15-tab dashboard), with **Problems** and **Output** panels docked at the
 bottom. See [`docs/WORKSPACE_SYSTEM.md`](docs/WORKSPACE_SYSTEM.md).
 
 ![Corpus Studio Start Center](docs/screenshots/workspace-start-center.png)

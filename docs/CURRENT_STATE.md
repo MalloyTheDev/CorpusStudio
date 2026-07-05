@@ -3,9 +3,11 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-07-04 (through v1.2.15, plus the deep bug/security audit —
-19 fixes across data integrity, gate/policy hardening, and quality/split
-correctness, PRs #104–118 — and the CI dependency refresh, PRs #94–101). Earlier
+Last reconciled: 2026-07-04 (through **v1.3** — Evaluation Suites & Chat Gates —
+plus the deep bug/security audit, 19 fixes across data integrity, gate/policy
+hardening, and quality/split correctness, PRs #104–118; a residual-audit pass
+hardening the v1.3 surface, PRs #133–142; and the CI dependency refresh, PRs
+#94–101). Earlier
 milestones: the Workspace shell, desktop polish, the LLM-judge evaluation scorer,
 a crash-safe / distributable build, the god-object decomposition (Debt + Arena
 tabs extracted), a unified JSONL reader, backend retry + per-item error
@@ -94,7 +96,10 @@ isolation, and off-thread document opens.
   eval run + evaluation gate (no new scoring); per-case failure isolation; each case
   records its dataset fingerprint; advisory by default, `--strict` exits 2 on block.
   Never folds non-comparable metric scales. See [`EVALUATION_SUITES.md`](EVALUATION_SUITES.md).
-  (Engine + CLI; no desktop surface or suite registry yet.)
+  A per-project `evaluation_suites/` **registry** (`suite-init` / `suite-list` /
+  `suite-run` by name), a desktop **Suites** tab (list / run / view), and
+  **`version_id`-pinned cases** (a case re-evaluates the verified reconstruction of a
+  pinned dataset version) all ship; suite history/trend is still future.
 - Model Arena (`arena-run`): run a prompt suite across several models side by
   side; responses are comparison artifacts, not trainable rows. Optional
   evaluator-only judging (`--judge-model`) scores each response and picks a
@@ -169,6 +174,9 @@ isolation, and off-thread document opens.
   stored); then the engine reconstructs the selected version to a verified temp and
   the desktop atomically swaps it onto `examples.jsonl`. Any failure before the
   swap leaves the dataset untouched. See [`VERSIONING.md`](VERSIONING.md).
+- After an import commit that added rows, the desktop **auto-captures a dataset
+  version** (best-effort — an honest note if the snapshot can't be written, never a
+  fake one).
 
 **Workspace shell & desktop (v1.2.1–v1.2.15)**
 - An **IDE-like workspace shell** with an activity bar: a **Start Center** (recent
@@ -177,8 +185,10 @@ isolation, and off-thread document opens.
   a **Universal Explorer** (VS Code-style file tree with file-type chips + an
   active-tab highlight, document tabs, text/JSON/image/binary viewers, a metadata
   panel; generated reports open read-only; `examples.jsonl` carries a single-writer
-  caution), and the classic 14-tab **Studio**. Both New Project entry points open the
-  one wizard. See [`WORKSPACE_SYSTEM.md`](WORKSPACE_SYSTEM.md).
+  caution), and the classic 15-tab **Studio** (Dashboard, Writing Studio, Examples,
+  Preference Review, Quarantine, Splits, Evaluation, AI Assist, Training, Arena,
+  Artifacts, **Suites**, Versions, Debt, Settings). Both New Project entry points open
+  the one wizard. See [`WORKSPACE_SYSTEM.md`](WORKSPACE_SYSTEM.md).
 - Two bottom-docked panels (mutually exclusive), toggled from the activity bar: a
   **Problems** panel (the dataset gate findings as a block-first list with fix hints
   and a count badge) and an **Output / Logs** panel (an ephemeral, local-only record of
@@ -231,18 +241,19 @@ isolation, and off-thread document opens.
 
 ## Not built yet (future roadmap)
 
-- **Finish the evaluation judge in the UI** — a desktop Evaluation-tab "Judge model"
-  field wiring the engine's `--judge-model` scorer through `PythonEngineService`.
-- **v1.3 — Evaluation Suites & Chat Gates.**
+- **Surface the LLM judge in the Evaluation tab** — the `--judge-model` scorer ships in
+  the engine and in suites; the desktop **Evaluation** tab still defaults to keyword
+  overlap with no judge-model field.
 - **A real tokenizer** (transformers/tokenizers) so token-budget / VRAM numbers are
-  exact rather than heuristic.
+  exact rather than heuristic. Deliberately deferred: it would break the dependency-light
+  engine, and the current estimate is documented as a heuristic.
 - **HF export/push** (upload/publishing) — see the hard boundary above; it stays a
   deliberate non-goal for now. (Read-only Hub *import* already ships.)
 - **Continue the view-model decomposition** beyond the Debt and Arena tabs; eventually
   an **Avalonia** port for macOS/Linux (see `CROSS_PLATFORM_ASSESSMENT.md`).
-- **Auto-capture** of a dataset version after an import commit, dataset-version
-  **reorder detection**, row-store **GC** (must never prune manifest-referenced
-  rows), and a normalized row identity.
+- Dataset-version **reorder detection**, row-store **GC** (must never prune
+  manifest-referenced rows), and a normalized row identity. (Auto-capture after an
+  import commit now ships — see above.)
 - Smaller deferrals: PII auto-redaction; a per-project gate-threshold editor in
   the desktop; per-element object shapes for lists-of-objects in the validator; an
   app icon. (CI hardening — ruff, mypy, pytest gate, dependabot, and CodeQL — is

@@ -101,8 +101,13 @@ The suite `name` is validated (`letters, digits, . _ -`) and the filename stem i
 registry key, so a name can never escape `evaluation_suites/`. There is no edit/delete
 command — edit the JSON directly, or `rm` the file.
 
-## Not in M1
+## Shipped since M1
 
-No suite registry / list / history, no desktop surface, no trend over time, no
-`version_id`-pinned cases, no non-evaluation cases (chat/dataset gates in a suite), no
-weighting or cross-suite comparison — all future.
+The `evaluation_suites/` **registry** (`suite-init` / `suite-list` / `suite-run` by name),
+the desktop **Suites tab**, and **`version_id`-pinned cases** (a case re-evaluates the
+verified reconstruction of a pinned dataset version) all shipped after M1.
+
+## Still future
+
+No suite **history / trend over time**, no **non-evaluation cases** (chat/dataset gates in
+a suite), and no **weighting or cross-suite comparison** — all future.

@@ -15,6 +15,11 @@ in the release PR.
 - [ ] Update `engine/corpus_studio/__init__.py` if it carries a version string.
 - [ ] Note user-facing changes since the last tag (new Labs surfaces, new CLI
       commands, new project-local JSON files).
+- [ ] **Reconcile [`CURRENT_STATE.md`](CURRENT_STATE.md)** to what actually shipped —
+      it is the single source of truth other docs defer to, so a shipped milestone must
+      move out of "Not built yet" and stale limitations (here and in feature docs) must
+      be cleared. Do this every milestone, not just at release, so the docs never drift a
+      full version behind again.
 
 ## 2. Automated verification
 
@@ -73,7 +78,6 @@ notes so expectations are set:
 - AI Assist is review-first: suggestions require human accept/reject and are
   never auto-applied to a dataset. Generated candidates are gated before review,
   but the gate only informs — it never auto-accepts or auto-rejects.
-- No Evaluation Suites or Chat Gates yet (v1.3).
 - The SQLite project index is an optional cache; JSON/JSONL remain the source of
   truth and the app works without it.
 - Evaluation runs are single-project, single-run; no streaming progress.
