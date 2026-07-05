@@ -18,6 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\CorpusStudio.Core\CorpusStudio.Core.csproj" />
     <ProjectReference Include="..\CorpusStudio.Desktop\CorpusStudio.Desktop.csproj" />
   </ItemGroup>
 

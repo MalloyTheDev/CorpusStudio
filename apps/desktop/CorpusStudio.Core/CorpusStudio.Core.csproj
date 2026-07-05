@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- WPF-free, cross-platform (net8.0) shared library: Models, ViewModels, and the WPF-free
+       Services + seam interfaces. Referenced by the WPF head today and (in Phase 1 of the Avalonia
+       migration) by an Avalonia head. Namespaces stay CorpusStudio.Desktop.* so no using churn.
+       See docs/AVALONIA_MIGRATION_PLAN.md. -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>CorpusStudio.Core</AssemblyName>
+    <RootNamespace>CorpusStudio.Desktop</RootNamespace>
+  </PropertyGroup>
+
+</Project>
