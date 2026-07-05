@@ -170,22 +170,22 @@ public sealed class AiAssistCandidateGateTests
     {
         var vm = new MainWindowViewModel();
 
-        vm.ApplyAiAssistRunResult(RunResult("pass"));
-        Assert.False(vm.SelectedAiAssistCandidateGateBlocks);
+        vm.AiAssist.ApplyAiAssistRunResult(RunResult("pass"));
+        Assert.False(vm.AiAssist.SelectedAiAssistCandidateGateBlocks);
 
-        vm.ApplyAiAssistRunResult(RunResult("warn"));
-        Assert.False(vm.SelectedAiAssistCandidateGateBlocks);
+        vm.AiAssist.ApplyAiAssistRunResult(RunResult("warn"));
+        Assert.False(vm.AiAssist.SelectedAiAssistCandidateGateBlocks);
 
-        vm.ApplyAiAssistRunResult(RunResult("block"));
-        Assert.True(vm.SelectedAiAssistCandidateGateBlocks);
+        vm.AiAssist.ApplyAiAssistRunResult(RunResult("block"));
+        Assert.True(vm.AiAssist.SelectedAiAssistCandidateGateBlocks);
     }
 
     [Fact]
     public void SelectedBlocks_IsCaseInsensitive()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyAiAssistRunResult(RunResult("BLOCK"));
-        Assert.True(vm.SelectedAiAssistCandidateGateBlocks);
+        vm.AiAssist.ApplyAiAssistRunResult(RunResult("BLOCK"));
+        Assert.True(vm.AiAssist.SelectedAiAssistCandidateGateBlocks);
     }
 
     [Fact]
@@ -193,8 +193,8 @@ public sealed class AiAssistCandidateGateTests
     {
         var vm = new MainWindowViewModel();
         // Fresh run passed...
-        vm.ApplyAiAssistRunResult(RunResult("pass"));
-        Assert.False(vm.SelectedAiAssistCandidateGateBlocks);
+        vm.AiAssist.ApplyAiAssistRunResult(RunResult("pass"));
+        Assert.False(vm.AiAssist.SelectedAiAssistCandidateGateBlocks);
 
         // ...but the selected queued item's gate blocks -> the item's gate wins.
         var blocked = new AiAssistReviewQueueItem
@@ -204,12 +204,12 @@ public sealed class AiAssistCandidateGateTests
             SuggestedJsonl = "{}",
             CandidateGate = Gate("block", new GateResult { GateId = "pii", Name = "PII", Status = "block", Message = "x" }),
         };
-        vm.SelectedAiAssistReviewQueueItem = blocked;
-        Assert.True(vm.SelectedAiAssistCandidateGateBlocks);
+        vm.AiAssist.SelectedAiAssistReviewQueueItem = blocked;
+        Assert.True(vm.AiAssist.SelectedAiAssistCandidateGateBlocks);
 
         // Deselect -> falls back to the fresh-run (passing) gate.
-        vm.SelectedAiAssistReviewQueueItem = null;
-        Assert.False(vm.SelectedAiAssistCandidateGateBlocks);
+        vm.AiAssist.SelectedAiAssistReviewQueueItem = null;
+        Assert.False(vm.AiAssist.SelectedAiAssistCandidateGateBlocks);
     }
 
     // ---- VM header status/color honest across states -----------------------------
@@ -218,33 +218,33 @@ public sealed class AiAssistCandidateGateTests
     public void ApplyRunResult_SetsHeaderStatusAndColor_Block()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyAiAssistRunResult(RunResult("block"));
+        vm.AiAssist.ApplyAiAssistRunResult(RunResult("block"));
 
-        Assert.Equal("BLOCK", vm.AiAssistCandidateGateStatus);
-        Assert.Equal("#DC2626", vm.AiAssistCandidateGateColor);
-        Assert.Contains("Candidate gate: BLOCK", vm.AiAssistReviewText);
+        Assert.Equal("BLOCK", vm.AiAssist.AiAssistCandidateGateStatus);
+        Assert.Equal("#DC2626", vm.AiAssist.AiAssistCandidateGateColor);
+        Assert.Contains("Candidate gate: BLOCK", vm.AiAssist.AiAssistReviewText);
     }
 
     [Fact]
     public void ApplyRunResult_NullGateNoContent_HeaderIsNaGray()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyAiAssistRunResult(new AiAssistRunResult { SuggestedJsonl = "", CandidateGate = null });
+        vm.AiAssist.ApplyAiAssistRunResult(new AiAssistRunResult { SuggestedJsonl = "", CandidateGate = null });
 
-        Assert.Equal("n/a", vm.AiAssistCandidateGateStatus);
-        Assert.Equal("#64748B", vm.AiAssistCandidateGateColor);
-        Assert.NotEqual("#16A34A", vm.AiAssistCandidateGateColor);   // never green
+        Assert.Equal("n/a", vm.AiAssist.AiAssistCandidateGateStatus);
+        Assert.Equal("#64748B", vm.AiAssist.AiAssistCandidateGateColor);
+        Assert.NotEqual("#16A34A", vm.AiAssist.AiAssistCandidateGateColor);   // never green
     }
 
     [Fact]
     public void ApplyRunResult_NullGateWithContent_HeaderIsNotRunGray()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyAiAssistRunResult(new AiAssistRunResult { SuggestedJsonl = "{}", CandidateGate = null });
+        vm.AiAssist.ApplyAiAssistRunResult(new AiAssistRunResult { SuggestedJsonl = "{}", CandidateGate = null });
 
-        Assert.Equal("not run", vm.AiAssistCandidateGateStatus);
-        Assert.Equal("#64748B", vm.AiAssistCandidateGateColor);
-        Assert.Contains("not run", vm.AiAssistReviewText);
+        Assert.Equal("not run", vm.AiAssist.AiAssistCandidateGateStatus);
+        Assert.Equal("#64748B", vm.AiAssist.AiAssistCandidateGateColor);
+        Assert.Contains("not run", vm.AiAssist.AiAssistReviewText);
     }
 
     // ---- Audit fixes: renderer honesty for unknown status, and stale-gate resets ----
@@ -276,44 +276,44 @@ public sealed class AiAssistCandidateGateTests
     public void SetAiAssistError_ResetsGateHeaderAndBlocks()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyAiAssistRunResult(RunResult("block"));
-        Assert.True(vm.SelectedAiAssistCandidateGateBlocks);
+        vm.AiAssist.ApplyAiAssistRunResult(RunResult("block"));
+        Assert.True(vm.AiAssist.SelectedAiAssistCandidateGateBlocks);
 
-        vm.SetAiAssistError("engine boom");
+        vm.AiAssist.SetAiAssistError("engine boom");
 
         // A failed run must not keep the previous run's verdict (was a persistent green
         // PASS / red BLOCK before the fix).
-        Assert.Equal("—", vm.AiAssistCandidateGateStatus);
-        Assert.Equal("#64748B", vm.AiAssistCandidateGateColor);
-        Assert.False(vm.SelectedAiAssistCandidateGateBlocks);
+        Assert.Equal("—", vm.AiAssist.AiAssistCandidateGateStatus);
+        Assert.Equal("#64748B", vm.AiAssist.AiAssistCandidateGateColor);
+        Assert.False(vm.AiAssist.SelectedAiAssistCandidateGateBlocks);
     }
 
     [Fact]
     public void SetAiAssistInProgress_ResetsGateHeader()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyAiAssistRunResult(RunResult("block"));
+        vm.AiAssist.ApplyAiAssistRunResult(RunResult("block"));
 
-        vm.SetAiAssistInProgress();
+        vm.AiAssist.SetAiAssistInProgress();
 
-        Assert.Equal("—", vm.AiAssistCandidateGateStatus);
-        Assert.Equal("#64748B", vm.AiAssistCandidateGateColor);
-        Assert.False(vm.SelectedAiAssistCandidateGateBlocks);
+        Assert.Equal("—", vm.AiAssist.AiAssistCandidateGateStatus);
+        Assert.Equal("#64748B", vm.AiAssist.AiAssistCandidateGateColor);
+        Assert.False(vm.AiAssist.SelectedAiAssistCandidateGateBlocks);
     }
 
     [Fact]
     public void SelectProject_ResetsGateHeaderAndBlocks()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyAiAssistRunResult(RunResult("block"));
-        Assert.True(vm.SelectedAiAssistCandidateGateBlocks);
+        vm.AiAssist.ApplyAiAssistRunResult(RunResult("block"));
+        Assert.True(vm.AiAssist.SelectedAiAssistCandidateGateBlocks);
 
         // Switching to a fresh project must not carry the prior project's verdict.
         var project = new DatasetProject("b", "Beta", "instruction", new DateTime(2026, 1, 1), new DateTime(2026, 1, 1));
         vm.SelectProject(new DatasetProjectListItem(project, "C:/projects/b"));
 
-        Assert.Equal("—", vm.AiAssistCandidateGateStatus);
-        Assert.False(vm.SelectedAiAssistCandidateGateBlocks);
+        Assert.Equal("—", vm.AiAssist.AiAssistCandidateGateStatus);
+        Assert.False(vm.AiAssist.SelectedAiAssistCandidateGateBlocks);
     }
 
     private static AiAssistRunResult RunResult(string overall)

@@ -175,6 +175,6 @@ public sealed class PreferenceReviewTests
 
         Assert.True(ok);
         Assert.Contains("Prepared Example 2", vm.PreferenceReview.PreferenceReviewSummary);
-        Assert.Contains("Judge preference strength", vm.AiAssistInstruction);
+        Assert.Contains("Judge preference strength", vm.AiAssist.AiAssistInstruction);
     }
 }

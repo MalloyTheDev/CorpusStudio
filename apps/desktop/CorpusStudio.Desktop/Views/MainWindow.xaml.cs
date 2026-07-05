@@ -1997,7 +1997,7 @@ public partial class MainWindow : Window
             out var errorMessage
         ))
         {
-            ViewModel.SetAiAssistError(errorMessage);
+            ViewModel.AiAssist.SetAiAssistError(errorMessage);
             return;
         }
 
@@ -2016,7 +2016,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            ViewModel.SetAiAssistError(ex.Message);
+            ViewModel.AiAssist.SetAiAssistError(ex.Message);
         }
         finally
         {
@@ -2069,13 +2069,13 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetAiAssistError("Create or select a dataset project before running AI Assist.");
+            ViewModel.AiAssist.SetAiAssistError("Create or select a dataset project before running AI Assist.");
             return;
         }
 
         if (string.IsNullOrWhiteSpace(ViewModel.WritingStudio.DraftText))
         {
-            ViewModel.SetAiAssistError("Add a draft example before running AI Assist.");
+            ViewModel.AiAssist.SetAiAssistError("Add a draft example before running AI Assist.");
             return;
         }
 
@@ -2089,7 +2089,7 @@ public partial class MainWindow : Window
             out var errorMessage
         ))
         {
-            ViewModel.SetAiAssistError(errorMessage);
+            ViewModel.AiAssist.SetAiAssistError(errorMessage);
             return;
         }
 
@@ -2097,7 +2097,7 @@ public partial class MainWindow : Window
         {
             Mouse.OverrideCursor = Cursors.Wait;
             ViewModel.SetBusy("Running AI Assist...");
-            ViewModel.SetAiAssistInProgress();
+            ViewModel.AiAssist.SetAiAssistInProgress();
             var result = await _engineService.RunAiAssistAsync(
                 ViewModel.WritingStudio.DraftText,
                 ViewModel.ActiveSchemaId,
@@ -2108,22 +2108,22 @@ public partial class MainWindow : Window
                 timeoutSeconds,
                 instruction
             );
-            ViewModel.ApplyAiAssistRunResult(result);
+            ViewModel.AiAssist.ApplyAiAssistRunResult(result);
             var queuedItem = _engineService.SaveAiAssistReviewQueueItem(
                 ViewModel.ActiveProjectPath,
                 ViewModel.WritingStudio.DraftText,
                 result
             );
-            ViewModel.SetAiAssistReviewQueue(
+            ViewModel.AiAssist.SetAiAssistReviewQueue(
                 _engineService.LoadAiAssistReviewQueue(ViewModel.ActiveProjectPath)
             );
-            ViewModel.SelectedAiAssistReviewQueueItem = ViewModel.AiAssistReviewQueue
+            ViewModel.AiAssist.SelectedAiAssistReviewQueueItem = ViewModel.AiAssist.AiAssistReviewQueue
                 .FirstOrDefault(item => item.ReviewId == queuedItem.ReviewId);
             ClearAiAssistBulkUndoStack();
         }
         catch (Exception ex)
         {
-            ViewModel.SetAiAssistError(ex.Message);
+            ViewModel.AiAssist.SetAiAssistError(ex.Message);
         }
         finally
         {
@@ -2139,13 +2139,13 @@ public partial class MainWindow : Window
         // by accident. Confirm-then-allow (never refuse); moving to the draft is not
         // acceptance. Covers both the queue-item and fresh-run paths (the VM checks the
         // active gate: selected queue item's gate, else the current run's gate).
-        if (ViewModel.SelectedAiAssistCandidateGateBlocks && !ConfirmMoveBlockedCandidate())
+        if (ViewModel.AiAssist.SelectedAiAssistCandidateGateBlocks && !ConfirmMoveBlockedCandidate())
         {
             return;
         }
 
-        if (ViewModel.SelectedAiAssistReviewQueueItem is null
-            || string.IsNullOrWhiteSpace(ViewModel.SelectedAiAssistReviewQueueItem.SuggestedJsonl))
+        if (ViewModel.AiAssist.SelectedAiAssistReviewQueueItem is null
+            || string.IsNullOrWhiteSpace(ViewModel.AiAssist.SelectedAiAssistReviewQueueItem.SuggestedJsonl))
         {
             ViewModel.MoveAiAssistSuggestionToDraft();
             return;
@@ -2214,48 +2214,48 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetAiAssistQueueError("Create or select a dataset project before saving an AI Assist queue view.");
+            ViewModel.AiAssist.SetAiAssistQueueError("Create or select a dataset project before saving an AI Assist queue view.");
             return;
         }
 
-        var view = ViewModel.BuildCurrentAiAssistQueueView();
+        var view = ViewModel.AiAssist.BuildCurrentAiAssistQueueView();
         if (string.IsNullOrWhiteSpace(view.Name))
         {
-            ViewModel.SetAiAssistQueueError("Name the AI Assist queue view before saving.");
+            ViewModel.AiAssist.SetAiAssistQueueError("Name the AI Assist queue view before saving.");
             return;
         }
 
         try
         {
             var savedView = _engineService.SaveAiAssistQueueView(ViewModel.ActiveProjectPath, view);
-            ViewModel.SetAiAssistQueueViews(
+            ViewModel.AiAssist.SetAiAssistQueueViews(
                 _engineService.LoadAiAssistQueueViews(ViewModel.ActiveProjectPath)
             );
-            ViewModel.SelectedAiAssistQueueView = ViewModel.AiAssistQueueViews
+            ViewModel.AiAssist.SelectedAiAssistQueueView = ViewModel.AiAssist.AiAssistQueueViews
                 .FirstOrDefault(item => string.Equals(
                     item.Name,
                     savedView.Name,
                     StringComparison.OrdinalIgnoreCase
                 ));
-            ViewModel.ApplyAiAssistQueueViewSaved(savedView);
+            ViewModel.AiAssist.ApplyAiAssistQueueViewSaved(savedView);
         }
         catch (Exception ex)
         {
-            ViewModel.SetAiAssistQueueError(ex.Message);
+            ViewModel.AiAssist.SetAiAssistQueueError(ex.Message);
         }
     }
 
     private void LoadAiAssistQueueViewButton_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.SelectedAiAssistQueueView is null)
+        if (ViewModel.AiAssist.SelectedAiAssistQueueView is null)
         {
-            ViewModel.SetAiAssistQueueError("Select a saved AI Assist queue view before loading.");
+            ViewModel.AiAssist.SetAiAssistQueueError("Select a saved AI Assist queue view before loading.");
             return;
         }
 
-        var view = ViewModel.SelectedAiAssistQueueView;
-        ViewModel.ApplyAiAssistQueueView(view);
-        ViewModel.ApplyAiAssistQueueViewLoaded(view);
+        var view = ViewModel.AiAssist.SelectedAiAssistQueueView;
+        ViewModel.AiAssist.ApplyAiAssistQueueView(view);
+        ViewModel.AiAssist.ApplyAiAssistQueueViewLoaded(view);
     }
 
     private void ResumeAiAssistRewriteBatchButton_Click(object sender, RoutedEventArgs e)
@@ -2277,36 +2277,36 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetAiAssistQueueError("Create or select a dataset project before updating AI Assist review state.");
+            ViewModel.AiAssist.SetAiAssistQueueError("Create or select a dataset project before updating AI Assist review state.");
             return false;
         }
 
-        if (ViewModel.SelectedAiAssistReviewQueueItem is null)
+        if (ViewModel.AiAssist.SelectedAiAssistReviewQueueItem is null)
         {
-            ViewModel.SetAiAssistQueueError("Select an AI Assist review before updating its state.");
+            ViewModel.AiAssist.SetAiAssistQueueError("Select an AI Assist review before updating its state.");
             return false;
         }
 
         try
         {
-            var reviewId = ViewModel.SelectedAiAssistReviewQueueItem.ReviewId;
+            var reviewId = ViewModel.AiAssist.SelectedAiAssistReviewQueueItem.ReviewId;
             var updatedItem = _engineService.UpdateAiAssistReviewState(
                 ViewModel.ActiveProjectPath,
                 reviewId,
                 reviewState
             );
-            ViewModel.SetAiAssistReviewQueue(
+            ViewModel.AiAssist.SetAiAssistReviewQueue(
                 _engineService.LoadAiAssistReviewQueue(ViewModel.ActiveProjectPath)
             );
-            ViewModel.SelectedAiAssistReviewQueueItem = ViewModel.AiAssistReviewQueue
+            ViewModel.AiAssist.SelectedAiAssistReviewQueueItem = ViewModel.AiAssist.AiAssistReviewQueue
                 .FirstOrDefault(item => item.ReviewId == reviewId);
-            ViewModel.ApplyAiAssistReviewState(updatedItem);
+            ViewModel.AiAssist.ApplyAiAssistReviewState(updatedItem);
             ClearAiAssistBulkUndoStack();
             return true;
         }
         catch (Exception ex)
         {
-            ViewModel.SetAiAssistQueueError(ex.Message);
+            ViewModel.AiAssist.SetAiAssistQueueError(ex.Message);
             return false;
         }
     }
@@ -2315,15 +2315,15 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetAiAssistQueueError("Create or select a dataset project before updating AI Assist review state.");
+            ViewModel.AiAssist.SetAiAssistQueueError("Create or select a dataset project before updating AI Assist review state.");
             return;
         }
 
-        var reviewIds = ViewModel.GetVisibleAiAssistReviewIds();
-        var previousStates = ViewModel.GetVisibleAiAssistReviewStates();
+        var reviewIds = ViewModel.AiAssist.GetVisibleAiAssistReviewIds();
+        var previousStates = ViewModel.AiAssist.GetVisibleAiAssistReviewStates();
         if (reviewIds.Count == 0)
         {
-            ViewModel.SetAiAssistQueueError("No AI Assist reviews match the current filter.");
+            ViewModel.AiAssist.SetAiAssistQueueError("No AI Assist reviews match the current filter.");
             return;
         }
 
@@ -2334,11 +2334,11 @@ public partial class MainWindow : Window
                 reviewIds,
                 reviewState
             );
-            ViewModel.SetAiAssistReviewQueue(
+            ViewModel.AiAssist.SetAiAssistReviewQueue(
                 _engineService.LoadAiAssistReviewQueue(ViewModel.ActiveProjectPath)
             );
             PushAiAssistBulkUndoStep(previousStates);
-            ViewModel.ApplyAiAssistBulkReviewState(
+            ViewModel.AiAssist.ApplyAiAssistBulkReviewState(
                 updatedCount,
                 reviewState,
                 _aiAssistBulkUndoStack.Count
@@ -2346,7 +2346,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            ViewModel.SetAiAssistQueueError(ex.Message);
+            ViewModel.AiAssist.SetAiAssistQueueError(ex.Message);
         }
     }
 
@@ -2354,13 +2354,13 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetAiAssistQueueError("Create or select a dataset project before undoing AI Assist bulk triage.");
+            ViewModel.AiAssist.SetAiAssistQueueError("Create or select a dataset project before undoing AI Assist bulk triage.");
             return;
         }
 
         if (_aiAssistBulkUndoStack.Count == 0)
         {
-            ViewModel.SetAiAssistQueueError("No AI Assist bulk triage action is available to undo.");
+            ViewModel.AiAssist.SetAiAssistQueueError("No AI Assist bulk triage action is available to undo.");
             return;
         }
 
@@ -2371,18 +2371,18 @@ public partial class MainWindow : Window
                 ViewModel.ActiveProjectPath,
                 previousStates
             );
-            ViewModel.SetAiAssistReviewQueue(
+            ViewModel.AiAssist.SetAiAssistReviewQueue(
                 _engineService.LoadAiAssistReviewQueue(ViewModel.ActiveProjectPath)
             );
             _aiAssistBulkUndoStack.RemoveAt(_aiAssistBulkUndoStack.Count - 1);
-            ViewModel.ApplyAiAssistBulkUndoReviewState(
+            ViewModel.AiAssist.ApplyAiAssistBulkUndoReviewState(
                 restoredCount,
                 _aiAssistBulkUndoStack.Count
             );
         }
         catch (Exception ex)
         {
-            ViewModel.SetAiAssistQueueError(ex.Message);
+            ViewModel.AiAssist.SetAiAssistQueueError(ex.Message);
         }
     }
 
@@ -3929,11 +3929,11 @@ public partial class MainWindow : Window
         baseUrl = string.IsNullOrWhiteSpace(ViewModel.AiAssistConnection.AiAssistBaseUrl)
             ? null
             : ViewModel.AiAssistConnection.AiAssistBaseUrl.Trim();
-        action = ViewModel.AiAssistAction.Trim();
+        action = ViewModel.AiAssist.AiAssistAction.Trim();
         timeoutSeconds = 0;
-        instruction = string.IsNullOrWhiteSpace(ViewModel.AiAssistInstruction)
+        instruction = string.IsNullOrWhiteSpace(ViewModel.AiAssist.AiAssistInstruction)
             ? null
-            : ViewModel.AiAssistInstruction.Trim();
+            : ViewModel.AiAssist.AiAssistInstruction.Trim();
         errorMessage = string.Empty;
 
         if (string.IsNullOrWhiteSpace(backend))
@@ -4123,8 +4123,8 @@ public partial class MainWindow : Window
         ViewModel.ApplyLabSettings(_engineService.LoadProjectLabSettings(project.ProjectPath));
         ViewModel.SetExamples(_engineService.LoadExamples(project.ProjectPath));
         ViewModel.Quarantine.SetItems(_engineService.LoadImportQuarantineItems(project.ProjectPath));
-        ViewModel.SetAiAssistReviewQueue(_engineService.LoadAiAssistReviewQueue(project.ProjectPath));
-        ViewModel.SetAiAssistQueueViews(_engineService.LoadAiAssistQueueViews(project.ProjectPath));
+        ViewModel.AiAssist.SetAiAssistReviewQueue(_engineService.LoadAiAssistReviewQueue(project.ProjectPath));
+        ViewModel.AiAssist.SetAiAssistQueueViews(_engineService.LoadAiAssistQueueViews(project.ProjectPath));
         ViewModel.RewriteBatches.SetAiAssistRewriteBatches(
             _engineService.LoadAiAssistRewriteBatches(project.ProjectPath)
         );

@@ -1807,15 +1807,15 @@
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <ComboBox AutomationProperties.AutomationId="AiAssistActionComboBox"
-                                          ItemsSource="{Binding AiAssistActionPresets}"
-                                          SelectedItem="{Binding AiAssistAction, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          ItemsSource="{Binding AiAssist.AiAssistActionPresets}"
+                                          SelectedItem="{Binding AiAssist.AiAssistAction, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                           Width="132"
                                           Margin="0,0,12,0" />
                                 <TextBlock Text="Instruction"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBox AutomationProperties.AutomationId="AiAssistInstructionTextBox"
-                                         Text="{Binding AiAssistInstruction, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding AiAssist.AiAssistInstruction, UpdateSourceTrigger=PropertyChanged}"
                                          Width="360"
                                          Margin="0,0,12,0" />
                                 <TextBlock Text="Timeout"
@@ -1856,7 +1856,7 @@
 
                                 <TextBox Grid.Row="0"
                                          AutomationProperties.AutomationId="AiAssistSummaryTextBox"
-                                         Text="{Binding AiAssistSummary, Mode=OneWay}"
+                                         Text="{Binding AiAssist.AiAssistSummary, Mode=OneWay}"
                                          IsReadOnly="True"
                                          AcceptsReturn="True"
                                          TextWrapping="Wrap"
@@ -1864,7 +1864,7 @@
 
                                 <StackPanel Grid.Row="1" Margin="0,8,0,4">
                                     <TextBlock AutomationProperties.AutomationId="AiAssistQueueSummaryTextBlock"
-                                               Text="{Binding AiAssistQueueSummary, Mode=OneWay}"
+                                               Text="{Binding AiAssist.AiAssistQueueSummary, Mode=OneWay}"
                                                FontWeight="SemiBold"
                                                TextWrapping="Wrap" />
                                     <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
@@ -1874,9 +1874,9 @@
                                              same idiom as the Debt tab's DebtGradeColor. Neutral gray
                                              for null/unknown/not-run (never green). -->
                                         <TextBlock AutomationProperties.AutomationId="AiAssistCandidateGateStatusTextBlock"
-                                                   Text="{Binding AiAssistCandidateGateStatus, Mode=OneWay}"
+                                                   Text="{Binding AiAssist.AiAssistCandidateGateStatus, Mode=OneWay}"
                                                    FontWeight="SemiBold"
-                                                   Foreground="{Binding AiAssistCandidateGateColor, Mode=OneWay}" />
+                                                   Foreground="{Binding AiAssist.AiAssistCandidateGateColor, Mode=OneWay}" />
                                     </StackPanel>
                                 </StackPanel>
 
@@ -1886,23 +1886,23 @@
                                                VerticalAlignment="Center"
                                                Margin="0,0,6,0" />
                                     <ComboBox AutomationProperties.AutomationId="AiAssistQueueFilterComboBox"
-                                              ItemsSource="{Binding AiAssistQueueFilterOptions}"
-                                              SelectedItem="{Binding AiAssistQueueFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                              ItemsSource="{Binding AiAssist.AiAssistQueueFilterOptions}"
+                                              SelectedItem="{Binding AiAssist.AiAssistQueueFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                               Width="104"
                                               Margin="0,0,8,0" />
                                     <TextBlock Text="Search"
                                                VerticalAlignment="Center"
                                                Margin="0,0,6,0" />
                                     <TextBox AutomationProperties.AutomationId="AiAssistQueueSearchTextBox"
-                                             Text="{Binding AiAssistQueueSearch, UpdateSourceTrigger=PropertyChanged}"
+                                             Text="{Binding AiAssist.AiAssistQueueSearch, UpdateSourceTrigger=PropertyChanged}"
                                              Width="136"
                                              Margin="0,0,8,0" />
                                     <TextBlock Text="Sort"
                                                VerticalAlignment="Center"
                                                Margin="0,0,6,0" />
                                     <ComboBox AutomationProperties.AutomationId="AiAssistQueueSortComboBox"
-                                              ItemsSource="{Binding AiAssistQueueSortOptions}"
-                                              SelectedItem="{Binding AiAssistQueueSort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                              ItemsSource="{Binding AiAssist.AiAssistQueueSortOptions}"
+                                              SelectedItem="{Binding AiAssist.AiAssistQueueSort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                               Width="104"
                                               Margin="0,0,8,0" />
                                     <Button AutomationProperties.AutomationId="BulkAcceptAiAssistReviewsButton"
@@ -1927,13 +1927,13 @@
                                                VerticalAlignment="Center"
                                                Margin="0,0,6,0" />
                                     <ComboBox AutomationProperties.AutomationId="AiAssistQueueViewComboBox"
-                                              ItemsSource="{Binding AiAssistQueueViews}"
-                                              SelectedItem="{Binding SelectedAiAssistQueueView, Mode=TwoWay}"
+                                              ItemsSource="{Binding AiAssist.AiAssistQueueViews}"
+                                              SelectedItem="{Binding AiAssist.SelectedAiAssistQueueView, Mode=TwoWay}"
                                               DisplayMemberPath="DisplayName"
                                               Width="136"
                                               Margin="0,0,8,0" />
                                     <TextBox AutomationProperties.AutomationId="AiAssistQueueViewNameTextBox"
-                                             Text="{Binding AiAssistQueueViewName, UpdateSourceTrigger=PropertyChanged}"
+                                             Text="{Binding AiAssist.AiAssistQueueViewName, UpdateSourceTrigger=PropertyChanged}"
                                              Width="128"
                                              Margin="0,0,8,0" />
                                     <Button AutomationProperties.AutomationId="SaveAiAssistQueueViewButton"
@@ -1950,8 +1950,8 @@
                                 <Grid Grid.Row="4">
                                     <ListBox x:Name="AiAssistReviewQueueListBox"
                                              AutomationProperties.AutomationId="AiAssistReviewQueueListBox"
-                                             ItemsSource="{Binding AiAssistReviewQueue}"
-                                             SelectedItem="{Binding SelectedAiAssistReviewQueueItem, Mode=TwoWay}"
+                                             ItemsSource="{Binding AiAssist.AiAssistReviewQueue}"
+                                             SelectedItem="{Binding AiAssist.SelectedAiAssistReviewQueueItem, Mode=TwoWay}"
                                              DisplayMemberPath="DisplayName"
                                              MinHeight="140" />
                                     <TextBlock Style="{StaticResource ListEmptyPlaceholderStyle}"
@@ -1996,7 +1996,7 @@
 
                                 <TextBox Grid.Row="0"
                                          AutomationProperties.AutomationId="AiAssistReviewTextBox"
-                                         Text="{Binding AiAssistReviewText, Mode=OneWay}"
+                                         Text="{Binding AiAssist.AiAssistReviewText, Mode=OneWay}"
                                          IsReadOnly="True"
                                          AcceptsReturn="True"
                                          FontFamily="Consolas"
@@ -2007,7 +2007,7 @@
 
                                 <TextBox Grid.Row="1"
                                          AutomationProperties.AutomationId="AiAssistDiffSummaryTextBox"
-                                         Text="{Binding AiAssistDiffSummary, Mode=OneWay}"
+                                         Text="{Binding AiAssist.AiAssistDiffSummary, Mode=OneWay}"
                                          Margin="0,8,0,8"
                                          IsReadOnly="True"
                                          TextWrapping="Wrap" />
@@ -2036,7 +2036,7 @@
                                     <TextBox Grid.Row="1"
                                              Grid.Column="0"
                                              AutomationProperties.AutomationId="AiAssistSourceDraftTextBox"
-                                             Text="{Binding AiAssistSourceDraftText, Mode=OneWay}"
+                                             Text="{Binding AiAssist.AiAssistSourceDraftText, Mode=OneWay}"
                                              IsReadOnly="True"
                                              AcceptsReturn="True"
                                              FontFamily="Consolas"
@@ -2047,7 +2047,7 @@
                                     <TextBox Grid.Row="1"
                                              Grid.Column="1"
                                              AutomationProperties.AutomationId="AiAssistSuggestedJsonlTextBox"
-                                             Text="{Binding AiAssistSuggestedJsonlText, Mode=OneWay}"
+                                             Text="{Binding AiAssist.AiAssistSuggestedJsonlText, Mode=OneWay}"
                                              Margin="8,0,0,0"
                                              IsReadOnly="True"
                                              AcceptsReturn="True"
