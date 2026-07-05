@@ -162,7 +162,15 @@ Current status: Corpus Studio generates a config from the engine
 `training-config` command and the desktop Training tab. The export path writes
 an inspectable file and returns a JSON summary that now also includes a real
 token budget, a rough VRAM planning estimate, a LoRA rank/alpha suggestion, and
-the exact per-target launch command. As of v0.5 the desktop can also launch the
+the exact per-target launch command.
+
+> **Token counts are an estimate by default.** To stay dependency-light the engine
+> uses a Unicode-aware heuristic (it counts CJK/kana/Hangul characters directly and
+> blends word/character estimates for everything else) — good enough for budget and
+> VRAM *planning*, but not exact. For exact BPE counts install the optional tokenizer
+> extra (`pip install corpus-studio-engine[tokenizer]`, which pulls in `tiktoken`);
+> `estimate_tokens` uses it automatically when present, with the heuristic as the
+> fallback. Treat the token budget and VRAM numbers as planning figures either way. As of v0.5 the desktop can also launch the
 user's installed trainer from that command (with explicit confirmation), stream
 logs, stop it, track checkpoints, resume, and compare before/after evaluations —
 see the [Training Launcher Design](#training-launcher-design-v05) section below.
