@@ -47,7 +47,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _debtTrendDirectionColor = "#64748B";
     private string _debtTrendSummary = "Run quality checks to build a debt trend.";
     private string _qualityTriageSummary = "Synthetic quality issues appear here after quality checks run.";
-    private string _splitSummary = "Create or select a project to generate train, validation, and test splits.";
     private string _preferencePromptText = "Select a saved preference example to inspect the prompt.";
     private string _preferenceChosenText = "Chosen response appears here.";
     private string _preferenceRejectedText = "Rejected response appears here.";
@@ -157,9 +156,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _datasetCardSummary =
         "Generate a dataset card to summarize metadata, schema, splits, quality, and evaluation.";
     private string _datasetCardPreview = "Dataset card preview appears here.";
-    private string _splitTrainPercent = "90";
-    private string _splitValidationPercent = "5";
-    private string _splitSeed = "42";
     private string _selectedImportQuarantineDetail =
         "Rejected import rows appear here after a mixed import.";
     private string _projectIndexSummary = "Projects list from local files. Rebuild the index to list from SQLite.";
@@ -222,17 +218,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public ISuitesViewModel Suites { get; }
 
+    public ISplitsViewModel Splits { get; }
+
     /// <summary>Design-time / test constructor.</summary>
     public MainWindowViewModel()
         : this(
             new DebtViewModel(), new ArenaViewModel(), new SettingsViewModel(),
-            new VersionsViewModel(), new ArtifactsViewModel(), new SuitesViewModel())
+            new VersionsViewModel(), new ArtifactsViewModel(), new SuitesViewModel(),
+            new SplitsViewModel())
     {
     }
 
     public MainWindowViewModel(
         IDebtViewModel debt, IArenaViewModel arena, ISettingsViewModel settings,
-        IVersionsViewModel versions, IArtifactsViewModel artifacts, ISuitesViewModel suites)
+        IVersionsViewModel versions, IArtifactsViewModel artifacts, ISuitesViewModel suites,
+        ISplitsViewModel splits)
     {
         Debt = debt;
         Arena = arena;
@@ -240,6 +240,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Versions = versions;
         Artifacts = artifacts;
         Suites = suites;
+        Splits = splits;
+        // A split failure surfaces in the shell's shared error banner; the tab keeps no shell
+        // reference, so it raises ErrorReported and the shell forwards it to ReportError.
+        Splits.ErrorReported += ReportError;
     }
 
     // ---- Engine availability (v1.2.15 distributability) --------------------------
@@ -1009,11 +1013,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
 
-    public string SplitSummary
-    {
-        get => _splitSummary;
-        private set => SetField(ref _splitSummary, value);
-    }
+    // Splits tab state + logic extracted to SplitsViewModel in Phase 2. The shell wires the child's
+    // ErrorReported to ReportError, pushes loaded settings, and forwards Reset() on project switch.
+    // Bindings use Splits.*, code-behind ViewModel.Splits.*.
 
     public string EvaluationBackend
     {
@@ -1830,24 +1832,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         private set => SetField(ref _datasetCardPreview, value);
     }
 
-    public string SplitTrainPercent
-    {
-        get => _splitTrainPercent;
-        set => SetField(ref _splitTrainPercent, value);
-    }
-
-    public string SplitValidationPercent
-    {
-        get => _splitValidationPercent;
-        set => SetField(ref _splitValidationPercent, value);
-    }
-
-    public string SplitSeed
-    {
-        get => _splitSeed;
-        set => SetField(ref _splitSeed, value);
-    }
-
     public ImportQuarantineItem? SelectedImportQuarantineItem
     {
         get => _selectedImportQuarantineItem;
@@ -2035,7 +2019,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ActiveSchemaId = project.SchemaId;
         ActiveSchemaDescription = $"{schemaName ?? project.SchemaId} project. Ready for examples.";
         ApplyAiAssistActionPresets(project.SchemaId);
-        ApplySplitSettings(project.Project.SplitSettings ?? SplitSettings.Default);
+        Splits.ApplySplitSettings(project.Project.SplitSettings ?? SplitSettings.Default);
         ApplyLabSettings(project.Project.LabSettings ?? LabBackendSettings.Default);
         ValidationSummary = "No validation has run yet.";
         ClearValidationIssues();
@@ -2046,7 +2030,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         QualityTriageSummary = "Synthetic quality issues appear here after quality checks run.";
         SyntheticPatternIssues.Clear();
         SelectedSyntheticPatternIssue = null;
-        SplitSummary = "Generate splits after examples are saved.";
+        Splits.Reset();
         EvaluationSummary = "Run a local model against this project's saved examples.";
         EvaluationReportJson = "Evaluation reports appear here after a run.";
         EvaluationReportHistory.Clear();
@@ -2587,58 +2571,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public void SetPreferenceRankingExportError(string message)
     {
         PreferenceReviewSummary = $"Preference ranking export failed.{Environment.NewLine}{message}";
-    }
-
-    public void SetSplitInProgress(double trainRatio, double validationRatio, int seed)
-    {
-        var testRatio = 1 - trainRatio - validationRatio;
-        SplitSummary = string.Join(
-            Environment.NewLine,
-            [
-                "Generating train, validation, and test splits...",
-                $"Train: {FormatPercent(trainRatio)}",
-                $"Validation: {FormatPercent(validationRatio)}",
-                $"Test: {FormatPercent(testRatio)}",
-                $"Seed: {seed}",
-            ]
-        );
-    }
-
-    public void ApplySplitSettings(SplitSettings settings)
-    {
-        SplitTrainPercent = settings.TrainPercentText;
-        SplitValidationPercent = settings.ValidationPercentText;
-        SplitSeed = settings.Seed.ToString();
-    }
-
-    public void ApplySplitReport(SplitReport report)
-    {
-        var lines = new List<string>
-        {
-            $"Train: {report.Train}",
-            $"Validation: {report.Validation}",
-            $"Test: {report.Test}",
-            $"Ratios: train {FormatPercent(report.TrainRatio)}, validation {FormatPercent(report.ValidationRatio)}, test {FormatPercent(report.TestRatio)}",
-            $"Seed: {report.Seed}",
-            $"Rows shared across splits: {report.RowsSharedAcrossSplits}"
-                + (report.RowsSharedAcrossSplits > 0 ? " (train/test leakage)" : ""),
-            $"Output: {report.OutputDirectory}",
-        };
-
-        if (report.Warnings.Count > 0)
-        {
-            lines.Add("");
-            lines.Add("Warnings:");
-            lines.AddRange(report.Warnings.Select(warning => $"- {warning}"));
-        }
-
-        SplitSummary = string.Join(Environment.NewLine, lines);
-    }
-
-    public void SetSplitError(string message)
-    {
-        SplitSummary = $"Splits could not be generated.{Environment.NewLine}{message}";
-        ReportError(message);
     }
 
     public void SetEvaluationInProgress()
@@ -4464,11 +4396,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         var location = issue.RowNumber is null ? "" : $"Row {issue.RowNumber}: ";
         var field = string.IsNullOrWhiteSpace(issue.Field) ? "" : $" [{issue.Field}]";
         return $"- {location}{issue.Message}{field}";
-    }
-
-    private static string FormatPercent(double ratio)
-    {
-        return $"{ratio * 100:0.##}%";
     }
 
     private static string FormatManualScoreSummary(EvaluationReport report)

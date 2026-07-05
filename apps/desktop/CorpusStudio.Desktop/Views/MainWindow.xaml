@@ -999,7 +999,7 @@
                                                 </Border>
                                                 <TextBlock Text="Splits" Style="{StaticResource DashboardCardLabelStyle}" Margin="11,0,0,0" />
                                             </StackPanel>
-                                            <TextBlock Text="{Binding SplitSummary, Mode=OneWay}"
+                                            <TextBlock Text="{Binding Splits.SplitSummary, Mode=OneWay}"
                                                        Style="{StaticResource CaptionTextStyle}" />
                                         </StackPanel>
                                     </Border>
@@ -1284,21 +1284,21 @@
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBox AutomationProperties.AutomationId="SplitTrainPercentTextBox"
-                                         Text="{Binding SplitTrainPercent, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding Splits.SplitTrainPercent, UpdateSourceTrigger=PropertyChanged}"
                                          Width="64"
                                          Margin="0,0,12,0" />
                                 <TextBlock Text="Validation %"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBox AutomationProperties.AutomationId="SplitValidationPercentTextBox"
-                                         Text="{Binding SplitValidationPercent, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding Splits.SplitValidationPercent, UpdateSourceTrigger=PropertyChanged}"
                                          Width="64"
                                          Margin="0,0,12,0" />
                                 <TextBlock Text="Seed"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBox AutomationProperties.AutomationId="SplitSeedTextBox"
-                                         Text="{Binding SplitSeed, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding Splits.SplitSeed, UpdateSourceTrigger=PropertyChanged}"
                                          Width="80"
                                          Margin="0,0,12,0" />
                                 <Button Style="{StaticResource PrimaryButtonStyle}"
@@ -1310,7 +1310,7 @@
 
                             <TextBox Grid.Row="1"
                                      AutomationProperties.AutomationId="SplitSummaryTextBox"
-                                     Text="{Binding SplitSummary, Mode=OneWay}"
+                                     Text="{Binding Splits.SplitSummary, Mode=OneWay}"
                                      IsReadOnly="True"
                                      AcceptsReturn="True"
                                      TextWrapping="Wrap"

@@ -3492,7 +3492,7 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetSplitError("Create a dataset project before generating splits.");
+            ViewModel.Splits.SetSplitError("Create a dataset project before generating splits.");
             return;
         }
 
@@ -3505,13 +3505,13 @@ public partial class MainWindow : Window
                 out var errorMessage
             ))
             {
-                ViewModel.SetSplitError(errorMessage);
+                ViewModel.Splits.SetSplitError(errorMessage);
                 return;
             }
 
             Mouse.OverrideCursor = Cursors.Wait;
             ViewModel.SetBusy("Generating splits...");
-            ViewModel.SetSplitInProgress(trainRatio, validationRatio, seed);
+            ViewModel.Splits.SetSplitInProgress(trainRatio, validationRatio, seed);
             var report = await _engineService.GenerateProjectSplitsAsync(
                 ViewModel.ActiveProjectPath,
                 ViewModel.ActiveSchemaId,
@@ -3529,11 +3529,11 @@ public partial class MainWindow : Window
                 }
             );
 
-            ViewModel.ApplySplitReport(report);
+            ViewModel.Splits.ApplySplitReport(report);
         }
         catch (Exception ex)
         {
-            ViewModel.SetSplitError(ex.Message);
+            ViewModel.Splits.SetSplitError(ex.Message);
         }
         finally
         {
@@ -3639,7 +3639,7 @@ public partial class MainWindow : Window
         errorMessage = string.Empty;
 
         if (!double.TryParse(
-            ViewModel.SplitTrainPercent,
+            ViewModel.Splits.SplitTrainPercent,
             NumberStyles.Float,
             CultureInfo.InvariantCulture,
             out var trainPercent
@@ -3650,7 +3650,7 @@ public partial class MainWindow : Window
         }
 
         if (!double.TryParse(
-            ViewModel.SplitValidationPercent,
+            ViewModel.Splits.SplitValidationPercent,
             NumberStyles.Float,
             CultureInfo.InvariantCulture,
             out var validationPercent
@@ -3661,7 +3661,7 @@ public partial class MainWindow : Window
         }
 
         if (!int.TryParse(
-            ViewModel.SplitSeed,
+            ViewModel.Splits.SplitSeed,
             NumberStyles.Integer,
             CultureInfo.InvariantCulture,
             out seed
@@ -4119,7 +4119,7 @@ public partial class MainWindow : Window
     private async Task LoadProjectAsync(DatasetProjectListItem project)
     {
         ViewModel.SelectProject(project);
-        ViewModel.ApplySplitSettings(_engineService.LoadProjectSplitSettings(project.ProjectPath));
+        ViewModel.Splits.ApplySplitSettings(_engineService.LoadProjectSplitSettings(project.ProjectPath));
         ViewModel.ApplyLabSettings(_engineService.LoadProjectLabSettings(project.ProjectPath));
         ViewModel.SetExamples(_engineService.LoadExamples(project.ProjectPath));
         ViewModel.SetImportQuarantineItems(_engineService.LoadImportQuarantineItems(project.ProjectPath));
