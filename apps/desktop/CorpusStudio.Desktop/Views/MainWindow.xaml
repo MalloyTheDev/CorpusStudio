@@ -1017,7 +1017,7 @@
                                                 </Border>
                                                 <TextBlock Text="Evaluation" Style="{StaticResource DashboardCardLabelStyle}" Margin="11,0,0,0" />
                                             </StackPanel>
-                                            <TextBlock Text="{Binding EvaluationSummary, Mode=OneWay}"
+                                            <TextBlock Text="{Binding Evaluation.EvaluationSummary, Mode=OneWay}"
                                                        Style="{StaticResource CaptionTextStyle}" />
                                         </StackPanel>
                                     </Border>
@@ -1434,14 +1434,14 @@
                                                VerticalAlignment="Center"
                                                Margin="0,0,6,0" />
                                     <TextBox AutomationProperties.AutomationId="EvaluationLimitTextBox"
-                                             Text="{Binding EvaluationLimit, UpdateSourceTrigger=PropertyChanged}"
+                                             Text="{Binding Evaluation.EvaluationLimit, UpdateSourceTrigger=PropertyChanged}"
                                              Width="64"
                                              Margin="0,0,12,0" />
                                     <TextBlock Text="Threshold"
                                                VerticalAlignment="Center"
                                                Margin="0,0,6,0" />
                                     <TextBox AutomationProperties.AutomationId="EvaluationScoreThresholdTextBox"
-                                             Text="{Binding EvaluationScoreThreshold, UpdateSourceTrigger=PropertyChanged}"
+                                             Text="{Binding Evaluation.EvaluationScoreThreshold, UpdateSourceTrigger=PropertyChanged}"
                                              Width="64"
                                              Margin="0,0,12,0" />
                                     <TextBlock Text="Timeout"
@@ -1465,7 +1465,7 @@
 
                                     <TextBox Grid.Row="0"
                                              AutomationProperties.AutomationId="EvaluationSummaryTextBox"
-                                             Text="{Binding EvaluationSummary, Mode=OneWay}"
+                                             Text="{Binding Evaluation.EvaluationSummary, Mode=OneWay}"
                                              IsReadOnly="True"
                                              AcceptsReturn="True"
                                              TextWrapping="Wrap"
@@ -1478,8 +1478,8 @@
 
                                     <ListBox Grid.Row="2"
                                              AutomationProperties.AutomationId="EvaluationReportHistoryListBox"
-                                             ItemsSource="{Binding EvaluationReportHistory}"
-                                             SelectedItem="{Binding SelectedEvaluationReportHistoryItem, Mode=TwoWay}"
+                                             ItemsSource="{Binding Evaluation.EvaluationReportHistory}"
+                                             SelectedItem="{Binding Evaluation.SelectedEvaluationReportHistoryItem, Mode=TwoWay}"
                                              DisplayMemberPath="DisplayName" />
 
                                     <TextBlock Grid.Row="3"
@@ -1490,8 +1490,8 @@
                                     <WrapPanel Grid.Row="4"
                                                Margin="0,0,0,6">
                                         <ComboBox AutomationProperties.AutomationId="EvaluationCompareReportComboBox"
-                                                  ItemsSource="{Binding EvaluationReportHistory}"
-                                                  SelectedItem="{Binding SecondaryEvaluationReportHistoryItem, Mode=TwoWay}"
+                                                  ItemsSource="{Binding Evaluation.EvaluationReportHistory}"
+                                                  SelectedItem="{Binding Evaluation.SecondaryEvaluationReportHistoryItem, Mode=TwoWay}"
                                                   DisplayMemberPath="DisplayName"
                                                   Width="204"
                                                   Margin="0,0,8,0" />
@@ -1508,7 +1508,7 @@
 
                                     <TextBox Grid.Row="5"
                                              AutomationProperties.AutomationId="EvaluationComparisonTextBox"
-                                             Text="{Binding EvaluationComparisonSummary, Mode=OneWay}"
+                                             Text="{Binding Evaluation.EvaluationComparisonSummary, Mode=OneWay}"
                                              IsReadOnly="True"
                                              AcceptsReturn="True"
                                              TextWrapping="Wrap"
@@ -1534,7 +1534,7 @@
                                     <TextBox Grid.Row="0"
                                              Grid.ColumnSpan="2"
                                              AutomationProperties.AutomationId="EvaluationReportTextBox"
-                                             Text="{Binding EvaluationReportJson, Mode=OneWay}"
+                                             Text="{Binding Evaluation.EvaluationReportJson, Mode=OneWay}"
                                              IsReadOnly="True"
                                              AcceptsReturn="True"
                                              FontFamily="Consolas"
@@ -1561,37 +1561,37 @@
                                                                VerticalAlignment="Center"
                                                                Margin="0,0,6,4" />
                                                     <ComboBox AutomationProperties.AutomationId="EvaluationResultFilterComboBox"
-                                                              ItemsSource="{Binding EvaluationResultFilterOptions}"
-                                                              SelectedItem="{Binding EvaluationResultFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              ItemsSource="{Binding Evaluation.EvaluationResultFilterOptions}"
+                                                              SelectedItem="{Binding Evaluation.EvaluationResultFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                               Width="120"
                                                               Margin="0,0,14,4" />
                                                     <TextBlock Text="Tag"
                                                                VerticalAlignment="Center"
                                                                Margin="0,0,6,4" />
                                                     <ComboBox AutomationProperties.AutomationId="EvaluationTagFilterComboBox"
-                                                              ItemsSource="{Binding EvaluationTagFilterOptions}"
-                                                              SelectedItem="{Binding EvaluationTagFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              ItemsSource="{Binding Evaluation.EvaluationTagFilterOptions}"
+                                                              SelectedItem="{Binding Evaluation.EvaluationTagFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                               Width="120"
                                                               Margin="0,0,14,4" />
                                                     <TextBlock Text="Reason"
                                                                VerticalAlignment="Center"
                                                                Margin="0,0,6,4" />
                                                     <ComboBox AutomationProperties.AutomationId="EvaluationFailureReasonFilterComboBox"
-                                                              ItemsSource="{Binding EvaluationFailureReasonFilterOptions}"
-                                                              SelectedItem="{Binding EvaluationFailureReasonFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              ItemsSource="{Binding Evaluation.EvaluationFailureReasonFilterOptions}"
+                                                              SelectedItem="{Binding Evaluation.EvaluationFailureReasonFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                               Width="150"
                                                               Margin="0,0,14,4" />
                                                     <TextBlock Text="Band"
                                                                VerticalAlignment="Center"
                                                                Margin="0,0,6,4" />
                                                     <ComboBox AutomationProperties.AutomationId="EvaluationScoreBandFilterComboBox"
-                                                              ItemsSource="{Binding EvaluationScoreBandFilterOptions}"
-                                                              SelectedItem="{Binding EvaluationScoreBandFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              ItemsSource="{Binding Evaluation.EvaluationScoreBandFilterOptions}"
+                                                              SelectedItem="{Binding Evaluation.EvaluationScoreBandFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                               Width="90"
                                                               Margin="0,0,4,4" />
                                                 </WrapPanel>
                                                 <TextBlock AutomationProperties.AutomationId="EvaluationResultsSummaryTextBlock"
-                                                           Text="{Binding EvaluationResultsSummary, Mode=OneWay}"
+                                                           Text="{Binding Evaluation.EvaluationResultsSummary, Mode=OneWay}"
                                                            Style="{StaticResource CaptionTextStyle}"
                                                            Margin="0,2,0,0" />
                                             </StackPanel>
@@ -1603,12 +1603,12 @@
                                                            Style="{StaticResource SectionHeaderTextStyle}" />
                                                 <WrapPanel>
                                                     <TextBox AutomationProperties.AutomationId="EvaluationFailureFilterNameTextBox"
-                                                             Text="{Binding EvaluationFailureFilterName, UpdateSourceTrigger=PropertyChanged}"
+                                                             Text="{Binding Evaluation.EvaluationFailureFilterName, UpdateSourceTrigger=PropertyChanged}"
                                                              Width="150"
                                                              Margin="0,0,8,4" />
                                                     <ComboBox AutomationProperties.AutomationId="EvaluationFailureFiltersComboBox"
-                                                              ItemsSource="{Binding EvaluationFailureFilters}"
-                                                              SelectedItem="{Binding SelectedEvaluationFailureFilter, Mode=TwoWay}"
+                                                              ItemsSource="{Binding Evaluation.EvaluationFailureFilters}"
+                                                              SelectedItem="{Binding Evaluation.SelectedEvaluationFailureFilter, Mode=TwoWay}"
                                                               DisplayMemberPath="DisplayName"
                                                               Width="200"
                                                               Margin="0,0,8,4" />
@@ -1624,7 +1624,7 @@
                                                             Click="ApplyEvaluationFailureFilterButton_Click" />
                                                 </WrapPanel>
                                                 <TextBlock AutomationProperties.AutomationId="EvaluationFailureFilterSummaryTextBlock"
-                                                           Text="{Binding EvaluationFailureFilterSummary, Mode=OneWay}"
+                                                           Text="{Binding Evaluation.EvaluationFailureFilterSummary, Mode=OneWay}"
                                                            Style="{StaticResource CaptionTextStyle}"
                                                            Margin="0,2,0,0" />
                                             </StackPanel>
@@ -1634,8 +1634,8 @@
                                     <Grid Grid.Row="3" Grid.Column="0">
                                         <ListBox x:Name="EvaluationResultsListBox"
                                                  AutomationProperties.AutomationId="EvaluationResultsListBox"
-                                                 ItemsSource="{Binding EvaluationResults}"
-                                                 SelectedItem="{Binding SelectedEvaluationExampleResult, Mode=TwoWay}"
+                                                 ItemsSource="{Binding Evaluation.EvaluationResults}"
+                                                 SelectedItem="{Binding Evaluation.SelectedEvaluationExampleResult, Mode=TwoWay}"
                                                  DisplayMemberPath="DisplayName" />
                                         <TextBlock Style="{StaticResource ListEmptyPlaceholderStyle}"
                                                    Text="Run an evaluation or reload a report to see per-example results."
@@ -1645,7 +1645,7 @@
                                     <TextBox Grid.Row="3"
                                              Grid.Column="1"
                                              AutomationProperties.AutomationId="EvaluationExampleDetailTextBox"
-                                             Text="{Binding SelectedEvaluationExampleDetail, Mode=OneWay}"
+                                             Text="{Binding Evaluation.SelectedEvaluationExampleDetail, Mode=OneWay}"
                                              Margin="8,0,0,0"
                                              IsReadOnly="True"
                                              AcceptsReturn="True"
@@ -1658,7 +1658,7 @@
                                                HorizontalAlignment="Right"
                                                VerticalAlignment="Center"
                                                Margin="0,8,0,0">
-                                        <TextBlock Text="{Binding EvaluationReviewSummary, Mode=OneWay}"
+                                        <TextBlock Text="{Binding Evaluation.EvaluationReviewSummary, Mode=OneWay}"
                                                    VerticalAlignment="Center"
                                                    Width="320"
                                                    TextWrapping="Wrap"
@@ -1667,14 +1667,14 @@
                                                    VerticalAlignment="Center"
                                                    Margin="0,0,6,0" />
                                         <TextBox AutomationProperties.AutomationId="EvaluationManualScoreTextBox"
-                                                 Text="{Binding EvaluationManualScore, UpdateSourceTrigger=PropertyChanged}"
+                                                 Text="{Binding Evaluation.EvaluationManualScore, UpdateSourceTrigger=PropertyChanged}"
                                                  Width="72"
                                                  Margin="0,0,12,0" />
                                         <TextBlock Text="Notes"
                                                    VerticalAlignment="Center"
                                                    Margin="0,0,6,0" />
                                         <TextBox AutomationProperties.AutomationId="EvaluationManualNotesTextBox"
-                                                 Text="{Binding EvaluationManualNotes, UpdateSourceTrigger=PropertyChanged}"
+                                                 Text="{Binding Evaluation.EvaluationManualNotes, UpdateSourceTrigger=PropertyChanged}"
                                                  Width="240"
                                                  Margin="0,0,12,0" />
                                         <Button AutomationProperties.AutomationId="PrepareEvaluationFailureButton"
