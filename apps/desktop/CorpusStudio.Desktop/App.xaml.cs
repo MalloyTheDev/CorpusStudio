@@ -54,6 +54,7 @@ public partial class App : Application
         services.AddTransient<IExamplesViewModel, ExamplesViewModel>();
         services.AddTransient<IWritingStudioViewModel, WritingStudioViewModel>();
         services.AddTransient<IAiAssistRewriteBatchesViewModel, AiAssistRewriteBatchesViewModel>();
+        services.AddTransient<IAiAssistConnectionViewModel, AiAssistConnectionViewModel>();
         services.AddTransient<MainWindowViewModel>();
     }
 

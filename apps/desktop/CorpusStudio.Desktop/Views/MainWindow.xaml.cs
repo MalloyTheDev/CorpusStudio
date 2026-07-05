@@ -1985,10 +1985,10 @@ public partial class MainWindow : Window
     private async void CheckAiAssistBackendButton_Click(object sender, RoutedEventArgs e)
     {
         if (!TryReadBackendOptions(
-            ViewModel.AiAssistBackend,
-            ViewModel.AiAssistModel,
-            ViewModel.AiAssistBaseUrl,
-            ViewModel.AiAssistTimeoutSeconds,
+            ViewModel.AiAssistConnection.AiAssistBackend,
+            ViewModel.AiAssistConnection.AiAssistModel,
+            ViewModel.AiAssistConnection.AiAssistBaseUrl,
+            ViewModel.AiAssistConnection.AiAssistTimeoutSeconds,
             "AI Assist",
             out var backend,
             out var model,
@@ -2028,9 +2028,9 @@ public partial class MainWindow : Window
     private async void RefreshAiAssistModelsButton_Click(object sender, RoutedEventArgs e)
     {
         if (!TryReadModelListOptions(
-            ViewModel.AiAssistBackend,
-            ViewModel.AiAssistBaseUrl,
-            ViewModel.AiAssistTimeoutSeconds,
+            ViewModel.AiAssistConnection.AiAssistBackend,
+            ViewModel.AiAssistConnection.AiAssistBaseUrl,
+            ViewModel.AiAssistConnection.AiAssistTimeoutSeconds,
             "AI Assist",
             out var backend,
             out var baseUrl,
@@ -3924,11 +3924,11 @@ public partial class MainWindow : Window
         out string errorMessage
     )
     {
-        backend = ViewModel.AiAssistBackend.Trim();
-        model = ViewModel.AiAssistModel.Trim();
-        baseUrl = string.IsNullOrWhiteSpace(ViewModel.AiAssistBaseUrl)
+        backend = ViewModel.AiAssistConnection.AiAssistBackend.Trim();
+        model = ViewModel.AiAssistConnection.AiAssistModel.Trim();
+        baseUrl = string.IsNullOrWhiteSpace(ViewModel.AiAssistConnection.AiAssistBaseUrl)
             ? null
-            : ViewModel.AiAssistBaseUrl.Trim();
+            : ViewModel.AiAssistConnection.AiAssistBaseUrl.Trim();
         action = ViewModel.AiAssistAction.Trim();
         timeoutSeconds = 0;
         instruction = string.IsNullOrWhiteSpace(ViewModel.AiAssistInstruction)
@@ -3955,7 +3955,7 @@ public partial class MainWindow : Window
         }
 
         if (!int.TryParse(
-            ViewModel.AiAssistTimeoutSeconds,
+            ViewModel.AiAssistConnection.AiAssistTimeoutSeconds,
             NumberStyles.Integer,
             CultureInfo.InvariantCulture,
             out timeoutSeconds

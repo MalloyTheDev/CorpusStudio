@@ -77,11 +77,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         "Refresh models to load running Ollama or OpenAI-compatible models.";
     private string _evaluationComparisonSummary =
         "Select two saved evaluation reports to compare score, failure, tag, and row-level changes.";
-    private string _aiAssistBackend = "ollama";
-    private string _aiAssistModel = "qwen2.5-coder:7b";
-    private string _aiAssistBaseUrl = "http://localhost:11434";
     private string _aiAssistAction = "review";
-    private string _aiAssistTimeoutSeconds = "120";
     private string _aiAssistInstruction =
         "Review the current draft and suggest safer tags or a stronger output.";
     private string _aiAssistSummary =
@@ -107,8 +103,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _aiAssistQueueViewName = "Review View";
     private string _reviewedFixSummary =
         "Edited failed rows appear here so you can track which fixes were re-tested.";
-    private string _aiAssistModelListSummary =
-        "Refresh models to load running Ollama or OpenAI-compatible models.";
     private string _trainingTarget = "axolotl_yaml";
     private string _trainingBaseModel = "Qwen/Qwen2.5-Coder-7B-Instruct";
     private string _trainingFormat = "instruction";
@@ -209,13 +203,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public IAiAssistRewriteBatchesViewModel RewriteBatches { get; }
 
+    public IAiAssistConnectionViewModel AiAssistConnection { get; }
+
     /// <summary>Design-time / test constructor.</summary>
     public MainWindowViewModel()
         : this(
             new DebtViewModel(), new ArenaViewModel(), new SettingsViewModel(),
             new VersionsViewModel(), new ArtifactsViewModel(), new SuitesViewModel(),
             new SplitsViewModel(), new PreferenceReviewViewModel(), new QuarantineViewModel(),
-            new ExamplesViewModel(), new WritingStudioViewModel(), new AiAssistRewriteBatchesViewModel())
+            new ExamplesViewModel(), new WritingStudioViewModel(), new AiAssistRewriteBatchesViewModel(),
+            new AiAssistConnectionViewModel())
     {
     }
 
@@ -224,7 +221,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         IVersionsViewModel versions, IArtifactsViewModel artifacts, ISuitesViewModel suites,
         ISplitsViewModel splits, IPreferenceReviewViewModel preferenceReview,
         IQuarantineViewModel quarantine, IExamplesViewModel examples,
-        IWritingStudioViewModel writingStudio, IAiAssistRewriteBatchesViewModel rewriteBatches)
+        IWritingStudioViewModel writingStudio, IAiAssistRewriteBatchesViewModel rewriteBatches,
+        IAiAssistConnectionViewModel aiAssistConnection)
     {
         Debt = debt;
         Arena = arena;
@@ -238,6 +236,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Examples = examples;
         WritingStudio = writingStudio;
         RewriteBatches = rewriteBatches;
+        AiAssistConnection = aiAssistConnection;
         // A split failure surfaces in the shell's shared error banner; the tab keeps no shell
         // reference, so it raises ErrorReported and the shell forwards it to ReportError.
         Splits.ErrorReported += ReportError;
@@ -377,8 +376,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public ObservableCollection<AiAssistQueueView> AiAssistQueueViews { get; } = [];
 
     public ObservableCollection<ReviewedFixRecord> ReviewedFixes { get; } = [];
-
-    public ObservableCollection<string> AiAssistAvailableModels { get; } = [];
 
     public ObservableCollection<string> AiAssistQueueFilterOptions { get; } =
     [
@@ -1108,34 +1105,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         private set => SetField(ref _evaluationModelListSummary, value);
     }
 
-    public string AiAssistBackend
-    {
-        get => _aiAssistBackend;
-        set => SetField(ref _aiAssistBackend, value);
-    }
-
-    public string AiAssistModel
-    {
-        get => _aiAssistModel;
-        set => SetField(ref _aiAssistModel, value);
-    }
-
-    public string AiAssistBaseUrl
-    {
-        get => _aiAssistBaseUrl;
-        set => SetField(ref _aiAssistBaseUrl, value);
-    }
-
     public string AiAssistAction
     {
         get => _aiAssistAction;
         set => SetField(ref _aiAssistAction, value);
-    }
-
-    public string AiAssistTimeoutSeconds
-    {
-        get => _aiAssistTimeoutSeconds;
-        set => SetField(ref _aiAssistTimeoutSeconds, value);
     }
 
     public string AiAssistInstruction
@@ -1300,11 +1273,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         private set => SetField(ref _reviewedFixSummary, value);
     }
 
-    public string AiAssistModelListSummary
-    {
-        get => _aiAssistModelListSummary;
-        private set => SetField(ref _aiAssistModelListSummary, value);
-    }
 
     public string TrainingTarget
     {
@@ -1957,10 +1925,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             },
             AiAssist = new ModelBackendSettings
             {
-                Backend = AiAssistBackend.Trim(),
-                Model = AiAssistModel.Trim(),
-                BaseUrl = AiAssistBaseUrl.Trim(),
-                TimeoutSeconds = ParsePositiveIntOrDefault(AiAssistTimeoutSeconds, 120),
+                Backend = AiAssistConnection.AiAssistBackend.Trim(),
+                Model = AiAssistConnection.AiAssistModel.Trim(),
+                BaseUrl = AiAssistConnection.AiAssistBaseUrl.Trim(),
+                TimeoutSeconds = ParsePositiveIntOrDefault(AiAssistConnection.AiAssistTimeoutSeconds, 120),
             },
         };
     }
@@ -2638,8 +2606,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             [
                 "Running AI Assist...",
                 $"Action: {AiAssistAction}",
-                $"Backend: {AiAssistBackend}",
-                $"Model: {AiAssistModel}",
+                $"Backend: {AiAssistConnection.AiAssistBackend}",
+                $"Model: {AiAssistConnection.AiAssistModel}",
             ]
         );
         AiAssistReviewText = "Waiting for local model response.";
@@ -3111,38 +3079,38 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Environment.NewLine,
             [
                 "Checking AI Assist backend...",
-                $"Backend: {AiAssistBackend}",
-                $"Model: {AiAssistModel}",
+                $"Backend: {AiAssistConnection.AiAssistBackend}",
+                $"Model: {AiAssistConnection.AiAssistModel}",
             ]
         );
     }
 
     public void ApplyAiAssistBackendHealthReport(BackendHealthReport report)
     {
-        SetAvailableModels(AiAssistAvailableModels, report.AvailableModels);
+        SetAvailableModels(AiAssistConnection.AiAssistAvailableModels, report.AvailableModels);
         AiAssistSummary = FormatBackendHealthReport("AI Assist backend", report);
     }
 
     public void SetAiAssistModelListInProgress()
     {
-        AiAssistModelListSummary = $"Refreshing models from {AiAssistBackend}...";
+        AiAssistConnection.SetModelListSummary($"Refreshing models from {AiAssistConnection.AiAssistBackend}...");
     }
 
     public void ApplyAiAssistModelListReport(BackendModelListReport report)
     {
         ApplyModelListReport(
             report,
-            AiAssistAvailableModels,
-            AiAssistModel,
-            model => AiAssistModel = model,
-            summary => AiAssistModelListSummary = summary,
+            AiAssistConnection.AiAssistAvailableModels,
+            AiAssistConnection.AiAssistModel,
+            model => AiAssistConnection.AiAssistModel = model,
+            summary => AiAssistConnection.SetModelListSummary(summary),
             "AI Assist"
         );
     }
 
     public void SetAiAssistModelListError(string message)
     {
-        AiAssistModelListSummary = $"AI Assist model refresh failed.{Environment.NewLine}{message}";
+        AiAssistConnection.SetModelListSummary($"AI Assist model refresh failed.{Environment.NewLine}{message}");
         ReportError(message);
     }
 
@@ -4567,10 +4535,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return;
         }
 
-        AiAssistBackend = backend;
-        AiAssistModel = model;
-        AiAssistBaseUrl = baseUrl;
-        AiAssistTimeoutSeconds = timeoutSeconds.ToString();
+        AiAssistConnection.AiAssistBackend = backend;
+        AiAssistConnection.AiAssistModel = model;
+        AiAssistConnection.AiAssistBaseUrl = baseUrl;
+        AiAssistConnection.AiAssistTimeoutSeconds = timeoutSeconds.ToString();
     }
 
     private static string DefaultBaseUrlForBackend(string backend)
