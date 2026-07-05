@@ -3008,7 +3008,7 @@ public partial class MainWindow : Window
         // Confirm — this overwrites the current dataset. The dialog is honest about the
         // undo capture and the canonical caveat.
         var confirm = MessageBox.Show(
-            VersionsViewModel.BuildRestoreConfirmation(selected, ViewModel.Examples.Count),
+            VersionsViewModel.BuildRestoreConfirmation(selected, ViewModel.Examples.Items.Count),
             "Restore version",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning);

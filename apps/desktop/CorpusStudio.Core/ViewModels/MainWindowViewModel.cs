@@ -153,7 +153,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _errorMessage = string.Empty;
     private string _labSettingsSummary = "Lab backend settings can be saved per project.";
     private DatasetProjectListItem? _selectedProject;
-    private SavedExampleItem? _selectedExample;
     private ValidationIssueNavigationItem? _selectedValidationIssue;
     private SyntheticPatternIssue? _selectedSyntheticPatternIssue;
     private EvaluationReportHistoryItem? _selectedEvaluationReportHistoryItem;
@@ -168,7 +167,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private EvaluationFailureFilter? _selectedEvaluationFailureFilter;
     private readonly List<EvaluationExampleResult> _allEvaluationResults = [];
     private readonly List<AiAssistReviewQueueItem> _allAiAssistReviewQueue = [];
-    private string _selectedExampleJson = "Saved examples appear here after a project is selected.";
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -209,12 +207,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public IQuarantineViewModel Quarantine { get; }
 
+    public IExamplesViewModel Examples { get; }
+
     /// <summary>Design-time / test constructor.</summary>
     public MainWindowViewModel()
         : this(
             new DebtViewModel(), new ArenaViewModel(), new SettingsViewModel(),
             new VersionsViewModel(), new ArtifactsViewModel(), new SuitesViewModel(),
-            new SplitsViewModel(), new PreferenceReviewViewModel(), new QuarantineViewModel())
+            new SplitsViewModel(), new PreferenceReviewViewModel(), new QuarantineViewModel(),
+            new ExamplesViewModel())
     {
     }
 
@@ -222,7 +223,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         IDebtViewModel debt, IArenaViewModel arena, ISettingsViewModel settings,
         IVersionsViewModel versions, IArtifactsViewModel artifacts, ISuitesViewModel suites,
         ISplitsViewModel splits, IPreferenceReviewViewModel preferenceReview,
-        IQuarantineViewModel quarantine)
+        IQuarantineViewModel quarantine, IExamplesViewModel examples)
     {
         Debt = debt;
         Arena = arena;
@@ -233,6 +234,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Splits = splits;
         PreferenceReview = preferenceReview;
         Quarantine = quarantine;
+        Examples = examples;
         // A split failure surfaces in the shell's shared error banner; the tab keeps no shell
         // reference, so it raises ErrorReported and the shell forwards it to ReportError.
         Splits.ErrorReported += ReportError;
@@ -332,7 +334,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
-    public ObservableCollection<SavedExampleItem> Examples { get; } = [];
 
     public ObservableCollection<ValidationIssueNavigationItem> ValidationIssues { get; } = [];
 
@@ -445,18 +446,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         set => SetField(ref _selectedProject, value);
     }
 
-    public SavedExampleItem? SelectedExample
-    {
-        get => _selectedExample;
-        set
-        {
-            if (SetField(ref _selectedExample, value))
-            {
-                SelectedExampleJson = value?.Json ?? "Select a saved example to inspect its JSON.";
-            }
-        }
-    }
-
+    // The saved-examples list/selection/JSON pane moved to ExamplesViewModel in Phase 2 (the dataset
+    // spine). The shell's SetExamples orchestrates the dataset-changed fan-out; cross-tab row
+    // navigation (quality triage/synthetic/reviewed-fix) reads Examples.Items + sets
+    // Examples.SelectedExample. Bindings use Examples.*, code-behind ViewModel.Examples.*.
 
     public ValidationIssueNavigationItem? SelectedValidationIssue
     {
@@ -476,12 +469,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                     : FormatSyntheticTriageSummary(value);
             }
         }
-    }
-
-    public string SelectedExampleJson
-    {
-        get => _selectedExampleJson;
-        private set => SetField(ref _selectedExampleJson, value);
     }
 
     private const string InitialDraftTemplate =
@@ -1971,12 +1958,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         TrainingFormat = project.SchemaId;
         TrainingSummary = "Generate a training config after validation, splits, and evaluation checks.";
         TrainingConfigPreview = "Training config preview appears here.";
-        Examples.Clear();
+        // Saved-examples state is per-project: reset the child (clears the list + selection).
+        Examples.Reset();
         // Import-quarantine state is per-project: reset the child; the retry-tracking (_pendingRetryItem)
         // is a shell-owned Writing-Studio bridge, cleared here too.
         Quarantine.Reset();
         _pendingRetryItem = null;
-        SelectedExample = null;
         // Preference-review state is per-project: reset the child so nothing leaks across a switch.
         PreferenceReview.Reset();
         // Dataset-version state is per-project: reset the child view-model so nothing leaks across
@@ -2046,21 +2033,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         LabSettingsSummary = $"Lab backend settings could not be saved.{Environment.NewLine}{message}";
     }
 
+    /// <summary>Dataset-changed orchestrator: rebuild the saved-examples list (via the Examples tab),
+    /// then fan the change out to the tabs that derive from the dataset — Preference pairs, the Quality
+    /// summary, and the (now stale) Debt grade.</summary>
     public void SetExamples(IEnumerable<SavedExampleItem> examples)
     {
-        Examples.Clear();
-        foreach (var example in examples)
-        {
-            Examples.Add(example);
-        }
-
-        SelectedExample = Examples.FirstOrDefault();
-        SelectedExampleJson = SelectedExample?.Json
-            ?? "No saved examples yet. Save a valid draft from Writing Studio.";
-        PreferenceReview.SetItems(Examples);
-        QualitySummary = Examples.Count == 0
+        Examples.SetItems(examples);
+        PreferenceReview.SetItems(Examples.Items);
+        QualitySummary = Examples.Items.Count == 0
             ? "No saved examples yet. Quality checks will run after examples are added."
-            : $"{Examples.Count} saved example(s). Run quality checks to inspect duplicates and empty rows.";
+            : $"{Examples.Items.Count} saved example(s). Run quality checks to inspect duplicates and empty rows.";
         // The dataset changed: any prior debt grade is now stale. Invalidate it so the
         // Debt tab can never show a verdict that no longer matches the data.
         Debt.InvalidateDebt();
@@ -2225,14 +2207,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return false;
         }
 
-        var example = Examples.FirstOrDefault(item => item.RowNumber == rowNumber);
+        var example = Examples.Items.FirstOrDefault(item => item.RowNumber == rowNumber);
         if (example is null)
         {
             QualityTriageSummary = $"Affected row {rowNumber} is not loaded in the Examples list.";
             return false;
         }
 
-        SelectedExample = example;
+        Examples.SelectedExample = example;
         LoadDraft(example.Json);
         if (AiAssistActionPresets.Contains("rewrite-output"))
         {
@@ -2267,7 +2249,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         var affectedRows = rowNumbers
-            .Select(rowNumber => Examples.FirstOrDefault(example => example.RowNumber == rowNumber))
+            .Select(rowNumber => Examples.Items.FirstOrDefault(example => example.RowNumber == rowNumber))
             .Where(example => example is not null)
             .Cast<SavedExampleItem>()
             .ToList();
@@ -2352,7 +2334,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return false;
         }
 
-        var example = Examples.FirstOrDefault(item => item.RowNumber == rowNumber);
+        var example = Examples.Items.FirstOrDefault(item => item.RowNumber == rowNumber);
         if (example is null)
         {
             EvaluationReviewSummary =
@@ -2371,7 +2353,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             SourceReport = SelectedEvaluationReportHistoryItem?.DisplayName ?? "current evaluation run",
         };
 
-        SelectedExample = example;
+        Examples.SelectedExample = example;
         LoadDraft(example.Json);
         ValidationSummary =
             $"Loaded evaluation failure row {rowNumber}. Validate before saving reviewed edits.";
@@ -2983,7 +2965,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return false;
         }
 
-        var example = Examples.FirstOrDefault(item => item.RowNumber == SelectedReviewedFix.RowNumber);
+        var example = Examples.Items.FirstOrDefault(item => item.RowNumber == SelectedReviewedFix.RowNumber);
         if (example is null)
         {
             ReviewedFixSummary =
@@ -2991,7 +2973,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return false;
         }
 
-        SelectedExample = example;
+        Examples.SelectedExample = example;
         LoadDraft(example.Json);
         ReviewedFixSummary =
             $"Reopened reviewed fix for {SelectedReviewedFix.ExampleId} (v{SelectedReviewedFix.Version}). Edit, validate, save, then rerun evaluation.";
