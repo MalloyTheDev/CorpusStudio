@@ -38,7 +38,7 @@ MODIFIED = "modified"
 # Descriptor files that identify an adapter/model directory, in priority order.
 _DESCRIPTOR_FILES = ("adapter_config.json", "config.json")
 # Weight files whose bytes ARE the model — top-level within an artifact directory.
-_WEIGHT_SUFFIXES = (".safetensors", ".bin", ".gguf", ".pt", ".pth")
+_WEIGHT_SUFFIXES = (".safetensors", ".bin", ".gguf", ".pt", ".pth", ".onnx", ".h5")
 _VALID_ARTIFACT_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
@@ -83,23 +83,43 @@ def _descriptor_file(directory: Path) -> Path | None:
 
 
 def _weight_files(directory: Path) -> list[Path]:
-    """Top-level weight files in an artifact directory (sorted for determinism)."""
+    """Every weight file under an artifact directory (RECURSIVE, sorted by relative path for
+    determinism). Recursion + the broadened suffix set (.safetensors/.bin/.gguf/.pt/.pth/.onnx/
+    .h5) mean a swapped SHARD in a subdir, or an .onnx/.h5 weight, is covered — not just a
+    top-level .safetensors. Callers key each file by its path RELATIVE to ``directory``, so a
+    top-level-only artifact hashes byte-identically to before (relative path == basename) and
+    only previously-under-covered layouts change."""
 
     return sorted(
-        entry
-        for entry in directory.iterdir()
-        if entry.is_file() and entry.suffix.lower() in _WEIGHT_SUFFIXES
+        (
+            entry
+            for entry in directory.rglob("*")
+            if entry.is_file() and entry.suffix.lower() in _WEIGHT_SUFFIXES
+        ),
+        key=lambda entry: entry.relative_to(directory).as_posix(),
     )
+
+
+def _rel_key(file: Path, base: Path) -> str:
+    """Stable per-file key: the path relative to the artifact dir (POSIX slashes) so nested
+    files with the same basename can't collide; falls back to the name for a single-file
+    artifact (where ``file`` is not under ``base``)."""
+
+    try:
+        return file.relative_to(base).as_posix()
+    except ValueError:
+        return file.name
 
 
 def compute_fingerprint(path: str) -> str | None:
     """Cheap, deterministic fingerprint: never reads weight bytes (only ``stat``).
 
     File -> ``"size:mtime_ns"``.
-    Dir  -> the descriptor file AND every top-level weight file as
-    ``"name=size:mtime_ns"`` joined by ``;`` — so an overwritten / resized / added /
-    removed weight is detected (a byte-swap that preserves size AND mtime is not; use
-    :func:`compute_content_hash` for that). Returns ``None`` when nothing is readable.
+    Dir  -> the descriptor file AND every weight file found RECURSIVELY as
+    ``"relpath=size:mtime_ns"`` joined by ``;`` — so an overwritten / resized / added /
+    removed weight (including a nested shard or an .onnx/.h5 file) is detected (a byte-swap
+    that preserves size AND mtime is not; use :func:`compute_content_hash` for that). Returns
+    ``None`` when nothing is readable.
     """
 
     target = Path(path)
@@ -112,10 +132,10 @@ def compute_fingerprint(path: str) -> str | None:
             descriptor = _descriptor_file(target)
             if descriptor is not None:
                 stat = descriptor.stat()
-                parts.append(f"{descriptor.name}={stat.st_size}:{stat.st_mtime_ns}")
+                parts.append(f"{_rel_key(descriptor, target)}={stat.st_size}:{stat.st_mtime_ns}")
             for weight in _weight_files(target):
                 stat = weight.stat()
-                parts.append(f"{weight.name}={stat.st_size}:{stat.st_mtime_ns}")
+                parts.append(f"{_rel_key(weight, target)}={stat.st_size}:{stat.st_mtime_ns}")
             return ";".join(parts) if parts else None
     except OSError:
         return None
@@ -147,7 +167,7 @@ def compute_content_hash(path: str) -> str | None:
             return None
         digest = hashlib.sha256()
         for file in files:
-            digest.update(file.name.encode("utf-8"))
+            digest.update(_rel_key(file, target).encode("utf-8"))
             digest.update(b"\0")
             with file.open("rb") as handle:
                 while True:

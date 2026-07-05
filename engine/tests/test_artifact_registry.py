@@ -11,6 +11,7 @@ from corpus_studio.training.artifact_registry import (
     OK,
     artifact_content_integrity,
     artifact_integrity,
+    compute_content_hash,
     compute_fingerprint,
     list_artifacts,
     load_artifact_record,
@@ -168,6 +169,46 @@ def test_content_integrity_legacy_record_falls_back_to_cheap(tmp_path: Path):
 
     (adapter / "adapter_model.safetensors").write_text("resized weights", encoding="utf-8")
     assert artifact_content_integrity(legacy) == MODIFIED  # falls back to size+mtime
+
+
+# --- C11: weight-hash coverage (nested shards + .onnx/.h5) --------------------
+
+def test_content_hash_covers_nested_shards(tmp_path: Path):
+    # A sharded model keeps weights in a subdir; a swap there must be caught, not ignored.
+    adapter = tmp_path / "model"
+    (adapter / "shards").mkdir(parents=True)
+    (adapter / "config.json").write_text("{}", encoding="utf-8")
+    shard = adapter / "shards" / "model-00001-of-00002.safetensors"
+    shard.write_text("real weights", encoding="utf-8")
+
+    before = compute_content_hash(str(adapter))
+    shard.write_text("swapped bytes", encoding="utf-8")
+    after = compute_content_hash(str(adapter))
+    assert before is not None and before != after  # the nested shard change is detected
+
+
+def test_content_hash_covers_onnx_and_h5(tmp_path: Path):
+    # .onnx / .h5 weights were previously ignored, leaving the promote-gate hash hollow.
+    for name in ("model.onnx", "model.h5"):
+        d = tmp_path / name.replace(".", "_")
+        d.mkdir()
+        (d / "config.json").write_text("{}", encoding="utf-8")
+        weight = d / name
+        weight.write_text("weights", encoding="utf-8")
+        before = compute_content_hash(str(d))
+        weight.write_text("tampered", encoding="utf-8")
+        assert before is not None and before != compute_content_hash(str(d))
+
+
+def test_top_level_only_artifact_keys_by_basename_unchanged(tmp_path: Path):
+    # Regression: for the common (top-level) layout the relative-path key equals the basename,
+    # so the fingerprint keeps the "name=size:mtime" form (no migration churn for existing
+    # records). Nesting is what introduces slashes.
+    adapter = _adapter_dir(tmp_path)
+    fingerprint = compute_fingerprint(str(adapter))
+    assert fingerprint is not None
+    assert "adapter_model.safetensors=" in fingerprint
+    assert "/" not in fingerprint  # top-level keys carry no path separator
 
 
 # --- status transitions ------------------------------------------------------
