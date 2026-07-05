@@ -83,7 +83,9 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop/Properties/PublishProfiles/win-x64.pubxml`
 - `apps/desktop/CorpusStudio.Desktop/Services/PythonEngineService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/IDialogService.cs`
+- `apps/desktop/CorpusStudio.Desktop/Services/IFilePickerService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/MessageBoxDialogService.cs`
+- `apps/desktop/CorpusStudio.Desktop/Services/Win32FilePickerService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/PythonExecutableResolver.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/RecentWorkspaceService.cs`
 - `apps/desktop/CorpusStudio.Desktop/Services/TrainingProcessRunner.cs`
@@ -151,6 +153,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceExplorerViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/SuitesTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceSearchTests.cs`
+- `apps/desktop/CorpusStudio.Desktop.Tests/Win32FilePickerServiceTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceOpenRoutingTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/WorkspaceWizardViewModelTests.cs`
 - `apps/desktop/CorpusStudio.Desktop.Tests/TempProjectDirectory.cs`
