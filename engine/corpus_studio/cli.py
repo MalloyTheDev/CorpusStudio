@@ -374,10 +374,12 @@ def hf_import(
     quarantine path so the desktop stays the single writer. Imported data is NOT
     assumed to be training-licensed; the dataset license is reported.
     """
-    # The engine must never write the dataset's single source of truth. Compare the
-    # basename case-insensitively (os.path.normcase) so `--out Examples.jsonl` cannot
-    # slip past the guard on a case-insensitive filesystem (Windows/macOS).
-    if os.path.normcase(out.name) == os.path.normcase("examples.jsonl"):
+    # The engine must never write the dataset's single source of truth. Compare the basename
+    # case-insensitively (casefold, NOT os.path.normcase — which only case-folds on Windows, so
+    # it was a no-op on the Linux CI) so `--out Examples.jsonl` cannot slip past the guard on a
+    # case-insensitive filesystem (Windows/macOS). Refusing the name on a case-sensitive OS too
+    # is safe and conservative.
+    if out.name.casefold() == "examples.jsonl":
         typer.echo(
             "Refusing to write examples.jsonl: HF import writes a staging file that the "
             "desktop imports through preview/quarantine.",
