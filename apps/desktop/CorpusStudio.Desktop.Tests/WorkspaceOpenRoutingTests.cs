@@ -47,6 +47,27 @@ public sealed class WorkspaceOpenRoutingTests : IDisposable
         Assert.Equal(expected, WorkspaceOpenRouting.Classify(hasManifest, hasExamples, isEmpty));
     }
 
+    // ---- ShouldReplaceWorkspace (the unsaved-work guard, pure) -------------------
+
+    [Fact]
+    public void ShouldReplaceWorkspace_NoUnsavedWork_ProceedsWithoutPrompting()
+    {
+        var prompted = false;
+        var proceed = WorkspaceOpenRouting.ShouldReplaceWorkspace(
+            hasUnsavedWork: false,
+            confirmDiscard: () => { prompted = true; return false; });
+
+        Assert.True(proceed);       // a clean workspace opens...
+        Assert.False(prompted);     // ...and the user is never prompted
+    }
+
+    [Fact]
+    public void ShouldReplaceWorkspace_UnsavedWork_PromptsAndHonorsTheChoice()
+    {
+        Assert.True(WorkspaceOpenRouting.ShouldReplaceWorkspace(true, confirmDiscard: () => true));   // discard confirmed
+        Assert.False(WorkspaceOpenRouting.ShouldReplaceWorkspace(true, confirmDiscard: () => false)); // cancelled -> no open
+    }
+
     // ---- Inspect (over real folders) ---------------------------------------------
 
     [Fact]

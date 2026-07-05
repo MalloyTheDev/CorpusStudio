@@ -79,6 +79,17 @@ public static class WorkspaceOpenRouting
         return Classify(hasManifest, hasExamples, isEmpty);
     }
 
+    /// <summary>Decide whether an action that REPLACES the current workspace (open folder,
+    /// recent, initialize, or new-project) may proceed. Proceeds immediately when there is no
+    /// unsaved work; otherwise proceeds only if the user confirms discarding it. Kept free of
+    /// dialogs so it is unit-testable — the code-behind supplies the confirmation prompt, which
+    /// is invoked ONLY when there is unsaved work (a clean workspace opens with no prompt).</summary>
+    public static bool ShouldReplaceWorkspace(bool hasUnsavedWork, Func<bool> confirmDiscard)
+    {
+        ArgumentNullException.ThrowIfNull(confirmDiscard);
+        return !hasUnsavedWork || confirmDiscard();
+    }
+
     /// <summary>Derive the (projectId, name, schemaId) used to open a folder as the active
     /// workspace: from a recognized manifest, else from the folder name + default schema.</summary>
     public static (string ProjectId, string Name, string SchemaId) DeriveOpenArgs(

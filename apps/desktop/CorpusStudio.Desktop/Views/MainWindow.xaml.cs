@@ -381,6 +381,15 @@ public partial class MainWindow : Window
     /// and land in the Explorer. The engine only ever reads from this path.</summary>
     private async Task OpenWorkspaceFolder(string folder)
     {
+        // Guard unsaved work before opening replaces the current draft and clears open
+        // documents — this is the single chokepoint for every open path (Open Folder, Recent,
+        // Initialize, New Project wizard), mirroring the project-switch and app-close prompts.
+        // On decline, open nothing and leave the current workspace untouched.
+        if (!ConfirmDiscardUnsavedWork("Open this workspace"))
+        {
+            return;
+        }
+
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
@@ -454,6 +463,22 @@ public partial class MainWindow : Window
     private bool ConfirmOpen(string message) =>
         MessageBox.Show(this, message, "Open Folder", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No)
         == MessageBoxResult.Yes;
+
+    /// <summary>Prompt to discard unsaved work (an edited draft or open documents) before an
+    /// action that replaces the current workspace. Returns true to proceed. A no-op returning
+    /// true when there is nothing unsaved, so a clean workspace opens without a prompt. Mirrors
+    /// the project-switch (ProjectsListBox_SelectionChanged) and app-close guards.</summary>
+    private bool ConfirmDiscardUnsavedWork(string actionDescription) =>
+        WorkspaceOpenRouting.ShouldReplaceWorkspace(
+            ViewModel.HasUnsavedWork,
+            () => MessageBox.Show(
+                this,
+                "You have unsaved changes (an edited draft or open documents). "
+                + $"{actionDescription} and discard them?",
+                "Unsaved changes",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No) == MessageBoxResult.Yes);
 
     private static string FolderDisplayName(string folder)
     {
