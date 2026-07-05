@@ -1,0 +1,52 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:CorpusStudio.Desktop.ViewModels;assembly=CorpusStudio.Core"
+        xmlns:models="clr-namespace:CorpusStudio.Desktop.Models;assembly=CorpusStudio.Core"
+        x:Class="CorpusStudio.Avalonia.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Width="920" Height="640"
+        Title="Corpus Studio — Avalonia spike (Debt + Arena over the shared view-models)">
+  <TabControl Margin="8">
+
+    <!-- Debt: read bindings + IsVisible bound to a bool (the Visibility→IsVisible port, proven). -->
+    <TabItem Header="Debt">
+      <ScrollViewer>
+        <StackPanel Margin="20" Spacing="10">
+          <StackPanel Orientation="Horizontal" Spacing="12">
+            <TextBlock Text="{Binding Debt.DebtGrade}" FontSize="44" FontWeight="Bold"/>
+            <TextBlock Text="stale" VerticalAlignment="Center" Foreground="#B45309"
+                       IsVisible="{Binding Debt.DebtStale}"/>
+          </StackPanel>
+          <TextBlock Text="{Binding Debt.DebtSummary}" TextWrapping="Wrap"/>
+          <ItemsControl ItemsSource="{Binding Debt.DebtItems}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="models:DebtDisplayItem">
+                <Border Padding="8" Margin="0,2" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="6">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <TextBlock Text="{Binding SeverityBadge}"/>
+                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding Measure}" Foreground="#64748B"/>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </ScrollViewer>
+    </TabItem>
+
+    <!-- Arena: TwoWay text bindings on get/set VM inputs (proven) + a read binding. -->
+    <TabItem Header="Arena">
+      <StackPanel Margin="20" Spacing="10">
+        <TextBlock Text="Prompts (one per line)"/>
+        <TextBox Text="{Binding Arena.ArenaPromptsInput}" AcceptsReturn="True" Height="90"/>
+        <TextBlock Text="Models (comma or newline)"/>
+        <TextBox Text="{Binding Arena.ArenaModelsInput}"/>
+        <TextBlock Text="Judge model (optional)"/>
+        <TextBox Text="{Binding Arena.ArenaJudgeModelInput}"/>
+        <TextBlock Text="{Binding Arena.ArenaSummary}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+      </StackPanel>
+    </TabItem>
+
+  </TabControl>
+</Window>

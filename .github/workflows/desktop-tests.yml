@@ -23,3 +23,9 @@ jobs:
 
       - name: Test
         run: dotnet test apps/desktop/CorpusStudio.Desktop.Tests/CorpusStudio.Desktop.Tests.csproj -c Release --no-restore
+
+      # Cross-platform Avalonia head (Phase 1 spike). Nothing else references it, so it needs its
+      # own restore+build. Compiled bindings validate the shared-VM bindings at build time, so a
+      # green build here IS the spike's guard. See docs/AVALONIA_MIGRATION_PLAN.md.
+      - name: Build Avalonia head (Release)
+        run: dotnet build apps/desktop/CorpusStudio.Avalonia/CorpusStudio.Avalonia.csproj -c Release

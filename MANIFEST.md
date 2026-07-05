@@ -19,6 +19,12 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `README.md`
 - `SECURITY.md`
 - `TASKS.md`
+- `apps/desktop/CorpusStudio.Avalonia/App.axaml`
+- `apps/desktop/CorpusStudio.Avalonia/App.axaml.cs`
+- `apps/desktop/CorpusStudio.Avalonia/CorpusStudio.Avalonia.csproj`
+- `apps/desktop/CorpusStudio.Avalonia/Program.cs`
+- `apps/desktop/CorpusStudio.Avalonia/Views/MainWindow.axaml`
+- `apps/desktop/CorpusStudio.Avalonia/Views/MainWindow.axaml.cs`
 - `apps/desktop/CorpusStudio.Desktop/App.xaml`
 - `apps/desktop/CorpusStudio.Desktop/App.xaml.cs`
 - `apps/desktop/CorpusStudio.Desktop/Converters.cs`
