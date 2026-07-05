@@ -146,8 +146,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _datasetCardSummary =
         "Generate a dataset card to summarize metadata, schema, splits, quality, and evaluation.";
     private string _datasetCardPreview = "Dataset card preview appears here.";
-    private string _selectedImportQuarantineDetail =
-        "Rejected import rows appear here after a mixed import.";
     private string _projectIndexSummary = "Projects list from local files. Rebuild the index to list from SQLite.";
     private bool _isBusy;
     private string _busyStatus = "Working...";
@@ -158,7 +156,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private SavedExampleItem? _selectedExample;
     private ValidationIssueNavigationItem? _selectedValidationIssue;
     private SyntheticPatternIssue? _selectedSyntheticPatternIssue;
-    private ImportQuarantineItem? _selectedImportQuarantineItem;
     private EvaluationReportHistoryItem? _selectedEvaluationReportHistoryItem;
     private EvaluationReportHistoryItem? _secondaryEvaluationReportHistoryItem;
     private EvaluationExampleResult? _selectedEvaluationExampleResult;
@@ -210,19 +207,22 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public IPreferenceReviewViewModel PreferenceReview { get; }
 
+    public IQuarantineViewModel Quarantine { get; }
+
     /// <summary>Design-time / test constructor.</summary>
     public MainWindowViewModel()
         : this(
             new DebtViewModel(), new ArenaViewModel(), new SettingsViewModel(),
             new VersionsViewModel(), new ArtifactsViewModel(), new SuitesViewModel(),
-            new SplitsViewModel(), new PreferenceReviewViewModel())
+            new SplitsViewModel(), new PreferenceReviewViewModel(), new QuarantineViewModel())
     {
     }
 
     public MainWindowViewModel(
         IDebtViewModel debt, IArenaViewModel arena, ISettingsViewModel settings,
         IVersionsViewModel versions, IArtifactsViewModel artifacts, ISuitesViewModel suites,
-        ISplitsViewModel splits, IPreferenceReviewViewModel preferenceReview)
+        ISplitsViewModel splits, IPreferenceReviewViewModel preferenceReview,
+        IQuarantineViewModel quarantine)
     {
         Debt = debt;
         Arena = arena;
@@ -232,6 +232,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Suites = suites;
         Splits = splits;
         PreferenceReview = preferenceReview;
+        Quarantine = quarantine;
         // A split failure surfaces in the shell's shared error banner; the tab keeps no shell
         // reference, so it raises ErrorReported and the shell forwards it to ReportError.
         Splits.ErrorReported += ReportError;
@@ -336,8 +337,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public ObservableCollection<ValidationIssueNavigationItem> ValidationIssues { get; } = [];
 
     public ObservableCollection<SyntheticPatternIssue> SyntheticPatternIssues { get; } = [];
-
-    public ObservableCollection<ImportQuarantineItem> ImportQuarantineItems { get; } = [];
 
     public ObservableCollection<EvaluationReportHistoryItem> EvaluationReportHistory { get; } = [];
 
@@ -1753,19 +1752,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         private set => SetField(ref _datasetCardPreview, value);
     }
 
-    public ImportQuarantineItem? SelectedImportQuarantineItem
-    {
-        get => _selectedImportQuarantineItem;
-        set
-        {
-            if (SetField(ref _selectedImportQuarantineItem, value))
-            {
-                SelectedImportQuarantineDetail = value?.DetailText
-                    ?? "Select a rejected import row to inspect it.";
-            }
-        }
-    }
-
     public EvaluationReportHistoryItem? SelectedEvaluationReportHistoryItem
     {
         get => _selectedEvaluationReportHistoryItem;
@@ -1788,12 +1774,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _evaluationComparisonSummary;
         private set => SetField(ref _evaluationComparisonSummary, value);
-    }
-
-    public string SelectedImportQuarantineDetail
-    {
-        get => _selectedImportQuarantineDetail;
-        private set => SetField(ref _selectedImportQuarantineDetail, value);
     }
 
     public string LabSettingsSummary
@@ -1992,8 +1972,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         TrainingSummary = "Generate a training config after validation, splits, and evaluation checks.";
         TrainingConfigPreview = "Training config preview appears here.";
         Examples.Clear();
-        ImportQuarantineItems.Clear();
-        SelectedImportQuarantineItem = null;
+        // Import-quarantine state is per-project: reset the child; the retry-tracking (_pendingRetryItem)
+        // is a shell-owned Writing-Studio bridge, cleared here too.
+        Quarantine.Reset();
         _pendingRetryItem = null;
         SelectedExample = null;
         // Preference-review state is per-project: reset the child so nothing leaks across a switch.
@@ -3547,29 +3528,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ReportError(message);
     }
 
-    public void SetImportQuarantineItems(IEnumerable<ImportQuarantineItem> items)
-    {
-        ImportQuarantineItems.Clear();
-        foreach (var item in items)
-        {
-            ImportQuarantineItems.Add(item);
-        }
-
-        SelectedImportQuarantineItem = ImportQuarantineItems.FirstOrDefault();
-        SelectedImportQuarantineDetail = SelectedImportQuarantineItem?.DetailText
-            ?? "No rejected import rows are in quarantine for this project.";
-    }
-
+    // The Import Quarantine list/selection/detail moved to QuarantineViewModel in Phase 2. The retry
+    // action stays here — it repairs a row by loading it into the not-yet-extracted Writing Studio
+    // draft (LoadDraft) and tracks the pending row so a successful save can clear it — reaching into
+    // the child for the selected row. Resolve this bridge when Writing Studio decomposes.
     private ImportQuarantineItem? _pendingRetryItem;
 
     public void RetrySelectedImportQuarantineItem()
     {
-        if (SelectedImportQuarantineItem is not null)
+        var selected = Quarantine.SelectedImportQuarantineItem;
+        if (selected is not null)
         {
-            LoadDraft(SelectedImportQuarantineItem.Raw);
+            LoadDraft(selected.Raw);
             // Remember which quarantine row is being repaired so a successful save can
             // remove it (otherwise the record orphans in quarantine forever).
-            _pendingRetryItem = SelectedImportQuarantineItem;
+            _pendingRetryItem = selected;
         }
     }
 

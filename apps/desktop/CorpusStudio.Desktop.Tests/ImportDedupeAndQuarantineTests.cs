@@ -163,8 +163,8 @@ public sealed class ImportDedupeAndQuarantineTests
     {
         var vm = new MainWindowViewModel();
         var item = new ImportQuarantineItem { RowNumber = 3, SourcePath = "s", Raw = "{\"x\":1}", QuarantinePath = "q" };
-        vm.SetImportQuarantineItems(new[] { item });
-        vm.SelectedImportQuarantineItem = item;
+        vm.Quarantine.SetItems(new[] { item });
+        vm.Quarantine.SelectedImportQuarantineItem = item;
 
         vm.RetrySelectedImportQuarantineItem();
         Assert.Equal(item.Raw, vm.DraftText);
