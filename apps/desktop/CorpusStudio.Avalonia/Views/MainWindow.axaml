@@ -201,5 +201,162 @@
       </Grid>
     </TabItem>
 
+    <!-- Writing Studio: the shared draft editor — TwoWay text + an IsVisible dirty indicator. -->
+    <TabItem Header="Writing Studio">
+      <DockPanel Margin="16">
+        <TextBlock DockPanel.Dock="Top" Text="Unsaved changes" Foreground="#B45309" Margin="0,0,0,6"
+                   IsVisible="{Binding WritingStudio.IsDraftDirty}"/>
+        <TextBox Text="{Binding WritingStudio.DraftText}" AcceptsReturn="True"
+                 FontFamily="Consolas" TextWrapping="NoWrap"
+                 HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+      </DockPanel>
+    </TabItem>
+
+    <!-- AI Assist: the connection child + action ComboBox + review queue + the colored candidate gate. -->
+    <TabItem Header="AI Assist">
+      <Grid Margin="16" ColumnDefinitions="320,*" RowDefinitions="Auto,*">
+        <StackPanel Grid.Column="0" Grid.RowSpan="2" Spacing="6">
+          <TextBlock Text="Backend / model"/>
+          <TextBox Text="{Binding AiAssistConnection.AiAssistBackend}"/>
+          <TextBox Text="{Binding AiAssistConnection.AiAssistModel}"/>
+          <TextBox Text="{Binding AiAssistConnection.AiAssistBaseUrl}"/>
+          <TextBlock Text="{Binding AiAssistConnection.AiAssistModelListSummary}"
+                     Foreground="#64748B" FontSize="11" TextWrapping="Wrap"/>
+          <TextBlock Text="Action" Margin="0,6,0,0"/>
+          <ComboBox HorizontalAlignment="Stretch"
+                    ItemsSource="{Binding AiAssist.AiAssistActionPresets}"
+                    SelectedItem="{Binding AiAssist.AiAssistAction}"/>
+          <TextBlock Text="{Binding AiAssist.AiAssistQueueSummary}" Margin="0,6,0,0"/>
+          <ComboBox HorizontalAlignment="Stretch"
+                    ItemsSource="{Binding AiAssist.AiAssistQueueFilterOptions}"
+                    SelectedItem="{Binding AiAssist.AiAssistQueueFilter}"/>
+          <TextBox Text="{Binding AiAssist.AiAssistQueueSearch}" Watermark="search"/>
+          <ListBox ItemsSource="{Binding AiAssist.AiAssistReviewQueue}"
+                   SelectedItem="{Binding AiAssist.SelectedAiAssistReviewQueueItem}" Height="200">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:AiAssistReviewQueueItem">
+                <StackPanel Margin="0,2">
+                  <TextBlock Text="{Binding ReviewId}" FontWeight="SemiBold"/>
+                  <TextBlock Text="{Binding ReviewState}" Foreground="#64748B" FontSize="11"/>
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Grid.Row="0" Margin="16,0,0,0" Spacing="6">
+          <TextBlock Text="Instruction"/>
+          <TextBox Text="{Binding AiAssist.AiAssistInstruction}" AcceptsReturn="True" Height="60"/>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="Candidate gate:" FontWeight="Bold"/>
+            <TextBlock Text="{Binding AiAssist.AiAssistCandidateGateStatus}"
+                       Foreground="{Binding AiAssist.AiAssistCandidateGateColor, Converter={StaticResource StringToBrush}}"/>
+          </StackPanel>
+          <TextBlock Text="{Binding AiAssist.AiAssistSummary}" TextWrapping="Wrap"/>
+        </StackPanel>
+        <TextBox Grid.Column="1" Grid.Row="1" Margin="16,8,0,0"
+                 Text="{Binding AiAssist.AiAssistSuggestedJsonlText}" IsReadOnly="True"
+                 AcceptsReturn="True" FontFamily="Consolas" TextWrapping="Wrap"/>
+      </Grid>
+    </TabItem>
+
+    <!-- Evaluation: run inputs + results list/selection + filter ComboBox + report-history comparison. -->
+    <TabItem Header="Evaluation">
+      <Grid Margin="16" ColumnDefinitions="320,*">
+        <StackPanel Grid.Column="0" Spacing="6">
+          <TextBlock Text="Limit / score threshold"/>
+          <TextBox Text="{Binding Evaluation.EvaluationLimit}"/>
+          <TextBox Text="{Binding Evaluation.EvaluationScoreThreshold}"/>
+          <TextBlock Text="{Binding Evaluation.EvaluationSummary}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+          <TextBlock Text="{Binding Evaluation.EvaluationResultsSummary}" Margin="0,6,0,0"/>
+          <ComboBox HorizontalAlignment="Stretch"
+                    ItemsSource="{Binding Evaluation.EvaluationResultFilterOptions}"
+                    SelectedItem="{Binding Evaluation.EvaluationResultFilter}"/>
+          <ListBox ItemsSource="{Binding Evaluation.EvaluationResults}"
+                   SelectedItem="{Binding Evaluation.SelectedEvaluationExampleResult}" Height="220">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:EvaluationExampleResult">
+                <StackPanel Margin="0,2">
+                  <TextBlock Text="{Binding ExampleId}" FontWeight="SemiBold"/>
+                  <TextBlock Text="{Binding Score}" Foreground="#64748B" FontSize="11"/>
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Margin="16,0,0,0" Spacing="6">
+          <TextBlock Text="{Binding Evaluation.SelectedEvaluationExampleDetail}" TextWrapping="Wrap"/>
+          <TextBlock Text="Manual score / notes" Margin="0,6,0,0"/>
+          <TextBox Text="{Binding Evaluation.EvaluationManualScore}"/>
+          <TextBox Text="{Binding Evaluation.EvaluationManualNotes}" AcceptsReturn="True" Height="50"/>
+          <TextBlock Text="{Binding Evaluation.EvaluationReviewSummary}" Foreground="#64748B" TextWrapping="Wrap"/>
+          <TextBlock Text="Report comparison" FontWeight="SemiBold" Margin="0,8,0,0"/>
+          <ComboBox HorizontalAlignment="Stretch"
+                    ItemsSource="{Binding Evaluation.EvaluationReportHistory}"
+                    SelectedItem="{Binding Evaluation.SelectedEvaluationReportHistoryItem}">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="models:EvaluationReportHistoryItem">
+                <TextBlock Text="{Binding DisplayName}"/>
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <TextBlock Text="{Binding Evaluation.EvaluationComparisonSummary}" TextWrapping="Wrap"/>
+        </StackPanel>
+      </Grid>
+    </TabItem>
+
+    <!-- Training: the config form (TwoWay inputs) + status/IsVisible + the live run log. -->
+    <TabItem Header="Training">
+      <Grid Margin="16" ColumnDefinitions="*,*">
+        <StackPanel Grid.Column="0" Spacing="6" Margin="0,0,10,0">
+          <TextBlock Text="Config" FontWeight="Bold"/>
+          <TextBox Text="{Binding Training.TrainingTarget}" Watermark="target"/>
+          <TextBox Text="{Binding Training.TrainingBaseModel}" Watermark="base model"/>
+          <TextBox Text="{Binding Training.TrainingFormat}" Watermark="format"/>
+          <TextBox Text="{Binding Training.TrainingSequenceLen}" Watermark="seq len"/>
+          <TextBox Text="{Binding Training.TrainingLoraR}" Watermark="lora r"/>
+          <TextBox Text="{Binding Training.TrainingLoraAlpha}" Watermark="lora alpha"/>
+          <TextBox Text="{Binding Training.TrainingLearningRate}" Watermark="learning rate"/>
+          <TextBlock Text="{Binding Training.TrainingSummary}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Spacing="6" Margin="10,0,0,0">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="Status:" FontWeight="Bold"/>
+            <TextBlock Text="{Binding Training.TrainingRunStatus}"/>
+            <TextBlock Text="running" Foreground="#B45309" IsVisible="{Binding Training.IsTrainingRunning}"/>
+          </StackPanel>
+          <TextBlock Text="{Binding Training.TrainingLaunchCommand}" TextWrapping="Wrap"
+                     FontFamily="Consolas" FontSize="11"/>
+          <TextBox Text="{Binding Training.TrainingRunLog}" IsReadOnly="True" AcceptsReturn="True"
+                   FontFamily="Consolas" Height="200" TextWrapping="Wrap"/>
+          <TextBlock Text="{Binding Training.TrainingCheckpointsSummary}" TextWrapping="Wrap"/>
+          <TextBlock Text="{Binding Training.TrainingComparisonSummary}" TextWrapping="Wrap"/>
+        </StackPanel>
+      </Grid>
+    </TabItem>
+
+    <!-- Artifacts: registered adapters/checkpoints list + TwoWay selection + summary/detail panes. -->
+    <TabItem Header="Artifacts">
+      <Grid Margin="16" ColumnDefinitions="320,*">
+        <DockPanel Grid.Column="0">
+          <TextBlock DockPanel.Dock="Top" Text="{Binding Artifacts.ArtifactSummary}"
+                     TextWrapping="Wrap" Margin="0,0,0,8"/>
+          <ListBox ItemsSource="{Binding Artifacts.ModelArtifacts}"
+                   SelectedItem="{Binding Artifacts.SelectedModelArtifact}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:ArtifactDisplayItem">
+                <StackPanel Margin="0,2">
+                  <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"/>
+                  <TextBlock Text="{Binding Integrity}" Foreground="#64748B" FontSize="11"/>
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+        <TextBox Grid.Column="1" Margin="16,0,0,0" Text="{Binding Artifacts.ArtifactDetail}"
+                 IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas"
+                 TextWrapping="Wrap" VerticalAlignment="Stretch"/>
+      </Grid>
+    </TabItem>
+
   </TabControl>
 </Window>
