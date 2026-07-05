@@ -14,6 +14,7 @@ from corpus_studio.training.run_registry import (
 )
 from corpus_studio.versions.version_registry import (
     DatasetVersionRecord,
+    _truncate_row_store,
     capture_dataset,
     compute_content_fingerprint,
     current_integrity,
@@ -166,6 +167,22 @@ def test_capture_store_failure_keeps_fingerprint(tmp_path: Path, monkeypatch):
     assert capture.rows_stored is False
     assert capture.new_rows_stored == 0
     assert _store_text(tmp_path) == ""  # partial store rolled back
+
+
+def test_truncate_skips_rollback_when_start_size_unknown(tmp_path: Path):
+    # Data-loss guard: if the pre-capture store size could not be determined (stat
+    # failed), the rollback must be SKIPPED — never truncate to a guessed 0 and wipe
+    # every prior version's rows. A known 0 still performs a genuine rollback.
+    store_dir = registry_dir(tmp_path)
+    store_dir.mkdir(parents=True, exist_ok=True)
+    store_file = store_dir / "row_store.jsonl"
+    store_file.write_text("prior-version-rows\n", encoding="utf-8")
+
+    _truncate_row_store(store_file, None)  # unknown size -> no-op
+    assert store_file.read_text(encoding="utf-8") == "prior-version-rows\n"  # preserved
+
+    _truncate_row_store(store_file, 0)  # known start size -> real rollback still works
+    assert store_file.read_text(encoding="utf-8") == ""
 
 
 def test_row_manifest_round_trip_and_absent(tmp_path: Path):

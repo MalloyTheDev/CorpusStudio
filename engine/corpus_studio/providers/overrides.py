@@ -22,7 +22,14 @@ def overrides_path(project_dir: Path | str) -> Path:
 
 
 def load_overrides(project_dir: Path | str) -> dict[str, dict[str, Any]]:
-    """Load overrides for a project, or an empty mapping when absent/unreadable."""
+    """Load overrides for a project, or an empty mapping when absent/unreadable.
+
+    Fails closed at BOTH levels: a non-dict top-level file, and any individual entry
+    whose value is not itself a dict, are dropped. This keeps a hand-edited file (the
+    JSON is meant to be user-editable) from crashing ``resolve_policy`` — which calls
+    ``entry.items()`` — with an ``AttributeError``. A malformed entry simply applies no
+    override, which is the safest posture.
+    """
 
     path = overrides_path(project_dir)
     if not path.exists():
@@ -31,7 +38,9 @@ def load_overrides(project_dir: Path | str) -> dict[str, dict[str, Any]]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    return {key: value for key, value in data.items() if isinstance(value, dict)}
 
 
 def save_overrides(project_dir: Path | str, overrides: dict[str, dict[str, Any]]) -> Path:
