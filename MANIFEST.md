@@ -112,7 +112,9 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IArenaViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IDebtViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/ISettingsViewModel.cs`
+- `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/IVersionsViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/SettingsViewModel.cs`
+- `apps/desktop/CorpusStudio.Core/ViewModels/Tabs/VersionsViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/ViewModelBase.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/WorkspaceExplorerViewModel.cs`
 - `apps/desktop/CorpusStudio.Core/ViewModels/WorkspaceSearchViewModel.cs`

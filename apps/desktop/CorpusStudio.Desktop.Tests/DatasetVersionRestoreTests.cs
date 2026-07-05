@@ -3,6 +3,7 @@ using System.IO;
 using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.Services;
 using CorpusStudio.Desktop.ViewModels;
+using CorpusStudio.Desktop.ViewModels.Tabs;
 using Xunit;
 
 namespace CorpusStudio.Desktop.Tests;
@@ -17,7 +18,7 @@ public sealed class DatasetVersionRestoreTests
     [Fact]
     public void BuildRestoreConfirmation_IsHonest()
     {
-        var text = MainWindowViewModel.BuildRestoreConfirmation(Version("v1", 5), currentRowCount: 8);
+        var text = VersionsViewModel.BuildRestoreConfirmation(Version("v1", 5), currentRowCount: 8);
         Assert.Contains("v1", text);
         Assert.Contains("8 row", text);  // current dataset
         Assert.Contains("5 row", text);  // target version
@@ -28,26 +29,26 @@ public sealed class DatasetVersionRestoreTests
     [Fact]
     public void BuildRestoreUndoLabel_Format()
     {
-        Assert.Equal("before restore of v1", MainWindowViewModel.BuildRestoreUndoLabel(Version("v1")));
+        Assert.Equal("before restore of v1", VersionsViewModel.BuildRestoreUndoLabel(Version("v1")));
     }
 
     [Fact]
     public void ApplyRestoreResult_ReportsRowsVerifiedAndUndo()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyRestoreResult(new RestoreResult { VersionId = "v1", RowsWritten = 7, Verified = true });
-        Assert.Contains("Restored version v1", vm.DatasetVersionDetail);
-        Assert.Contains("7 row", vm.DatasetVersionDetail);
-        Assert.Contains("verified", vm.DatasetVersionDetail);
-        Assert.Contains("undo", vm.DatasetVersionDetail, StringComparison.OrdinalIgnoreCase);
+        vm.Versions.ApplyRestoreResult(new RestoreResult { VersionId = "v1", RowsWritten = 7, Verified = true });
+        Assert.Contains("Restored version v1", vm.Versions.DatasetVersionDetail);
+        Assert.Contains("7 row", vm.Versions.DatasetVersionDetail);
+        Assert.Contains("verified", vm.Versions.DatasetVersionDetail);
+        Assert.Contains("undo", vm.Versions.DatasetVersionDetail, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void ApplyRestoreResult_UnverifiedWhenVerifySkipped()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyRestoreResult(new RestoreResult { VersionId = "v1", RowsWritten = 3, Verified = false, VerifySkipped = true });
-        Assert.Contains("unverified", vm.DatasetVersionDetail);
+        vm.Versions.ApplyRestoreResult(new RestoreResult { VersionId = "v1", RowsWritten = 3, Verified = false, VerifySkipped = true });
+        Assert.Contains("unverified", vm.Versions.DatasetVersionDetail);
     }
 
     // --- atomic replace-from-file (real file IO, no WPF/engine) ------------

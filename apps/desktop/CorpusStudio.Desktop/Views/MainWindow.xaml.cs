@@ -2925,7 +2925,7 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetDatasetVersionError("Create or select a dataset project first.");
+            ViewModel.Versions.SetDatasetVersionError("Create or select a dataset project first.");
             return;
         }
 
@@ -2938,16 +2938,16 @@ public partial class MainWindow : Window
             // Capture goes through the engine so the fingerprint is computed one way
             // (never reimplemented in C#, which would risk a phantom 'drifted').
             var record = await _engineService.CreateDatasetVersionAsync(
-                projectPath, ViewModel.DatasetVersionLabel, "manual");
-            ViewModel.DatasetVersionLabel = string.Empty;
+                projectPath, ViewModel.Versions.DatasetVersionLabel, "manual");
+            ViewModel.Versions.DatasetVersionLabel = string.Empty;
             // Honest confirmation: a fingerprint-less record (missing/unreadable
             // dataset) must not read as a verified success.
-            ViewModel.SetDatasetVersionDetail(MainWindowViewModel.FormatCaptureConfirmation(record));
+            ViewModel.Versions.SetDatasetVersionDetail(VersionsViewModel.FormatCaptureConfirmation(record));
             await RefreshDatasetVersionsAsync();
         }
         catch (Exception ex)
         {
-            ViewModel.SetDatasetVersionError(ex.Message);
+            ViewModel.Versions.SetDatasetVersionError(ex.Message);
         }
         finally
         {
@@ -2958,10 +2958,10 @@ public partial class MainWindow : Window
 
     private async void ViewDatasetVersionCardButton_Click(object sender, RoutedEventArgs e)
     {
-        var selected = ViewModel.SelectedDatasetVersion;
+        var selected = ViewModel.Versions.SelectedDatasetVersion;
         if (selected is null)
         {
-            ViewModel.SetDatasetVersionError("Select a version first.");
+            ViewModel.Versions.SetDatasetVersionError("Select a version first.");
             return;
         }
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
@@ -2976,11 +2976,11 @@ public partial class MainWindow : Window
 
             var markdown = await _engineService.GetDatasetVersionCardAsync(
                 ViewModel.ActiveProjectPath, selected.Record.VersionId);
-            ViewModel.SetDatasetVersionDetail(markdown);
+            ViewModel.Versions.SetDatasetVersionDetail(markdown);
         }
         catch (Exception ex)
         {
-            ViewModel.SetDatasetVersionError(ex.Message);
+            ViewModel.Versions.SetDatasetVersionError(ex.Message);
         }
         finally
         {
@@ -2991,15 +2991,15 @@ public partial class MainWindow : Window
 
     private async void RestoreDatasetVersionButton_Click(object sender, RoutedEventArgs e)
     {
-        var selected = ViewModel.SelectedDatasetVersion;
+        var selected = ViewModel.Versions.SelectedDatasetVersion;
         if (selected is null)
         {
-            ViewModel.SetDatasetVersionError("Select a version to restore.");
+            ViewModel.Versions.SetDatasetVersionError("Select a version to restore.");
             return;
         }
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetDatasetVersionError("Create or select a dataset project first.");
+            ViewModel.Versions.SetDatasetVersionError("Create or select a dataset project first.");
             return;
         }
 
@@ -3008,7 +3008,7 @@ public partial class MainWindow : Window
         // Confirm — this overwrites the current dataset. The dialog is honest about the
         // undo capture and the canonical caveat.
         var confirm = MessageBox.Show(
-            MainWindowViewModel.BuildRestoreConfirmation(selected, ViewModel.Examples.Count),
+            VersionsViewModel.BuildRestoreConfirmation(selected, ViewModel.Examples.Count),
             "Restore version",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning);
@@ -3026,16 +3026,16 @@ public partial class MainWindow : Window
             // the selected version to a verified temp and atomically swaps it in. Any
             // failure before the swap leaves examples.jsonl untouched.
             var result = await _engineService.RestoreDatasetVersionInPlaceAsync(
-                projectPath, selected.Record.VersionId, MainWindowViewModel.BuildRestoreUndoLabel(selected));
+                projectPath, selected.Record.VersionId, VersionsViewModel.BuildRestoreUndoLabel(selected));
 
             // Reflect the restored dataset (and the flipped integrity badges) in the UI.
             ViewModel.SetExamples(_engineService.LoadExamples(projectPath));
-            ViewModel.ApplyRestoreResult(result);
+            ViewModel.Versions.ApplyRestoreResult(result);
             await RefreshDatasetVersionsAsync();
         }
         catch (Exception ex)
         {
-            ViewModel.SetDatasetVersionError(ex.Message);
+            ViewModel.Versions.SetDatasetVersionError(ex.Message);
         }
         finally
         {
@@ -3046,31 +3046,31 @@ public partial class MainWindow : Window
 
     private void SetDiffBaseButton_Click(object sender, RoutedEventArgs e)
     {
-        var selected = ViewModel.SelectedDatasetVersion;
+        var selected = ViewModel.Versions.SelectedDatasetVersion;
         if (selected is null)
         {
-            ViewModel.SetDatasetVersionError("Select a version to set as the diff base.");
+            ViewModel.Versions.SetDatasetVersionError("Select a version to set as the diff base.");
             return;
         }
-        ViewModel.SetDatasetDiffBase(selected);
+        ViewModel.Versions.SetDatasetDiffBase(selected);
     }
 
     private async void DiffVersionsButton_Click(object sender, RoutedEventArgs e)
     {
-        var selected = ViewModel.SelectedDatasetVersion;
+        var selected = ViewModel.Versions.SelectedDatasetVersion;
         if (selected is null)
         {
-            ViewModel.SetDatasetVersionError("Select a version to diff against the base.");
+            ViewModel.Versions.SetDatasetVersionError("Select a version to diff against the base.");
             return;
         }
-        if (string.IsNullOrEmpty(ViewModel.DatasetDiffBaseId))
+        if (string.IsNullOrEmpty(ViewModel.Versions.DatasetDiffBaseId))
         {
-            ViewModel.SetDatasetVersionError("Set a diff base first (select a version and click 'Set diff base').");
+            ViewModel.Versions.SetDatasetVersionError("Set a diff base first (select a version and click 'Set diff base').");
             return;
         }
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetDatasetVersionError("Create or select a dataset project first.");
+            ViewModel.Versions.SetDatasetVersionError("Create or select a dataset project first.");
             return;
         }
 
@@ -3082,14 +3082,14 @@ public partial class MainWindow : Window
             // Read-only: the engine compares the two versions' stored manifests and
             // refuses (throws) if either lacks stored rows.
             var markdown = await _engineService.GetDatasetVersionDiffAsync(
-                ViewModel.ActiveProjectPath, ViewModel.DatasetDiffBaseId, selected.Record.VersionId);
-            ViewModel.SetDatasetVersionDetail(markdown);
+                ViewModel.ActiveProjectPath, ViewModel.Versions.DatasetDiffBaseId, selected.Record.VersionId);
+            ViewModel.Versions.SetDatasetVersionDetail(markdown);
         }
         catch (Exception ex)
         {
-            ViewModel.SetDatasetVersionError(ex.Message);
+            ViewModel.Versions.SetDatasetVersionError(ex.Message);
             // Replace any prior successful diff so a failure never leaves a stale result.
-            ViewModel.SetDatasetVersionDetail("Diff failed: " + ex.Message);
+            ViewModel.Versions.SetDatasetVersionDetail("Diff failed: " + ex.Message);
         }
         finally
         {
@@ -3107,18 +3107,18 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetDatasetVersionError("Create or select a dataset project first.");
+            ViewModel.Versions.SetDatasetVersionError("Create or select a dataset project first.");
             return;
         }
 
         try
         {
             var items = await _engineService.LoadDatasetVersionsAsync(ViewModel.ActiveProjectPath);
-            ViewModel.ApplyDatasetVersions(items);
+            ViewModel.Versions.ApplyDatasetVersions(items);
         }
         catch (Exception ex)
         {
-            ViewModel.SetDatasetVersionError(ex.Message);
+            ViewModel.Versions.SetDatasetVersionError(ex.Message);
         }
     }
 

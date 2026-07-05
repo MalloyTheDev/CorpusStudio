@@ -23,6 +23,7 @@ public partial class App : Application
             services.AddTransient<IDebtViewModel, DebtViewModel>();
             services.AddTransient<IArenaViewModel, ArenaViewModel>();
             services.AddTransient<ISettingsViewModel, SettingsViewModel>();
+            services.AddTransient<IVersionsViewModel, VersionsViewModel>();
             services.AddTransient<MainWindowViewModel>();
             var provider = services.BuildServiceProvider();
 

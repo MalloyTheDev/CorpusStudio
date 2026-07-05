@@ -2530,12 +2530,12 @@
                                            TextWrapping="Wrap"
                                            Margin="0,4,0,8" />
                                 <TextBlock AutomationProperties.AutomationId="DatasetVersionSummaryTextBlock"
-                                           Text="{Binding DatasetVersionSummary, Mode=OneWay}"
+                                           Text="{Binding Versions.DatasetVersionSummary, Mode=OneWay}"
                                            Foreground="#334155"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,8" />
                                 <TextBlock AutomationProperties.AutomationId="DatasetDiffBaseTextBlock"
-                                           Text="{Binding DatasetDiffBaseLabel, Mode=OneWay}"
+                                           Text="{Binding Versions.DatasetDiffBaseLabel, Mode=OneWay}"
                                            Foreground="#64748B"
                                            FontStyle="Italic"
                                            TextWrapping="Wrap"
@@ -2546,7 +2546,7 @@
                                                Foreground="#334155"
                                                Margin="0,0,8,0" />
                                     <TextBox AutomationProperties.AutomationId="DatasetVersionLabelTextBox"
-                                             Text="{Binding DatasetVersionLabel, UpdateSourceTrigger=PropertyChanged}"
+                                             Text="{Binding Versions.DatasetVersionLabel, UpdateSourceTrigger=PropertyChanged}"
                                              Width="280" />
                                 </StackPanel>
                             </StackPanel>
@@ -2586,14 +2586,14 @@
                                 </Grid.ColumnDefinitions>
                                 <ListBox Grid.Column="0"
                                          AutomationProperties.AutomationId="DatasetVersionsListBox"
-                                         ItemsSource="{Binding DatasetVersions}"
-                                         SelectedItem="{Binding SelectedDatasetVersion, Mode=TwoWay}"
+                                         ItemsSource="{Binding Versions.DatasetVersions}"
+                                         SelectedItem="{Binding Versions.SelectedDatasetVersion, Mode=TwoWay}"
                                          DisplayMemberPath="DisplayName"
                                          FontFamily="Consolas"
                                          FontSize="12" />
                                 <TextBox Grid.Column="1"
                                          AutomationProperties.AutomationId="DatasetVersionDetailTextBox"
-                                         Text="{Binding DatasetVersionDetail, Mode=OneWay}"
+                                         Text="{Binding Versions.DatasetVersionDetail, Mode=OneWay}"
                                          Margin="12,0,0,0"
                                          IsReadOnly="True"
                                          AcceptsReturn="True"
