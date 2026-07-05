@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Windows;
-using Microsoft.Win32;
 using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.Services;
 using CorpusStudio.Desktop.ViewModels;
@@ -27,12 +26,16 @@ public partial class WorkspaceWizardWindow : Window
 
     public WorkspaceWizardResult? Result { get; private set; }
 
-    private void BrowseButton_Click(object sender, RoutedEventArgs e)
+    /// <summary>Head-agnostic folder picker seam (defaults to the WPF adapter). See
+    /// docs/AVALONIA_MIGRATION_PLAN.md.</summary>
+    public IFilePickerService FilePicker { get; set; } = new Win32FilePickerService();
+
+    private async void BrowseButton_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "Choose where to create the project" };
-        if (dialog.ShowDialog(this) == true)
+        var folder = await FilePicker.PickFolderAsync("Choose where to create the project");
+        if (folder is not null)
         {
-            ViewModel.Location = dialog.FolderName;
+            ViewModel.Location = folder;
         }
     }
 

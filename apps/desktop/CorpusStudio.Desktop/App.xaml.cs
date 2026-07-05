@@ -31,6 +31,7 @@ public partial class App : Application
         {
             DataContext = provider.GetRequiredService<MainWindowViewModel>(),
             Dialogs = provider.GetRequiredService<IDialogService>(),
+            FilePicker = provider.GetRequiredService<IFilePickerService>(),
         };
         window.Show();
     }
@@ -40,6 +41,7 @@ public partial class App : Application
     private static void ConfigureServices(IServiceCollection services)
     {
         services.AddSingleton<IDialogService, MessageBoxDialogService>();
+        services.AddSingleton<IFilePickerService, Win32FilePickerService>();
         services.AddTransient<IDebtViewModel, DebtViewModel>();
         services.AddTransient<IArenaViewModel, ArenaViewModel>();
         services.AddTransient<MainWindowViewModel>();

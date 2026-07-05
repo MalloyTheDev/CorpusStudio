@@ -7,7 +7,6 @@ using System.IO;
 using System.Threading;
 using System.Windows.Input;
 using System.Windows.Threading;
-using Microsoft.Win32;
 
 using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.Services;
@@ -32,6 +31,10 @@ public partial class MainWindow : Window
     /// logic behind them can move to shared view-models during the cross-platform port. See
     /// docs/AVALONIA_MIGRATION_PLAN.md.</summary>
     public IDialogService Dialogs { get; set; } = new MessageBoxDialogService();
+
+    /// <summary>Head-agnostic file/folder picker seam (set from DI; defaults to the WPF adapter).
+    /// See docs/AVALONIA_MIGRATION_PLAN.md.</summary>
+    public IFilePickerService FilePicker { get; set; } = new Win32FilePickerService();
 
     public MainWindow()
     {
@@ -94,16 +97,14 @@ public partial class MainWindow : Window
 
     private async void LocateEngineButton_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog
-        {
-            Title = "Select the Corpus Studio engine folder (or the repo root that contains it)",
-        };
-        if (dialog.ShowDialog(this) != true)
+        var folder = await FilePicker.PickFolderAsync(
+            "Select the Corpus Studio engine folder (or the repo root that contains it)");
+        if (folder is null)
         {
             return;
         }
 
-        if (_engineService.TryLocateEngine(dialog.FolderName))
+        if (_engineService.TryLocateEngine(folder))
         {
             ViewModel.ClearEngineUnavailable();
             await InitializeWorkspaceAsync();
@@ -260,7 +261,7 @@ public partial class MainWindow : Window
             var schemas = await _engineService.GetSchemasAsync();
             Mouse.OverrideCursor = null;
 
-            var wizard = new WorkspaceWizardWindow(schemas) { Owner = this };
+            var wizard = new WorkspaceWizardWindow(schemas) { Owner = this, FilePicker = FilePicker };
             if (wizard.ShowDialog() == true && wizard.Result is not null)
             {
                 await OpenWorkspaceFolder(wizard.Result.Folder);
@@ -279,10 +280,10 @@ public partial class MainWindow : Window
 
     private async void StartOpenFolder_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "Open dataset workspace folder" };
-        if (dialog.ShowDialog(this) == true)
+        var folder = await FilePicker.PickFolderAsync("Open dataset workspace folder");
+        if (folder is not null)
         {
-            await RouteOpenFolder(dialog.FolderName);
+            await RouteOpenFolder(folder);
         }
     }
 
@@ -735,20 +736,16 @@ public partial class MainWindow : Window
             return;
         }
 
-        var dialog = new OpenFileDialog
-        {
-            Title = "Import JSONL Dataset",
-            Filter = "JSONL files (*.jsonl)|*.jsonl|All files (*.*)|*.*",
-            CheckFileExists = true,
-            Multiselect = false
-        };
-
-        if (dialog.ShowDialog(this) != true)
+        var file = await FilePicker.PickFileAsync(
+            "Import JSONL Dataset",
+            new FilePickerFilter("JSONL files", "jsonl"),
+            new FilePickerFilter("All files", "*"));
+        if (file is null)
         {
             return;
         }
 
-        await PreviewAndImportJsonlAsync(dialog.FileName);
+        await PreviewAndImportJsonlAsync(file);
     }
 
     private async void ImportFromHuggingFaceButton_Click(object sender, RoutedEventArgs e)
