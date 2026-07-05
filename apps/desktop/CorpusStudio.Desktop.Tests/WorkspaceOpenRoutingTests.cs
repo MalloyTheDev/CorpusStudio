@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.Services;
 using CorpusStudio.Desktop.ViewModels;
@@ -66,6 +67,27 @@ public sealed class WorkspaceOpenRoutingTests : IDisposable
     {
         Assert.True(WorkspaceOpenRouting.ShouldReplaceWorkspace(true, confirmDiscard: () => true));   // discard confirmed
         Assert.False(WorkspaceOpenRouting.ShouldReplaceWorkspace(true, confirmDiscard: () => false)); // cancelled -> no open
+    }
+
+    // ---- ShouldReplaceWorkspaceAsync (the async dialog-seam form, Phase 0) -------
+
+    [Fact]
+    public async Task ShouldReplaceWorkspaceAsync_NoUnsavedWork_ProceedsWithoutPrompting()
+    {
+        var prompted = false;
+        var proceed = await WorkspaceOpenRouting.ShouldReplaceWorkspaceAsync(
+            hasUnsavedWork: false,
+            confirmDiscard: () => { prompted = true; return Task.FromResult(false); });
+
+        Assert.True(proceed);    // a clean workspace opens...
+        Assert.False(prompted);  // ...and the async prompt is never awaited
+    }
+
+    [Fact]
+    public async Task ShouldReplaceWorkspaceAsync_UnsavedWork_HonorsTheAwaitedChoice()
+    {
+        Assert.True(await WorkspaceOpenRouting.ShouldReplaceWorkspaceAsync(true, () => Task.FromResult(true)));   // confirmed
+        Assert.False(await WorkspaceOpenRouting.ShouldReplaceWorkspaceAsync(true, () => Task.FromResult(false))); // cancelled
     }
 
     // ---- Inspect (over real folders) ---------------------------------------------
