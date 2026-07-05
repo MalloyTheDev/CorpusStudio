@@ -5,13 +5,21 @@ using CorpusStudio.Desktop.Models;
 
 namespace CorpusStudio.Desktop.Services;
 
+/// <summary>Content search over a workspace (find-in-files). Extracted as an interface so the
+/// search view-model can be unit-tested against a fake (one that throws or blocks) without a
+/// real filesystem.</summary>
+public interface IWorkspaceSearchService
+{
+    WorkspaceSearchResult Search(string? workspaceRoot, string? query, bool caseSensitive = false);
+}
+
 /// <summary>Workspace content search ("find in files"): walks the same root-bounded,
 /// junk-skipping, symlink-safe tree the Universal Explorer builds, and reports
 /// case-insensitive (by default) substring matches per line in text-editable files.
 /// Pure and deterministic over the filesystem, so it is unit-testable; the view-model
 /// runs it off the UI thread. Read-only — it never opens binaries, huge files, or
 /// mutates anything.</summary>
-public sealed class WorkspaceSearchService
+public sealed class WorkspaceSearchService : IWorkspaceSearchService
 {
     private readonly WorkspaceExplorerService _explorer;
 

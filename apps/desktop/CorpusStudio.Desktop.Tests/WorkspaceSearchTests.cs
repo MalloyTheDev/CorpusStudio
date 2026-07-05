@@ -1,7 +1,9 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
+using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.Services;
 using CorpusStudio.Desktop.ViewModels;
 using Xunit;
@@ -200,5 +202,61 @@ public sealed class WorkspaceSearchTests : IDisposable
         await vm.RunAsync();
         Assert.False(vm.HasResults);
         Assert.Contains("No matches", vm.Status);
+    }
+
+    // --- hardening (B8): error isolation + re-entrancy -----------------------
+
+    private sealed class ThrowingSearch : IWorkspaceSearchService
+    {
+        public WorkspaceSearchResult Search(string? root, string? query, bool caseSensitive = false) =>
+            throw new IOException("disk went away mid-search");
+    }
+
+    [Fact]
+    public async Task ViewModel_RunAsync_WhenSearchThrows_ResetsStateAndReportsError()
+    {
+        var vm = new WorkspaceSearchViewModel(new ThrowingSearch());
+        vm.SetWorkspaceRoot(_root);
+        vm.Query = "quick";
+
+        await vm.RunAsync(); // must NOT throw out of the (async void) caller
+
+        Assert.False(vm.IsSearching);          // reset in finally, not stuck on "Searching…"
+        Assert.False(vm.HasResults);
+        Assert.Contains("Search failed", vm.Status);
+    }
+
+    private sealed class BlockingSearch : IWorkspaceSearchService
+    {
+        public readonly ManualResetEventSlim Gate = new(false);
+        public int Calls;
+
+        public WorkspaceSearchResult Search(string? root, string? query, bool caseSensitive = false)
+        {
+            Interlocked.Increment(ref Calls);
+            Gate.Wait(2000); // bounded so a regression can't hang the suite
+            return WorkspaceSearchResult.Empty;
+        }
+    }
+
+    [Fact]
+    public async Task ViewModel_RunAsync_IsReentrancyGuarded()
+    {
+        var svc = new BlockingSearch();
+        var vm = new WorkspaceSearchViewModel(svc);
+        vm.SetWorkspaceRoot(_root);
+        vm.Query = "quick";
+
+        var first = vm.RunAsync();     // IsSearching is set synchronously before the awaited search
+        Assert.True(vm.IsSearching);
+
+        await vm.RunAsync();           // second call is guarded -> returns immediately, no new search
+        Assert.True(vm.IsSearching);   // still the first run in flight
+
+        svc.Gate.Set();                // release the blocked first search
+        await first;
+
+        Assert.Equal(1, svc.Calls);    // the guarded second call never reached Search
+        Assert.False(vm.IsSearching);
     }
 }

@@ -213,12 +213,22 @@ public partial class MainWindow : Window
             return;
         }
 
-        ViewModel.ShowFiles(); // sets the Explorer root + shows the Files view
-        await ViewModel.Explorer.OpenNodeAsync(new WorkspaceTreeNode
+        try
         {
-            RelativePath = match.RelativePath,
-            IsDirectory = false,
-        });
+            ViewModel.ShowFiles(); // sets the Explorer root + shows the Files view
+            await ViewModel.Explorer.OpenNodeAsync(new WorkspaceTreeNode
+            {
+                RelativePath = match.RelativePath,
+                IsDirectory = false,
+            });
+        }
+        catch (Exception ex)
+        {
+            // A result can go stale between searching and opening (file moved/deleted/locked).
+            // These handlers are async void, so an unguarded throw would crash the app — surface
+            // it and stay put instead.
+            MessageBox.Show(this, ex.Message, "Open Search Result", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private void ProblemsButton_Click(object sender, RoutedEventArgs e) =>
