@@ -867,7 +867,7 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveSchemaId))
         {
-            ViewModel.SetTrainingConfigError(
+            ViewModel.Training.SetTrainingConfigError(
                 "Create or select a dataset project before checking training compatibility."
             );
             return;
@@ -879,14 +879,14 @@ public partial class MainWindow : Window
             ViewModel.SetBusy("Checking training compatibility...");
             var result = await _engineService.CheckTrainingCompatibilityAsync(
                 ViewModel.ActiveSchemaId,
-                ViewModel.TrainingFormat,
-                ViewModel.TrainingTarget
+                ViewModel.Training.TrainingFormat,
+                ViewModel.Training.TrainingTarget
             );
-            ViewModel.ApplyTrainingCompatibility(result);
+            ViewModel.Training.ApplyTrainingCompatibility(result);
         }
         catch (Exception ex)
         {
-            ViewModel.SetTrainingConfigError(ex.Message);
+            ViewModel.Training.SetTrainingConfigError(ex.Message);
         }
         finally
         {
@@ -2470,12 +2470,12 @@ public partial class MainWindow : Window
 
     private async void LaunchTrainingButton_Click(object sender, RoutedEventArgs e)
     {
-        await RunTrainingAsync(ViewModel.TrainingLaunchArgv, ViewModel.TrainingLaunchCommand);
+        await RunTrainingAsync(ViewModel.Training.TrainingLaunchArgv, ViewModel.Training.TrainingLaunchCommand);
     }
 
     private async void ResumeTrainingButton_Click(object sender, RoutedEventArgs e)
     {
-        await RunTrainingAsync(ViewModel.TrainingResumeArgv, ViewModel.TrainingResumeCommand);
+        await RunTrainingAsync(ViewModel.Training.TrainingResumeArgv, ViewModel.Training.TrainingResumeCommand);
     }
 
     /// <summary>Shared launch core for fresh runs and resume-from-checkpoint: the
@@ -2494,7 +2494,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (ViewModel.IsTrainingRunning)
+        if (ViewModel.Training.IsTrainingRunning)
         {
             return;
         }
@@ -2522,19 +2522,19 @@ public partial class MainWindow : Window
             var baseline = ViewModel.HasActiveProject && !string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath)
                 ? _engineService.LoadEvaluationReportHistory(ViewModel.ActiveProjectPath).FirstOrDefault()
                 : null;
-            ViewModel.SetTrainingBaseline(baseline);
+            ViewModel.Training.SetTrainingBaseline(baseline);
         }
         catch
         {
-            ViewModel.SetTrainingBaseline(null);
+            ViewModel.Training.SetTrainingBaseline(null);
         }
 
-        var workingDirectory = ViewModel.TrainingLaunchWorkingDirectory;
+        var workingDirectory = ViewModel.Training.TrainingLaunchWorkingDirectory;
         var cts = new CancellationTokenSource();
         _trainingRunCts = cts;
         _trainingCancelRequested = false;
         while (_trainingLogQueue.TryDequeue(out _)) { } // discard any residual lines
-        var runId = ViewModel.BeginTrainingRun();
+        var runId = ViewModel.Training.BeginTrainingRun();
 
         // Durable run record (v0.8): recorded to the project's training_runs/.
         var runProjectPath = ViewModel.HasActiveProject ? ViewModel.ActiveProjectPath : null;
@@ -2576,26 +2576,26 @@ public partial class MainWindow : Window
             if (_trainingCancelRequested)
             {
                 terminalStatus = "cancelled";
-                ViewModel.SetTrainingRunCancelled();
+                ViewModel.Training.SetTrainingRunCancelled();
             }
             else
             {
                 terminalStatus = exitCode == 0 ? "succeeded" : "failed";
-                ViewModel.CompleteTrainingRun(exitCode);
+                ViewModel.Training.CompleteTrainingRun(exitCode);
             }
         }
         catch (OperationCanceledException)
         {
             FlushTrainingLogQueue(runId);
             terminalStatus = "cancelled";
-            ViewModel.SetTrainingRunCancelled();
+            ViewModel.Training.SetTrainingRunCancelled();
         }
         catch (Exception ex)
         {
             FlushTrainingLogQueue(runId);
             terminalStatus = "failed";
             terminalNote = ex.Message;
-            ViewModel.SetTrainingRunError(ex.Message);
+            ViewModel.Training.SetTrainingRunError(ex.Message);
         }
         finally
         {
@@ -2630,12 +2630,12 @@ public partial class MainWindow : Window
             CreatedAt = now,
             UpdatedAt = now,
             Status = "running",
-            Target = ViewModel.TrainingTarget,
-            BaseModel = ViewModel.TrainingBaseModel,
-            ConfigPath = ViewModel.TrainingConfigPath,
-            OutputDir = ViewModel.TrainingOutputDirectory,
+            Target = ViewModel.Training.TrainingTarget,
+            BaseModel = ViewModel.Training.TrainingBaseModel,
+            ConfigPath = ViewModel.Training.TrainingConfigPath,
+            OutputDir = ViewModel.Training.TrainingOutputDirectory,
             Argv = argv.ToList(),
-            BeforeEvalPath = ViewModel.TrainingBaselineReport?.ReportPath,
+            BeforeEvalPath = ViewModel.Training.TrainingBaselineReport?.ReportPath,
         };
         TrySaveRunRecord(projectPath, record);
         return record;
@@ -2717,7 +2717,7 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetTrainingRunGateError("Create or select a dataset project first.");
+            ViewModel.Training.SetTrainingRunGateError("Create or select a dataset project first.");
             return;
         }
 
@@ -2729,7 +2729,7 @@ public partial class MainWindow : Window
 
             // Link the newest post-training eval (not the baseline) to the newest
             // run, carrying the model id so provenance can be verified.
-            var baseline = ViewModel.TrainingBaselineReport;
+            var baseline = ViewModel.Training.TrainingBaselineReport;
             var after = _engineService.LoadEvaluationReportHistory(projectPath).FirstOrDefault(item =>
                 baseline is null
                 || !string.Equals(item.ReportPath, baseline.ReportPath, StringComparison.OrdinalIgnoreCase));
@@ -2740,17 +2740,17 @@ public partial class MainWindow : Window
 
             if (runId is null)
             {
-                ViewModel.SetTrainingRunGateError("No training run has been recorded yet.");
+                ViewModel.Training.SetTrainingRunGateError("No training run has been recorded yet.");
                 return;
             }
 
             var report = await _engineService.RunTrainingRunGateAsync(projectPath, runId);
-            ViewModel.ApplyTrainingRunGate(report);
-            ViewModel.ApplyTrainingRunHistory(_engineService.LoadTrainingRunRecords(projectPath));
+            ViewModel.Training.ApplyTrainingRunGate(report);
+            ViewModel.Training.ApplyTrainingRunHistory(_engineService.LoadTrainingRunRecords(projectPath));
         }
         catch (Exception ex)
         {
-            ViewModel.SetTrainingRunGateError(ex.Message);
+            ViewModel.Training.SetTrainingRunGateError(ex.Message);
         }
         finally
         {
@@ -3155,18 +3155,18 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetTrainingRunHistoryError("Create or select a dataset project first.");
+            ViewModel.Training.SetTrainingRunHistoryError("Create or select a dataset project first.");
             return;
         }
 
         try
         {
             var records = _engineService.LoadTrainingRunRecords(ViewModel.ActiveProjectPath);
-            ViewModel.ApplyTrainingRunHistory(records);
+            ViewModel.Training.ApplyTrainingRunHistory(records);
         }
         catch (Exception ex)
         {
-            ViewModel.SetTrainingRunHistoryError(ex.Message);
+            ViewModel.Training.SetTrainingRunHistoryError(ex.Message);
         }
     }
 
@@ -3179,19 +3179,19 @@ public partial class MainWindow : Window
 
         try
         {
-            ViewModel.CompareTrainingBaseline(
+            ViewModel.Training.CompareTrainingBaseline(
                 _engineService.LoadEvaluationReportHistory(ViewModel.ActiveProjectPath)
             );
         }
         catch (Exception ex)
         {
-            ViewModel.SetTrainingConfigError(ex.Message);
+            ViewModel.Training.SetTrainingConfigError(ex.Message);
         }
     }
 
     private async Task RefreshTrainingCheckpointsAsync()
     {
-        var outputDirectory = ViewModel.TrainingOutputDirectory;
+        var outputDirectory = ViewModel.Training.TrainingOutputDirectory;
         if (string.IsNullOrWhiteSpace(outputDirectory))
         {
             return;
@@ -3201,10 +3201,10 @@ public partial class MainWindow : Window
         {
             var result = await _engineService.GetTrainingCheckpointsAsync(
                 outputDirectory,
-                string.IsNullOrWhiteSpace(ViewModel.TrainingTarget) ? "axolotl" : ViewModel.TrainingTarget,
-                ViewModel.TrainingConfigPath
+                string.IsNullOrWhiteSpace(ViewModel.Training.TrainingTarget) ? "axolotl" : ViewModel.Training.TrainingTarget,
+                ViewModel.Training.TrainingConfigPath
             );
-            ViewModel.ApplyTrainingCheckpoints(result);
+            ViewModel.Training.ApplyTrainingCheckpoints(result);
         }
         catch
         {
@@ -3225,7 +3225,7 @@ public partial class MainWindow : Window
             batch.Add(line);
         }
 
-        ViewModel.AppendTrainingRunLogBatch(runId, batch);
+        ViewModel.Training.AppendTrainingRunLogBatch(runId, batch);
     }
 
     private void StopTrainingButton_Click(object sender, RoutedEventArgs e)
@@ -3254,7 +3254,7 @@ public partial class MainWindow : Window
             }
         }
 
-        if (!ViewModel.IsTrainingRunning)
+        if (!ViewModel.Training.IsTrainingRunning)
         {
             return;
         }
@@ -3281,7 +3281,7 @@ public partial class MainWindow : Window
 
     private void CopyLaunchCommandButton_Click(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(ViewModel.TrainingLaunchCommand))
+        if (string.IsNullOrWhiteSpace(ViewModel.Training.TrainingLaunchCommand))
         {
             MessageBox.Show(
                 this,
@@ -3295,11 +3295,11 @@ public partial class MainWindow : Window
 
         try
         {
-            Clipboard.SetText(ViewModel.TrainingLaunchCommand);
+            Clipboard.SetText(ViewModel.Training.TrainingLaunchCommand);
         }
         catch (Exception ex)
         {
-            ViewModel.SetTrainingConfigError($"Could not copy the launch command: {ex.Message}");
+            ViewModel.Training.SetTrainingConfigError($"Could not copy the launch command: {ex.Message}");
         }
     }
 
@@ -3307,7 +3307,7 @@ public partial class MainWindow : Window
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
-            ViewModel.SetTrainingConfigError("Create or select a dataset project before generating a training config.");
+            ViewModel.Training.SetTrainingConfigError("Create or select a dataset project before generating a training config.");
             return;
         }
 
@@ -3324,7 +3324,7 @@ public partial class MainWindow : Window
             out var errorMessage
         ))
         {
-            ViewModel.SetTrainingConfigError(errorMessage);
+            ViewModel.Training.SetTrainingConfigError(errorMessage);
             return;
         }
 
@@ -3332,7 +3332,7 @@ public partial class MainWindow : Window
         {
             Mouse.OverrideCursor = Cursors.Wait;
             ViewModel.SetBusy("Generating training config...");
-            ViewModel.SetTrainingConfigInProgress();
+            ViewModel.Training.SetTrainingConfigInProgress();
             var result = await _engineService.GenerateTrainingConfigAsync(
                 ViewModel.ActiveProjectPath,
                 ViewModel.ActiveSchemaId,
@@ -3346,11 +3346,11 @@ public partial class MainWindow : Window
                 gradientAccumulationSteps,
                 learningRate
             );
-            ViewModel.ApplyTrainingConfigExportResult(result);
+            ViewModel.Training.ApplyTrainingConfigExportResult(result);
         }
         catch (Exception ex)
         {
-            ViewModel.SetTrainingConfigError(ex.Message);
+            ViewModel.Training.SetTrainingConfigError(ex.Message);
         }
         finally
         {
@@ -3981,9 +3981,9 @@ public partial class MainWindow : Window
         out string errorMessage
     )
     {
-        target = ViewModel.TrainingTarget.Trim();
-        baseModel = ViewModel.TrainingBaseModel.Trim();
-        datasetFormat = ViewModel.TrainingFormat.Trim();
+        target = ViewModel.Training.TrainingTarget.Trim();
+        baseModel = ViewModel.Training.TrainingBaseModel.Trim();
+        datasetFormat = ViewModel.Training.TrainingFormat.Trim();
         sequenceLen = 0;
         loraR = 0;
         loraAlpha = 0;
@@ -4011,7 +4011,7 @@ public partial class MainWindow : Window
         }
 
         if (!int.TryParse(
-            ViewModel.TrainingSequenceLen,
+            ViewModel.Training.TrainingSequenceLen,
             NumberStyles.Integer,
             CultureInfo.InvariantCulture,
             out sequenceLen
@@ -4022,7 +4022,7 @@ public partial class MainWindow : Window
         }
 
         if (!int.TryParse(
-            ViewModel.TrainingLoraR,
+            ViewModel.Training.TrainingLoraR,
             NumberStyles.Integer,
             CultureInfo.InvariantCulture,
             out loraR
@@ -4033,7 +4033,7 @@ public partial class MainWindow : Window
         }
 
         if (!int.TryParse(
-            ViewModel.TrainingLoraAlpha,
+            ViewModel.Training.TrainingLoraAlpha,
             NumberStyles.Integer,
             CultureInfo.InvariantCulture,
             out loraAlpha
@@ -4044,7 +4044,7 @@ public partial class MainWindow : Window
         }
 
         if (!int.TryParse(
-            ViewModel.TrainingMicroBatchSize,
+            ViewModel.Training.TrainingMicroBatchSize,
             NumberStyles.Integer,
             CultureInfo.InvariantCulture,
             out microBatchSize
@@ -4055,7 +4055,7 @@ public partial class MainWindow : Window
         }
 
         if (!int.TryParse(
-            ViewModel.TrainingGradientAccumulationSteps,
+            ViewModel.Training.TrainingGradientAccumulationSteps,
             NumberStyles.Integer,
             CultureInfo.InvariantCulture,
             out gradientAccumulationSteps
@@ -4066,7 +4066,7 @@ public partial class MainWindow : Window
         }
 
         if (!double.TryParse(
-            ViewModel.TrainingLearningRate,
+            ViewModel.Training.TrainingLearningRate,
             NumberStyles.Float,
             CultureInfo.InvariantCulture,
             out learningRate

@@ -2083,21 +2083,21 @@
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBox AutomationProperties.AutomationId="TrainingTargetTextBox"
-                                         Text="{Binding TrainingTarget, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding Training.TrainingTarget, UpdateSourceTrigger=PropertyChanged}"
                                          Width="132"
                                          Margin="0,0,12,0" />
                                 <TextBlock Text="Base Model"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBox AutomationProperties.AutomationId="TrainingBaseModelTextBox"
-                                         Text="{Binding TrainingBaseModel, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding Training.TrainingBaseModel, UpdateSourceTrigger=PropertyChanged}"
                                          Width="240"
                                          Margin="0,0,12,0" />
                                 <TextBlock Text="Format"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBox AutomationProperties.AutomationId="TrainingFormatTextBox"
-                                         Text="{Binding TrainingFormat, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding Training.TrainingFormat, UpdateSourceTrigger=PropertyChanged}"
                                          Width="112"
                                          Margin="0,0,12,0" />
                                 <Button AutomationProperties.AutomationId="CheckTrainingCompatibilityButton"
@@ -2125,49 +2125,49 @@
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBox AutomationProperties.AutomationId="TrainingSequenceLenTextBox"
-                                         Text="{Binding TrainingSequenceLen, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding Training.TrainingSequenceLen, UpdateSourceTrigger=PropertyChanged}"
                                          Width="72"
                                          Margin="0,0,12,0" />
                                 <TextBlock Text="LoRA r"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBox AutomationProperties.AutomationId="TrainingLoraRTextBox"
-                                         Text="{Binding TrainingLoraR, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding Training.TrainingLoraR, UpdateSourceTrigger=PropertyChanged}"
                                          Width="56"
                                          Margin="0,0,12,0" />
                                 <TextBlock Text="Alpha"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBox AutomationProperties.AutomationId="TrainingLoraAlphaTextBox"
-                                         Text="{Binding TrainingLoraAlpha, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding Training.TrainingLoraAlpha, UpdateSourceTrigger=PropertyChanged}"
                                          Width="56"
                                          Margin="0,0,12,0" />
                                 <TextBlock Text="Micro Batch"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBox AutomationProperties.AutomationId="TrainingMicroBatchSizeTextBox"
-                                         Text="{Binding TrainingMicroBatchSize, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding Training.TrainingMicroBatchSize, UpdateSourceTrigger=PropertyChanged}"
                                          Width="56"
                                          Margin="0,0,12,0" />
                                 <TextBlock Text="Grad Accum"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBox AutomationProperties.AutomationId="TrainingGradientAccumulationStepsTextBox"
-                                         Text="{Binding TrainingGradientAccumulationSteps, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding Training.TrainingGradientAccumulationSteps, UpdateSourceTrigger=PropertyChanged}"
                                          Width="56"
                                          Margin="0,0,12,0" />
                                 <TextBlock Text="LR"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBox AutomationProperties.AutomationId="TrainingLearningRateTextBox"
-                                         Text="{Binding TrainingLearningRate, UpdateSourceTrigger=PropertyChanged}"
+                                         Text="{Binding Training.TrainingLearningRate, UpdateSourceTrigger=PropertyChanged}"
                                          Width="80" />
                             </WrapPanel>
 
                             <TextBox Grid.Row="2"
                                      Grid.Column="0"
                                      AutomationProperties.AutomationId="TrainingSummaryTextBox"
-                                     Text="{Binding TrainingSummary, Mode=OneWay}"
+                                     Text="{Binding Training.TrainingSummary, Mode=OneWay}"
                                      IsReadOnly="True"
                                      AcceptsReturn="True"
                                      TextWrapping="Wrap"
@@ -2176,7 +2176,7 @@
                             <TextBox Grid.Row="2"
                                      Grid.Column="1"
                                      AutomationProperties.AutomationId="TrainingConfigPreviewTextBox"
-                                     Text="{Binding TrainingConfigPreview, Mode=OneWay}"
+                                     Text="{Binding Training.TrainingConfigPreview, Mode=OneWay}"
                                      Margin="12,0,0,0"
                                      IsReadOnly="True"
                                      AcceptsReturn="True"
@@ -2193,17 +2193,17 @@
                                 <Button Style="{StaticResource PrimaryButtonStyle}"
                                         AutomationProperties.AutomationId="LaunchTrainingButton"
                                         Content="Launch _Training"
-                                        IsEnabled="{Binding CanLaunchTraining, Mode=OneWay}"
+                                        IsEnabled="{Binding Training.CanLaunchTraining, Mode=OneWay}"
                                         Margin="0,0,8,0"
                                         Click="LaunchTrainingButton_Click" />
                                 <Button AutomationProperties.AutomationId="StopTrainingButton"
                                         Content="Stop"
-                                        IsEnabled="{Binding IsTrainingRunning, Mode=OneWay}"
+                                        IsEnabled="{Binding Training.IsTrainingRunning, Mode=OneWay}"
                                         Margin="0,0,12,0"
                                         Click="StopTrainingButton_Click" />
                                 <Button AutomationProperties.AutomationId="ResumeTrainingButton"
                                         Content="Resume latest"
-                                        IsEnabled="{Binding CanResumeTraining, Mode=OneWay}"
+                                        IsEnabled="{Binding Training.CanResumeTraining, Mode=OneWay}"
                                         ToolTip="Relaunch from the newest checkpoint (targets with a resume flag only)"
                                         Margin="0,0,8,0"
                                         Click="ResumeTrainingButton_Click" />
@@ -2230,12 +2230,12 @@
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
                                 <TextBlock AutomationProperties.AutomationId="TrainingRunStatusTextBlock"
-                                           Text="{Binding TrainingRunStatus, Mode=OneWay}"
+                                           Text="{Binding Training.TrainingRunStatus, Mode=OneWay}"
                                            FontWeight="SemiBold"
                                            VerticalAlignment="Center"
                                            Margin="0,0,12,0" />
                                 <TextBlock AutomationProperties.AutomationId="TrainingCheckpointsSummaryTextBlock"
-                                           Text="{Binding TrainingCheckpointsSummary, Mode=OneWay}"
+                                           Text="{Binding Training.TrainingCheckpointsSummary, Mode=OneWay}"
                                            Foreground="#475569"
                                            VerticalAlignment="Center" />
                             </WrapPanel>
@@ -2248,7 +2248,7 @@
                                 </Grid.ColumnDefinitions>
                                 <TextBox Grid.Column="0"
                                          AutomationProperties.AutomationId="TrainingRunLogTextBox"
-                                         Text="{Binding TrainingRunLog, Mode=OneWay}"
+                                         Text="{Binding Training.TrainingRunLog, Mode=OneWay}"
                                          IsReadOnly="True"
                                          AcceptsReturn="True"
                                          FontFamily="Consolas"
@@ -2263,7 +2263,7 @@
                                     </Grid.RowDefinitions>
                                     <TextBox Grid.Row="0"
                                              AutomationProperties.AutomationId="TrainingComparisonSummaryTextBox"
-                                             Text="{Binding TrainingComparisonSummary, Mode=OneWay}"
+                                             Text="{Binding Training.TrainingComparisonSummary, Mode=OneWay}"
                                              IsReadOnly="True"
                                              AcceptsReturn="True"
                                              TextWrapping="Wrap"
@@ -2271,12 +2271,12 @@
                                     <DockPanel Grid.Row="1" Margin="0,8,0,0">
                                         <TextBlock DockPanel.Dock="Top"
                                                    AutomationProperties.AutomationId="TrainingRunGateSummaryTextBlock"
-                                                   Text="{Binding TrainingRunGateSummary, Mode=OneWay}"
+                                                   Text="{Binding Training.TrainingRunGateSummary, Mode=OneWay}"
                                                    Foreground="#334155"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,6" />
                                         <TextBox AutomationProperties.AutomationId="TrainingRunHistoryTextBox"
-                                                 Text="{Binding TrainingRunHistorySummary, Mode=OneWay}"
+                                                 Text="{Binding Training.TrainingRunHistorySummary, Mode=OneWay}"
                                                  IsReadOnly="True"
                                                  AcceptsReturn="True"
                                                  FontFamily="Consolas"

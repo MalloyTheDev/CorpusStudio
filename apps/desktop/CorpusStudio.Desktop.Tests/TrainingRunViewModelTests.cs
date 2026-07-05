@@ -1,5 +1,6 @@
 using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.ViewModels;
+using CorpusStudio.Desktop.ViewModels.Tabs;
 using Xunit;
 
 namespace CorpusStudio.Desktop.Tests;
@@ -22,99 +23,99 @@ public sealed class TrainingRunViewModelTests
     public void CanLaunchTraining_FalseUntilConfigGenerated()
     {
         var vm = new MainWindowViewModel();
-        Assert.False(vm.CanLaunchTraining);
+        Assert.False(vm.Training.CanLaunchTraining);
 
-        vm.ApplyTrainingConfigExportResult(ConfigWithLaunch());
+        vm.Training.ApplyTrainingConfigExportResult(ConfigWithLaunch());
 
-        Assert.True(vm.CanLaunchTraining);
-        Assert.Equal(5, vm.TrainingLaunchArgv.Count);
-        Assert.EndsWith("exports\\x", vm.TrainingLaunchWorkingDirectory.Replace('/', '\\'));
+        Assert.True(vm.Training.CanLaunchTraining);
+        Assert.Equal(5, vm.Training.TrainingLaunchArgv.Count);
+        Assert.EndsWith("exports\\x", vm.Training.TrainingLaunchWorkingDirectory.Replace('/', '\\'));
     }
 
     [Fact]
     public void RunLifecycle_TracksStatusAndLog()
     {
         var vm = new MainWindowViewModel();
-        vm.ApplyTrainingConfigExportResult(ConfigWithLaunch());
+        vm.Training.ApplyTrainingConfigExportResult(ConfigWithLaunch());
 
-        vm.BeginTrainingRun();
-        Assert.True(vm.IsTrainingRunning);
-        Assert.False(vm.CanLaunchTraining); // cannot launch while running
+        vm.Training.BeginTrainingRun();
+        Assert.True(vm.Training.IsTrainingRunning);
+        Assert.False(vm.Training.CanLaunchTraining); // cannot launch while running
 
-        vm.AppendTrainingRunLog("epoch 1");
-        vm.AppendTrainingRunLog("epoch 2");
-        Assert.Contains("epoch 1", vm.TrainingRunLog);
-        Assert.Contains("epoch 2", vm.TrainingRunLog);
+        vm.Training.AppendTrainingRunLog("epoch 1");
+        vm.Training.AppendTrainingRunLog("epoch 2");
+        Assert.Contains("epoch 1", vm.Training.TrainingRunLog);
+        Assert.Contains("epoch 2", vm.Training.TrainingRunLog);
 
-        vm.CompleteTrainingRun(0);
-        Assert.False(vm.IsTrainingRunning);
-        Assert.Contains("Completed", vm.TrainingRunStatus);
-        Assert.True(vm.CanLaunchTraining); // launchable again
+        vm.Training.CompleteTrainingRun(0);
+        Assert.False(vm.Training.IsTrainingRunning);
+        Assert.Contains("Completed", vm.Training.TrainingRunStatus);
+        Assert.True(vm.Training.CanLaunchTraining); // launchable again
     }
 
     [Fact]
     public void CompleteTrainingRun_NonZero_MarksFailed()
     {
         var vm = new MainWindowViewModel();
-        vm.BeginTrainingRun();
-        vm.CompleteTrainingRun(1);
-        Assert.Contains("Failed", vm.TrainingRunStatus);
+        vm.Training.BeginTrainingRun();
+        vm.Training.CompleteTrainingRun(1);
+        Assert.Contains("Failed", vm.Training.TrainingRunStatus);
     }
 
     [Fact]
     public void Cancel_SetsCancelledStatus()
     {
         var vm = new MainWindowViewModel();
-        vm.BeginTrainingRun();
-        vm.SetTrainingRunCancelled();
-        Assert.False(vm.IsTrainingRunning);
-        Assert.Equal("Cancelled", vm.TrainingRunStatus);
+        vm.Training.BeginTrainingRun();
+        vm.Training.SetTrainingRunCancelled();
+        Assert.False(vm.Training.IsTrainingRunning);
+        Assert.Equal("Cancelled", vm.Training.TrainingRunStatus);
     }
 
     [Fact]
     public void BeginTrainingRun_IncrementsRunId()
     {
         var vm = new MainWindowViewModel();
-        Assert.NotEqual(vm.BeginTrainingRun(), vm.BeginTrainingRun());
+        Assert.NotEqual(vm.Training.BeginTrainingRun(), vm.Training.BeginTrainingRun());
     }
 
     [Fact]
     public void AppendTrainingRunLogBatch_DropsStaleRunId()
     {
         var vm = new MainWindowViewModel();
-        var runId = vm.BeginTrainingRun();
+        var runId = vm.Training.BeginTrainingRun();
 
-        vm.AppendTrainingRunLogBatch(runId, new[] { "current-line" });
-        vm.AppendTrainingRunLogBatch(runId - 1, new[] { "stale-line" });
+        vm.Training.AppendTrainingRunLogBatch(runId, new[] { "current-line" });
+        vm.Training.AppendTrainingRunLogBatch(runId - 1, new[] { "stale-line" });
 
-        Assert.Contains("current-line", vm.TrainingRunLog);
-        Assert.DoesNotContain("stale-line", vm.TrainingRunLog);
+        Assert.Contains("current-line", vm.Training.TrainingRunLog);
+        Assert.DoesNotContain("stale-line", vm.Training.TrainingRunLog);
     }
 
     [Fact]
     public void AppendTrainingRunLogBatch_AppendsAndCaps()
     {
         var vm = new MainWindowViewModel();
-        var runId = vm.BeginTrainingRun();
-        vm.AppendTrainingRunLogBatch(runId, new[] { "a", "b", "c" });
-        Assert.Contains("a", vm.TrainingRunLog);
-        Assert.Contains("c", vm.TrainingRunLog);
+        var runId = vm.Training.BeginTrainingRun();
+        vm.Training.AppendTrainingRunLogBatch(runId, new[] { "a", "b", "c" });
+        Assert.Contains("a", vm.Training.TrainingRunLog);
+        Assert.Contains("c", vm.Training.TrainingRunLog);
     }
 
     [Fact]
     public void AppendTrainingRunLog_CapsAtMaxLines()
     {
         var vm = new MainWindowViewModel();
-        vm.BeginTrainingRun();
-        var total = MainWindowViewModel.TrainingLogMaxLines + 500;
+        vm.Training.BeginTrainingRun();
+        var total = TrainingViewModel.TrainingLogMaxLines + 500;
         for (var index = 0; index < total; index++)
         {
-            vm.AppendTrainingRunLog($"line-{index}");
+            vm.Training.AppendTrainingRunLog($"line-{index}");
         }
 
-        var lineCount = vm.TrainingRunLog.Split('\n').Length;
-        Assert.True(lineCount <= MainWindowViewModel.TrainingLogMaxLines);
-        Assert.Contains($"line-{total - 1}", vm.TrainingRunLog); // newest kept
-        Assert.DoesNotContain("line-0\r", vm.TrainingRunLog); // oldest dropped
+        var lineCount = vm.Training.TrainingRunLog.Split('\n').Length;
+        Assert.True(lineCount <= TrainingViewModel.TrainingLogMaxLines);
+        Assert.Contains($"line-{total - 1}", vm.Training.TrainingRunLog); // newest kept
+        Assert.DoesNotContain("line-0\r", vm.Training.TrainingRunLog); // oldest dropped
     }
 }
