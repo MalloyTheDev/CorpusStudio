@@ -57,7 +57,8 @@ public partial class App : Application
         services.AddTransient<IAiAssistConnectionViewModel, AiAssistConnectionViewModel>();
         services.AddTransient<IEvaluationConnectionViewModel, EvaluationConnectionViewModel>();
         services.AddTransient<IQualityViewModel, QualityViewModel>();
-        services.AddTransient<MainWindowViewModel>();
+        services.AddSingleton<CorpusStudio.Desktop.Services.IEngineService, CorpusStudio.Desktop.Services.PythonEngineService>();
+            services.AddTransient<MainWindowViewModel>();
     }
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
