@@ -15,14 +15,31 @@ public sealed class EngineCommandTests
 {
     private sealed class FakeEngine : IEngineService
     {
-        private readonly DebtReport _report;
+        private readonly DebtReport _debt;
+        private readonly GateReport _gate;
         public string? LastProjectPath { get; private set; }
-        public FakeEngine(DebtReport report) => _report = report;
+        public FakeEngine(DebtReport debt, GateReport? gate = null)
+        {
+            _debt = debt;
+            _gate = gate ?? new GateReport();
+        }
+
         public Task<DebtReport> GetDatasetDebtAsync(string projectPath)
         {
             LastProjectPath = projectPath;
-            return Task.FromResult(_report);
+            return Task.FromResult(_debt);
         }
+
+        public Task<GateReport> RunDatasetGatesAsync(string projectPath, string schemaId, bool exportScope = false)
+        {
+            LastProjectPath = projectPath;
+            return Task.FromResult(_gate);
+        }
+
+        public Task<GateReport> RunChatGatesAsync(string projectPath) => Task.FromResult(_gate);
+        public Task<ArenaReport> RunArenaAsync(string promptsText, System.Collections.Generic.IReadOnlyList<string> models,
+            string? judgeModel = null, string? projectPath = null) => Task.FromResult(new ArenaReport());
+        public Task<SuiteReport> RunSuiteAsync(string projectPath, string suiteName) => Task.FromResult(new SuiteReport());
     }
 
     private static MainWindowViewModel VmWith(IEngineService engine) => new(
@@ -59,5 +76,25 @@ public sealed class EngineCommandTests
 
         Assert.Equal("D", vm.Debt.DebtGrade);
         Assert.Equal(@"C:\fake\project", engine.LastProjectPath);
+    }
+
+    [Fact]
+    public async Task RunGates_WithProject_InvokesTheEngineForThatProject()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }, new GateReport());
+        var vm = VmWith(engine);
+        SelectFakeProject(vm);
+
+        await vm.RunGatesAsync();
+
+        Assert.Equal(@"C:\fake\project", engine.LastProjectPath);
+    }
+
+    [Fact]
+    public async Task RunGates_WithoutProject_SetsGateError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        await vm.RunGatesAsync();
+        Assert.Contains("Create or select a dataset project", vm.GateSummary);
     }
 }

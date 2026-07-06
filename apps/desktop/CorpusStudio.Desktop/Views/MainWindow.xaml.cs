@@ -1122,109 +1122,13 @@ public partial class MainWindow : Window
         await RefreshQualityAsync();
     }
 
-    private async void RunGatesButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            ViewModel.SetGateError("Create or select a dataset project before running gates.");
-            return;
-        }
 
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy("Running gates...");
-            ViewModel.SetGateInProgress();
-            var report = await _engineService.RunDatasetGatesAsync(
-                ViewModel.ActiveProjectPath,
-                ViewModel.ActiveSchemaId
-            );
-            ViewModel.ApplyGateReport(report);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.SetGateError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
-
-    private async void RunChatGatesButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            ViewModel.SetGateError("Create or select a dataset project before running gates.");
-            return;
-        }
-
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy("Running chat gates...");
-            ViewModel.SetGateInProgress();
-            var report = await _engineService.RunChatGatesAsync(ViewModel.ActiveProjectPath);
-            ViewModel.ApplyGateReport(report);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.SetGateError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
 
     private async void RefreshProviderPoliciesButton_Click(object sender, RoutedEventArgs e)
     {
         await RefreshProviderPoliciesAsync();
     }
 
-    private async void RunArenaButton_Click(object sender, RoutedEventArgs e)
-    {
-        var models = ArenaViewModel.ParseModelList(ViewModel.Arena.ArenaModelsInput);
-        if (string.IsNullOrWhiteSpace(ViewModel.Arena.ArenaPromptsInput))
-        {
-            ViewModel.Arena.SetArenaError("Enter at least one prompt (one per line).");
-            return;
-        }
-        if (models.Count == 0)
-        {
-            ViewModel.Arena.SetArenaError("Enter at least one model (comma or newline separated).");
-            return;
-        }
-
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy("Running arena...");
-            ViewModel.Arena.SetArenaInProgress();
-            var judge = string.IsNullOrWhiteSpace(ViewModel.Arena.ArenaJudgeModelInput)
-                ? null
-                : ViewModel.Arena.ArenaJudgeModelInput.Trim();
-            var projectPath = ViewModel.HasActiveProject ? ViewModel.ActiveProjectPath : null;
-            var report = await _engineService.RunArenaAsync(
-                ViewModel.Arena.ArenaPromptsInput,
-                models,
-                judge,
-                projectPath
-            );
-            ViewModel.Arena.ApplyArenaReport(report);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.Arena.SetArenaError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
 
     // ---- Evaluation Suites tab (v1.3 M2) ---------------------------------------------
 
@@ -1281,31 +1185,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void RunSuiteButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.Suites.CanRunSuite || ViewModel.Suites.SelectedSuite is not { } suite
-            || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            return;
-        }
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.Suites.IsSuitesBusy = true;
-            ViewModel.SetBusy($"Running suite '{suite.Name}' (live backend evaluations)...");
-            ViewModel.Suites.ApplySuiteReport(await _engineService.RunSuiteAsync(ViewModel.ActiveProjectPath, suite.Name));
-        }
-        catch (Exception ex)
-        {
-            ViewModel.Suites.SetSuitesError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.Suites.IsSuitesBusy = false;
-            ViewModel.ClearBusy();
-        }
-    }
 
     private async Task RefreshProviderPoliciesAsync()
     {
