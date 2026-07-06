@@ -19,6 +19,28 @@ public enum WorkspaceShellMode
     Studio,
 }
 
+/// <summary>The Studio tabs, in the WPF head's TabControl order. The values are the tab indices the
+/// WPF head binds via <c>SelectedIndex="{Binding SelectedStudioTabIndex}"</c>, so cross-tab navigation
+/// lives in the view-model (a shared command) instead of code-behind. Keep in sync with the XAML order.</summary>
+public enum StudioTab
+{
+    Dashboard = 0,
+    WritingStudio = 1,
+    Examples = 2,
+    PreferenceReview = 3,
+    Quarantine = 4,
+    Splits = 5,
+    Evaluation = 6,
+    AiAssist = 7,
+    Training = 8,
+    Arena = 9,
+    Artifacts = 10,
+    Suites = 11,
+    Versions = 12,
+    Debt = 13,
+    Settings = 14,
+}
+
 public sealed class MainWindowViewModel : INotifyPropertyChanged
 {
     private string _activeProjectTitle = "New Dataset Project";
@@ -132,6 +154,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand ToggleOutputPanelCommand { get; }
     public System.Windows.Input.ICommand DismissErrorCommand { get; }
 
+    // Cross-tab navigation commands (replace the desktop's XxxTab.IsSelected = true code-behind).
+    public System.Windows.Input.ICommand GoToDebtCommand { get; }
+    public System.Windows.Input.ICommand GoToWritingStudioCommand { get; }
+    public System.Windows.Input.ICommand GoToSplitsCommand { get; }
+    public System.Windows.Input.ICommand GoToEvaluationCommand { get; }
+    public System.Windows.Input.ICommand GoToTrainingCommand { get; }
+    // Prepare-then-navigate: run the AI-Assist handoff bridge; on success it selects the AI Assist tab.
+    public System.Windows.Input.ICommand PrepareEvaluationFailureReviewCommand { get; }
+    public System.Windows.Input.ICommand PreparePreferenceJudgeReviewCommand { get; }
+    public System.Windows.Input.ICommand PreparePreferenceBatchJudgeReviewCommand { get; }
+
     /// <summary>Design-time / test constructor.</summary>
     public MainWindowViewModel()
         : this(
@@ -189,6 +222,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ToggleProblemsPanelCommand = new RelayCommand(ToggleProblemsPanel);
         ToggleOutputPanelCommand = new RelayCommand(ToggleOutputPanel);
         DismissErrorCommand = new RelayCommand(DismissError);
+        GoToDebtCommand = new RelayCommand(() => GoToStudioTab(StudioTab.Debt));
+        GoToWritingStudioCommand = new RelayCommand(() => GoToStudioTab(StudioTab.WritingStudio));
+        GoToSplitsCommand = new RelayCommand(() => GoToStudioTab(StudioTab.Splits));
+        GoToEvaluationCommand = new RelayCommand(() => GoToStudioTab(StudioTab.Evaluation));
+        GoToTrainingCommand = new RelayCommand(() => GoToStudioTab(StudioTab.Training));
+        PrepareEvaluationFailureReviewCommand = new RelayCommand(() => PrepareEvaluationFailureReview());
+        PreparePreferenceJudgeReviewCommand = new RelayCommand(() => PreparePreferenceJudgeReview());
+        PreparePreferenceBatchJudgeReviewCommand = new RelayCommand(() => PreparePreferenceBatchJudgeReview());
     }
 
     // ---- Engine availability (v1.2.15 distributability) --------------------------
@@ -267,6 +308,25 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
     public void ShowStudio() => ShellMode = WorkspaceShellMode.Studio;
+
+    private int _selectedStudioTabIndex;
+
+    /// <summary>The selected Studio tab, bound by the WPF head's TabControl <c>SelectedIndex</c>. Cross-tab
+    /// navigation sets this in the view-model (via <see cref="GoToStudioTab"/> + commands) rather than
+    /// code-behind. See <see cref="StudioTab"/> for the index meanings.</summary>
+    public int SelectedStudioTabIndex
+    {
+        get => _selectedStudioTabIndex;
+        set => SetField(ref _selectedStudioTabIndex, value);
+    }
+
+    /// <summary>Switch to the Studio view and select <paramref name="tab"/>. The shared target for the
+    /// cross-tab navigation commands (replacing the desktop's <c>XxxTab.IsSelected = true</c> code-behind).</summary>
+    public void GoToStudioTab(StudioTab tab)
+    {
+        ShowStudio();
+        SelectedStudioTabIndex = (int)tab;
+    }
 
     public ObservableCollection<DatasetProjectListItem> Projects { get; } = [];
 
@@ -1256,6 +1316,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         AiAssist.AiAssistInstruction = BuildEvaluationFailureInstruction(Evaluation.SelectedEvaluationExampleResult);
         Evaluation.EvaluationReviewSummary =
             $"Prepared failed evaluation example {Evaluation.SelectedEvaluationExampleResult.ExampleId} for AI Assist triage.";
+        GoToStudioTab(StudioTab.AiAssist);
         return true;
     }
 
@@ -1335,6 +1396,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         );
         PreferenceReview.SetReviewSummary(
             $"Prepared Example {selected.RowNumber} for AI Assist preference-strength review.");
+        GoToStudioTab(StudioTab.AiAssist);
         return true;
     }
 
@@ -1362,6 +1424,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         AiAssist.AiAssistInstruction = BuildPreferenceBatchJudgeInstruction(items);
         PreferenceReview.SetReviewSummary(
             $"Prepared {items.Count} visible preference pair(s) for AI Assist batch judging.");
+        GoToStudioTab(StudioTab.AiAssist);
         return true;
     }
 

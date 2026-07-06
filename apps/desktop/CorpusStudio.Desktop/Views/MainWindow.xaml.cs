@@ -833,31 +833,10 @@ public partial class MainWindow : Window
         ViewModel.SetBusy("Cancelling...");
     }
 
-    private void GoToWritingStudioButton_Click(object sender, RoutedEventArgs e)
-    {
-        WritingStudioTab.IsSelected = true;
-    }
 
-    private void GoToSplitsButton_Click(object sender, RoutedEventArgs e)
-    {
-        SplitsTab.IsSelected = true;
-    }
 
-    private void GoToEvaluationButton_Click(object sender, RoutedEventArgs e)
-    {
-        EvaluationTab.IsSelected = true;
-    }
 
-    private void GoToTrainingButton_Click(object sender, RoutedEventArgs e)
-    {
-        TrainingTab.IsSelected = true;
-    }
 
-    private void GoToDebtTab_Click(object sender, RoutedEventArgs e)
-    {
-        ViewModel.ShowStudio();
-        DebtTab.IsSelected = true;
-    }
 
     private async void CheckTrainingCompatibilityButton_Click(object sender, RoutedEventArgs e)
     {
@@ -1453,15 +1432,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void PrepareEvaluationFailureButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.PrepareEvaluationFailureReview())
-        {
-            return;
-        }
-
-        AiAssistTab.IsSelected = true;
-    }
 
     private void EditEvaluationFailureButton_Click(object sender, RoutedEventArgs e)
     {
@@ -1576,25 +1546,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void PreparePreferenceJudgeButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.PreparePreferenceJudgeReview())
-        {
-            return;
-        }
 
-        AiAssistTab.IsSelected = true;
-    }
-
-    private void PreparePreferenceBatchJudgeButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.PreparePreferenceBatchJudgeReview())
-        {
-            return;
-        }
-
-        AiAssistTab.IsSelected = true;
-    }
 
     private async void ExportPreferenceForTrainingButton_Click(object sender, RoutedEventArgs e)
     {

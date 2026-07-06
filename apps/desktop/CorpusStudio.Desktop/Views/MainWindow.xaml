@@ -829,7 +829,7 @@
                         <!-- Dataset debt grade badge (v1.2.8). At-a-glance grade in the header;
                              passive (reflects the last debt check, invalidates on dataset change,
                              never auto-runs); click opens the Debt tab to run / see the ledger. -->
-                        <Button Click="GoToDebtTab_Click" ToolTip="Dataset debt grade — click for the debt ledger"
+                        <Button Command="{Binding GoToDebtCommand}" ToolTip="Dataset debt grade — click for the debt ledger"
                                 Cursor="Hand" Background="Transparent" BorderThickness="0" Padding="0" Margin="0,0,10,0"
                                 VerticalAlignment="Top">
                             <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1"
@@ -903,7 +903,7 @@
                     </Grid>
                 </Border>
 
-                <TabControl Grid.Row="2">
+                <TabControl Grid.Row="2" SelectedIndex="{Binding SelectedStudioTabIndex}">
                     <TabItem x:Name="DashboardTab" Header="Dashboard">
                         <ScrollViewer VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled"
@@ -916,7 +916,7 @@
                                             AutomationProperties.AutomationId="DashboardAuthorButton"
                                             Content="Author examples"
                                             Width="150" MinHeight="38" Margin="0,0,10,10"
-                                            Click="GoToWritingStudioButton_Click" />
+                                            Command="{Binding GoToWritingStudioCommand}" />
                                     <Button AutomationProperties.AutomationId="DashboardRunQualityButton"
                                             Content="Run quality"
                                             Width="132" MinHeight="38" Margin="0,0,10,10"
@@ -924,15 +924,15 @@
                                     <Button AutomationProperties.AutomationId="DashboardSplitsButton"
                                             Content="Generate splits"
                                             Width="132" MinHeight="38" Margin="0,0,10,10"
-                                            Click="GoToSplitsButton_Click" />
+                                            Command="{Binding GoToSplitsCommand}" />
                                     <Button AutomationProperties.AutomationId="DashboardEvaluationButton"
                                             Content="Run evaluation"
                                             Width="132" MinHeight="38" Margin="0,0,10,10"
-                                            Click="GoToEvaluationButton_Click" />
+                                            Command="{Binding GoToEvaluationCommand}" />
                                     <Button AutomationProperties.AutomationId="DashboardTrainingButton"
                                             Content="Training config"
                                             Width="132" MinHeight="38" Margin="0,0,10,10"
-                                            Click="GoToTrainingButton_Click" />
+                                            Command="{Binding GoToTrainingCommand}" />
                                     <Button AutomationProperties.AutomationId="DashboardNewProjectButton"
                                             Content="New project"
                                             Width="132" MinHeight="38" Margin="0,0,10,10"
@@ -1202,12 +1202,12 @@
                                         Content="Prepare Judge Review"
                                         Height="32"
                                         Margin="0,0,0,6"
-                                        Click="PreparePreferenceJudgeButton_Click" />
+                                        Command="{Binding PreparePreferenceJudgeReviewCommand}" />
                                 <Button AutomationProperties.AutomationId="PreparePreferenceBatchJudgeButton"
                                         Content="Prepare Batch Judge"
                                         Height="32"
                                         Margin="0,0,0,6"
-                                        Click="PreparePreferenceBatchJudgeButton_Click" />
+                                        Command="{Binding PreparePreferenceBatchJudgeReviewCommand}" />
                                 <Button AutomationProperties.AutomationId="ExportPreferenceRankingButton"
                                         Content="Export Ranking"
                                         Height="32"
@@ -1681,7 +1681,7 @@
                                                 Content="Prepare Failure"
                                                 Width="112"
                                                 Margin="0,0,8,0"
-                                                Click="PrepareEvaluationFailureButton_Click" />
+                                                Command="{Binding PrepareEvaluationFailureReviewCommand}" />
                                         <Button AutomationProperties.AutomationId="EditEvaluationFailureButton"
                                                 Content="Edit Failed Row"
                                                 Width="116"

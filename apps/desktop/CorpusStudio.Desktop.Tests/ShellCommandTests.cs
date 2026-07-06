@@ -46,4 +46,21 @@ public sealed class ShellCommandTests
         vm.DismissErrorCommand.Execute(null);
         Assert.False(vm.HasError);
     }
+
+    [Fact]
+    public void NavigationCommands_SwitchToStudioAndSelectTheTab()
+    {
+        var vm = new MainWindowViewModel();
+        vm.ShowStartCenter();
+
+        vm.GoToDebtCommand.Execute(null);
+        Assert.True(vm.IsStudio);
+        Assert.Equal((int)StudioTab.Debt, vm.SelectedStudioTabIndex);
+
+        vm.GoToEvaluationCommand.Execute(null);
+        Assert.Equal((int)StudioTab.Evaluation, vm.SelectedStudioTabIndex);
+
+        vm.GoToTrainingCommand.Execute(null);
+        Assert.Equal((int)StudioTab.Training, vm.SelectedStudioTabIndex);
+    }
 }
