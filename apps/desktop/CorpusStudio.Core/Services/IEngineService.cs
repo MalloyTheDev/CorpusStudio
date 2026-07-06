@@ -25,4 +25,16 @@ public interface IEngineService
 
     /// <summary>Run a named evaluation suite (live backend evaluations) and return its report.</summary>
     Task<SuiteReport> RunSuiteAsync(string projectPath, string suiteName);
+
+    /// <summary>Render a saved dataset-version card as Markdown (lineage + live integrity).</summary>
+    Task<string> GetDatasetVersionCardAsync(string projectPath, string versionId);
+
+    /// <summary>Diff two saved dataset versions (added/removed/common rows) as Markdown.</summary>
+    Task<string> GetDatasetVersionDiffAsync(string projectPath, string baseVersionId, string otherVersionId);
+
+    /// <summary>Render a model-artifact weight card as Markdown (byte-exact integrity at decision time).</summary>
+    Task<string> GetWeightCardAsync(string projectPath, string artifactId);
+
+    /// <summary>Generate the dataset card (metadata/schema/splits/quality/eval summary).</summary>
+    Task<DatasetCardResult> GenerateDatasetCardAsync(string projectPath, string schemaId);
 }

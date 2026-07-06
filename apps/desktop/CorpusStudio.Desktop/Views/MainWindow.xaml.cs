@@ -2647,36 +2647,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void ViewArtifactCardButton_Click(object sender, RoutedEventArgs e)
-    {
-        var selected = ViewModel.Artifacts.SelectedModelArtifact;
-        if (selected is null)
-        {
-            ViewModel.Artifacts.SetArtifactError("Select an artifact first.");
-            return;
-        }
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            return;
-        }
-
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy("Rendering weight card...");
-            var markdown = await _engineService.GetWeightCardAsync(ViewModel.ActiveProjectPath, selected.Record.ArtifactId);
-            ViewModel.Artifacts.SetArtifactDetail(markdown);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.Artifacts.SetArtifactError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
 
     private void RejectArtifactButton_Click(object sender, RoutedEventArgs e) => SetSelectedArtifactStatus("rejected");
 
@@ -2769,38 +2739,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void ViewDatasetVersionCardButton_Click(object sender, RoutedEventArgs e)
-    {
-        var selected = ViewModel.Versions.SelectedDatasetVersion;
-        if (selected is null)
-        {
-            ViewModel.Versions.SetDatasetVersionError("Select a version first.");
-            return;
-        }
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            return;
-        }
-
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy("Rendering version card...");
-
-            var markdown = await _engineService.GetDatasetVersionCardAsync(
-                ViewModel.ActiveProjectPath, selected.Record.VersionId);
-            ViewModel.Versions.SetDatasetVersionDetail(markdown);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.Versions.SetDatasetVersionError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
 
     private async void RestoreDatasetVersionButton_Click(object sender, RoutedEventArgs e)
     {
@@ -2868,48 +2806,6 @@ public partial class MainWindow : Window
         ViewModel.Versions.SetDatasetDiffBase(selected);
     }
 
-    private async void DiffVersionsButton_Click(object sender, RoutedEventArgs e)
-    {
-        var selected = ViewModel.Versions.SelectedDatasetVersion;
-        if (selected is null)
-        {
-            ViewModel.Versions.SetDatasetVersionError("Select a version to diff against the base.");
-            return;
-        }
-        if (string.IsNullOrEmpty(ViewModel.Versions.DatasetDiffBaseId))
-        {
-            ViewModel.Versions.SetDatasetVersionError("Set a diff base first (select a version and click 'Set diff base').");
-            return;
-        }
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            ViewModel.Versions.SetDatasetVersionError("Create or select a dataset project first.");
-            return;
-        }
-
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy("Diffing versions...");
-
-            // Read-only: the engine compares the two versions' stored manifests and
-            // refuses (throws) if either lacks stored rows.
-            var markdown = await _engineService.GetDatasetVersionDiffAsync(
-                ViewModel.ActiveProjectPath, ViewModel.Versions.DatasetDiffBaseId, selected.Record.VersionId);
-            ViewModel.Versions.SetDatasetVersionDetail(markdown);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.Versions.SetDatasetVersionError(ex.Message);
-            // Replace any prior successful diff so a failure never leaves a stale result.
-            ViewModel.Versions.SetDatasetVersionDetail("Diff failed: " + ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
 
     private async void RefreshDatasetVersionsButton_Click(object sender, RoutedEventArgs e)
     {
@@ -3144,35 +3040,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void GenerateDatasetCardButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            ViewModel.SetDatasetCardError("Create or select a dataset project before generating a dataset card.");
-            return;
-        }
-
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy("Generating dataset card...");
-            ViewModel.SetDatasetCardInProgress();
-            var result = await _engineService.GenerateDatasetCardAsync(
-                ViewModel.ActiveProjectPath,
-                ViewModel.ActiveSchemaId
-            );
-            ViewModel.ApplyDatasetCardResult(result);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.SetDatasetCardError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
 
     private void SaveLabSettingsButton_Click(object sender, RoutedEventArgs e)
     {
