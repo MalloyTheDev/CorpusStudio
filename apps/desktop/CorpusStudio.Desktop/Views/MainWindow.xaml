@@ -2387,7 +2387,7 @@
                                 <Button AutomationProperties.AutomationId="ViewArtifactCardButton"
                                         Content="View card"
                                         Margin="0,0,8,0"
-                                        Click="ViewArtifactCardButton_Click" />
+                                        Command="{Binding ViewArtifactCardCommand}" />
                                 <Button AutomationProperties.AutomationId="RefreshArtifactsButton"
                                         Content="Refresh"
                                         Click="RefreshArtifactsButton_Click" />
@@ -2559,7 +2559,7 @@
                                 <Button AutomationProperties.AutomationId="ViewDatasetVersionCardButton"
                                         Content="View card"
                                         Margin="0,0,8,0"
-                                        Click="ViewDatasetVersionCardButton_Click" />
+                                        Command="{Binding ViewDatasetVersionCardCommand}" />
                                 <Button AutomationProperties.AutomationId="RestoreDatasetVersionButton"
                                         Content="Restore this version"
                                         ToolTip="Overwrite the current dataset with this version (your current dataset is captured first so you can undo)"
@@ -2574,7 +2574,7 @@
                                         Content="Diff base → selected"
                                         ToolTip="Compare the pinned base version to the selected version (added/removed/common rows)"
                                         Margin="0,0,8,0"
-                                        Click="DiffVersionsButton_Click" />
+                                        Command="{Binding DiffVersionsCommand}" />
                                 <Button AutomationProperties.AutomationId="RefreshDatasetVersionsButton"
                                         Content="Refresh"
                                         Click="RefreshDatasetVersionsButton_Click" />
@@ -2944,7 +2944,7 @@
                 <Button AutomationProperties.AutomationId="GenerateDatasetCardButton"
                         Content="Generate Dataset Card"
                         Margin="0,8,0,8"
-                        Click="GenerateDatasetCardButton_Click" />
+                        Command="{Binding GenerateDatasetCardCommand}" />
                 <TextBox AutomationProperties.AutomationId="DatasetCardSummaryTextBox"
                          Text="{Binding DatasetCardSummary, Mode=OneWay}"
                          IsReadOnly="True"

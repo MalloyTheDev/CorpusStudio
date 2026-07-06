@@ -164,6 +164,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand RunChatGatesCommand { get; }
     public System.Windows.Input.ICommand RunArenaCommand { get; }
     public System.Windows.Input.ICommand RunSuiteCommand { get; }
+    public System.Windows.Input.ICommand ViewDatasetVersionCardCommand { get; }
+    public System.Windows.Input.ICommand DiffVersionsCommand { get; }
+    public System.Windows.Input.ICommand ViewArtifactCardCommand { get; }
+    public System.Windows.Input.ICommand GenerateDatasetCardCommand { get; }
 
     // Cross-tab navigation commands (replace the desktop's XxxTab.IsSelected = true code-behind).
     public System.Windows.Input.ICommand GoToDebtCommand { get; }
@@ -241,6 +245,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RunChatGatesCommand = new AsyncRelayCommand(RunChatGatesAsync);
         RunArenaCommand = new AsyncRelayCommand(RunArenaAsync);
         RunSuiteCommand = new AsyncRelayCommand(RunSuiteAsync);
+        ViewDatasetVersionCardCommand = new AsyncRelayCommand(ViewDatasetVersionCardAsync);
+        DiffVersionsCommand = new AsyncRelayCommand(DiffVersionsAsync);
+        ViewArtifactCardCommand = new AsyncRelayCommand(ViewArtifactCardAsync);
+        GenerateDatasetCardCommand = new AsyncRelayCommand(GenerateDatasetCardAsync);
         GoToDebtCommand = new RelayCommand(() => GoToStudioTab(StudioTab.Debt));
         GoToWritingStudioCommand = new RelayCommand(() => GoToStudioTab(StudioTab.WritingStudio));
         GoToSplitsCommand = new RelayCommand(() => GoToStudioTab(StudioTab.Splits));
@@ -486,6 +494,132 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         finally
         {
             Suites.IsSuitesBusy = false;
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Render the selected dataset-version card. Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task ViewDatasetVersionCardAsync()
+    {
+        if (Versions.SelectedDatasetVersion is not { } selected)
+        {
+            Versions.SetDatasetVersionError("Select a version first.");
+            return;
+        }
+
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            return;
+        }
+
+        try
+        {
+            SetBusy("Rendering version card...");
+            var markdown = await _engine.GetDatasetVersionCardAsync(ActiveProjectPath, selected.Record.VersionId);
+            Versions.SetDatasetVersionDetail(markdown);
+        }
+        catch (System.Exception ex)
+        {
+            Versions.SetDatasetVersionError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Diff the selected dataset version against the pinned base. Moved from code-behind.</summary>
+    public async System.Threading.Tasks.Task DiffVersionsAsync()
+    {
+        if (Versions.SelectedDatasetVersion is not { } selected)
+        {
+            Versions.SetDatasetVersionError("Select a version to diff against the base.");
+            return;
+        }
+
+        if (string.IsNullOrEmpty(Versions.DatasetDiffBaseId))
+        {
+            Versions.SetDatasetVersionError("Set a diff base first (select a version and click 'Set diff base').");
+            return;
+        }
+
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Versions.SetDatasetVersionError("Create or select a dataset project first.");
+            return;
+        }
+
+        try
+        {
+            SetBusy("Diffing versions...");
+            var markdown = await _engine.GetDatasetVersionDiffAsync(
+                ActiveProjectPath, Versions.DatasetDiffBaseId, selected.Record.VersionId);
+            Versions.SetDatasetVersionDetail(markdown);
+        }
+        catch (System.Exception ex)
+        {
+            Versions.SetDatasetVersionError(ex.Message);
+            // Replace any prior successful diff so a failure never leaves a stale result.
+            Versions.SetDatasetVersionDetail("Diff failed: " + ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Render the selected model-artifact weight card. Moved from code-behind.</summary>
+    public async System.Threading.Tasks.Task ViewArtifactCardAsync()
+    {
+        if (Artifacts.SelectedModelArtifact is not { } selected)
+        {
+            Artifacts.SetArtifactError("Select an artifact first.");
+            return;
+        }
+
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            return;
+        }
+
+        try
+        {
+            SetBusy("Rendering weight card...");
+            var markdown = await _engine.GetWeightCardAsync(ActiveProjectPath, selected.Record.ArtifactId);
+            Artifacts.SetArtifactDetail(markdown);
+        }
+        catch (System.Exception ex)
+        {
+            Artifacts.SetArtifactError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Generate the dataset card and apply it. Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task GenerateDatasetCardAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            SetDatasetCardError("Create or select a dataset project before generating a dataset card.");
+            return;
+        }
+
+        try
+        {
+            SetBusy("Generating dataset card...");
+            SetDatasetCardInProgress();
+            var result = await _engine.GenerateDatasetCardAsync(ActiveProjectPath, ActiveSchemaId);
+            ApplyDatasetCardResult(result);
+        }
+        catch (System.Exception ex)
+        {
+            SetDatasetCardError(ex.Message);
+        }
+        finally
+        {
             ClearBusy();
         }
     }
