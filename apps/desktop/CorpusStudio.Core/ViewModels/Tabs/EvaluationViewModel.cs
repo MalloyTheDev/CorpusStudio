@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
+using System.Windows.Input;
 using CorpusStudio.Desktop.Models;
 
 namespace CorpusStudio.Desktop.ViewModels.Tabs;
@@ -23,6 +24,27 @@ public sealed class EvaluationViewModel : ViewModelBase, IEvaluationViewModel
     public EvaluationViewModel(IEvaluationConnectionViewModel connection)
     {
         _connection = connection;
+        CompareReportsCommand = new RelayCommand(() => CompareSelectedEvaluationReports());
+        ApplyFailureFilterCommand = new RelayCommand(ApplySelectedFailureFilter);
+    }
+
+    /// <summary>Compare the two selected saved reports. Bound as a command so both heads share the action.</summary>
+    public ICommand CompareReportsCommand { get; }
+
+    /// <summary>Apply the selected saved failure view (guarding on a selection). Command target.</summary>
+    public ICommand ApplyFailureFilterCommand { get; }
+
+    /// <summary>Apply the selected saved failure view; reports if none is selected. Command target
+    /// (the logic moved here from the desktop code-behind so both heads can bind the command).</summary>
+    public void ApplySelectedFailureFilter()
+    {
+        if (SelectedEvaluationFailureFilter is null)
+        {
+            SetEvaluationFailureFilterError("Select a saved failure filter before applying it.");
+            return;
+        }
+
+        ApplyEvaluationFailureFilter(SelectedEvaluationFailureFilter);
     }
 
     private string _evaluationLimit = "10";

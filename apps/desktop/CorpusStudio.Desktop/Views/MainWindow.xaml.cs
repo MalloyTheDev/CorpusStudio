@@ -826,10 +826,6 @@ public partial class MainWindow : Window
         ExportJsonlButton.Focus();
     }
 
-    private void DismissErrorButton_Click(object sender, RoutedEventArgs e)
-    {
-        ViewModel.DismissError();
-    }
 
     private void CancelEngineButton_Click(object sender, RoutedEventArgs e)
     {
@@ -1544,16 +1540,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ApplyEvaluationFailureFilterButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel.Evaluation.SelectedEvaluationFailureFilter is null)
-        {
-            ViewModel.Evaluation.SetEvaluationFailureFilterError("Select a saved failure filter before applying it.");
-            return;
-        }
-
-        ViewModel.Evaluation.ApplyEvaluationFailureFilter(ViewModel.Evaluation.SelectedEvaluationFailureFilter);
-    }
 
     private void ResumeReviewedFixButton_Click(object sender, RoutedEventArgs e)
     {
@@ -2463,10 +2449,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void CompareEvaluationReportsButton_Click(object sender, RoutedEventArgs e)
-    {
-        ViewModel.Evaluation.CompareSelectedEvaluationReports();
-    }
 
     private async void LaunchTrainingButton_Click(object sender, RoutedEventArgs e)
     {

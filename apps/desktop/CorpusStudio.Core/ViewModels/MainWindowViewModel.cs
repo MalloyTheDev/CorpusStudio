@@ -130,6 +130,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand ShowStudioCommand { get; }
     public System.Windows.Input.ICommand ToggleProblemsPanelCommand { get; }
     public System.Windows.Input.ICommand ToggleOutputPanelCommand { get; }
+    public System.Windows.Input.ICommand DismissErrorCommand { get; }
 
     /// <summary>Design-time / test constructor.</summary>
     public MainWindowViewModel()
@@ -187,6 +188,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ShowStudioCommand = new RelayCommand(ShowStudio);
         ToggleProblemsPanelCommand = new RelayCommand(ToggleProblemsPanel);
         ToggleOutputPanelCommand = new RelayCommand(ToggleOutputPanel);
+        DismissErrorCommand = new RelayCommand(DismissError);
     }
 
     // ---- Engine availability (v1.2.15 distributability) --------------------------
