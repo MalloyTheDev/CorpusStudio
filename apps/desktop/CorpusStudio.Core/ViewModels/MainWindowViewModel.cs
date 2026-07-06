@@ -123,6 +123,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public IQualityViewModel Quality { get; }
 
+    // Shell-navigation commands: both heads can bind Command="{Binding X}" instead of per-head
+    // code-behind Click handlers (the cross-platform pattern the Avalonia port moves toward).
+    public System.Windows.Input.ICommand ShowStartCenterCommand { get; }
+    public System.Windows.Input.ICommand ShowFilesCommand { get; }
+    public System.Windows.Input.ICommand ShowStudioCommand { get; }
+    public System.Windows.Input.ICommand ToggleProblemsPanelCommand { get; }
+    public System.Windows.Input.ICommand ToggleOutputPanelCommand { get; }
+
     /// <summary>Design-time / test constructor.</summary>
     public MainWindowViewModel()
         : this(
@@ -173,6 +181,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Evaluation.ErrorReported += ReportError;
         Training.ErrorReported += ReportError;
         Quality.ErrorReported += ReportError;
+
+        ShowStartCenterCommand = new RelayCommand(ShowStartCenter);
+        ShowFilesCommand = new RelayCommand(ShowFiles);
+        ShowStudioCommand = new RelayCommand(ShowStudio);
+        ToggleProblemsPanelCommand = new RelayCommand(ToggleProblemsPanel);
+        ToggleOutputPanelCommand = new RelayCommand(ToggleOutputPanel);
     }
 
     // ---- Engine availability (v1.2.15 distributability) --------------------------
