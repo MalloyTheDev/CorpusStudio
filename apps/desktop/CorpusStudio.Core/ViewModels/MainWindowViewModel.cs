@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 
 using CorpusStudio.Desktop.Models;
+using CorpusStudio.Desktop.Services;
 using CorpusStudio.Desktop.ViewModels.Tabs;
 
 namespace CorpusStudio.Desktop.ViewModels;
@@ -154,6 +155,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand ToggleOutputPanelCommand { get; }
     public System.Windows.Input.ICommand DismissErrorCommand { get; }
 
+    private readonly IEngineService _engine = null!;
+
+    /// <summary>Run the dataset-debt assessment and apply it to the Debt tab — the engine-run
+    /// orchestration moved off the desktop code-behind into a shared async command.</summary>
+    public System.Windows.Input.ICommand RunDatasetDebtCommand { get; }
+
     // Cross-tab navigation commands (replace the desktop's XxxTab.IsSelected = true code-behind).
     public System.Windows.Input.ICommand GoToDebtCommand { get; }
     public System.Windows.Input.ICommand GoToWritingStudioCommand { get; }
@@ -172,7 +179,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             new VersionsViewModel(), new ArtifactsViewModel(), new SuitesViewModel(),
             new SplitsViewModel(), new PreferenceReviewViewModel(), new QuarantineViewModel(),
             new ExamplesViewModel(), new WritingStudioViewModel(), new AiAssistRewriteBatchesViewModel(),
-            new AiAssistConnectionViewModel(), new EvaluationConnectionViewModel(), new QualityViewModel())
+            new AiAssistConnectionViewModel(), new EvaluationConnectionViewModel(), new QualityViewModel(),
+            new PythonEngineService())
     {
     }
 
@@ -183,8 +191,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         IQuarantineViewModel quarantine, IExamplesViewModel examples,
         IWritingStudioViewModel writingStudio, IAiAssistRewriteBatchesViewModel rewriteBatches,
         IAiAssistConnectionViewModel aiAssistConnection, IEvaluationConnectionViewModel evaluationConnection,
-        IQualityViewModel quality)
+        IQualityViewModel quality,
+        IEngineService engine)
     {
+        _engine = engine;
         Debt = debt;
         Arena = arena;
         Settings = settings;
@@ -222,6 +232,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ToggleProblemsPanelCommand = new RelayCommand(ToggleProblemsPanel);
         ToggleOutputPanelCommand = new RelayCommand(ToggleOutputPanel);
         DismissErrorCommand = new RelayCommand(DismissError);
+        RunDatasetDebtCommand = new AsyncRelayCommand(RunDatasetDebtAsync);
         GoToDebtCommand = new RelayCommand(() => GoToStudioTab(StudioTab.Debt));
         GoToWritingStudioCommand = new RelayCommand(() => GoToStudioTab(StudioTab.WritingStudio));
         GoToSplitsCommand = new RelayCommand(() => GoToStudioTab(StudioTab.Splits));
@@ -326,6 +337,34 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         ShowStudio();
         SelectedStudioTabIndex = (int)tab;
+    }
+
+    /// <summary>Assess dataset debt via the engine and apply it to the Debt tab. Moved verbatim from the
+    /// desktop code-behind (minus the WPF-only wait cursor) so the run is a shared, bindable async command
+    /// (see <see cref="RunDatasetDebtCommand"/>). Read-only: the engine computes/grades, the VM parses.</summary>
+    public async System.Threading.Tasks.Task RunDatasetDebtAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Debt.SetDebtError("Create or select a dataset project first.");
+            return;
+        }
+
+        var projectPath = ActiveProjectPath;
+        try
+        {
+            SetBusy("Assessing dataset debt...");
+            var report = await _engine.GetDatasetDebtAsync(projectPath);
+            Debt.ApplyDebtReport(report);
+        }
+        catch (System.Exception ex)
+        {
+            Debt.SetDebtError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
     }
 
     public ObservableCollection<DatasetProjectListItem> Projects { get; } = [];

@@ -2644,7 +2644,7 @@
                                         ToolTip="Assess the current dataset's debt (via the engine) and grade it"
                                         HorizontalAlignment="Left"
                                         Margin="0,0,0,8"
-                                        Click="RunDatasetDebtButton_Click" />
+                                        Command="{Binding RunDatasetDebtCommand}" />
                             </StackPanel>
                             <ListBox Grid.Row="3"
                                      AutomationProperties.AutomationId="DebtItemsListBox"

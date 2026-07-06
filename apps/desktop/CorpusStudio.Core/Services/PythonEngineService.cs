@@ -10,7 +10,7 @@ using CorpusStudio.Desktop.Models;
 
 namespace CorpusStudio.Desktop.Services;
 
-public sealed class PythonEngineService
+public sealed class PythonEngineService : IEngineService
 {
     private sealed record EngineProcessResult(int ExitCode, string Output, string Error);
 

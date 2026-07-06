@@ -117,6 +117,8 @@
             <TextBlock Text="stale" VerticalAlignment="Center" Foreground="#B45309"
                        IsVisible="{Binding Debt.DebtStale}"/>
           </StackPanel>
+          <!-- The same shared async engine command the WPF head binds — one run, both heads. -->
+          <Button Content="Run debt check" Command="{Binding RunDatasetDebtCommand}" HorizontalAlignment="Left"/>
           <TextBlock Text="{Binding Debt.DebtSummary}" TextWrapping="Wrap"/>
           <ItemsControl ItemsSource="{Binding Debt.DebtItems}">
             <ItemsControl.ItemTemplate>
