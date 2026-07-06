@@ -2334,7 +2334,7 @@
                                 <Button Style="{StaticResource PrimaryButtonStyle}"
                                         AutomationProperties.AutomationId="RunArenaButton"
                                         Content="Run _Arena"
-                                        Click="RunArenaButton_Click" />
+                                        Command="{Binding RunArenaCommand}" />
                             </StackPanel>
 
                             <TextBox Grid.Column="1"
@@ -2440,7 +2440,7 @@
                                         Margin="0,0,8,0" Click="NewSuiteButton_Click" />
                                 <Button AutomationProperties.AutomationId="RunSuiteButton" Content="Run"
                                         ToolTip="Run the selected suite (live backend evaluations)"
-                                        IsEnabled="{Binding Suites.CanRunSuite}" Margin="0,0,8,0" Click="RunSuiteButton_Click" />
+                                        IsEnabled="{Binding Suites.CanRunSuite}" Margin="0,0,8,0" Command="{Binding RunSuiteCommand}" />
                                 <Button AutomationProperties.AutomationId="RefreshSuitesButton" Content="Refresh"
                                         Click="RefreshSuitesButton_Click" />
                             </WrapPanel>
@@ -2834,13 +2834,13 @@
                         Content="Run _Gates"
                         ToolTip="Check whether this dataset passes the schema, quality, and PII gates"
                         Margin="0,0,0,8"
-                        Click="RunGatesButton_Click" />
+                        Command="{Binding RunGatesCommand}" />
                 <Button AutomationProperties.AutomationId="RunChatGatesButton"
                         Content="Run chat gates"
                         ToolTip="Check conversation structure (role alternation, dangling turns, system placement…) — chat datasets only"
                         Margin="0,0,0,8"
                         Visibility="{Binding IsChatProject, Converter={StaticResource BoolToVis}}"
-                        Click="RunChatGatesButton_Click" />
+                        Command="{Binding RunChatGatesCommand}" />
                 <TextBlock Text="Synthetic Triage"
                            FontWeight="SemiBold"
                            Foreground="#334155"
@@ -3012,7 +3012,7 @@
                                                Margin="14,0,0,0" VerticalAlignment="Center" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                                    <Button Content="Run gates" Click="RunGatesButton_Click" Padding="12,5" Margin="0,0,8,0"
+                                    <Button Content="Run gates" Command="{Binding RunGatesCommand}" Padding="12,5" Margin="0,0,8,0"
                                             IsEnabled="{Binding HasActiveProject}" />
                                     <Button Click="ProblemsButton_Click" ToolTip="Close panel" Style="{StaticResource ExplorerIconStyle}">
                                         <Path Data="M5,5 L15,15 M15,5 L5,15" Stroke="#64748B" StrokeThickness="1.6"

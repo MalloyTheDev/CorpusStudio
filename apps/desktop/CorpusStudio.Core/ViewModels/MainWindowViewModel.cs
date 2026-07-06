@@ -160,6 +160,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// <summary>Run the dataset-debt assessment and apply it to the Debt tab — the engine-run
     /// orchestration moved off the desktop code-behind into a shared async command.</summary>
     public System.Windows.Input.ICommand RunDatasetDebtCommand { get; }
+    public System.Windows.Input.ICommand RunGatesCommand { get; }
+    public System.Windows.Input.ICommand RunChatGatesCommand { get; }
+    public System.Windows.Input.ICommand RunArenaCommand { get; }
+    public System.Windows.Input.ICommand RunSuiteCommand { get; }
 
     // Cross-tab navigation commands (replace the desktop's XxxTab.IsSelected = true code-behind).
     public System.Windows.Input.ICommand GoToDebtCommand { get; }
@@ -233,6 +237,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ToggleOutputPanelCommand = new RelayCommand(ToggleOutputPanel);
         DismissErrorCommand = new RelayCommand(DismissError);
         RunDatasetDebtCommand = new AsyncRelayCommand(RunDatasetDebtAsync);
+        RunGatesCommand = new AsyncRelayCommand(RunGatesAsync);
+        RunChatGatesCommand = new AsyncRelayCommand(RunChatGatesAsync);
+        RunArenaCommand = new AsyncRelayCommand(RunArenaAsync);
+        RunSuiteCommand = new AsyncRelayCommand(RunSuiteAsync);
         GoToDebtCommand = new RelayCommand(() => GoToStudioTab(StudioTab.Debt));
         GoToWritingStudioCommand = new RelayCommand(() => GoToStudioTab(StudioTab.WritingStudio));
         GoToSplitsCommand = new RelayCommand(() => GoToStudioTab(StudioTab.Splits));
@@ -363,6 +371,121 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
         finally
         {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Run the dataset gate suite and apply the report. Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task RunGatesAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            SetGateError("Create or select a dataset project before running gates.");
+            return;
+        }
+
+        try
+        {
+            SetBusy("Running gates...");
+            SetGateInProgress();
+            var report = await _engine.RunDatasetGatesAsync(ActiveProjectPath, ActiveSchemaId);
+            ApplyGateReport(report);
+        }
+        catch (System.Exception ex)
+        {
+            SetGateError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Run the chat conversation-structure gate and apply the report. Moved from code-behind.</summary>
+    public async System.Threading.Tasks.Task RunChatGatesAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            SetGateError("Create or select a dataset project before running gates.");
+            return;
+        }
+
+        try
+        {
+            SetBusy("Running chat gates...");
+            SetGateInProgress();
+            var report = await _engine.RunChatGatesAsync(ActiveProjectPath);
+            ApplyGateReport(report);
+        }
+        catch (System.Exception ex)
+        {
+            SetGateError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Run the model arena across the entered prompts/models. Moved from code-behind.</summary>
+    public async System.Threading.Tasks.Task RunArenaAsync()
+    {
+        var models = ArenaViewModel.ParseModelList(Arena.ArenaModelsInput);
+        if (string.IsNullOrWhiteSpace(Arena.ArenaPromptsInput))
+        {
+            Arena.SetArenaError("Enter at least one prompt (one per line).");
+            return;
+        }
+
+        if (models.Count == 0)
+        {
+            Arena.SetArenaError("Enter at least one model (comma or newline separated).");
+            return;
+        }
+
+        try
+        {
+            SetBusy("Running arena...");
+            Arena.SetArenaInProgress();
+            var judge = string.IsNullOrWhiteSpace(Arena.ArenaJudgeModelInput)
+                ? null
+                : Arena.ArenaJudgeModelInput.Trim();
+            var projectPath = HasActiveProject ? ActiveProjectPath : null;
+            var report = await _engine.RunArenaAsync(Arena.ArenaPromptsInput, models, judge, projectPath);
+            Arena.ApplyArenaReport(report);
+        }
+        catch (System.Exception ex)
+        {
+            Arena.SetArenaError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Run the selected evaluation suite (live backend). Moved from code-behind.</summary>
+    public async System.Threading.Tasks.Task RunSuiteAsync()
+    {
+        if (!Suites.CanRunSuite || Suites.SelectedSuite is not { } suite
+            || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            return;
+        }
+
+        try
+        {
+            Suites.IsSuitesBusy = true;
+            SetBusy($"Running suite '{suite.Name}' (live backend evaluations)...");
+            Suites.ApplySuiteReport(await _engine.RunSuiteAsync(ActiveProjectPath, suite.Name));
+        }
+        catch (System.Exception ex)
+        {
+            Suites.SetSuitesError(ex.Message);
+        }
+        finally
+        {
+            Suites.IsSuitesBusy = false;
             ClearBusy();
         }
     }
