@@ -35,4 +35,15 @@ public sealed class ShellCommandTests
         vm.ToggleOutputPanelCommand.Execute(null);
         Assert.True(vm.OutputPanelVisible);
     }
+
+    [Fact]
+    public void DismissErrorCommand_ClearsTheErrorBanner()
+    {
+        var vm = new MainWindowViewModel();
+        vm.Evaluation.SetEvaluationError("boom"); // lights the shared banner via ErrorReported
+        Assert.True(vm.HasError);
+
+        vm.DismissErrorCommand.Execute(null);
+        Assert.False(vm.HasError);
+    }
 }

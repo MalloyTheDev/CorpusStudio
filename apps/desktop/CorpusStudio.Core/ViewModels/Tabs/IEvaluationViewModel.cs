@@ -70,6 +70,15 @@ public interface IEvaluationViewModel : INotifyPropertyChanged
     /// <summary>Compare the two selected saved evaluation reports; writes <see cref="EvaluationComparisonSummary"/>.</summary>
     bool CompareSelectedEvaluationReports();
 
+    /// <summary>Apply the selected saved failure view (guarding on a selection). Command target.</summary>
+    void ApplySelectedFailureFilter();
+
+    /// <summary>Compare the two selected saved reports — the <see cref="CompareSelectedEvaluationReports"/> action as a command.</summary>
+    System.Windows.Input.ICommand CompareReportsCommand { get; }
+
+    /// <summary>Apply the selected saved failure view — the <see cref="ApplySelectedFailureFilter"/> action as a command.</summary>
+    System.Windows.Input.ICommand ApplyFailureFilterCommand { get; }
+
     /// <summary>Build a before/after comparison of two reports. Public so the shell's Training-baseline
     /// bridge (<c>CompareTrainingBaseline</c>) can reuse it until Training decomposes.</summary>
     string BuildEvaluationReportComparison(EvaluationReportHistoryItem selected, EvaluationReportHistoryItem comparison);

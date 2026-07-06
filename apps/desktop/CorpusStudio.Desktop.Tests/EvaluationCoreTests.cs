@@ -64,4 +64,22 @@ public sealed class EvaluationCoreTests
         Assert.False(compared);
         Assert.Contains("Select a saved evaluation report", vm.EvaluationComparisonSummary);
     }
+
+    [Fact]
+    public void CompareReportsCommand_RunsTheComparison()
+    {
+        // The command wraps CompareSelectedEvaluationReports so both heads can bind it.
+        var vm = new EvaluationViewModel(new EvaluationConnectionViewModel());
+        vm.CompareReportsCommand.Execute(null);
+        Assert.Contains("Select a saved evaluation report", vm.EvaluationComparisonSummary);
+    }
+
+    [Fact]
+    public void ApplyFailureFilterCommand_WithoutSelection_ReportsError()
+    {
+        // The guard logic moved out of the desktop code-behind into ApplySelectedFailureFilter.
+        var vm = new EvaluationViewModel(new EvaluationConnectionViewModel());
+        vm.ApplyFailureFilterCommand.Execute(null);
+        Assert.Contains("Select a saved failure filter", vm.EvaluationFailureFilterSummary);
+    }
 }

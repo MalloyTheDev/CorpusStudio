@@ -899,7 +899,7 @@
                                 Width="88"
                                 VerticalAlignment="Center"
                                 Margin="12,0,0,0"
-                                Click="DismissErrorButton_Click" />
+                                Command="{Binding DismissErrorCommand}" />
                     </Grid>
                 </Border>
 
@@ -1499,7 +1499,7 @@
                                                 Content="Compare"
                                                 Width="88"
                                                 Margin="0,0,8,0"
-                                                Click="CompareEvaluationReportsButton_Click" />
+                                                Command="{Binding Evaluation.CompareReportsCommand}" />
                                         <Button AutomationProperties.AutomationId="RerunEvaluationReportButton"
                                                 Content="Rerun Selected"
                                                 Width="116"
@@ -1621,7 +1621,7 @@
                                                             Content="Apply Filter"
                                                             Width="96"
                                                             Margin="0,0,8,4"
-                                                            Click="ApplyEvaluationFailureFilterButton_Click" />
+                                                            Command="{Binding Evaluation.ApplyFailureFilterCommand}" />
                                                 </WrapPanel>
                                                 <TextBlock AutomationProperties.AutomationId="EvaluationFailureFilterSummaryTextBlock"
                                                            Text="{Binding Evaluation.EvaluationFailureFilterSummary, Mode=OneWay}"
