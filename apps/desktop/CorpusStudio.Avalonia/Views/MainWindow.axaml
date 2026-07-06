@@ -8,18 +8,18 @@
         Title="Corpus Studio — Avalonia (full shell over the shared view-models)">
   <Grid ColumnDefinitions="52,*">
 
-    <!-- Activity bar: mode switches + panel toggles. Minimal code-behind Click handlers call the
-         shell VM (ShowStartCenter/ShowFiles/ShowStudio/Toggle*Panel) — no ICommand yet, same as WPF. -->
+    <!-- Activity bar: mode switches + panel toggles bound to the shell VM's ICommands (RelayCommand),
+         so there is NO code-behind here — the cross-platform pattern the port moves toward. -->
     <StackPanel Grid.Column="0" Background="#0F172A" Spacing="2">
-      <Button Content="⌂" Click="ActivityHome_Click" Background="Transparent" Foreground="White"
+      <Button Content="⌂" Command="{Binding ShowStartCenterCommand}" Background="Transparent" Foreground="White"
               FontSize="18" Width="52" Height="44" HorizontalContentAlignment="Center"/>
-      <Button Content="🗀" Click="ActivityFiles_Click" Background="Transparent" Foreground="White"
+      <Button Content="🗀" Command="{Binding ShowFilesCommand}" Background="Transparent" Foreground="White"
               FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
-      <Button Content="▦" Click="ActivityStudio_Click" Background="Transparent" Foreground="White"
+      <Button Content="▦" Command="{Binding ShowStudioCommand}" Background="Transparent" Foreground="White"
               FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
-      <Button Content="⚠" Click="ToggleProblems_Click" Background="Transparent" Foreground="White"
+      <Button Content="⚠" Command="{Binding ToggleProblemsPanelCommand}" Background="Transparent" Foreground="White"
               FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
-      <Button Content="≡" Click="ToggleOutput_Click" Background="Transparent" Foreground="White"
+      <Button Content="≡" Command="{Binding ToggleOutputPanelCommand}" Background="Transparent" Foreground="White"
               FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
     </StackPanel>
 
@@ -44,24 +44,44 @@
           </StackPanel>
         </ScrollViewer>
 
-        <!-- Files / Universal Explorer mode (IsVisible←IsFiles): open documents + status. -->
+        <!-- Files / Universal Explorer mode (IsVisible←IsFiles): the hierarchical file TREE +
+             open-document tabs + the active document. Proves the TreeView / TreeDataTemplate shape. -->
         <Grid IsVisible="{Binding IsFiles}" ColumnDefinitions="300,*" Margin="12">
           <DockPanel Grid.Column="0">
             <TextBlock DockPanel.Dock="Top" Text="{Binding Explorer.WorkspaceName}"
                        FontWeight="Bold" Margin="0,0,0,6"/>
             <TextBlock DockPanel.Dock="Bottom" Text="{Binding Explorer.ExplorerStatus}"
                        Foreground="#64748B" FontSize="11" Margin="0,6,0,0"/>
-            <ListBox ItemsSource="{Binding Explorer.OpenDocuments}"
-                     SelectedItem="{Binding Explorer.ActiveDocument}">
+            <TreeView ItemsSource="{Binding Explorer.RootNode.Children}">
+              <TreeView.ItemTemplate>
+                <TreeDataTemplate x:DataType="models:WorkspaceTreeNode" ItemsSource="{Binding Children}">
+                  <StackPanel Orientation="Horizontal" Spacing="6" Height="20">
+                    <TextBlock Text="🗀" IsVisible="{Binding IsDirectory}" VerticalAlignment="Center"/>
+                    <Border Background="#EEF4FF" CornerRadius="3" Padding="3,0" VerticalAlignment="Center"
+                            IsVisible="{Binding !IsDirectory}">
+                      <TextBlock Text="{Binding ChipLabel}" FontSize="8" FontWeight="Bold"
+                                 Foreground="#1D4ED8" VerticalAlignment="Center"/>
+                    </Border>
+                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+                    <Ellipse Width="6" Height="6" Fill="#F59E0B" VerticalAlignment="Center"
+                             IsVisible="{Binding IsGeneratedArtifact}"/>
+                  </StackPanel>
+                </TreeDataTemplate>
+              </TreeView.ItemTemplate>
+            </TreeView>
+          </DockPanel>
+          <DockPanel Grid.Column="1" Margin="12,0,0,0">
+            <ListBox DockPanel.Dock="Top" ItemsSource="{Binding Explorer.OpenDocuments}"
+                     SelectedItem="{Binding Explorer.ActiveDocument}" MaxHeight="90">
               <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="models:OpenWorkspaceDocument">
-                  <TextBlock Text="{Binding DisplayName}" Margin="0,2"/>
+                  <TextBlock Text="{Binding DisplayName}" Margin="0,1"/>
                 </DataTemplate>
               </ListBox.ItemTemplate>
             </ListBox>
+            <TextBox IsReadOnly="True" AcceptsReturn="True" Margin="0,8,0,0"
+                     FontFamily="Consolas" TextWrapping="Wrap" Text="{Binding Explorer.ActiveRelPath}"/>
           </DockPanel>
-          <TextBox Grid.Column="1" Margin="12,0,0,0" IsReadOnly="True" AcceptsReturn="True"
-                   FontFamily="Consolas" TextWrapping="Wrap" Text="{Binding Explorer.ActiveRelPath}"/>
         </Grid>
 
         <!-- Studio mode (IsVisible←IsStudio): hero + projects sidebar + the 14-tab TabControl + Quality panel. -->
