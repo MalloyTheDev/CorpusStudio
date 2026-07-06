@@ -37,4 +37,16 @@ public interface IEngineService
 
     /// <summary>Generate the dataset card (metadata/schema/splits/quality/eval summary).</summary>
     Task<DatasetCardResult> GenerateDatasetCardAsync(string projectPath, string schemaId);
+
+    /// <summary>Validate a draft against a schema (required fields, types, enums, chat shape, …).</summary>
+    Task<ValidationReport> ValidateDraftAsync(string draftText, string schemaId);
+
+    /// <summary>Check training-config compatibility for a schema/format/target with warnings.</summary>
+    Task<TrainingCompatibilityResult> CheckTrainingCompatibilityAsync(string schemaId, string datasetFormat, string target);
+
+    /// <summary>List the project's registered evaluation suites (name/case-count/validity).</summary>
+    Task<IReadOnlyList<SuiteSummary>> ListSuitesAsync(string projectPath);
+
+    /// <summary>Export a preference project for training (DPO/KTO/reward) with a pair-integrity gate.</summary>
+    Task<PreferenceExportResult> ExportPreferenceForTrainingAsync(string projectPath, string format);
 }

@@ -168,6 +168,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand DiffVersionsCommand { get; }
     public System.Windows.Input.ICommand ViewArtifactCardCommand { get; }
     public System.Windows.Input.ICommand GenerateDatasetCardCommand { get; }
+    public System.Windows.Input.ICommand ValidateDraftCommand { get; }
+    public System.Windows.Input.ICommand CheckTrainingCompatibilityCommand { get; }
+    public System.Windows.Input.ICommand RefreshSuitesCommand { get; }
+    public System.Windows.Input.ICommand ExportPreferenceForTrainingCommand { get; }
 
     // Cross-tab navigation commands (replace the desktop's XxxTab.IsSelected = true code-behind).
     public System.Windows.Input.ICommand GoToDebtCommand { get; }
@@ -249,6 +253,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         DiffVersionsCommand = new AsyncRelayCommand(DiffVersionsAsync);
         ViewArtifactCardCommand = new AsyncRelayCommand(ViewArtifactCardAsync);
         GenerateDatasetCardCommand = new AsyncRelayCommand(GenerateDatasetCardAsync);
+        ValidateDraftCommand = new AsyncRelayCommand(ValidateDraftAsync);
+        CheckTrainingCompatibilityCommand = new AsyncRelayCommand(CheckTrainingCompatibilityAsync);
+        RefreshSuitesCommand = new AsyncRelayCommand(RefreshSuitesAsync);
+        ExportPreferenceForTrainingCommand = new AsyncRelayCommand(ExportPreferenceForTrainingAsync);
         GoToDebtCommand = new RelayCommand(() => GoToStudioTab(StudioTab.Debt));
         GoToWritingStudioCommand = new RelayCommand(() => GoToStudioTab(StudioTab.WritingStudio));
         GoToSplitsCommand = new RelayCommand(() => GoToStudioTab(StudioTab.Splits));
@@ -617,6 +625,108 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         catch (System.Exception ex)
         {
             SetDatasetCardError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Validate the current Writing Studio draft against the active schema. Moved from code-behind.</summary>
+    public async System.Threading.Tasks.Task ValidateDraftAsync()
+    {
+        try
+        {
+            SetValidationInProgress();
+            var report = await _engine.ValidateDraftAsync(WritingStudio.DraftText, ActiveSchemaId);
+            ApplyValidationReport(report);
+        }
+        catch (System.Exception ex)
+        {
+            SetValidationError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Check training-config compatibility for the current format/target. Moved from code-behind.</summary>
+    public async System.Threading.Tasks.Task CheckTrainingCompatibilityAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveSchemaId))
+        {
+            Training.SetTrainingConfigError(
+                "Create or select a dataset project before checking training compatibility.");
+            return;
+        }
+
+        try
+        {
+            SetBusy("Checking training compatibility...");
+            var result = await _engine.CheckTrainingCompatibilityAsync(
+                ActiveSchemaId, Training.TrainingFormat, Training.TrainingTarget);
+            Training.ApplyTrainingCompatibility(result);
+        }
+        catch (System.Exception ex)
+        {
+            Training.SetTrainingConfigError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Refresh the project's evaluation-suite registry. Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task RefreshSuitesAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Suites.SetSuitesError("Create or select a dataset project first.");
+            return;
+        }
+
+        try
+        {
+            Suites.IsSuitesBusy = true;
+            Suites.ApplySuites(await _engine.ListSuitesAsync(ActiveProjectPath));
+        }
+        catch (System.Exception ex)
+        {
+            Suites.SetSuitesError(ex.Message);
+        }
+        finally
+        {
+            Suites.IsSuitesBusy = false;
+        }
+    }
+
+    /// <summary>Export the preference project for training (DPO/KTO/reward). Moved from code-behind.</summary>
+    public async System.Threading.Tasks.Task ExportPreferenceForTrainingAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            PreferenceReview.SetPreferenceRankingExportError("Create or select a preference project before exporting.");
+            return;
+        }
+
+        if (ActiveSchemaId != "preference")
+        {
+            PreferenceReview.SetPreferenceRankingExportError("Training export is available for preference projects.");
+            return;
+        }
+
+        try
+        {
+            SetBusy("Exporting preference data...");
+            var result = await _engine.ExportPreferenceForTrainingAsync(
+                ActiveProjectPath, PreferenceReview.PreferenceExportFormat);
+            PreferenceReview.ApplyPreferenceTrainingExport(result);
+        }
+        catch (System.Exception ex)
+        {
+            PreferenceReview.SetPreferenceRankingExportError(ex.Message);
         }
         finally
         {

@@ -1220,7 +1220,7 @@
                                 <Button AutomationProperties.AutomationId="ExportPreferenceForTrainingButton"
                                         Content="Export for Training"
                                         Height="32"
-                                        Click="ExportPreferenceForTrainingButton_Click" />
+                                        Command="{Binding ExportPreferenceForTrainingCommand}" />
                             </StackPanel>
                         </Grid>
                     </TabItem>
@@ -2104,7 +2104,7 @@
                                         Content="Check Compatibility"
                                         Width="150"
                                         Margin="0,0,8,0"
-                                        Click="CheckTrainingCompatibilityButton_Click" />
+                                        Command="{Binding CheckTrainingCompatibilityCommand}" />
                                 <Button Style="{StaticResource PrimaryButtonStyle}"
                                         AutomationProperties.AutomationId="GenerateTrainingConfigButton"
                                         Content="Generate Config"
@@ -2442,7 +2442,7 @@
                                         ToolTip="Run the selected suite (live backend evaluations)"
                                         IsEnabled="{Binding Suites.CanRunSuite}" Margin="0,0,8,0" Command="{Binding RunSuiteCommand}" />
                                 <Button AutomationProperties.AutomationId="RefreshSuitesButton" Content="Refresh"
-                                        Click="RefreshSuitesButton_Click" />
+                                        Command="{Binding RefreshSuitesCommand}" />
                             </WrapPanel>
                             <Grid Grid.Row="2">
                                 <Grid.ColumnDefinitions>
@@ -2923,7 +2923,7 @@
                 <Button AutomationProperties.AutomationId="ValidateButton"
                         Content="_Validate"
                         Margin="0,8,0,8"
-                        Click="ValidateButton_Click" />
+                        Command="{Binding ValidateDraftCommand}" />
                 <TextBlock Text="Cleaning (applied only to the exported file):"
                            Foreground="#475569"
                            Margin="0,4,0,4"
