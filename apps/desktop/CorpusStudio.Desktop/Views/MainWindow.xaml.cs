@@ -838,37 +838,6 @@ public partial class MainWindow : Window
 
 
 
-    private async void CheckTrainingCompatibilityButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveSchemaId))
-        {
-            ViewModel.Training.SetTrainingConfigError(
-                "Create or select a dataset project before checking training compatibility."
-            );
-            return;
-        }
-
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy("Checking training compatibility...");
-            var result = await _engineService.CheckTrainingCompatibilityAsync(
-                ViewModel.ActiveSchemaId,
-                ViewModel.Training.TrainingFormat,
-                ViewModel.Training.TrainingTarget
-            );
-            ViewModel.Training.ApplyTrainingCompatibility(result);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.Training.SetTrainingConfigError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
 
     private async Task PreviewAndImportJsonlAsync(string importPath)
     {
@@ -1026,29 +995,6 @@ public partial class MainWindow : Window
         return string.Join(Environment.NewLine, lines);
     }
 
-    private async void ValidateButton_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetValidationInProgress();
-            var report = await _engineService.ValidateDraftAsync(
-                ViewModel.WritingStudio.DraftText,
-                ViewModel.ActiveSchemaId
-            );
-
-            ViewModel.ApplyValidationReport(report);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.SetValidationError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
 
     private async void SaveExampleButton_Click(object sender, RoutedEventArgs e)
     {
@@ -1132,27 +1078,6 @@ public partial class MainWindow : Window
 
     // ---- Evaluation Suites tab (v1.3 M2) ---------------------------------------------
 
-    private async void RefreshSuitesButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            ViewModel.Suites.SetSuitesError("Create or select a dataset project first.");
-            return;
-        }
-        try
-        {
-            ViewModel.Suites.IsSuitesBusy = true;
-            ViewModel.Suites.ApplySuites(await _engineService.ListSuitesAsync(ViewModel.ActiveProjectPath));
-        }
-        catch (Exception ex)
-        {
-            ViewModel.Suites.SetSuitesError(ex.Message);
-        }
-        finally
-        {
-            ViewModel.Suites.IsSuitesBusy = false;
-        }
-    }
 
     private async void NewSuiteButton_Click(object sender, RoutedEventArgs e)
     {
@@ -1427,40 +1352,6 @@ public partial class MainWindow : Window
 
 
 
-    private async void ExportPreferenceForTrainingButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            ViewModel.PreferenceReview.SetPreferenceRankingExportError("Create or select a preference project before exporting.");
-            return;
-        }
-
-        if (ViewModel.ActiveSchemaId != "preference")
-        {
-            ViewModel.PreferenceReview.SetPreferenceRankingExportError("Training export is available for preference projects.");
-            return;
-        }
-
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy("Exporting preference data...");
-            var result = await _engineService.ExportPreferenceForTrainingAsync(
-                ViewModel.ActiveProjectPath,
-                ViewModel.PreferenceReview.PreferenceExportFormat
-            );
-            ViewModel.PreferenceReview.ApplyPreferenceTrainingExport(result);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.PreferenceReview.SetPreferenceRankingExportError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
 
     private void ExportPreferenceRankingButton_Click(object sender, RoutedEventArgs e)
     {
