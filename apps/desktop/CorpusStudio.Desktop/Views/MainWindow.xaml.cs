@@ -428,7 +428,7 @@ public partial class MainWindow : Window
             ViewModel.SetExamples(_engineService.LoadExamples(folder));
             ViewModel.Quarantine.SetItems(_engineService.LoadImportQuarantineItems(folder));
             Mouse.OverrideCursor = null;
-            await RefreshQualityAsync(recordHistory: false);
+            await ViewModel.RefreshQualityAsync(recordHistory: false);
 
             RecordRecentWorkspace(folder, name, schemaId);
             ViewModel.ShowFiles();
@@ -972,7 +972,7 @@ public partial class MainWindow : Window
             ViewModel.Quarantine.SetItems(
                 _engineService.LoadImportQuarantineItems(ViewModel.ActiveProjectPath!)
             );
-            await RefreshQualityAsync();
+            await ViewModel.RefreshQualityAsync();
 
             // Snapshot the dataset change so an import is never silent. Best-effort: the import
             // already succeeded, so a failed snapshot is a note, not a failure — never claim a
@@ -1122,7 +1122,7 @@ public partial class MainWindow : Window
                     _engineService.LoadImportQuarantineItems(ViewModel.ActiveProjectPath));
             }
 
-            await RefreshQualityAsync();
+            await ViewModel.RefreshQualityAsync();
             MessageBox.Show(
                 this,
                 $"Saved {savedCount} example(s).",
@@ -1140,11 +1140,6 @@ public partial class MainWindow : Window
             Mouse.OverrideCursor = null;
             ViewModel.ClearBusy();
         }
-    }
-
-    private async void RunQualityButton_Click(object sender, RoutedEventArgs e)
-    {
-        await RefreshQualityAsync();
     }
 
 
@@ -2818,41 +2813,7 @@ public partial class MainWindow : Window
         );
         await RefreshDatasetVersionsAsync();
         await RefreshGateThresholdsAsync();
-        await RefreshQualityAsync(recordHistory: false);
+        await ViewModel.RefreshQualityAsync(recordHistory: false);
     }
 
-    private async Task RefreshQualityAsync(bool recordHistory = true)
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            ViewModel.Quality.SetQualityError("Create or select a dataset project before running quality checks.");
-            return;
-        }
-
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy("Running quality checks...");
-            ViewModel.Quality.SetQualityInProgress();
-            var report = await _engineService.BuildQualityReportAsync(ViewModel.ActiveProjectPath);
-            if (recordHistory)
-            {
-                _engineService.SaveQualityHistoryEntry(ViewModel.ActiveProjectPath, report);
-            }
-
-            // Load a wider window than the 5-line text summary uses so the debt-trend chart
-            // has enough points; the summary still shows only its most recent few internally.
-            var history = _engineService.LoadQualityHistory(ViewModel.ActiveProjectPath, maxEntries: 30);
-            ViewModel.Quality.ApplyQualityReport(report, history);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.Quality.SetQualityError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
 }
