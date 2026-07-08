@@ -691,10 +691,10 @@ public partial class MainWindow : Window
 
     /// <summary>Minimal single-line text prompt (no dependency on VisualBasic). Returns the
     /// trimmed input, or null if cancelled or empty.</summary>
-    private string? PromptForRelativePath(string title, string prompt)
+    private string? PromptForRelativePath(string title, string prompt, string initial = "", string okLabel = "Create")
     {
-        var input = new TextBox { MinWidth = 340, Margin = new Thickness(0, 8, 0, 0) };
-        var ok = new Button { Content = "Create", IsDefault = true, MinWidth = 84, Margin = new Thickness(0, 0, 8, 0) };
+        var input = new TextBox { MinWidth = 340, Margin = new Thickness(0, 8, 0, 0), Text = initial };
+        var ok = new Button { Content = okLabel, IsDefault = true, MinWidth = 84, Margin = new Thickness(0, 0, 8, 0) };
         var cancel = new Button { Content = "Cancel", IsCancel = true, MinWidth = 84 };
         var buttons = new StackPanel
         {
@@ -721,11 +721,84 @@ public partial class MainWindow : Window
             ShowInTaskbar = false,
         };
         ok.Click += (_, _) => dialog.DialogResult = true;
-        dialog.Loaded += (_, _) => input.Focus();
+        dialog.Loaded += (_, _) => { input.Focus(); input.SelectAll(); };
 
         return dialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(input.Text)
             ? input.Text.Trim()
             : null;
+    }
+
+    // --- Explorer tree node context-menu operations (issue #200). The node is the menu item's
+    // inherited DataContext (the ContextMenu is placed on the node template). ---
+    private void ExplorerNodeReveal_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not WorkspaceTreeNode node)
+        {
+            return;
+        }
+
+        var startInfo = RevealInFileExplorer.BuildStartInfo(node.FullPath);
+        if (startInfo is null)
+        {
+            MessageBox.Show(this, "That file or folder no longer exists on disk.", "Reveal",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            System.Diagnostics.Process.Start(startInfo);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Reveal", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void ExplorerNodeRename_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not WorkspaceTreeNode node)
+        {
+            return;
+        }
+
+        var newName = PromptForRelativePath("Rename", $"New name for “{node.Name}”:", node.Name, "Rename");
+        if (newName is null)
+        {
+            return;
+        }
+
+        var error = ViewModel.Explorer.RenameNode(node, newName);
+        if (error is not null)
+        {
+            MessageBox.Show(this, error, "Rename", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private async void ExplorerNodeDelete_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not WorkspaceTreeNode node)
+        {
+            return;
+        }
+
+        var kind = node.IsDirectory ? "folder" : "file";
+        var confirmed = await Dialogs.ConfirmAsync(
+            $"Permanently delete the {kind} “{node.Name}”? This cannot be undone.",
+            "Delete",
+            DialogButtons.YesNo,
+            DialogSeverity.Warning,
+            defaultAffirmative: false);
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var error = ViewModel.Explorer.DeleteNode(node);
+        if (error is not null)
+        {
+            MessageBox.Show(this, error, "Delete", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private async void ImportDatasetButton_Click(object sender, RoutedEventArgs e)
