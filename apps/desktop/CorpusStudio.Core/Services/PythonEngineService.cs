@@ -2165,28 +2165,26 @@ public sealed class PythonEngineService : IEngineService
             ?? throw new InvalidOperationException("The Python engine returned an invalid split report.");
     }
 
-    public async Task<EvaluationRunResult> RunEvaluationAsync(
-        string projectPath,
+    /// <summary>Build the <c>eval-run</c> argument list (pure/testable). When <paramref name="judgeModel"/>
+    /// is set, the opt-in <b>LLM-judge scorer</b> is requested (<c>--judge-model</c>, metric
+    /// <c>llm_judge</c>) — an evaluator-only model that scores each answer 0–100 with a rationale; the
+    /// judge backend/base-url default to the eval run's own when not given. With no judge model the run
+    /// stays on the default keyword-overlap metric.</summary>
+    public static List<string> BuildEvaluationRunArguments(
+        string examplesPath,
         string schemaId,
         string backend,
         string model,
+        string reportPath,
+        double scoreThreshold,
+        int timeoutSeconds,
         string? baseUrl,
         int? limit,
-        double scoreThreshold,
-        int timeoutSeconds
+        string? judgeModel,
+        string? judgeBackend,
+        string? judgeBaseUrl
     )
     {
-        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
-        if (!File.Exists(examplesPath))
-        {
-            throw new FileNotFoundException("Project examples file was not found.", examplesPath);
-        }
-
-        var projectId = new DirectoryInfo(projectPath).Name;
-        var reportDirectory = Path.Combine(ResolveExportRoot(), projectId, "evaluation");
-        var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
-        var reportPath = Path.Combine(reportDirectory, $"{timestamp}_evaluation_report.json");
-
         var arguments = new List<string>
         {
             "eval-run",
@@ -2215,6 +2213,55 @@ public sealed class PythonEngineService : IEngineService
             arguments.Add("--limit");
             arguments.Add(limit.Value.ToString(CultureInfo.InvariantCulture));
         }
+
+        // Opt-in LLM-judge scorer. Evaluator-only (0–100 + rationale); NOT a quality guarantee. The
+        // judge backend/base-url fall back to the eval run's own so a single-backend setup just works.
+        if (!string.IsNullOrWhiteSpace(judgeModel))
+        {
+            arguments.Add("--judge-model");
+            arguments.Add(judgeModel);
+            arguments.Add("--judge-backend");
+            arguments.Add(string.IsNullOrWhiteSpace(judgeBackend) ? backend : judgeBackend);
+
+            var effectiveJudgeBaseUrl = string.IsNullOrWhiteSpace(judgeBaseUrl) ? baseUrl : judgeBaseUrl;
+            if (!string.IsNullOrWhiteSpace(effectiveJudgeBaseUrl))
+            {
+                arguments.Add("--judge-base-url");
+                arguments.Add(effectiveJudgeBaseUrl);
+            }
+        }
+
+        return arguments;
+    }
+
+    public async Task<EvaluationRunResult> RunEvaluationAsync(
+        string projectPath,
+        string schemaId,
+        string backend,
+        string model,
+        string? baseUrl,
+        int? limit,
+        double scoreThreshold,
+        int timeoutSeconds,
+        string? judgeModel = null,
+        string? judgeBackend = null,
+        string? judgeBaseUrl = null
+    )
+    {
+        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+        if (!File.Exists(examplesPath))
+        {
+            throw new FileNotFoundException("Project examples file was not found.", examplesPath);
+        }
+
+        var projectId = new DirectoryInfo(projectPath).Name;
+        var reportDirectory = Path.Combine(ResolveExportRoot(), projectId, "evaluation");
+        var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+        var reportPath = Path.Combine(reportDirectory, $"{timestamp}_evaluation_report.json");
+
+        var arguments = BuildEvaluationRunArguments(
+            examplesPath, schemaId, backend, model, reportPath, scoreThreshold, timeoutSeconds,
+            baseUrl, limit, judgeModel, judgeBackend, judgeBaseUrl);
 
         var output = await RunEngineCommandAsync(arguments.ToArray());
         var reportJson = File.Exists(reportPath)

@@ -11,6 +11,7 @@ public sealed class EvaluationConnectionViewModel : ViewModelBase, IEvaluationCo
     private string _evaluationModel = "qwen2.5-coder:7b";
     private string _evaluationBaseUrl = "http://localhost:11434";
     private string _evaluationTimeoutSeconds = "120";
+    private string _evaluationJudgeModel = string.Empty;
     private string _evaluationModelListSummary =
         "Refresh models to load running Ollama or OpenAI-compatible models.";
 
@@ -36,6 +37,12 @@ public sealed class EvaluationConnectionViewModel : ViewModelBase, IEvaluationCo
     {
         get => _evaluationTimeoutSeconds;
         set => SetField(ref _evaluationTimeoutSeconds, value);
+    }
+
+    public string EvaluationJudgeModel
+    {
+        get => _evaluationJudgeModel;
+        set => SetField(ref _evaluationJudgeModel, value);
     }
 
     public ObservableCollection<string> EvaluationAvailableModels { get; } = [];
