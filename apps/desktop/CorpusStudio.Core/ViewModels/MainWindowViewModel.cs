@@ -237,6 +237,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Evaluation.ErrorReported += ReportError;
         Training.ErrorReported += ReportError;
         Quality.ErrorReported += ReportError;
+        // Load a suite's run-history trend when it's selected (best-effort; the engine call stays here).
+        Suites.SuiteSelected += name => _ = LoadSuiteHistoryAsync(name);
 
         ShowStartCenterCommand = new RelayCommand(ShowStartCenter);
         ShowFilesCommand = new RelayCommand(ShowFiles);
@@ -494,6 +496,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Suites.IsSuitesBusy = true;
             SetBusy($"Running suite '{suite.Name}' (live backend evaluations)...");
             Suites.ApplySuiteReport(await _engine.RunSuiteAsync(ActiveProjectPath, suite.Name));
+            await LoadSuiteHistoryAsync(suite.Name);
         }
         catch (System.Exception ex)
         {
@@ -503,6 +506,24 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             Suites.IsSuitesBusy = false;
             ClearBusy();
+        }
+    }
+
+    /// <summary>Load a suite's run-history trend into the Suites tab. Best-effort: a history read
+    /// failure must not clobber the report or the tab with an error banner.</summary>
+    private async System.Threading.Tasks.Task LoadSuiteHistoryAsync(string suiteName)
+    {
+        if (string.IsNullOrWhiteSpace(ActiveProjectPath) || string.IsNullOrWhiteSpace(suiteName))
+        {
+            return;
+        }
+        try
+        {
+            Suites.SetSuiteHistory(await _engine.GetSuiteHistoryAsync(ActiveProjectPath, suiteName));
+        }
+        catch (System.Exception)
+        {
+            // History is a secondary trend view; leave the previous history rather than surface an error.
         }
     }
 

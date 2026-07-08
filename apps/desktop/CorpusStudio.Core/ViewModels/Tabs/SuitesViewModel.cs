@@ -24,6 +24,7 @@ public sealed class SuitesViewModel : ViewModelBase, ISuitesViewModel
     private string _suiteReportSummary = DefaultReportSummary;
     private string _suiteOverallStatus = string.Empty;
     private string _suiteOverallColor = SuiteReport.ColorForStatus(null);
+    private string _suiteHistorySummary = "Run history appears here after a suite runs.";
 
     /// <summary>Registered evaluation suites (from `suite-list`).</summary>
     public ObservableCollection<SuiteSummary> Suites { get; } = [];
@@ -34,9 +35,22 @@ public sealed class SuitesViewModel : ViewModelBase, ISuitesViewModel
     /// <summary>The last run's per-case results.</summary>
     public ObservableCollection<SuiteCaseResult> SuiteCaseRows { get; } = [];
 
+    /// <summary>The selected suite's run history (newest first) for the trend (#190).</summary>
+    public ObservableCollection<SuiteHistoryEntry> SuiteHistory { get; } = [];
+
+    public string SuiteHistorySummary
+    {
+        get => _suiteHistorySummary;
+        private set => SetField(ref _suiteHistorySummary, value);
+    }
+
     /// <summary>Honest framing shown under the report — the verdict is not a quality judgment.</summary>
     public string SuiteHonestyNote =>
         "Verdicts case structure + score thresholds, not model quality. Keyword-overlap is a lexical proxy.";
+
+    /// <summary>Raised when a suite is selected (with its name) so the shell can load its run history.
+    /// Keeps the async engine call off this VM, mirroring the error-up event pattern.</summary>
+    public event System.Action<string>? SuiteSelected;
 
     public SuiteSummary? SelectedSuite
     {
@@ -46,6 +60,10 @@ public sealed class SuitesViewModel : ViewModelBase, ISuitesViewModel
             if (SetField(ref _selectedSuite, value))
             {
                 OnPropertyChanged(nameof(CanRunSuite));
+                if (value is not null)
+                {
+                    SuiteSelected?.Invoke(value.Name);
+                }
             }
         }
     }
@@ -164,6 +182,19 @@ public sealed class SuitesViewModel : ViewModelBase, ISuitesViewModel
         HasSuiteReport = false;
     }
 
+    /// <summary>Load the selected suite's run history (newest first for the trend list).</summary>
+    public void SetSuiteHistory(IEnumerable<SuiteHistoryEntry> history)
+    {
+        SuiteHistory.Clear();
+        foreach (var entry in history.Reverse())
+        {
+            SuiteHistory.Add(entry);
+        }
+        SuiteHistorySummary = SuiteHistory.Count == 0
+            ? "No run history yet — run this suite to start a trend."
+            : $"{SuiteHistory.Count} run(s), newest first (a count over time, not a quality score).";
+    }
+
     /// <summary>Reset all suite state on a project switch so it can't leak across projects. The
     /// shell re-pushes <see cref="HasActiveProject"/> after this, so the Run gate is left disabled
     /// until the new project's flag is synced.</summary>
@@ -173,6 +204,8 @@ public sealed class SuitesViewModel : ViewModelBase, ISuitesViewModel
         SelectedSuite = null;
         SuiteMetricRows.Clear();
         SuiteCaseRows.Clear();
+        SuiteHistory.Clear();
+        SuiteHistorySummary = "Run history appears here after a suite runs.";
         SuiteOverallStatus = string.Empty;
         SuiteOverallColor = SuiteReport.ColorForStatus(null);
         HasSuiteReport = false;

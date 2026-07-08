@@ -107,7 +107,15 @@ The `evaluation_suites/` **registry** (`suite-init` / `suite-list` / `suite-run`
 the desktop **Suites tab**, and **`version_id`-pinned cases** (a case re-evaluates the
 verified reconstruction of a pinned dataset version) all shipped after M1.
 
+## History & trend
+
+Each `suite-run` (with `--project-dir`) appends a timestamped point to
+`suite_reports/history/<suite>.jsonl` — the run's verdict + per-status case counts (capped to the
+most recent runs). `suite-history <name> --project-dir <p> [--json]` reads it back, and the desktop
+Suites tab shows it as a newest-first trend. The counts are a sum of case outcomes over time — a
+count, **not** a folded quality score.
+
 ## Still future
 
-No suite **history / trend over time**, no **non-evaluation cases** (chat/dataset gates in
-a suite), and no **weighting or cross-suite comparison** — all future.
+No **non-evaluation cases** (chat/dataset gates in a suite) and no **weighting or cross-suite
+comparison** — both future.

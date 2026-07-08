@@ -23,12 +23,15 @@ from corpus_studio.suites.models import (
     SuiteCaseResult,
     SuiteCaseStatus,
     SuiteDefinition,
+    SuiteHistoryEntry,
     SuiteMetricRollup,
     SuiteReport,
 )
 from corpus_studio.versions.version_registry import fingerprint_dataset
 
 SUITE_REPORTS_DIRNAME = "suite_reports"
+SUITE_HISTORY_DIRNAME = "history"
+SUITE_HISTORY_LIMIT = 200  # keep the most recent N runs per suite; older points are pruned
 
 _DEFAULT_MIN_SCORE = 70.0
 _DEFAULT_MIN_PASS_RATE = 0.5
@@ -164,5 +167,52 @@ def save_suite_report(project_dir: Path | str, report: SuiteReport) -> Path:
     path = directory / f"{report.suite}.json"
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+    return path
+
+
+def _is_safe_suite_name(suite_name: str) -> bool:
+    """A suite name must be a single filesystem-safe segment — no separators or traversal — so a
+    caller-supplied name can never point the history file outside suite_reports/history/."""
+    name = suite_name.strip()
+    return bool(name) and name not in {".", ".."} and name == Path(name).name
+
+
+def suite_history_path(project_dir: Path | str, suite_name: str) -> Path:
+    return Path(project_dir) / SUITE_REPORTS_DIRNAME / SUITE_HISTORY_DIRNAME / f"{suite_name}.jsonl"
+
+
+def load_suite_history(project_dir: Path | str, suite_name: str) -> list[SuiteHistoryEntry]:
+    """Load a suite's run history (oldest → newest). Missing file → empty; a corrupt line is skipped
+    rather than crashing the trend."""
+    if not _is_safe_suite_name(suite_name):
+        return []
+    path = suite_history_path(project_dir, suite_name)
+    if not path.exists():
+        return []
+    entries: list[SuiteHistoryEntry] = []
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            entries.append(SuiteHistoryEntry.model_validate_json(stripped))
+        except ValidationError:
+            continue
+    return entries
+
+
+def append_suite_history(project_dir: Path | str, report: SuiteReport) -> Path:
+    """Append this run to the suite's history (suite_reports/history/<suite>.jsonl), keeping the most
+    recent :data:`SUITE_HISTORY_LIMIT` points. Atomic rewrite so a crash can't truncate the history."""
+    path = suite_history_path(project_dir, report.suite)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    entries = load_suite_history(project_dir, report.suite)
+    entries.append(SuiteHistoryEntry.from_report(report))
+    trimmed = entries[-SUITE_HISTORY_LIMIT:]
+
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text("\n".join(entry.model_dump_json() for entry in trimmed) + "\n", encoding="utf-8")
     os.replace(tmp, path)
     return path

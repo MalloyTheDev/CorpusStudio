@@ -26,6 +26,9 @@ public interface IEngineService
     /// <summary>Run a named evaluation suite (live backend evaluations) and return its report.</summary>
     Task<SuiteReport> RunSuiteAsync(string projectPath, string suiteName);
 
+    /// <summary>A suite's run history (oldest → newest) for the Suites-tab trend.</summary>
+    Task<IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName);
+
     /// <summary>Render a saved dataset-version card as Markdown (lineage + live integrity).</summary>
     Task<string> GetDatasetVersionCardAsync(string projectPath, string versionId);
 
