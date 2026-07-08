@@ -47,6 +47,15 @@ public interface IEngineService
     /// <summary>Reconcile tracked reviewed-fixes against a fresh evaluation's per-example results.</summary>
     IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, IReadOnlyList<EvaluationExampleResult> results);
 
+    /// <summary>Build the dataset quality report (heuristics, PII/secret detection, debt signals).</summary>
+    Task<QualityReport> BuildQualityReportAsync(string projectPath);
+
+    /// <summary>Append a quality-history entry for the debt-trend chart.</summary>
+    QualityHistoryEntry SaveQualityHistoryEntry(string projectPath, QualityReport report);
+
+    /// <summary>Load the project's quality history (newest first) for the trend chart.</summary>
+    IReadOnlyList<QualityHistoryEntry> LoadQualityHistory(string projectPath, int maxEntries = 5);
+
     /// <summary>The project's recorded training runs (newest first).</summary>
     IReadOnlyList<TrainingRunRecord> LoadTrainingRunRecords(string projectPath);
 

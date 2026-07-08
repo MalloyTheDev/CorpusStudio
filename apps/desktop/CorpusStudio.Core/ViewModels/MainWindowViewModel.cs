@@ -176,6 +176,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand RefreshAiAssistModelsCommand { get; }
     public System.Windows.Input.ICommand GenerateSplitsCommand { get; }
     public System.Windows.Input.ICommand GateTrainingRunCommand { get; }
+    public System.Windows.Input.ICommand RunQualityCommand { get; }
     public System.Windows.Input.ICommand DiffVersionsCommand { get; }
     public System.Windows.Input.ICommand ViewArtifactCardCommand { get; }
     public System.Windows.Input.ICommand GenerateDatasetCardCommand { get; }
@@ -274,6 +275,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RefreshAiAssistModelsCommand = new AsyncRelayCommand(RefreshAiAssistModelsAsync);
         GenerateSplitsCommand = new AsyncRelayCommand(GenerateSplitsAsync);
         GateTrainingRunCommand = new AsyncRelayCommand(GateTrainingRunAsync);
+        RunQualityCommand = new AsyncRelayCommand(() => RefreshQualityAsync());
         DiffVersionsCommand = new AsyncRelayCommand(DiffVersionsAsync);
         ViewArtifactCardCommand = new AsyncRelayCommand(ViewArtifactCardAsync);
         GenerateDatasetCardCommand = new AsyncRelayCommand(GenerateDatasetCardAsync);
@@ -1455,6 +1457,41 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         return true;
+    }
+
+    /// <summary>Run the quality checks and refresh the Quality tab (optionally recording a history
+    /// entry for the debt-trend chart). Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task RefreshQualityAsync(bool recordHistory = true)
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Quality.SetQualityError("Create or select a dataset project before running quality checks.");
+            return;
+        }
+
+        try
+        {
+            SetBusy("Running quality checks...");
+            Quality.SetQualityInProgress();
+            var report = await _engine.BuildQualityReportAsync(ActiveProjectPath);
+            if (recordHistory)
+            {
+                _engine.SaveQualityHistoryEntry(ActiveProjectPath, report);
+            }
+
+            // Load a wider window than the 5-line text summary uses so the debt-trend chart
+            // has enough points; the summary still shows only its most recent few internally.
+            var history = _engine.LoadQualityHistory(ActiveProjectPath, maxEntries: 30);
+            Quality.ApplyQualityReport(report, history);
+        }
+        catch (Exception ex)
+        {
+            Quality.SetQualityError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
     }
 
     /// <summary>Render the selected dataset-version card. Moved from the desktop code-behind.</summary>

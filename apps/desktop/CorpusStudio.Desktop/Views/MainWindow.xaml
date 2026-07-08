@@ -928,7 +928,7 @@
                                     <Button AutomationProperties.AutomationId="DashboardRunQualityButton"
                                             Content="Run quality"
                                             Width="132" MinHeight="38" Margin="0,0,10,10"
-                                            Click="RunQualityButton_Click" />
+                                            Command="{Binding RunQualityCommand}" />
                                     <Button AutomationProperties.AutomationId="DashboardSplitsButton"
                                             Content="Generate splits"
                                             Width="132" MinHeight="38" Margin="0,0,10,10"
@@ -2912,7 +2912,7 @@
                         AutomationProperties.AutomationId="RunQualityButton"
                         Content="Run _Quality"
                         Margin="0,4,0,8"
-                        Click="RunQualityButton_Click" />
+                        Command="{Binding RunQualityCommand}" />
                 <TextBlock Text="Gates"
                            FontWeight="SemiBold"
                            Foreground="#334155"
