@@ -36,12 +36,18 @@ public partial class App : Application
             services.AddTransient<IEvaluationConnectionViewModel, EvaluationConnectionViewModel>();
         services.AddTransient<IQualityViewModel, QualityViewModel>();
             services.AddSingleton<CorpusStudio.Desktop.Services.IEngineService, CorpusStudio.Desktop.Services.PythonEngineService>();
+            // Platform seams — the Avalonia adapters (issue #185), mirroring the WPF head's
+            // MessageBoxDialogService / Win32FilePickerService registrations.
+            services.AddSingleton<CorpusStudio.Desktop.Services.IDialogService, Services.AvaloniaDialogService>();
+            services.AddSingleton<CorpusStudio.Desktop.Services.IFilePickerService, Services.AvaloniaFilePickerService>();
             services.AddTransient<MainWindowViewModel>();
             var provider = services.BuildServiceProvider();
 
             desktop.MainWindow = new MainWindow
             {
                 DataContext = provider.GetRequiredService<MainWindowViewModel>(),
+                Dialogs = provider.GetRequiredService<CorpusStudio.Desktop.Services.IDialogService>(),
+                FilePicker = provider.GetRequiredService<CorpusStudio.Desktop.Services.IFilePickerService>(),
             };
         }
 
