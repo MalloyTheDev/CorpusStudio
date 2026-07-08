@@ -47,6 +47,12 @@ public interface IEngineService
     /// <summary>Reconcile tracked reviewed-fixes against a fresh evaluation's per-example results.</summary>
     IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, IReadOnlyList<EvaluationExampleResult> results);
 
+    /// <summary>Persist the edited gate thresholds (engine validates + rejects out-of-range values).</summary>
+    Task SetGateThresholdsAsync(string projectPath, GateThresholds thresholds);
+
+    /// <summary>List the project's provider generation policies (approved model allow-list).</summary>
+    Task<IReadOnlyList<ProviderPolicyItem>> GetProviderPoliciesAsync(string projectPath);
+
     /// <summary>Build the dataset quality report (heuristics, PII/secret detection, debt signals).</summary>
     Task<QualityReport> BuildQualityReportAsync(string projectPath);
 

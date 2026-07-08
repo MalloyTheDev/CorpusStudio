@@ -2756,7 +2756,7 @@
                                         Click="RevokeProviderGenerationButton_Click" />
                                 <Button AutomationProperties.AutomationId="RefreshProviderPoliciesButton"
                                         Content="Refresh"
-                                        Click="RefreshProviderPoliciesButton_Click" />
+                                        Command="{Binding RefreshProviderPoliciesCommand}" />
                             </StackPanel>
 
                             <TextBlock Text="Gate Thresholds (this project)"
@@ -2811,7 +2811,7 @@
                                 </StackPanel>
                                 <Button AutomationProperties.AutomationId="SaveGateThresholdsButton"
                                         Content="Save Gate Thresholds" HorizontalAlignment="Left"
-                                        Margin="0,6,0,0" Click="SaveGateThresholdsButton_Click" />
+                                        Margin="0,6,0,0" Command="{Binding SaveGateThresholdsCommand}" />
                             </StackPanel>
                         </StackPanel>
                     </TabItem>

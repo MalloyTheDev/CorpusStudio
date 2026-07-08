@@ -43,6 +43,8 @@ public sealed class EngineCommandTests
         public Task<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName)
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>>(new System.Collections.Generic.List<SuiteHistoryEntry>());
         public Task<BenchmarkReport> RunBenchmarkAsync(string projectPath, string schemaId, string backend, System.Collections.Generic.IReadOnlyList<string> models, string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds) => Task.FromResult(new BenchmarkReport());
+        public Task SetGateThresholdsAsync(string projectPath, GateThresholds thresholds) => Task.CompletedTask;
+        public Task<System.Collections.Generic.IReadOnlyList<ProviderPolicyItem>> GetProviderPoliciesAsync(string projectPath) => Task.FromResult<System.Collections.Generic.IReadOnlyList<ProviderPolicyItem>>(new System.Collections.Generic.List<ProviderPolicyItem>());
         public Task<QualityReport> BuildQualityReportAsync(string projectPath) => Task.FromResult(new QualityReport());
         public QualityHistoryEntry SaveQualityHistoryEntry(string projectPath, QualityReport report) => new QualityHistoryEntry();
         public System.Collections.Generic.IReadOnlyList<QualityHistoryEntry> LoadQualityHistory(string projectPath, int maxEntries = 5) => new System.Collections.Generic.List<QualityHistoryEntry>();
@@ -342,5 +344,25 @@ public sealed class EngineCommandTests
         await vm.RefreshQualityAsync();
 
         Assert.Contains("Create or select a dataset project", vm.Quality.QualitySummary);
+    }
+
+    [Fact]
+    public async Task SaveGateThresholds_WithoutProject_SetsError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+
+        await vm.SaveGateThresholdsAsync();
+
+        Assert.Contains("Create or select a dataset project", vm.Settings.GateThresholdsSummary);
+    }
+
+    [Fact]
+    public async Task RefreshProviderPolicies_WithoutProject_SetsError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+
+        await vm.RefreshProviderPoliciesAsync();
+
+        Assert.Contains("Create or select a dataset project", vm.Settings.ProviderPolicySummary);
     }
 }

@@ -177,6 +177,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand GenerateSplitsCommand { get; }
     public System.Windows.Input.ICommand GateTrainingRunCommand { get; }
     public System.Windows.Input.ICommand RunQualityCommand { get; }
+    public System.Windows.Input.ICommand SaveGateThresholdsCommand { get; }
+    public System.Windows.Input.ICommand RefreshProviderPoliciesCommand { get; }
     public System.Windows.Input.ICommand DiffVersionsCommand { get; }
     public System.Windows.Input.ICommand ViewArtifactCardCommand { get; }
     public System.Windows.Input.ICommand GenerateDatasetCardCommand { get; }
@@ -276,6 +278,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         GenerateSplitsCommand = new AsyncRelayCommand(GenerateSplitsAsync);
         GateTrainingRunCommand = new AsyncRelayCommand(GateTrainingRunAsync);
         RunQualityCommand = new AsyncRelayCommand(() => RefreshQualityAsync());
+        SaveGateThresholdsCommand = new AsyncRelayCommand(SaveGateThresholdsAsync);
+        RefreshProviderPoliciesCommand = new AsyncRelayCommand(RefreshProviderPoliciesAsync);
         DiffVersionsCommand = new AsyncRelayCommand(DiffVersionsAsync);
         ViewArtifactCardCommand = new AsyncRelayCommand(ViewArtifactCardAsync);
         GenerateDatasetCardCommand = new AsyncRelayCommand(GenerateDatasetCardAsync);
@@ -1291,6 +1295,54 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         return true;
+    }
+
+    /// <summary>Save the edited gate thresholds (the engine validates ranges and rejects bad values).
+    /// Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task SaveGateThresholdsAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Settings.SetGateThresholdsError("Create or select a dataset project first.");
+            return;
+        }
+
+        try
+        {
+            SetBusy("Saving gate thresholds...");
+            // The engine validates ranges and rejects a bad value, so an invalid edit surfaces here.
+            await _engine.SetGateThresholdsAsync(ActiveProjectPath, Settings.GateThresholds);
+            Settings.SetGateThresholdsSaved();
+        }
+        catch (System.Exception ex)
+        {
+            Settings.SetGateThresholdsError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Reload the project's provider generation policies into the Settings tab.
+    /// Moved from the desktop code-behind (public so the approve/revoke flow can refresh too).</summary>
+    public async System.Threading.Tasks.Task RefreshProviderPoliciesAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Settings.SetProviderPolicyError("Create or select a dataset project first.");
+            return;
+        }
+
+        try
+        {
+            var policies = await _engine.GetProviderPoliciesAsync(ActiveProjectPath);
+            Settings.ApplyProviderPolicies(policies);
+        }
+        catch (System.Exception ex)
+        {
+            Settings.SetProviderPolicyError(ex.Message);
+        }
     }
 
     /// <summary>Run the training-run regression gate: link the newest post-training eval to the newest
