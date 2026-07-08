@@ -103,5 +103,5 @@ resulting features in full.
   remain); then each view is re-authored as `.axaml` (Phase 3) and per-OS packaging follows.
   See [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md) and
   [`CROSS_PLATFORM_ASSESSMENT.md`](CROSS_PLATFORM_ASSESSMENT.md).
-- Smaller: dataset-version reorder detection, row-store GC (never prune manifest-referenced
-  rows), PII auto-redaction, and a per-project gate-threshold editor in the desktop.
+- Smaller: dataset-version reorder detection and a normalized row identity. (Row-store GC,
+  PII redaction on export, and the desktop gate-threshold editor now ship.)

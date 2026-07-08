@@ -266,9 +266,11 @@ per-item error isolation, and off-thread document opens.
   tab view-models decomposed out of `MainWindowViewModel`; Dashboard + Training remain), after
   which each view is re-authored as `.axaml` (Phase 3). The Avalonia head is not shipped yet.
   See `AVALONIA_MIGRATION_PLAN.md`.
-- Dataset-version **reorder detection**, row-store **GC** (must never prune
-  manifest-referenced rows), and a normalized row identity. (Auto-capture after an
-  import commit now ships — see above.)
+- **Row-store garbage collection** (`dataset-version-gc`): prunes row-store rows no version
+  references, keeping the union of every version manifest. Fail-closed — it aborts on an unreadable
+  manifest and keeps any line it can't identify, so it never removes a referenced row; `--dry-run`
+  previews. (Auto-capture after an import commit ships too.)
+- Dataset-version **reorder detection** and a normalized row identity are still future.
 - **Opt-in PII/secret redaction on export** (`export --redact-pii`): masks the same
   high-precision patterns the reporter detects (emails, SSNs, keys/tokens, JWTs, Luhn-valid
   cards) with `[REDACTED:kind]` placeholders, so a dataset the export gate would block on PII
