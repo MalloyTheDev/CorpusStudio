@@ -1313,7 +1313,7 @@
                                         AutomationProperties.AutomationId="GenerateSplitsButton"
                                         Content="_Generate Splits"
                                         Width="124"
-                                        Click="GenerateSplitsButton_Click" />
+                                        Command="{Binding GenerateSplitsCommand}" />
                             </WrapPanel>
 
                             <TextBox Grid.Row="1"

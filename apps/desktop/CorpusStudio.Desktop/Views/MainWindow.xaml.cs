@@ -2633,60 +2633,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void GenerateSplitsButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            ViewModel.Splits.SetSplitError("Create a dataset project before generating splits.");
-            return;
-        }
-
-        try
-        {
-            if (!TryReadSplitOptions(
-                out var trainRatio,
-                out var validationRatio,
-                out var seed,
-                out var errorMessage
-            ))
-            {
-                ViewModel.Splits.SetSplitError(errorMessage);
-                return;
-            }
-
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy("Generating splits...");
-            ViewModel.Splits.SetSplitInProgress(trainRatio, validationRatio, seed);
-            var report = await _engineService.GenerateProjectSplitsAsync(
-                ViewModel.ActiveProjectPath,
-                ViewModel.ActiveSchemaId,
-                trainRatio,
-                validationRatio,
-                seed
-            );
-            _engineService.SaveProjectSplitSettings(
-                ViewModel.ActiveProjectPath,
-                new SplitSettings
-                {
-                    TrainRatio = trainRatio,
-                    ValidationRatio = validationRatio,
-                    Seed = seed,
-                }
-            );
-
-            ViewModel.Splits.ApplySplitReport(report);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.Splits.SetSplitError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
-
     private void ValidationIssuesListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (ViewModel.SelectedValidationIssue is null)
@@ -2769,70 +2715,6 @@ public partial class MainWindow : Window
         }
 
         return 0;
-    }
-
-    private bool TryReadSplitOptions(
-        out double trainRatio,
-        out double validationRatio,
-        out int seed,
-        out string errorMessage
-    )
-    {
-        trainRatio = 0;
-        validationRatio = 0;
-        seed = 0;
-        errorMessage = string.Empty;
-
-        if (!double.TryParse(
-            ViewModel.Splits.SplitTrainPercent,
-            NumberStyles.Float,
-            CultureInfo.InvariantCulture,
-            out var trainPercent
-        ))
-        {
-            errorMessage = "Train split must be a number from 1 to 98.";
-            return false;
-        }
-
-        if (!double.TryParse(
-            ViewModel.Splits.SplitValidationPercent,
-            NumberStyles.Float,
-            CultureInfo.InvariantCulture,
-            out var validationPercent
-        ))
-        {
-            errorMessage = "Validation split must be a number from 0 to 98.";
-            return false;
-        }
-
-        if (!int.TryParse(
-            ViewModel.Splits.SplitSeed,
-            NumberStyles.Integer,
-            CultureInfo.InvariantCulture,
-            out seed
-        ))
-        {
-            errorMessage = "Seed must be a whole number.";
-            return false;
-        }
-
-        if (!double.IsFinite(trainPercent) || !double.IsFinite(validationPercent))
-        {
-            errorMessage = "Split percentages must be finite numbers.";
-            return false;
-        }
-
-        trainRatio = trainPercent / 100;
-        validationRatio = validationPercent / 100;
-        var testRatio = 1 - trainRatio - validationRatio;
-
-        if (trainRatio <= 0 || validationRatio < 0 || testRatio <= 0)
-        {
-            errorMessage = "Split percentages must leave at least some room for train and test rows.";
-            return false;
-        }
-
-        return true;
     }
 
     private bool TryReadEvaluationManualReview(

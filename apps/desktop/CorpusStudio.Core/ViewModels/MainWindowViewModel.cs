@@ -174,6 +174,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand RefreshEvaluationModelsCommand { get; }
     public System.Windows.Input.ICommand CheckAiAssistBackendCommand { get; }
     public System.Windows.Input.ICommand RefreshAiAssistModelsCommand { get; }
+    public System.Windows.Input.ICommand GenerateSplitsCommand { get; }
     public System.Windows.Input.ICommand DiffVersionsCommand { get; }
     public System.Windows.Input.ICommand ViewArtifactCardCommand { get; }
     public System.Windows.Input.ICommand GenerateDatasetCardCommand { get; }
@@ -270,6 +271,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RefreshEvaluationModelsCommand = new AsyncRelayCommand(RefreshEvaluationModelsAsync);
         CheckAiAssistBackendCommand = new AsyncRelayCommand(CheckAiAssistBackendAsync);
         RefreshAiAssistModelsCommand = new AsyncRelayCommand(RefreshAiAssistModelsAsync);
+        GenerateSplitsCommand = new AsyncRelayCommand(GenerateSplitsAsync);
         DiffVersionsCommand = new AsyncRelayCommand(DiffVersionsAsync);
         ViewArtifactCardCommand = new AsyncRelayCommand(ViewArtifactCardAsync);
         GenerateDatasetCardCommand = new AsyncRelayCommand(GenerateDatasetCardAsync);
@@ -1281,6 +1283,126 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ) || timeoutSeconds <= 0)
         {
             errorMessage = $"{label} timeout must be a positive whole number.";
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Generate deterministic train/validation/test splits and persist the settings.
+    /// Moved from the desktop code-behind; the ratios/seed come from the Splits tab's own fields.</summary>
+    public async System.Threading.Tasks.Task GenerateSplitsAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Splits.SetSplitError("Create a dataset project before generating splits.");
+            return;
+        }
+
+        try
+        {
+            if (!TryGetSplitOptions(
+                out var trainRatio,
+                out var validationRatio,
+                out var seed,
+                out var errorMessage
+            ))
+            {
+                Splits.SetSplitError(errorMessage);
+                return;
+            }
+
+            SetBusy("Generating splits...");
+            Splits.SetSplitInProgress(trainRatio, validationRatio, seed);
+            var report = await _engine.GenerateProjectSplitsAsync(
+                ActiveProjectPath,
+                ActiveSchemaId,
+                trainRatio,
+                validationRatio,
+                seed
+            );
+            _engine.SaveProjectSplitSettings(
+                ActiveProjectPath,
+                new SplitSettings
+                {
+                    TrainRatio = trainRatio,
+                    ValidationRatio = validationRatio,
+                    Seed = seed,
+                }
+            );
+
+            Splits.ApplySplitReport(report);
+        }
+        catch (System.Exception ex)
+        {
+            Splits.SetSplitError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Parse + validate the Splits tab's train/validation percentages and seed.
+    /// Moved from the desktop code-behind.</summary>
+    private bool TryGetSplitOptions(
+        out double trainRatio,
+        out double validationRatio,
+        out int seed,
+        out string errorMessage
+    )
+    {
+        trainRatio = 0;
+        validationRatio = 0;
+        seed = 0;
+        errorMessage = string.Empty;
+
+        if (!double.TryParse(
+            Splits.SplitTrainPercent,
+            NumberStyles.Float,
+            CultureInfo.InvariantCulture,
+            out var trainPercent
+        ))
+        {
+            errorMessage = "Train split must be a number from 1 to 98.";
+            return false;
+        }
+
+        if (!double.TryParse(
+            Splits.SplitValidationPercent,
+            NumberStyles.Float,
+            CultureInfo.InvariantCulture,
+            out var validationPercent
+        ))
+        {
+            errorMessage = "Validation split must be a number from 0 to 98.";
+            return false;
+        }
+
+        if (!int.TryParse(
+            Splits.SplitSeed,
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out seed
+        ))
+        {
+            errorMessage = "Seed must be a whole number.";
+            return false;
+        }
+
+        if (!double.IsFinite(trainPercent) || !double.IsFinite(validationPercent))
+        {
+            errorMessage = "Split percentages must be finite numbers.";
+            return false;
+        }
+
+        trainRatio = trainPercent / 100;
+        validationRatio = validationPercent / 100;
+        var testRatio = 1 - trainRatio - validationRatio;
+
+        if (trainRatio <= 0 || validationRatio < 0 || testRatio <= 0)
+        {
+            errorMessage = "Split percentages must leave at least some room for train and test rows.";
             return false;
         }
 
