@@ -1391,7 +1391,7 @@
                                         Content="Run Evaluation"
                                         Width="124"
                                         Margin="0,0,8,0"
-                                        Click="RunEvaluationButton_Click" />
+                                        Command="{Binding RunEvaluationCommand}" />
                                 <TextBlock AutomationProperties.AutomationId="EvaluationModelListSummaryTextBlock"
                                            Text="{Binding EvaluationConnection.EvaluationModelListSummary, Mode=OneWay}"
                                            Width="260"
@@ -1524,7 +1524,7 @@
                                         <Button AutomationProperties.AutomationId="RerunEvaluationReportButton"
                                                 Content="Rerun Selected"
                                                 Width="116"
-                                                Click="RerunEvaluationReportButton_Click" />
+                                                Command="{Binding RerunEvaluationReportCommand}" />
                                     </WrapPanel>
 
                                     <TextBox Grid.Row="5"

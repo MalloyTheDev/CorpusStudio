@@ -29,6 +29,21 @@ public interface IEngineService
     /// <summary>A suite's run history (oldest → newest) for the Suites-tab trend.</summary>
     Task<IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName);
 
+    /// <summary>Preflight a backend/model (reachability + model availability) before a live run.</summary>
+    Task<BackendHealthReport> CheckBackendHealthAsync(string backend, string model, string? baseUrl, int timeoutSeconds);
+
+    /// <summary>Run a graded evaluation over the dataset (live backend calls); optional LLM-judge.</summary>
+    Task<EvaluationRunResult> RunEvaluationAsync(
+        string projectPath, string schemaId, string backend, string model, string? baseUrl,
+        int? limit, double scoreThreshold, int timeoutSeconds, string? judgeModel = null,
+        string? judgeBackend = null, string? judgeBaseUrl = null);
+
+    /// <summary>The project's saved evaluation reports (newest first) for history/regression.</summary>
+    IReadOnlyList<EvaluationReportHistoryItem> LoadEvaluationReportHistory(string projectPath, int maxReports = 20);
+
+    /// <summary>Reconcile tracked reviewed-fixes against a fresh evaluation's per-example results.</summary>
+    IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, IReadOnlyList<EvaluationExampleResult> results);
+
     /// <summary>Run a multi-model benchmark over the dataset (live backend calls).</summary>
     Task<BenchmarkReport> RunBenchmarkAsync(
         string projectPath, string schemaId, string backend, IReadOnlyList<string> models,

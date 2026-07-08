@@ -43,6 +43,10 @@ public sealed class EngineCommandTests
         public Task<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName)
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>>(new System.Collections.Generic.List<SuiteHistoryEntry>());
         public Task<BenchmarkReport> RunBenchmarkAsync(string projectPath, string schemaId, string backend, System.Collections.Generic.IReadOnlyList<string> models, string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds) => Task.FromResult(new BenchmarkReport());
+        public Task<BackendHealthReport> CheckBackendHealthAsync(string backend, string model, string? baseUrl, int timeoutSeconds) => Task.FromResult(new BackendHealthReport());
+        public Task<EvaluationRunResult> RunEvaluationAsync(string projectPath, string schemaId, string backend, string model, string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds, string? judgeModel = null, string? judgeBackend = null, string? judgeBaseUrl = null) => Task.FromResult(new EvaluationRunResult(new EvaluationReport(), string.Empty, string.Empty));
+        public System.Collections.Generic.IReadOnlyList<EvaluationReportHistoryItem> LoadEvaluationReportHistory(string projectPath, int maxReports = 20) => new System.Collections.Generic.List<EvaluationReportHistoryItem>();
+        public System.Collections.Generic.IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, System.Collections.Generic.IReadOnlyList<EvaluationExampleResult> results) => new System.Collections.Generic.List<ReviewedFixRecord>();
         public Task<TrainingConfigExportResult> GenerateTrainingConfigAsync(string projectPath, string schemaId, string target, string baseModel, string datasetFormat, int sequenceLen, int loraR, int loraAlpha, int microBatchSize, int gradientAccumulationSteps, double learningRate) => Task.FromResult(new TrainingConfigExportResult());
         public Task<System.Collections.Generic.IReadOnlyList<DatasetVersionDisplayItem>> LoadDatasetVersionsAsync(string projectPath)
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<DatasetVersionDisplayItem>>(new System.Collections.Generic.List<DatasetVersionDisplayItem>());
@@ -200,5 +204,37 @@ public sealed class EngineCommandTests
         await vm.RunBenchmarkAsync();
 
         Assert.Contains("Benchmarked", vm.BenchmarkSummary); // ApplyBenchmarkReport ran (no error branch)
+    }
+
+    [Fact]
+    public async Task RunEvaluation_WithoutProject_SetsEvaluationError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+
+        await vm.RunEvaluationAsync();
+
+        Assert.Contains("Create or select a dataset project", vm.Evaluation.EvaluationSummary);
+    }
+
+    [Fact]
+    public async Task RunEvaluation_WithUnreachableBackend_SetsPreflightError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        SelectFakeProject(vm); // instruction schema + valid default connection options
+
+        await vm.RunEvaluationAsync();
+
+        // The fake's default BackendHealthReport is not reachable → preflight blocks the run.
+        Assert.Contains("backend health check failed", vm.Evaluation.EvaluationSummary);
+    }
+
+    [Fact]
+    public async Task RerunEvaluationReport_WithoutProject_SetsEvaluationError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+
+        await vm.RerunEvaluationReportAsync();
+
+        Assert.Contains("Create or select a dataset project", vm.Evaluation.EvaluationSummary);
     }
 }
