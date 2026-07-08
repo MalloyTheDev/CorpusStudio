@@ -2298,6 +2298,39 @@ def dataset_version_list(project_dir: Path):
     typer.echo(json.dumps({"versions": versions}, indent=2))
 
 
+@app.command("dataset-version-gc")
+def dataset_version_gc(
+    project_dir: Path,
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Report what would be pruned without rewriting the row store."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+):
+    """Prune row-store rows that no dataset version references.
+
+    Safe by construction: the rows to keep are the union of every version manifest, and a row that
+    can't be positively identified as unreferenced is kept. If any manifest is unreadable, GC aborts
+    rather than risk deleting referenced rows.
+    """
+    from corpus_studio.versions.gc import gc_row_store
+
+    try:
+        result = gc_row_store(project_dir, dry_run=dry_run)
+    except OSError as exc:
+        typer.echo(f"GC aborted (a version manifest could not be read): {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if as_json:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+
+    action = "Would prune" if dry_run else "Pruned"
+    typer.echo(
+        f"Row store: {result.scanned_rows} row(s), {result.referenced_row_ids} referenced. "
+        f"{action} {result.pruned_rows}, kept {result.kept_rows}."
+    )
+
+
 @app.command("dataset-version-show")
 def dataset_version_show(
     project_dir: Path,
