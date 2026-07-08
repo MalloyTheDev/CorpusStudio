@@ -1598,7 +1598,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!TryReadEvaluationOptions(
+        if (!ViewModel.TryGetEvaluationRunOptions(
             out var backend,
             out var model,
             out var baseUrl,
@@ -1653,69 +1653,6 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             ViewModel.Evaluation.SetEvaluationError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
-
-    private async void RunBenchmarkButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            ViewModel.SetBenchmarkError("Create or select a dataset project before benchmarking.");
-            return;
-        }
-
-        if (ViewModel.ActiveSchemaId is not ("instruction" or "chat"))
-        {
-            ViewModel.SetBenchmarkError("Evaluation Lab supports instruction and chat projects.");
-            return;
-        }
-
-        var models = ViewModel.GetBenchmarkModels();
-        if (models.Count == 0)
-        {
-            ViewModel.SetBenchmarkError("Enter at least one model to benchmark (one per line).");
-            return;
-        }
-
-        if (!TryReadEvaluationOptions(
-            out var backend,
-            out _,
-            out var baseUrl,
-            out var limit,
-            out var scoreThreshold,
-            out var timeoutSeconds,
-            out var errorMessage,
-            requireModel: false
-        ))
-        {
-            ViewModel.SetBenchmarkError(errorMessage);
-            return;
-        }
-
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy($"Benchmarking {models.Count} model(s)...");
-            var report = await _engineService.RunBenchmarkAsync(
-                ViewModel.ActiveProjectPath,
-                ViewModel.ActiveSchemaId,
-                backend,
-                models,
-                baseUrl,
-                limit,
-                scoreThreshold,
-                timeoutSeconds
-            );
-            ViewModel.ApplyBenchmarkReport(report);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.SetBenchmarkError(ex.Message);
         }
         finally
         {
@@ -3250,80 +3187,6 @@ public partial class MainWindow : Window
         if (trainRatio <= 0 || validationRatio < 0 || testRatio <= 0)
         {
             errorMessage = "Split percentages must leave at least some room for train and test rows.";
-            return false;
-        }
-
-        return true;
-    }
-
-    private bool TryReadEvaluationOptions(
-        out string backend,
-        out string model,
-        out string? baseUrl,
-        out int? limit,
-        out double scoreThreshold,
-        out int timeoutSeconds,
-        out string errorMessage,
-        bool requireModel = true
-    )
-    {
-        backend = ViewModel.EvaluationConnection.EvaluationBackend.Trim();
-        model = ViewModel.EvaluationConnection.EvaluationModel.Trim();
-        baseUrl = string.IsNullOrWhiteSpace(ViewModel.EvaluationConnection.EvaluationBaseUrl)
-            ? null
-            : ViewModel.EvaluationConnection.EvaluationBaseUrl.Trim();
-        limit = null;
-        scoreThreshold = 0;
-        timeoutSeconds = 0;
-        errorMessage = string.Empty;
-
-        if (string.IsNullOrWhiteSpace(backend))
-        {
-            errorMessage = "Evaluation backend is required.";
-            return false;
-        }
-
-        if (requireModel && string.IsNullOrWhiteSpace(model))
-        {
-            errorMessage = "Evaluation model is required.";
-            return false;
-        }
-
-        if (!string.IsNullOrWhiteSpace(ViewModel.Evaluation.EvaluationLimit))
-        {
-            if (!int.TryParse(
-                ViewModel.Evaluation.EvaluationLimit,
-                NumberStyles.Integer,
-                CultureInfo.InvariantCulture,
-                out var parsedLimit
-            ) || parsedLimit <= 0)
-            {
-                errorMessage = "Evaluation limit must be a positive whole number or blank.";
-                return false;
-            }
-
-            limit = parsedLimit;
-        }
-
-        if (!double.TryParse(
-            ViewModel.Evaluation.EvaluationScoreThreshold,
-            NumberStyles.Float,
-            CultureInfo.InvariantCulture,
-            out scoreThreshold
-        ) || !double.IsFinite(scoreThreshold) || scoreThreshold < 0 || scoreThreshold > 100)
-        {
-            errorMessage = "Evaluation score threshold must be a number from 0 to 100.";
-            return false;
-        }
-
-        if (!int.TryParse(
-            ViewModel.EvaluationConnection.EvaluationTimeoutSeconds,
-            NumberStyles.Integer,
-            CultureInfo.InvariantCulture,
-            out timeoutSeconds
-        ) || timeoutSeconds <= 0)
-        {
-            errorMessage = "Evaluation timeout must be a positive whole number.";
             return false;
         }
 

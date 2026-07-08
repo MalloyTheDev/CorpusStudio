@@ -1425,7 +1425,7 @@
                                             AutomationProperties.AutomationId="RunBenchmarkButton"
                                             Content="Run _Benchmark"
                                             HorizontalAlignment="Left"
-                                            Click="RunBenchmarkButton_Click" />
+                                            Command="{Binding RunBenchmarkCommand}" />
                                     <TextBox AutomationProperties.AutomationId="BenchmarkSummaryTextBox"
                                              Text="{Binding BenchmarkSummary, Mode=OneWay}"
                                              IsReadOnly="True"

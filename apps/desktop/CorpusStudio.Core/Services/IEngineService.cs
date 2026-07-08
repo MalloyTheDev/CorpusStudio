@@ -29,6 +29,11 @@ public interface IEngineService
     /// <summary>A suite's run history (oldest → newest) for the Suites-tab trend.</summary>
     Task<IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName);
 
+    /// <summary>Run a multi-model benchmark over the dataset (live backend calls).</summary>
+    Task<BenchmarkReport> RunBenchmarkAsync(
+        string projectPath, string schemaId, string backend, IReadOnlyList<string> models,
+        string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds);
+
     /// <summary>Generate a training config export from the Training tab's options.</summary>
     Task<TrainingConfigExportResult> GenerateTrainingConfigAsync(
         string projectPath, string schemaId, string target, string baseModel, string datasetFormat,

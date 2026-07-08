@@ -167,6 +167,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand ViewDatasetVersionCardCommand { get; }
     public System.Windows.Input.ICommand CaptureDatasetVersionCommand { get; }
     public System.Windows.Input.ICommand GenerateTrainingConfigCommand { get; }
+    public System.Windows.Input.ICommand RunBenchmarkCommand { get; }
     public System.Windows.Input.ICommand DiffVersionsCommand { get; }
     public System.Windows.Input.ICommand ViewArtifactCardCommand { get; }
     public System.Windows.Input.ICommand GenerateDatasetCardCommand { get; }
@@ -256,6 +257,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ViewDatasetVersionCardCommand = new AsyncRelayCommand(ViewDatasetVersionCardAsync);
         CaptureDatasetVersionCommand = new AsyncRelayCommand(CaptureDatasetVersionAsync);
         GenerateTrainingConfigCommand = new AsyncRelayCommand(GenerateTrainingConfigAsync);
+        RunBenchmarkCommand = new AsyncRelayCommand(RunBenchmarkAsync);
         DiffVersionsCommand = new AsyncRelayCommand(DiffVersionsAsync);
         ViewArtifactCardCommand = new AsyncRelayCommand(ViewArtifactCardAsync);
         GenerateDatasetCardCommand = new AsyncRelayCommand(GenerateDatasetCardAsync);
@@ -674,6 +676,127 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ) || !double.IsFinite(learningRate) || learningRate <= 0)
         {
             errorMessage = "Training learning rate must be a positive number.";
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Run a multi-model benchmark. Moved from the desktop code-behind; the models and eval
+    /// options come from the tab's own VM fields.</summary>
+    public async System.Threading.Tasks.Task RunBenchmarkAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            SetBenchmarkError("Create or select a dataset project before benchmarking.");
+            return;
+        }
+
+        if (ActiveSchemaId is not ("instruction" or "chat"))
+        {
+            SetBenchmarkError("Evaluation Lab supports instruction and chat projects.");
+            return;
+        }
+
+        var models = GetBenchmarkModels();
+        if (models.Count == 0)
+        {
+            SetBenchmarkError("Enter at least one model to benchmark (one per line).");
+            return;
+        }
+
+        if (!TryGetEvaluationRunOptions(out var backend, out _, out var baseUrl, out var limit,
+            out var scoreThreshold, out var timeoutSeconds, out var errorMessage, requireModel: false))
+        {
+            SetBenchmarkError(errorMessage);
+            return;
+        }
+
+        try
+        {
+            SetBusy($"Benchmarking {models.Count} model(s)...");
+            var report = await _engine.RunBenchmarkAsync(
+                ActiveProjectPath, ActiveSchemaId, backend, models, baseUrl, limit, scoreThreshold, timeoutSeconds);
+            ApplyBenchmarkReport(report);
+        }
+        catch (System.Exception ex)
+        {
+            SetBenchmarkError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    public bool TryGetEvaluationRunOptions(
+        out string backend,
+        out string model,
+        out string? baseUrl,
+        out int? limit,
+        out double scoreThreshold,
+        out int timeoutSeconds,
+        out string errorMessage,
+        bool requireModel = true
+    )
+    {
+        backend = EvaluationConnection.EvaluationBackend.Trim();
+        model = EvaluationConnection.EvaluationModel.Trim();
+        baseUrl = string.IsNullOrWhiteSpace(EvaluationConnection.EvaluationBaseUrl)
+            ? null
+            : EvaluationConnection.EvaluationBaseUrl.Trim();
+        limit = null;
+        scoreThreshold = 0;
+        timeoutSeconds = 0;
+        errorMessage = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(backend))
+        {
+            errorMessage = "Evaluation backend is required.";
+            return false;
+        }
+
+        if (requireModel && string.IsNullOrWhiteSpace(model))
+        {
+            errorMessage = "Evaluation model is required.";
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(Evaluation.EvaluationLimit))
+        {
+            if (!int.TryParse(
+                Evaluation.EvaluationLimit,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var parsedLimit
+            ) || parsedLimit <= 0)
+            {
+                errorMessage = "Evaluation limit must be a positive whole number or blank.";
+                return false;
+            }
+
+            limit = parsedLimit;
+        }
+
+        if (!double.TryParse(
+            Evaluation.EvaluationScoreThreshold,
+            NumberStyles.Float,
+            CultureInfo.InvariantCulture,
+            out scoreThreshold
+        ) || !double.IsFinite(scoreThreshold) || scoreThreshold < 0 || scoreThreshold > 100)
+        {
+            errorMessage = "Evaluation score threshold must be a number from 0 to 100.";
+            return false;
+        }
+
+        if (!int.TryParse(
+            EvaluationConnection.EvaluationTimeoutSeconds,
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out timeoutSeconds
+        ) || timeoutSeconds <= 0)
+        {
+            errorMessage = "Evaluation timeout must be a positive whole number.";
             return false;
         }
 

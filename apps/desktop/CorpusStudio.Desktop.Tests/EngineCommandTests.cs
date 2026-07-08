@@ -42,6 +42,7 @@ public sealed class EngineCommandTests
         public Task<SuiteReport> RunSuiteAsync(string projectPath, string suiteName) => Task.FromResult(new SuiteReport());
         public Task<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName)
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>>(new System.Collections.Generic.List<SuiteHistoryEntry>());
+        public Task<BenchmarkReport> RunBenchmarkAsync(string projectPath, string schemaId, string backend, System.Collections.Generic.IReadOnlyList<string> models, string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds) => Task.FromResult(new BenchmarkReport());
         public Task<TrainingConfigExportResult> GenerateTrainingConfigAsync(string projectPath, string schemaId, string target, string baseModel, string datasetFormat, int sequenceLen, int loraR, int loraAlpha, int microBatchSize, int gradientAccumulationSteps, double learningRate) => Task.FromResult(new TrainingConfigExportResult());
         public Task<System.Collections.Generic.IReadOnlyList<DatasetVersionDisplayItem>> LoadDatasetVersionsAsync(string projectPath)
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<DatasetVersionDisplayItem>>(new System.Collections.Generic.List<DatasetVersionDisplayItem>());
@@ -164,5 +165,40 @@ public sealed class EngineCommandTests
         var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
         await vm.RunGatesAsync();
         Assert.Contains("Create or select a dataset project", vm.GateSummary);
+    }
+
+    [Fact]
+    public async Task RunBenchmark_WithoutProject_SetsBenchmarkError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        vm.BenchmarkModelsInput = "model-a";
+
+        await vm.RunBenchmarkAsync();
+
+        Assert.Contains("Create or select a dataset project", vm.BenchmarkSummary);
+    }
+
+    [Fact]
+    public async Task RunBenchmark_WithoutModels_SetsBenchmarkError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        SelectFakeProject(vm);
+        vm.BenchmarkModelsInput = string.Empty;
+
+        await vm.RunBenchmarkAsync();
+
+        Assert.Contains("at least one model", vm.BenchmarkSummary);
+    }
+
+    [Fact]
+    public async Task RunBenchmark_WithProjectAndModels_AppliesTheEngineReport()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        SelectFakeProject(vm);
+        vm.BenchmarkModelsInput = "model-a";
+
+        await vm.RunBenchmarkAsync();
+
+        Assert.Contains("Benchmarked", vm.BenchmarkSummary); // ApplyBenchmarkReport ran (no error branch)
     }
 }
