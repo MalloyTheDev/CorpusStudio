@@ -2130,7 +2130,7 @@
                                         AutomationProperties.AutomationId="GenerateTrainingConfigButton"
                                         Content="Generate Config"
                                         Width="132"
-                                        Click="GenerateTrainingConfigButton_Click" />
+                                        Command="{Binding GenerateTrainingConfigCommand}" />
                                 <Button AutomationProperties.AutomationId="CopyLaunchCommandButton"
                                         Content="Copy launch command"
                                         Margin="8,0,0,0"

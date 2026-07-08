@@ -29,6 +29,12 @@ public interface IEngineService
     /// <summary>A suite's run history (oldest → newest) for the Suites-tab trend.</summary>
     Task<IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName);
 
+    /// <summary>Generate a training config export from the Training tab's options.</summary>
+    Task<TrainingConfigExportResult> GenerateTrainingConfigAsync(
+        string projectPath, string schemaId, string target, string baseModel, string datasetFormat,
+        int sequenceLen, int loraR, int loraAlpha, int microBatchSize, int gradientAccumulationSteps,
+        double learningRate);
+
     /// <summary>List the project's dataset versions (newest first) with live integrity.</summary>
     Task<IReadOnlyList<DatasetVersionDisplayItem>> LoadDatasetVersionsAsync(string projectPath);
 
