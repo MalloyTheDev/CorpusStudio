@@ -47,6 +47,12 @@ public interface IEngineService
     /// <summary>Reconcile tracked reviewed-fixes against a fresh evaluation's per-example results.</summary>
     IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, IReadOnlyList<EvaluationExampleResult> results);
 
+    /// <summary>Generate deterministic train/validation/test splits over the project's examples.</summary>
+    Task<SplitReport> GenerateProjectSplitsAsync(string projectPath, string schemaId, double trainRatio, double validationRatio, int seed);
+
+    /// <summary>Persist the project's split settings (ratios + seed) to project.json.</summary>
+    void SaveProjectSplitSettings(string projectPath, SplitSettings settings);
+
     /// <summary>Run a multi-model benchmark over the dataset (live backend calls).</summary>
     Task<BenchmarkReport> RunBenchmarkAsync(
         string projectPath, string schemaId, string backend, IReadOnlyList<string> models,

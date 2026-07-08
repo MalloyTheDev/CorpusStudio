@@ -43,6 +43,8 @@ public sealed class EngineCommandTests
         public Task<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName)
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>>(new System.Collections.Generic.List<SuiteHistoryEntry>());
         public Task<BenchmarkReport> RunBenchmarkAsync(string projectPath, string schemaId, string backend, System.Collections.Generic.IReadOnlyList<string> models, string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds) => Task.FromResult(new BenchmarkReport());
+        public Task<SplitReport> GenerateProjectSplitsAsync(string projectPath, string schemaId, double trainRatio, double validationRatio, int seed) => Task.FromResult(new SplitReport());
+        public void SaveProjectSplitSettings(string projectPath, SplitSettings settings) { }
         public Task<BackendHealthReport> CheckBackendHealthAsync(string backend, string model, string? baseUrl, int timeoutSeconds) => Task.FromResult(new BackendHealthReport());
         public Task<BackendModelListReport> ListBackendModelsAsync(string backend, string? baseUrl, int timeoutSeconds) => Task.FromResult(new BackendModelListReport());
         public Task<EvaluationRunResult> RunEvaluationAsync(string projectPath, string schemaId, string backend, string model, string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds, string? judgeModel = null, string? judgeBackend = null, string? judgeBaseUrl = null) => Task.FromResult(new EvaluationRunResult(new EvaluationReport(), string.Empty, string.Empty));
@@ -281,5 +283,27 @@ public sealed class EngineCommandTests
         await vm.RefreshAiAssistModelsAsync();
 
         Assert.Contains("backend is required", vm.AiAssistConnection.AiAssistModelListSummary);
+    }
+
+    [Fact]
+    public async Task GenerateSplits_WithoutProject_SetsSplitError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+
+        await vm.GenerateSplitsAsync();
+
+        Assert.Contains("Create a dataset project", vm.Splits.SplitSummary);
+    }
+
+    [Fact]
+    public async Task GenerateSplits_WithInvalidTrainPercent_SetsSplitError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        SelectFakeProject(vm);
+        vm.Splits.SplitTrainPercent = "not-a-number";
+
+        await vm.GenerateSplitsAsync();
+
+        Assert.Contains("Train split must be a number", vm.Splits.SplitSummary);
     }
 }
