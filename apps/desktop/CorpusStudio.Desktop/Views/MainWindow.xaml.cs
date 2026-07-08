@@ -2125,52 +2125,6 @@ public partial class MainWindow : Window
         await RefreshTrainingCheckpointsAsync();
     }
 
-    private async void GateTrainingRunButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            ViewModel.Training.SetTrainingRunGateError("Create or select a dataset project first.");
-            return;
-        }
-
-        var projectPath = ViewModel.ActiveProjectPath;
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy("Running regression gate...");
-
-            // Link the newest post-training eval (not the baseline) to the newest
-            // run, carrying the model id so provenance can be verified.
-            var baseline = ViewModel.Training.TrainingBaselineReport;
-            var after = _engineService.LoadEvaluationReportHistory(projectPath).FirstOrDefault(item =>
-                baseline is null
-                || !string.Equals(item.ReportPath, baseline.ReportPath, StringComparison.OrdinalIgnoreCase));
-
-            var runId = after is not null
-                ? _engineService.LinkAfterEvalToNewestRun(projectPath, after.ReportPath, after.Report.Model)
-                : _engineService.LoadTrainingRunRecords(projectPath).FirstOrDefault()?.RunId;
-
-            if (runId is null)
-            {
-                ViewModel.Training.SetTrainingRunGateError("No training run has been recorded yet.");
-                return;
-            }
-
-            var report = await _engineService.RunTrainingRunGateAsync(projectPath, runId);
-            ViewModel.Training.ApplyTrainingRunGate(report);
-            ViewModel.Training.ApplyTrainingRunHistory(_engineService.LoadTrainingRunRecords(projectPath));
-        }
-        catch (Exception ex)
-        {
-            ViewModel.Training.SetTrainingRunGateError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
-
     private void RegisterArtifactFromRunButton_Click(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
