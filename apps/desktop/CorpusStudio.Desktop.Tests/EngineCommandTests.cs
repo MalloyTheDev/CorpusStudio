@@ -42,6 +42,7 @@ public sealed class EngineCommandTests
         public Task<SuiteReport> RunSuiteAsync(string projectPath, string suiteName) => Task.FromResult(new SuiteReport());
         public Task<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName)
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>>(new System.Collections.Generic.List<SuiteHistoryEntry>());
+        public Task<TrainingConfigExportResult> GenerateTrainingConfigAsync(string projectPath, string schemaId, string target, string baseModel, string datasetFormat, int sequenceLen, int loraR, int loraAlpha, int microBatchSize, int gradientAccumulationSteps, double learningRate) => Task.FromResult(new TrainingConfigExportResult());
         public Task<System.Collections.Generic.IReadOnlyList<DatasetVersionDisplayItem>> LoadDatasetVersionsAsync(string projectPath)
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<DatasetVersionDisplayItem>>(new System.Collections.Generic.List<DatasetVersionDisplayItem>());
         public Task<DatasetVersionRecord> CreateDatasetVersionAsync(string projectPath, string label, string trigger) => Task.FromResult(new DatasetVersionRecord());
@@ -123,6 +124,28 @@ public sealed class EngineCommandTests
         await vm.CaptureDatasetVersionAsync();
 
         Assert.Contains("Create or select a dataset project", vm.Versions.DatasetVersionSummary + vm.Versions.DatasetVersionDetail);
+    }
+
+    [Fact]
+    public async Task GenerateTrainingConfig_WithoutProject_SetsError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+
+        await vm.GenerateTrainingConfigAsync();
+
+        Assert.Contains("Create or select a dataset project", vm.Training.TrainingSummary);
+    }
+
+    [Fact]
+    public async Task GenerateTrainingConfig_WithMissingTarget_SetsValidationError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        SelectFakeProject(vm);
+        vm.Training.TrainingTarget = string.Empty;
+
+        await vm.GenerateTrainingConfigAsync();
+
+        Assert.Contains("target is required", vm.Training.TrainingSummary);
     }
 
     [Fact]

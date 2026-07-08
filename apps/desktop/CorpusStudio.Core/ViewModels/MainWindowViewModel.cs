@@ -166,6 +166,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand RunSuiteCommand { get; }
     public System.Windows.Input.ICommand ViewDatasetVersionCardCommand { get; }
     public System.Windows.Input.ICommand CaptureDatasetVersionCommand { get; }
+    public System.Windows.Input.ICommand GenerateTrainingConfigCommand { get; }
     public System.Windows.Input.ICommand DiffVersionsCommand { get; }
     public System.Windows.Input.ICommand ViewArtifactCardCommand { get; }
     public System.Windows.Input.ICommand GenerateDatasetCardCommand { get; }
@@ -254,6 +255,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RunSuiteCommand = new AsyncRelayCommand(RunSuiteAsync);
         ViewDatasetVersionCardCommand = new AsyncRelayCommand(ViewDatasetVersionCardAsync);
         CaptureDatasetVersionCommand = new AsyncRelayCommand(CaptureDatasetVersionAsync);
+        GenerateTrainingConfigCommand = new AsyncRelayCommand(GenerateTrainingConfigAsync);
         DiffVersionsCommand = new AsyncRelayCommand(DiffVersionsAsync);
         ViewArtifactCardCommand = new AsyncRelayCommand(ViewArtifactCardAsync);
         GenerateDatasetCardCommand = new AsyncRelayCommand(GenerateDatasetCardAsync);
@@ -527,6 +529,155 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             // History is a secondary trend view; leave the previous history rather than surface an error.
         }
+    }
+
+    /// <summary>Generate a training config export. Moved from the desktop code-behind; the options
+    /// are read + validated from the Training tab's own fields (no View coupling).</summary>
+    public async System.Threading.Tasks.Task GenerateTrainingConfigAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Training.SetTrainingConfigError("Create or select a dataset project before generating a training config.");
+            return;
+        }
+
+        if (!TryGetTrainingConfigOptions(
+            out var target, out var baseModel, out var datasetFormat, out var sequenceLen,
+            out var loraR, out var loraAlpha, out var microBatchSize, out var gradientAccumulationSteps,
+            out var learningRate, out var errorMessage))
+        {
+            Training.SetTrainingConfigError(errorMessage);
+            return;
+        }
+
+        try
+        {
+            SetBusy("Generating training config...");
+            Training.SetTrainingConfigInProgress();
+            var result = await _engine.GenerateTrainingConfigAsync(
+                ActiveProjectPath, ActiveSchemaId, target, baseModel, datasetFormat, sequenceLen,
+                loraR, loraAlpha, microBatchSize, gradientAccumulationSteps, learningRate);
+            Training.ApplyTrainingConfigExportResult(result);
+        }
+        catch (System.Exception ex)
+        {
+            Training.SetTrainingConfigError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    private bool TryGetTrainingConfigOptions(
+        out string target,
+        out string baseModel,
+        out string datasetFormat,
+        out int sequenceLen,
+        out int loraR,
+        out int loraAlpha,
+        out int microBatchSize,
+        out int gradientAccumulationSteps,
+        out double learningRate,
+        out string errorMessage
+    )
+    {
+        target = Training.TrainingTarget.Trim();
+        baseModel = Training.TrainingBaseModel.Trim();
+        datasetFormat = Training.TrainingFormat.Trim();
+        sequenceLen = 0;
+        loraR = 0;
+        loraAlpha = 0;
+        microBatchSize = 0;
+        gradientAccumulationSteps = 0;
+        learningRate = 0;
+        errorMessage = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(target))
+        {
+            errorMessage = "Training target is required.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(baseModel))
+        {
+            errorMessage = "Training base model is required.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(datasetFormat))
+        {
+            errorMessage = "Training format is required.";
+            return false;
+        }
+
+        if (!int.TryParse(
+            Training.TrainingSequenceLen,
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out sequenceLen
+        ) || sequenceLen <= 0)
+        {
+            errorMessage = "Training sequence length must be a positive whole number.";
+            return false;
+        }
+
+        if (!int.TryParse(
+            Training.TrainingLoraR,
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out loraR
+        ) || loraR <= 0)
+        {
+            errorMessage = "Training LoRA r must be a positive whole number.";
+            return false;
+        }
+
+        if (!int.TryParse(
+            Training.TrainingLoraAlpha,
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out loraAlpha
+        ) || loraAlpha <= 0)
+        {
+            errorMessage = "Training LoRA alpha must be a positive whole number.";
+            return false;
+        }
+
+        if (!int.TryParse(
+            Training.TrainingMicroBatchSize,
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out microBatchSize
+        ) || microBatchSize <= 0)
+        {
+            errorMessage = "Training micro batch size must be a positive whole number.";
+            return false;
+        }
+
+        if (!int.TryParse(
+            Training.TrainingGradientAccumulationSteps,
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out gradientAccumulationSteps
+        ) || gradientAccumulationSteps <= 0)
+        {
+            errorMessage = "Training gradient accumulation steps must be a positive whole number.";
+            return false;
+        }
+
+        if (!double.TryParse(
+            Training.TrainingLearningRate,
+            NumberStyles.Float,
+            CultureInfo.InvariantCulture,
+            out learningRate
+        ) || !double.IsFinite(learningRate) || learningRate <= 0)
+        {
+            errorMessage = "Training learning rate must be a positive number.";
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>Render the selected dataset-version card. Moved from the desktop code-behind.</summary>
