@@ -43,6 +43,9 @@ public sealed class EngineCommandTests
         public Task<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName)
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>>(new System.Collections.Generic.List<SuiteHistoryEntry>());
         public Task<BenchmarkReport> RunBenchmarkAsync(string projectPath, string schemaId, string backend, System.Collections.Generic.IReadOnlyList<string> models, string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds) => Task.FromResult(new BenchmarkReport());
+        public System.Collections.Generic.IReadOnlyList<TrainingRunRecord> LoadTrainingRunRecords(string projectPath) => new System.Collections.Generic.List<TrainingRunRecord>();
+        public string? LinkAfterEvalToNewestRun(string projectPath, string afterEvalPath, string? afterEvalModel) => null;
+        public Task<GateReport> RunTrainingRunGateAsync(string projectPath, string runId) => Task.FromResult(new GateReport());
         public Task<SplitReport> GenerateProjectSplitsAsync(string projectPath, string schemaId, double trainRatio, double validationRatio, int seed) => Task.FromResult(new SplitReport());
         public void SaveProjectSplitSettings(string projectPath, SplitSettings settings) { }
         public Task<BackendHealthReport> CheckBackendHealthAsync(string backend, string model, string? baseUrl, int timeoutSeconds) => Task.FromResult(new BackendHealthReport());
@@ -305,5 +308,26 @@ public sealed class EngineCommandTests
         await vm.GenerateSplitsAsync();
 
         Assert.Contains("Train split must be a number", vm.Splits.SplitSummary);
+    }
+
+    [Fact]
+    public async Task GateTrainingRun_WithoutProject_SetsGateError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+
+        await vm.GateTrainingRunAsync();
+
+        Assert.Contains("Create or select a dataset project", vm.Training.TrainingRunGateSummary);
+    }
+
+    [Fact]
+    public async Task GateTrainingRun_WithNoRecordedRun_SetsGateError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        SelectFakeProject(vm); // fake has no runs + LinkAfterEvalToNewestRun returns null → runId is null
+
+        await vm.GateTrainingRunAsync();
+
+        Assert.Contains("No training run has been recorded", vm.Training.TrainingRunGateSummary);
     }
 }

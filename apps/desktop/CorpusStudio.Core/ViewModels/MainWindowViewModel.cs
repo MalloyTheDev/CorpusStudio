@@ -175,6 +175,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand CheckAiAssistBackendCommand { get; }
     public System.Windows.Input.ICommand RefreshAiAssistModelsCommand { get; }
     public System.Windows.Input.ICommand GenerateSplitsCommand { get; }
+    public System.Windows.Input.ICommand GateTrainingRunCommand { get; }
     public System.Windows.Input.ICommand DiffVersionsCommand { get; }
     public System.Windows.Input.ICommand ViewArtifactCardCommand { get; }
     public System.Windows.Input.ICommand GenerateDatasetCardCommand { get; }
@@ -272,6 +273,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         CheckAiAssistBackendCommand = new AsyncRelayCommand(CheckAiAssistBackendAsync);
         RefreshAiAssistModelsCommand = new AsyncRelayCommand(RefreshAiAssistModelsAsync);
         GenerateSplitsCommand = new AsyncRelayCommand(GenerateSplitsAsync);
+        GateTrainingRunCommand = new AsyncRelayCommand(GateTrainingRunAsync);
         DiffVersionsCommand = new AsyncRelayCommand(DiffVersionsAsync);
         ViewArtifactCardCommand = new AsyncRelayCommand(ViewArtifactCardAsync);
         GenerateDatasetCardCommand = new AsyncRelayCommand(GenerateDatasetCardAsync);
@@ -1287,6 +1289,52 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         return true;
+    }
+
+    /// <summary>Run the training-run regression gate: link the newest post-training eval to the newest
+    /// run (carrying the model id for provenance), then gate it. Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task GateTrainingRunAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Training.SetTrainingRunGateError("Create or select a dataset project first.");
+            return;
+        }
+
+        var projectPath = ActiveProjectPath;
+        try
+        {
+            SetBusy("Running regression gate...");
+
+            // Link the newest post-training eval (not the baseline) to the newest
+            // run, carrying the model id so provenance can be verified.
+            var baseline = Training.TrainingBaselineReport;
+            var after = _engine.LoadEvaluationReportHistory(projectPath).FirstOrDefault(item =>
+                baseline is null
+                || !string.Equals(item.ReportPath, baseline.ReportPath, StringComparison.OrdinalIgnoreCase));
+
+            var runId = after is not null
+                ? _engine.LinkAfterEvalToNewestRun(projectPath, after.ReportPath, after.Report.Model)
+                : _engine.LoadTrainingRunRecords(projectPath).FirstOrDefault()?.RunId;
+
+            if (runId is null)
+            {
+                Training.SetTrainingRunGateError("No training run has been recorded yet.");
+                return;
+            }
+
+            var report = await _engine.RunTrainingRunGateAsync(projectPath, runId);
+            Training.ApplyTrainingRunGate(report);
+            Training.ApplyTrainingRunHistory(_engine.LoadTrainingRunRecords(projectPath));
+        }
+        catch (System.Exception ex)
+        {
+            Training.SetTrainingRunGateError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
     }
 
     /// <summary>Generate deterministic train/validation/test splits and persist the settings.

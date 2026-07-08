@@ -47,6 +47,15 @@ public interface IEngineService
     /// <summary>Reconcile tracked reviewed-fixes against a fresh evaluation's per-example results.</summary>
     IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, IReadOnlyList<EvaluationExampleResult> results);
 
+    /// <summary>The project's recorded training runs (newest first).</summary>
+    IReadOnlyList<TrainingRunRecord> LoadTrainingRunRecords(string projectPath);
+
+    /// <summary>Link an after-training eval report to the newest run (returns that run's id, or null).</summary>
+    string? LinkAfterEvalToNewestRun(string projectPath, string afterEvalPath, string? afterEvalModel);
+
+    /// <summary>Run the training-run regression gate for a recorded run.</summary>
+    Task<GateReport> RunTrainingRunGateAsync(string projectPath, string runId);
+
     /// <summary>Generate deterministic train/validation/test splits over the project's examples.</summary>
     Task<SplitReport> GenerateProjectSplitsAsync(string projectPath, string schemaId, double trainRatio, double validationRatio, int seed);
 
