@@ -2510,23 +2510,43 @@
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
-                                    <!-- per-case rows -->
+                                    <!-- per-case rows + run-history trend -->
                                     <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" Margin="0,8,0,0">
-                                        <ItemsControl ItemsSource="{Binding Suites.SuiteCaseRows}">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Border BorderBrush="#F1F5F9" BorderThickness="0,0,0,1" Padding="0,4">
-                                                        <StackPanel Orientation="Horizontal">
+                                        <StackPanel>
+                                            <ItemsControl ItemsSource="{Binding Suites.SuiteCaseRows}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border BorderBrush="#F1F5F9" BorderThickness="0,0,0,1" Padding="0,4">
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <Border Background="{Binding StatusColor}" CornerRadius="3" Padding="5,1" Margin="0,0,8,0" VerticalAlignment="Center">
+                                                                    <TextBlock Text="{Binding Status}" Foreground="White" FontSize="10" />
+                                                                </Border>
+                                                                <TextBlock Text="{Binding CaseLine}" FontFamily="Consolas" FontSize="12"
+                                                                           Foreground="#1E293B" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <TextBlock Text="Run history (trend)" FontWeight="SemiBold" Foreground="#64748B"
+                                                       FontSize="11" Margin="0,14,0,3" />
+                                            <TextBlock Text="{Binding Suites.SuiteHistorySummary}" Foreground="#94A3B8"
+                                                       FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4" />
+                                            <ItemsControl AutomationProperties.AutomationId="SuiteHistoryList"
+                                                          ItemsSource="{Binding Suites.SuiteHistory}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Orientation="Horizontal" Margin="0,1">
                                                             <Border Background="{Binding StatusColor}" CornerRadius="3" Padding="5,1" Margin="0,0,8,0" VerticalAlignment="Center">
-                                                                <TextBlock Text="{Binding Status}" Foreground="White" FontSize="10" />
+                                                                <TextBlock Text="{Binding OverallStatus}" Foreground="White" FontSize="10" />
                                                             </Border>
-                                                            <TextBlock Text="{Binding CaseLine}" FontFamily="Consolas" FontSize="12"
-                                                                       Foreground="#1E293B" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding DisplayLine}" FontFamily="Consolas" FontSize="12"
+                                                                       Foreground="#334155" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                         </StackPanel>
-                                                    </Border>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
                                     </ScrollViewer>
                                     <TextBlock Grid.Row="4" Text="{Binding Suites.SuiteHonestyNote}" Foreground="#94A3B8"
                                                FontSize="11" FontStyle="Italic" TextWrapping="Wrap" Margin="0,8,0,0" />

@@ -761,7 +761,12 @@ def suite_run(
 
     from corpus_studio.gates.models import GateStatus
     from corpus_studio.suites.registry import load_suite_by_name
-    from corpus_studio.suites.runner import load_suite_definition, run_suite, save_suite_report
+    from corpus_studio.suites.runner import (
+        append_suite_history,
+        load_suite_definition,
+        run_suite,
+        save_suite_report,
+    )
 
     suite_file = Path(suite)
     try:
@@ -792,11 +797,43 @@ def suite_run(
 
     if project_dir is not None:
         save_suite_report(project_dir, report)
+        append_suite_history(project_dir, report)
 
     typer.echo(report.model_dump_json(indent=2))
 
     if strict and report.overall_status == GateStatus.BLOCK:
         raise typer.Exit(code=2)
+
+
+@app.command("suite-history")
+def suite_history(
+    name: str,
+    project_dir: Path = typer.Option(..., "--project-dir", help="Project holding suite_reports/history/."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the history as JSON."),
+):
+    """Show a registered suite's run history (oldest → newest) for trending pass/warn/block over time.
+
+    Each point is the run time, the aggregate verdict, and per-status case counts — a count, never a
+    folded quality score.
+    """
+    from corpus_studio.suites.runner import load_suite_history
+
+    entries = load_suite_history(project_dir, name)
+    if as_json:
+        typer.echo(json.dumps([entry.model_dump() for entry in entries], indent=2))
+        return
+
+    if not entries:
+        typer.echo(f"No run history for suite '{name}' yet.")
+        return
+    typer.echo(f"Suite '{name}' — {len(entries)} run(s):")
+    for entry in entries:
+        typer.echo(
+            f"  {entry.generated_at or '?'}  {entry.overall_status.value.upper():5}  "
+            f"{entry.passed}/{entry.total} passed"
+            + (f", {entry.blocked} blocked" if entry.blocked else "")
+            + (f", {entry.errored} errored" if entry.errored else "")
+        )
 
 
 @app.command("benchmark")

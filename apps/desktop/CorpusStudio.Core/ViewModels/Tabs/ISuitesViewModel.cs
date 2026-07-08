@@ -19,7 +19,12 @@ public interface ISuitesViewModel : INotifyPropertyChanged
     ObservableCollection<SuiteSummary> Suites { get; }
     ObservableCollection<SuiteMetricRollup> SuiteMetricRows { get; }
     ObservableCollection<SuiteCaseResult> SuiteCaseRows { get; }
+    ObservableCollection<SuiteHistoryEntry> SuiteHistory { get; }
+    string SuiteHistorySummary { get; }
     string SuiteHonestyNote { get; }
+
+    /// <summary>Raised when a suite is selected (name), so the shell can load its run-history trend.</summary>
+    event System.Action<string>? SuiteSelected;
 
     SuiteSummary? SelectedSuite { get; set; }
     bool IsSuitesBusy { get; set; }
@@ -40,6 +45,9 @@ public interface ISuitesViewModel : INotifyPropertyChanged
     void ApplySuites(IReadOnlyList<SuiteSummary> summaries);
     void ApplySuiteReport(SuiteReport report);
     void SetSuitesError(string message);
+
+    /// <summary>Load the selected suite's run history (newest first) for the trend.</summary>
+    void SetSuiteHistory(IEnumerable<SuiteHistoryEntry> history);
 
     /// <summary>Reset all suite state on a project switch (list, selection, report, panes).</summary>
     void Reset();

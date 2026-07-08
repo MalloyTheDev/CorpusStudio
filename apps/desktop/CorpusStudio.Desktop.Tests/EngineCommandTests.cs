@@ -40,6 +40,8 @@ public sealed class EngineCommandTests
         public Task<ArenaReport> RunArenaAsync(string promptsText, System.Collections.Generic.IReadOnlyList<string> models,
             string? judgeModel = null, string? projectPath = null) => Task.FromResult(new ArenaReport());
         public Task<SuiteReport> RunSuiteAsync(string projectPath, string suiteName) => Task.FromResult(new SuiteReport());
+        public Task<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName)
+            => Task.FromResult<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>>(new System.Collections.Generic.List<SuiteHistoryEntry>());
         public Task<string> GetDatasetVersionCardAsync(string projectPath, string versionId) => Task.FromResult("# card");
         public Task<string> GetDatasetVersionDiffAsync(string projectPath, string baseVersionId, string otherVersionId) => Task.FromResult("# diff");
         public Task<string> GetWeightCardAsync(string projectPath, string artifactId) => Task.FromResult("# weights");

@@ -1201,6 +1201,24 @@ public sealed class PythonEngineService : IEngineService
             ?? throw new InvalidOperationException("The Python engine returned an invalid suite report.");
     }
 
+    /// <summary>A suite's run history (oldest → newest) for the Suites-tab trend (#190).</summary>
+    public async Task<IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName)
+    {
+        var output = await RunEngineCommandAsync(
+            "suite-history", suiteName, "--project-dir", projectPath, "--json");
+        return ParseSuiteHistory(output);
+    }
+
+    /// <summary>Parse `suite-history --json` output. Pure/testable.</summary>
+    public static IReadOnlyList<SuiteHistoryEntry> ParseSuiteHistory(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+        return JsonSerializer.Deserialize<List<SuiteHistoryEntry>>(json, JsonOptions) ?? [];
+    }
+
     public async Task<ArenaReport> RunArenaAsync(
         string promptsText,
         IReadOnlyList<string> models,

@@ -99,7 +99,9 @@ per-item error isolation, and off-thread document opens.
   A per-project `evaluation_suites/` **registry** (`suite-init` / `suite-list` /
   `suite-run` by name), a desktop **Suites** tab (list / run / view), and
   **`version_id`-pinned cases** (a case re-evaluates the verified reconstruction of a
-  pinned dataset version) all ship; suite history/trend is still future.
+  pinned dataset version) all ship. **Suite run history + trend** (`suite-history`): each run
+  appends a timestamped point (verdict + per-status case counts, capped) that the Suites tab shows
+  as a newest-first trend — a count over time, never a folded quality score.
 - Model Arena (`arena-run`): run a prompt suite across several models side by
   side; responses are comparison artifacts, not trainable rows. Optional
   evaluator-only judging (`--judge-model`) scores each response and picks a

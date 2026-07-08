@@ -109,6 +109,38 @@ class SuiteReport(BaseModel):
     summary: str = ""
 
 
+class SuiteHistoryEntry(BaseModel):
+    """One point in a suite's run history (issue #190): the run time, the aggregate verdict, and the
+    per-status case counts — enough to trend pass/warn/block over time without storing every case.
+    The per-metric roll-up is intentionally NOT folded into a single score; these counts are a sum of
+    case outcomes across metrics, which is a count, not a quality number."""
+
+    generated_at: str | None = None
+    overall_status: GateStatus = GateStatus.PASS
+    total: int = 0
+    passed: int = 0
+    warned: int = 0
+    blocked: int = 0
+    errored: int = 0
+    summary: str = ""
+
+    @classmethod
+    def from_report(cls, report: SuiteReport) -> "SuiteHistoryEntry":
+        totals = {"total": 0, "passed": 0, "warned": 0, "blocked": 0, "errored": 0}
+        for rollup in report.per_metric:
+            totals["total"] += rollup.total
+            totals["passed"] += rollup.passed
+            totals["warned"] += rollup.warned
+            totals["blocked"] += rollup.blocked
+            totals["errored"] += rollup.errored
+        return cls(
+            generated_at=report.generated_at,
+            overall_status=report.overall_status,
+            summary=report.summary,
+            **totals,
+        )
+
+
 class SuiteSummary(BaseModel):
     """One row in `suite-list`: a registered suite's filename-stem key + case count. A
     malformed registry file is surfaced as valid=False with an error, never a crash."""
