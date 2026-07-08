@@ -168,6 +168,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand CaptureDatasetVersionCommand { get; }
     public System.Windows.Input.ICommand GenerateTrainingConfigCommand { get; }
     public System.Windows.Input.ICommand RunBenchmarkCommand { get; }
+    public System.Windows.Input.ICommand RunEvaluationCommand { get; }
+    public System.Windows.Input.ICommand RerunEvaluationReportCommand { get; }
     public System.Windows.Input.ICommand DiffVersionsCommand { get; }
     public System.Windows.Input.ICommand ViewArtifactCardCommand { get; }
     public System.Windows.Input.ICommand GenerateDatasetCardCommand { get; }
@@ -258,6 +260,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         CaptureDatasetVersionCommand = new AsyncRelayCommand(CaptureDatasetVersionAsync);
         GenerateTrainingConfigCommand = new AsyncRelayCommand(GenerateTrainingConfigAsync);
         RunBenchmarkCommand = new AsyncRelayCommand(RunBenchmarkAsync);
+        RunEvaluationCommand = new AsyncRelayCommand(RunEvaluationAsync);
+        RerunEvaluationReportCommand = new AsyncRelayCommand(RerunEvaluationReportAsync);
         DiffVersionsCommand = new AsyncRelayCommand(DiffVersionsAsync);
         ViewArtifactCardCommand = new AsyncRelayCommand(ViewArtifactCardAsync);
         GenerateDatasetCardCommand = new AsyncRelayCommand(GenerateDatasetCardAsync);
@@ -801,6 +805,235 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         return true;
+    }
+
+    /// <summary>Run an evaluation (preflight health check, then the graded run). Moved from the
+    /// desktop code-behind; options come from the Evaluation tab's own VM fields.</summary>
+    public async System.Threading.Tasks.Task RunEvaluationAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Evaluation.SetEvaluationError("Create or select a dataset project before running evaluation.");
+            return;
+        }
+
+        if (ActiveSchemaId is not ("instruction" or "chat"))
+        {
+            Evaluation.SetEvaluationError("Evaluation Lab MVP supports instruction and chat projects.");
+            return;
+        }
+
+        if (!TryGetEvaluationRunOptions(
+            out var backend,
+            out var model,
+            out var baseUrl,
+            out var limit,
+            out var scoreThreshold,
+            out var timeoutSeconds,
+            out var errorMessage
+        ))
+        {
+            Evaluation.SetEvaluationError(errorMessage);
+            return;
+        }
+
+        try
+        {
+            SetBusy("Running evaluation...");
+            Evaluation.SetEvaluationPreflightInProgress();
+            var healthReport = await _engine.CheckBackendHealthAsync(
+                backend,
+                model,
+                baseUrl,
+                timeoutSeconds
+            );
+            if (!IsEvaluationBackendReady(healthReport))
+            {
+                Evaluation.SetEvaluationError(FormatEvaluationPreflightError(healthReport));
+                return;
+            }
+
+            Evaluation.SetEvaluationInProgress();
+            // Opt-in LLM-judge: when a judge model is set, the run scores with metric=llm_judge (the judge
+            // reuses this run's backend/base-url). Blank = the default keyword-overlap scorer.
+            var judgeModel = EvaluationConnection.EvaluationJudgeModel?.Trim();
+            var result = await _engine.RunEvaluationAsync(
+                ActiveProjectPath,
+                ActiveSchemaId,
+                backend,
+                model,
+                baseUrl,
+                limit,
+                scoreThreshold,
+                timeoutSeconds,
+                judgeModel: string.IsNullOrWhiteSpace(judgeModel) ? null : judgeModel
+            );
+            Evaluation.ApplyEvaluationRunResult(result);
+            Evaluation.SetEvaluationReportHistory(
+                _engine.LoadEvaluationReportHistory(ActiveProjectPath)
+            );
+            ReconcileReviewedFixesAfterRun(result);
+        }
+        catch (Exception ex)
+        {
+            Evaluation.SetEvaluationError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Rerun the selected saved evaluation report's settings for a regression comparison.
+    /// Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task RerunEvaluationReportAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Evaluation.SetEvaluationError("Create or select a dataset project before rerunning evaluation.");
+            return;
+        }
+
+        if (!Evaluation.TryGetSelectedEvaluationRunSettings(
+            out var settings,
+            out var errorMessage
+        ))
+        {
+            Evaluation.SetEvaluationError(errorMessage);
+            return;
+        }
+
+        if (settings.SchemaId is not ("instruction" or "chat"))
+        {
+            Evaluation.SetEvaluationError("Evaluation regression reruns support instruction and chat reports.");
+            return;
+        }
+
+        if (!string.Equals(settings.SchemaId, ActiveSchemaId, StringComparison.OrdinalIgnoreCase))
+        {
+            Evaluation.SetEvaluationError(
+                $"The selected report uses schema '{settings.SchemaId}', but the active project uses '{ActiveSchemaId}'."
+            );
+            return;
+        }
+
+        var baselineReportPath = Evaluation.SelectedEvaluationReportHistoryItem?.ReportPath;
+        try
+        {
+            SetBusy("Rerunning evaluation...");
+            Evaluation.SetEvaluationRegressionRerunPreflightInProgress(settings);
+            var healthReport = await _engine.CheckBackendHealthAsync(
+                settings.Backend,
+                settings.Model,
+                settings.BaseUrl,
+                settings.TimeoutSeconds
+            );
+            if (!IsEvaluationBackendReady(healthReport))
+            {
+                Evaluation.SetEvaluationError(FormatEvaluationPreflightError(healthReport));
+                return;
+            }
+
+            Evaluation.SetEvaluationRegressionRerunInProgress(settings);
+            var result = await _engine.RunEvaluationAsync(
+                ActiveProjectPath,
+                settings.SchemaId,
+                settings.Backend,
+                settings.Model,
+                settings.BaseUrl,
+                settings.Limit,
+                settings.ScoreThreshold,
+                settings.TimeoutSeconds
+            );
+            Evaluation.ApplyEvaluationRunResult(result);
+            Evaluation.SetEvaluationReportHistory(
+                _engine.LoadEvaluationReportHistory(ActiveProjectPath)
+            );
+            ReconcileReviewedFixesAfterRun(result);
+
+            var newItem = Evaluation.EvaluationReportHistory
+                .FirstOrDefault(item => item.ReportPath == result.ReportPath);
+            var baselineItem = string.IsNullOrWhiteSpace(baselineReportPath)
+                ? null
+                : Evaluation.EvaluationReportHistory
+                    .FirstOrDefault(item => item.ReportPath == baselineReportPath);
+
+            if (newItem is not null)
+            {
+                Evaluation.SelectedEvaluationReportHistoryItem = newItem;
+            }
+
+            if (baselineItem is not null)
+            {
+                Evaluation.SecondaryEvaluationReportHistoryItem = baselineItem;
+                Evaluation.CompareSelectedEvaluationReports();
+            }
+        }
+        catch (Exception ex)
+        {
+            Evaluation.SetEvaluationError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    private void ReconcileReviewedFixesAfterRun(EvaluationRunResult result)
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            return;
+        }
+
+        try
+        {
+            SetReviewedFixes(
+                _engine.ReconcileReviewedFixes(ActiveProjectPath, result.Report.Results)
+            );
+            ApplyReviewedFixesReconciled();
+        }
+        catch (Exception ex)
+        {
+            SetReviewedFixError(ex.Message);
+        }
+    }
+
+    private static bool IsEvaluationBackendReady(BackendHealthReport report)
+    {
+        return report.Reachable && report.ModelAvailable;
+    }
+
+    private static string FormatEvaluationPreflightError(BackendHealthReport report)
+    {
+        var lines = new List<string>
+        {
+            "Pre-run backend health check failed.",
+            $"Backend: {report.ProviderName}",
+            $"Model: {report.ModelName}",
+            $"Base URL: {report.BaseUrl}",
+        };
+
+        if (!report.Reachable)
+        {
+            lines.Add("Backend is not reachable.");
+        }
+        else if (!report.ModelAvailable)
+        {
+            lines.Add("The configured model was not listed by the backend.");
+        }
+
+        if (report.AvailableModels.Count > 0)
+        {
+            lines.Add($"Available models: {string.Join(", ", report.AvailableModels.Take(5))}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(report.Error))
+        {
+            lines.Add($"Error: {report.Error}");
+        }
+
+        return string.Join(Environment.NewLine, lines);
     }
 
     /// <summary>Render the selected dataset-version card. Moved from the desktop code-behind.</summary>
