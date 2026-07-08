@@ -1511,6 +1511,9 @@ public partial class MainWindow : Window
             }
 
             ViewModel.Evaluation.SetEvaluationInProgress();
+            // Opt-in LLM-judge: when a judge model is set, the run scores with metric=llm_judge (the judge
+            // reuses this run's backend/base-url). Blank = the default keyword-overlap scorer.
+            var judgeModel = ViewModel.EvaluationConnection.EvaluationJudgeModel?.Trim();
             var result = await _engineService.RunEvaluationAsync(
                 ViewModel.ActiveProjectPath,
                 ViewModel.ActiveSchemaId,
@@ -1519,7 +1522,8 @@ public partial class MainWindow : Window
                 baseUrl,
                 limit,
                 scoreThreshold,
-                timeoutSeconds
+                timeoutSeconds,
+                judgeModel: string.IsNullOrWhiteSpace(judgeModel) ? null : judgeModel
             );
             ViewModel.Evaluation.ApplyEvaluationRunResult(result);
             ViewModel.Evaluation.SetEvaluationReportHistory(

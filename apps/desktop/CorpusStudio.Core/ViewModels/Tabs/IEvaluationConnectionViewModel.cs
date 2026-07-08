@@ -18,6 +18,11 @@ public interface IEvaluationConnectionViewModel : INotifyPropertyChanged
     string EvaluationModel { get; set; }
     string EvaluationBaseUrl { get; set; }
     string EvaluationTimeoutSeconds { get; set; }
+
+    /// <summary>Optional evaluator model for the opt-in LLM-judge scorer (metric <c>llm_judge</c>). Blank =
+    /// keyword-overlap only. When set, the eval run scores each answer 0–100 with a rationale using this
+    /// model (evaluator-only; not a quality guarantee).</summary>
+    string EvaluationJudgeModel { get; set; }
     ObservableCollection<string> EvaluationAvailableModels { get; }
     string EvaluationModelListSummary { get; }
 
