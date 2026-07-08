@@ -44,6 +44,7 @@ public sealed class EngineCommandTests
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>>(new System.Collections.Generic.List<SuiteHistoryEntry>());
         public Task<BenchmarkReport> RunBenchmarkAsync(string projectPath, string schemaId, string backend, System.Collections.Generic.IReadOnlyList<string> models, string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds) => Task.FromResult(new BenchmarkReport());
         public Task<BackendHealthReport> CheckBackendHealthAsync(string backend, string model, string? baseUrl, int timeoutSeconds) => Task.FromResult(new BackendHealthReport());
+        public Task<BackendModelListReport> ListBackendModelsAsync(string backend, string? baseUrl, int timeoutSeconds) => Task.FromResult(new BackendModelListReport());
         public Task<EvaluationRunResult> RunEvaluationAsync(string projectPath, string schemaId, string backend, string model, string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds, string? judgeModel = null, string? judgeBackend = null, string? judgeBaseUrl = null) => Task.FromResult(new EvaluationRunResult(new EvaluationReport(), string.Empty, string.Empty));
         public System.Collections.Generic.IReadOnlyList<EvaluationReportHistoryItem> LoadEvaluationReportHistory(string projectPath, int maxReports = 20) => new System.Collections.Generic.List<EvaluationReportHistoryItem>();
         public System.Collections.Generic.IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, System.Collections.Generic.IReadOnlyList<EvaluationExampleResult> results) => new System.Collections.Generic.List<ReviewedFixRecord>();
@@ -236,5 +237,49 @@ public sealed class EngineCommandTests
         await vm.RerunEvaluationReportAsync();
 
         Assert.Contains("Create or select a dataset project", vm.Evaluation.EvaluationSummary);
+    }
+
+    [Fact]
+    public async Task CheckEvaluationBackend_WithBlankBackend_SetsEvaluationError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        vm.EvaluationConnection.EvaluationBackend = "   ";
+
+        await vm.CheckEvaluationBackendAsync();
+
+        Assert.Contains("backend is required", vm.Evaluation.EvaluationSummary);
+    }
+
+    [Fact]
+    public async Task RefreshEvaluationModels_WithBlankBackend_SetsModelListError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        vm.EvaluationConnection.EvaluationBackend = string.Empty;
+
+        await vm.RefreshEvaluationModelsAsync();
+
+        Assert.Contains("backend is required", vm.EvaluationConnection.EvaluationModelListSummary);
+    }
+
+    [Fact]
+    public async Task CheckAiAssistBackend_WithBlankBackend_SetsAiAssistError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        vm.AiAssistConnection.AiAssistBackend = "   ";
+
+        await vm.CheckAiAssistBackendAsync();
+
+        Assert.Contains("backend is required", vm.AiAssist.AiAssistSummary);
+    }
+
+    [Fact]
+    public async Task RefreshAiAssistModels_WithBlankBackend_SetsModelListError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        vm.AiAssistConnection.AiAssistBackend = string.Empty;
+
+        await vm.RefreshAiAssistModelsAsync();
+
+        Assert.Contains("backend is required", vm.AiAssistConnection.AiAssistModelListSummary);
     }
 }

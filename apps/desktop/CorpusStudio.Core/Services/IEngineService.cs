@@ -32,6 +32,9 @@ public interface IEngineService
     /// <summary>Preflight a backend/model (reachability + model availability) before a live run.</summary>
     Task<BackendHealthReport> CheckBackendHealthAsync(string backend, string model, string? baseUrl, int timeoutSeconds);
 
+    /// <summary>List a backend's available models (for the connection panels' model pickers).</summary>
+    Task<BackendModelListReport> ListBackendModelsAsync(string backend, string? baseUrl, int timeoutSeconds);
+
     /// <summary>Run a graded evaluation over the dataset (live backend calls); optional LLM-judge.</summary>
     Task<EvaluationRunResult> RunEvaluationAsync(
         string projectPath, string schemaId, string backend, string model, string? baseUrl,
