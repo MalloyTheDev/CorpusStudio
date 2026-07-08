@@ -170,6 +170,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand RunBenchmarkCommand { get; }
     public System.Windows.Input.ICommand RunEvaluationCommand { get; }
     public System.Windows.Input.ICommand RerunEvaluationReportCommand { get; }
+    public System.Windows.Input.ICommand CheckEvaluationBackendCommand { get; }
+    public System.Windows.Input.ICommand RefreshEvaluationModelsCommand { get; }
+    public System.Windows.Input.ICommand CheckAiAssistBackendCommand { get; }
+    public System.Windows.Input.ICommand RefreshAiAssistModelsCommand { get; }
     public System.Windows.Input.ICommand DiffVersionsCommand { get; }
     public System.Windows.Input.ICommand ViewArtifactCardCommand { get; }
     public System.Windows.Input.ICommand GenerateDatasetCardCommand { get; }
@@ -262,6 +266,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RunBenchmarkCommand = new AsyncRelayCommand(RunBenchmarkAsync);
         RunEvaluationCommand = new AsyncRelayCommand(RunEvaluationAsync);
         RerunEvaluationReportCommand = new AsyncRelayCommand(RerunEvaluationReportAsync);
+        CheckEvaluationBackendCommand = new AsyncRelayCommand(CheckEvaluationBackendAsync);
+        RefreshEvaluationModelsCommand = new AsyncRelayCommand(RefreshEvaluationModelsAsync);
+        CheckAiAssistBackendCommand = new AsyncRelayCommand(CheckAiAssistBackendAsync);
+        RefreshAiAssistModelsCommand = new AsyncRelayCommand(RefreshAiAssistModelsAsync);
         DiffVersionsCommand = new AsyncRelayCommand(DiffVersionsAsync);
         ViewArtifactCardCommand = new AsyncRelayCommand(ViewArtifactCardAsync);
         GenerateDatasetCardCommand = new AsyncRelayCommand(GenerateDatasetCardAsync);
@@ -1034,6 +1042,249 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         return string.Join(Environment.NewLine, lines);
+    }
+
+    /// <summary>Preflight-check the Evaluation backend/model (reachability + model availability). Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task CheckEvaluationBackendAsync()
+    {
+        if (!TryReadBackendOptions(
+            EvaluationConnection.EvaluationBackend,
+            EvaluationConnection.EvaluationModel,
+            EvaluationConnection.EvaluationBaseUrl,
+            EvaluationConnection.EvaluationTimeoutSeconds,
+            "Evaluation",
+            out var backend,
+            out var model,
+            out var baseUrl,
+            out var timeoutSeconds,
+            out var errorMessage
+        ))
+        {
+            Evaluation.SetEvaluationError(errorMessage);
+            return;
+        }
+
+        try
+        {
+            SetBusy("Checking evaluation backend...");
+            SetEvaluationHealthCheckInProgress();
+            var report = await _engine.CheckBackendHealthAsync(
+                backend,
+                model,
+                baseUrl,
+                timeoutSeconds
+            );
+            ApplyEvaluationBackendHealthReport(report);
+        }
+        catch (Exception ex)
+        {
+            Evaluation.SetEvaluationError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>List the Evaluation backend's available models. Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task RefreshEvaluationModelsAsync()
+    {
+        if (!TryReadModelListOptions(
+            EvaluationConnection.EvaluationBackend,
+            EvaluationConnection.EvaluationBaseUrl,
+            EvaluationConnection.EvaluationTimeoutSeconds,
+            "Evaluation",
+            out var backend,
+            out var baseUrl,
+            out var timeoutSeconds,
+            out var errorMessage
+        ))
+        {
+            SetEvaluationModelListError(errorMessage);
+            return;
+        }
+
+        try
+        {
+            SetBusy("Loading models...");
+            SetEvaluationModelListInProgress();
+            var report = await _engine.ListBackendModelsAsync(
+                backend,
+                baseUrl,
+                timeoutSeconds
+            );
+            ApplyEvaluationModelListReport(report);
+        }
+        catch (Exception ex)
+        {
+            SetEvaluationModelListError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Preflight-check the AI-Assist backend/model. Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task CheckAiAssistBackendAsync()
+    {
+        if (!TryReadBackendOptions(
+            AiAssistConnection.AiAssistBackend,
+            AiAssistConnection.AiAssistModel,
+            AiAssistConnection.AiAssistBaseUrl,
+            AiAssistConnection.AiAssistTimeoutSeconds,
+            "AI Assist",
+            out var backend,
+            out var model,
+            out var baseUrl,
+            out var timeoutSeconds,
+            out var errorMessage
+        ))
+        {
+            AiAssist.SetAiAssistError(errorMessage);
+            return;
+        }
+
+        try
+        {
+            SetBusy("Checking AI Assist backend...");
+            SetAiAssistHealthCheckInProgress();
+            var report = await _engine.CheckBackendHealthAsync(
+                backend,
+                model,
+                baseUrl,
+                timeoutSeconds
+            );
+            ApplyAiAssistBackendHealthReport(report);
+        }
+        catch (Exception ex)
+        {
+            AiAssist.SetAiAssistError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>List the AI-Assist backend's available models. Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task RefreshAiAssistModelsAsync()
+    {
+        if (!TryReadModelListOptions(
+            AiAssistConnection.AiAssistBackend,
+            AiAssistConnection.AiAssistBaseUrl,
+            AiAssistConnection.AiAssistTimeoutSeconds,
+            "AI Assist",
+            out var backend,
+            out var baseUrl,
+            out var timeoutSeconds,
+            out var errorMessage
+        ))
+        {
+            SetAiAssistModelListError(errorMessage);
+            return;
+        }
+
+        try
+        {
+            SetBusy("Loading models...");
+            SetAiAssistModelListInProgress();
+            var report = await _engine.ListBackendModelsAsync(
+                backend,
+                baseUrl,
+                timeoutSeconds
+            );
+            ApplyAiAssistModelListReport(report);
+        }
+        catch (Exception ex)
+        {
+            SetAiAssistModelListError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    private static bool TryReadBackendOptions(
+        string backendText,
+        string modelText,
+        string baseUrlText,
+        string timeoutText,
+        string label,
+        out string backend,
+        out string model,
+        out string? baseUrl,
+        out int timeoutSeconds,
+        out string errorMessage
+    )
+    {
+        backend = backendText.Trim();
+        model = modelText.Trim();
+        baseUrl = string.IsNullOrWhiteSpace(baseUrlText) ? null : baseUrlText.Trim();
+        timeoutSeconds = 0;
+        errorMessage = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(backend))
+        {
+            errorMessage = $"{label} backend is required.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            errorMessage = $"{label} model is required.";
+            return false;
+        }
+
+        if (!int.TryParse(
+            timeoutText,
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out timeoutSeconds
+        ) || timeoutSeconds <= 0)
+        {
+            errorMessage = $"{label} timeout must be a positive whole number.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryReadModelListOptions(
+        string backendText,
+        string baseUrlText,
+        string timeoutText,
+        string label,
+        out string backend,
+        out string? baseUrl,
+        out int timeoutSeconds,
+        out string errorMessage
+    )
+    {
+        backend = backendText.Trim();
+        baseUrl = string.IsNullOrWhiteSpace(baseUrlText) ? null : baseUrlText.Trim();
+        timeoutSeconds = 0;
+        errorMessage = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(backend))
+        {
+            errorMessage = $"{label} backend is required.";
+            return false;
+        }
+
+        if (!int.TryParse(
+            timeoutText,
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out timeoutSeconds
+        ) || timeoutSeconds <= 0)
+        {
+            errorMessage = $"{label} timeout must be a positive whole number.";
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>Render the selected dataset-version card. Moved from the desktop code-behind.</summary>
