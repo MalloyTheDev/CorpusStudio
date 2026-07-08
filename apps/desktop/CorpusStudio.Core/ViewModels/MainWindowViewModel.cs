@@ -165,6 +165,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand RunArenaCommand { get; }
     public System.Windows.Input.ICommand RunSuiteCommand { get; }
     public System.Windows.Input.ICommand ViewDatasetVersionCardCommand { get; }
+    public System.Windows.Input.ICommand CaptureDatasetVersionCommand { get; }
     public System.Windows.Input.ICommand DiffVersionsCommand { get; }
     public System.Windows.Input.ICommand ViewArtifactCardCommand { get; }
     public System.Windows.Input.ICommand GenerateDatasetCardCommand { get; }
@@ -252,6 +253,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RunArenaCommand = new AsyncRelayCommand(RunArenaAsync);
         RunSuiteCommand = new AsyncRelayCommand(RunSuiteAsync);
         ViewDatasetVersionCardCommand = new AsyncRelayCommand(ViewDatasetVersionCardAsync);
+        CaptureDatasetVersionCommand = new AsyncRelayCommand(CaptureDatasetVersionAsync);
         DiffVersionsCommand = new AsyncRelayCommand(DiffVersionsAsync);
         ViewArtifactCardCommand = new AsyncRelayCommand(ViewArtifactCardAsync);
         GenerateDatasetCardCommand = new AsyncRelayCommand(GenerateDatasetCardAsync);
@@ -546,6 +548,55 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             SetBusy("Rendering version card...");
             var markdown = await _engine.GetDatasetVersionCardAsync(ActiveProjectPath, selected.Record.VersionId);
             Versions.SetDatasetVersionDetail(markdown);
+        }
+        catch (System.Exception ex)
+        {
+            Versions.SetDatasetVersionError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Reload the project's dataset versions into the Versions tab. Shared by the capture
+    /// command and the project-switch load (the desktop code-behind delegates here).</summary>
+    public async System.Threading.Tasks.Task RefreshDatasetVersionsAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Versions.SetDatasetVersionError("Create or select a dataset project first.");
+            return;
+        }
+
+        try
+        {
+            Versions.ApplyDatasetVersions(await _engine.LoadDatasetVersionsAsync(ActiveProjectPath));
+        }
+        catch (System.Exception ex)
+        {
+            Versions.SetDatasetVersionError(ex.Message);
+        }
+    }
+
+    /// <summary>Capture the current dataset as a new version. Moved from the desktop code-behind — the
+    /// engine computes the fingerprint (never reimplemented in C#), and a fingerprint-less record is
+    /// confirmed honestly rather than as a verified success.</summary>
+    public async System.Threading.Tasks.Task CaptureDatasetVersionAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Versions.SetDatasetVersionError("Create or select a dataset project first.");
+            return;
+        }
+
+        try
+        {
+            SetBusy("Capturing dataset version...");
+            var record = await _engine.CreateDatasetVersionAsync(ActiveProjectPath, Versions.DatasetVersionLabel, "manual");
+            Versions.DatasetVersionLabel = string.Empty;
+            Versions.SetDatasetVersionDetail(Tabs.VersionsViewModel.FormatCaptureConfirmation(record));
+            await RefreshDatasetVersionsAsync();
         }
         catch (System.Exception ex)
         {

@@ -42,6 +42,9 @@ public sealed class EngineCommandTests
         public Task<SuiteReport> RunSuiteAsync(string projectPath, string suiteName) => Task.FromResult(new SuiteReport());
         public Task<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName)
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>>(new System.Collections.Generic.List<SuiteHistoryEntry>());
+        public Task<System.Collections.Generic.IReadOnlyList<DatasetVersionDisplayItem>> LoadDatasetVersionsAsync(string projectPath)
+            => Task.FromResult<System.Collections.Generic.IReadOnlyList<DatasetVersionDisplayItem>>(new System.Collections.Generic.List<DatasetVersionDisplayItem>());
+        public Task<DatasetVersionRecord> CreateDatasetVersionAsync(string projectPath, string label, string trigger) => Task.FromResult(new DatasetVersionRecord());
         public Task<string> GetDatasetVersionCardAsync(string projectPath, string versionId) => Task.FromResult("# card");
         public Task<string> GetDatasetVersionDiffAsync(string projectPath, string baseVersionId, string otherVersionId) => Task.FromResult("# diff");
         public Task<string> GetWeightCardAsync(string projectPath, string artifactId) => Task.FromResult("# weights");
@@ -98,6 +101,38 @@ public sealed class EngineCommandTests
         await vm.RunGatesAsync();
 
         Assert.Equal(@"C:\fake\project", engine.LastProjectPath);
+    }
+
+    [Fact]
+    public async Task CaptureDatasetVersion_WithProject_CapturesAndClearsTheLabel()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        SelectFakeProject(vm);
+        vm.Versions.DatasetVersionLabel = "before training";
+
+        await vm.CaptureDatasetVersionAsync();
+
+        Assert.Equal(string.Empty, vm.Versions.DatasetVersionLabel); // cleared after a successful capture
+    }
+
+    [Fact]
+    public async Task CaptureDatasetVersion_WithoutProject_SetsVersionError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+
+        await vm.CaptureDatasetVersionAsync();
+
+        Assert.Contains("Create or select a dataset project", vm.Versions.DatasetVersionSummary + vm.Versions.DatasetVersionDetail);
+    }
+
+    [Fact]
+    public async Task RefreshDatasetVersions_WithoutProject_SetsVersionError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+
+        await vm.RefreshDatasetVersionsAsync();
+
+        Assert.Contains("Create or select a dataset project", vm.Versions.DatasetVersionSummary + vm.Versions.DatasetVersionDetail);
     }
 
     [Fact]

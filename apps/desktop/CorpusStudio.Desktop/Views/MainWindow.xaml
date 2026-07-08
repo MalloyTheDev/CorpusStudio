@@ -2596,7 +2596,7 @@
                                         Content="Capture version"
                                         ToolTip="Record the current dataset (examples.jsonl) as a version, via the engine"
                                         Margin="0,0,8,0"
-                                        Click="CaptureDatasetVersionButton_Click" />
+                                        Command="{Binding CaptureDatasetVersionCommand}" />
                                 <Button AutomationProperties.AutomationId="ViewDatasetVersionCardButton"
                                         Content="View card"
                                         Margin="0,0,8,0"

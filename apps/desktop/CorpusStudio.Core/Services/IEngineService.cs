@@ -29,6 +29,12 @@ public interface IEngineService
     /// <summary>A suite's run history (oldest → newest) for the Suites-tab trend.</summary>
     Task<IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName);
 
+    /// <summary>List the project's dataset versions (newest first) with live integrity.</summary>
+    Task<IReadOnlyList<DatasetVersionDisplayItem>> LoadDatasetVersionsAsync(string projectPath);
+
+    /// <summary>Capture the current dataset as a new version (the engine computes the fingerprint).</summary>
+    Task<DatasetVersionRecord> CreateDatasetVersionAsync(string projectPath, string label, string trigger);
+
     /// <summary>Render a saved dataset-version card as Markdown (lineage + live integrity).</summary>
     Task<string> GetDatasetVersionCardAsync(string projectPath, string versionId);
 
