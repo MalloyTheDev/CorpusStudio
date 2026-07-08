@@ -525,6 +525,14 @@
                                 <TreeView.ItemTemplate>
                                     <HierarchicalDataTemplate ItemsSource="{Binding Children}">
                                         <StackPanel Orientation="Horizontal" Height="22">
+                                            <StackPanel.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="Reveal in Explorer" Click="ExplorerNodeReveal_Click" />
+                                                    <MenuItem Header="Rename…" Click="ExplorerNodeRename_Click" />
+                                                    <Separator />
+                                                    <MenuItem Header="Delete" Click="ExplorerNodeDelete_Click" />
+                                                </ContextMenu>
+                                            </StackPanel.ContextMenu>
                                             <Path Data="M3,7 A1,1 0 0 1 4,6 H8 L10,8 H20 A1,1 0 0 1 21,9 V17 A1,1 0 0 1 20,18 H4 A1,1 0 0 1 3,17 Z"
                                                   Stroke="#94A3B8" StrokeThickness="1.3" Fill="#EEF2F7" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
                                                   Visibility="{Binding IsDirectory, Converter={StaticResource BoolToVis}}" />

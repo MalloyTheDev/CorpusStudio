@@ -254,6 +254,60 @@ public sealed class WorkspaceExplorerViewModel : INotifyPropertyChanged
         return null;
     }
 
+    /// <summary>Rename a tree node's file/folder. Refuses dataset core files (examples.jsonl /
+    /// the project manifest) since renaming them would break the project. Returns an error or null.</summary>
+    public string? RenameNode(WorkspaceTreeNode? node, string newName)
+    {
+        if (!HasWorkspace)
+        {
+            return "No workspace is open.";
+        }
+        if (node is null)
+        {
+            return "Select a file or folder first.";
+        }
+        if (node.IsDatasetCoreFile)
+        {
+            return "Dataset core files (examples.jsonl and the project manifest) can't be renamed here.";
+        }
+
+        var result = _explorer.RenamePath(_workspaceRoot!, node.FullPath, newName);
+        if (!result.Ok)
+        {
+            return result.Error;
+        }
+
+        RefreshTree();
+        return null;
+    }
+
+    /// <summary>Permanently delete a tree node's file/folder. Refuses dataset core files. Returns an
+    /// error or null on success.</summary>
+    public string? DeleteNode(WorkspaceTreeNode? node)
+    {
+        if (!HasWorkspace)
+        {
+            return "No workspace is open.";
+        }
+        if (node is null)
+        {
+            return "Select a file or folder first.";
+        }
+        if (node.IsDatasetCoreFile)
+        {
+            return "Dataset core files (examples.jsonl and the project manifest) can't be deleted here.";
+        }
+
+        var result = _explorer.DeletePath(_workspaceRoot!, node.FullPath);
+        if (!result.Ok)
+        {
+            return result.Error;
+        }
+
+        RefreshTree();
+        return null;
+    }
+
     /// <summary>Explicitly save the active document (refused for read-only docs by the
     /// service). Returns an error string or null on success.</summary>
     public string? SaveActiveDocument()

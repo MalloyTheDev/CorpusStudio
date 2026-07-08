@@ -140,4 +140,107 @@ public sealed class WorkspaceExplorerService
             return new ExplorerCreateResult { Error = ex.Message };
         }
     }
+
+    /// <summary>Rename a file/folder in-place within the workspace. <paramref name="newName"/> must be a
+    /// single safe filename (no separators / traversal / invalid chars); the target must not already exist
+    /// and the source must exist and not be the workspace root.</summary>
+    public ExplorerCreateResult RenamePath(string workspaceRoot, string fullPath, string newName)
+    {
+        var root = WorkspacePathSafety.NormalizeRoot(workspaceRoot);
+        var source = Path.GetFullPath(fullPath);
+
+        if (string.Equals(source, root, StringComparison.OrdinalIgnoreCase))
+            return new ExplorerCreateResult { Error = "The workspace root cannot be renamed." };
+        if (!IsWithinRoot(root, source))
+            return new ExplorerCreateResult { Error = "Path escapes the workspace root." };
+
+        var isDirectory = Directory.Exists(source);
+        if (!isDirectory && !File.Exists(source))
+            return new ExplorerCreateResult { Error = "That file or folder no longer exists." };
+
+        var nameError = ValidateSingleName(newName);
+        if (nameError is not null)
+            return new ExplorerCreateResult { Error = nameError };
+
+        var target = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(source)!, newName));
+        if (string.Equals(source, target, StringComparison.OrdinalIgnoreCase))
+            return new ExplorerCreateResult { Error = "The new name is the same as the current name." };
+        if (Directory.Exists(target) || File.Exists(target))
+            return new ExplorerCreateResult { Error = "A file or folder with that name already exists." };
+
+        try
+        {
+            if (isDirectory)
+                Directory.Move(source, target);
+            else
+                File.Move(source, target);
+
+            return new ExplorerCreateResult
+            {
+                FullPath = target,
+                RelativePath = WorkspaceLayout.Normalize(Path.GetRelativePath(root, target)),
+                FileKind = WorkspaceFileKinds.Classify(target, isDirectory),
+            };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new ExplorerCreateResult { Error = ex.Message };
+        }
+    }
+
+    /// <summary>Permanently delete a file/folder within the workspace. The source must exist, stay within
+    /// the workspace, and not be the workspace root. Folders are removed recursively.</summary>
+    public ExplorerCreateResult DeletePath(string workspaceRoot, string fullPath)
+    {
+        var root = WorkspacePathSafety.NormalizeRoot(workspaceRoot);
+        var source = Path.GetFullPath(fullPath);
+
+        if (string.Equals(source, root, StringComparison.OrdinalIgnoreCase))
+            return new ExplorerCreateResult { Error = "The workspace root cannot be deleted." };
+        if (!IsWithinRoot(root, source))
+            return new ExplorerCreateResult { Error = "Path escapes the workspace root." };
+
+        var isDirectory = Directory.Exists(source);
+        if (!isDirectory && !File.Exists(source))
+            return new ExplorerCreateResult { Error = "That file or folder no longer exists." };
+
+        try
+        {
+            if (isDirectory)
+                Directory.Delete(source, recursive: true);
+            else
+                File.Delete(source);
+
+            return new ExplorerCreateResult
+            {
+                FullPath = source,
+                RelativePath = WorkspaceLayout.Normalize(Path.GetRelativePath(root, source)),
+            };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new ExplorerCreateResult { Error = ex.Message };
+        }
+    }
+
+    private static bool IsWithinRoot(string normalizedRoot, string fullPath)
+    {
+        var rooted = normalizedRoot.EndsWith(Path.DirectorySeparatorChar) ? normalizedRoot
+            : normalizedRoot + Path.DirectorySeparatorChar;
+        return fullPath.StartsWith(rooted, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? ValidateSingleName(string newName)
+    {
+        var name = (newName ?? string.Empty).Trim();
+        if (name.Length == 0)
+            return "Enter a name.";
+        if (name is "." or "..")
+            return "That name is not allowed.";
+        if (name.IndexOf(Path.DirectorySeparatorChar) >= 0 || name.IndexOf(Path.AltDirectorySeparatorChar) >= 0)
+            return "The name cannot contain a path separator.";
+        if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            return "The name contains invalid characters.";
+        return null;
+    }
 }
