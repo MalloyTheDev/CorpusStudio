@@ -1,0 +1,76 @@
+name: Release
+
+# Automates the release checklist's build/package step (docs/RELEASE_CHECKLIST.md): run the engine
+# + desktop gates, publish the self-contained single-file Windows build, and attach it to a GitHub
+# Release. Runs on a pushed `v*` tag (the release is published then). `workflow_dispatch` does a
+# DRY-RUN build on any ref — it publishes nothing, only uploads the zip as a workflow artifact so the
+# packaging can be validated without cutting a release.
+#
+# macOS/Linux distributables track the Avalonia head (see issue #188 / AVALONIA_MIGRATION_PLAN.md
+# Phase 4) and are intentionally not built here yet — the WPF product head is Windows-only.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # create the release + upload assets
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      # Engine gate (dependency-light): the same ruff + mypy + pytest that gate every PR.
+      - name: Engine gate
+        run: |
+          cd engine
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          ruff check .
+          mypy corpus_studio
+          pytest -q
+
+      # Desktop gate: build + full test suite in Release.
+      - name: Desktop tests (Release)
+        run: dotnet test apps/desktop/CorpusStudio.Desktop.Tests/CorpusStudio.Desktop.Tests.csproj -c Release
+
+      # Self-contained single-file Windows build (needs no installed .NET runtime; the Python engine
+      # remains a runtime prerequisite). Profile: apps/.../PublishProfiles/win-x64.pubxml.
+      - name: Publish Windows single-file
+        run: dotnet publish apps/desktop/CorpusStudio.Desktop/CorpusStudio.Desktop.csproj -c Release -p:PublishProfile=win-x64
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}"
+          $zip = "CorpusStudio-$version-win-x64.zip"
+          Compress-Archive -Path apps/desktop/CorpusStudio.Desktop/bin/publish/win-x64/* -DestinationPath $zip
+          "ASSET=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # Always available for inspection (this is what makes a workflow_dispatch dry-run verifiable).
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-studio-win-x64
+          path: ${{ env.ASSET }}
+
+      # Only when a tag was pushed: publish the GitHub Release with the zip attached. Uses the built-in
+      # gh CLI + GITHUB_TOKEN — no third-party action.
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" "${{ env.ASSET }}" --title "${{ github.ref_name }}" --generate-notes
