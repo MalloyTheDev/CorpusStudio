@@ -25,7 +25,15 @@ public sealed class WorkspaceExplorerViewModel : INotifyPropertyChanged
     {
         _explorer = explorer ?? new WorkspaceExplorerService();
         _documents = documents ?? new WorkspaceDocumentService();
+        RefreshTreeCommand = new RelayCommand(RefreshTree);
+        CollapseAllCommand = new RelayCommand(CollapseAll);
     }
+
+    /// <summary>Rebuild the file tree from disk (bindable for either head's toolbar).</summary>
+    public System.Windows.Input.ICommand RefreshTreeCommand { get; }
+
+    /// <summary>Collapse the file tree.</summary>
+    public System.Windows.Input.ICommand CollapseAllCommand { get; }
 
     private string? _workspaceRoot;
     private string _workspaceName = string.Empty;
