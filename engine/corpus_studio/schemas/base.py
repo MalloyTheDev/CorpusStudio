@@ -33,6 +33,9 @@ class SchemaField(BaseModel):
     maximum: float | None = None
     # Nested field shapes for an ``object`` field, validated recursively.
     fields: list["SchemaField"] | None = None
+    # Per-element object shape for a ``list`` of ``object`` elements (``item_type == "object"``),
+    # validated recursively against each element. None = element type only, no per-element shape check.
+    item_fields: list["SchemaField"] | None = None
 
 
 class DatasetSchema(BaseModel):

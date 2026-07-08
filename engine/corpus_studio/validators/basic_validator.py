@@ -130,6 +130,17 @@ def _validate_field_type(
                         full_name,
                     )
                 )
+                continue
+            # Lists of objects: validate each element against the declared per-element shape.
+            if field.item_type == "object" and field.item_fields is not None:
+                issues.extend(
+                    _validate_fields(
+                        element,
+                        field.item_fields,
+                        row_number,
+                        field_prefix=f"{full_name}[{index}].",
+                    )
+                )
 
     if field_type in {"integer", "float"}:
         if field.minimum is not None and value < field.minimum:
