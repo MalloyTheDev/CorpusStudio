@@ -13,6 +13,9 @@ public sealed class SettingsViewModel : ViewModelBase, ISettingsViewModel
     private string _settingsSummary = "Settings load when the app starts.";
     private string _providerPolicySummary =
         "Provider generation policy: refresh to see which providers may create trainable rows.";
+    private GateThresholds _gateThresholds = new();
+    private string _gateThresholdsSummary =
+        "Gate thresholds load with the project. Edit and save to override how gates block/warn.";
 
     public string SettingsSummary
     {
@@ -43,6 +46,37 @@ public sealed class SettingsViewModel : ViewModelBase, ISettingsViewModel
     public void SetProviderPolicyError(string message)
     {
         ProviderPolicySummary = $"Provider policy action failed.{Environment.NewLine}{message}";
+    }
+
+    /// <summary>The editable per-project gate thresholds (the Settings form two-way-binds its fields).
+    /// Replaced wholesale on load so the form rebinds.</summary>
+    public GateThresholds GateThresholds
+    {
+        get => _gateThresholds;
+        private set => SetField(ref _gateThresholds, value);
+    }
+
+    public string GateThresholdsSummary
+    {
+        get => _gateThresholdsSummary;
+        private set => SetField(ref _gateThresholdsSummary, value);
+    }
+
+    public void ApplyGateThresholds(GateThresholds thresholds)
+    {
+        GateThresholds = thresholds;
+        GateThresholdsSummary = "Loaded effective gate thresholds (defaults merged with this project's "
+            + "gate_thresholds.json). Edit and Save to override.";
+    }
+
+    public void SetGateThresholdsSaved()
+    {
+        GateThresholdsSummary = "Saved. The new thresholds apply the next time gates run for this project.";
+    }
+
+    public void SetGateThresholdsError(string message)
+    {
+        GateThresholdsSummary = $"Gate thresholds could not be saved.{Environment.NewLine}{message}";
     }
 
     public void ApplyProviderPolicies(IReadOnlyList<ProviderPolicyItem> policies)

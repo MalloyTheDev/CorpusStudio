@@ -1664,6 +1664,23 @@ public sealed class PythonEngineService : IEngineService
             .ToList();
     }
 
+    /// <summary>Read the effective gate thresholds (defaults merged with the project's
+    /// gate_thresholds.json) for the Settings editor (#198).</summary>
+    public async Task<GateThresholds> GetGateThresholdsAsync(string projectPath)
+    {
+        var output = await RunEngineCommandAsync("gate-thresholds", projectPath);
+        return JsonSerializer.Deserialize<GateThresholds>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned invalid gate thresholds.");
+    }
+
+    /// <summary>Validate + write the project's gate_thresholds.json. The engine validates the whole object
+    /// (ranges/finite) and rejects an invalid value, so a bad edit throws instead of writing.</summary>
+    public async Task SetGateThresholdsAsync(string projectPath, GateThresholds thresholds)
+    {
+        var json = JsonSerializer.Serialize(thresholds, JsonOptions);
+        await RunEngineCommandAsync("gate-thresholds-set", projectPath, "--values-json", json);
+    }
+
     public async Task ApproveProviderGenerationAsync(
         string projectPath,
         string providerId,

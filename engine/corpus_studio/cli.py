@@ -1971,6 +1971,38 @@ def gate_thresholds(project_dir: Path):
     typer.echo(load_gate_thresholds(project_dir).model_dump_json(indent=2))
 
 
+@app.command("gate-thresholds-set")
+def gate_thresholds_set(
+    project_dir: Path,
+    values_json: str = typer.Option(
+        ...,
+        "--values-json",
+        help="GateThresholds as a JSON object. Validated (ranges/finite) before writing; an invalid "
+        "value is rejected rather than written.",
+    ),
+):
+    """Validate and write a project's ``gate_thresholds.json`` from a JSON payload.
+
+    The whole object is validated through the ``GateThresholds`` model, so an out-of-range or
+    non-finite value is refused (exit 1) instead of producing a broken threshold file.
+    """
+    from pydantic import ValidationError
+
+    from corpus_studio.gates.models import GateThresholds, save_gate_thresholds
+
+    try:
+        data = json.loads(values_json)
+        if not isinstance(data, dict):
+            raise ValueError("Expected a JSON object of threshold values.")
+        thresholds = GateThresholds(**data)
+    except (json.JSONDecodeError, ValueError, ValidationError) as exc:
+        typer.echo(f"Invalid gate thresholds: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    path = save_gate_thresholds(project_dir, thresholds)
+    typer.echo(json.dumps({"path": str(path), "thresholds": thresholds.model_dump()}, indent=2))
+
+
 @app.command("gate-run")
 def gate_run(
     input_path: Path,
