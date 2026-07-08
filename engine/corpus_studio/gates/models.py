@@ -160,3 +160,15 @@ def load_gate_thresholds(project_dir: Path | str) -> GateThresholds:
             continue
         valid[key] = value
     return GateThresholds(**valid)
+
+
+def save_gate_thresholds(project_dir: Path | str, thresholds: GateThresholds) -> Path:
+    """Write validated thresholds to the project-local ``gate_thresholds.json`` (UTF-8, no BOM).
+
+    ``thresholds`` is already a validated :class:`GateThresholds`, so the written file always
+    round-trips cleanly through :func:`load_gate_thresholds`.
+    """
+    path = gate_thresholds_path(project_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(thresholds.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    return path

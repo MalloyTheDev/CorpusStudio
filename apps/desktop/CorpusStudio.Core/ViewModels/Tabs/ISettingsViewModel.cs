@@ -15,6 +15,10 @@ public interface ISettingsViewModel : INotifyPropertyChanged
     string SettingsSummary { get; }
     string ProviderPolicySummary { get; }
 
+    /// <summary>The editable per-project gate thresholds (the form two-way-binds its fields).</summary>
+    GateThresholds GateThresholds { get; }
+    string GateThresholdsSummary { get; }
+
     /// <summary>Show the resolved app paths (repository/engine/python/projects/exports).</summary>
     void SetSettings(DesktopSettings settings);
 
@@ -23,4 +27,13 @@ public interface ISettingsViewModel : INotifyPropertyChanged
 
     /// <summary>Report a failed provider-policy action without a confident stale summary.</summary>
     void SetProviderPolicyError(string message);
+
+    /// <summary>Load the effective gate thresholds into the editor (on project switch).</summary>
+    void ApplyGateThresholds(GateThresholds thresholds);
+
+    /// <summary>Confirm a successful save.</summary>
+    void SetGateThresholdsSaved();
+
+    /// <summary>Report a failed threshold save without a confident stale summary.</summary>
+    void SetGateThresholdsError(string message);
 }

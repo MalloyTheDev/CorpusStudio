@@ -273,7 +273,11 @@ per-item error isolation, and off-thread document opens.
   can export with the secrets masked; writes a redaction manifest (kinds/counts/rows, never raw
   values) and never rewrites `examples.jsonl`. Honest boundary: known patterns only — **not** a
   de-identification guarantee (a desktop toggle is a follow-up).
-- Smaller deferrals: a per-project gate-threshold editor in
-  the desktop; per-element object shapes for lists-of-objects in the validator; an
+- A **per-project gate-threshold editor** in the desktop Settings tab: reads the effective
+  thresholds (`gate-thresholds`) and writes a validated `gate_thresholds.json`
+  (`gate-thresholds-set`, engine-validated so out-of-range values are refused, not written).
+- The validator now checks **lists-of-objects** against a per-element shape (`SchemaField.item_fields`),
+  recursively, with indexed paths.
+- Smaller deferrals: an
   app icon. (CI hardening — ruff, mypy, pytest gate, dependabot, and CodeQL — is
   in place.)

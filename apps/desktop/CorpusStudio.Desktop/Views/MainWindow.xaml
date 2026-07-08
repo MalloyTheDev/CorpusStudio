@@ -2738,6 +2738,61 @@
                                         Content="Refresh"
                                         Click="RefreshProviderPoliciesButton_Click" />
                             </StackPanel>
+
+                            <TextBlock Text="Gate Thresholds (this project)"
+                                       FontWeight="SemiBold" FontSize="14" Margin="0,22,0,4" />
+                            <TextBlock Text="{Binding Settings.GateThresholdsSummary, Mode=OneWay}"
+                                       AutomationProperties.AutomationId="GateThresholdsSummaryTextBlock"
+                                       Foreground="#475569" TextWrapping="Wrap" Margin="0,0,0,8" />
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock Text="Exact duplicates — max" Width="210" VerticalAlignment="Center" />
+                                    <TextBox Width="70" Text="{Binding Settings.GateThresholds.MaxExactDuplicates, Mode=TwoWay}" />
+                                    <CheckBox Content="block" Margin="12,0,0,0" VerticalAlignment="Center"
+                                              IsChecked="{Binding Settings.GateThresholds.BlockExactDuplicates, Mode=TwoWay}" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock Text="Normalized duplicates — max" Width="210" VerticalAlignment="Center" />
+                                    <TextBox Width="70" Text="{Binding Settings.GateThresholds.MaxNormalizedDuplicates, Mode=TwoWay}" />
+                                    <CheckBox Content="block" Margin="12,0,0,0" VerticalAlignment="Center"
+                                              IsChecked="{Binding Settings.GateThresholds.BlockNormalizedDuplicates, Mode=TwoWay}" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock Text="Low-information rows — max" Width="210" VerticalAlignment="Center" />
+                                    <TextBox Width="70" Text="{Binding Settings.GateThresholds.MaxLowInformation, Mode=TwoWay}" />
+                                    <CheckBox Content="block" Margin="12,0,0,0" VerticalAlignment="Center"
+                                              IsChecked="{Binding Settings.GateThresholds.BlockLowInformation, Mode=TwoWay}" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock Text="Synthetic-pattern issues — warn at" Width="210" VerticalAlignment="Center" />
+                                    <TextBox Width="70" Text="{Binding Settings.GateThresholds.WarnSyntheticPatternIssues, Mode=TwoWay}" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <CheckBox Content="Block on high-severity PII/secrets" VerticalAlignment="Center"
+                                              IsChecked="{Binding Settings.GateThresholds.BlockOnHighSeverityPii, Mode=TwoWay}" />
+                                    <CheckBox Content="Warn on medium-severity PII" Margin="18,0,0,0" VerticalAlignment="Center"
+                                              IsChecked="{Binding Settings.GateThresholds.WarnOnMediumSeverityPii, Mode=TwoWay}" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock Text="Eval — min avg score" Width="210" VerticalAlignment="Center" />
+                                    <TextBox Width="70" Text="{Binding Settings.GateThresholds.MinEvalAverageScore, Mode=TwoWay}" />
+                                    <TextBlock Text="min pass rate (0–1)" Margin="16,0,6,0" VerticalAlignment="Center" />
+                                    <TextBox Width="70" Text="{Binding Settings.GateThresholds.MinEvalPassRate, Mode=TwoWay}" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock Text="Max regression score drop" Width="210" VerticalAlignment="Center" />
+                                    <TextBox Width="70" Text="{Binding Settings.GateThresholds.MaxRegressionScoreDrop, Mode=TwoWay}" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock Text="Chat turns — min" Width="210" VerticalAlignment="Center" />
+                                    <TextBox Width="70" Text="{Binding Settings.GateThresholds.MinChatTurns, Mode=TwoWay}" />
+                                    <TextBlock Text="max (0 = none)" Margin="16,0,6,0" VerticalAlignment="Center" />
+                                    <TextBox Width="70" Text="{Binding Settings.GateThresholds.MaxChatTurns, Mode=TwoWay}" />
+                                </StackPanel>
+                                <Button AutomationProperties.AutomationId="SaveGateThresholdsButton"
+                                        Content="Save Gate Thresholds" HorizontalAlignment="Left"
+                                        Margin="0,6,0,0" Click="SaveGateThresholdsButton_Click" />
+                            </StackPanel>
                         </StackPanel>
                     </TabItem>
                 </TabControl>

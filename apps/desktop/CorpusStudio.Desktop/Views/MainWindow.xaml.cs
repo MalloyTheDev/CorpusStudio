@@ -1209,6 +1209,52 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Load the effective gate thresholds into the Settings editor (issue #198).</summary>
+    private async Task RefreshGateThresholdsAsync()
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var thresholds = await _engineService.GetGateThresholdsAsync(ViewModel.ActiveProjectPath);
+            ViewModel.Settings.ApplyGateThresholds(thresholds);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.Settings.SetGateThresholdsError(ex.Message);
+        }
+    }
+
+    private async void SaveGateThresholdsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
+        {
+            ViewModel.Settings.SetGateThresholdsError("Create or select a dataset project first.");
+            return;
+        }
+
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            ViewModel.SetBusy("Saving gate thresholds...");
+            // The engine validates ranges and rejects a bad value, so an invalid edit surfaces here.
+            await _engineService.SetGateThresholdsAsync(ViewModel.ActiveProjectPath, ViewModel.Settings.GateThresholds);
+            ViewModel.Settings.SetGateThresholdsSaved();
+        }
+        catch (Exception ex)
+        {
+            ViewModel.Settings.SetGateThresholdsError(ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            ViewModel.ClearBusy();
+        }
+    }
+
     private async void ApproveProviderGenerationButton_Click(object sender, RoutedEventArgs e)
     {
         await ApplyProviderApprovalAsync(revoke: false);
@@ -3765,6 +3811,7 @@ public partial class MainWindow : Window
             _engineService.LoadEvaluationReportHistory(project.ProjectPath)
         );
         await RefreshDatasetVersionsAsync();
+        await RefreshGateThresholdsAsync();
         await RefreshQualityAsync(recordHistory: false);
     }
 
