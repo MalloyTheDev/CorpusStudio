@@ -635,13 +635,19 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Build the reveal command through the hardened helper: the path is passed as an escaped
+        // argument (not interpolated into a shell-parsed string) and must still exist on disk (#208).
+        var startInfo = RevealInFileExplorer.BuildStartInfo(doc.FullPath);
+        if (startInfo is null)
+        {
+            MessageBox.Show(this, "That file or folder no longer exists on disk.", "Reveal",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
-                "explorer.exe", $"/select,\"{doc.FullPath}\"")
-            {
-                UseShellExecute = true,
-            });
+            System.Diagnostics.Process.Start(startInfo);
         }
         catch (Exception ex)
         {
