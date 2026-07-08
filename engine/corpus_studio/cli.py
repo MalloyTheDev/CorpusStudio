@@ -39,6 +39,7 @@ from corpus_studio.evaluation.evaluator import (
 )
 from corpus_studio.evaluation.scorers import LlmJudgeScorer
 from corpus_studio.exporters.cleaning import clean_rows
+from corpus_studio.exporters.redaction import redact_rows
 from corpus_studio.exporters.jsonl_exporter import export_jsonl, write_jsonl
 from corpus_studio.exporters.preference_exporter import (
     analyze_preference_pairs,
@@ -1668,6 +1669,13 @@ def export(
         "--drop-low-information",
         help="Drop rows below the low-information token threshold.",
     ),
+    redact_pii: bool = typer.Option(
+        False,
+        "--redact-pii",
+        help="Mask detected PII/secrets (emails, SSNs, keys/tokens, cards) in the EXPORT with typed "
+        "[REDACTED:kind] placeholders. Masks known high-precision patterns only — NOT a guarantee of "
+        "de-identification. Writes a redaction manifest; never rewrites the input.",
+    ),
 ):
     """Validate and export a JSONL file, optionally cleaning it first."""
     report = validate_jsonl_file(input_path, schema)
@@ -1679,6 +1687,14 @@ def export(
     from corpus_studio.gates.models import GateStatus
 
     rows = list(read_jsonl(input_path))
+
+    # Opt-in redaction runs BEFORE the export gate so masking the known PII/secret patterns is what
+    # lets a blocked-on-PII dataset export (with the secrets masked) rather than being refused. It is a
+    # known-pattern safety net, not de-identification — the manifest records what was masked.
+    redaction_result = None
+    if redact_pii:
+        rows, redaction_result = redact_rows(rows)
+
     export_gate = run_export_gates(rows, schema)
     if export_gate.overall_status == GateStatus.BLOCK:
         typer.echo("Export blocked by the export gate:", err=True)
@@ -1719,7 +1735,11 @@ def export(
         # Verbatim copy, but still surface remaining duplicates so the quality
         # surfaces are not purely advisory when the deliverable is produced.
         quality = build_basic_quality_report(rows)
-        export_jsonl(input_path, output_path)
+        if redaction_result is not None:
+            # Redaction changed the rows, so the deliverable is the redacted rows — not an input copy.
+            write_jsonl(rows, output_path)
+        else:
+            export_jsonl(input_path, output_path)
         if quality.duplicate_exact_count or quality.duplicate_normalized_count:
             warnings.append(
                 f"Exported without cleaning: {quality.duplicate_exact_count} exact and "
@@ -1735,6 +1755,24 @@ def export(
             "removed_rows": 0,
             "warnings": warnings,
         }
+
+    if redaction_result is not None:
+        redaction_manifest_path = output_path.with_name(
+            output_path.name + ".redaction_manifest.json"
+        )
+        redaction_manifest_path.write_text(
+            redaction_result.model_dump_json(indent=2) + "\n", encoding="utf-8"
+        )
+        payload["redacted"] = True
+        payload["redacted_spans"] = redaction_result.redacted_spans
+        payload["redacted_rows"] = redaction_result.redacted_rows
+        payload["redaction_manifest_path"] = str(redaction_manifest_path)
+        if redaction_result.redacted_spans:
+            warnings.append(
+                f"Redacted {redaction_result.redacted_spans} PII/secret span(s) across "
+                f"{redaction_result.redacted_rows} row(s) with [REDACTED:kind] placeholders. Known "
+                "high-precision patterns only — NOT a guarantee of de-identification; review before publishing."
+            )
 
     typer.echo(json.dumps(payload, indent=2))
 

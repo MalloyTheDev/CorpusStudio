@@ -267,7 +267,13 @@ per-item error isolation, and off-thread document opens.
 - Dataset-version **reorder detection**, row-store **GC** (must never prune
   manifest-referenced rows), and a normalized row identity. (Auto-capture after an
   import commit now ships — see above.)
-- Smaller deferrals: PII auto-redaction; a per-project gate-threshold editor in
+- **Opt-in PII/secret redaction on export** (`export --redact-pii`): masks the same
+  high-precision patterns the reporter detects (emails, SSNs, keys/tokens, JWTs, Luhn-valid
+  cards) with `[REDACTED:kind]` placeholders, so a dataset the export gate would block on PII
+  can export with the secrets masked; writes a redaction manifest (kinds/counts/rows, never raw
+  values) and never rewrites `examples.jsonl`. Honest boundary: known patterns only — **not** a
+  de-identification guarantee (a desktop toggle is a follow-up).
+- Smaller deferrals: a per-project gate-threshold editor in
   the desktop; per-element object shapes for lists-of-objects in the validator; an
   app icon. (CI hardening — ruff, mypy, pytest gate, dependabot, and CodeQL — is
   in place.)
