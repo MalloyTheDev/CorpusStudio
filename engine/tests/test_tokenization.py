@@ -1,8 +1,11 @@
+import pytest
+
 from corpus_studio.tokenization import estimate as estimate_mod
 from corpus_studio.tokenization.estimate import (
     estimate_tokens,
     estimator_name,
     rough_token_estimate,
+    tokenizer_offline,
 )
 
 
@@ -85,3 +88,48 @@ def test_no_model_id_skips_the_model_tokenizer_tier(monkeypatch):
     _use_fake_hf_tokenizer(monkeypatch)
     assert estimator_name() == "heuristic"
     assert estimate_tokens("a b c d e") >= 5  # heuristic, not the 5-id fake
+
+
+# --- offline safety: the model tier must never touch the network when disabled ----
+
+
+def _clear_offline_env(monkeypatch):
+    for name in estimate_mod._OFFLINE_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    estimate_mod._hf_tokenizer_cache.clear()
+
+
+@pytest.mark.parametrize("var", ["CORPUS_STUDIO_TOKENIZER_OFFLINE", "HF_HUB_OFFLINE"])
+def test_tokenizer_offline_detects_each_flag(monkeypatch, var):
+    _clear_offline_env(monkeypatch)
+    assert tokenizer_offline() is False
+    monkeypatch.setenv(var, "1")
+    assert tokenizer_offline() is True
+
+
+def test_offline_returns_none_without_any_fetch(monkeypatch):
+    _clear_offline_env(monkeypatch)
+
+    def _must_not_fetch(model_id):
+        raise AssertionError("offline mode must not attempt the network fetch")
+
+    monkeypatch.setattr(estimate_mod, "_fetch_hf_tokenizer", _must_not_fetch)
+    monkeypatch.setenv("CORPUS_STUDIO_TOKENIZER_OFFLINE", "1")
+
+    assert estimate_mod._load_hf_tokenizer("any/model") is None  # no AssertionError raised
+
+
+def test_online_calls_the_fetch(monkeypatch):
+    _clear_offline_env(monkeypatch)
+    monkeypatch.setattr(estimate_mod, "_fetch_hf_tokenizer", lambda model_id: _FakeTokenizer())
+    assert estimate_mod._load_hf_tokenizer("any/model") is not None
+
+
+def test_offline_forces_a_deterministic_non_hf_estimator(monkeypatch):
+    # Even if a model tokenizer *would* be fetchable, offline mode reports (and uses) a
+    # network-free estimator, so the budget is reproducible and can't stall.
+    _clear_offline_env(monkeypatch)
+    monkeypatch.setattr(estimate_mod, "_fetch_hf_tokenizer", lambda model_id: _FakeTokenizer())
+    monkeypatch.setenv("CORPUS_STUDIO_TOKENIZER_OFFLINE", "1")
+
+    assert not estimator_name("fake/model").startswith("hf:")

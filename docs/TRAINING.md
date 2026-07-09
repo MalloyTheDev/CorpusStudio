@@ -202,6 +202,12 @@ not "this run will succeed".
 > gated/unknown model). Treat the token budget and VRAM numbers as planning figures unless
 > `method` names a real tokenizer.
 >
+> **Offline safety.** The model-specific tier is the only one that touches the network. Set
+> `CORPUS_STUDIO_TOKENIZER_OFFLINE=1` (or the standard `HF_HUB_OFFLINE=1`) to skip it entirely —
+> estimation stays fully offline and deterministic, so `training-config` can never stall on a
+> slow/captive network while fetching a tokenizer (you trade the model-exact count for tiktoken /
+> the heuristic).
+>
 > **Chat-aware counting.** A chat row (`messages` turns) is counted as each turn's content
 > tokens *plus* the per-message role/turn markers and per-conversation BOS/EOS a chat template
 > adds — so the budget doesn't under-count chat/instruction rows and under-predict truncation.
