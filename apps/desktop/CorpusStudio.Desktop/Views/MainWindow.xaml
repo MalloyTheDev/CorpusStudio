@@ -3496,10 +3496,10 @@
                         <Button Style="{StaticResource PrimaryButtonStyle}"
                                 AutomationProperties.AutomationId="LocateEngineButton"
                                 Content="Locate engine folder…" Padding="16,8" Margin="0,0,10,0"
-                                Click="LocateEngineButton_Click" />
+                                Command="{Binding LocateEngineCommand}" />
                         <Button AutomationProperties.AutomationId="RetryEngineButton"
                                 Content="Retry" Padding="16,8"
-                                Click="RetryEngineButton_Click" />
+                                Command="{Binding RetryEngineCommand}" />
                     </StackPanel>
                 </StackPanel>
             </Border>
