@@ -39,6 +39,12 @@ class TrainingConfigTemplate(BaseModel):
     micro_batch_size: int = Field(default=1, gt=0)
     gradient_accumulation_steps: int = Field(default=8, gt=0)
     learning_rate: float = Field(default=0.0002, gt=0)
+    # Emitted into every target's config so weight initialisation, data shuffling, and
+    # dropout are deterministic — this is what makes a run reproducible (the run's
+    # provenance manifest hashes the config, so the seed is pinned with it). All the
+    # supported trainers (axolotl / TRL / transformers / unsloth / llama-factory) read a
+    # top-level `seed`. A fixed default (not a random one) keeps runs reproducible by default.
+    seed: int = Field(default=42, ge=0)
 
     def to_training_dict(self) -> dict[str, object]:
         """Return a serializable config dictionary."""
@@ -59,6 +65,7 @@ def build_lora_config_template(
     micro_batch_size: int = 1,
     gradient_accumulation_steps: int = 8,
     learning_rate: float = 0.0002,
+    seed: int = 42,
 ) -> TrainingConfigTemplate:
     """Build a conservative LoRA config template.
 
@@ -79,6 +86,7 @@ def build_lora_config_template(
         micro_batch_size=micro_batch_size,
         gradient_accumulation_steps=gradient_accumulation_steps,
         learning_rate=learning_rate,
+        seed=seed,
     )
 
 
