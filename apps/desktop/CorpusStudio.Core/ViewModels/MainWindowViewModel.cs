@@ -165,6 +165,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private readonly IHuggingFaceImportDialog _huggingFaceImportDialog = new NullHuggingFaceImportDialog();
     private readonly IDispatcherTimerFactory _dispatcherTimerFactory = new NullDispatcherTimerFactory();
 
+    // Training-run launch state (moved from the desktop code-behind, #246). The runner spawns the
+    // trainer + streams output; lines are enqueued off-thread and flushed to the UI by a timer.
+    private readonly IProcessRunner _trainingRunner = new TrainingProcessRunner();
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _trainingLogQueue = new();
+    private System.Threading.CancellationTokenSource? _trainingRunCts;
+    private bool _trainingCancelRequested;
+
     /// <summary>Run the dataset-debt assessment and apply it to the Debt tab — the engine-run
     /// orchestration moved off the desktop code-behind into a shared async command.</summary>
     public System.Windows.Input.ICommand RunDatasetDebtCommand { get; }
@@ -186,6 +193,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand GenerateSplitsCommand { get; }
     public System.Windows.Input.ICommand GateTrainingRunCommand { get; }
     public System.Windows.Input.ICommand RefreshTrainingCheckpointsCommand { get; }
+    public System.Windows.Input.ICommand LaunchTrainingCommand { get; }
+    public System.Windows.Input.ICommand ResumeTrainingCommand { get; }
+    public System.Windows.Input.ICommand StopTrainingCommand { get; }
     public System.Windows.Input.ICommand RunQualityCommand { get; }
     public System.Windows.Input.ICommand SaveGateThresholdsCommand { get; }
     public System.Windows.Input.ICommand RefreshProviderPoliciesCommand { get; }
@@ -234,7 +244,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             new ExamplesViewModel(), new WritingStudioViewModel(), new AiAssistRewriteBatchesViewModel(),
             new AiAssistConnectionViewModel(), new EvaluationConnectionViewModel(), new QualityViewModel(),
             new PythonEngineService(), new NullDialogService(), new NullFilePickerService(),
-            new NullHuggingFaceImportDialog(), new NullDispatcherTimerFactory())
+            new NullHuggingFaceImportDialog(), new NullDispatcherTimerFactory(), new TrainingProcessRunner())
     {
     }
 
@@ -250,12 +260,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         IDialogService dialogs,
         IFilePickerService filePicker,
         IHuggingFaceImportDialog huggingFaceImportDialog,
-        IDispatcherTimerFactory dispatcherTimerFactory)
+        IDispatcherTimerFactory dispatcherTimerFactory,
+        IProcessRunner trainingRunner)
     {
         _engine = engine;
         _dialogs = dialogs;
         _filePicker = filePicker;
         _dispatcherTimerFactory = dispatcherTimerFactory;
+        _trainingRunner = trainingRunner;
         _huggingFaceImportDialog = huggingFaceImportDialog;
         Debt = debt;
         Arena = arena;
@@ -315,6 +327,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         GenerateSplitsCommand = new AsyncRelayCommand(GenerateSplitsAsync);
         GateTrainingRunCommand = new AsyncRelayCommand(GateTrainingRunAsync);
         RefreshTrainingCheckpointsCommand = new AsyncRelayCommand(RefreshTrainingCheckpointsAsync);
+        LaunchTrainingCommand = new AsyncRelayCommand(LaunchTrainingAsync);
+        ResumeTrainingCommand = new AsyncRelayCommand(ResumeTrainingAsync);
+        StopTrainingCommand = new RelayCommand(StopTraining);
         RunQualityCommand = new AsyncRelayCommand(() => RefreshQualityAsync());
         SaveGateThresholdsCommand = new AsyncRelayCommand(SaveGateThresholdsAsync);
         RefreshProviderPoliciesCommand = new AsyncRelayCommand(RefreshProviderPoliciesAsync);
@@ -2226,6 +2241,298 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             // Checkpoint refresh is advisory; never let it disrupt a run.
         }
+    }
+
+    /// <summary>Launch a fresh training run (the generated config's command).</summary>
+    public System.Threading.Tasks.Task LaunchTrainingAsync() =>
+        RunTrainingAsync(Training.TrainingLaunchArgv, Training.TrainingLaunchCommand);
+
+    /// <summary>Resume a training run from a checkpoint (the resume command).</summary>
+    public System.Threading.Tasks.Task ResumeTrainingAsync() =>
+        RunTrainingAsync(Training.TrainingResumeArgv, Training.TrainingResumeCommand);
+
+    /// <summary>Shared launch core for fresh runs and resume-from-checkpoint: the user confirms the
+    /// exact command, then the trainer is spawned + streamed. Moved from the desktop code-behind (#246);
+    /// the process spawn/stream is behind IProcessRunner and the log-flush / checkpoint-poll timers behind
+    /// the IDispatcherTimer seam, so the launch orchestration is head-agnostic + testable. The trainer
+    /// runs on the user's machine with their tools — the engine never runs it.</summary>
+    private async System.Threading.Tasks.Task RunTrainingAsync(IReadOnlyList<string> argv, string command)
+    {
+        if (argv.Count == 0)
+        {
+            await _dialogs.ShowAsync(
+                "Generate a training config first — the launch command is produced with it.",
+                "Corpus Studio", DialogSeverity.Information);
+            return;
+        }
+
+        if (Training.IsTrainingRunning)
+        {
+            return;
+        }
+
+        var confirmed = await _dialogs.ConfirmAsync(
+            "This runs the trainer on your machine (it can use significant CPU/GPU for a long "
+                + "time) with your installed tools. Corpus Studio only launches the command below "
+                + "and streams its output.\n\n"
+                + command
+                + "\n\nRun it now?",
+            "Launch training", DialogButtons.OkCancel, DialogSeverity.Warning);
+        if (!confirmed)
+        {
+            return;
+        }
+
+        // Capture the pre-training baseline (newest saved eval report, if any) so
+        // the run can be compared before/after once the trained model is evaluated.
+        try
+        {
+            var baseline = HasActiveProject && !string.IsNullOrWhiteSpace(ActiveProjectPath)
+                ? _engine.LoadEvaluationReportHistory(ActiveProjectPath).FirstOrDefault()
+                : null;
+            Training.SetTrainingBaseline(baseline);
+        }
+        catch
+        {
+            Training.SetTrainingBaseline(null);
+        }
+
+        var workingDirectory = Training.TrainingLaunchWorkingDirectory;
+        var cts = new System.Threading.CancellationTokenSource();
+        _trainingRunCts = cts;
+        _trainingCancelRequested = false;
+        while (_trainingLogQueue.TryDequeue(out _)) { } // discard any residual lines
+        var runId = Training.BeginTrainingRun();
+
+        // Durable run record (v0.8): recorded to the project's training_runs/.
+        var runProjectPath = HasActiveProject ? ActiveProjectPath : null;
+        // Reproducibility manifest (dataset fingerprint / config hash / engine+platform) captured at
+        // run start. Best-effort: a manifest failure must not block the run — it just leaves it absent.
+        RunProvenance? provenance = null;
+        if (!string.IsNullOrWhiteSpace(runProjectPath)
+            && !string.IsNullOrWhiteSpace(Training.TrainingConfigPath))
+        {
+            try
+            {
+                provenance = await _engine.BuildRunProvenanceAsync(runProjectPath, Training.TrainingConfigPath);
+            }
+            catch
+            {
+                provenance = null;
+            }
+        }
+        var runRecord = CreateAndSaveRunRecord(runProjectPath, argv, provenance);
+        var terminalStatus = "interrupted";
+        int? terminalExitCode = null;
+        string? terminalNote = null;
+
+        // Coalesce log lines: background reader threads enqueue, and a UI-thread timer flushes at a
+        // fixed rate so a chatty trainer can't flood the dispatcher.
+        var logTimer = CreateBackgroundTimer(TimeSpan.FromMilliseconds(150), (_, _) => FlushTrainingLogQueue(runId));
+        logTimer.Start();
+
+        // Slow poll so checkpoints surface while the run is live (they appear minutes apart).
+        var checkpointTimer = CreateBackgroundTimer(
+            TimeSpan.FromSeconds(15), async (_, _) => await RefreshTrainingCheckpointsAsync());
+        checkpointTimer.Start();
+
+        try
+        {
+            int? cleanExitCode = null;
+            Exception? runError = null;
+            try
+            {
+                cleanExitCode = await _trainingRunner.RunAsync(
+                    argv,
+                    workingDirectory,
+                    _trainingLogQueue.Enqueue,
+                    cts.Token,
+                    onStarted: (pid, startedAt) => RecordRunPid(runProjectPath, runRecord, pid, startedAt)
+                );
+            }
+            catch (Exception ex)
+            {
+                runError = ex;
+            }
+
+            FlushTrainingLogQueue(runId);
+
+            // Pure classification (unit-tested) drives the terminal status + which VM state to set.
+            var outcome = TrainingRunClassifier.Classify(cleanExitCode, _trainingCancelRequested, runError);
+            terminalStatus = outcome.Status;
+            terminalExitCode = outcome.ExitCode;
+            terminalNote = outcome.Note;
+
+            if (outcome.Note is not null)
+            {
+                Training.SetTrainingRunError(outcome.Note);
+            }
+            else if (outcome.Status == TrainingRunOutcome.Cancelled)
+            {
+                Training.SetTrainingRunCancelled();
+            }
+            else
+            {
+                Training.CompleteTrainingRun(outcome.ExitCode ?? 0);
+            }
+        }
+        finally
+        {
+            logTimer.Stop();
+            checkpointTimer.Stop();
+            if (ReferenceEquals(_trainingRunCts, cts))
+            {
+                _trainingRunCts = null;
+            }
+
+            cts.Dispose();
+
+            // A stopped/crashed run is exactly when surviving checkpoints matter.
+            await RefreshTrainingCheckpointsAsync();
+
+            // Finalize the durable record with fresh checkpoints + terminal status.
+            await FinalizeRunRecord(runProjectPath, runRecord, terminalStatus, terminalExitCode, terminalNote);
+        }
+    }
+
+    /// <summary>Request cancellation of the live run (the finally block reconciles the record).</summary>
+    public void StopTraining()
+    {
+        _trainingCancelRequested = true;
+        _trainingRunCts?.Cancel();
+    }
+
+    /// <summary>Best-effort: cancel the run and synchronously kill the trainer tree so it is not
+    /// orphaned when the app exits (the shell calls this from its window-closing hook).</summary>
+    public void StopTrainingForShutdown()
+    {
+        _trainingCancelRequested = true;
+        _trainingRunCts?.Cancel();
+        _trainingRunner.TryKillCurrent();
+    }
+
+    private TrainingRunRecord? CreateAndSaveRunRecord(string? projectPath, IReadOnlyList<string> argv, RunProvenance? provenance = null)
+    {
+        if (string.IsNullOrWhiteSpace(projectPath))
+        {
+            return null;
+        }
+
+        var now = PythonEngineService.UtcNowIso();
+        var record = new TrainingRunRecord
+        {
+            RunId = PythonEngineService.MintTrainingRunId(),
+            CreatedAt = now,
+            UpdatedAt = now,
+            Status = "running",
+            Target = Training.TrainingTarget,
+            BaseModel = Training.TrainingBaseModel,
+            ConfigPath = Training.TrainingConfigPath,
+            OutputDir = Training.TrainingOutputDirectory,
+            Argv = argv.ToList(),
+            BeforeEvalPath = Training.TrainingBaselineReport?.ReportPath,
+            Provenance = provenance,
+        };
+        TrySaveRunRecord(projectPath, record);
+        return record;
+    }
+
+    private void RecordRunPid(string? projectPath, TrainingRunRecord? record, int pid, DateTime? startedAt)
+    {
+        if (string.IsNullOrWhiteSpace(projectPath) || record is null)
+        {
+            return;
+        }
+
+        record.Pid = pid;
+        record.ProcessStartedAt = startedAt?.ToString("o", System.Globalization.CultureInfo.InvariantCulture);
+        record.UpdatedAt = PythonEngineService.UtcNowIso();
+        TrySaveRunRecord(projectPath, record);
+    }
+
+    private async System.Threading.Tasks.Task FinalizeRunRecord(
+        string? projectPath, TrainingRunRecord? record, string status, int? exitCode, string? note)
+    {
+        if (string.IsNullOrWhiteSpace(projectPath) || record is null)
+        {
+            return;
+        }
+
+        // Enumerate checkpoints against THIS run's captured output dir/config, not the live VM.
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(record.OutputDir))
+            {
+                var checkpoints = await _engine.GetTrainingCheckpointsAsync(
+                    record.OutputDir,
+                    string.IsNullOrWhiteSpace(record.Target) ? "axolotl_yaml" : record.Target,
+                    record.ConfigPath
+                );
+                record.Checkpoints = checkpoints.Checkpoints.ToList();
+            }
+        }
+        catch
+        {
+            // Leave checkpoints as-is if enumeration fails.
+        }
+
+        record.Status = status;
+        record.ExitCode = exitCode;
+        record.UpdatedAt = PythonEngineService.UtcNowIso();
+        if (!string.IsNullOrWhiteSpace(note))
+        {
+            record.Notes = note;
+        }
+        TrySaveRunRecord(projectPath, record);
+
+        // Close the train→eval loop: a succeeded run produced a model, so surface the plan to evaluate it.
+        if (status == "succeeded")
+        {
+            await ShowEvalHandoffAsync(projectPath, record.RunId);
+        }
+    }
+
+    /// <summary>Surface the close-the-loop plan for a finished run. Public because the run finalizer and
+    /// the run-history refresh both use it.</summary>
+    public async System.Threading.Tasks.Task ShowEvalHandoffAsync(string projectPath, string runId)
+    {
+        try
+        {
+            var plan = await _engine.BuildEvalHandoffAsync(projectPath, runId);
+            Training.ApplyEvalHandoff(plan);
+        }
+        catch (Exception ex)
+        {
+            Training.SetEvalHandoffError(ex.Message);
+        }
+    }
+
+    private void TrySaveRunRecord(string projectPath, TrainingRunRecord record)
+    {
+        try
+        {
+            _engine.SaveTrainingRunRecord(projectPath, record);
+        }
+        catch
+        {
+            // Recording must never break or interrupt the training run.
+        }
+    }
+
+    private void FlushTrainingLogQueue(int runId)
+    {
+        if (_trainingLogQueue.IsEmpty)
+        {
+            return;
+        }
+
+        var batch = new List<string>();
+        while (_trainingLogQueue.TryDequeue(out var line))
+        {
+            batch.Add(line);
+        }
+
+        Training.AppendTrainingRunLogBatch(runId, batch);
     }
 
     /// <summary>Generate deterministic train/validation/test splits and persist the settings.

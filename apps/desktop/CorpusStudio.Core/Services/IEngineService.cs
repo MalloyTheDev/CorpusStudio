@@ -184,6 +184,9 @@ public interface IEngineService
     /// <summary>The project's recorded training runs (newest first).</summary>
     IReadOnlyList<TrainingRunRecord> LoadTrainingRunRecords(string projectPath);
 
+    /// <summary>Persist a training run record (the desktop owns the process, so it writes these).</summary>
+    void SaveTrainingRunRecord(string projectPath, TrainingRunRecord record);
+
     /// <summary>Link an after-training eval report to the newest run (returns that run's id, or null).</summary>
     string? LinkAfterEvalToNewestRun(string projectPath, string afterEvalPath, string? afterEvalModel);
 

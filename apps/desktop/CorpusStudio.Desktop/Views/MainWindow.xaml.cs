@@ -18,10 +18,6 @@ namespace CorpusStudio.Desktop.Views;
 public partial class MainWindow : Window
 {
     private readonly PythonEngineService _engineService = new();
-    private readonly IProcessRunner _trainingRunner = new TrainingProcessRunner();
-    private CancellationTokenSource? _trainingRunCts;
-    private readonly ConcurrentQueue<string> _trainingLogQueue = new();
-    private bool _trainingCancelRequested;
 
     /// <summary>Head-agnostic dialog seam (set from DI in App.OnStartup; defaults to the WPF adapter
     /// so a plain `new MainWindow()` still works). Confirm/message prompts route through this so the
@@ -1197,288 +1193,6 @@ public partial class MainWindow : Window
     }
 
 
-    private async void LaunchTrainingButton_Click(object sender, RoutedEventArgs e)
-    {
-        await RunTrainingAsync(ViewModel.Training.TrainingLaunchArgv, ViewModel.Training.TrainingLaunchCommand);
-    }
-
-    private async void ResumeTrainingButton_Click(object sender, RoutedEventArgs e)
-    {
-        await RunTrainingAsync(ViewModel.Training.TrainingResumeArgv, ViewModel.Training.TrainingResumeCommand);
-    }
-
-    /// <summary>Shared launch core for fresh runs and resume-from-checkpoint: the
-    /// user confirms the exact command, then the trainer is spawned and streamed.</summary>
-    private async Task RunTrainingAsync(IReadOnlyList<string> argv, string command)
-    {
-        if (argv.Count == 0)
-        {
-            MessageBox.Show(
-                this,
-                "Generate a training config first — the launch command is produced with it.",
-                "Corpus Studio",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information
-            );
-            return;
-        }
-
-        if (ViewModel.Training.IsTrainingRunning)
-        {
-            return;
-        }
-
-        var confirm = MessageBox.Show(
-            this,
-            "This runs the trainer on your machine (it can use significant CPU/GPU for a long "
-                + "time) with your installed tools. Corpus Studio only launches the command below "
-                + "and streams its output.\n\n"
-                + command
-                + "\n\nRun it now?",
-            "Launch training",
-            MessageBoxButton.OKCancel,
-            MessageBoxImage.Warning
-        );
-        if (confirm != MessageBoxResult.OK)
-        {
-            return;
-        }
-
-        // Capture the pre-training baseline (newest saved eval report, if any) so
-        // the run can be compared before/after once the trained model is evaluated.
-        try
-        {
-            var baseline = ViewModel.HasActiveProject && !string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath)
-                ? _engineService.LoadEvaluationReportHistory(ViewModel.ActiveProjectPath).FirstOrDefault()
-                : null;
-            ViewModel.Training.SetTrainingBaseline(baseline);
-        }
-        catch
-        {
-            ViewModel.Training.SetTrainingBaseline(null);
-        }
-
-        var workingDirectory = ViewModel.Training.TrainingLaunchWorkingDirectory;
-        var cts = new CancellationTokenSource();
-        _trainingRunCts = cts;
-        _trainingCancelRequested = false;
-        while (_trainingLogQueue.TryDequeue(out _)) { } // discard any residual lines
-        var runId = ViewModel.Training.BeginTrainingRun();
-
-        // Durable run record (v0.8): recorded to the project's training_runs/.
-        var runProjectPath = ViewModel.HasActiveProject ? ViewModel.ActiveProjectPath : null;
-        // Reproducibility manifest (dataset fingerprint / config hash / engine+platform) captured at
-        // run start. Best-effort: a manifest failure must not block the run — it just leaves it absent.
-        RunProvenance? provenance = null;
-        if (!string.IsNullOrWhiteSpace(runProjectPath)
-            && !string.IsNullOrWhiteSpace(ViewModel.Training.TrainingConfigPath))
-        {
-            try
-            {
-                provenance = await _engineService.BuildRunProvenanceAsync(
-                    runProjectPath, ViewModel.Training.TrainingConfigPath);
-            }
-            catch
-            {
-                provenance = null;
-            }
-        }
-        var runRecord = CreateAndSaveRunRecord(runProjectPath, argv, provenance);
-        var terminalStatus = "interrupted";
-        int? terminalExitCode = null;
-        string? terminalNote = null;
-
-        // Coalesce log lines: background reader threads enqueue, and a timer flushes
-        // to the UI at a fixed rate so a chatty trainer can't flood the dispatcher.
-        var logTimer = new DispatcherTimer(DispatcherPriority.Background)
-        {
-            Interval = TimeSpan.FromMilliseconds(150),
-        };
-        logTimer.Tick += (_, _) => FlushTrainingLogQueue(runId);
-        logTimer.Start();
-
-        // Slow poll so checkpoints surface while the run is live (they appear
-        // minutes apart; no hot timer).
-        var checkpointTimer = new DispatcherTimer(DispatcherPriority.Background)
-        {
-            Interval = TimeSpan.FromSeconds(15),
-        };
-        checkpointTimer.Tick += async (_, _) => await RefreshTrainingCheckpointsAsync();
-        checkpointTimer.Start();
-
-        try
-        {
-            int? cleanExitCode = null;
-            Exception? runError = null;
-            try
-            {
-                cleanExitCode = await _trainingRunner.RunAsync(
-                    argv,
-                    workingDirectory,
-                    _trainingLogQueue.Enqueue,
-                    cts.Token,
-                    onStarted: (pid, startedAt) => RecordRunPid(runProjectPath, runRecord, pid, startedAt)
-                );
-            }
-            catch (Exception ex)
-            {
-                runError = ex;
-            }
-
-            FlushTrainingLogQueue(runId);
-
-            // Pure classification (unit-tested in Core) drives the terminal status +
-            // which VM state to set — the launch code-behind no longer branches by hand.
-            var outcome = TrainingRunClassifier.Classify(cleanExitCode, _trainingCancelRequested, runError);
-            terminalStatus = outcome.Status;
-            terminalExitCode = outcome.ExitCode;
-            terminalNote = outcome.Note;
-
-            if (outcome.Note is not null)
-            {
-                ViewModel.Training.SetTrainingRunError(outcome.Note);
-            }
-            else if (outcome.Status == TrainingRunOutcome.Cancelled)
-            {
-                ViewModel.Training.SetTrainingRunCancelled();
-            }
-            else
-            {
-                ViewModel.Training.CompleteTrainingRun(outcome.ExitCode ?? 0);
-            }
-        }
-        finally
-        {
-            logTimer.Stop();
-            checkpointTimer.Stop();
-            if (ReferenceEquals(_trainingRunCts, cts))
-            {
-                _trainingRunCts = null;
-            }
-
-            cts.Dispose();
-
-            // A stopped/crashed run is exactly when surviving checkpoints matter.
-            await RefreshTrainingCheckpointsAsync();
-
-            // Finalize the durable record with fresh checkpoints + terminal status.
-            await FinalizeRunRecord(runProjectPath, runRecord, terminalStatus, terminalExitCode, terminalNote);
-        }
-    }
-
-    private TrainingRunRecord? CreateAndSaveRunRecord(string? projectPath, IReadOnlyList<string> argv, RunProvenance? provenance = null)
-    {
-        if (string.IsNullOrWhiteSpace(projectPath))
-        {
-            return null;
-        }
-
-        var now = PythonEngineService.UtcNowIso();
-        var record = new TrainingRunRecord
-        {
-            RunId = PythonEngineService.MintTrainingRunId(),
-            CreatedAt = now,
-            UpdatedAt = now,
-            Status = "running",
-            Target = ViewModel.Training.TrainingTarget,
-            BaseModel = ViewModel.Training.TrainingBaseModel,
-            ConfigPath = ViewModel.Training.TrainingConfigPath,
-            OutputDir = ViewModel.Training.TrainingOutputDirectory,
-            Argv = argv.ToList(),
-            BeforeEvalPath = ViewModel.Training.TrainingBaselineReport?.ReportPath,
-            Provenance = provenance,
-        };
-        TrySaveRunRecord(projectPath, record);
-        return record;
-    }
-
-    private void RecordRunPid(string? projectPath, TrainingRunRecord? record, int pid, DateTime? startedAt)
-    {
-        if (string.IsNullOrWhiteSpace(projectPath) || record is null)
-        {
-            return;
-        }
-
-        record.Pid = pid;
-        record.ProcessStartedAt = startedAt?.ToString("o", System.Globalization.CultureInfo.InvariantCulture);
-        record.UpdatedAt = PythonEngineService.UtcNowIso();
-        TrySaveRunRecord(projectPath, record);
-    }
-
-    private async Task FinalizeRunRecord(
-        string? projectPath,
-        TrainingRunRecord? record,
-        string status,
-        int? exitCode,
-        string? note
-    )
-    {
-        if (string.IsNullOrWhiteSpace(projectPath) || record is null)
-        {
-            return;
-        }
-
-        // Enumerate checkpoints against THIS run's captured output dir/config, not
-        // the live VM (which the user may have changed by regenerating a config).
-        try
-        {
-            if (!string.IsNullOrWhiteSpace(record.OutputDir))
-            {
-                var checkpoints = await _engineService.GetTrainingCheckpointsAsync(
-                    record.OutputDir,
-                    string.IsNullOrWhiteSpace(record.Target) ? "axolotl_yaml" : record.Target,
-                    record.ConfigPath
-                );
-                record.Checkpoints = checkpoints.Checkpoints.ToList();
-            }
-        }
-        catch
-        {
-            // Leave checkpoints as-is if enumeration fails.
-        }
-
-        record.Status = status;
-        record.ExitCode = exitCode;
-        record.UpdatedAt = PythonEngineService.UtcNowIso();
-        if (!string.IsNullOrWhiteSpace(note))
-        {
-            record.Notes = note;
-        }
-        TrySaveRunRecord(projectPath, record);
-
-        // Close the train→eval loop: a succeeded run produced a model, so surface the
-        // ordered plan to evaluate it (serve → eval → link → gate). Best-effort.
-        if (status == "succeeded")
-        {
-            await ShowEvalHandoffAsync(projectPath, record.RunId);
-        }
-    }
-
-    private async Task ShowEvalHandoffAsync(string projectPath, string runId)
-    {
-        try
-        {
-            var plan = await _engineService.BuildEvalHandoffAsync(projectPath, runId);
-            ViewModel.Training.ApplyEvalHandoff(plan);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.Training.SetEvalHandoffError(ex.Message);
-        }
-    }
-
-    private void TrySaveRunRecord(string projectPath, TrainingRunRecord record)
-    {
-        try
-        {
-            _engineService.SaveTrainingRunRecord(projectPath, record);
-        }
-        catch
-        {
-            // Recording must never break or interrupt the training run.
-        }
-    }
-
     private void SetDiffBaseButton_Click(object sender, RoutedEventArgs e)
     {
         var selected = ViewModel.Versions.SelectedDatasetVersion;
@@ -1520,7 +1234,7 @@ public partial class MainWindow : Window
         // honest about a run that hasn't succeeded yet).
         if (records.Count > 0)
         {
-            await ShowEvalHandoffAsync(ViewModel.ActiveProjectPath, records[0].RunId);
+            await ViewModel.ShowEvalHandoffAsync(ViewModel.ActiveProjectPath, records[0].RunId);
         }
     }
 
@@ -1543,31 +1257,6 @@ public partial class MainWindow : Window
         }
     }
 
-    // The checkpoint refresh now lives on the shared view-model (RefreshTrainingCheckpointsCommand +
-    // the live-run poll timer + the run finalizer all use it); the code-behind callers delegate to it.
-    private Task RefreshTrainingCheckpointsAsync() => ViewModel.RefreshTrainingCheckpointsAsync();
-
-    private void FlushTrainingLogQueue(int runId)
-    {
-        if (_trainingLogQueue.IsEmpty)
-        {
-            return;
-        }
-
-        var batch = new List<string>();
-        while (_trainingLogQueue.TryDequeue(out var line))
-        {
-            batch.Add(line);
-        }
-
-        ViewModel.Training.AppendTrainingRunLogBatch(runId, batch);
-    }
-
-    private void StopTrainingButton_Click(object sender, RoutedEventArgs e)
-    {
-        _trainingCancelRequested = true;
-        _trainingRunCts?.Cancel();
-    }
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
@@ -1609,9 +1298,7 @@ public partial class MainWindow : Window
 
         // Best-effort: cancel the run and synchronously kill the trainer tree so it
         // is not orphaned when the app exits.
-        _trainingCancelRequested = true;
-        _trainingRunCts?.Cancel();
-        _trainingRunner.TryKillCurrent();
+        ViewModel.StopTrainingForShutdown();
     }
 
     private void CopyLaunchCommandButton_Click(object sender, RoutedEventArgs e)

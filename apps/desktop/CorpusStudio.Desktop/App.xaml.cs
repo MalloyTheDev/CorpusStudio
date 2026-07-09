@@ -43,6 +43,7 @@ public partial class App : Application
         services.AddSingleton<IDialogService, MessageBoxDialogService>();
         services.AddSingleton<IFilePickerService, Win32FilePickerService>();
         services.AddSingleton<IDispatcherTimerFactory, WpfDispatcherTimerFactory>();
+        services.AddSingleton<IProcessRunner, TrainingProcessRunner>();
         // The HF import dialog adapter needs the concrete engine (the modal calls its inspect/stage
         // methods); the singleton is registered as IEngineService, so resolve + cast it here.
         services.AddSingleton<IHuggingFaceImportDialog>(sp =>

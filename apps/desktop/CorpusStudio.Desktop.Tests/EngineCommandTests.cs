@@ -98,6 +98,8 @@ public sealed class EngineCommandTests
         public System.Collections.Generic.IReadOnlyList<QualityHistoryEntry> LoadQualityHistory(string projectPath, int maxEntries = 5) => new System.Collections.Generic.List<QualityHistoryEntry>();
         public Task<RunProvenance> BuildRunProvenanceAsync(string projectPath, string configPath) => Task.FromResult(new RunProvenance());
         public System.Collections.Generic.IReadOnlyList<TrainingRunRecord> LoadTrainingRunRecords(string projectPath) => new System.Collections.Generic.List<TrainingRunRecord>();
+        public int SaveTrainingRunRecordCallCount { get; private set; }
+        public void SaveTrainingRunRecord(string projectPath, TrainingRunRecord record) => SaveTrainingRunRecordCallCount++;
         public string? LinkAfterEvalToNewestRun(string projectPath, string afterEvalPath, string? afterEvalModel) => null;
         public Task<GateReport> RunTrainingRunGateAsync(string projectPath, string runId) => Task.FromResult(new GateReport());
         public Task<EvalHandoffPlan> BuildEvalHandoffAsync(string projectPath, string runId) => Task.FromResult(new EvalHandoffPlan());
@@ -206,19 +208,46 @@ public sealed class EngineCommandTests
         }
     }
 
+    // A process runner that streams configured lines + returns a configured exit code (no real spawn).
+    private sealed class FakeTrainingProcessRunner : IProcessRunner
+    {
+        public int ExitCode { get; set; }
+        public string[] Lines { get; set; } = Array.Empty<string>();
+        public Exception? ThrowError { get; set; }
+        public bool KillCalled { get; private set; }
+        public bool RunCalled { get; private set; }
+        public Task<int> RunAsync(IReadOnlyList<string> argv, string? workingDirectory, Action<string> onOutputLine,
+            System.Threading.CancellationToken cancellationToken, Action<int, DateTime?>? onStarted = null)
+        {
+            RunCalled = true;
+            onStarted?.Invoke(1234, null);
+            foreach (var line in Lines)
+            {
+                onOutputLine(line);
+            }
+            if (ThrowError is not null)
+            {
+                throw ThrowError;
+            }
+            return Task.FromResult(ExitCode);
+        }
+        public void TryKillCurrent() => KillCalled = true;
+    }
+
     private static MainWindowViewModel VmWith(
         IEngineService engine,
         IDialogService? dialogs = null,
         IFilePickerService? filePicker = null,
         IHuggingFaceImportDialog? hfImportDialog = null,
-        IDispatcherTimerFactory? timerFactory = null) => new(
+        IDispatcherTimerFactory? timerFactory = null,
+        IProcessRunner? trainingRunner = null) => new(
         new DebtViewModel(), new ArenaViewModel(), new SettingsViewModel(), new VersionsViewModel(),
         new ArtifactsViewModel(), new SuitesViewModel(), new SplitsViewModel(), new PreferenceReviewViewModel(),
         new QuarantineViewModel(), new ExamplesViewModel(), new WritingStudioViewModel(),
         new AiAssistRewriteBatchesViewModel(), new AiAssistConnectionViewModel(),
         new EvaluationConnectionViewModel(), new QualityViewModel(), engine, dialogs ?? new NullDialogService(),
         filePicker ?? new NullFilePickerService(), hfImportDialog ?? new NullHuggingFaceImportDialog(),
-        timerFactory ?? new NullDispatcherTimerFactory());
+        timerFactory ?? new NullDispatcherTimerFactory(), trainingRunner ?? new TrainingProcessRunner());
 
     private static void SelectFakeProject(MainWindowViewModel vm) => vm.SelectProject(
         new DatasetProjectListItem(
@@ -825,6 +854,89 @@ public sealed class EngineCommandTests
             OutputPath = "C:/proj/exports/x/config.yaml",
             TrainingOutputDirectory = "C:/proj/exports/x/output",
         });
+
+    private static TrainingConfigExportResult LaunchableConfig() => new()
+    {
+        Target = "axolotl_yaml",
+        OutputPath = "C:/proj/exports/x/config.yaml",
+        TrainingOutputDirectory = "C:/proj/exports/x/output",
+        Launch = new TrainingLaunchPlan
+        {
+            Target = "axolotl_yaml",
+            Command = "trainer config.yaml",
+            Argv = ["trainer", "config.yaml"],
+        },
+    };
+
+    [Fact]
+    public async Task LaunchTraining_ConfirmedRun_StreamsLogs_Completes_AndSavesRecords()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var runner = new FakeTrainingProcessRunner { ExitCode = 0, Lines = new[] { "epoch 1", "epoch 2" } };
+        var vm = VmWith(engine, new FakeDialogService(confirm: true), trainingRunner: runner);
+        SelectFakeProject(vm);
+        vm.Training.ApplyTrainingConfigExportResult(LaunchableConfig());
+
+        await vm.LaunchTrainingAsync();
+
+        Assert.True(runner.RunCalled);
+        Assert.False(vm.Training.IsTrainingRunning);            // completed
+        Assert.Contains("epoch 1", vm.Training.TrainingRunLog); // streamed lines flushed to the log
+        Assert.True(engine.SaveTrainingRunRecordCallCount > 0); // durable run record persisted
+    }
+
+    [Fact]
+    public async Task LaunchTraining_ConfirmDeclined_DoesNotRun()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var runner = new FakeTrainingProcessRunner();
+        var vm = VmWith(engine, new FakeDialogService(confirm: false), trainingRunner: runner);
+        SelectFakeProject(vm);
+        vm.Training.ApplyTrainingConfigExportResult(LaunchableConfig());
+
+        await vm.LaunchTrainingAsync();
+
+        Assert.False(runner.RunCalled); // the user cancelled the confirm
+    }
+
+    [Fact]
+    public async Task LaunchTraining_WithoutAConfig_DoesNotRun()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var runner = new FakeTrainingProcessRunner();
+        var vm = VmWith(engine, new FakeDialogService(confirm: true), trainingRunner: runner);
+        SelectFakeProject(vm); // no config generated → empty launch argv
+
+        await vm.LaunchTrainingAsync();
+
+        Assert.False(runner.RunCalled);
+    }
+
+    [Fact]
+    public async Task LaunchTraining_NonZeroExit_MarksFailed()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var runner = new FakeTrainingProcessRunner { ExitCode = 1 };
+        var vm = VmWith(engine, new FakeDialogService(confirm: true), trainingRunner: runner);
+        SelectFakeProject(vm);
+        vm.Training.ApplyTrainingConfigExportResult(LaunchableConfig());
+
+        await vm.LaunchTrainingAsync();
+
+        Assert.True(runner.RunCalled);
+        Assert.Contains("Failed", vm.Training.TrainingRunStatus);
+    }
+
+    [Fact]
+    public void StopTrainingForShutdown_KillsTheTrainerTree()
+    {
+        var runner = new FakeTrainingProcessRunner();
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }), trainingRunner: runner);
+
+        vm.StopTrainingForShutdown();
+
+        Assert.True(runner.KillCalled); // best-effort kill so the trainer isn't orphaned on exit
+    }
 
     [Fact]
     public async Task RefreshTrainingCheckpoints_WithOutputDir_CallsTheEngine()
