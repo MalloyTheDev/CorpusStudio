@@ -31,10 +31,38 @@ def test_diff_is_multiset_aware():
     assert diff.common_count == 2
 
 
-def test_diff_reorder_is_not_a_change():
+def test_diff_reorder_is_not_a_content_change_but_is_flagged():
+    # Same rows, different order (#196): no add/remove, but reordered=True + moved positions.
     diff = diff_manifests(["a", "b", "c"], ["c", "a", "b"], "v1", "v2")
     assert diff.added_count == 0 and diff.removed_count == 0
     assert diff.common_count == 3
+    assert diff.reordered is True
+    assert diff.moved_count == 3  # all three positions changed
+
+
+def test_diff_identical_order_is_not_reordered():
+    diff = diff_manifests(["a", "b", "c"], ["a", "b", "c"], "v1", "v2")
+    assert diff.reordered is False
+    assert diff.moved_count == 0
+
+
+def test_diff_partial_reorder_counts_moved_positions():
+    # "a" stays put; "b" and "c" swap → 2 positions moved.
+    diff = diff_manifests(["a", "b", "c"], ["a", "c", "b"], "v1", "v2")
+    assert diff.reordered is True
+    assert diff.moved_count == 2
+
+
+def test_content_change_is_not_a_pure_reorder():
+    diff = diff_manifests(["a", "b", "c"], ["c", "b", "d"], "v1", "v2")
+    assert diff.added_count == 1 and diff.removed_count == 1
+    assert diff.reordered is False  # content changed, so not a *pure* reorder
+
+
+def test_render_flags_a_reorder():
+    diff = diff_manifests(["a", "b", "c"], ["c", "a", "b"], "v1", "v2")
+    markdown = render_dataset_version_diff_markdown(diff)
+    assert "Reordered" in markdown and "3 position" in markdown
 
 
 def test_render_diff_is_injection_safe():

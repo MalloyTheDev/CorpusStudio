@@ -189,7 +189,11 @@ before the swap leaves the dataset untouched; the engine still never writes
 engine's `dataset-version-diff` (added/removed/common + sample rows) in the detail
 pane. Read-only; the engine owns the diff (it refuses a version without stored rows).
 
+**Reorder detection** (#196): when two versions hold the *same* rows in a *different*
+order (nothing added or removed), the diff flags it explicitly — `reordered` +
+`moved_count`, and a "⚠ Reordered" note in the diff card — rather than showing a
+misleading "no changes". A sequence-sensitive trainer would see a different dataset.
+
 **Deferred:**
 - Auto-capture after an import/append commit; restore straight to stdout.
-- Reorder/"moved" detection in diff, GC of orphaned store blobs (which must never
-  prune rows referenced by a manifest), and a `normalized` row identity.
+- A `normalized` row identity (whitespace/key-order-insensitive) as an opt-in mode.
