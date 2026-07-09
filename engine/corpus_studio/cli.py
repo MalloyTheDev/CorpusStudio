@@ -604,6 +604,12 @@ def eval_run(
     judge_backend: str = typer.Option("ollama", "--judge-backend", help="Judge backend."),
     judge_base_url: Optional[str] = typer.Option(None, "--judge-base-url", help="Judge provider base URL."),
     judge_api_key: Optional[str] = typer.Option(None, "--judge-api-key", help="Judge API key."),
+    progress: bool = typer.Option(
+        False,
+        "--progress",
+        help="Stream per-example progress ('[k/N] evaluated') to stderr during a long run. "
+        "The report JSON still prints to stdout unchanged.",
+    ),
 ):
     """Run an Evaluation Lab pass against a local model backend.
 
@@ -656,6 +662,11 @@ def eval_run(
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=1) from exc
 
+    def _emit_progress(completed: int, total: int) -> None:
+        # Progress goes to stderr so stdout stays the pure report JSON (mirrors suite-run's
+        # "Running N case(s)" note). Carriage-return-free lines so a log file stays readable.
+        typer.echo(f"[{completed}/{total}] evaluated", err=True)
+
     report = run_evaluation(
         EvaluationRunConfig(
             dataset=input_path.stem,
@@ -672,6 +683,7 @@ def eval_run(
         backend_client,
         limit=limit,
         scorer=scorer,
+        progress_callback=_emit_progress if progress else None,
     )
     payload = report.model_dump_json(indent=2)
     if output_path is not None:

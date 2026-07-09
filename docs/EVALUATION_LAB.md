@@ -139,6 +139,11 @@ evaluation report with a `metric` field, a `run_settings` object, plus derived
 `tag_summary`, `failure_reason_summary`, and `score_band_summary` arrays. This
 command requires the chosen local backend to already be running.
 
+Add **`--progress`** to stream per-example progress (`[k/N] evaluated`) to **stderr**
+during a long run — the report JSON on stdout is unchanged, so `--output-path` and
+piping still work. (The desktop Evaluation tab surfacing this as a live progress bar
+is a follow-up — it needs the streaming process seam the launcher uses.)
+
 ### Scoring metric (read this)
 
 The default automatic score (`metric: "keyword_overlap"`) is **keyword-overlap
@@ -195,8 +200,10 @@ The desktop Evaluation tab is a thin UI over the CLI MVP:
 
 Multi-model benchmark comparison exists (`benchmark` runs one dataset across
 several models and ranks them), and the Model Arena compares models on ad-hoc
-prompt suites with optional evaluator-only judging. Not yet provided: streaming
-progress, hosted-provider credential management, and multi-run failure triage.
+prompt suites with optional evaluator-only judging. Streaming progress is available
+on the CLI (`eval-run --progress`, per-example counts to stderr); surfacing it as a
+desktop progress bar, hosted-provider credential management, and multi-run failure
+triage are not yet provided.
 
 ## UI Screen Basis
 
