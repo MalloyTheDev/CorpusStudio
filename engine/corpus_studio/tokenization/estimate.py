@@ -2,14 +2,24 @@
 
 The old estimate was a flat ``len(text) // 4``, which badly underestimates
 non-Latin scripts (CJK/kana/Hangul have no spaces, so char/4 is far too low) and
-ignores word/punctuation structure. ``estimate_tokens`` uses a real tokenizer
-(tiktoken) when it is installed and otherwise a Unicode-aware heuristic that
-counts CJK characters directly and blends word- and character-based estimates
-for everything else. No hard dependency is added.
+ignores word/punctuation structure. ``estimate_tokens`` picks the most exact
+counter available, in order, and never adds a hard dependency:
+
+1. the **target model's own tokenizer** (via the optional ``tokenizers`` library —
+   ``Tokenizer.from_pretrained`` fetches just the model's ``tokenizer.json``) when a
+   ``model_id`` is given and the library + model are available — exact for that model;
+2. **tiktoken** (optional ``tokenizer`` extra) — exact BPE for the GPT-4 family;
+3. a **Unicode-aware heuristic** that counts CJK characters directly and blends
+   word- and character-based estimates for everything else.
+
+Every failure (library absent, no network, gated/unknown model, slow-only
+tokenizer) falls silently to the next tier, and ``estimator_name`` reports which
+tier actually ran so a token budget is never presented as exact when it is not.
 """
 
 import re
 import unicodedata
+from typing import Any
 
 # CJK / kana / Hangul: roughly one (sometimes more) BPE token per character,
 # and no whitespace to split on, so these must be counted directly.
@@ -77,10 +87,46 @@ def _tiktoken_encoder():
     return _encoder
 
 
-def estimate_tokens(text: str) -> int:
-    """Best-effort token count: exact via tiktoken if available, else heuristic."""
+_hf_tokenizer_cache: dict[str, Any] = {}
+
+
+def _load_hf_tokenizer(model_id: str) -> Any:
+    """Load a model's fast tokenizer via the optional ``tokenizers`` library.
+
+    ``Tokenizer.from_pretrained`` fetches only the model's ``tokenizer.json`` from
+    the Hub (far lighter than ``transformers``). Returns ``None`` on ANY failure —
+    library not installed, no network, gated/unknown model, or a model that ships
+    only a slow tokenizer — so estimation always falls back and never raises.
+    Kept as a module-level function so tests can inject a fake tokenizer.
+    """
+    try:  # pragma: no cover - depends on the environment / network
+        from tokenizers import Tokenizer
+
+        return Tokenizer.from_pretrained(model_id)
+    except Exception:  # noqa: BLE001 - optional accuracy boost, never a hard dependency.
+        return None
+
+
+def _hf_tokenizer(model_id: str) -> Any:
+    if model_id not in _hf_tokenizer_cache:
+        _hf_tokenizer_cache[model_id] = _load_hf_tokenizer(model_id)
+    return _hf_tokenizer_cache[model_id]
+
+
+def estimate_tokens(text: str, model_id: str | None = None) -> int:
+    """Best-effort token count: the target model's own tokenizer when available,
+    else tiktoken, else the Unicode-aware heuristic. ``model_id`` is a Hub id such
+    as ``"meta-llama/Llama-3-8B"``; omit it to skip the model-specific tier."""
     if not text:
         return 0
+
+    if model_id:
+        tokenizer = _hf_tokenizer(model_id)
+        if tokenizer is not None:
+            try:
+                return max(1, len(tokenizer.encode(text).ids))
+            except Exception:  # noqa: BLE001 - fall through to tiktoken / heuristic.
+                pass
 
     encoder = _tiktoken_encoder()
     if encoder is not None:
@@ -92,6 +138,9 @@ def estimate_tokens(text: str) -> int:
     return _heuristic_token_estimate(text)
 
 
-def estimator_name() -> str:
-    """Which estimator ``estimate_tokens`` will use: 'tiktoken' or 'heuristic'."""
+def estimator_name(model_id: str | None = None) -> str:
+    """Which estimator ``estimate_tokens`` will use for this model: the model's own
+    Hub tokenizer (``'hf:<model_id>'``), ``'tiktoken'``, or ``'heuristic'``."""
+    if model_id and _hf_tokenizer(model_id) is not None:
+        return f"hf:{model_id}"
     return "tiktoken" if _tiktoken_encoder() is not None else "heuristic"

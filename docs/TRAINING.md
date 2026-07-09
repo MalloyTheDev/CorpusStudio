@@ -171,13 +171,21 @@ an inspectable file and returns a JSON summary that now also includes a real
 token budget, a rough VRAM planning estimate, a LoRA rank/alpha suggestion, and
 the exact per-target launch command.
 
-> **Token counts are an estimate by default.** To stay dependency-light the engine
-> uses a Unicode-aware heuristic (it counts CJK/kana/Hangul characters directly and
-> blends word/character estimates for everything else) — good enough for budget and
-> VRAM *planning*, but not exact. For exact BPE counts install the optional tokenizer
-> extra (`pip install corpus-studio-engine[tokenizer]`, which pulls in `tiktoken`);
-> `estimate_tokens` uses it automatically when present, with the heuristic as the
-> fallback. Treat the token budget and VRAM numbers as planning figures either way. As of v0.5 the desktop can also launch the
+> **Token counts are an estimate by default, and the budget says which counter ran.**
+> To stay dependency-light the engine picks the most exact counter available, in order,
+> and reports it in the budget's `method` field so a figure is never shown as exact when
+> it isn't:
+> 1. the **target model's own tokenizer** — install `pip install corpus-studio-engine[model-tokenizer]`
+>    (the light `tokenizers` library); `training-config` passes its `--base-model`, so the
+>    budget is exact *for that model* when its tokenizer is on the Hub (`method: hf:<model>`);
+> 2. **tiktoken** — `pip install corpus-studio-engine[tokenizer]`, exact BPE for the GPT-4
+>    family (`method: tiktoken`);
+> 3. a **Unicode-aware heuristic** (counts CJK/kana/Hangul directly, blends word/character
+>    estimates otherwise) — good for *planning*, not exact (`method: heuristic`).
+>
+> Each tier falls silently to the next on any failure (library absent, no network,
+> gated/unknown model). Treat the token budget and VRAM numbers as planning figures unless
+> `method` names a real tokenizer. As of v0.5 the desktop can also launch the
 user's installed trainer from that command (with explicit confirmation), stream
 logs, stop it, track checkpoints, resume, and compare before/after evaluations —
 see the [Training Launcher Design](#training-launcher-design-v05) section below.

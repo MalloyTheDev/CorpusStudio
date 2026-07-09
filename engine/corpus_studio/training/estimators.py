@@ -71,37 +71,44 @@ def _row_text(value: Any) -> str:
     return " ".join(parts)
 
 
-def estimate_token_budget(text_samples: list[str]) -> TokenBudgetEstimate:
-    """Estimate tokens across text samples using the shared token estimator."""
+def estimate_token_budget(
+    text_samples: list[str], model_id: str | None = None
+) -> TokenBudgetEstimate:
+    """Estimate tokens across text samples using the shared token estimator. When
+    ``model_id`` (a Hub id) is given and its tokenizer is available, the counts are
+    exact for that model; otherwise it falls back to tiktoken / the heuristic."""
 
-    counts = [estimate_tokens(sample) for sample in text_samples]
+    counts = [estimate_tokens(sample, model_id) for sample in text_samples]
     total = sum(counts)
     return TokenBudgetEstimate(
         example_count=len(text_samples),
         estimated_tokens=total,
-        method=estimator_name(),
+        method=estimator_name(model_id),
         mean_tokens_per_example=round(total / len(counts), 1) if counts else 0.0,
         max_tokens_in_example=max(counts) if counts else 0,
     )
 
 
-def build_training_token_budget(rows: list[dict], sequence_len: int) -> TokenBudgetEstimate:
+def build_training_token_budget(
+    rows: list[dict], sequence_len: int, model_id: str | None = None
+) -> TokenBudgetEstimate:
     """Full per-row token budget, including truncation against ``sequence_len``.
 
     ``tokens_per_epoch`` caps each row at ``sequence_len`` (what a trainer would
     actually process after truncation), and ``examples_over_sequence_len`` counts
-    the rows that would be truncated.
+    the rows that would be truncated. When ``model_id`` is given and its tokenizer
+    is available, the counts are exact for that target model.
     """
 
-    counts = [estimate_tokens(_row_text(row)) for row in rows]
+    counts = [estimate_tokens(_row_text(row), model_id) for row in rows]
     if not counts:
-        return TokenBudgetEstimate(sequence_len=sequence_len, method=estimator_name())
+        return TokenBudgetEstimate(sequence_len=sequence_len, method=estimator_name(model_id))
 
     total = sum(counts)
     return TokenBudgetEstimate(
         example_count=len(counts),
         estimated_tokens=total,
-        method=estimator_name(),
+        method=estimator_name(model_id),
         sequence_len=sequence_len,
         mean_tokens_per_example=round(total / len(counts), 1),
         max_tokens_in_example=max(counts),

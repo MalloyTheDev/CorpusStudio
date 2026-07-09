@@ -4,12 +4,47 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from corpus_studio.cli import app
+from corpus_studio.tokenization import estimate as estimate_mod
 from corpus_studio.training.estimators import (
     build_training_token_budget,
     estimate_token_budget,
 )
 
 runner = CliRunner()
+
+
+class _FakeEncoding:
+    def __init__(self, ids: list[int]) -> None:
+        self.ids = ids
+
+
+class _FakeTokenizer:
+    def encode(self, text: str) -> _FakeEncoding:
+        return _FakeEncoding(list(range(len(text.split()))))
+
+
+def test_budget_uses_the_target_model_tokenizer_when_available(monkeypatch):
+    # When the target model's tokenizer loads (optional `tokenizers` extra), the
+    # budget's method reports it, so the count is exact for that model.
+    estimate_mod._hf_tokenizer_cache.clear()
+    monkeypatch.setattr(estimate_mod, "_load_hf_tokenizer", lambda model_id: _FakeTokenizer())
+
+    budget = build_training_token_budget(
+        [{"instruction": "a b c", "output": "d e"}], sequence_len=2048, model_id="fake/model"
+    )
+
+    assert budget.method == "hf:fake/model"
+
+
+def test_budget_falls_back_without_a_model_tokenizer(monkeypatch):
+    estimate_mod._hf_tokenizer_cache.clear()
+    monkeypatch.setattr(estimate_mod, "_load_hf_tokenizer", lambda model_id: None)
+
+    budget = build_training_token_budget(
+        [{"instruction": "a b c", "output": "d e"}], sequence_len=2048, model_id="fake/model"
+    )
+
+    assert budget.method == "heuristic"  # no tokenizer + no tiktoken -> heuristic
 
 
 def _write(path: Path, rows: list[dict]) -> None:
