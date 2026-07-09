@@ -34,4 +34,14 @@ jobs:
       - name: Run tests with coverage
         run: |
           cd engine
-          pytest --cov=corpus_studio --cov-report=term-missing
+          pytest --cov=corpus_studio --cov-report=term-missing --cov-report=xml
+
+      # Upload coverage to Codecov. Soft-fail: this is best-effort reporting and must never
+      # break the gate — it no-ops until a CODECOV_TOKEN secret is configured for the repo.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./engine/coverage.xml
+          flags: engine
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
