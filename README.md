@@ -282,6 +282,8 @@ For what is implemented today, see [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.
 and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 For hands-on setup, see [`docs/DEVELOPMENT_SETUP.md`](docs/DEVELOPMENT_SETUP.md).
+For every engine command (the desktop shells out to the same ones), see the
+[`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md).
 For copyable row formats, see [`docs/SCHEMA_SYSTEM.md`](docs/SCHEMA_SYSTEM.md) and
 the per-schema reference in [`docs/schemas/`](docs/schemas/README.md).
 For dataset card output, see [`docs/DATASET_CARD.md`](docs/DATASET_CARD.md).
