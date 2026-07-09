@@ -2065,7 +2065,8 @@ public sealed class PythonEngineService : IEngineService
         string projectPath,
         string schemaId,
         bool removeDuplicates = false,
-        bool removeLowInformation = false
+        bool removeLowInformation = false,
+        bool redactPii = false
     )
     {
         var examplesPath = Path.Combine(projectPath, "examples.jsonl");
@@ -2085,6 +2086,10 @@ public sealed class PythonEngineService : IEngineService
         if (removeLowInformation)
         {
             arguments.Add("--drop-low-information");
+        }
+        if (redactPii)
+        {
+            arguments.Add("--redact-pii");
         }
 
         var output = await RunEngineCommandAsync(arguments.ToArray());
