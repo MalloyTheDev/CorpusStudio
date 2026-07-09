@@ -13,6 +13,25 @@ public interface IEngineService
     /// <summary>Compute the graded dataset-debt ledger for a project's examples.jsonl.</summary>
     Task<DebtReport> GetDatasetDebtAsync(string projectPath);
 
+    // --- Engine lifecycle (workspace startup / setup screen) -----------------------------
+    /// <summary>Whether the Python engine was located + is usable (else the setup screen shows).</summary>
+    bool IsEngineAvailable { get; }
+
+    /// <summary>Why the engine is unavailable (null when available) — surfaced on the setup screen.</summary>
+    string? EngineUnavailableReason { get; }
+
+    /// <summary>Retry locating the engine on the default search paths; true when it becomes available.</summary>
+    bool TryReinitialize();
+
+    /// <summary>Point the engine at a user-chosen folder; true when it contains a usable engine.</summary>
+    bool TryLocateEngine(string candidateDirectory);
+
+    /// <summary>List the dataset projects the engine knows about (for the Start Center / project list).</summary>
+    IReadOnlyList<DatasetProjectListItem> LoadProjects();
+
+    /// <summary>The desktop's saved settings (engine paths, defaults).</summary>
+    DesktopSettings GetSettings();
+
     /// <summary>The built-in dataset schemas (for mapping an import to the active project's schema).</summary>
     Task<IReadOnlyList<DatasetSchema>> GetSchemasAsync();
 

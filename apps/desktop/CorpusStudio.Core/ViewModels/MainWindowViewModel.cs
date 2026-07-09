@@ -197,6 +197,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand SaveExampleCommand { get; }
     public System.Windows.Input.ICommand ImportDatasetCommand { get; }
     public System.Windows.Input.ICommand ImportFromHuggingFaceCommand { get; }
+    public System.Windows.Input.ICommand LocateEngineCommand { get; }
+    public System.Windows.Input.ICommand RetryEngineCommand { get; }
     public System.Windows.Input.ICommand NewSuiteCommand { get; }
     public System.Windows.Input.ICommand ExportJsonlCommand { get; }
     public System.Windows.Input.ICommand RegisterArtifactFromRunCommand { get; }
@@ -322,6 +324,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         SaveExampleCommand = new AsyncRelayCommand(SaveExampleAsync);
         ImportDatasetCommand = new AsyncRelayCommand(ImportDatasetAsync);
         ImportFromHuggingFaceCommand = new AsyncRelayCommand(ImportFromHuggingFaceAsync);
+        LocateEngineCommand = new AsyncRelayCommand(LocateEngineAsync);
+        RetryEngineCommand = new AsyncRelayCommand(RetryEngineAsync);
         NewSuiteCommand = new AsyncRelayCommand(CreateSuiteAsync);
         ExportJsonlCommand = new AsyncRelayCommand(ExportJsonlAsync);
         RegisterArtifactFromRunCommand = new RelayCommand(RegisterArtifactFromRun);
@@ -2437,6 +2441,83 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         await RefreshDatasetVersionsAsync();
         await RefreshGateThresholdsAsync();
         await RefreshQualityAsync(recordHistory: false);
+    }
+
+    /// <summary>App-startup entry: show the setup screen when the engine isn't available, else load
+    /// the workspace. Called by the shell on load and after Locate/Retry succeed. Moved from the
+    /// code-behind (#249) so startup + the engine-setup screen are testable.</summary>
+    public async System.Threading.Tasks.Task StartWorkspaceAsync()
+    {
+        if (!_engine.IsEngineAvailable)
+        {
+            // Don't touch the engine — show the setup screen instead of crashing.
+            SetEngineUnavailable(_engine.EngineUnavailableReason);
+            return;
+        }
+
+        await InitializeWorkspaceAsync();
+    }
+
+    /// <summary>Load projects + settings from the engine and open the first project. Safe to call
+    /// again after the engine is located via the setup screen.</summary>
+    public async System.Threading.Tasks.Task InitializeWorkspaceAsync()
+    {
+        try
+        {
+            var projects = _engine.LoadProjects();
+            SetProjects(projects);
+            Settings.SetSettings(_engine.GetSettings());
+
+            var firstProject = projects.FirstOrDefault();
+            if (firstProject is not null)
+            {
+                await LoadProjectAsync(firstProject);
+            }
+        }
+        catch (Exception ex)
+        {
+            await _dialogs.ShowAsync(ex.Message, "Corpus Studio", DialogSeverity.Error);
+        }
+    }
+
+    /// <summary>Locate the engine via a folder picker; on success clear the setup screen + load the
+    /// workspace, else warn. Moved from the code-behind (#249).</summary>
+    public async System.Threading.Tasks.Task LocateEngineAsync()
+    {
+        var folder = await _filePicker.PickFolderAsync(
+            "Select the Corpus Studio engine folder (or the repo root that contains it)");
+        if (folder is null)
+        {
+            return;
+        }
+
+        if (_engine.TryLocateEngine(folder))
+        {
+            ClearEngineUnavailable();
+            await InitializeWorkspaceAsync();
+        }
+        else
+        {
+            await _dialogs.ShowAsync(
+                "That folder does not contain the Corpus Studio engine "
+                + "(expected corpus_studio/cli.py, or an engine/ subfolder).",
+                "Engine not found", DialogSeverity.Warning);
+        }
+    }
+
+    /// <summary>Retry initialising the engine on the default paths; on success load the workspace,
+    /// else re-show the setup screen. Moved from the code-behind (#249).</summary>
+    public async System.Threading.Tasks.Task RetryEngineAsync()
+    {
+        if (_engine.TryReinitialize())
+        {
+            ClearEngineUnavailable();
+            await InitializeWorkspaceAsync();
+        }
+        else
+        {
+            SetEngineUnavailable(_engine.EngineUnavailableReason);
+        }
     }
 
     /// <summary>Load + surface the project's gate thresholds (or an error). Moved from the code-behind

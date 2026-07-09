@@ -58,77 +58,12 @@ public partial class MainWindow : Window
 
     private MainWindowViewModel ViewModel => (MainWindowViewModel)DataContext;
 
+    // Startup + the engine-setup screen (locate/retry) now live on the shared view-model (#249):
+    // the shell just delegates its Loaded event to StartWorkspaceAsync, and the setup-screen
+    // buttons bind to LocateEngineCommand / RetryEngineCommand.
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        if (!_engineService.IsEngineAvailable)
-        {
-            // Don't touch the engine — show the setup screen instead of crashing.
-            ViewModel.SetEngineUnavailable(_engineService.EngineUnavailableReason);
-            return;
-        }
-
-        await InitializeWorkspaceAsync();
-    }
-
-    /// <summary>Load projects/settings from the engine. Safe to call again after the engine is
-    /// located via the setup screen.</summary>
-    private async Task InitializeWorkspaceAsync()
-    {
-        try
-        {
-            var projects = _engineService.LoadProjects();
-            ViewModel.SetProjects(projects);
-            ViewModel.Settings.SetSettings(_engineService.GetSettings());
-
-            var firstProject = projects.FirstOrDefault();
-            if (firstProject is not null)
-            {
-                await LoadProjectAsync(firstProject);
-            }
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "Corpus Studio", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private async void LocateEngineButton_Click(object sender, RoutedEventArgs e)
-    {
-        var folder = await FilePicker.PickFolderAsync(
-            "Select the Corpus Studio engine folder (or the repo root that contains it)");
-        if (folder is null)
-        {
-            return;
-        }
-
-        if (_engineService.TryLocateEngine(folder))
-        {
-            ViewModel.ClearEngineUnavailable();
-            await InitializeWorkspaceAsync();
-        }
-        else
-        {
-            MessageBox.Show(
-                this,
-                "That folder does not contain the Corpus Studio engine "
-                + "(expected corpus_studio/cli.py, or an engine/ subfolder).",
-                "Engine not found",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-        }
-    }
-
-    private async void RetryEngineButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_engineService.TryReinitialize())
-        {
-            ViewModel.ClearEngineUnavailable();
-            await InitializeWorkspaceAsync();
-        }
-        else
-        {
-            ViewModel.SetEngineUnavailable(_engineService.EngineUnavailableReason);
-        }
+        await ViewModel.StartWorkspaceAsync();
     }
 
     // The Studio-sidebar "New Dataset Project" button and the Start Center both open the

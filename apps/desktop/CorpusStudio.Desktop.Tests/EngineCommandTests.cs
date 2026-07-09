@@ -31,6 +31,16 @@ public sealed class EngineCommandTests
             return Task.FromResult(_debt);
         }
 
+        // Engine lifecycle (settable so tests can exercise the available / locate / retry paths).
+        public bool IsEngineAvailable { get; set; } = true;
+        public string? EngineUnavailableReason { get; set; }
+        public bool TryReinitializeResult { get; set; } = true;
+        public bool TryLocateResult { get; set; } = true;
+        public bool TryReinitialize() => TryReinitializeResult;
+        public bool TryLocateEngine(string candidateDirectory) => TryLocateResult;
+        public IReadOnlyList<DatasetProjectListItem> LoadProjects() => new List<DatasetProjectListItem>();
+        public DesktopSettings GetSettings() => new(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
+
         public Task<GateReport> RunDatasetGatesAsync(string projectPath, string schemaId, bool exportScope = false)
         {
             LastProjectPath = projectPath;
@@ -635,6 +645,80 @@ public sealed class EngineCommandTests
         Assert.True(engine.ConvertTabularCalled);          // CSV was converted to a staging JSONL...
         Assert.Equal(@"C:\fake\data.csv", engine.LastConvertInput);
         Assert.True(engine.CommitCalled);                  // ...then flowed through the shared preview/commit path
+    }
+
+    [Fact]
+    public async Task StartWorkspace_EngineUnavailable_ShowsSetupScreen()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { IsEngineAvailable = false, EngineUnavailableReason = "not found" };
+        var vm = VmWith(engine);
+
+        await vm.StartWorkspaceAsync();
+
+        Assert.True(vm.IsEngineUnavailable); // setup screen, not a crash
+    }
+
+    [Fact]
+    public async Task StartWorkspace_EngineAvailable_DoesNotShowSetup()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { IsEngineAvailable = true };
+        var vm = VmWith(engine);
+
+        await vm.StartWorkspaceAsync();
+
+        Assert.False(vm.IsEngineUnavailable); // initialised the workspace
+    }
+
+    [Fact]
+    public async Task LocateEngine_Success_ClearsTheSetupScreen()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { TryLocateResult = true };
+        var vm = VmWith(engine, filePicker: new FakeFilePickerService(@"C:\engine"));
+        vm.SetEngineUnavailable("not found");
+
+        await vm.LocateEngineAsync();
+
+        Assert.False(vm.IsEngineUnavailable); // located → cleared + initialised
+    }
+
+    [Fact]
+    public async Task LocateEngine_Failure_KeepsTheSetupScreen()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { TryLocateResult = false };
+        var vm = VmWith(engine, new FakeDialogService(confirm: true), new FakeFilePickerService(@"C:\wrong"));
+        vm.SetEngineUnavailable("not found");
+
+        await vm.LocateEngineAsync();
+
+        Assert.True(vm.IsEngineUnavailable); // wrong folder → still unavailable
+    }
+
+    [Fact]
+    public async Task LocateEngine_NoFolderPicked_IsANoOp()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { TryLocateResult = true };
+        var vm = VmWith(engine, filePicker: new FakeFilePickerService(null)); // cancelled picker
+        vm.SetEngineUnavailable("not found");
+
+        await vm.LocateEngineAsync();
+
+        Assert.True(vm.IsEngineUnavailable); // nothing changed
+    }
+
+    [Fact]
+    public async Task RetryEngine_Success_ClearsSetup_FailureKeepsIt()
+    {
+        var ok = new FakeEngine(new DebtReport { Grade = "A" }) { TryReinitializeResult = true };
+        var okVm = VmWith(ok);
+        okVm.SetEngineUnavailable("x");
+        await okVm.RetryEngineAsync();
+        Assert.False(okVm.IsEngineUnavailable);
+
+        var bad = new FakeEngine(new DebtReport { Grade = "A" }) { TryReinitializeResult = false, EngineUnavailableReason = "still not found" };
+        var badVm = VmWith(bad);
+        badVm.SetEngineUnavailable("x");
+        await badVm.RetryEngineAsync();
+        Assert.True(badVm.IsEngineUnavailable);
     }
 
     [Fact]
