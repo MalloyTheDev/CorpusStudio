@@ -57,6 +57,11 @@ public interface IAiAssistViewModel : INotifyPropertyChanged
     void ApplyAiAssistReviewState(AiAssistReviewQueueItem item);
     void ApplyAiAssistBulkReviewState(int updatedCount, string reviewState, int undoStepsAvailable);
     void ApplyAiAssistBulkUndoReviewState(int updatedCount, int undoStepsAvailable);
+    int BulkUndoStackDepth { get; }
+    void PushBulkUndoStep(IReadOnlyDictionary<string, string> previousStates);
+    IReadOnlyDictionary<string, string>? PeekBulkUndoStep();
+    void RemoveLastBulkUndoStep();
+    void ClearBulkUndoStack();
     IReadOnlyList<string> GetVisibleAiAssistReviewIds();
     IReadOnlyDictionary<string, string> GetVisibleAiAssistReviewStates();
     void SetAiAssistError(string message);

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.Services;
@@ -109,6 +110,17 @@ public sealed class EngineCommandTests
         public Task NewSuiteAsync(string projectPath, string name) => Task.CompletedTask;
         public Task<System.Collections.Generic.IReadOnlyList<SuiteSummary>> ListSuitesAsync(string projectPath) => Task.FromResult((System.Collections.Generic.IReadOnlyList<SuiteSummary>)new System.Collections.Generic.List<SuiteSummary>());
         public Task<PreferenceExportResult> ExportPreferenceForTrainingAsync(string projectPath, string format) => Task.FromResult(new PreferenceExportResult());
+        public bool RunAiAssistCalled { get; private set; }
+        public string? LastAiAssistDraft { get; private set; }
+        public AiAssistRunResult AiAssistRunResultToReturn { get; set; } = new() { ModelOutput = "a suggestion" };
+        public Task<AiAssistRunResult> RunAiAssistAsync(string draftText, string schemaId, string action, string backend, string model, string? baseUrl, int timeoutSeconds, string? instruction)
+        {
+            RunAiAssistCalled = true;
+            LastAiAssistDraft = draftText;
+            return Task.FromResult(AiAssistRunResultToReturn);
+        }
+        public AiAssistReviewQueueItem SaveAiAssistReviewQueueItem(string projectPath, string sourceDraft, AiAssistRunResult result) => new() { ReviewId = "r1" };
+        public System.Collections.Generic.IReadOnlyList<AiAssistReviewQueueItem> LoadAiAssistReviewQueue(string projectPath, int maxItems = 50) => new System.Collections.Generic.List<AiAssistReviewQueueItem> { new() { ReviewId = "r1" } };
     }
 
     private sealed class FakeDialogService : IDialogService
@@ -584,6 +596,72 @@ public sealed class EngineCommandTests
         Assert.True(engine.ConvertTabularCalled);          // CSV was converted to a staging JSONL...
         Assert.Equal(@"C:\fake\data.csv", engine.LastConvertInput);
         Assert.True(engine.CommitCalled);                  // ...then flowed through the shared preview/commit path
+    }
+
+    private static void SetAiAssistRunOptions(MainWindowViewModel vm)
+    {
+        vm.WritingStudio.DraftText = "a draft example";
+        vm.AiAssistConnection.AiAssistBackend = "ollama";
+        vm.AiAssistConnection.AiAssistModel = "llama3";
+        vm.AiAssistConnection.AiAssistTimeoutSeconds = "60";
+        // AiAssistAction defaults to "review".
+    }
+
+    [Fact]
+    public async Task RunAiAssist_HappyPath_Runs_Queues_Selects_AndClearsUndo()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine);
+        SelectFakeProject(vm);
+        SetAiAssistRunOptions(vm);
+        vm.AiAssist.PushBulkUndoStep(new Dictionary<string, string> { ["x"] = "accepted" });
+
+        await vm.RunAiAssistAsync();
+
+        Assert.True(engine.RunAiAssistCalled);
+        Assert.Equal("a draft example", engine.LastAiAssistDraft);
+        Assert.NotNull(vm.AiAssist.SelectedAiAssistReviewQueueItem); // queued item selected
+        Assert.Equal(0, vm.AiAssist.BulkUndoStackDepth);             // a fresh run clears the undo stack
+    }
+
+    [Fact]
+    public async Task RunAiAssist_WithoutProject_SetsErrorAndDoesNotRun()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine); // no project selected
+        SetAiAssistRunOptions(vm);
+
+        await vm.RunAiAssistAsync();
+
+        Assert.False(engine.RunAiAssistCalled);
+    }
+
+    [Fact]
+    public async Task RunAiAssist_WithoutDraft_SetsErrorAndDoesNotRun()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine);
+        SelectFakeProject(vm);
+        SetAiAssistRunOptions(vm);
+        vm.WritingStudio.DraftText = "   "; // blank draft
+
+        await vm.RunAiAssistAsync();
+
+        Assert.False(engine.RunAiAssistCalled);
+    }
+
+    [Fact]
+    public async Task RunAiAssist_WithInvalidTimeout_SetsErrorAndDoesNotRun()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine);
+        SelectFakeProject(vm);
+        SetAiAssistRunOptions(vm);
+        vm.AiAssistConnection.AiAssistTimeoutSeconds = "not-a-number";
+
+        await vm.RunAiAssistAsync();
+
+        Assert.False(engine.RunAiAssistCalled);
     }
 
     [Fact]

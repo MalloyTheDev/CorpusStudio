@@ -1811,7 +1811,7 @@
                                         Content="Run AI Assist"
                                         Width="124"
                                         Margin="0,0,8,0"
-                                        Click="RunAiAssistButton_Click" />
+                                        Command="{Binding RunAiAssistCommand}" />
                                 <TextBlock AutomationProperties.AutomationId="AiAssistModelListSummaryTextBlock"
                                            Text="{Binding AiAssistConnection.AiAssistModelListSummary, Mode=OneWay}"
                                            Width="260"
