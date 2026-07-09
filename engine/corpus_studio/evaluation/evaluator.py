@@ -1,5 +1,7 @@
 """Evaluation orchestration for local model testing."""
 
+from collections.abc import Callable
+
 from pydantic import BaseModel, Field
 
 from corpus_studio.evaluation.reports import (
@@ -117,85 +119,99 @@ def extract_evaluation_examples(
     raise ValueError("Evaluation Lab MVP supports instruction and chat schemas.")
 
 
+def _evaluate_example(
+    example: EvaluationDatasetExample,
+    backend: ModelBackend,
+    active_scorer: Scorer,
+    config: EvaluationRunConfig,
+) -> EvaluationExampleResult:
+    """Evaluate one example, isolating any backend/scorer failure into a scored-0
+    result (never raising) so one bad row can't discard the whole run."""
+    try:
+        response = backend.generate(
+            BackendGenerateRequest(
+                prompt=example.prompt if not example.messages else None,
+                messages=example.messages,
+            )
+        )
+    except BACKEND_ERROR_TYPES as exc:
+        # Isolate one example's backend failure: record it as a scored-0
+        # failure so the run finishes and the rest of the dataset is scored.
+        return EvaluationExampleResult(
+            example_id=example.example_id,
+            prompt=example.prompt,
+            expected_output=example.expected_output,
+            model_output="",
+            score=0.0,
+            passed=False,
+            tags=example.tags or config.tags,
+            notes="backend_error",
+            error=format_backend_error(exc),
+        )
+
+    try:
+        scored = active_scorer.score(example.prompt, example.expected_output, response.text)
+    except BACKEND_ERROR_TYPES as exc:
+        # BACKEND_ERROR_TYPES = (OSError, ValueError), so this also covers JSON decode
+        # errors (json.JSONDecodeError subclasses ValueError) from a judge response.
+        # Isolate a scorer failure (e.g. an LLM-judge backend outage or an unparseable
+        # judge response) to THIS row: the model output already succeeded, so keep it,
+        # record the row as a scored-0 failure, and finish the rest of the run — one bad
+        # judge call must not discard the whole evaluation. Mirrors the backend-error path.
+        return EvaluationExampleResult(
+            example_id=example.example_id,
+            prompt=example.prompt,
+            expected_output=example.expected_output,
+            model_output=response.text,
+            score=0.0,
+            passed=False,
+            tags=example.tags or config.tags,
+            notes="scorer_error",
+            error=format_backend_error(exc),
+        )
+
+    return EvaluationExampleResult(
+        example_id=example.example_id,
+        prompt=example.prompt,
+        expected_output=example.expected_output,
+        model_output=response.text,
+        score=scored.score,
+        passed=scored.score >= config.score_threshold,
+        tags=example.tags or config.tags,
+        notes=_score_failure_note(scored.score, config.score_threshold),
+        rationale=scored.rationale,
+    )
+
+
 def run_evaluation(
     config: EvaluationRunConfig,
     examples: list[EvaluationDatasetExample],
     backend: ModelBackend,
     limit: int | None = None,
     scorer: Scorer | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> EvaluationReport:
     """Run examples through a backend and return a JSON-serializable report.
 
     ``scorer`` selects the automatic metric; it defaults to keyword-overlap recall (offline,
     no judge). Pass an ``LlmJudgeScorer`` to score with an evaluator model instead.
+
+    ``progress_callback`` (optional) is invoked ``(completed, total)`` after each example is
+    scored — for a live progress bar / streamed count on a long run. It is best-effort: a
+    callback that raises must not abort the evaluation, so its errors are swallowed.
     """
 
     active_scorer: Scorer = scorer if scorer is not None else KeywordOverlapScorer()
     selected_examples = examples[:limit] if limit is not None else examples
+    total = len(selected_examples)
     results: list[EvaluationExampleResult] = []
     for example in selected_examples:
-        try:
-            response = backend.generate(
-                BackendGenerateRequest(
-                    prompt=example.prompt if not example.messages else None,
-                    messages=example.messages,
-                )
-            )
-        except BACKEND_ERROR_TYPES as exc:
-            # Isolate one example's backend failure: record it as a scored-0
-            # failure so the run finishes and the rest of the dataset is scored.
-            results.append(
-                EvaluationExampleResult(
-                    example_id=example.example_id,
-                    prompt=example.prompt,
-                    expected_output=example.expected_output,
-                    model_output="",
-                    score=0.0,
-                    passed=False,
-                    tags=example.tags or config.tags,
-                    notes="backend_error",
-                    error=format_backend_error(exc),
-                )
-            )
-            continue
-
-        try:
-            scored = active_scorer.score(example.prompt, example.expected_output, response.text)
-        except BACKEND_ERROR_TYPES as exc:
-            # BACKEND_ERROR_TYPES = (OSError, ValueError), so this also covers JSON decode
-            # errors (json.JSONDecodeError subclasses ValueError) from a judge response.
-            # Isolate a scorer failure (e.g. an LLM-judge backend outage or an unparseable
-            # judge response) to THIS row: the model output already succeeded, so keep it,
-            # record the row as a scored-0 failure, and finish the rest of the run — one bad
-            # judge call must not discard the whole evaluation. Mirrors the backend-error path.
-            results.append(
-                EvaluationExampleResult(
-                    example_id=example.example_id,
-                    prompt=example.prompt,
-                    expected_output=example.expected_output,
-                    model_output=response.text,
-                    score=0.0,
-                    passed=False,
-                    tags=example.tags or config.tags,
-                    notes="scorer_error",
-                    error=format_backend_error(exc),
-                )
-            )
-            continue
-
-        results.append(
-            EvaluationExampleResult(
-                example_id=example.example_id,
-                prompt=example.prompt,
-                expected_output=example.expected_output,
-                model_output=response.text,
-                score=scored.score,
-                passed=scored.score >= config.score_threshold,
-                tags=example.tags or config.tags,
-                notes=_score_failure_note(scored.score, config.score_threshold),
-                rationale=scored.rationale,
-            )
-        )
+        results.append(_evaluate_example(example, backend, active_scorer, config))
+        if progress_callback is not None:
+            try:
+                progress_callback(len(results), total)
+            except Exception:  # noqa: BLE001 - a progress sink must never break the run
+                pass
 
     return EvaluationReport.from_results(
         dataset=config.dataset,
