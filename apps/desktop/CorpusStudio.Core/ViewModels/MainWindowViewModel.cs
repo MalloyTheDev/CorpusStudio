@@ -156,6 +156,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand DismissErrorCommand { get; }
 
     private readonly IEngineService _engine = null!;
+    private readonly IDialogService _dialogs = new NullDialogService();
 
     /// <summary>Run the dataset-debt assessment and apply it to the Debt tab — the engine-run
     /// orchestration moved off the desktop code-behind into a shared async command.</summary>
@@ -182,6 +183,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand RebuildProjectIndexCommand { get; }
     public System.Windows.Input.ICommand ExportPreferenceRankingCommand { get; }
     public System.Windows.Input.ICommand RefreshDatasetVersionsCommand { get; }
+    public System.Windows.Input.ICommand RestoreDatasetVersionCommand { get; }
     public System.Windows.Input.ICommand RegisterArtifactFromRunCommand { get; }
     public System.Windows.Input.ICommand KeepArtifactCommand { get; }
     public System.Windows.Input.ICommand RejectArtifactCommand { get; }
@@ -213,7 +215,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             new SplitsViewModel(), new PreferenceReviewViewModel(), new QuarantineViewModel(),
             new ExamplesViewModel(), new WritingStudioViewModel(), new AiAssistRewriteBatchesViewModel(),
             new AiAssistConnectionViewModel(), new EvaluationConnectionViewModel(), new QualityViewModel(),
-            new PythonEngineService())
+            new PythonEngineService(), new NullDialogService())
     {
     }
 
@@ -225,9 +227,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         IWritingStudioViewModel writingStudio, IAiAssistRewriteBatchesViewModel rewriteBatches,
         IAiAssistConnectionViewModel aiAssistConnection, IEvaluationConnectionViewModel evaluationConnection,
         IQualityViewModel quality,
-        IEngineService engine)
+        IEngineService engine,
+        IDialogService dialogs)
     {
         _engine = engine;
+        _dialogs = dialogs;
         Debt = debt;
         Arena = arena;
         Settings = settings;
@@ -290,6 +294,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RebuildProjectIndexCommand = new AsyncRelayCommand(RebuildProjectIndexAsync);
         ExportPreferenceRankingCommand = new RelayCommand(ExportPreferenceRanking);
         RefreshDatasetVersionsCommand = new AsyncRelayCommand(RefreshDatasetVersionsAsync);
+        RestoreDatasetVersionCommand = new AsyncRelayCommand(RestoreDatasetVersionAsync);
         RegisterArtifactFromRunCommand = new RelayCommand(RegisterArtifactFromRun);
         KeepArtifactCommand = new AsyncRelayCommand(KeepArtifactAsync);
         RejectArtifactCommand = new RelayCommand(() => SetSelectedArtifactStatus("rejected"));
@@ -1309,6 +1314,61 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         return true;
+    }
+
+    /// <summary>Restore the selected dataset version in place (after a confirm), capturing the current
+    /// dataset as an undo version first. The confirm routes through the head-agnostic IDialogService
+    /// seam so the VM owns the flow (no View coupling). Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task RestoreDatasetVersionAsync()
+    {
+        if (Versions.SelectedDatasetVersion is not { } selected)
+        {
+            Versions.SetDatasetVersionError("Select a version to restore.");
+            return;
+        }
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Versions.SetDatasetVersionError("Create or select a dataset project first.");
+            return;
+        }
+
+        var projectPath = ActiveProjectPath;
+
+        // Confirm — this overwrites the current dataset. The dialog is honest about the
+        // undo capture and the canonical caveat.
+        var confirmed = await _dialogs.ConfirmAsync(
+            VersionsViewModel.BuildRestoreConfirmation(selected, Examples.Items.Count),
+            "Restore version",
+            DialogButtons.YesNo,
+            DialogSeverity.Warning);
+        if (!confirmed)
+        {
+            return;
+        }
+
+        try
+        {
+            SetBusy("Restoring version (capturing the current dataset first)...");
+
+            // The service captures the current dataset as an undo version, then restores
+            // the selected version to a verified temp and atomically swaps it in. Any
+            // failure before the swap leaves examples.jsonl untouched.
+            var result = await _engine.RestoreDatasetVersionInPlaceAsync(
+                projectPath, selected.Record.VersionId, VersionsViewModel.BuildRestoreUndoLabel(selected));
+
+            // Reflect the restored dataset (and the flipped integrity badges) in the UI.
+            SetExamples(_engine.LoadExamples(projectPath));
+            Versions.ApplyRestoreResult(result);
+            await RefreshDatasetVersionsAsync();
+        }
+        catch (System.Exception ex)
+        {
+            Versions.SetDatasetVersionError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
     }
 
     /// <summary>Export the visible preference-review ranking to a file. Moved from the desktop code-behind.</summary>
