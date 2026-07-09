@@ -2216,18 +2216,18 @@
                                         Content="Launch _Training"
                                         IsEnabled="{Binding Training.CanLaunchTraining, Mode=OneWay}"
                                         Margin="0,0,8,0"
-                                        Click="LaunchTrainingButton_Click" />
+                                        Command="{Binding LaunchTrainingCommand}" />
                                 <Button AutomationProperties.AutomationId="StopTrainingButton"
                                         Content="Stop"
                                         IsEnabled="{Binding Training.IsTrainingRunning, Mode=OneWay}"
                                         Margin="0,0,12,0"
-                                        Click="StopTrainingButton_Click" />
+                                        Command="{Binding StopTrainingCommand}" />
                                 <Button AutomationProperties.AutomationId="ResumeTrainingButton"
                                         Content="Resume latest"
                                         IsEnabled="{Binding Training.CanResumeTraining, Mode=OneWay}"
                                         ToolTip="Relaunch from the newest checkpoint (targets with a resume flag only)"
                                         Margin="0,0,8,0"
-                                        Click="ResumeTrainingButton_Click" />
+                                        Command="{Binding ResumeTrainingCommand}" />
                                 <Button AutomationProperties.AutomationId="RefreshTrainingCheckpointsButton"
                                         Content="Refresh checkpoints"
                                         Margin="0,0,8,0"

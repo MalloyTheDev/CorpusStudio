@@ -43,6 +43,7 @@ public partial class App : Application
             // No Avalonia HF import window yet — the no-op keeps the shared VM graph composing (issue #245).
             services.AddSingleton<CorpusStudio.Desktop.Services.IHuggingFaceImportDialog, CorpusStudio.Desktop.Services.NullHuggingFaceImportDialog>();
             services.AddSingleton<CorpusStudio.Desktop.Services.IDispatcherTimerFactory, Services.AvaloniaDispatcherTimerFactory>();
+            services.AddSingleton<CorpusStudio.Desktop.Services.IProcessRunner, CorpusStudio.Desktop.Services.TrainingProcessRunner>();
             services.AddTransient<MainWindowViewModel>();
             var provider = services.BuildServiceProvider();
 
