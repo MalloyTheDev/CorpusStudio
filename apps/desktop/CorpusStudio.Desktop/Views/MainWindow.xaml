@@ -1219,7 +1219,7 @@
                                 <Button AutomationProperties.AutomationId="ExportPreferenceRankingButton"
                                         Content="Export Ranking"
                                         Height="32"
-                                        Click="ExportPreferenceRankingButton_Click" />
+                                        Command="{Binding ExportPreferenceRankingCommand}" />
                                 <ComboBox AutomationProperties.AutomationId="PreferenceExportFormatComboBox"
                                           ItemsSource="{Binding PreferenceReview.PreferenceExportFormatOptions}"
                                           SelectedItem="{Binding PreferenceReview.PreferenceExportFormat, Mode=TwoWay}"

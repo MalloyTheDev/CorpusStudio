@@ -43,6 +43,7 @@ public sealed class EngineCommandTests
         public Task<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName)
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>>(new System.Collections.Generic.List<SuiteHistoryEntry>());
         public Task<BenchmarkReport> RunBenchmarkAsync(string projectPath, string schemaId, string backend, System.Collections.Generic.IReadOnlyList<string> models, string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds) => Task.FromResult(new BenchmarkReport());
+        public string ExportPreferenceRanking(string projectPath, System.Collections.Generic.IReadOnlyList<PreferenceReviewItem> items) => string.Empty;
         public System.Collections.Generic.IReadOnlyList<(ModelArtifactRecord Record, string Integrity)> LoadArtifacts(string projectPath, System.Func<ModelArtifactRecord, string>? integrityOf = null) => new System.Collections.Generic.List<(ModelArtifactRecord, string)>();
         public ModelArtifactRecord RegisterArtifact(string projectPath, string runId, string path, string kind = "adapter", string notes = "") => new ModelArtifactRecord();
         public Task<GateReport> GateArtifactAsync(string projectPath, string artifactId) => Task.FromResult(new GateReport());
@@ -414,5 +415,15 @@ public sealed class EngineCommandTests
         vm.RefreshArtifacts();
 
         Assert.Contains("Create or select a dataset project", vm.Artifacts.ArtifactSummary);
+    }
+
+    [Fact]
+    public void ExportPreferenceRanking_WithoutProject_SetsError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+
+        vm.ExportPreferenceRanking();
+
+        Assert.Contains("Create or select a preference project", vm.PreferenceReview.PreferenceReviewSummary);
     }
 }
