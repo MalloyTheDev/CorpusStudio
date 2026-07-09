@@ -180,6 +180,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand SaveGateThresholdsCommand { get; }
     public System.Windows.Input.ICommand RefreshProviderPoliciesCommand { get; }
     public System.Windows.Input.ICommand RebuildProjectIndexCommand { get; }
+    public System.Windows.Input.ICommand RegisterArtifactFromRunCommand { get; }
+    public System.Windows.Input.ICommand KeepArtifactCommand { get; }
+    public System.Windows.Input.ICommand RejectArtifactCommand { get; }
+    public System.Windows.Input.ICommand RefreshArtifactsCommand { get; }
     public System.Windows.Input.ICommand DiffVersionsCommand { get; }
     public System.Windows.Input.ICommand ViewArtifactCardCommand { get; }
     public System.Windows.Input.ICommand GenerateDatasetCardCommand { get; }
@@ -282,6 +286,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         SaveGateThresholdsCommand = new AsyncRelayCommand(SaveGateThresholdsAsync);
         RefreshProviderPoliciesCommand = new AsyncRelayCommand(RefreshProviderPoliciesAsync);
         RebuildProjectIndexCommand = new AsyncRelayCommand(RebuildProjectIndexAsync);
+        RegisterArtifactFromRunCommand = new RelayCommand(RegisterArtifactFromRun);
+        KeepArtifactCommand = new AsyncRelayCommand(KeepArtifactAsync);
+        RejectArtifactCommand = new RelayCommand(() => SetSelectedArtifactStatus("rejected"));
+        RefreshArtifactsCommand = new RelayCommand(RefreshArtifacts);
         DiffVersionsCommand = new AsyncRelayCommand(DiffVersionsAsync);
         ViewArtifactCardCommand = new AsyncRelayCommand(ViewArtifactCardAsync);
         GenerateDatasetCardCommand = new AsyncRelayCommand(GenerateDatasetCardAsync);
@@ -1297,6 +1305,139 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         return true;
+    }
+
+    /// <summary>Register the newest training run's output directory as a model artifact.
+    /// Moved from the desktop code-behind.</summary>
+    public void RegisterArtifactFromRun()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Artifacts.SetArtifactError("Create or select a dataset project first.");
+            return;
+        }
+
+        var projectPath = ActiveProjectPath;
+        try
+        {
+            var run = _engine.LoadTrainingRunRecords(projectPath).FirstOrDefault();
+            if (run is null)
+            {
+                Artifacts.SetArtifactError("No training run has been recorded yet.");
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(run.OutputDir))
+            {
+                Artifacts.SetArtifactError("The latest run has no output directory to register.");
+                return;
+            }
+
+            _engine.RegisterArtifact(projectPath, run.RunId, run.OutputDir);
+            RefreshArtifacts();
+        }
+        catch (System.Exception ex)
+        {
+            Artifacts.SetArtifactError(ex.Message);
+        }
+    }
+
+    /// <summary>Promote-gate then keep the selected artifact — the engine re-enforces the gate
+    /// authoritatively, so a keep can never bypass it. Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task KeepArtifactAsync()
+    {
+        var selected = Artifacts.SelectedModelArtifact;
+        if (selected is null)
+        {
+            Artifacts.SetArtifactError("Select an artifact first.");
+            return;
+        }
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            return;
+        }
+
+        var projectPath = ActiveProjectPath;
+        try
+        {
+            SetBusy("Promote-gating artifact...");
+
+            // Preview the promote gate so the user sees the verdict/reason before writing.
+            var report = await _engine.GateArtifactAsync(projectPath, selected.Record.ArtifactId);
+            var allowed = Artifacts.ApplyPromoteGate(report);
+            if (!allowed)
+            {
+                return;
+            }
+
+            // ...then write through the ENGINE, which re-enforces the gate authoritatively — the
+            // keep can never bypass it (a block throws and is surfaced below).
+            await _engine.PromoteArtifactAsync(projectPath, selected.Record.ArtifactId);
+            RefreshArtifacts();
+        }
+        catch (System.Exception ex)
+        {
+            Artifacts.SetArtifactError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Set the selected artifact's status directly (candidate/rejected — never "kept",
+    /// which must go through the gated promote path). Moved from the desktop code-behind.</summary>
+    private void SetSelectedArtifactStatus(string status)
+    {
+        var selected = Artifacts.SelectedModelArtifact;
+        if (selected is null)
+        {
+            Artifacts.SetArtifactError("Select an artifact first.");
+            return;
+        }
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            return;
+        }
+
+        try
+        {
+            _engine.UpdateArtifactStatus(ActiveProjectPath, selected.Record.ArtifactId, status);
+            RefreshArtifacts();
+        }
+        catch (System.Exception ex)
+        {
+            Artifacts.SetArtifactError(ex.Message);
+        }
+    }
+
+    /// <summary>Reload the artifact list, resolving each artifact's base_model live via its run_id
+    /// (never stored on the artifact). Moved from the desktop code-behind.</summary>
+    public void RefreshArtifacts()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Artifacts.SetArtifactError("Create or select a dataset project first.");
+            return;
+        }
+
+        var projectPath = ActiveProjectPath;
+        try
+        {
+            // Resolve base_model live through run_id (never stored on the artifact).
+            var runs = _engine.LoadTrainingRunRecords(projectPath)
+                .ToDictionary(r => r.RunId, r => r, StringComparer.Ordinal);
+            var items = _engine.LoadArtifacts(projectPath)
+                .Select(entry => new ArtifactDisplayItem(
+                    entry.Record,
+                    entry.Integrity,
+                    runs.TryGetValue(entry.Record.RunId, out var run) ? run.BaseModel : string.Empty))
+                .ToList();
+            Artifacts.ApplyArtifacts(items);
+        }
+        catch (System.Exception ex)
+        {
+            Artifacts.SetArtifactError(ex.Message);
+        }
     }
 
     /// <summary>Rebuild the project index from disk and reload the project list (preserving the

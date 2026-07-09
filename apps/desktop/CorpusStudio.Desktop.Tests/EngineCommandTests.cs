@@ -43,6 +43,11 @@ public sealed class EngineCommandTests
         public Task<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName)
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>>(new System.Collections.Generic.List<SuiteHistoryEntry>());
         public Task<BenchmarkReport> RunBenchmarkAsync(string projectPath, string schemaId, string backend, System.Collections.Generic.IReadOnlyList<string> models, string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds) => Task.FromResult(new BenchmarkReport());
+        public System.Collections.Generic.IReadOnlyList<(ModelArtifactRecord Record, string Integrity)> LoadArtifacts(string projectPath, System.Func<ModelArtifactRecord, string>? integrityOf = null) => new System.Collections.Generic.List<(ModelArtifactRecord, string)>();
+        public ModelArtifactRecord RegisterArtifact(string projectPath, string runId, string path, string kind = "adapter", string notes = "") => new ModelArtifactRecord();
+        public Task<GateReport> GateArtifactAsync(string projectPath, string artifactId) => Task.FromResult(new GateReport());
+        public Task<ModelArtifactRecord> PromoteArtifactAsync(string projectPath, string artifactId) => Task.FromResult(new ModelArtifactRecord());
+        public ModelArtifactRecord UpdateArtifactStatus(string projectPath, string artifactId, string status) => new ModelArtifactRecord();
         public Task<ProjectIndexRebuildResult> RebuildProjectIndexAsync() => Task.FromResult(new ProjectIndexRebuildResult());
         public Task<System.Collections.Generic.IReadOnlyList<DatasetProjectListItem>> LoadProjectsFromIndexAsync() => Task.FromResult<System.Collections.Generic.IReadOnlyList<DatasetProjectListItem>>(new System.Collections.Generic.List<DatasetProjectListItem>());
         public Task SetGateThresholdsAsync(string projectPath, GateThresholds thresholds) => Task.CompletedTask;
@@ -378,5 +383,36 @@ public sealed class EngineCommandTests
         // Fake returns an empty rebuild result + empty project list → the flow completed end-to-end.
         Assert.Contains("No projects found to index", vm.ProjectIndexSummary);
         Assert.Empty(vm.Projects);
+    }
+
+    [Fact]
+    public void RegisterArtifactFromRun_WithoutProject_SetsArtifactError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+
+        vm.RegisterArtifactFromRun();
+
+        Assert.Contains("Create or select a dataset project", vm.Artifacts.ArtifactSummary);
+    }
+
+    [Fact]
+    public async Task KeepArtifact_WithoutSelection_SetsArtifactError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        SelectFakeProject(vm); // no artifact selected
+
+        await vm.KeepArtifactAsync();
+
+        Assert.Contains("Select an artifact first", vm.Artifacts.ArtifactSummary);
+    }
+
+    [Fact]
+    public void RefreshArtifacts_WithoutProject_SetsArtifactError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+
+        vm.RefreshArtifacts();
+
+        Assert.Contains("Create or select a dataset project", vm.Artifacts.ArtifactSummary);
     }
 }

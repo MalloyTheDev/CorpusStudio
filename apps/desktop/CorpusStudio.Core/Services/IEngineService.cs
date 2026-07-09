@@ -47,6 +47,23 @@ public interface IEngineService
     /// <summary>Reconcile tracked reviewed-fixes against a fresh evaluation's per-example results.</summary>
     IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, IReadOnlyList<EvaluationExampleResult> results);
 
+    /// <summary>Load the project's model artifacts (record + live integrity string).</summary>
+    IReadOnlyList<(ModelArtifactRecord Record, string Integrity)> LoadArtifacts(
+        string projectPath, System.Func<ModelArtifactRecord, string>? integrityOf = null);
+
+    /// <summary>Register a training run's output directory as a model artifact.</summary>
+    ModelArtifactRecord RegisterArtifact(
+        string projectPath, string runId, string path, string kind = "adapter", string notes = "");
+
+    /// <summary>Preview the promote gate for an artifact (verdict/reason; does not write).</summary>
+    Task<GateReport> GateArtifactAsync(string projectPath, string artifactId);
+
+    /// <summary>Promote an artifact to "kept" through the engine (re-enforces the promote gate).</summary>
+    Task<ModelArtifactRecord> PromoteArtifactAsync(string projectPath, string artifactId);
+
+    /// <summary>Set an artifact's status directly (candidate/rejected; "kept" must use PromoteArtifactAsync).</summary>
+    ModelArtifactRecord UpdateArtifactStatus(string projectPath, string artifactId, string status);
+
     /// <summary>Rebuild the on-disk project index (rescans the project root).</summary>
     Task<ProjectIndexRebuildResult> RebuildProjectIndexAsync();
 

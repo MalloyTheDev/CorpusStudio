@@ -2396,22 +2396,22 @@
                                         Content="Register latest run's output"
                                         ToolTip="Register the newest training run's output directory as an artifact"
                                         Margin="0,0,8,0"
-                                        Click="RegisterArtifactFromRunButton_Click" />
+                                        Command="{Binding RegisterArtifactFromRunCommand}" />
                                 <Button AutomationProperties.AutomationId="KeepArtifactButton"
                                         Content="Keep"
                                         Margin="0,0,8,0"
-                                        Click="KeepArtifactButton_Click" />
+                                        Command="{Binding KeepArtifactCommand}" />
                                 <Button AutomationProperties.AutomationId="RejectArtifactButton"
                                         Content="Reject"
                                         Margin="0,0,8,0"
-                                        Click="RejectArtifactButton_Click" />
+                                        Command="{Binding RejectArtifactCommand}" />
                                 <Button AutomationProperties.AutomationId="ViewArtifactCardButton"
                                         Content="View card"
                                         Margin="0,0,8,0"
                                         Command="{Binding ViewArtifactCardCommand}" />
                                 <Button AutomationProperties.AutomationId="RefreshArtifactsButton"
                                         Content="Refresh"
-                                        Click="RefreshArtifactsButton_Click" />
+                                        Command="{Binding RefreshArtifactsCommand}" />
                             </WrapPanel>
                             <Grid Grid.Row="2">
                                 <Grid.ColumnDefinitions>
