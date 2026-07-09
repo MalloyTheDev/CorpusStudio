@@ -51,6 +51,10 @@ public interface IEngineService
     /// optionally mask detected PII/secrets in the export — known patterns only, not de-identification).</summary>
     Task<ExportResult> ExportProjectExamplesAsync(string projectPath, string schemaId, bool removeDuplicates = false, bool removeLowInformation = false, bool redactPii = false);
 
+    /// <summary>Convert a CSV/TSV file to a staging JSONL (header row → keys, cells as text) so it can
+    /// flow through the same import-preview/quarantine/commit path as any JSONL import.</summary>
+    Task ConvertTabularToJsonlAsync(string inputPath, string outputPath);
+
     /// <summary>Preview a JSONL import against a schema (accepted/rejected rows, no write).</summary>
     Task<ImportPreviewReport> PreviewImportAsync(string importPath, string schemaId);
 

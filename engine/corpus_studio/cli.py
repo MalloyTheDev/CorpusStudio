@@ -56,6 +56,7 @@ from corpus_studio.importers.hf_hub import (
 )
 from corpus_studio.importers.jsonl_importer import read_jsonl
 from corpus_studio.importers.jsonl_preview import preview_jsonl_import
+from corpus_studio.importers.tabular_importer import convert_tabular_to_jsonl
 from corpus_studio.model_backends.base import BackendHealthReport, BackendModelListReport
 from corpus_studio.model_backends.ollama import OllamaBackend, default_ollama_config
 from corpus_studio.model_backends.openai_compatible import (
@@ -337,6 +338,34 @@ def import_preview(path: Path, schema: str):
 
     report = preview_jsonl_import(path, schema)
     typer.echo(report.model_dump_json(indent=2))
+
+
+@app.command("import-convert")
+def import_convert(path: Path, output_path: Path):
+    """Convert a CSV/TSV file to a JSONL staging file for import.
+
+    The header row defines the keys; every cell is carried across as text (CSV
+    has no types), so a value that a schema field expects as a number/list will
+    quarantine in the normal import-preview — this command only reshapes tabular
+    -> JSONL. The staging JSONL then flows through the same import-preview ->
+    quarantine -> commit path as any JSONL or Hugging Face import.
+    """
+    try:
+        result = convert_tabular_to_jsonl(path, output_path)
+    except (OSError, ValueError, UnicodeError) as exc:
+        typer.echo(f"Could not convert '{path}': {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(
+        json.dumps(
+            {
+                "output_path": result.output_path,
+                "rows_converted": result.rows_converted,
+                "columns": result.columns,
+            },
+            indent=2,
+        )
+    )
 
 
 @app.command("hf-inspect")

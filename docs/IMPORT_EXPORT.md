@@ -13,6 +13,8 @@ The import system turns existing files into dataset examples.
 ### Supported current imports
 
 - JSONL through the desktop app and Python engine preview command
+- **CSV / TSV** through the desktop **Import Dataset** picker and the engine
+  `import-convert` command — see below
 - **Hugging Face Hub datasets** (read-only, public) via the engine
   `hf-inspect` / `hf-import` commands — see below
 
@@ -21,7 +23,6 @@ The import system turns existing files into dataset examples.
 - JSON
 - TXT
 - Markdown
-- CSV
 - Parquet
 - code folders
 - image folders
@@ -39,13 +40,32 @@ Select source
 -> quarantine failed rows
 ```
 
-The current desktop import flow accepts a JSONL file, previews every non-empty
-row against the active project schema, reports accepted and rejected row counts,
-and shows failed row numbers with validation errors. When a file contains both
-valid and rejected rows, the user can explicitly import the valid rows and save
+The current desktop import flow accepts a JSONL, CSV, or TSV file, previews every
+non-empty row against the active project schema, reports accepted and rejected row
+counts, and shows failed row numbers with validation errors. When a file contains
+both valid and rejected rows, the user can explicitly import the valid rows and save
 the rejected rows to `import_quarantine` for repair. The desktop app can review
 quarantined rows and retry a selected raw row by loading it back into Writing
 Studio.
+
+### CSV / TSV import
+
+Corpus Studio stays **JSONL-canonical** — it authors, validates, gates, and exports
+JSONL. Tabular files are supported at the import boundary by converting them to a
+staging JSONL that then flows through the *exact same* preview → quarantine → commit
+path as any JSONL (or Hugging Face) import, so there is one validation/commit path,
+not a second tabular one. The desktop **Import Dataset** picker accepts `.csv`,
+`.tsv`, and `.jsonl`; a CSV/TSV pick is converted to a temp staging JSONL first (the
+engine `import-convert <path> <output>` command), then previewed and imported.
+
+The header row defines the field keys and the delimiter is chosen by extension
+(`.tsv`/`.tab` → tab, else comma; a UTF-8 BOM from Excel/Windows exports is
+tolerated). **Honesty boundary:** a CSV cell has no type, so every value is imported
+as text. A row whose schema field expects a number/list/object will therefore fail
+the normal import-preview validation and land in **quarantine** for repair — exactly
+like a malformed JSONL row. The converter never coerces types or drops columns; the
+original file is never modified. (Parquet/Excel remain future work — they would pull
+in a heavier dependency; CSV/TSV use the standard library only.)
 
 ### Import principles
 

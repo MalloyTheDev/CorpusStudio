@@ -37,7 +37,7 @@ a training run of your own installed trainer:
 - author and validate examples through the Python engine (required fields,
   types, list element types, enums, numeric bounds, nested object shapes,
   chat message structure) with selectable issue navigation
-- preview/import JSONL with failed-row quarantine, review, and retry
+- preview/import JSONL, CSV, and TSV with failed-row quarantine, review, and retry
 - full Unicode support end to end (CJK/Cyrillic/accented text round-trips
   correctly between the desktop and engine)
 

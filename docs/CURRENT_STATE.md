@@ -23,7 +23,9 @@ per-item error isolation, and off-thread document opens.
   declared field types, list element types, enum/label sets, numeric bounds,
   nested object shapes, and chat message structure, with selectable issue
   navigation in the desktop.
-- JSONL import preview with failed-row quarantine, review, and retry.
+- JSONL / CSV / TSV import preview with failed-row quarantine, review, and retry
+  (CSV/TSV convert to a staging JSONL and flow through the same preview/commit path;
+  cells import as text, so schema type mismatches quarantine like a bad JSONL row).
 - **Hugging Face Hub dataset import** (read-only, public): `hf-inspect` /
   `hf-import` fetch rows via the public datasets-server JSON API (stdlib urllib,
   no `datasets`/`huggingface_hub` dependency), map columns to a schema, and write
