@@ -23,6 +23,8 @@ public interface IEvaluationConnectionViewModel : INotifyPropertyChanged
     /// keyword-overlap only. When set, the eval run scores each answer 0–100 with a rationale using this
     /// model (evaluator-only; not a quality guarantee).</summary>
     string EvaluationJudgeModel { get; set; }
+    string EvaluationJudgeBackend { get; set; }
+    string EvaluationJudgeBaseUrl { get; set; }
     ObservableCollection<string> EvaluationAvailableModels { get; }
     string EvaluationModelListSummary { get; }
 

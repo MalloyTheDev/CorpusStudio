@@ -45,6 +45,23 @@ public sealed class EvaluationConnectionViewModel : ViewModelBase, IEvaluationCo
         set => SetField(ref _evaluationJudgeModel, value);
     }
 
+    // Optional separate judge provider (#224): blank reuses the eval run's own backend/base-url.
+    // The real use case is a local eval (Ollama) scored by a cloud judge (openai-compatible).
+    private string _evaluationJudgeBackend = string.Empty;
+    private string _evaluationJudgeBaseUrl = string.Empty;
+
+    public string EvaluationJudgeBackend
+    {
+        get => _evaluationJudgeBackend;
+        set => SetField(ref _evaluationJudgeBackend, value);
+    }
+
+    public string EvaluationJudgeBaseUrl
+    {
+        get => _evaluationJudgeBaseUrl;
+        set => SetField(ref _evaluationJudgeBaseUrl, value);
+    }
+
     public ObservableCollection<string> EvaluationAvailableModels { get; } = [];
 
     public string EvaluationModelListSummary
