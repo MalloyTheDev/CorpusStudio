@@ -1123,6 +1123,12 @@ def training_config(
     micro_batch_size: int = typer.Option(1, "--micro-batch-size"),
     gradient_accumulation_steps: int = typer.Option(8, "--gradient-accumulation-steps"),
     learning_rate: float = typer.Option(0.0002, "--learning-rate"),
+    seed: int = typer.Option(
+        42,
+        "--seed",
+        help="Training seed emitted into the config for reproducible weight init / shuffling. "
+        "A fixed default keeps runs reproducible; the run's provenance manifest pins it via the config hash.",
+    ),
     training_output_dir: str = typer.Option(
         "output",
         "--training-output-dir",
@@ -1153,6 +1159,7 @@ def training_config(
             micro_batch_size=micro_batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
             learning_rate=learning_rate,
+            seed=seed,
         )
     except ValueError as exc:
         typer.echo(str(exc), err=True)

@@ -667,6 +667,10 @@ def test_training_config_command_writes_config_without_training_dependencies(tmp
     assert payload["training_launcher_implemented"] is True
     assert payload["config"]["sequence_len"] == 2048
     assert payload["config"]["lora_r"] == 8
+    # A reproducible-by-default seed is emitted into the config (pinned by the run's
+    # provenance manifest via the config hash).
+    assert payload["config"]["seed"] == 42
+    assert "seed: 42" in written_config
     assert 'base_model: "Qwen/Qwen2.5-Coder-7B-Instruct"' in written_config
     assert "exports the config only" in payload["warnings"][0]
 

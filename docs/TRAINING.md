@@ -217,8 +217,11 @@ see the [Training Launcher Design](#training-launcher-design-v05) section below.
 **SHA-256** (proves *which config*, byte-for-byte), and the **engine version** + platform. Together
 with the record's exact `argv`, `base_model`, dataset-version back-link, and before/after eval, that
 is the auditable recipe behind a produced model, surfaced per run in the Training tab's run history.
-Known limitation: the generated config does not yet emit a training **seed**, so the manifest pins the
-*inputs* (data + config + environment), not bit-exact weight initialisation (seed capture is a follow-up).
+The generated config now emits a fixed training **seed** (default 42, `--seed` to override), so weight
+initialisation, data shuffling, and dropout are deterministic *by default* — and because the manifest
+hashes the config, the seed is pinned along with the inputs. (Bit-exact reproducibility across
+different hardware/library versions still depends on the trainer + CUDA/cuDNN determinism, which is
+outside the config; the seed removes the run-to-run randomness the config controls.)
 
 Configs are always generated before any launch, and the exact command is always
 shown and confirmed first, so users keep inspectable files they can also run
@@ -294,6 +297,7 @@ lora_alpha: 32
 micro_batch_size: 1
 gradient_accumulation_steps: 8
 learning_rate: 0.0002
+seed: 42
 ```
 
 Each target's supported training styles are declared in

@@ -25,6 +25,32 @@ def test_training_config_template_returns_expected_fields():
     assert payload["lora_r"] == 16
 
 
+def test_config_emits_a_fixed_default_seed_for_reproducibility():
+    template = build_lora_config_template(
+        base_model="Qwen/Qwen2.5-Coder-7B-Instruct",
+        dataset_path="train.jsonl",
+        eval_dataset_path=None,
+        dataset_format="instruction",
+    )
+    payload = template.to_training_dict()
+    # A fixed default (not random) → runs are reproducible by default; the config hash
+    # in the run provenance manifest then pins weight-init with it.
+    assert payload["seed"] == 42
+    assert "seed: 42" in render_training_config(template)
+
+
+def test_custom_seed_threads_through_to_the_config():
+    template = build_lora_config_template(
+        base_model="m",
+        dataset_path="train.jsonl",
+        eval_dataset_path=None,
+        dataset_format="instruction",
+        seed=1234,
+    )
+    assert template.to_training_dict()["seed"] == 1234
+    assert "seed: 1234" in render_training_config(template)
+
+
 def test_training_config_renderer_returns_inspectable_yaml():
     template = build_lora_config_template(
         base_model="Qwen/Qwen2.5-Coder-7B-Instruct",
