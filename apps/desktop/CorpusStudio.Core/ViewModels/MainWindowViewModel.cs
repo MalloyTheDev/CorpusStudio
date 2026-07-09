@@ -157,6 +157,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     private readonly IEngineService _engine = null!;
     private readonly IDialogService _dialogs = new NullDialogService();
+    private readonly IFilePickerService _filePicker = new NullFilePickerService();
 
     /// <summary>Run the dataset-debt assessment and apply it to the Debt tab — the engine-run
     /// orchestration moved off the desktop code-behind into a shared async command.</summary>
@@ -185,6 +186,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand RefreshDatasetVersionsCommand { get; }
     public System.Windows.Input.ICommand RestoreDatasetVersionCommand { get; }
     public System.Windows.Input.ICommand SaveExampleCommand { get; }
+    public System.Windows.Input.ICommand ImportDatasetCommand { get; }
     public System.Windows.Input.ICommand RegisterArtifactFromRunCommand { get; }
     public System.Windows.Input.ICommand KeepArtifactCommand { get; }
     public System.Windows.Input.ICommand RejectArtifactCommand { get; }
@@ -216,7 +218,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             new SplitsViewModel(), new PreferenceReviewViewModel(), new QuarantineViewModel(),
             new ExamplesViewModel(), new WritingStudioViewModel(), new AiAssistRewriteBatchesViewModel(),
             new AiAssistConnectionViewModel(), new EvaluationConnectionViewModel(), new QualityViewModel(),
-            new PythonEngineService(), new NullDialogService())
+            new PythonEngineService(), new NullDialogService(), new NullFilePickerService())
     {
     }
 
@@ -229,10 +231,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         IAiAssistConnectionViewModel aiAssistConnection, IEvaluationConnectionViewModel evaluationConnection,
         IQualityViewModel quality,
         IEngineService engine,
-        IDialogService dialogs)
+        IDialogService dialogs,
+        IFilePickerService filePicker)
     {
         _engine = engine;
         _dialogs = dialogs;
+        _filePicker = filePicker;
         Debt = debt;
         Arena = arena;
         Settings = settings;
@@ -297,6 +301,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RefreshDatasetVersionsCommand = new AsyncRelayCommand(RefreshDatasetVersionsAsync);
         RestoreDatasetVersionCommand = new AsyncRelayCommand(RestoreDatasetVersionAsync);
         SaveExampleCommand = new AsyncRelayCommand(SaveExampleAsync);
+        ImportDatasetCommand = new AsyncRelayCommand(ImportDatasetAsync);
         RegisterArtifactFromRunCommand = new RelayCommand(RegisterArtifactFromRun);
         KeepArtifactCommand = new AsyncRelayCommand(KeepArtifactAsync);
         RejectArtifactCommand = new RelayCommand(() => SetSelectedArtifactStatus("rejected"));
@@ -1316,6 +1321,143 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         return true;
+    }
+
+    /// <summary>Pick a JSONL file and run it through the shared preview/confirm/import flow.
+    /// The picker + info dialog route through the head-agnostic seams. Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task ImportDatasetAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            await _dialogs.ShowAsync("Create or select a dataset project before importing.", "Corpus Studio", DialogSeverity.Information);
+            return;
+        }
+
+        var file = await _filePicker.PickFileAsync(
+            "Import JSONL Dataset",
+            new FilePickerFilter("JSONL files", "jsonl"),
+            new FilePickerFilter("All files", "*"));
+        if (file is null)
+        {
+            return;
+        }
+
+        await PreviewAndImportJsonlAsync(file);
+    }
+
+    /// <summary>Preview a JSONL import, confirm, then append (quarantining rejects) and snapshot the
+    /// dataset. Shared by the file-import and Hugging-Face-staging paths (public so the HF code-behind
+    /// flow can hand its staging file to the same logic). Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task PreviewAndImportJsonlAsync(string importPath)
+    {
+        try
+        {
+            SetBusy("Importing dataset...");
+            SetImportInProgress(importPath);
+            var report = await _engine.PreviewImportAsync(importPath, ActiveSchemaId);
+            ApplyImportPreview(report);
+
+            if (report.AcceptedRows == 0 && report.RejectedRows == 0)
+            {
+                await _dialogs.ShowAsync("No importable rows were found.", "Import Preview", DialogSeverity.Information);
+                return;
+            }
+
+            var confirmed = report.RejectedRows > 0
+                ? await _dialogs.ConfirmAsync(BuildPartialImportPrompt(report), "Import Preview", DialogButtons.YesNo, DialogSeverity.Warning)
+                : await _dialogs.ConfirmAsync($"Import {report.AcceptedRows} row(s) into {ActiveProjectTitle}?", "Import Preview", DialogButtons.YesNo, DialogSeverity.Question);
+            if (!confirmed)
+            {
+                return;
+            }
+
+            var importResult = _engine.CommitJsonlImportToProjectExamples(ActiveProjectPath!, importPath, report);
+            SetExamples(_engine.LoadExamples(ActiveProjectPath!));
+            Quarantine.SetItems(_engine.LoadImportQuarantineItems(ActiveProjectPath!));
+            await RefreshQualityAsync();
+
+            // Snapshot the dataset change so an import is never silent. Best-effort: the import
+            // already succeeded, so a failed snapshot is a note, not a failure — never claim a
+            // snapshot that didn't happen.
+            var snapshotNote = await AutoCaptureAfterImportAsync(importResult);
+
+            await _dialogs.ShowAsync(BuildImportCompleteMessage(importResult, snapshotNote), "Import Complete", DialogSeverity.Information);
+        }
+        catch (System.Exception ex)
+        {
+            SetImportError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    private string BuildPartialImportPrompt(ImportPreviewReport report)
+    {
+        if (report.AcceptedRows == 0)
+        {
+            return $"No rows can be imported. Save {report.RejectedRows} rejected row(s) to quarantine?";
+        }
+
+        return string.Join(
+            System.Environment.NewLine,
+            [
+                $"Import {report.AcceptedRows} valid row(s) into {ActiveProjectTitle}?",
+                $"The {report.RejectedRows} rejected row(s) will be saved to quarantine for repair.",
+            ]
+        );
+    }
+
+    private static string BuildImportCompleteMessage(ImportCommitResult result, string? snapshotNote = null)
+    {
+        var lines = new List<string>
+        {
+            $"Imported {result.ImportedCount} row(s).",
+        };
+
+        if (result.SkippedDuplicateCount > 0)
+        {
+            lines.Add($"Skipped {result.SkippedDuplicateCount} duplicate row(s) already in the dataset.");
+        }
+
+        if (result.QuarantinedCount > 0)
+        {
+            lines.Add($"Quarantined {result.QuarantinedCount} rejected row(s).");
+            if (!string.IsNullOrWhiteSpace(result.QuarantinePath))
+            {
+                lines.Add(result.QuarantinePath);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(snapshotNote))
+        {
+            lines.Add(snapshotNote);
+        }
+
+        return string.Join(System.Environment.NewLine, lines);
+    }
+
+    private async System.Threading.Tasks.Task<string?> AutoCaptureAfterImportAsync(ImportCommitResult importResult)
+    {
+        if (!importResult.ShouldAutoCapture || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            return null;
+        }
+
+        string note;
+        try
+        {
+            var version = await _engine.CreateDatasetVersionAsync(ActiveProjectPath!, importResult.AutoCaptureLabel, "import");
+            note = $"Snapshotted this import as dataset version {version.VersionId}.";
+        }
+        catch (System.Exception ex)
+        {
+            note = $"Note: could not snapshot this import as a dataset version ({ex.Message}).";
+        }
+
+        await RefreshDatasetVersionsAsync();
+        return note;
     }
 
     /// <summary>Validate the current draft and, if valid, append it to the project's examples (clearing a

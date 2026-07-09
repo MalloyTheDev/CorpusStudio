@@ -774,31 +774,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void ImportDatasetButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            MessageBox.Show(
-                this,
-                "Create or select a dataset project before importing.",
-                "Corpus Studio",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information
-            );
-            return;
-        }
-
-        var file = await FilePicker.PickFileAsync(
-            "Import JSONL Dataset",
-            new FilePickerFilter("JSONL files", "jsonl"),
-            new FilePickerFilter("All files", "*"));
-        if (file is null)
-        {
-            return;
-        }
-
-        await PreviewAndImportJsonlAsync(file);
-    }
 
     private async void ImportFromHuggingFaceButton_Click(object sender, RoutedEventArgs e)
     {
@@ -855,7 +830,7 @@ public partial class MainWindow : Window
         var staging = dialog.Result.StagingPath;
         try
         {
-            await PreviewAndImportJsonlAsync(staging);
+            await ViewModel.PreviewAndImportJsonlAsync(staging);
         }
         finally
         {
@@ -891,162 +866,10 @@ public partial class MainWindow : Window
 
 
 
-    private async Task PreviewAndImportJsonlAsync(string importPath)
-    {
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy("Importing dataset...");
-            ViewModel.SetImportInProgress(importPath);
-            var report = await _engineService.PreviewImportAsync(importPath, ViewModel.ActiveSchemaId);
-            ViewModel.ApplyImportPreview(report);
-            Mouse.OverrideCursor = null;
-
-            if (report.AcceptedRows == 0 && report.RejectedRows == 0)
-            {
-                MessageBox.Show(
-                    this,
-                    "No importable rows were found.",
-                    "Import Preview",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information
-                );
-                return;
-            }
-
-            var importChoice = report.RejectedRows > 0
-                ? MessageBox.Show(
-                    this,
-                    BuildPartialImportPrompt(report),
-                    "Import Preview",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Warning
-                )
-                : MessageBox.Show(
-                    this,
-                    $"Import {report.AcceptedRows} row(s) into {ViewModel.ActiveProjectTitle}?",
-                    "Import Preview",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Question
-                );
-
-            if (importChoice != MessageBoxResult.Yes)
-            {
-                return;
-            }
-
-            Mouse.OverrideCursor = Cursors.Wait;
-            var importResult = _engineService.CommitJsonlImportToProjectExamples(
-                ViewModel.ActiveProjectPath!,
-                importPath,
-                report
-            );
-            ViewModel.SetExamples(_engineService.LoadExamples(ViewModel.ActiveProjectPath!));
-            ViewModel.Quarantine.SetItems(
-                _engineService.LoadImportQuarantineItems(ViewModel.ActiveProjectPath!)
-            );
-            await ViewModel.RefreshQualityAsync();
-
-            // Snapshot the dataset change so an import is never silent. Best-effort: the import
-            // already succeeded, so a failed snapshot is a note, not a failure — never claim a
-            // snapshot that didn't happen.
-            var snapshotNote = await AutoCaptureAfterImportAsync(importResult);
-
-            Mouse.OverrideCursor = null;
-            MessageBox.Show(
-                this,
-                BuildImportCompleteMessage(importResult, snapshotNote),
-                "Import Complete",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information
-            );
-        }
-        catch (Exception ex)
-        {
-            ViewModel.SetImportError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
-
-    private string BuildPartialImportPrompt(ImportPreviewReport report)
-    {
-        if (report.AcceptedRows == 0)
-        {
-            return $"No rows can be imported. Save {report.RejectedRows} rejected row(s) to quarantine?";
-        }
-
-        return string.Join(
-            Environment.NewLine,
-            [
-                $"Import {report.AcceptedRows} valid row(s) into {ViewModel.ActiveProjectTitle}?",
-                $"The {report.RejectedRows} rejected row(s) will be saved to quarantine for repair.",
-            ]
-        );
-    }
-
     /// <summary>Snapshot the dataset as a version after an import that added rows, so the change
     /// is never silent. Best-effort: the import already succeeded, so a snapshot failure returns
     /// an honest note (never a claim that a snapshot happened) and does not fail the import.
     /// Returns a message line, or null when nothing was captured.</summary>
-    private async Task<string?> AutoCaptureAfterImportAsync(ImportCommitResult importResult)
-    {
-        if (!importResult.ShouldAutoCapture || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            return null;
-        }
-
-        string note;
-        try
-        {
-            var version = await _engineService.CreateDatasetVersionAsync(
-                ViewModel.ActiveProjectPath!,
-                importResult.AutoCaptureLabel,
-                "import"
-            );
-            note = $"Snapshotted this import as dataset version {version.VersionId}.";
-        }
-        catch (Exception ex)
-        {
-            note = $"Note: could not snapshot this import as a dataset version ({ex.Message}).";
-        }
-
-        await RefreshDatasetVersionsAsync();
-        return note;
-    }
-
-    private static string BuildImportCompleteMessage(ImportCommitResult result, string? snapshotNote = null)
-    {
-        var lines = new List<string>
-        {
-            $"Imported {result.ImportedCount} row(s).",
-        };
-
-        if (result.SkippedDuplicateCount > 0)
-        {
-            lines.Add($"Skipped {result.SkippedDuplicateCount} duplicate row(s) already in the dataset.");
-        }
-
-        if (result.QuarantinedCount > 0)
-        {
-            lines.Add($"Quarantined {result.QuarantinedCount} rejected row(s).");
-            if (!string.IsNullOrWhiteSpace(result.QuarantinePath))
-            {
-                lines.Add(result.QuarantinePath);
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(snapshotNote))
-        {
-            lines.Add(snapshotNote);
-        }
-
-        return string.Join(Environment.NewLine, lines);
-    }
-
 
 
     // ---- Evaluation Suites tab (v1.3 M2) ---------------------------------------------
