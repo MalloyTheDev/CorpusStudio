@@ -19,6 +19,8 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from corpus_studio.training import gpu_probe
+
 PASS = "pass"
 WARN = "warn"
 BLOCK = "block"
@@ -68,12 +70,15 @@ def run_training_preflight(
     dataset_row_count: int,
     examples_over_sequence_len: int,
     sequence_len: int,
+    vram_min_gb: float | None = None,
 ) -> TrainingPreflightReport:
     """Run the pre-flight checks and return a structured verdict.
 
     ``launch_argv[0]`` is the trainer executable to resolve on PATH; ``data_paths``
     are the dataset/split files the run reads; the sequence-length inputs come from
-    the token budget already computed for the config.
+    the token budget already computed for the config. ``vram_min_gb`` is the most
+    memory-efficient VRAM estimate (e.g. the 4-bit figure) — when a GPU is detected
+    it drives the OOM check.
     """
     checks: list[PreflightCheck] = []
 
@@ -168,6 +173,34 @@ def run_training_preflight(
                 message=f"No examples exceed sequence_len={sequence_len}.",
             )
         )
+
+    # 6. OOM realism (only when a GPU is actually detected — otherwise the VRAM
+    #    estimate is arithmetic-only and this is skipped rather than guessing).
+    gpu = gpu_probe.probe_gpu_memory()
+    if gpu is not None and vram_min_gb is not None:
+        if vram_min_gb > gpu.free_gb:
+            checks.append(
+                PreflightCheck(
+                    name="gpu_memory",
+                    status=WARN,
+                    message=(
+                        f"Likely OOM: the most memory-efficient (4-bit) estimate is ~{vram_min_gb:.1f} GB but the "
+                        f"GPU has ~{gpu.free_gb:.1f} GB free (of ~{gpu.total_gb:.1f} GB). Use a smaller base model, "
+                        "4-bit quantization, or a lower sequence_len / batch size."
+                    ),
+                )
+            )
+        else:
+            checks.append(
+                PreflightCheck(
+                    name="gpu_memory",
+                    status=PASS,
+                    message=(
+                        f"GPU has ~{gpu.free_gb:.1f} GB free (of ~{gpu.total_gb:.1f} GB); the 4-bit estimate "
+                        f"~{vram_min_gb:.1f} GB fits."
+                    ),
+                )
+            )
 
     status = _worst([check.status for check in checks])
     return TrainingPreflightReport(

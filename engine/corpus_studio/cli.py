@@ -1195,6 +1195,7 @@ def training_config(
         dataset_row_count=token_budget.example_count,
         examples_over_sequence_len=token_budget.examples_over_sequence_len,
         sequence_len=sequence_len,
+        vram_min_gb=vram_estimate.total_gb_int4,
     )
 
     typer.echo(

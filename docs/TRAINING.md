@@ -176,11 +176,15 @@ of GPU, so `training-config` runs cheap deterministic checks and returns a
 `preflight` verdict (`pass` / `warn` / `block`): is the trainer command on `PATH`
 (warn + which packages to install), are the config and referenced data files present
 and non-empty (**block** if missing), does the dataset have a usable number of rows
-(**block** if empty, warn if tiny), and will rows be truncated at `sequence_len`
-(warn). The desktop surfaces each check and **disables the Launch button when a check
-blocks**, so a run that is certain to fail can't be started. It is a pre-flight, not a
-guarantee — it never runs the trainer or inspects the GPU, so a green pre-flight means
-"nothing obviously wrong", not "this run will succeed".
+(**block** if empty, warn if tiny), will rows be truncated at `sequence_len` (warn), and —
+when an NVIDIA GPU is detected via `nvidia-smi` — does the config's most memory-efficient
+(4-bit) VRAM estimate fit in the GPU's free memory, or is it **likely to OOM** (warn, with the
+fix: smaller model / 4-bit / lower `sequence_len` or batch). The GPU probe is best-effort and
+dependency-free — no `nvidia-smi` (CPU-only box, or generating the config to train elsewhere)
+simply skips the OOM check. The desktop surfaces each check and **disables the Launch button when
+a check blocks**, so a run that is certain to fail can't be started. It is a pre-flight, not a
+guarantee — it never runs the trainer, so a green pre-flight means "nothing obviously wrong",
+not "this run will succeed".
 
 > **Token counts are an estimate by default, and the budget says which counter ran.**
 > To stay dependency-light the engine picks the most exact counter available, in order,
