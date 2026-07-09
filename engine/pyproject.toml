@@ -20,12 +20,18 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.8"
 ]
-# Optional exact tokenizer. The engine stays dependency-light by default (a
-# Unicode-aware heuristic estimates token counts); installing this extra lets
-# estimate_tokens use tiktoken for exact BPE counts. `pip install
-# corpus-studio-engine[tokenizer]`. See corpus_studio/tokenization/estimate.py.
+# Optional exact tokenizers. The engine stays dependency-light by default (a
+# Unicode-aware heuristic estimates token counts). Installing `tokenizer` lets
+# estimate_tokens use tiktoken for exact GPT-4-family BPE counts; installing
+# `model-tokenizer` lets it load a training target model's OWN tokenizer from the
+# Hub (`Tokenizer.from_pretrained`) for exact per-model budgets. Both are optional
+# and fall back gracefully. `pip install corpus-studio-engine[model-tokenizer]`.
+# See corpus_studio/tokenization/estimate.py.
 tokenizer = [
     "tiktoken>=0.7"
+]
+model-tokenizer = [
+    "tokenizers>=0.15"
 ]
 
 [project.scripts]

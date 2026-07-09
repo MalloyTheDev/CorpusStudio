@@ -1122,7 +1122,12 @@ def training_config(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(config_text, encoding="utf-8")
 
-    token_budget = build_training_token_budget(list(read_jsonl(input_path)), sequence_len)
+    # Use the target model's own tokenizer for the budget when it's available (optional
+    # `tokenizers` extra); otherwise this falls back to tiktoken / the heuristic, and the
+    # budget's `method` field reports which ran so the count is never overstated as exact.
+    token_budget = build_training_token_budget(
+        list(read_jsonl(input_path)), sequence_len, model_id=base_model
+    )
     launch_plan = build_launch_plan(normalized_target, str(output_path))
 
     # Relative output dirs resolve against the config's directory (the launch CWD).
