@@ -50,9 +50,10 @@ public sealed class EngineCommandTests
         public bool LastRemoveDuplicates { get; private set; }
         public bool LastRemoveLowInformation { get; private set; }
         public bool LastRedactPii { get; private set; }
-        public Task<ExportResult> ExportProjectExamplesAsync(string projectPath, string schemaId, bool removeDuplicates = false, bool removeLowInformation = false, bool redactPii = false)
+        public string? LastExportFormat { get; private set; }
+        public Task<ExportResult> ExportProjectExamplesAsync(string projectPath, string schemaId, bool removeDuplicates = false, bool removeLowInformation = false, bool redactPii = false, string format = "jsonl")
         {
-            ExportCalled = true; LastRemoveDuplicates = removeDuplicates; LastRemoveLowInformation = removeLowInformation; LastRedactPii = redactPii;
+            ExportCalled = true; LastRemoveDuplicates = removeDuplicates; LastRemoveLowInformation = removeLowInformation; LastRedactPii = redactPii; LastExportFormat = format;
             return Task.FromResult(new ExportResult());
         }
         public bool ConvertTabularCalled { get; private set; }
@@ -684,6 +685,20 @@ public sealed class EngineCommandTests
         Assert.True(engine.LastRemoveDuplicates);
         Assert.False(engine.LastRemoveLowInformation);
         Assert.False(engine.LastRedactPii); // off by default
+        Assert.Equal("jsonl", engine.LastExportFormat); // JSONL is the default format
+    }
+
+    [Fact]
+    public async Task ExportJsonl_WithCsvFormat_PassesTheFormatToTheEngine()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine);
+        SelectFakeProject(vm);
+        vm.ExportFormat = "csv";
+
+        await vm.ExportJsonlAsync();
+
+        Assert.Equal("csv", engine.LastExportFormat); // the format selector drives export --format
     }
 
     [Fact]

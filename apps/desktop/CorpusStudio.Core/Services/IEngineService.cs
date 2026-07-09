@@ -47,9 +47,11 @@ public interface IEngineService
     /// <summary>Reconcile tracked reviewed-fixes against a fresh evaluation's per-example results.</summary>
     IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, IReadOnlyList<EvaluationExampleResult> results);
 
-    /// <summary>Export the project's examples to JSONL (optionally dedupe / drop low-information rows;
-    /// optionally mask detected PII/secrets in the export — known patterns only, not de-identification).</summary>
-    Task<ExportResult> ExportProjectExamplesAsync(string projectPath, string schemaId, bool removeDuplicates = false, bool removeLowInformation = false, bool redactPii = false);
+    /// <summary>Export the project's examples (optionally dedupe / drop low-information rows; optionally
+    /// mask detected PII/secrets — known patterns only, not de-identification). <paramref name="format"/>
+    /// is "jsonl" (default, all schemas) or "csv"/"tsv" (flat schemas only — the engine refuses a schema
+    /// with chat messages or nested objects).</summary>
+    Task<ExportResult> ExportProjectExamplesAsync(string projectPath, string schemaId, bool removeDuplicates = false, bool removeLowInformation = false, bool redactPii = false, string format = "jsonl");
 
     /// <summary>Convert a CSV/TSV file to a staging JSONL (header row → keys, cells as text) so it can
     /// flow through the same import-preview/quarantine/commit path as any JSONL import.</summary>

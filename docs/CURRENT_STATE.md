@@ -55,6 +55,9 @@ per-item error isolation, and off-thread document opens.
   near-duplicate rows shared across train/validation/test.
 - Export with an optional cleaning pass (dedupe / drop low-information) that
   writes a removal manifest; verbatim exports warn when duplicates remain.
+- Export format is JSONL by default (model-ready, all schemas); **CSV/TSV export**
+  is available for flat schemas (a chat/nested-object schema is refused, not
+  lossy-flattened) through the same validate/gate/clean pipeline.
 - Preference exports (DPO/KTO/reward) with a pair-integrity gate.
 - Dataset card summarizing metadata, schema, splits, quality, and evaluation.
 

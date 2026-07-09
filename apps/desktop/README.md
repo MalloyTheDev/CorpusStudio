@@ -32,7 +32,7 @@ The desktop workflow supports:
 - prompt **Arena** for side-by-side model comparison, and a **Debt** tab (graded A–F dataset-debt ledger with ranked remediation)
 - Hugging Face Hub dataset import (read-only, public) through the normal import-preview/quarantine flow
 - gate runs (schema/quality/leakage/PII/eval + chat-structure) with an editable per-project gate-threshold editor and a provider generation-policy approve/revoke surface
-- JSONL export (with optional dedupe / drop-low-information cleaning)
+- export as JSONL (default, model-ready, all schemas) or CSV/TSV for flat schemas (chat/nested-object schemas are refused, not lossy-flattened), with optional dedupe / drop-low-information cleaning and PII/secret redaction
 - local settings inspection and per-project lab backend settings persistence
 - polished desktop shell styling, a workflow stage strip, and a wired sidebar
   Export Center affordance

@@ -66,6 +66,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private bool _exportRemoveDuplicates;
     private bool _exportRemoveLowInformation;
     private bool _exportRedactPii;
+    private string _exportFormat = "jsonl";
     private string _benchmarkModelsInput = string.Empty;
     private string _benchmarkSummary =
         "Enter one model per line, then benchmark them against this project's examples.";
@@ -1348,7 +1349,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             SetBusy("Exporting JSONL...");
             var exportResult = await _engine.ExportProjectExamplesAsync(
-                ActiveProjectPath, ActiveSchemaId, ExportRemoveDuplicates, ExportRemoveLowInformation, ExportRedactPii);
+                ActiveProjectPath, ActiveSchemaId, ExportRemoveDuplicates, ExportRemoveLowInformation, ExportRedactPii, ExportFormat);
 
             var message = $"Exported {exportResult.OutputRows} row(s) to:{System.Environment.NewLine}{exportResult.OutputPath}";
             if (exportResult.Cleaned && exportResult.RemovedRows > 0)
@@ -2875,6 +2876,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _exportRedactPii;
         set => SetField(ref _exportRedactPii, value);
+    }
+
+    /// <summary>Export file format (bound to the Export format selector): "jsonl" (default, model-ready,
+    /// all schemas) or "csv"/"tsv" (flat schemas only — the engine refuses a chat/nested schema).</summary>
+    public string ExportFormat
+    {
+        get => _exportFormat;
+        set => SetField(ref _exportFormat, value);
     }
 
     public string BenchmarkSummary

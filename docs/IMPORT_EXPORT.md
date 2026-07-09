@@ -143,13 +143,34 @@ One JSON object per line.
 {"prompt":"Explain recursion simply.","chosen":"Recursion is when a function calls itself.","rejected":"Recursion is when code does things again."}
 ```
 
+#### CSV / TSV (flat schemas)
+
+JSONL is the **canonical, model-ready** export — it works for every schema and is
+what trainers consume. CSV/TSV is an opt-in convenience for **flat** schemas
+(classification, raw text, simple instruction, evaluation, retrieval, preference,
+…): open the cleaned set in Excel/pandas or share it. Select the format in the
+desktop Export panel, or pass `export … --format csv` / `--format tsv` on the CLI.
+
+The header row is the schema's fields (then any extra row keys, so nothing a row
+carries is dropped); a scalar list field like `tags` is written as a `"; "`-joined
+cell. CSV/TSV goes through the *same* validate → PII/secret export-gate → optional
+clean/redact pipeline as JSONL — only the writer differs. A schema with a chat
+`messages` field, a nested `object`, or a list of objects is **refused** (exit 2)
+with a clear "export as JSONL instead" message rather than lossy-flattened, honoring
+the export rule below. (Parquet/Excel remain future work — they need a heavier
+dependency; CSV/TSV use the standard library only.)
+
+```text
+text,label,tags
+Great value for the price.,positive,sentiment; review
+```
+
 ### Planned dataset exports
 
-Shipped: preference exports (DPO/KTO/reward), the dataset card, and training
-config templates for the major targets (Axolotl / TRL / Unsloth / HF /
-LLaMA-Factory). Still planned:
+Shipped: preference exports (DPO/KTO/reward), CSV/TSV (flat schemas), the dataset
+card, and training config templates for the major targets (Axolotl / TRL / Unsloth
+/ HF / LLaMA-Factory). Still planned:
 
-- CSV
 - Parquet
 - Alpaca
 - ShareGPT
