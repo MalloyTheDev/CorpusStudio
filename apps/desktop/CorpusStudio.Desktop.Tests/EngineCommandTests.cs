@@ -66,6 +66,8 @@ public sealed class EngineCommandTests
         public Task<System.Collections.Generic.IReadOnlyList<DatasetProjectListItem>> LoadProjectsFromIndexAsync() => Task.FromResult<System.Collections.Generic.IReadOnlyList<DatasetProjectListItem>>(new System.Collections.Generic.List<DatasetProjectListItem>());
         public Task SetGateThresholdsAsync(string projectPath, GateThresholds thresholds) => Task.CompletedTask;
         public Task<System.Collections.Generic.IReadOnlyList<ProviderPolicyItem>> GetProviderPoliciesAsync(string projectPath) => Task.FromResult<System.Collections.Generic.IReadOnlyList<ProviderPolicyItem>>(new System.Collections.Generic.List<ProviderPolicyItem>());
+        public bool ApproveCalled { get; private set; }
+        public Task ApproveProviderGenerationAsync(string projectPath, string providerId, string modelId, bool revoke = false) { ApproveCalled = true; return Task.CompletedTask; }
         public Task<QualityReport> BuildQualityReportAsync(string projectPath) => Task.FromResult(new QualityReport());
         public QualityHistoryEntry SaveQualityHistoryEntry(string projectPath, QualityReport report) => new QualityHistoryEntry();
         public System.Collections.Generic.IReadOnlyList<QualityHistoryEntry> LoadQualityHistory(string projectPath, int maxEntries = 5) => new System.Collections.Generic.List<QualityHistoryEntry>();
@@ -581,5 +583,42 @@ public sealed class EngineCommandTests
 
         Assert.Equal(string.Empty, vm.Suites.NewSuiteName); // cleared after a successful scaffold
         Assert.Contains("Created suite 'smoke'", vm.Suites.SuiteReportSummary);
+    }
+
+    [Fact]
+    public async Task ApplyProviderApproval_WithoutProject_SetsError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+
+        await vm.ApplyProviderApprovalAsync(revoke: false);
+
+        Assert.Contains("Create or select a dataset project", vm.Settings.ProviderPolicySummary);
+    }
+
+    [Fact]
+    public async Task ApplyProviderApproval_WithBlankModel_DoesNotCallEngine()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine);
+        SelectFakeProject(vm);
+        vm.Settings.ProviderApprovalModel = "   "; // provider defaults to "ollama"
+
+        await vm.ApplyProviderApprovalAsync(revoke: false);
+
+        Assert.False(engine.ApproveCalled);
+        Assert.Contains("Choose a provider and enter a model name", vm.Settings.ProviderPolicySummary);
+    }
+
+    [Fact]
+    public async Task ApplyProviderApproval_WithProviderAndModel_CallsEngine()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine);
+        SelectFakeProject(vm);
+        vm.Settings.ProviderApprovalModel = "llama3";
+
+        await vm.ApplyProviderApprovalAsync(revoke: false);
+
+        Assert.True(engine.ApproveCalled);
     }
 }
