@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from corpus_studio.training import gpu_probe
+from corpus_studio.training.gpu_probe import GpuMemory
 from corpus_studio.training.preflight import (
     BLOCK,
     PASS,
@@ -83,3 +85,32 @@ def test_missing_config_blocks(tmp_path: Path):
     report = _run(tmp_path, config_path=tmp_path / "nope.yaml")
     assert report.status == BLOCK
     assert report.can_launch is False
+
+
+# --- OOM / GPU-memory realism (nvidia-smi probe) -----------------------------
+
+
+def _gpu(monkeypatch, memory):
+    monkeypatch.setattr(gpu_probe, "probe_gpu_memory", lambda: memory)
+
+
+def test_no_gpu_detected_skips_the_oom_check(tmp_path: Path, monkeypatch):
+    _gpu(monkeypatch, None)  # nvidia-smi not available
+    report = _run(tmp_path, vram_min_gb=48.0)
+    assert not any(check.name == "gpu_memory" for check in report.checks)
+
+
+def test_oom_warns_when_the_estimate_exceeds_free_vram(tmp_path: Path, monkeypatch):
+    _gpu(monkeypatch, GpuMemory(total_gb=24.0, free_gb=23.0))
+    report = _run(tmp_path, vram_min_gb=40.0)  # 40 GB needed, 23 free
+    gpu_check = next(c for c in report.checks if c.name == "gpu_memory")
+    assert gpu_check.status == WARN
+    assert "Likely OOM" in gpu_check.message
+    assert report.can_launch is True  # OOM is a warning, not a hard block
+
+
+def test_oom_passes_when_it_fits(tmp_path: Path, monkeypatch):
+    _gpu(monkeypatch, GpuMemory(total_gb=24.0, free_gb=22.0))
+    report = _run(tmp_path, vram_min_gb=8.0)  # 8 GB needed, 22 free
+    gpu_check = next(c for c in report.checks if c.name == "gpu_memory")
+    assert gpu_check.status == PASS
