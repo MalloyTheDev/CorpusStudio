@@ -3025,19 +3025,19 @@
                            Foreground="#475569"
                            Margin="0,4,0,4"
                            TextWrapping="Wrap" />
-                <CheckBox x:Name="ExportRemoveDuplicatesCheckBox"
-                          AutomationProperties.AutomationId="ExportRemoveDuplicatesCheckBox"
+                <CheckBox AutomationProperties.AutomationId="ExportRemoveDuplicatesCheckBox"
                           Content="Remove duplicate rows (exact + normalized)"
-                          Margin="0,0,0,4" />
-                <CheckBox x:Name="ExportRemoveLowInformationCheckBox"
-                          AutomationProperties.AutomationId="ExportRemoveLowInformationCheckBox"
+                          Margin="0,0,0,4"
+                          IsChecked="{Binding ExportRemoveDuplicates, Mode=TwoWay}" />
+                <CheckBox AutomationProperties.AutomationId="ExportRemoveLowInformationCheckBox"
                           Content="Remove low-information rows"
-                          Margin="0,0,0,8" />
+                          Margin="0,0,0,8"
+                          IsChecked="{Binding ExportRemoveLowInformation, Mode=TwoWay}" />
                 <Button x:Name="ExportJsonlButton"
                         Style="{StaticResource PrimaryButtonStyle}"
                         AutomationProperties.AutomationId="ExportJsonlButton"
                         Content="_Export JSONL"
-                        Click="ExportJsonlButton_Click" />
+                        Command="{Binding ExportJsonlCommand}" />
                 <Button AutomationProperties.AutomationId="GenerateDatasetCardButton"
                         Content="Generate Dataset Card"
                         Margin="0,8,0,8"

@@ -46,6 +46,14 @@ public sealed class EngineCommandTests
         public int PreviewAccepted { get; set; }
         public int PreviewRejected { get; set; }
         public bool CommitCalled { get; private set; }
+        public bool ExportCalled { get; private set; }
+        public bool LastRemoveDuplicates { get; private set; }
+        public bool LastRemoveLowInformation { get; private set; }
+        public Task<ExportResult> ExportProjectExamplesAsync(string projectPath, string schemaId, bool removeDuplicates = false, bool removeLowInformation = false)
+        {
+            ExportCalled = true; LastRemoveDuplicates = removeDuplicates; LastRemoveLowInformation = removeLowInformation;
+            return Task.FromResult(new ExportResult());
+        }
         public Task<ImportPreviewReport> PreviewImportAsync(string importPath, string schemaId) => Task.FromResult(new ImportPreviewReport { AcceptedRows = PreviewAccepted, RejectedRows = PreviewRejected });
         public ImportCommitResult CommitJsonlImportToProjectExamples(string projectPath, string importPath, ImportPreviewReport report) { CommitCalled = true; return new ImportCommitResult(0, 0, null); }
         public bool ValidateReturnsValid { get; set; }
@@ -620,5 +628,21 @@ public sealed class EngineCommandTests
         await vm.ApplyProviderApprovalAsync(revoke: false);
 
         Assert.True(engine.ApproveCalled);
+    }
+
+    [Fact]
+    public async Task ExportJsonl_WithProject_PassesTheCleaningOptionsToTheEngine()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine);
+        SelectFakeProject(vm);
+        vm.ExportRemoveDuplicates = true;
+        vm.ExportRemoveLowInformation = false;
+
+        await vm.ExportJsonlAsync();
+
+        Assert.True(engine.ExportCalled);
+        Assert.True(engine.LastRemoveDuplicates);
+        Assert.False(engine.LastRemoveLowInformation);
     }
 }

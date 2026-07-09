@@ -1906,62 +1906,6 @@ public partial class MainWindow : Window
         }));
     }
 
-    private async void ExportJsonlButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            MessageBox.Show(
-                this,
-                "Create a dataset project before exporting.",
-                "Corpus Studio",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information
-            );
-            return;
-        }
-
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy("Exporting JSONL...");
-            var removeDuplicates = ExportRemoveDuplicatesCheckBox.IsChecked == true;
-            var removeLowInformation = ExportRemoveLowInformationCheckBox.IsChecked == true;
-            var exportResult = await _engineService.ExportProjectExamplesAsync(
-                ViewModel.ActiveProjectPath,
-                ViewModel.ActiveSchemaId,
-                removeDuplicates,
-                removeLowInformation
-            );
-
-            var message = $"Exported {exportResult.OutputRows} row(s) to:\n{exportResult.OutputPath}";
-            if (exportResult.Cleaned && exportResult.RemovedRows > 0)
-            {
-                message += $"\nRemoved {exportResult.RemovedRows} row(s) during cleaning.";
-            }
-            if (exportResult.Warnings.Count > 0)
-            {
-                message += "\n\nWarnings:\n- " + string.Join("\n- ", exportResult.Warnings);
-            }
-
-            MessageBox.Show(
-                this,
-                message,
-                "Export Complete",
-                MessageBoxButton.OK,
-                exportResult.Warnings.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information
-            );
-        }
-        catch (Exception ex)
-        {
-            ViewModel.SetValidationError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
-
     private void ValidationIssuesListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (ViewModel.SelectedValidationIssue is null)
