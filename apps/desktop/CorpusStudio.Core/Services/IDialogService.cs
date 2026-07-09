@@ -38,4 +38,8 @@ public interface IDialogService
 
     /// <summary>Show an informational acknowledge dialog (single OK).</summary>
     Task ShowAsync(string message, string title, DialogSeverity severity = DialogSeverity.Information);
+
+    /// <summary>Prompt for a single line of text (OK/Cancel). Returns the entered text, or null if the
+    /// user cancelled. Used for explorer new-file / new-folder / rename.</summary>
+    Task<string?> PromptAsync(string title, string message, string defaultValue = "");
 }

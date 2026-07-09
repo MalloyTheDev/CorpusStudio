@@ -1,5 +1,6 @@
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 
 namespace CorpusStudio.Desktop.Services;
 
@@ -22,6 +23,42 @@ public sealed class MessageBoxDialogService : IDialogService
     {
         Show(message, title, MessageBoxButton.OK, ToImage(severity), MessageBoxResult.OK);
         return Task.CompletedTask;
+    }
+
+    public Task<string?> PromptAsync(string title, string message, string defaultValue = "")
+    {
+        // WPF's MessageBox has no text input, so build a minimal modal input dialog in code.
+        var input = new TextBox { Text = defaultValue, MinWidth = 320, Margin = new Thickness(0, 8, 0, 12) };
+        var ok = new Button { Content = "OK", IsDefault = true, MinWidth = 74, Margin = new Thickness(0, 0, 8, 0) };
+        var cancel = new Button { Content = "Cancel", IsCancel = true, MinWidth = 74 };
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+        };
+        buttons.Children.Add(ok);
+        buttons.Children.Add(cancel);
+        var body = new StackPanel { Margin = new Thickness(16), MaxWidth = 420 };
+        body.Children.Add(new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap });
+        body.Children.Add(input);
+        body.Children.Add(buttons);
+
+        var owner = Application.Current?.MainWindow;
+        var window = new Window
+        {
+            Title = title,
+            Content = body,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            WindowStartupLocation = owner is null ? WindowStartupLocation.CenterScreen : WindowStartupLocation.CenterOwner,
+            Owner = owner,
+        };
+        ok.Click += (_, _) => { window.DialogResult = true; };
+        input.Loaded += (_, _) => { input.SelectAll(); input.Focus(); };
+
+        var confirmed = window.ShowDialog() == true;
+        return Task.FromResult<string?>(confirmed ? input.Text : null);
     }
 
     private static MessageBoxResult Show(

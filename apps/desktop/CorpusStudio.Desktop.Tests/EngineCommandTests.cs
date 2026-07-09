@@ -186,6 +186,7 @@ public sealed class EngineCommandTests
         public FakeDialogService(bool confirm) => _confirm = confirm;
         public Task<bool> ConfirmAsync(string message, string title, DialogButtons buttons = DialogButtons.YesNo, DialogSeverity severity = DialogSeverity.Question, bool defaultAffirmative = false) => Task.FromResult(_confirm);
         public Task ShowAsync(string message, string title, DialogSeverity severity = DialogSeverity.Information) => Task.CompletedTask;
+        public Task<string?> PromptAsync(string title, string message, string defaultValue = "") => Task.FromResult<string?>(null);
     }
 
     private sealed class FakeFilePickerService : IFilePickerService

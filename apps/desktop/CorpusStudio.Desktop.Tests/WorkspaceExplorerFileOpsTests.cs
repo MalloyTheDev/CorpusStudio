@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading.Tasks;
 using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.Services;
 using CorpusStudio.Desktop.ViewModels;
@@ -17,6 +18,196 @@ public sealed class WorkspaceExplorerFileOpsTests
         var dir = Path.Combine(Path.GetTempPath(), "cs_ws_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         return dir;
+    }
+
+    /// <summary>Scriptable dialog seam: returns a fixed prompt answer + confirm verdict and records the
+    /// last surfaced message, so the command-level tests can assert prompt/confirm/error behaviour (#223).</summary>
+    private sealed class ScriptedDialogService : IDialogService
+    {
+        private readonly string? _promptAnswer;
+        private readonly bool _confirm;
+        public ScriptedDialogService(string? promptAnswer, bool confirm)
+        {
+            _promptAnswer = promptAnswer;
+            _confirm = confirm;
+        }
+
+        public string? LastShownMessage { get; private set; }
+        public int ShownCount { get; private set; }
+        public Task<bool> ConfirmAsync(string message, string title, DialogButtons buttons = DialogButtons.YesNo, DialogSeverity severity = DialogSeverity.Question, bool defaultAffirmative = false) => Task.FromResult(_confirm);
+        public Task ShowAsync(string message, string title, DialogSeverity severity = DialogSeverity.Information)
+        {
+            LastShownMessage = message;
+            ShownCount++;
+            return Task.CompletedTask;
+        }
+        public Task<string?> PromptAsync(string title, string message, string defaultValue = "") => Task.FromResult(_promptAnswer);
+    }
+
+    private static WorkspaceTreeNode FileNode(string root, string name) => new()
+    {
+        Name = name,
+        FullPath = Path.Combine(root, name),
+        RelativePath = name,
+    };
+
+    [Fact]
+    public async Task NewFileCommand_CreatesFile_WhenPromptReturnsAName()
+    {
+        var root = NewWorkspace();
+        try
+        {
+            var dialogs = new ScriptedDialogService("notes.md", confirm: true);
+            var vm = new WorkspaceExplorerViewModel(dialogs: dialogs);
+            vm.SetWorkspaceRoot(root, "ws");
+
+            await vm.PromptNewFileAsync();
+
+            Assert.True(File.Exists(Path.Combine(root, "notes.md")));
+            Assert.Equal(0, dialogs.ShownCount); // success surfaces no error dialog
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task NewFileCommand_Cancelled_CreatesNothing()
+    {
+        var root = NewWorkspace();
+        try
+        {
+            var dialogs = new ScriptedDialogService(promptAnswer: null, confirm: true); // user cancelled the prompt
+            var vm = new WorkspaceExplorerViewModel(dialogs: dialogs);
+            vm.SetWorkspaceRoot(root, "ws");
+
+            await vm.PromptNewFileAsync();
+
+            Assert.Empty(Directory.GetFiles(root));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task NewFolderCommand_CreatesFolder_WhenPromptReturnsAName()
+    {
+        var root = NewWorkspace();
+        try
+        {
+            var dialogs = new ScriptedDialogService("docs", confirm: true);
+            var vm = new WorkspaceExplorerViewModel(dialogs: dialogs);
+            vm.SetWorkspaceRoot(root, "ws");
+
+            await vm.PromptNewFolderAsync();
+
+            Assert.True(Directory.Exists(Path.Combine(root, "docs")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RenameCommand_RenamesOnDisk_WhenPromptReturnsANewName()
+    {
+        var root = NewWorkspace();
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "a.txt"), "x");
+            var dialogs = new ScriptedDialogService("b.txt", confirm: true);
+            var vm = new WorkspaceExplorerViewModel(dialogs: dialogs);
+            vm.SetWorkspaceRoot(root, "ws");
+
+            await vm.PromptRenameNodeAsync(FileNode(root, "a.txt"));
+
+            Assert.False(File.Exists(Path.Combine(root, "a.txt")));
+            Assert.True(File.Exists(Path.Combine(root, "b.txt")));
+            Assert.Equal(0, dialogs.ShownCount);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RenameCommand_Cancelled_LeavesFileUntouched()
+    {
+        var root = NewWorkspace();
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "a.txt"), "x");
+            var dialogs = new ScriptedDialogService(promptAnswer: null, confirm: true);
+            var vm = new WorkspaceExplorerViewModel(dialogs: dialogs);
+            vm.SetWorkspaceRoot(root, "ws");
+
+            await vm.PromptRenameNodeAsync(FileNode(root, "a.txt"));
+
+            Assert.True(File.Exists(Path.Combine(root, "a.txt"))); // unchanged
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteCommand_DeletesOnConfirm_KeepsOnDecline()
+    {
+        var root = NewWorkspace();
+        try
+        {
+            var keep = Path.Combine(root, "keep.txt");
+            File.WriteAllText(keep, "x");
+            var vmDecline = new WorkspaceExplorerViewModel(dialogs: new ScriptedDialogService(null, confirm: false));
+            vmDecline.SetWorkspaceRoot(root, "ws");
+            await vmDecline.ConfirmDeleteNodeAsync(FileNode(root, "keep.txt"));
+            Assert.True(File.Exists(keep)); // declined → still there
+
+            var vmConfirm = new WorkspaceExplorerViewModel(dialogs: new ScriptedDialogService(null, confirm: true));
+            vmConfirm.SetWorkspaceRoot(root, "ws");
+            await vmConfirm.ConfirmDeleteNodeAsync(FileNode(root, "keep.txt"));
+            Assert.False(File.Exists(keep)); // confirmed → gone
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RenameCommand_DatasetCoreFile_SurfacesErrorAndDoesNotRename()
+    {
+        var root = NewWorkspace();
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "examples.jsonl"), "{}");
+            var dialogs = new ScriptedDialogService("renamed.jsonl", confirm: true);
+            var vm = new WorkspaceExplorerViewModel(dialogs: dialogs);
+            vm.SetWorkspaceRoot(root, "ws");
+            var core = new WorkspaceTreeNode
+            {
+                Name = "examples.jsonl",
+                FullPath = Path.Combine(root, "examples.jsonl"),
+                RelativePath = "examples.jsonl",
+                IsDatasetCoreFile = true,
+            };
+
+            await vm.PromptRenameNodeAsync(core);
+
+            Assert.Equal(1, dialogs.ShownCount);
+            Assert.Contains("core file", dialogs.LastShownMessage);
+            Assert.True(File.Exists(Path.Combine(root, "examples.jsonl"))); // not renamed
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]
