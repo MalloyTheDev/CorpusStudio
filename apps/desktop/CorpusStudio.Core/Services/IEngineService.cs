@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using CorpusStudio.Desktop.Models;
@@ -76,11 +77,12 @@ public interface IEngineService
     /// <summary>List a backend's available models (for the connection panels' model pickers).</summary>
     Task<BackendModelListReport> ListBackendModelsAsync(string backend, string? baseUrl, int timeoutSeconds);
 
-    /// <summary>Run a graded evaluation over the dataset (live backend calls); optional LLM-judge.</summary>
+    /// <summary>Run a graded evaluation over the dataset (live backend calls); optional LLM-judge.
+    /// When <paramref name="progress"/> is supplied, per-example progress lines stream to it live.</summary>
     Task<EvaluationRunResult> RunEvaluationAsync(
         string projectPath, string schemaId, string backend, string model, string? baseUrl,
         int? limit, double scoreThreshold, int timeoutSeconds, string? judgeModel = null,
-        string? judgeBackend = null, string? judgeBaseUrl = null);
+        string? judgeBackend = null, string? judgeBaseUrl = null, IProgress<string>? progress = null);
 
     /// <summary>The project's saved evaluation reports (newest first) for history/regression.</summary>
     IReadOnlyList<EvaluationReportHistoryItem> LoadEvaluationReportHistory(string projectPath, int maxReports = 20);

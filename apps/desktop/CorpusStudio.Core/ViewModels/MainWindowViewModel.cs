@@ -942,6 +942,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             }
 
             Evaluation.SetEvaluationInProgress();
+            Evaluation.BeginEvaluationProgress();
+            // Stream per-example progress live: the engine writes '[k/N] evaluated' to stderr; the
+            // Progress<string> (created here on the UI thread) marshals each line back to the UI thread.
+            var progress = new Progress<string>(line =>
+            {
+                if (TryParseEvaluationProgress(line, out var completed, out var total))
+                {
+                    Evaluation.SetEvaluationProgress(completed, total);
+                }
+            });
             // Opt-in LLM-judge: when a judge model is set, the run scores with metric=llm_judge (the judge
             // reuses this run's backend/base-url). Blank = the default keyword-overlap scorer.
             var judgeModel = EvaluationConnection.EvaluationJudgeModel?.Trim();
@@ -954,7 +964,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 limit,
                 scoreThreshold,
                 timeoutSeconds,
-                judgeModel: string.IsNullOrWhiteSpace(judgeModel) ? null : judgeModel
+                judgeModel: string.IsNullOrWhiteSpace(judgeModel) ? null : judgeModel,
+                progress: progress
             );
             Evaluation.ApplyEvaluationRunResult(result);
             Evaluation.SetEvaluationReportHistory(
@@ -968,8 +979,29 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
         finally
         {
+            Evaluation.ClearEvaluationProgress();
             ClearBusy();
         }
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex EvaluationProgressPattern =
+        new(@"^\[(\d+)/(\d+)\]\s+evaluated$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>Parse the engine's <c>[k/N] evaluated</c> stderr progress line into (completed, total).
+    /// Returns false for any other stderr line (so unrelated output is ignored).</summary>
+    public static bool TryParseEvaluationProgress(string line, out int completed, out int total)
+    {
+        completed = 0;
+        total = 0;
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return false;
+        }
+
+        var match = EvaluationProgressPattern.Match(line.Trim());
+        return match.Success
+            && int.TryParse(match.Groups[1].Value, out completed)
+            && int.TryParse(match.Groups[2].Value, out total);
     }
 
     /// <summary>Rerun the selected saved evaluation report's settings for a regression comparison.
@@ -1023,6 +1055,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             }
 
             Evaluation.SetEvaluationRegressionRerunInProgress(settings);
+            Evaluation.BeginEvaluationProgress();
+            var progress = new Progress<string>(line =>
+            {
+                if (TryParseEvaluationProgress(line, out var completed, out var total))
+                {
+                    Evaluation.SetEvaluationProgress(completed, total);
+                }
+            });
             var result = await _engine.RunEvaluationAsync(
                 ActiveProjectPath,
                 settings.SchemaId,
@@ -1031,7 +1071,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 settings.BaseUrl,
                 settings.Limit,
                 settings.ScoreThreshold,
-                settings.TimeoutSeconds
+                settings.TimeoutSeconds,
+                progress: progress
             );
             Evaluation.ApplyEvaluationRunResult(result);
             Evaluation.SetEvaluationReportHistory(
@@ -1063,6 +1104,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
         finally
         {
+            Evaluation.ClearEvaluationProgress();
             ClearBusy();
         }
     }

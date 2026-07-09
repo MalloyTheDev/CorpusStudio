@@ -50,6 +50,12 @@ public interface IEvaluationViewModel : INotifyPropertyChanged
     string EvaluationComparisonSummary { get; }
 
     void SetEvaluationInProgress();
+    bool IsEvaluationInProgress { get; }
+    double EvaluationProgressPercent { get; }
+    string EvaluationProgressText { get; }
+    void BeginEvaluationProgress();
+    void SetEvaluationProgress(int completed, int total);
+    void ClearEvaluationProgress();
     void SetEvaluationPreflightInProgress();
     void SetEvaluationRegressionRerunPreflightInProgress(EvaluationRunSettings settings);
     void SetEvaluationRegressionRerunInProgress(EvaluationRunSettings settings);

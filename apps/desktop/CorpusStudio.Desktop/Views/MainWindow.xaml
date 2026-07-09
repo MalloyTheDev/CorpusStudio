@@ -1398,6 +1398,19 @@
                                            TextWrapping="Wrap"
                                            VerticalAlignment="Center" />
                             </WrapPanel>
+                            <StackPanel AutomationProperties.AutomationId="EvaluationProgressPanel"
+                                        Margin="0,8,0,0"
+                                        Visibility="{Binding Evaluation.IsEvaluationInProgress, Converter={StaticResource BoolToVis}}">
+                                <TextBlock AutomationProperties.AutomationId="EvaluationProgressText"
+                                           Text="{Binding Evaluation.EvaluationProgressText, Mode=OneWay}"
+                                           Foreground="#334155"
+                                           FontSize="12"
+                                           Margin="0,0,0,4" />
+                                <ProgressBar AutomationProperties.AutomationId="EvaluationProgressBar"
+                                             Height="8"
+                                             Minimum="0" Maximum="100"
+                                             Value="{Binding Evaluation.EvaluationProgressPercent, Mode=OneWay}" />
+                            </StackPanel>
                             <TextBlock Text="Judge model (optional): scores each answer 0–100 with a rationale via an evaluator model (metric llm_judge, evaluator-only). A high judge score is not a guarantee of quality — manual scoring stays the human-trustworthy path. Blank keeps the default keyword-overlap recall."
                                        TextWrapping="Wrap"
                                        Foreground="#64748B"
