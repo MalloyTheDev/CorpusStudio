@@ -9,9 +9,10 @@ namespace CorpusStudio.Desktop.Services;
 /// Spawns an external trainer process from a structured argv (no shell) and
 /// streams its stdout/stderr line by line. Cancellation kills the process tree.
 /// The engine never runs this; it only produces the argv, and the user confirms
-/// the command before it is spawned.
+/// the command before it is spawned. The real <see cref="IProcessRunner"/> the
+/// desktop head uses; tests drive a fake through the same seam.
 /// </summary>
-public sealed class TrainingProcessRunner
+public sealed class TrainingProcessRunner : IProcessRunner
 {
     private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
