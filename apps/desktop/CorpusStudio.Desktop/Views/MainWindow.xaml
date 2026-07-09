@@ -1048,7 +1048,7 @@
                                         AutomationProperties.AutomationId="SaveExampleButton"
                                         Content="Save Example"
                                         Width="112"
-                                        Click="SaveExampleButton_Click" />
+                                        Command="{Binding SaveExampleCommand}" />
                             </StackPanel>
 
                             <TextBox x:Name="DraftTextBox"

@@ -184,6 +184,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand ExportPreferenceRankingCommand { get; }
     public System.Windows.Input.ICommand RefreshDatasetVersionsCommand { get; }
     public System.Windows.Input.ICommand RestoreDatasetVersionCommand { get; }
+    public System.Windows.Input.ICommand SaveExampleCommand { get; }
     public System.Windows.Input.ICommand RegisterArtifactFromRunCommand { get; }
     public System.Windows.Input.ICommand KeepArtifactCommand { get; }
     public System.Windows.Input.ICommand RejectArtifactCommand { get; }
@@ -295,6 +296,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ExportPreferenceRankingCommand = new RelayCommand(ExportPreferenceRanking);
         RefreshDatasetVersionsCommand = new AsyncRelayCommand(RefreshDatasetVersionsAsync);
         RestoreDatasetVersionCommand = new AsyncRelayCommand(RestoreDatasetVersionAsync);
+        SaveExampleCommand = new AsyncRelayCommand(SaveExampleAsync);
         RegisterArtifactFromRunCommand = new RelayCommand(RegisterArtifactFromRun);
         KeepArtifactCommand = new AsyncRelayCommand(KeepArtifactAsync);
         RejectArtifactCommand = new RelayCommand(() => SetSelectedArtifactStatus("rejected"));
@@ -1314,6 +1316,54 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         return true;
+    }
+
+    /// <summary>Validate the current draft and, if valid, append it to the project's examples (clearing a
+    /// repaired quarantine row and refreshing quality). Info dialogs route through the IDialogService seam.
+    /// Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task SaveExampleAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            await _dialogs.ShowAsync("Create a dataset project before saving examples.", "Corpus Studio", DialogSeverity.Information);
+            return;
+        }
+
+        try
+        {
+            SetValidationInProgress();
+
+            var report = await _engine.ValidateDraftAsync(WritingStudio.DraftText, ActiveSchemaId);
+            ApplyValidationReport(report);
+            if (!report.Valid)
+            {
+                return;
+            }
+
+            var savedCount = _engine.AppendDraftToProjectExamples(ActiveProjectPath, WritingStudio.DraftText);
+
+            SetExamples(_engine.LoadExamples(ActiveProjectPath));
+            WritingStudio.MarkDraftClean(); // the draft is now persisted — no longer unsaved work
+
+            // If this save repaired a quarantined row, clear that record so it doesn't orphan.
+            var retried = TakePendingRetryItem();
+            if (retried is not null)
+            {
+                _engine.RemoveImportQuarantineItem(retried);
+                Quarantine.SetItems(_engine.LoadImportQuarantineItems(ActiveProjectPath));
+            }
+
+            await RefreshQualityAsync();
+            await _dialogs.ShowAsync($"Saved {savedCount} example(s).", "Example Saved", DialogSeverity.Information);
+        }
+        catch (System.Exception ex)
+        {
+            SetValidationError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
     }
 
     /// <summary>Restore the selected dataset version in place (after a confirm), capturing the current
