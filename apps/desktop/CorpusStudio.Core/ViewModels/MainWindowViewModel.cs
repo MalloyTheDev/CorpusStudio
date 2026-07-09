@@ -162,6 +162,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private readonly IEngineService _engine = null!;
     private readonly IDialogService _dialogs = new NullDialogService();
     private readonly IFilePickerService _filePicker = new NullFilePickerService();
+    private readonly IHuggingFaceImportDialog _huggingFaceImportDialog = new NullHuggingFaceImportDialog();
 
     /// <summary>Run the dataset-debt assessment and apply it to the Debt tab — the engine-run
     /// orchestration moved off the desktop code-behind into a shared async command.</summary>
@@ -195,6 +196,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand RestoreDatasetVersionCommand { get; }
     public System.Windows.Input.ICommand SaveExampleCommand { get; }
     public System.Windows.Input.ICommand ImportDatasetCommand { get; }
+    public System.Windows.Input.ICommand ImportFromHuggingFaceCommand { get; }
     public System.Windows.Input.ICommand NewSuiteCommand { get; }
     public System.Windows.Input.ICommand ExportJsonlCommand { get; }
     public System.Windows.Input.ICommand RegisterArtifactFromRunCommand { get; }
@@ -228,7 +230,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             new SplitsViewModel(), new PreferenceReviewViewModel(), new QuarantineViewModel(),
             new ExamplesViewModel(), new WritingStudioViewModel(), new AiAssistRewriteBatchesViewModel(),
             new AiAssistConnectionViewModel(), new EvaluationConnectionViewModel(), new QualityViewModel(),
-            new PythonEngineService(), new NullDialogService(), new NullFilePickerService())
+            new PythonEngineService(), new NullDialogService(), new NullFilePickerService(),
+            new NullHuggingFaceImportDialog())
     {
     }
 
@@ -242,11 +245,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         IQualityViewModel quality,
         IEngineService engine,
         IDialogService dialogs,
-        IFilePickerService filePicker)
+        IFilePickerService filePicker,
+        IHuggingFaceImportDialog huggingFaceImportDialog)
     {
         _engine = engine;
         _dialogs = dialogs;
         _filePicker = filePicker;
+        _huggingFaceImportDialog = huggingFaceImportDialog;
         Debt = debt;
         Arena = arena;
         Settings = settings;
@@ -316,6 +321,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RestoreDatasetVersionCommand = new AsyncRelayCommand(RestoreDatasetVersionAsync);
         SaveExampleCommand = new AsyncRelayCommand(SaveExampleAsync);
         ImportDatasetCommand = new AsyncRelayCommand(ImportDatasetAsync);
+        ImportFromHuggingFaceCommand = new AsyncRelayCommand(ImportFromHuggingFaceAsync);
         NewSuiteCommand = new AsyncRelayCommand(CreateSuiteAsync);
         ExportJsonlCommand = new AsyncRelayCommand(ExportJsonlAsync);
         RegisterArtifactFromRunCommand = new RelayCommand(RegisterArtifactFromRun);
@@ -1508,6 +1514,72 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         finally
         {
             Suites.IsSuitesBusy = false;
+        }
+    }
+
+    /// <summary>Import rows from a public Hugging Face dataset: show the HF import dialog (via the
+    /// head-agnostic seam) mapped to the active project's built-in schema, then run the staged JSONL
+    /// through the SAME preview/confirm/quarantine flow as any import, cleaning up the temp file.
+    /// Moved from the desktop code-behind (#250); the modal window is now behind IHuggingFaceImportDialog.</summary>
+    public async System.Threading.Tasks.Task ImportFromHuggingFaceAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            await _dialogs.ShowAsync("Create or select a dataset project before importing.", "Corpus Studio", DialogSeverity.Information);
+            return;
+        }
+
+        // Map HF columns to the ACTIVE project's schema so imported rows match the project.
+        IReadOnlyList<DatasetSchema> schemas;
+        try
+        {
+            SetBusy("Loading schemas...");
+            schemas = await _engine.GetSchemasAsync();
+        }
+        catch (Exception ex)
+        {
+            SetImportError(ex.Message);
+            return;
+        }
+        finally
+        {
+            ClearBusy();
+        }
+
+        var schema = schemas.FirstOrDefault(s => s.Id == ActiveSchemaId);
+        if (schema is null)
+        {
+            await _dialogs.ShowAsync(
+                $"The active project's schema ('{ActiveSchemaId}') is not a built-in schema, so Hugging Face import can't map to it.",
+                "Import from Hugging Face", DialogSeverity.Information);
+            return;
+        }
+
+        var staging = await _huggingFaceImportDialog.ShowAsync(schema.Id, schema.Name, schema.Fields);
+        if (string.IsNullOrWhiteSpace(staging))
+        {
+            return; // cancelled or nothing staged
+        }
+
+        // Hand the staging file to the SAME preview/confirm/append+quarantine flow as any JSONL
+        // import (the desktop is the single writer of examples.jsonl), then clean up the temp file.
+        try
+        {
+            await PreviewAndImportJsonlAsync(staging);
+        }
+        finally
+        {
+            try
+            {
+                if (System.IO.File.Exists(staging))
+                {
+                    System.IO.File.Delete(staging);
+                }
+            }
+            catch (System.IO.IOException)
+            {
+                // best-effort temp cleanup
+            }
         }
     }
 

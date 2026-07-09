@@ -40,6 +40,8 @@ public partial class App : Application
             // MessageBoxDialogService / Win32FilePickerService registrations.
             services.AddSingleton<CorpusStudio.Desktop.Services.IDialogService, Services.AvaloniaDialogService>();
             services.AddSingleton<CorpusStudio.Desktop.Services.IFilePickerService, Services.AvaloniaFilePickerService>();
+            // No Avalonia HF import window yet — the no-op keeps the shared VM graph composing (issue #245).
+            services.AddSingleton<CorpusStudio.Desktop.Services.IHuggingFaceImportDialog, CorpusStudio.Desktop.Services.NullHuggingFaceImportDialog>();
             services.AddTransient<MainWindowViewModel>();
             var provider = services.BuildServiceProvider();
 

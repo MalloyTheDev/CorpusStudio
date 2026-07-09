@@ -714,7 +714,7 @@
                 <Button AutomationProperties.AutomationId="ImportFromHuggingFaceButton"
                         Content="Import from Hugging Face"
                         Margin="0,0,0,10"
-                        Click="ImportFromHuggingFaceButton_Click" />
+                        Command="{Binding ImportFromHuggingFaceCommand}" />
                 <Button AutomationProperties.AutomationId="ExportCenterButton"
                         Content="Export Center"
                         Margin="0,0,0,28"
