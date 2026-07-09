@@ -43,6 +43,11 @@ public sealed class EngineCommandTests
         public Task<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName)
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>>(new System.Collections.Generic.List<SuiteHistoryEntry>());
         public Task<BenchmarkReport> RunBenchmarkAsync(string projectPath, string schemaId, string backend, System.Collections.Generic.IReadOnlyList<string> models, string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds) => Task.FromResult(new BenchmarkReport());
+        public int PreviewAccepted { get; set; }
+        public int PreviewRejected { get; set; }
+        public bool CommitCalled { get; private set; }
+        public Task<ImportPreviewReport> PreviewImportAsync(string importPath, string schemaId) => Task.FromResult(new ImportPreviewReport { AcceptedRows = PreviewAccepted, RejectedRows = PreviewRejected });
+        public ImportCommitResult CommitJsonlImportToProjectExamples(string projectPath, string importPath, ImportPreviewReport report) { CommitCalled = true; return new ImportCommitResult(0, 0, null); }
         public bool ValidateReturnsValid { get; set; }
         public bool AppendCalled { get; private set; }
         public int AppendDraftToProjectExamples(string projectPath, string draftText) { AppendCalled = true; return 1; }
@@ -101,7 +106,8 @@ public sealed class EngineCommandTests
         new ArtifactsViewModel(), new SuitesViewModel(), new SplitsViewModel(), new PreferenceReviewViewModel(),
         new QuarantineViewModel(), new ExamplesViewModel(), new WritingStudioViewModel(),
         new AiAssistRewriteBatchesViewModel(), new AiAssistConnectionViewModel(),
-        new EvaluationConnectionViewModel(), new QualityViewModel(), engine, dialogs ?? new NullDialogService());
+        new EvaluationConnectionViewModel(), new QualityViewModel(), engine, dialogs ?? new NullDialogService(),
+        new NullFilePickerService());
 
     private static void SelectFakeProject(MainWindowViewModel vm) => vm.SelectProject(
         new DatasetProjectListItem(
@@ -502,5 +508,41 @@ public sealed class EngineCommandTests
         await vm.SaveExampleAsync();
 
         Assert.False(engine.AppendCalled); // invalid draft is not persisted
+    }
+
+    [Fact]
+    public async Task PreviewAndImport_WhenConfirmed_CommitsTheImport()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { PreviewAccepted = 3 };
+        var vm = VmWith(engine, new FakeDialogService(confirm: true));
+        SelectFakeProject(vm);
+
+        await vm.PreviewAndImportJsonlAsync(@"C:\fake\import.jsonl");
+
+        Assert.True(engine.CommitCalled);
+    }
+
+    [Fact]
+    public async Task PreviewAndImport_WhenDeclined_DoesNotCommit()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { PreviewAccepted = 3 };
+        var vm = VmWith(engine, new FakeDialogService(confirm: false));
+        SelectFakeProject(vm);
+
+        await vm.PreviewAndImportJsonlAsync(@"C:\fake\import.jsonl");
+
+        Assert.False(engine.CommitCalled); // declining the confirm gates the import
+    }
+
+    [Fact]
+    public async Task PreviewAndImport_WhenNoImportableRows_DoesNotCommit()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }); // 0 accepted / 0 rejected
+        var vm = VmWith(engine, new FakeDialogService(confirm: true));
+        SelectFakeProject(vm);
+
+        await vm.PreviewAndImportJsonlAsync(@"C:\fake\import.jsonl");
+
+        Assert.False(engine.CommitCalled);
     }
 }

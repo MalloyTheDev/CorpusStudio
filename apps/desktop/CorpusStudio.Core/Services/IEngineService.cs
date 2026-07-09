@@ -47,6 +47,12 @@ public interface IEngineService
     /// <summary>Reconcile tracked reviewed-fixes against a fresh evaluation's per-example results.</summary>
     IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, IReadOnlyList<EvaluationExampleResult> results);
 
+    /// <summary>Preview a JSONL import against a schema (accepted/rejected rows, no write).</summary>
+    Task<ImportPreviewReport> PreviewImportAsync(string importPath, string schemaId);
+
+    /// <summary>Commit a previewed JSONL import into the project's examples.jsonl (dedupe + quarantine).</summary>
+    ImportCommitResult CommitJsonlImportToProjectExamples(string projectPath, string importPath, ImportPreviewReport report);
+
     /// <summary>Validate + append the draft to the project's examples.jsonl; returns the rows saved.</summary>
     int AppendDraftToProjectExamples(string projectPath, string draftText);
 

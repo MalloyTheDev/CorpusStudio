@@ -710,7 +710,7 @@
                 <Button AutomationProperties.AutomationId="ImportDatasetButton"
                         Content="Import Dataset"
                         Margin="0,0,0,10"
-                        Click="ImportDatasetButton_Click" />
+                        Command="{Binding ImportDatasetCommand}" />
                 <Button AutomationProperties.AutomationId="ImportFromHuggingFaceButton"
                         Content="Import from Hugging Face"
                         Margin="0,0,0,10"
