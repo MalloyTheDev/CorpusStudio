@@ -36,6 +36,15 @@ public sealed class SuiteHistoryEntry
     [JsonIgnore]
     public string StatusColor => SuiteReport.ColorForStatus(OverallStatus);
 
+    /// <summary>Pass rate (0–1) for this run, used by the trend sparkline. 0 when the run had no cases.</summary>
+    [JsonIgnore]
+    public double PassRate => Total > 0 ? (double)Passed / Total : 0;
+
+    /// <summary>Sparkline bar height in px: pass rate scaled into 4–36 px (a floor so a 0% run is
+    /// still a visible tick). Colour comes from <see cref="StatusColor"/>.</summary>
+    [JsonIgnore]
+    public double SparkBarHeight => 4 + PassRate * 32;
+
     [JsonIgnore]
     public string DisplayLine =>
         $"{GeneratedAt ?? "?"} · {OverallStatus.ToUpper(CultureInfo.InvariantCulture)} · {Passed}/{Total} passed"

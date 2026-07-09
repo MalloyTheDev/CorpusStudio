@@ -59,6 +59,32 @@ public sealed class SuiteHistoryTests
     }
 
     [Fact]
+    public void HasSuiteHistory_TracksWhetherThereIsATrendToPlot()
+    {
+        var vm = new SuitesViewModel();
+        Assert.False(vm.HasSuiteHistory);
+
+        vm.SetSuiteHistory([new SuiteHistoryEntry { GeneratedAt = "t1", OverallStatus = "pass" }]);
+        Assert.True(vm.HasSuiteHistory);
+
+        vm.SetSuiteHistory(Array.Empty<SuiteHistoryEntry>());
+        Assert.False(vm.HasSuiteHistory);
+    }
+
+    [Theory]
+    [InlineData(8, 10, 0.8)]   // 80% pass → 4 + 0.8*32 = 29.6 px
+    [InlineData(0, 10, 0.0)]   // 0% → the 4px floor
+    [InlineData(0, 0, 0.0)]    // no cases → 0 rate, still the 4px floor
+    [InlineData(10, 10, 1.0)]  // 100% → 36px
+    public void SparkBarHeight_ScalesPassRateIntoAVisibleBar(int passed, int total, double expectedRate)
+    {
+        var entry = new SuiteHistoryEntry { Passed = passed, Total = total, OverallStatus = "pass" };
+        Assert.Equal(expectedRate, entry.PassRate, 3);
+        Assert.Equal(4 + expectedRate * 32, entry.SparkBarHeight, 3);
+        Assert.True(entry.SparkBarHeight >= 4); // a 0% run is still a visible tick
+    }
+
+    [Fact]
     public void DisplayLine_IncludesVerdictCountsAndBlocked()
     {
         var entry = new SuiteHistoryEntry
