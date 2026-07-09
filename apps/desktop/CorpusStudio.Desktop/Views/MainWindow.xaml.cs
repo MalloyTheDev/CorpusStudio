@@ -21,7 +21,7 @@ public partial class MainWindow : Window
 
     private readonly PythonEngineService _engineService = new();
     private readonly List<IReadOnlyDictionary<string, string>> _aiAssistBulkUndoStack = [];
-    private readonly TrainingProcessRunner _trainingRunner = new();
+    private readonly IProcessRunner _trainingRunner = new TrainingProcessRunner();
     private CancellationTokenSource? _trainingRunCts;
     private readonly ConcurrentQueue<string> _trainingLogQueue = new();
     private bool _trainingCancelRequested;
@@ -1559,39 +1559,44 @@ public partial class MainWindow : Window
 
         try
         {
-            var exitCode = await _trainingRunner.RunAsync(
-                argv,
-                workingDirectory,
-                _trainingLogQueue.Enqueue,
-                cts.Token,
-                onStarted: (pid, startedAt) => RecordRunPid(runProjectPath, runRecord, pid, startedAt)
-            );
+            int? cleanExitCode = null;
+            Exception? runError = null;
+            try
+            {
+                cleanExitCode = await _trainingRunner.RunAsync(
+                    argv,
+                    workingDirectory,
+                    _trainingLogQueue.Enqueue,
+                    cts.Token,
+                    onStarted: (pid, startedAt) => RecordRunPid(runProjectPath, runRecord, pid, startedAt)
+                );
+            }
+            catch (Exception ex)
+            {
+                runError = ex;
+            }
 
             FlushTrainingLogQueue(runId);
-            terminalExitCode = exitCode;
-            if (_trainingCancelRequested)
+
+            // Pure classification (unit-tested in Core) drives the terminal status +
+            // which VM state to set — the launch code-behind no longer branches by hand.
+            var outcome = TrainingRunClassifier.Classify(cleanExitCode, _trainingCancelRequested, runError);
+            terminalStatus = outcome.Status;
+            terminalExitCode = outcome.ExitCode;
+            terminalNote = outcome.Note;
+
+            if (outcome.Note is not null)
             {
-                terminalStatus = "cancelled";
+                ViewModel.Training.SetTrainingRunError(outcome.Note);
+            }
+            else if (outcome.Status == TrainingRunOutcome.Cancelled)
+            {
                 ViewModel.Training.SetTrainingRunCancelled();
             }
             else
             {
-                terminalStatus = exitCode == 0 ? "succeeded" : "failed";
-                ViewModel.Training.CompleteTrainingRun(exitCode);
+                ViewModel.Training.CompleteTrainingRun(outcome.ExitCode ?? 0);
             }
-        }
-        catch (OperationCanceledException)
-        {
-            FlushTrainingLogQueue(runId);
-            terminalStatus = "cancelled";
-            ViewModel.Training.SetTrainingRunCancelled();
-        }
-        catch (Exception ex)
-        {
-            FlushTrainingLogQueue(runId);
-            terminalStatus = "failed";
-            terminalNote = ex.Message;
-            ViewModel.Training.SetTrainingRunError(ex.Message);
         }
         finally
         {
