@@ -1422,9 +1422,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         var file = await _filePicker.PickFileAsync(
             "Import Dataset",
-            new FilePickerFilter("Dataset files (JSONL, CSV, TSV)", "jsonl", "csv", "tsv"),
+            new FilePickerFilter("Dataset files (JSONL, CSV, TSV, Parquet)", "jsonl", "csv", "tsv", "parquet"),
             new FilePickerFilter("JSONL files", "jsonl"),
             new FilePickerFilter("CSV / TSV files", "csv", "tsv"),
+            new FilePickerFilter("Parquet files", "parquet"),
             new FilePickerFilter("All files", "*"));
         if (file is null)
         {
@@ -1432,19 +1433,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         var extension = System.IO.Path.GetExtension(file).TrimStart('.').ToLowerInvariant();
-        if (extension is "csv" or "tsv" or "tab")
+        if (extension is "csv" or "tsv" or "tab" or "parquet")
         {
-            await ImportTabularAsync(file);
+            await ImportConvertedFileAsync(file);
             return;
         }
 
         await PreviewAndImportJsonlAsync(file);
     }
 
-    /// <summary>Convert a CSV/TSV file to a temp staging JSONL via the engine, then run it through the
-    /// same preview/confirm/quarantine/commit flow as any JSONL import (mirrors the Hugging-Face staging
-    /// path). CSV cells import as text, so a schema type mismatch quarantines like a bad JSONL row.</summary>
-    private async System.Threading.Tasks.Task ImportTabularAsync(string tabularPath)
+    /// <summary>Convert a CSV/TSV/Parquet file to a temp staging JSONL via the engine, then run it through
+    /// the same preview/confirm/quarantine/commit flow as any JSONL import (mirrors the Hugging-Face staging
+    /// path). The engine routes by extension; a CSV cell imports as text (so a schema type mismatch
+    /// quarantines like a bad JSONL row), while Parquet keeps its column types. Parquet needs the engine's
+    /// optional [parquet] extra — a missing dependency surfaces as an import error with the install hint.</summary>
+    private async System.Threading.Tasks.Task ImportConvertedFileAsync(string sourcePath)
     {
         var staging = System.IO.Path.Combine(
             System.IO.Path.GetTempPath(),
@@ -1454,7 +1457,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             try
             {
                 SetBusy("Converting to JSONL for import...");
-                await _engine.ConvertTabularToJsonlAsync(tabularPath, staging);
+                await _engine.ConvertTabularToJsonlAsync(sourcePath, staging);
             }
             finally
             {
@@ -2879,7 +2882,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
     /// <summary>Export file format (bound to the Export format selector): "jsonl" (default, model-ready,
-    /// all schemas) or "csv"/"tsv" (flat schemas only — the engine refuses a chat/nested schema).</summary>
+    /// all schemas), "csv"/"tsv" (flat schemas only — the engine refuses a chat/nested schema), or
+    /// "parquet" (columnar, all schemas; needs the engine's optional [parquet] extra).</summary>
     public string ExportFormat
     {
         get => _exportFormat;

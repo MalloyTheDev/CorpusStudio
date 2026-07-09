@@ -3052,13 +3052,14 @@
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8" VerticalAlignment="Center">
                     <TextBlock Text="Format:" VerticalAlignment="Center" Margin="0,0,8,0" />
                     <ComboBox AutomationProperties.AutomationId="ExportFormatComboBox"
-                              Width="200"
+                              Width="220"
                               SelectedValuePath="Tag"
                               SelectedValue="{Binding ExportFormat, Mode=TwoWay}"
-                              ToolTip="JSONL is model-ready and works for every schema. CSV/TSV is a flat-schema convenience (open in Excel/pandas) — a chat or nested-object schema is refused; export those as JSONL.">
+                              ToolTip="JSONL is model-ready and works for every schema. CSV/TSV is a flat-schema convenience (open in Excel/pandas) — a chat or nested-object schema is refused; export those as JSONL or Parquet. Parquet is columnar, supports every schema, and needs the engine's optional [parquet] extra.">
                         <ComboBoxItem Tag="jsonl" Content="JSONL (model-ready, all schemas)" />
                         <ComboBoxItem Tag="csv" Content="CSV (flat schemas)" />
                         <ComboBoxItem Tag="tsv" Content="TSV (flat schemas)" />
+                        <ComboBoxItem Tag="parquet" Content="Parquet (all schemas, needs extra)" />
                     </ComboBox>
                 </StackPanel>
                 <Button x:Name="ExportJsonlButton"

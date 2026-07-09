@@ -23,9 +23,11 @@ per-item error isolation, and off-thread document opens.
   declared field types, list element types, enum/label sets, numeric bounds,
   nested object shapes, and chat message structure, with selectable issue
   navigation in the desktop.
-- JSONL / CSV / TSV import preview with failed-row quarantine, review, and retry
-  (CSV/TSV convert to a staging JSONL and flow through the same preview/commit path;
-  cells import as text, so schema type mismatches quarantine like a bad JSONL row).
+- JSONL / CSV / TSV / Parquet import preview with failed-row quarantine, review, and
+  retry (CSV/TSV/Parquet convert to a staging JSONL and flow through the same
+  preview/commit path; CSV/TSV cells import as text so schema type mismatches
+  quarantine like a bad JSONL row, while Parquet keeps its column types. Parquet
+  needs the engine's optional `[parquet]` extra — a clear install hint when absent).
 - **Hugging Face Hub dataset import** (read-only, public): `hf-inspect` /
   `hf-import` fetch rows via the public datasets-server JSON API (stdlib urllib,
   no `datasets`/`huggingface_hub` dependency), map columns to a schema, and write
@@ -57,7 +59,9 @@ per-item error isolation, and off-thread document opens.
   writes a removal manifest; verbatim exports warn when duplicates remain.
 - Export format is JSONL by default (model-ready, all schemas); **CSV/TSV export**
   is available for flat schemas (a chat/nested-object schema is refused, not
-  lossy-flattened) through the same validate/gate/clean pipeline.
+  lossy-flattened) and **Parquet export** for every schema (columnar, chat/nested
+  included; needs the optional `[parquet]` extra) — all through the same
+  validate/gate/clean pipeline.
 - Preference exports (DPO/KTO/reward) with a pair-integrity gate.
 - Dataset card summarizing metadata, schema, splits, quality, and evaluation.
 

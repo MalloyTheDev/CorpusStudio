@@ -15,7 +15,7 @@ The desktop workflow supports:
 - JSON example authoring
 - Python-engine validation with selectable issue navigation
 - saving examples to the active project
-- JSONL / CSV / TSV import preview with failed-row reporting (CSV/TSV convert to a staging JSONL through the same preview/quarantine path)
+- JSONL / CSV / TSV / Parquet import preview with failed-row reporting (CSV/TSV/Parquet convert to a staging JSONL through the same preview/quarantine path; Parquet needs the engine's optional `[parquet]` extra)
 - quarantine review and retry for rejected import rows
 - quality checks for empty rows, duplicates, low-information examples, and first-pass synthetic-pattern warnings with repair suggestions plus single-row and batch triage-to-rewrite handoffs
 - project-level quality history
@@ -32,7 +32,7 @@ The desktop workflow supports:
 - prompt **Arena** for side-by-side model comparison, and a **Debt** tab (graded A–F dataset-debt ledger with ranked remediation)
 - Hugging Face Hub dataset import (read-only, public) through the normal import-preview/quarantine flow
 - gate runs (schema/quality/leakage/PII/eval + chat-structure) with an editable per-project gate-threshold editor and a provider generation-policy approve/revoke surface
-- export as JSONL (default, model-ready, all schemas) or CSV/TSV for flat schemas (chat/nested-object schemas are refused, not lossy-flattened), with optional dedupe / drop-low-information cleaning and PII/secret redaction
+- export as JSONL (default, model-ready, all schemas), CSV/TSV for flat schemas (chat/nested-object schemas are refused, not lossy-flattened), or Parquet (columnar, all schemas incl. chat/nested; needs the engine's optional `[parquet]` extra), with optional dedupe / drop-low-information cleaning and PII/secret redaction
 - local settings inspection and per-project lab backend settings persistence
 - polished desktop shell styling, a workflow stage strip, and a wired sidebar
   Export Center affordance
@@ -70,10 +70,12 @@ set `CORPUS_STUDIO_ENGINE_DIR`) instead of crashing. Bundling a Python runtime i
 JSONL imports are previewed against the active schema and only fully valid files
 are appended directly to the active project's `examples.jsonl`. Mixed-validity
 imports can append valid rows after confirmation and save rejected rows under
-the project's `import_quarantine` folder for repair. CSV and TSV files are
-converted to a staging JSONL first (header row → field keys, cells as text) and
-then run through the same preview/quarantine/commit path — so a cell whose schema
-field expects a number or list quarantines like any invalid row.
+the project's `import_quarantine` folder for repair. CSV, TSV, and Parquet files
+are converted to a staging JSONL first and then run through the same
+preview/quarantine/commit path. CSV/TSV cells are text (so a cell whose schema
+field expects a number or list quarantines like any invalid row), while Parquet
+keeps its column types; Parquet import/export needs the engine's optional
+`[parquet]` extra and fails fast with an install hint when it is absent.
 
 Split generation lets the user set train and validation percentages plus a
 deterministic seed. The test split uses the remaining percentage, and output is
