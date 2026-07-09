@@ -15,6 +15,8 @@ The import system turns existing files into dataset examples.
 - JSONL through the desktop app and Python engine preview command
 - **CSV / TSV** through the desktop **Import Dataset** picker and the engine
   `import-convert` command — see below
+- **Parquet** via `import-convert <file.parquet> <output>` (optional `[parquet]`
+  extra) — see below
 - **Hugging Face Hub datasets** (read-only, public) via the engine
   `hf-inspect` / `hf-import` commands — see below
 
@@ -23,7 +25,6 @@ The import system turns existing files into dataset examples.
 - JSON
 - TXT
 - Markdown
-- Parquet
 - code folders
 - image folders
 - Git repositories
@@ -64,8 +65,21 @@ tolerated). **Honesty boundary:** a CSV cell has no type, so every value is impo
 as text. A row whose schema field expects a number/list/object will therefore fail
 the normal import-preview validation and land in **quarantine** for repair — exactly
 like a malformed JSONL row. The converter never coerces types or drops columns; the
-original file is never modified. (Parquet/Excel remain future work — they would pull
-in a heavier dependency; CSV/TSV use the standard library only.)
+original file is never modified. (Excel remains future work; CSV/TSV use the standard
+library only.)
+
+### Parquet import
+
+Parquet is a typed, columnar format, so unlike CSV a Parquet integer/list/struct
+column keeps its type into the staging JSONL and validates against the schema
+directly (no forced-string quarantine). `import-convert <file.parquet> <output>` is
+routed by the `.parquet` extension, streams the file per record-batch (bounded
+memory), and takes the columns from the Parquet schema. Because Parquet needs the
+large `pyarrow` dependency, it is an **optional extra** — the engine stays
+dependency-light by default and, without it installed, every Parquet path fails fast
+with `pip install corpus-studio-engine[parquet]` instead of an opaque error. Binary
+columns are best-effort decoded as text (image/audio payloads are out of scope for a
+text-dataset tool).
 
 ### Import principles
 
@@ -157,21 +171,32 @@ cell. CSV/TSV goes through the *same* validate → PII/secret export-gate → op
 clean/redact pipeline as JSONL — only the writer differs. A schema with a chat
 `messages` field, a nested `object`, or a list of objects is **refused** (exit 2)
 with a clear "export as JSONL instead" message rather than lossy-flattened, honoring
-the export rule below. (Parquet/Excel remain future work — they need a heavier
-dependency; CSV/TSV use the standard library only.)
+the export rule below. (Excel remains future work; CSV/TSV use the standard library
+only.)
 
 ```text
 text,label,tags
 Great value for the price.,positive,sentiment; review
 ```
 
+#### Parquet (all schemas)
+
+Parquet is columnar and represents nested types natively, so — unlike CSV/TSV — it
+supports **every** schema, chat and nested objects included (a `messages` array
+becomes a `list<struct>` column, not a refused field). It is an analytics-friendly
+deliverable (pandas / DuckDB / Spark) while JSONL stays the canonical, diffable,
+trainer-ready format. Pass `export … --format parquet` (or select it in the desktop
+Export panel); it shares the same validate → PII/secret export-gate → optional
+clean/redact pipeline — only the writer differs. Parquet needs the optional
+`[parquet]` extra; without `pyarrow` installed the export fails fast (before any
+output is written) with `pip install corpus-studio-engine[parquet]`.
+
 ### Planned dataset exports
 
-Shipped: preference exports (DPO/KTO/reward), CSV/TSV (flat schemas), the dataset
-card, and training config templates for the major targets (Axolotl / TRL / Unsloth
-/ HF / LLaMA-Factory). Still planned:
+Shipped: preference exports (DPO/KTO/reward), CSV/TSV (flat schemas), **Parquet (all
+schemas)**, the dataset card, and training config templates for the major targets
+(Axolotl / TRL / Unsloth / HF / LLaMA-Factory). Still planned:
 
-- Parquet
 - Alpaca
 - ShareGPT
 - ChatML-like

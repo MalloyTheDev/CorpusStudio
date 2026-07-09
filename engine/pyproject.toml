@@ -18,7 +18,10 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "ruff>=0.5",
-    "mypy>=1.8"
+    "mypy>=1.8",
+    # Installed in dev/CI so the optional Parquet round-trip is actually exercised
+    # (it is a runtime *optional* extra for users — see `parquet` below).
+    "pyarrow>=15"
 ]
 # Optional exact tokenizers. The engine stays dependency-light by default (a
 # Unicode-aware heuristic estimates token counts). Installing `tokenizer` lets
@@ -32,6 +35,13 @@ tokenizer = [
 ]
 model-tokenizer = [
     "tokenizers>=0.15"
+]
+# Optional Parquet import/export. Parquet is a large columnar dependency (pyarrow),
+# so the engine stays dependency-light by default and Parquet paths fail fast with an
+# install hint when it's absent. `pip install corpus-studio-engine[parquet]`.
+# See corpus_studio/parquet_support.py.
+parquet = [
+    "pyarrow>=15"
 ]
 
 [project.scripts]

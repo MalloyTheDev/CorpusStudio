@@ -357,16 +357,33 @@ def run_provenance(project_dir: Path, config_path: Path):
 
 @app.command("import-convert")
 def import_convert(path: Path, output_path: Path):
-    """Convert a CSV/TSV file to a JSONL staging file for import.
+    """Convert a CSV/TSV/Parquet file to a JSONL staging file for import.
 
-    The header row defines the keys; every cell is carried across as text (CSV
-    has no types), so a value that a schema field expects as a number/list will
-    quarantine in the normal import-preview — this command only reshapes tabular
-    -> JSONL. The staging JSONL then flows through the same import-preview ->
-    quarantine -> commit path as any JSONL or Hugging Face import.
+    Routed by extension: ``.parquet`` uses the typed columnar reader (values keep
+    their type); ``.csv``/``.tsv``/other use the tabular reader (the header defines
+    the keys; every cell is text). Either way this only reshapes the source ->
+    JSONL — schema validation is the import-preview's job, so a value that violates
+    the target schema quarantines the same as any JSONL/Hugging Face import.
+    Parquet needs the optional ``[parquet]`` extra (a clear message if it's missing).
     """
+    from corpus_studio.parquet_support import ParquetSupportError
+
     try:
-        result = convert_tabular_to_jsonl(path, output_path)
+        if path.suffix.lower() == ".parquet":
+            from corpus_studio.importers.parquet_importer import convert_parquet_to_jsonl
+
+            parquet_result = convert_parquet_to_jsonl(path, output_path)
+            columns = parquet_result.columns
+            rows_converted = parquet_result.rows_converted
+            resolved_output = parquet_result.output_path
+        else:
+            result = convert_tabular_to_jsonl(path, output_path)
+            columns = result.columns
+            rows_converted = result.rows_converted
+            resolved_output = result.output_path
+    except ParquetSupportError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
     except (OSError, ValueError, UnicodeError) as exc:
         typer.echo(f"Could not convert '{path}': {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -374,9 +391,9 @@ def import_convert(path: Path, output_path: Path):
     typer.echo(
         json.dumps(
             {
-                "output_path": result.output_path,
-                "rows_converted": result.rows_converted,
-                "columns": result.columns,
+                "output_path": resolved_output,
+                "rows_converted": rows_converted,
+                "columns": columns,
             },
             indent=2,
         )
@@ -1860,16 +1877,28 @@ def export(
     export_format: str = typer.Option(
         "jsonl",
         "--format",
-        help="Output format: jsonl (default, model-ready, all schemas) or csv/tsv. CSV/TSV is a "
-        "flat-schema convenience — a schema with chat messages or nested objects is refused (use jsonl). "
-        "Scalar list fields (e.g. tags) are written as a '; '-joined cell.",
+        help="Output format: jsonl (default, model-ready, all schemas), csv/tsv, or parquet. CSV/TSV is a "
+        "flat-schema convenience — a schema with chat messages or nested objects is refused (use jsonl/parquet); "
+        "scalar list fields (e.g. tags) are written as a '; '-joined cell. Parquet is columnar and supports "
+        "every schema (chat/nested included) but needs the optional [parquet] extra.",
     ),
 ):
     """Validate and export a JSONL file, optionally cleaning it first."""
     export_format = export_format.strip().lower()
-    if export_format not in ("jsonl", "csv", "tsv"):
-        typer.echo(f"Unknown --format '{export_format}'; expected jsonl, csv, or tsv.", err=True)
+    if export_format not in ("jsonl", "csv", "tsv", "parquet"):
+        typer.echo(
+            f"Unknown --format '{export_format}'; expected jsonl, csv, tsv, or parquet.", err=True
+        )
         raise typer.Exit(code=1)
+
+    # Parquet needs the optional pyarrow extra — fail fast with the install hint
+    # before any validation/cleaning work so no partial output is written.
+    if export_format == "parquet":
+        from corpus_studio.parquet_support import PARQUET_INSTALL_HINT, parquet_available
+
+        if not parquet_available():
+            typer.echo(PARQUET_INSTALL_HINT, err=True)
+            raise typer.Exit(code=1)
 
     report = validate_jsonl_file(input_path, schema)
     _exit_if_invalid(report)
@@ -1913,10 +1942,14 @@ def export(
 
     warnings: list[str] = []
 
-    # csv/tsv share the entire validate/redact/gate/clean pipeline above; only the
-    # writer differs. tabular_schema is set (and proven flat) when format is csv/tsv.
+    # csv/tsv/parquet share the entire validate/redact/gate/clean pipeline above; only
+    # the writer differs. tabular_schema is set (and proven flat) for csv/tsv; parquet
+    # is columnar and needs no flat-schema gate (it represents nested types natively).
     tabular_columns: list[str] | None = None
     delimiter = "\t" if export_format == "tsv" else ","
+    is_parquet = export_format == "parquet"
+    if is_parquet:
+        from corpus_studio.exporters.parquet_exporter import write_parquet
 
     if dedupe or drop_low_information:
         kept, clean_result = clean_rows(
@@ -1924,7 +1957,9 @@ def export(
             dedupe=dedupe,
             drop_low_information=drop_low_information,
         )
-        if tabular_schema is not None:
+        if is_parquet:
+            _, tabular_columns = write_parquet(kept, output_path)
+        elif tabular_schema is not None:
             _, tabular_columns = write_tabular(kept, output_path, tabular_schema, delimiter)
         else:
             write_jsonl(kept, output_path)
@@ -1952,7 +1987,9 @@ def export(
         # Verbatim copy, but still surface remaining duplicates so the quality
         # surfaces are not purely advisory when the deliverable is produced.
         quality = build_basic_quality_report(rows)
-        if tabular_schema is not None:
+        if is_parquet:
+            _, tabular_columns = write_parquet(rows, output_path)
+        elif tabular_schema is not None:
             _, tabular_columns = write_tabular(rows, output_path, tabular_schema, delimiter)
         elif redaction_result is not None:
             # Redaction changed the rows, so the deliverable is the redacted rows — not an input copy.
