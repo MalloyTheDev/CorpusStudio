@@ -1144,10 +1144,6 @@ public partial class MainWindow : Window
 
 
 
-    private async void RefreshProviderPoliciesButton_Click(object sender, RoutedEventArgs e)
-    {
-        await RefreshProviderPoliciesAsync();
-    }
 
 
     // ---- Evaluation Suites tab (v1.3 M2) ---------------------------------------------
@@ -1185,25 +1181,6 @@ public partial class MainWindow : Window
     }
 
 
-    private async Task RefreshProviderPoliciesAsync()
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            ViewModel.Settings.SetProviderPolicyError("Create or select a dataset project first.");
-            return;
-        }
-
-        try
-        {
-            var policies = await _engineService.GetProviderPoliciesAsync(ViewModel.ActiveProjectPath);
-            ViewModel.Settings.ApplyProviderPolicies(policies);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.Settings.SetProviderPolicyError(ex.Message);
-        }
-    }
-
     /// <summary>Load the effective gate thresholds into the Settings editor (issue #198).</summary>
     private async Task RefreshGateThresholdsAsync()
     {
@@ -1220,33 +1197,6 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             ViewModel.Settings.SetGateThresholdsError(ex.Message);
-        }
-    }
-
-    private async void SaveGateThresholdsButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            ViewModel.Settings.SetGateThresholdsError("Create or select a dataset project first.");
-            return;
-        }
-
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy("Saving gate thresholds...");
-            // The engine validates ranges and rejects a bad value, so an invalid edit surfaces here.
-            await _engineService.SetGateThresholdsAsync(ViewModel.ActiveProjectPath, ViewModel.Settings.GateThresholds);
-            ViewModel.Settings.SetGateThresholdsSaved();
-        }
-        catch (Exception ex)
-        {
-            ViewModel.Settings.SetGateThresholdsError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
         }
     }
 
@@ -1287,7 +1237,7 @@ public partial class MainWindow : Window
                 model,
                 revoke
             );
-            await RefreshProviderPoliciesAsync();
+            await ViewModel.RefreshProviderPoliciesAsync();
         }
         catch (Exception ex)
         {
