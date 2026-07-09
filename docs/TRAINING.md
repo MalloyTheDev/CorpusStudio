@@ -41,12 +41,17 @@ The staged order is:
 
 #### v0.4 Config Generation
 
-Corpus Studio should generate training config files for established tools. The
-app should not run training yet.
+Corpus Studio generates training config files for established tools and then
+launches the user's installed trainer with that config.
 
-Current MVP status: the Python engine has a `training-config` command and the
-desktop app has a Training tab that writes a rendered config file under the
-configured export directory. This is config export only.
+Current status: the Python engine has a `training-config` command and the
+desktop Training tab writes a rendered config file under the configured export
+directory, **then launches your installed trainer** with the generated command
+(after a confirm), streaming its logs live, listing checkpoints, recording each
+run, supporting resume-from-checkpoint, and running a post-training regression
+gate. It orchestrates the trainer you already have — it never bundles or installs
+CUDA/PyTorch/Transformers or implements a training loop itself. (Config-export
+came first; the launcher followed — see the launcher section below.)
 
 Config generation should include:
 
@@ -141,9 +146,11 @@ Possible future targets:
 - quality report
 - training config draft
 
-The current engine and desktop app can export first-pass Training Lab config
-files. They do not install CUDA, PyTorch, Transformers, or trainer-specific
-packages, and they do not launch training processes.
+The current engine and desktop app export Training Lab config files **and launch
+the user's installed trainer** with them (live logs, checkpoints, run history,
+resume, and a regression gate). They do not install CUDA, PyTorch, Transformers,
+or trainer-specific packages, and they never implement a training loop — they
+orchestrate the trainer the user already has.
 
 ### Rule
 
