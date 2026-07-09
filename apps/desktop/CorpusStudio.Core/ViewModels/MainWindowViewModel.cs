@@ -180,6 +180,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand SaveGateThresholdsCommand { get; }
     public System.Windows.Input.ICommand RefreshProviderPoliciesCommand { get; }
     public System.Windows.Input.ICommand RebuildProjectIndexCommand { get; }
+    public System.Windows.Input.ICommand ExportPreferenceRankingCommand { get; }
     public System.Windows.Input.ICommand RegisterArtifactFromRunCommand { get; }
     public System.Windows.Input.ICommand KeepArtifactCommand { get; }
     public System.Windows.Input.ICommand RejectArtifactCommand { get; }
@@ -286,6 +287,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         SaveGateThresholdsCommand = new AsyncRelayCommand(SaveGateThresholdsAsync);
         RefreshProviderPoliciesCommand = new AsyncRelayCommand(RefreshProviderPoliciesAsync);
         RebuildProjectIndexCommand = new AsyncRelayCommand(RebuildProjectIndexAsync);
+        ExportPreferenceRankingCommand = new RelayCommand(ExportPreferenceRanking);
         RegisterArtifactFromRunCommand = new RelayCommand(RegisterArtifactFromRun);
         KeepArtifactCommand = new AsyncRelayCommand(KeepArtifactAsync);
         RejectArtifactCommand = new RelayCommand(() => SetSelectedArtifactStatus("rejected"));
@@ -1305,6 +1307,27 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         return true;
+    }
+
+    /// <summary>Export the visible preference-review ranking to a file. Moved from the desktop code-behind.</summary>
+    public void ExportPreferenceRanking()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            PreferenceReview.SetPreferenceRankingExportError("Create or select a preference project before exporting rankings.");
+            return;
+        }
+
+        try
+        {
+            var items = PreferenceReview.GetVisiblePreferenceReviewItems();
+            var outputPath = _engine.ExportPreferenceRanking(ActiveProjectPath, items);
+            PreferenceReview.ApplyPreferenceRankingExport(outputPath, items.Count);
+        }
+        catch (System.Exception ex)
+        {
+            PreferenceReview.SetPreferenceRankingExportError(ex.Message);
+        }
     }
 
     /// <summary>Register the newest training run's output directory as a model artifact.

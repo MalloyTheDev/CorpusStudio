@@ -47,6 +47,9 @@ public interface IEngineService
     /// <summary>Reconcile tracked reviewed-fixes against a fresh evaluation's per-example results.</summary>
     IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, IReadOnlyList<EvaluationExampleResult> results);
 
+    /// <summary>Export the visible preference-review ranking to a file; returns the output path.</summary>
+    string ExportPreferenceRanking(string projectPath, IReadOnlyList<PreferenceReviewItem> items);
+
     /// <summary>Load the project's model artifacts (record + live integrity string).</summary>
     IReadOnlyList<(ModelArtifactRecord Record, string Integrity)> LoadArtifacts(
         string projectPath, System.Func<ModelArtifactRecord, string>? integrityOf = null);

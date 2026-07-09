@@ -1379,29 +1379,6 @@ public partial class MainWindow : Window
 
 
 
-    private void ExportPreferenceRankingButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            ViewModel.PreferenceReview.SetPreferenceRankingExportError("Create or select a preference project before exporting rankings.");
-            return;
-        }
-
-        try
-        {
-            var items = ViewModel.PreferenceReview.GetVisiblePreferenceReviewItems();
-            var outputPath = _engineService.ExportPreferenceRanking(
-                ViewModel.ActiveProjectPath,
-                items
-            );
-            ViewModel.PreferenceReview.ApplyPreferenceRankingExport(outputPath, items.Count);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.PreferenceReview.SetPreferenceRankingExportError(ex.Message);
-        }
-    }
-
     private async void RunAiAssistButton_Click(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
