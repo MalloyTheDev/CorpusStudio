@@ -1636,11 +1636,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void RefreshTrainingCheckpointsButton_Click(object sender, RoutedEventArgs e)
-    {
-        await RefreshTrainingCheckpointsAsync();
-    }
-
     private void SetDiffBaseButton_Click(object sender, RoutedEventArgs e)
     {
         var selected = ViewModel.Versions.SelectedDatasetVersion;
@@ -1705,28 +1700,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task RefreshTrainingCheckpointsAsync()
-    {
-        var outputDirectory = ViewModel.Training.TrainingOutputDirectory;
-        if (string.IsNullOrWhiteSpace(outputDirectory))
-        {
-            return;
-        }
-
-        try
-        {
-            var result = await _engineService.GetTrainingCheckpointsAsync(
-                outputDirectory,
-                string.IsNullOrWhiteSpace(ViewModel.Training.TrainingTarget) ? "axolotl" : ViewModel.Training.TrainingTarget,
-                ViewModel.Training.TrainingConfigPath
-            );
-            ViewModel.Training.ApplyTrainingCheckpoints(result);
-        }
-        catch
-        {
-            // Checkpoint refresh is advisory; never let it disrupt a run.
-        }
-    }
+    // The checkpoint refresh now lives on the shared view-model (RefreshTrainingCheckpointsCommand +
+    // the live-run poll timer + the run finalizer all use it); the code-behind callers delegate to it.
+    private Task RefreshTrainingCheckpointsAsync() => ViewModel.RefreshTrainingCheckpointsAsync();
 
     private void FlushTrainingLogQueue(int runId)
     {

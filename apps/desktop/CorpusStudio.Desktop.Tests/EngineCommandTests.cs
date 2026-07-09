@@ -90,6 +90,18 @@ public sealed class EngineCommandTests
         public string? LinkAfterEvalToNewestRun(string projectPath, string afterEvalPath, string? afterEvalModel) => null;
         public Task<GateReport> RunTrainingRunGateAsync(string projectPath, string runId) => Task.FromResult(new GateReport());
         public Task<EvalHandoffPlan> BuildEvalHandoffAsync(string projectPath, string runId) => Task.FromResult(new EvalHandoffPlan());
+        public bool GetCheckpointsCalled { get; private set; }
+        public bool ThrowOnGetCheckpoints { get; set; }
+        public TrainingCheckpointsResult CheckpointsToReturn { get; set; } = new();
+        public Task<TrainingCheckpointsResult> GetTrainingCheckpointsAsync(string outputDirectory, string target, string? configPath)
+        {
+            GetCheckpointsCalled = true;
+            if (ThrowOnGetCheckpoints)
+            {
+                throw new InvalidOperationException("checkpoint enumeration failed");
+            }
+            return Task.FromResult(CheckpointsToReturn);
+        }
         public Task<SplitReport> GenerateProjectSplitsAsync(string projectPath, string schemaId, double trainRatio, double validationRatio, int seed) => Task.FromResult(new SplitReport());
         public void SaveProjectSplitSettings(string projectPath, SplitSettings settings) { }
         public Task<BackendHealthReport> CheckBackendHealthAsync(string backend, string model, string? baseUrl, int timeoutSeconds) => Task.FromResult(new BackendHealthReport());
@@ -596,6 +608,50 @@ public sealed class EngineCommandTests
         Assert.True(engine.ConvertTabularCalled);          // CSV was converted to a staging JSONL...
         Assert.Equal(@"C:\fake\data.csv", engine.LastConvertInput);
         Assert.True(engine.CommitCalled);                  // ...then flowed through the shared preview/commit path
+    }
+
+    private static void GiveTrainingOutputDir(MainWindowViewModel vm) =>
+        vm.Training.ApplyTrainingConfigExportResult(new TrainingConfigExportResult
+        {
+            Target = "axolotl_yaml",
+            OutputPath = "C:/proj/exports/x/config.yaml",
+            TrainingOutputDirectory = "C:/proj/exports/x/output",
+        });
+
+    [Fact]
+    public async Task RefreshTrainingCheckpoints_WithOutputDir_CallsTheEngine()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine);
+        GiveTrainingOutputDir(vm);
+
+        await vm.RefreshTrainingCheckpointsAsync();
+
+        Assert.True(engine.GetCheckpointsCalled);
+    }
+
+    [Fact]
+    public async Task RefreshTrainingCheckpoints_WithoutOutputDir_IsANoOp()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine); // no config generated → no output dir
+
+        await vm.RefreshTrainingCheckpointsAsync();
+
+        Assert.False(engine.GetCheckpointsCalled); // guarded — nothing to poll
+    }
+
+    [Fact]
+    public async Task RefreshTrainingCheckpoints_SwallowsEngineErrors()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { ThrowOnGetCheckpoints = true };
+        var vm = VmWith(engine);
+        GiveTrainingOutputDir(vm);
+
+        // Advisory refresh (also driven by a poll timer during a live run) must never throw.
+        await vm.RefreshTrainingCheckpointsAsync();
+
+        Assert.True(engine.GetCheckpointsCalled);
     }
 
     private static void SetAiAssistRunOptions(MainWindowViewModel vm)
