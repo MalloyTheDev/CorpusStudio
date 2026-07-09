@@ -163,6 +163,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private readonly IDialogService _dialogs = new NullDialogService();
     private readonly IFilePickerService _filePicker = new NullFilePickerService();
     private readonly IHuggingFaceImportDialog _huggingFaceImportDialog = new NullHuggingFaceImportDialog();
+    private readonly IDispatcherTimerFactory _dispatcherTimerFactory = new NullDispatcherTimerFactory();
 
     /// <summary>Run the dataset-debt assessment and apply it to the Debt tab — the engine-run
     /// orchestration moved off the desktop code-behind into a shared async command.</summary>
@@ -233,7 +234,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             new ExamplesViewModel(), new WritingStudioViewModel(), new AiAssistRewriteBatchesViewModel(),
             new AiAssistConnectionViewModel(), new EvaluationConnectionViewModel(), new QualityViewModel(),
             new PythonEngineService(), new NullDialogService(), new NullFilePickerService(),
-            new NullHuggingFaceImportDialog())
+            new NullHuggingFaceImportDialog(), new NullDispatcherTimerFactory())
     {
     }
 
@@ -248,11 +249,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         IEngineService engine,
         IDialogService dialogs,
         IFilePickerService filePicker,
-        IHuggingFaceImportDialog huggingFaceImportDialog)
+        IHuggingFaceImportDialog huggingFaceImportDialog,
+        IDispatcherTimerFactory dispatcherTimerFactory)
     {
         _engine = engine;
         _dialogs = dialogs;
         _filePicker = filePicker;
+        _dispatcherTimerFactory = dispatcherTimerFactory;
         _huggingFaceImportDialog = huggingFaceImportDialog;
         Debt = debt;
         Arena = arena;
@@ -2185,6 +2188,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             ClearBusy();
         }
+    }
+
+    /// <summary>Create a UI-thread background timer (via the head's factory) that fires
+    /// <paramref name="onTick"/> every <paramref name="interval"/> — used by the training-run launch to
+    /// flush streamed log lines and poll checkpoints without the View owning a DispatcherTimer (#246).</summary>
+    private IDispatcherTimer CreateBackgroundTimer(TimeSpan interval, EventHandler onTick)
+    {
+        var timer = _dispatcherTimerFactory.Create();
+        timer.Interval = interval;
+        timer.Tick += onTick;
+        return timer;
     }
 
     /// <summary>List the checkpoints/adapters the current run's output dir contains and surface them.

@@ -184,17 +184,41 @@ public sealed class EngineCommandTests
         }
     }
 
+    // A dispatcher timer that a test can tick synchronously (no real UI thread).
+    private sealed class FakeDispatcherTimer : IDispatcherTimer
+    {
+        public TimeSpan Interval { get; set; }
+        public bool IsRunning { get; private set; }
+        public event EventHandler? Tick;
+        public void Start() => IsRunning = true;
+        public void Stop() => IsRunning = false;
+        public void TickNow() => Tick?.Invoke(this, EventArgs.Empty);
+    }
+
+    private sealed class FakeDispatcherTimerFactory : IDispatcherTimerFactory
+    {
+        public List<FakeDispatcherTimer> Created { get; } = new();
+        public IDispatcherTimer Create()
+        {
+            var timer = new FakeDispatcherTimer();
+            Created.Add(timer);
+            return timer;
+        }
+    }
+
     private static MainWindowViewModel VmWith(
         IEngineService engine,
         IDialogService? dialogs = null,
         IFilePickerService? filePicker = null,
-        IHuggingFaceImportDialog? hfImportDialog = null) => new(
+        IHuggingFaceImportDialog? hfImportDialog = null,
+        IDispatcherTimerFactory? timerFactory = null) => new(
         new DebtViewModel(), new ArenaViewModel(), new SettingsViewModel(), new VersionsViewModel(),
         new ArtifactsViewModel(), new SuitesViewModel(), new SplitsViewModel(), new PreferenceReviewViewModel(),
         new QuarantineViewModel(), new ExamplesViewModel(), new WritingStudioViewModel(),
         new AiAssistRewriteBatchesViewModel(), new AiAssistConnectionViewModel(),
         new EvaluationConnectionViewModel(), new QualityViewModel(), engine, dialogs ?? new NullDialogService(),
-        filePicker ?? new NullFilePickerService(), hfImportDialog ?? new NullHuggingFaceImportDialog());
+        filePicker ?? new NullFilePickerService(), hfImportDialog ?? new NullHuggingFaceImportDialog(),
+        timerFactory ?? new NullDispatcherTimerFactory());
 
     private static void SelectFakeProject(MainWindowViewModel vm) => vm.SelectProject(
         new DatasetProjectListItem(
