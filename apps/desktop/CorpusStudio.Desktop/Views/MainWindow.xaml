@@ -2733,28 +2733,28 @@
                                      TextWrapping="Wrap"
                                      VerticalScrollBarVisibility="Auto" />
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                <ComboBox x:Name="ProviderApprovalProviderComboBox"
-                                          AutomationProperties.AutomationId="ProviderApprovalProviderComboBox"
+                                <ComboBox AutomationProperties.AutomationId="ProviderApprovalProviderComboBox"
                                           Width="180"
-                                          SelectedIndex="0"
+                                          SelectedValuePath="Content"
+                                          SelectedValue="{Binding Settings.ProviderApprovalProvider, Mode=TwoWay}"
                                           Margin="0,0,8,0">
                                     <ComboBoxItem Content="ollama" />
                                     <ComboBoxItem Content="openai_compatible" />
                                 </ComboBox>
-                                <TextBox x:Name="ProviderApprovalModelTextBox"
-                                         AutomationProperties.AutomationId="ProviderApprovalModelTextBox"
+                                <TextBox AutomationProperties.AutomationId="ProviderApprovalModelTextBox"
                                          Width="200"
                                          VerticalContentAlignment="Center"
                                          ToolTip="Model name to approve, e.g. llama3"
-                                         Margin="0,0,8,0" />
+                                         Margin="0,0,8,0"
+                                         Text="{Binding Settings.ProviderApprovalModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 <Button AutomationProperties.AutomationId="ApproveProviderGenerationButton"
                                         Content="Approve"
                                         Margin="0,0,8,0"
-                                        Click="ApproveProviderGenerationButton_Click" />
+                                        Command="{Binding ApproveProviderGenerationCommand}" />
                                 <Button AutomationProperties.AutomationId="RevokeProviderGenerationButton"
                                         Content="Revoke"
                                         Margin="0,0,8,0"
-                                        Click="RevokeProviderGenerationButton_Click" />
+                                        Command="{Binding RevokeProviderGenerationCommand}" />
                                 <Button AutomationProperties.AutomationId="RefreshProviderPoliciesButton"
                                         Content="Refresh"
                                         Command="{Binding RefreshProviderPoliciesCommand}" />

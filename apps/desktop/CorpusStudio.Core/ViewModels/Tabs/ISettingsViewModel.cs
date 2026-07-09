@@ -15,6 +15,10 @@ public interface ISettingsViewModel : INotifyPropertyChanged
     string SettingsSummary { get; }
     string ProviderPolicySummary { get; }
 
+    /// <summary>The provider + model for the "approve generation" form (bound two-way).</summary>
+    string ProviderApprovalProvider { get; set; }
+    string ProviderApprovalModel { get; set; }
+
     /// <summary>The editable per-project gate thresholds (the form two-way-binds its fields).</summary>
     GateThresholds GateThresholds { get; }
     string GateThresholdsSummary { get; }

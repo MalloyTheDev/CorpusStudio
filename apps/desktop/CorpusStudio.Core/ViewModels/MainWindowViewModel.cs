@@ -181,6 +181,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand RunQualityCommand { get; }
     public System.Windows.Input.ICommand SaveGateThresholdsCommand { get; }
     public System.Windows.Input.ICommand RefreshProviderPoliciesCommand { get; }
+    public System.Windows.Input.ICommand ApproveProviderGenerationCommand { get; }
+    public System.Windows.Input.ICommand RevokeProviderGenerationCommand { get; }
     public System.Windows.Input.ICommand RebuildProjectIndexCommand { get; }
     public System.Windows.Input.ICommand ExportPreferenceRankingCommand { get; }
     public System.Windows.Input.ICommand RefreshDatasetVersionsCommand { get; }
@@ -297,6 +299,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RunQualityCommand = new AsyncRelayCommand(() => RefreshQualityAsync());
         SaveGateThresholdsCommand = new AsyncRelayCommand(SaveGateThresholdsAsync);
         RefreshProviderPoliciesCommand = new AsyncRelayCommand(RefreshProviderPoliciesAsync);
+        ApproveProviderGenerationCommand = new AsyncRelayCommand(() => ApplyProviderApprovalAsync(revoke: false));
+        RevokeProviderGenerationCommand = new AsyncRelayCommand(() => ApplyProviderApprovalAsync(revoke: true));
         RebuildProjectIndexCommand = new AsyncRelayCommand(RebuildProjectIndexAsync);
         ExportPreferenceRankingCommand = new RelayCommand(ExportPreferenceRanking);
         RefreshDatasetVersionsCommand = new AsyncRelayCommand(RefreshDatasetVersionsAsync);
@@ -1797,6 +1801,41 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         catch (System.Exception ex)
         {
             Settings.SetGateThresholdsError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Approve (or revoke) the Settings-tab provider/model for generating trainable rows, then
+    /// refresh the policy list. Provider + model come from the tab's own bound fields. Moved from the
+    /// desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task ApplyProviderApprovalAsync(bool revoke)
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Settings.SetProviderPolicyError("Create or select a dataset project first.");
+            return;
+        }
+
+        var provider = Settings.ProviderApprovalProvider?.Trim() ?? string.Empty;
+        var model = Settings.ProviderApprovalModel?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(provider) || string.IsNullOrWhiteSpace(model))
+        {
+            Settings.SetProviderPolicyError("Choose a provider and enter a model name.");
+            return;
+        }
+
+        try
+        {
+            SetBusy(revoke ? "Revoking generation approval..." : "Approving generation...");
+            await _engine.ApproveProviderGenerationAsync(ActiveProjectPath, provider, model, revoke);
+            await RefreshProviderPoliciesAsync();
+        }
+        catch (System.Exception ex)
+        {
+            Settings.SetProviderPolicyError(ex.Message);
         }
         finally
         {

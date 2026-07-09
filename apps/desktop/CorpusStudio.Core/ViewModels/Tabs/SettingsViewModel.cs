@@ -16,6 +16,8 @@ public sealed class SettingsViewModel : ViewModelBase, ISettingsViewModel
     private GateThresholds _gateThresholds = new();
     private string _gateThresholdsSummary =
         "Gate thresholds load with the project. Edit and save to override how gates block/warn.";
+    private string _providerApprovalProvider = "ollama";
+    private string _providerApprovalModel = string.Empty;
 
     public string SettingsSummary
     {
@@ -27,6 +29,20 @@ public sealed class SettingsViewModel : ViewModelBase, ISettingsViewModel
     {
         get => _providerPolicySummary;
         private set => SetField(ref _providerPolicySummary, value);
+    }
+
+    /// <summary>The provider chosen in the "approve generation" combo (bound two-way via SelectedValue).</summary>
+    public string ProviderApprovalProvider
+    {
+        get => _providerApprovalProvider;
+        set => SetField(ref _providerApprovalProvider, value);
+    }
+
+    /// <summary>The model name typed into the "approve generation" box (bound two-way).</summary>
+    public string ProviderApprovalModel
+    {
+        get => _providerApprovalModel;
+        set => SetField(ref _providerApprovalModel, value);
     }
 
     public void SetSettings(DesktopSettings settings)

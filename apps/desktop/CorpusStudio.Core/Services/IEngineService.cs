@@ -100,6 +100,9 @@ public interface IEngineService
     /// <summary>List the project's provider generation policies (approved model allow-list).</summary>
     Task<IReadOnlyList<ProviderPolicyItem>> GetProviderPoliciesAsync(string projectPath);
 
+    /// <summary>Approve (or revoke) a provider/model for generating trainable rows.</summary>
+    Task ApproveProviderGenerationAsync(string projectPath, string providerId, string modelId, bool revoke = false);
+
     /// <summary>Build the dataset quality report (heuristics, PII/secret detection, debt signals).</summary>
     Task<QualityReport> BuildQualityReportAsync(string projectPath);
 
