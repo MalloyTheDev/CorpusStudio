@@ -91,13 +91,46 @@
         <!-- Studio mode (IsVisible←IsStudio): hero + projects sidebar + the 14-tab TabControl + Quality panel. -->
         <Grid IsVisible="{Binding IsStudio}" RowDefinitions="Auto,*" ColumnDefinitions="170,*,300">
           <Border Grid.Row="0" Grid.ColumnSpan="3" Background="#F8FAFC" Padding="14,10" Margin="0,0,0,6">
-            <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
-              <TextBlock Text="{Binding ActiveProjectTitle}" FontSize="18" FontWeight="Bold" VerticalAlignment="Center"/>
-              <TextBlock Text="{Binding ActiveSchemaDescription}" Foreground="#64748B" VerticalAlignment="Center"/>
-              <Border CornerRadius="6" Padding="10,4" VerticalAlignment="Center"
-                      Background="{Binding Debt.DebtGradeColor, Converter={StaticResource StringToBrush}}">
-                <TextBlock Text="{Binding Debt.DebtGrade}" Foreground="White" FontWeight="Bold"/>
-              </Border>
+            <StackPanel Spacing="8">
+              <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                <TextBlock Text="{Binding ActiveProjectTitle}" FontSize="18" FontWeight="Bold" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding ActiveSchemaDescription}" Foreground="#64748B" VerticalAlignment="Center"/>
+                <Border CornerRadius="6" Padding="10,4" VerticalAlignment="Center"
+                        Background="{Binding Debt.DebtGradeColor, Converter={StaticResource StringToBrush}}">
+                  <TextBlock Text="{Binding Debt.DebtGrade}" Foreground="White" FontWeight="Bold"/>
+                </Border>
+              </StackPanel>
+              <!-- Project-level actions bound to the shared shell commands (issue #245 — sync with WPF). -->
+              <WrapPanel>
+                <Button Content="Import dataset" Command="{Binding ImportDatasetCommand}" Margin="0,0,6,4"/>
+                <Button Content="Import from HF" Command="{Binding ImportFromHuggingFaceCommand}" Margin="0,0,6,4"/>
+                <Button Content="Rebuild index" Command="{Binding RebuildProjectIndexCommand}" Margin="0,0,6,4"/>
+                <Button Content="Generate card" Command="{Binding GenerateDatasetCardCommand}" Margin="0,0,6,4"/>
+                <Button Content="Run gates" Command="{Binding RunGatesCommand}" Margin="0,0,6,4"/>
+                <Button Content="Run chat gates" Command="{Binding RunChatGatesCommand}" Margin="0,0,6,4"/>
+                <Button Content="Benchmark" Command="{Binding RunBenchmarkCommand}" Margin="0,0,6,4"/>
+              </WrapPanel>
+              <WrapPanel VerticalAlignment="Center">
+                <CheckBox Content="dedupe" IsChecked="{Binding ExportRemoveDuplicates}" Margin="0,0,8,0"/>
+                <CheckBox Content="drop low-info" IsChecked="{Binding ExportRemoveLowInformation}" Margin="0,0,8,0"/>
+                <TextBox Text="{Binding ExportFormat}" Watermark="jsonl/csv/tsv/parquet" Width="150" Margin="0,0,6,0"/>
+                <Button Content="Export dataset" Command="{Binding ExportJsonlCommand}" Margin="0,0,10,0"/>
+                <Button Content="Debt" Command="{Binding GoToDebtCommand}" Margin="0,0,4,0"/>
+                <Button Content="Eval" Command="{Binding GoToEvaluationCommand}" Margin="0,0,4,0"/>
+                <Button Content="Splits" Command="{Binding GoToSplitsCommand}" Margin="0,0,4,0"/>
+                <Button Content="Train" Command="{Binding GoToTrainingCommand}" Margin="0,0,4,0"/>
+                <Button Content="Studio" Command="{Binding GoToWritingStudioCommand}" Margin="0,0,4,0"/>
+              </WrapPanel>
+              <!-- Engine setup (shown when the engine is not located) + the error-banner dismiss. -->
+              <WrapPanel IsVisible="{Binding IsEngineUnavailable}">
+                <TextBlock Text="{Binding EngineUnavailableMessage}" Foreground="#B45309" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <Button Content="Locate engine…" Command="{Binding LocateEngineCommand}" Margin="0,0,6,0"/>
+                <Button Content="Retry" Command="{Binding RetryEngineCommand}" Margin="0,0,6,0"/>
+              </WrapPanel>
+              <WrapPanel IsVisible="{Binding HasError}">
+                <TextBlock Text="{Binding ErrorMessage}" Foreground="#B91C1C" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <Button Content="Dismiss" Command="{Binding DismissErrorCommand}"/>
+              </WrapPanel>
             </StackPanel>
           </Border>
           <ListBox Grid.Row="1" Grid.Column="0" ItemsSource="{Binding Projects}"
@@ -157,8 +190,16 @@
         <StackPanel Margin="20" Spacing="8">
           <TextBlock Text="App settings" FontWeight="Bold" FontSize="16"/>
           <TextBlock Text="{Binding Settings.SettingsSummary}" TextWrapping="Wrap" FontFamily="Consolas"/>
+          <Button Content="Save gate thresholds" Command="{Binding SaveGateThresholdsCommand}" HorizontalAlignment="Left" Margin="0,6,0,0"/>
           <TextBlock Text="Provider generation policy" FontWeight="Bold" FontSize="16" Margin="0,14,0,0"/>
           <TextBlock Text="{Binding Settings.ProviderPolicySummary}" TextWrapping="Wrap" FontFamily="Consolas"/>
+          <TextBox Text="{Binding Settings.ProviderApprovalProvider}" Watermark="provider" Margin="0,6,0,0"/>
+          <TextBox Text="{Binding Settings.ProviderApprovalModel}" Watermark="model"/>
+          <WrapPanel>
+            <Button Content="Refresh policies" Command="{Binding RefreshProviderPoliciesCommand}" Margin="0,0,6,4"/>
+            <Button Content="Approve" Command="{Binding ApproveProviderGenerationCommand}" Margin="0,0,6,4"/>
+            <Button Content="Revoke" Command="{Binding RevokeProviderGenerationCommand}" Margin="0,0,6,4"/>
+          </WrapPanel>
         </StackPanel>
       </ScrollViewer>
     </TabItem>
@@ -184,10 +225,13 @@
         <StackPanel Grid.Column="1" Margin="16,0,0,0" Spacing="8">
           <TextBlock Text="Version label"/>
           <TextBox Text="{Binding Versions.DatasetVersionLabel}"/>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button Content="View card" Command="{Binding ViewDatasetVersionCardCommand}"/>
-            <Button Content="Diff versions" Command="{Binding DiffVersionsCommand}"/>
-          </StackPanel>
+          <WrapPanel>
+            <Button Content="Capture version" Command="{Binding CaptureDatasetVersionCommand}" Margin="0,0,6,4"/>
+            <Button Content="Refresh" Command="{Binding RefreshDatasetVersionsCommand}" Margin="0,0,6,4"/>
+            <Button Content="View card" Command="{Binding ViewDatasetVersionCardCommand}" Margin="0,0,6,4"/>
+            <Button Content="Diff versions" Command="{Binding DiffVersionsCommand}" Margin="0,0,6,4"/>
+            <Button Content="Restore" Command="{Binding RestoreDatasetVersionCommand}" Margin="0,0,6,4"/>
+          </WrapPanel>
           <TextBlock Text="{Binding Versions.DatasetDiffBaseLabel}" Foreground="#64748B"/>
           <TextBlock Text="{Binding Versions.DatasetVersionDetail}" TextWrapping="Wrap" Margin="0,8,0,0"/>
         </StackPanel>
@@ -210,7 +254,9 @@
           </ListBox>
         </DockPanel>
         <StackPanel Grid.Column="1" Margin="16,0,0,0" Spacing="8">
+          <TextBox Text="{Binding Suites.NewSuiteName}" Watermark="new suite name"/>
           <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Content="New suite" Command="{Binding NewSuiteCommand}"/>
             <Button Content="Run" Command="{Binding RunSuiteCommand}"/>
             <Button Content="Refresh" Command="{Binding RefreshSuitesCommand}"/>
           </StackPanel>
@@ -244,6 +290,7 @@
         <TextBox Text="{Binding Splits.SplitValidationPercent}"/>
         <TextBlock Text="Seed"/>
         <TextBox Text="{Binding Splits.SplitSeed}"/>
+        <Button Content="Generate splits" Command="{Binding GenerateSplitsCommand}" HorizontalAlignment="Left" Margin="0,4,0,0"/>
         <TextBlock Text="{Binding Splits.SplitSummary}" TextWrapping="Wrap" Margin="0,10,0,0"/>
       </StackPanel>
     </TabItem>
@@ -302,10 +349,12 @@
           </ListBox>
         </DockPanel>
         <StackPanel Grid.Column="1" Margin="16,0,0,0" Spacing="6">
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button Content="Export for training" Command="{Binding ExportPreferenceForTrainingCommand}"/>
-            <Button Content="Prepare judge review" Command="{Binding PreparePreferenceJudgeReviewCommand}"/>
-          </StackPanel>
+          <WrapPanel>
+            <Button Content="Export for training" Command="{Binding ExportPreferenceForTrainingCommand}" Margin="0,0,6,4"/>
+            <Button Content="Export ranking" Command="{Binding ExportPreferenceRankingCommand}" Margin="0,0,6,4"/>
+            <Button Content="Prepare judge review" Command="{Binding PreparePreferenceJudgeReviewCommand}" Margin="0,0,6,4"/>
+            <Button Content="Batch judge" Command="{Binding PreparePreferenceBatchJudgeReviewCommand}" Margin="0,0,6,4"/>
+          </WrapPanel>
           <TextBlock Text="{Binding PreferenceReview.PreferenceRankingSummary}" TextWrapping="Wrap"/>
           <TextBlock Text="Prompt" FontWeight="SemiBold" Margin="0,6,0,0"/>
           <TextBlock Text="{Binding PreferenceReview.PreferencePromptText}" TextWrapping="Wrap"/>
@@ -322,8 +371,10 @@
     <!-- Writing Studio: the shared draft editor — TwoWay text + an IsVisible dirty indicator. -->
     <TabItem Header="Writing Studio">
       <DockPanel Margin="16">
-        <Button DockPanel.Dock="Top" Content="Validate draft" Command="{Binding ValidateDraftCommand}"
-                HorizontalAlignment="Left" Margin="0,0,0,6"/>
+        <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+          <Button Content="Validate draft" Command="{Binding ValidateDraftCommand}" Margin="0,0,6,0"/>
+          <Button Content="Save example" Command="{Binding SaveExampleCommand}" Margin="0,0,6,0"/>
+        </WrapPanel>
         <TextBlock DockPanel.Dock="Top" Text="Unsaved changes" Foreground="#B45309" Margin="0,0,0,6"
                    IsVisible="{Binding WritingStudio.IsDraftDirty}"/>
         <TextBox Text="{Binding WritingStudio.DraftText}" AcceptsReturn="True"
@@ -366,6 +417,11 @@
         <StackPanel Grid.Column="1" Grid.Row="0" Margin="16,0,0,0" Spacing="6">
           <TextBlock Text="Instruction"/>
           <TextBox Text="{Binding AiAssist.AiAssistInstruction}" AcceptsReturn="True" Height="60"/>
+          <WrapPanel>
+            <Button Content="Check backend" Command="{Binding CheckAiAssistBackendCommand}" Margin="0,0,6,4"/>
+            <Button Content="Refresh models" Command="{Binding RefreshAiAssistModelsCommand}" Margin="0,0,6,4"/>
+            <Button Content="Run AI Assist" Command="{Binding RunAiAssistCommand}" Margin="0,0,6,4"/>
+          </WrapPanel>
           <StackPanel Orientation="Horizontal" Spacing="8">
             <TextBlock Text="Candidate gate:" FontWeight="Bold"/>
             <TextBlock Text="{Binding AiAssist.AiAssistCandidateGateStatus}"
@@ -386,6 +442,17 @@
           <TextBlock Text="Limit / score threshold"/>
           <TextBox Text="{Binding Evaluation.EvaluationLimit}"/>
           <TextBox Text="{Binding Evaluation.EvaluationScoreThreshold}"/>
+          <WrapPanel>
+            <Button Content="Check backend" Command="{Binding CheckEvaluationBackendCommand}" Margin="0,0,6,4"/>
+            <Button Content="Refresh models" Command="{Binding RefreshEvaluationModelsCommand}" Margin="0,0,6,4"/>
+            <Button Content="Run Evaluation" Command="{Binding RunEvaluationCommand}" Margin="0,0,6,4"/>
+            <Button Content="Rerun report" Command="{Binding RerunEvaluationReportCommand}" Margin="0,0,6,4"/>
+            <Button Content="Prepare failure review" Command="{Binding PrepareEvaluationFailureReviewCommand}" Margin="0,0,6,4"/>
+          </WrapPanel>
+          <StackPanel IsVisible="{Binding Evaluation.IsEvaluationInProgress}" Spacing="3">
+            <TextBlock Text="{Binding Evaluation.EvaluationProgressText}" FontSize="11"/>
+            <ProgressBar Minimum="0" Maximum="100" Value="{Binding Evaluation.EvaluationProgressPercent}"/>
+          </StackPanel>
           <TextBlock Text="{Binding Evaluation.EvaluationSummary}" TextWrapping="Wrap" Margin="0,6,0,0"/>
           <TextBlock Text="{Binding Evaluation.EvaluationResultsSummary}" Margin="0,6,0,0"/>
           <ComboBox HorizontalAlignment="Stretch"
@@ -439,8 +506,10 @@
           <TextBox Text="{Binding Training.TrainingLoraR}" Watermark="lora r"/>
           <TextBox Text="{Binding Training.TrainingLoraAlpha}" Watermark="lora alpha"/>
           <TextBox Text="{Binding Training.TrainingLearningRate}" Watermark="learning rate"/>
-          <Button Content="Check compatibility" Command="{Binding CheckTrainingCompatibilityCommand}"
-                  HorizontalAlignment="Left" Margin="0,4,0,0"/>
+          <WrapPanel Margin="0,4,0,0">
+            <Button Content="Check compatibility" Command="{Binding CheckTrainingCompatibilityCommand}" Margin="0,0,6,4"/>
+            <Button Content="Generate config" Command="{Binding GenerateTrainingConfigCommand}" Margin="0,0,6,4"/>
+          </WrapPanel>
           <TextBlock Text="{Binding Training.TrainingSummary}" TextWrapping="Wrap" Margin="0,6,0,0"/>
         </StackPanel>
         <StackPanel Grid.Column="1" Spacing="6" Margin="10,0,0,0">
@@ -449,6 +518,13 @@
             <TextBlock Text="{Binding Training.TrainingRunStatus}"/>
             <TextBlock Text="running" Foreground="#B45309" IsVisible="{Binding Training.IsTrainingRunning}"/>
           </StackPanel>
+          <WrapPanel>
+            <Button Content="Launch" Command="{Binding LaunchTrainingCommand}" IsEnabled="{Binding Training.CanLaunchTraining}" Margin="0,0,6,4"/>
+            <Button Content="Stop" Command="{Binding StopTrainingCommand}" IsEnabled="{Binding Training.IsTrainingRunning}" Margin="0,0,6,4"/>
+            <Button Content="Resume" Command="{Binding ResumeTrainingCommand}" IsEnabled="{Binding Training.CanResumeTraining}" Margin="0,0,6,4"/>
+            <Button Content="Refresh checkpoints" Command="{Binding RefreshTrainingCheckpointsCommand}" Margin="0,0,6,4"/>
+            <Button Content="Regression gate" Command="{Binding GateTrainingRunCommand}" Margin="0,0,6,4"/>
+          </WrapPanel>
           <TextBlock Text="{Binding Training.TrainingLaunchCommand}" TextWrapping="Wrap"
                      FontFamily="Consolas" FontSize="11"/>
           <TextBox Text="{Binding Training.TrainingRunLog}" IsReadOnly="True" AcceptsReturn="True"
@@ -465,8 +541,13 @@
         <DockPanel Grid.Column="0">
           <TextBlock DockPanel.Dock="Top" Text="{Binding Artifacts.ArtifactSummary}"
                      TextWrapping="Wrap" Margin="0,0,0,8"/>
-          <Button DockPanel.Dock="Top" Content="View weight card" Command="{Binding ViewArtifactCardCommand}"
-                  HorizontalAlignment="Left" Margin="0,0,0,8"/>
+          <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+            <Button Content="View weight card" Command="{Binding ViewArtifactCardCommand}" Margin="0,0,6,4"/>
+            <Button Content="Refresh" Command="{Binding RefreshArtifactsCommand}" Margin="0,0,6,4"/>
+            <Button Content="Register from run" Command="{Binding RegisterArtifactFromRunCommand}" Margin="0,0,6,4"/>
+            <Button Content="Keep" Command="{Binding KeepArtifactCommand}" Margin="0,0,6,4"/>
+            <Button Content="Reject" Command="{Binding RejectArtifactCommand}" Margin="0,0,6,4"/>
+          </WrapPanel>
           <ListBox ItemsSource="{Binding Artifacts.ModelArtifacts}"
                    SelectedItem="{Binding Artifacts.SelectedModelArtifact}">
             <ListBox.ItemTemplate>
@@ -491,6 +572,7 @@
           <ScrollViewer Grid.Row="1" Grid.Column="2">
             <StackPanel Margin="10" Spacing="6">
               <TextBlock Text="Quality" FontWeight="Bold" FontSize="16"/>
+              <Button Content="Run quality check" Command="{Binding RunQualityCommand}" HorizontalAlignment="Left"/>
               <TextBlock Text="{Binding Quality.QualitySummary}" TextWrapping="Wrap"/>
               <ItemsControl ItemsSource="{Binding Quality.QualityMetrics}">
                 <ItemsControl.ItemTemplate>
