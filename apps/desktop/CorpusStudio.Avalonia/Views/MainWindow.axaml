@@ -442,6 +442,10 @@
           <TextBlock Text="Limit / score threshold"/>
           <TextBox Text="{Binding Evaluation.EvaluationLimit}"/>
           <TextBox Text="{Binding Evaluation.EvaluationScoreThreshold}"/>
+          <TextBlock Text="Judge (optional): model / backend / base-url" FontSize="11" Foreground="#64748B"/>
+          <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeModel}" Watermark="judge model"/>
+          <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeBackend}" Watermark="judge backend (blank = eval backend)"/>
+          <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeBaseUrl}" Watermark="judge base url (blank = eval base url)"/>
           <WrapPanel>
             <Button Content="Check backend" Command="{Binding CheckEvaluationBackendCommand}" Margin="0,0,6,4"/>
             <Button Content="Refresh models" Command="{Binding RefreshEvaluationModelsCommand}" Margin="0,0,6,4"/>

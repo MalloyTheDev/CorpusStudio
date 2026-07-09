@@ -166,8 +166,10 @@ Trustworthy scoring comes from two places:
   judge provider must be **evaluator-authorized** by provider policy (so OpenAI/Anthropic
   are permitted as judges, local models fine); a run with no `--judge-model` makes no cloud
   call and stays on keyword overlap. Unparseable judge output is flagged
-  (`judge_unparseable`, score 0) rather than crashing the run. *(Engine + CLI shipped;
-  desktop Evaluation-tab wiring is a fast follow-up.)*
+  (`judge_unparseable`, score 0) rather than crashing the run. The desktop Evaluation tab
+  exposes the judge **model, backend, and base-url** (all optional): leaving the judge
+  backend/base-url blank reuses the eval run's own provider, or set them for a **local eval
+  (Ollama) scored by a cloud judge** (openai-compatible) — the classic mixed setup.
 
 ## Current Desktop MVP
 

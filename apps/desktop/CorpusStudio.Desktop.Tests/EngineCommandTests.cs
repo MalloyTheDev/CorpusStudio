@@ -117,11 +117,19 @@ public sealed class EngineCommandTests
         }
         public Task<SplitReport> GenerateProjectSplitsAsync(string projectPath, string schemaId, double trainRatio, double validationRatio, int seed) => Task.FromResult(new SplitReport());
         public void SaveProjectSplitSettings(string projectPath, SplitSettings settings) { }
-        public Task<BackendHealthReport> CheckBackendHealthAsync(string backend, string model, string? baseUrl, int timeoutSeconds) => Task.FromResult(new BackendHealthReport());
+        public bool BackendHealthy { get; set; } // default false: preflight blocks (existing tests rely on this)
+        public Task<BackendHealthReport> CheckBackendHealthAsync(string backend, string model, string? baseUrl, int timeoutSeconds)
+            => Task.FromResult(new BackendHealthReport { Reachable = BackendHealthy, ModelAvailable = BackendHealthy });
         public Task<BackendModelListReport> ListBackendModelsAsync(string backend, string? baseUrl, int timeoutSeconds) => Task.FromResult(new BackendModelListReport());
         public string[] EvaluationProgressLines { get; set; } = Array.Empty<string>();
+        public string? LastJudgeModel { get; private set; }
+        public string? LastJudgeBackend { get; private set; }
+        public string? LastJudgeBaseUrl { get; private set; }
         public Task<EvaluationRunResult> RunEvaluationAsync(string projectPath, string schemaId, string backend, string model, string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds, string? judgeModel = null, string? judgeBackend = null, string? judgeBaseUrl = null, IProgress<string>? progress = null)
         {
+            LastJudgeModel = judgeModel;
+            LastJudgeBackend = judgeBackend;
+            LastJudgeBaseUrl = judgeBaseUrl;
             foreach (var line in EvaluationProgressLines)
             {
                 progress?.Report(line);
@@ -889,6 +897,46 @@ public sealed class EngineCommandTests
         Assert.Equal(ok, parsed);
         Assert.Equal(completed, c);
         Assert.Equal(total, t);
+    }
+
+    [Fact]
+    public async Task RunEvaluation_ThreadsSeparateJudgeBackendAndBaseUrl()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { BackendHealthy = true };
+        var vm = VmWith(engine);
+        SelectFakeProject(vm);
+        vm.EvaluationConnection.EvaluationBackend = "ollama";
+        vm.EvaluationConnection.EvaluationModel = "llama3";
+        vm.EvaluationConnection.EvaluationTimeoutSeconds = "60";
+        vm.EvaluationConnection.EvaluationJudgeModel = "gpt-4o";
+        vm.EvaluationConnection.EvaluationJudgeBackend = "openai-compatible";
+        vm.EvaluationConnection.EvaluationJudgeBaseUrl = "https://api.example/v1";
+
+        await vm.RunEvaluationAsync();
+
+        // Local eval (ollama) scored by a cloud judge — the explicit judge provider is passed through.
+        Assert.Equal("gpt-4o", engine.LastJudgeModel);
+        Assert.Equal("openai-compatible", engine.LastJudgeBackend);
+        Assert.Equal("https://api.example/v1", engine.LastJudgeBaseUrl);
+    }
+
+    [Fact]
+    public async Task RunEvaluation_BlankJudgeProvider_PassesNull_SoTheEngineReusesTheEvalBackend()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { BackendHealthy = true };
+        var vm = VmWith(engine);
+        SelectFakeProject(vm);
+        vm.EvaluationConnection.EvaluationBackend = "ollama";
+        vm.EvaluationConnection.EvaluationModel = "llama3";
+        vm.EvaluationConnection.EvaluationTimeoutSeconds = "60";
+        vm.EvaluationConnection.EvaluationJudgeModel = "judge-model";
+        // judge backend/base-url left blank
+
+        await vm.RunEvaluationAsync();
+
+        Assert.Equal("judge-model", engine.LastJudgeModel);
+        Assert.Null(engine.LastJudgeBackend); // blank → null → engine falls back to the eval backend
+        Assert.Null(engine.LastJudgeBaseUrl);
     }
 
     [Fact]

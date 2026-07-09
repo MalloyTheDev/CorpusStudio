@@ -952,9 +952,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                     Evaluation.SetEvaluationProgress(completed, total);
                 }
             });
-            // Opt-in LLM-judge: when a judge model is set, the run scores with metric=llm_judge (the judge
-            // reuses this run's backend/base-url). Blank = the default keyword-overlap scorer.
+            // Opt-in LLM-judge: when a judge model is set, the run scores with metric=llm_judge. The judge
+            // provider defaults to this run's backend/base-url, but an explicit judge backend/base-url
+            // overrides it (e.g. local eval + cloud judge). Blank = the default keyword-overlap scorer.
             var judgeModel = EvaluationConnection.EvaluationJudgeModel?.Trim();
+            var judgeBackend = EvaluationConnection.EvaluationJudgeBackend?.Trim();
+            var judgeBaseUrl = EvaluationConnection.EvaluationJudgeBaseUrl?.Trim();
             var result = await _engine.RunEvaluationAsync(
                 ActiveProjectPath,
                 ActiveSchemaId,
@@ -965,6 +968,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 scoreThreshold,
                 timeoutSeconds,
                 judgeModel: string.IsNullOrWhiteSpace(judgeModel) ? null : judgeModel,
+                judgeBackend: string.IsNullOrWhiteSpace(judgeBackend) ? null : judgeBackend,
+                judgeBaseUrl: string.IsNullOrWhiteSpace(judgeBaseUrl) ? null : judgeBaseUrl,
                 progress: progress
             );
             Evaluation.ApplyEvaluationRunResult(result);
