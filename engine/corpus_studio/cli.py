@@ -1496,6 +1496,83 @@ def training_run_gate_command(
     typer.echo(report.model_dump_json(indent=2))
 
 
+@app.command("training-eval-plan")
+def training_eval_plan(
+    project_dir: Path,
+    run_id: str = typer.Option(..., "--run-id", help="Finished run to evaluate."),
+    eval_dataset: Optional[str] = typer.Option(
+        None, "--eval-dataset", help="Held-out set to evaluate (defaults to the baseline's)."
+    ),
+    schema: Optional[str] = typer.Option(None, "--schema", help="Schema id (defaults to the baseline's)."),
+    backend: str = typer.Option("ollama", "--backend", help="ollama or openai-compatible."),
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="Serving endpoint (for openai-compatible)."),
+    served_model: Optional[str] = typer.Option(
+        None, "--served-model", help="Name the trained model is served under."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit the plan as JSON."),
+):
+    """Close the train→eval loop: print the ordered steps to evaluate a finished run's model.
+
+    The serve step is external (Ollama/vLLM/TGI); the eval/link/gate commands are exact. When
+    ``--eval-dataset`` / ``--schema`` are omitted they are pre-filled from the run's baseline
+    (before-eval) report so the after-eval compares like with like.
+    """
+
+    from corpus_studio.evaluation.reports import EvaluationReport
+    from corpus_studio.training.eval_handoff import build_eval_handoff
+    from corpus_studio.training.run_registry import load_run_record, record_path
+
+    path = record_path(project_dir, run_id)
+    if not path.exists():
+        typer.echo(f"No run record for '{run_id}'.", err=True)
+        raise typer.Exit(code=1)
+
+    record = load_run_record(path)
+
+    # Best-effort: pre-fill the held-out set + schema from the baseline eval so the
+    # after-eval is comparable. A missing/unreadable baseline just leaves placeholders.
+    dataset_default = eval_dataset
+    schema_default = schema
+    if (dataset_default is None or schema_default is None) and record.before_eval_path:
+        try:
+            before = EvaluationReport.model_validate_json(
+                Path(record.before_eval_path).read_text(encoding="utf-8")
+            )
+        except (ValidationError, json.JSONDecodeError, OSError):
+            before = None
+        if before is not None and before.run_settings is not None:
+            if dataset_default is None:
+                dataset_default = before.run_settings.dataset_path or None
+            if schema_default is None:
+                schema_default = before.run_settings.schema_id or None
+
+    plan = build_eval_handoff(
+        record,
+        project_dir=str(project_dir),
+        eval_dataset_path=dataset_default or "",
+        schema_id=schema_default or "",
+        backend=backend,
+        base_url=base_url,
+        served_model=served_model or "",
+    )
+
+    if as_json:
+        typer.echo(plan.model_dump_json(indent=2))
+        return
+
+    typer.echo(f"Evaluate the model from run {plan.run_id} (status: {plan.status})")
+    if plan.note:
+        typer.echo(plan.note)
+    if not plan.ready:
+        return
+    for index, step in enumerate(plan.steps, start=1):
+        typer.echo("")
+        typer.echo(f"{index}. {step.title}")
+        typer.echo(f"   {step.detail}")
+        if step.command:
+            typer.echo(f"   $ {step.command}")
+
+
 @app.command("training-checkpoints")
 def training_checkpoints(
     output_dir: Path,
