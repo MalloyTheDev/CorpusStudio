@@ -142,9 +142,9 @@ command requires the chosen local backend to already be running.
 Add **`--progress`** to stream progress (`[k/N] evaluated`) to **stderr** during a long
 run — the report JSON on stdout is unchanged, so `--output-path` and piping still work.
 Output is throttled to ~100 updates (always the first and last), so a 10k-row run streams
-a readable trickle instead of one line per example. (The desktop Evaluation tab surfacing
-this as a live progress bar is a follow-up — it needs the streaming process seam the
-launcher uses.)
+a readable trickle instead of one line per example. The **desktop Evaluation tab surfaces
+this as a live progress bar**: a run (and a regression rerun) passes `--progress`, streams the
+`[k/N]` lines back to the UI, and shows an "Evaluating k/N…" bar until the run finishes.
 
 ### Scoring metric (read this)
 
@@ -202,10 +202,9 @@ The desktop Evaluation tab is a thin UI over the CLI MVP:
 
 Multi-model benchmark comparison exists (`benchmark` runs one dataset across
 several models and ranks them), and the Model Arena compares models on ad-hoc
-prompt suites with optional evaluator-only judging. Streaming progress is available
-on the CLI (`eval-run --progress`, per-example counts to stderr); surfacing it as a
-desktop progress bar, hosted-provider credential management, and multi-run failure
-triage are not yet provided.
+prompt suites with optional evaluator-only judging. Streaming progress is shown live in
+the desktop (a per-example progress bar, fed by `eval-run --progress`); hosted-provider
+credential management and multi-run failure triage are not yet provided.
 
 ## UI Screen Basis
 

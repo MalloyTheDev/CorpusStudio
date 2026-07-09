@@ -56,6 +56,11 @@ public sealed class EvaluationViewModel : ViewModelBase, IEvaluationViewModel
 
     private string _evaluationReportJson = "Evaluation reports appear here after a run.";
 
+    // Live per-example progress during a run (#191): the engine streams '[k/N] evaluated' to stderr.
+    private bool _isEvaluationInProgress;
+    private double _evaluationProgressPercent;
+    private string _evaluationProgressText = string.Empty;
+
     private string _selectedEvaluationExampleDetail =
         "Per-example evaluation results appear here after a run or report reload.";
 
@@ -278,6 +283,57 @@ public sealed class EvaluationViewModel : ViewModelBase, IEvaluationViewModel
     {
         get => _evaluationComparisonSummary;
         private set => SetField(ref _evaluationComparisonSummary, value);
+    }
+
+    /// <summary>True while a run streams progress — drives the progress bar's visibility.</summary>
+    public bool IsEvaluationInProgress
+    {
+        get => _isEvaluationInProgress;
+        private set => SetField(ref _isEvaluationInProgress, value);
+    }
+
+    /// <summary>0–100 completion for the progress bar (indeterminate until the first update).</summary>
+    public double EvaluationProgressPercent
+    {
+        get => _evaluationProgressPercent;
+        private set => SetField(ref _evaluationProgressPercent, value);
+    }
+
+    /// <summary>"Evaluating k/N…" caption shown beside the progress bar.</summary>
+    public string EvaluationProgressText
+    {
+        get => _evaluationProgressText;
+        private set => SetField(ref _evaluationProgressText, value);
+    }
+
+    /// <summary>Start showing the progress bar (before any per-example update arrives).</summary>
+    public void BeginEvaluationProgress()
+    {
+        IsEvaluationInProgress = true;
+        EvaluationProgressPercent = 0;
+        EvaluationProgressText = "Starting evaluation…";
+    }
+
+    /// <summary>Apply one per-example progress update ("k of N evaluated"). Ignores a non-positive total,
+    /// and — since progress lines are marshaled asynchronously — ignores any update that arrives after the
+    /// run cleared (so a late line can't re-show the bar with stale data). <see cref="BeginEvaluationProgress"/>
+    /// opens the window.</summary>
+    public void SetEvaluationProgress(int completed, int total)
+    {
+        if (total <= 0 || !IsEvaluationInProgress)
+        {
+            return;
+        }
+
+        EvaluationProgressPercent = System.Math.Clamp(completed * 100.0 / total, 0, 100);
+        EvaluationProgressText = $"Evaluating {completed}/{total}…";
+    }
+
+    /// <summary>Hide the progress bar (the run finished or failed).</summary>
+    public void ClearEvaluationProgress()
+    {
+        IsEvaluationInProgress = false;
+        EvaluationProgressText = string.Empty;
     }
 
     public void SetEvaluationInProgress()

@@ -2332,7 +2332,8 @@ public sealed class PythonEngineService : IEngineService
         int timeoutSeconds,
         string? judgeModel = null,
         string? judgeBackend = null,
-        string? judgeBaseUrl = null
+        string? judgeBaseUrl = null,
+        IProgress<string>? progress = null
     )
     {
         var examplesPath = Path.Combine(projectPath, "examples.jsonl");
@@ -2350,7 +2351,18 @@ public sealed class PythonEngineService : IEngineService
             examplesPath, schemaId, backend, model, reportPath, scoreThreshold, timeoutSeconds,
             baseUrl, limit, judgeModel, judgeBackend, judgeBaseUrl);
 
-        var output = await RunEngineCommandAsync(arguments.ToArray());
+        // With a progress sink, ask the engine to stream '[k/N] evaluated' to stderr and forward each
+        // line (the report JSON still comes back on stdout, so the result is unchanged).
+        string output;
+        if (progress is not null)
+        {
+            arguments.Add("--progress");
+            output = await RunEngineCommandStreamingAsync(progress.Report, arguments.ToArray());
+        }
+        else
+        {
+            output = await RunEngineCommandAsync(arguments.ToArray());
+        }
         var reportJson = File.Exists(reportPath)
             ? File.ReadAllText(reportPath, Encoding.UTF8)
             : output;
@@ -2975,9 +2987,57 @@ public sealed class PythonEngineService : IEngineService
         return result.Output;
     }
 
-    private async Task<EngineProcessResult> RunEngineProcessAsync(
+    /// <summary>Run the engine CLI, streaming each stderr line to <paramref name="onStderrLine"/> as it
+    /// arrives (for live progress), and return stdout (throwing on a non-zero exit like the non-streaming
+    /// path). Used by the evaluation run with <c>--progress</c>.</summary>
+    private async Task<string> RunEngineCommandStreamingAsync(Action<string> onStderrLine, string[] arguments)
+    {
+        var result = await RunEngineProcessAsync(_engineDirectory, onStderrLine, arguments);
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(result.Error) ? result.Output : result.Error
+            );
+        }
+
+        return result.Output;
+    }
+
+    /// <summary>Read a stderr stream line-by-line, invoking <paramref name="onLine"/> for each (a raising
+    /// callback must not break the read), and return the accumulated text (so the final error is intact).</summary>
+    private static async Task<string> ReadStderrLinesAsync(StreamReader reader, Action<string> onLine)
+    {
+        var builder = new StringBuilder();
+        string? line;
+        while ((line = await reader.ReadLineAsync()) is not null)
+        {
+            builder.AppendLine(line);
+            try
+            {
+                onLine(line);
+            }
+            catch
+            {
+                // A progress sink must never break the engine read.
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private Task<EngineProcessResult> RunEngineProcessAsync(
         string engineDirectory,
         params string[] arguments
+    ) => RunEngineProcessAsync(engineDirectory, onStderrLine: null, arguments);
+
+    /// <summary>Run the engine CLI. When <paramref name="onStderrLine"/> is supplied, stderr is read
+    /// line-by-line and each line is streamed to it as it arrives (for live progress) instead of being
+    /// collected only at the end — the callback runs on a background thread, so a UI caller should marshal
+    /// via <see cref="System.Progress{T}"/>.</summary>
+    private async Task<EngineProcessResult> RunEngineProcessAsync(
+        string engineDirectory,
+        Action<string>? onStderrLine,
+        string[] arguments
     )
     {
         if (!IsEngineAvailable)
@@ -3030,7 +3090,9 @@ public sealed class PythonEngineService : IEngineService
         _currentRunCts = runCts;
 
         var outputTask = process.StandardOutput.ReadToEndAsync();
-        var errorTask = process.StandardError.ReadToEndAsync();
+        var errorTask = onStderrLine is null
+            ? process.StandardError.ReadToEndAsync()
+            : ReadStderrLinesAsync(process.StandardError, onStderrLine);
         var stopwatch = Stopwatch.StartNew();
 
         try

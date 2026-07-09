@@ -119,7 +119,15 @@ public sealed class EngineCommandTests
         public void SaveProjectSplitSettings(string projectPath, SplitSettings settings) { }
         public Task<BackendHealthReport> CheckBackendHealthAsync(string backend, string model, string? baseUrl, int timeoutSeconds) => Task.FromResult(new BackendHealthReport());
         public Task<BackendModelListReport> ListBackendModelsAsync(string backend, string? baseUrl, int timeoutSeconds) => Task.FromResult(new BackendModelListReport());
-        public Task<EvaluationRunResult> RunEvaluationAsync(string projectPath, string schemaId, string backend, string model, string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds, string? judgeModel = null, string? judgeBackend = null, string? judgeBaseUrl = null) => Task.FromResult(new EvaluationRunResult(new EvaluationReport(), string.Empty, string.Empty));
+        public string[] EvaluationProgressLines { get; set; } = Array.Empty<string>();
+        public Task<EvaluationRunResult> RunEvaluationAsync(string projectPath, string schemaId, string backend, string model, string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds, string? judgeModel = null, string? judgeBackend = null, string? judgeBaseUrl = null, IProgress<string>? progress = null)
+        {
+            foreach (var line in EvaluationProgressLines)
+            {
+                progress?.Report(line);
+            }
+            return Task.FromResult(new EvaluationRunResult(new EvaluationReport(), string.Empty, string.Empty));
+        }
         public System.Collections.Generic.IReadOnlyList<EvaluationReportHistoryItem> LoadEvaluationReportHistory(string projectPath, int maxReports = 20) => new System.Collections.Generic.List<EvaluationReportHistoryItem>();
         public System.Collections.Generic.IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, System.Collections.Generic.IReadOnlyList<EvaluationExampleResult> results) => new System.Collections.Generic.List<ReviewedFixRecord>();
         public Task<TrainingConfigExportResult> GenerateTrainingConfigAsync(string projectPath, string schemaId, string target, string baseModel, string datasetFormat, int sequenceLen, int loraR, int loraAlpha, int microBatchSize, int gradientAccumulationSteps, double learningRate) => Task.FromResult(new TrainingConfigExportResult());
@@ -867,6 +875,47 @@ public sealed class EngineCommandTests
             Argv = ["trainer", "config.yaml"],
         },
     };
+
+    [Theory]
+    [InlineData("[42/100] evaluated", true, 42, 100)]
+    [InlineData("[1/1] evaluated", true, 1, 1)]
+    [InlineData("  [7/9] evaluated  ", true, 7, 9)] // trimmed
+    [InlineData("some other stderr line", false, 0, 0)]
+    [InlineData("[42/100] scored", false, 0, 0)]
+    [InlineData("", false, 0, 0)]
+    public void TryParseEvaluationProgress_ParsesTheEngineFormatOnly(string line, bool ok, int completed, int total)
+    {
+        var parsed = MainWindowViewModel.TryParseEvaluationProgress(line, out var c, out var t);
+        Assert.Equal(ok, parsed);
+        Assert.Equal(completed, c);
+        Assert.Equal(total, t);
+    }
+
+    [Fact]
+    public void EvaluationProgress_BeginSetAndClear_TrackState()
+    {
+        var vm = new MainWindowViewModel();
+
+        vm.Evaluation.SetEvaluationProgress(1, 2); // ignored before Begin (no active run)
+        Assert.False(vm.Evaluation.IsEvaluationInProgress);
+        Assert.Equal(0, vm.Evaluation.EvaluationProgressPercent);
+
+        vm.Evaluation.BeginEvaluationProgress();
+        Assert.True(vm.Evaluation.IsEvaluationInProgress);
+
+        vm.Evaluation.SetEvaluationProgress(3, 4);
+        Assert.Equal(75, vm.Evaluation.EvaluationProgressPercent);
+        Assert.Contains("3/4", vm.Evaluation.EvaluationProgressText);
+
+        vm.Evaluation.SetEvaluationProgress(1, 0); // guarded — non-positive total ignored
+        Assert.Equal(75, vm.Evaluation.EvaluationProgressPercent);
+
+        vm.Evaluation.ClearEvaluationProgress();
+        Assert.False(vm.Evaluation.IsEvaluationInProgress);
+
+        vm.Evaluation.SetEvaluationProgress(4, 4); // a late line after clear must not re-show the bar
+        Assert.False(vm.Evaluation.IsEvaluationInProgress);
+    }
 
     [Fact]
     public async Task LaunchTraining_ConfirmedRun_StreamsLogs_Completes_AndSavesRecords()
