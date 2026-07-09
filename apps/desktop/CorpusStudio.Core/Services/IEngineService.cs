@@ -47,8 +47,17 @@ public interface IEngineService
     /// <summary>Reconcile tracked reviewed-fixes against a fresh evaluation's per-example results.</summary>
     IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, IReadOnlyList<EvaluationExampleResult> results);
 
+    /// <summary>Validate + append the draft to the project's examples.jsonl; returns the rows saved.</summary>
+    int AppendDraftToProjectExamples(string projectPath, string draftText);
+
     /// <summary>Load the project's saved examples (examples.jsonl → display items).</summary>
     IReadOnlyList<SavedExampleItem> LoadExamples(string projectPath);
+
+    /// <summary>Remove a resolved import-quarantine record (its on-disk file).</summary>
+    void RemoveImportQuarantineItem(ImportQuarantineItem item);
+
+    /// <summary>Load the project's import-quarantine items (rows that failed import validation).</summary>
+    IReadOnlyList<ImportQuarantineItem> LoadImportQuarantineItems(string projectPath);
 
     /// <summary>Restore a dataset version in place (captures an undo version, verifies, atomically swaps).</summary>
     Task<RestoreResult> RestoreDatasetVersionInPlaceAsync(string projectPath, string versionId, string undoLabel);

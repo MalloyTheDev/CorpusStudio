@@ -43,7 +43,12 @@ public sealed class EngineCommandTests
         public Task<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName)
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>>(new System.Collections.Generic.List<SuiteHistoryEntry>());
         public Task<BenchmarkReport> RunBenchmarkAsync(string projectPath, string schemaId, string backend, System.Collections.Generic.IReadOnlyList<string> models, string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds) => Task.FromResult(new BenchmarkReport());
+        public bool ValidateReturnsValid { get; set; }
+        public bool AppendCalled { get; private set; }
+        public int AppendDraftToProjectExamples(string projectPath, string draftText) { AppendCalled = true; return 1; }
         public System.Collections.Generic.IReadOnlyList<SavedExampleItem> LoadExamples(string projectPath) => new System.Collections.Generic.List<SavedExampleItem>();
+        public void RemoveImportQuarantineItem(ImportQuarantineItem item) { }
+        public System.Collections.Generic.IReadOnlyList<ImportQuarantineItem> LoadImportQuarantineItems(string projectPath) => new System.Collections.Generic.List<ImportQuarantineItem>();
         public bool RestoreCalled { get; private set; }
         public Task<RestoreResult> RestoreDatasetVersionInPlaceAsync(string projectPath, string versionId, string undoLabel) { RestoreCalled = true; return Task.FromResult(new RestoreResult()); }
         public string ExportPreferenceRanking(string projectPath, System.Collections.Generic.IReadOnlyList<PreferenceReviewItem> items) => string.Empty;
@@ -77,7 +82,7 @@ public sealed class EngineCommandTests
         public Task<string> GetDatasetVersionDiffAsync(string projectPath, string baseVersionId, string otherVersionId) => Task.FromResult("# diff");
         public Task<string> GetWeightCardAsync(string projectPath, string artifactId) => Task.FromResult("# weights");
         public Task<DatasetCardResult> GenerateDatasetCardAsync(string projectPath, string schemaId) => Task.FromResult(new DatasetCardResult());
-        public Task<ValidationReport> ValidateDraftAsync(string draftText, string schemaId) => Task.FromResult(new ValidationReport());
+        public Task<ValidationReport> ValidateDraftAsync(string draftText, string schemaId) => Task.FromResult(new ValidationReport { Valid = ValidateReturnsValid });
         public Task<TrainingCompatibilityResult> CheckTrainingCompatibilityAsync(string schemaId, string datasetFormat, string target) => Task.FromResult(new TrainingCompatibilityResult());
         public Task<System.Collections.Generic.IReadOnlyList<SuiteSummary>> ListSuitesAsync(string projectPath) => Task.FromResult((System.Collections.Generic.IReadOnlyList<SuiteSummary>)new System.Collections.Generic.List<SuiteSummary>());
         public Task<PreferenceExportResult> ExportPreferenceForTrainingAsync(string projectPath, string format) => Task.FromResult(new PreferenceExportResult());
@@ -472,5 +477,30 @@ public sealed class EngineCommandTests
         await vm.RestoreDatasetVersionAsync();
 
         Assert.True(engine.RestoreCalled);
+    }
+
+    [Fact]
+    public async Task SaveExample_WithValidDraft_AppendsAndMarksDraftClean()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { ValidateReturnsValid = true };
+        var vm = VmWith(engine);
+        SelectFakeProject(vm);
+
+        await vm.SaveExampleAsync();
+
+        Assert.True(engine.AppendCalled);
+        Assert.False(vm.WritingStudio.IsDraftDirty); // MarkDraftClean ran after persist
+    }
+
+    [Fact]
+    public async Task SaveExample_WithInvalidDraft_DoesNotAppend()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { ValidateReturnsValid = false };
+        var vm = VmWith(engine);
+        SelectFakeProject(vm);
+
+        await vm.SaveExampleAsync();
+
+        Assert.False(engine.AppendCalled); // invalid draft is not persisted
     }
 }
