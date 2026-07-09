@@ -180,6 +180,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand RefreshEvaluationModelsCommand { get; }
     public System.Windows.Input.ICommand CheckAiAssistBackendCommand { get; }
     public System.Windows.Input.ICommand RefreshAiAssistModelsCommand { get; }
+    public System.Windows.Input.ICommand RunAiAssistCommand { get; }
     public System.Windows.Input.ICommand GenerateSplitsCommand { get; }
     public System.Windows.Input.ICommand GateTrainingRunCommand { get; }
     public System.Windows.Input.ICommand RunQualityCommand { get; }
@@ -299,6 +300,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RefreshEvaluationModelsCommand = new AsyncRelayCommand(RefreshEvaluationModelsAsync);
         CheckAiAssistBackendCommand = new AsyncRelayCommand(CheckAiAssistBackendAsync);
         RefreshAiAssistModelsCommand = new AsyncRelayCommand(RefreshAiAssistModelsAsync);
+        RunAiAssistCommand = new AsyncRelayCommand(RunAiAssistAsync);
         GenerateSplitsCommand = new AsyncRelayCommand(GenerateSplitsAsync);
         GateTrainingRunCommand = new AsyncRelayCommand(GateTrainingRunAsync);
         RunQualityCommand = new AsyncRelayCommand(() => RefreshQualityAsync());
@@ -1252,6 +1254,103 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             ClearBusy();
         }
+    }
+
+    /// <summary>Run AI Assist over the current draft, queue the suggestion for review, and select it.
+    /// Moved from the desktop code-behind (#247); the bulk-undo stack now lives on the AI-Assist VM, so
+    /// a fresh run clears it (a prior bulk undo would no longer be coherent).</summary>
+    public async System.Threading.Tasks.Task RunAiAssistAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            AiAssist.SetAiAssistError("Create or select a dataset project before running AI Assist.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(WritingStudio.DraftText))
+        {
+            AiAssist.SetAiAssistError("Add a draft example before running AI Assist.");
+            return;
+        }
+
+        if (!TryReadAiAssistOptions(
+            out var backend, out var model, out var baseUrl, out var action,
+            out var timeoutSeconds, out var instruction, out var errorMessage))
+        {
+            AiAssist.SetAiAssistError(errorMessage);
+            return;
+        }
+
+        try
+        {
+            SetBusy("Running AI Assist...");
+            AiAssist.SetAiAssistInProgress();
+            var result = await _engine.RunAiAssistAsync(
+                WritingStudio.DraftText, ActiveSchemaId, action, backend, model, baseUrl, timeoutSeconds, instruction);
+            AiAssist.ApplyAiAssistRunResult(result);
+            var queuedItem = _engine.SaveAiAssistReviewQueueItem(ActiveProjectPath, WritingStudio.DraftText, result);
+            AiAssist.SetAiAssistReviewQueue(_engine.LoadAiAssistReviewQueue(ActiveProjectPath));
+            AiAssist.SelectedAiAssistReviewQueueItem = AiAssist.AiAssistReviewQueue
+                .FirstOrDefault(item => item.ReviewId == queuedItem.ReviewId);
+            AiAssist.ClearBulkUndoStack();
+        }
+        catch (Exception ex)
+        {
+            AiAssist.SetAiAssistError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Read + validate the AI-Assist run options from the connection/tab view-models.
+    /// Moved verbatim from the code-behind (reads only VM state, so it is head-agnostic).</summary>
+    private bool TryReadAiAssistOptions(
+        out string backend, out string model, out string? baseUrl, out string action,
+        out int timeoutSeconds, out string? instruction, out string errorMessage)
+    {
+        backend = AiAssistConnection.AiAssistBackend.Trim();
+        model = AiAssistConnection.AiAssistModel.Trim();
+        baseUrl = string.IsNullOrWhiteSpace(AiAssistConnection.AiAssistBaseUrl)
+            ? null
+            : AiAssistConnection.AiAssistBaseUrl.Trim();
+        action = AiAssist.AiAssistAction.Trim();
+        timeoutSeconds = 0;
+        instruction = string.IsNullOrWhiteSpace(AiAssist.AiAssistInstruction)
+            ? null
+            : AiAssist.AiAssistInstruction.Trim();
+        errorMessage = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(backend))
+        {
+            errorMessage = "AI Assist backend is required.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            errorMessage = "AI Assist model is required.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(action))
+        {
+            errorMessage = "AI Assist action is required.";
+            return false;
+        }
+
+        if (!int.TryParse(
+            AiAssistConnection.AiAssistTimeoutSeconds,
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out timeoutSeconds) || timeoutSeconds <= 0)
+        {
+            errorMessage = "AI Assist timeout must be a positive whole number.";
+            return false;
+        }
+
+        return true;
     }
 
     private static bool TryReadBackendOptions(

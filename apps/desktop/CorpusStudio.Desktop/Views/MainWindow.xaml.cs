@@ -17,10 +17,7 @@ namespace CorpusStudio.Desktop.Views;
 
 public partial class MainWindow : Window
 {
-    private const int MaxAiAssistBulkUndoSteps = 20;
-
     private readonly PythonEngineService _engineService = new();
-    private readonly List<IReadOnlyDictionary<string, string>> _aiAssistBulkUndoStack = [];
     private readonly IProcessRunner _trainingRunner = new TrainingProcessRunner();
     private CancellationTokenSource? _trainingRunCts;
     private readonly ConcurrentQueue<string> _trainingLogQueue = new();
@@ -1049,73 +1046,6 @@ public partial class MainWindow : Window
 
 
 
-    private async void RunAiAssistButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            ViewModel.AiAssist.SetAiAssistError("Create or select a dataset project before running AI Assist.");
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(ViewModel.WritingStudio.DraftText))
-        {
-            ViewModel.AiAssist.SetAiAssistError("Add a draft example before running AI Assist.");
-            return;
-        }
-
-        if (!TryReadAiAssistOptions(
-            out var backend,
-            out var model,
-            out var baseUrl,
-            out var action,
-            out var timeoutSeconds,
-            out var instruction,
-            out var errorMessage
-        ))
-        {
-            ViewModel.AiAssist.SetAiAssistError(errorMessage);
-            return;
-        }
-
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy("Running AI Assist...");
-            ViewModel.AiAssist.SetAiAssistInProgress();
-            var result = await _engineService.RunAiAssistAsync(
-                ViewModel.WritingStudio.DraftText,
-                ViewModel.ActiveSchemaId,
-                action,
-                backend,
-                model,
-                baseUrl,
-                timeoutSeconds,
-                instruction
-            );
-            ViewModel.AiAssist.ApplyAiAssistRunResult(result);
-            var queuedItem = _engineService.SaveAiAssistReviewQueueItem(
-                ViewModel.ActiveProjectPath,
-                ViewModel.WritingStudio.DraftText,
-                result
-            );
-            ViewModel.AiAssist.SetAiAssistReviewQueue(
-                _engineService.LoadAiAssistReviewQueue(ViewModel.ActiveProjectPath)
-            );
-            ViewModel.AiAssist.SelectedAiAssistReviewQueueItem = ViewModel.AiAssist.AiAssistReviewQueue
-                .FirstOrDefault(item => item.ReviewId == queuedItem.ReviewId);
-            ClearAiAssistBulkUndoStack();
-        }
-        catch (Exception ex)
-        {
-            ViewModel.AiAssist.SetAiAssistError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
-
     private void UseAiAssistSuggestionButton_Click(object sender, RoutedEventArgs e)
     {
         // Confirm-on-block: the pre-review candidate gate only INFORMS — a block never
@@ -1285,7 +1215,7 @@ public partial class MainWindow : Window
             ViewModel.AiAssist.SelectedAiAssistReviewQueueItem = ViewModel.AiAssist.AiAssistReviewQueue
                 .FirstOrDefault(item => item.ReviewId == reviewId);
             ViewModel.AiAssist.ApplyAiAssistReviewState(updatedItem);
-            ClearAiAssistBulkUndoStack();
+            ViewModel.AiAssist.ClearBulkUndoStack();
             return true;
         }
         catch (Exception ex)
@@ -1321,11 +1251,11 @@ public partial class MainWindow : Window
             ViewModel.AiAssist.SetAiAssistReviewQueue(
                 _engineService.LoadAiAssistReviewQueue(ViewModel.ActiveProjectPath)
             );
-            PushAiAssistBulkUndoStep(previousStates);
+            ViewModel.AiAssist.PushBulkUndoStep(previousStates);
             ViewModel.AiAssist.ApplyAiAssistBulkReviewState(
                 updatedCount,
                 reviewState,
-                _aiAssistBulkUndoStack.Count
+                ViewModel.AiAssist.BulkUndoStackDepth
             );
         }
         catch (Exception ex)
@@ -1342,7 +1272,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_aiAssistBulkUndoStack.Count == 0)
+        var previousStates = ViewModel.AiAssist.PeekBulkUndoStep();
+        if (previousStates is null)
         {
             ViewModel.AiAssist.SetAiAssistQueueError("No AI Assist bulk triage action is available to undo.");
             return;
@@ -1350,7 +1281,6 @@ public partial class MainWindow : Window
 
         try
         {
-            var previousStates = _aiAssistBulkUndoStack[^1];
             var restoredCount = _engineService.UpdateAiAssistReviewStates(
                 ViewModel.ActiveProjectPath,
                 previousStates
@@ -1358,40 +1288,16 @@ public partial class MainWindow : Window
             ViewModel.AiAssist.SetAiAssistReviewQueue(
                 _engineService.LoadAiAssistReviewQueue(ViewModel.ActiveProjectPath)
             );
-            _aiAssistBulkUndoStack.RemoveAt(_aiAssistBulkUndoStack.Count - 1);
+            ViewModel.AiAssist.RemoveLastBulkUndoStep();
             ViewModel.AiAssist.ApplyAiAssistBulkUndoReviewState(
                 restoredCount,
-                _aiAssistBulkUndoStack.Count
+                ViewModel.AiAssist.BulkUndoStackDepth
             );
         }
         catch (Exception ex)
         {
             ViewModel.AiAssist.SetAiAssistQueueError(ex.Message);
         }
-    }
-
-    private void PushAiAssistBulkUndoStep(IReadOnlyDictionary<string, string> previousStates)
-    {
-        if (previousStates.Count == 0)
-        {
-            return;
-        }
-
-        if (_aiAssistBulkUndoStack.Count >= MaxAiAssistBulkUndoSteps)
-        {
-            _aiAssistBulkUndoStack.RemoveAt(0);
-        }
-
-        _aiAssistBulkUndoStack.Add(previousStates.ToDictionary(
-            pair => pair.Key,
-            pair => pair.Value,
-            StringComparer.Ordinal
-        ));
-    }
-
-    private void ClearAiAssistBulkUndoStack()
-    {
-        _aiAssistBulkUndoStack.Clear();
     }
 
     private void SaveEvaluationReviewButton_Click(object sender, RoutedEventArgs e)
@@ -2073,60 +1979,6 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private bool TryReadAiAssistOptions(
-        out string backend,
-        out string model,
-        out string? baseUrl,
-        out string action,
-        out int timeoutSeconds,
-        out string? instruction,
-        out string errorMessage
-    )
-    {
-        backend = ViewModel.AiAssistConnection.AiAssistBackend.Trim();
-        model = ViewModel.AiAssistConnection.AiAssistModel.Trim();
-        baseUrl = string.IsNullOrWhiteSpace(ViewModel.AiAssistConnection.AiAssistBaseUrl)
-            ? null
-            : ViewModel.AiAssistConnection.AiAssistBaseUrl.Trim();
-        action = ViewModel.AiAssist.AiAssistAction.Trim();
-        timeoutSeconds = 0;
-        instruction = string.IsNullOrWhiteSpace(ViewModel.AiAssist.AiAssistInstruction)
-            ? null
-            : ViewModel.AiAssist.AiAssistInstruction.Trim();
-        errorMessage = string.Empty;
-
-        if (string.IsNullOrWhiteSpace(backend))
-        {
-            errorMessage = "AI Assist backend is required.";
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(model))
-        {
-            errorMessage = "AI Assist model is required.";
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(action))
-        {
-            errorMessage = "AI Assist action is required.";
-            return false;
-        }
-
-        if (!int.TryParse(
-            ViewModel.AiAssistConnection.AiAssistTimeoutSeconds,
-            NumberStyles.Integer,
-            CultureInfo.InvariantCulture,
-            out timeoutSeconds
-        ) || timeoutSeconds <= 0)
-        {
-            errorMessage = "AI Assist timeout must be a positive whole number.";
-            return false;
-        }
-
-        return true;
-    }
-
     private bool _suppressProjectSelectionChange;
 
     private async void ProjectsListBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
@@ -2182,7 +2034,7 @@ public partial class MainWindow : Window
         ViewModel.Evaluation.SetEvaluationFailureFilters(
             _engineService.LoadEvaluationFailureFilters(project.ProjectPath)
         );
-        ClearAiAssistBulkUndoStack();
+        ViewModel.AiAssist.ClearBulkUndoStack();
         ViewModel.Evaluation.SetEvaluationReportHistory(
             _engineService.LoadEvaluationReportHistory(project.ProjectPath)
         );

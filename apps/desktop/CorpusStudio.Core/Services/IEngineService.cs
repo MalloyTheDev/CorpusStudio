@@ -47,6 +47,17 @@ public interface IEngineService
     /// <summary>Reconcile tracked reviewed-fixes against a fresh evaluation's per-example results.</summary>
     IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, IReadOnlyList<EvaluationExampleResult> results);
 
+    /// <summary>Run AI Assist over a draft (live backend call) and return its suggestion + gate.</summary>
+    Task<AiAssistRunResult> RunAiAssistAsync(
+        string draftText, string schemaId, string action, string backend, string model,
+        string? baseUrl, int timeoutSeconds, string? instruction);
+
+    /// <summary>Persist an AI-Assist run as a pending review-queue item and return it.</summary>
+    AiAssistReviewQueueItem SaveAiAssistReviewQueueItem(string projectPath, string sourceDraft, AiAssistRunResult result);
+
+    /// <summary>Load the project's AI-Assist review queue (newest first).</summary>
+    IReadOnlyList<AiAssistReviewQueueItem> LoadAiAssistReviewQueue(string projectPath, int maxItems = 50);
+
     /// <summary>Export the project's examples (optionally dedupe / drop low-information rows; optionally
     /// mask detected PII/secrets — known patterns only, not de-identification). <paramref name="format"/>
     /// is "jsonl" (default, all schemas) or "csv"/"tsv" (flat schemas only — the engine refuses a schema

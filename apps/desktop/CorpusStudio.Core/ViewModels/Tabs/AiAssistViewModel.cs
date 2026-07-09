@@ -25,6 +25,13 @@ public sealed class AiAssistViewModel : ViewModelBase, IAiAssistViewModel
         _connection = connection;
     }
 
+    // Bulk-triage undo stack (moved from the desktop code-behind, #247): each entry snapshots
+    // the review-id → previous-state of a bulk mark, so a bulk action can be reverted. Capped
+    // so the history can't grow without bound; any single-review edit / new run / project switch
+    // clears it (a bulk undo would no longer be coherent). Pure in-memory VM state — unit-tested.
+    private const int MaxBulkUndoSteps = 20;
+    private readonly List<IReadOnlyDictionary<string, string>> _bulkUndoStack = [];
+
     private string _aiAssistAction = "review";
     private string _aiAssistInstruction =
         "Review the current draft and suggest safer tags or a stronger output.";
@@ -424,6 +431,47 @@ public sealed class AiAssistViewModel : ViewModelBase, IAiAssistViewModel
         ApplyAiAssistReviewQueueItem(item);
         AiAssistQueueSummary = $"AI Assist review marked {item.ReviewState}.";
     }
+
+    /// <summary>Depth of the bulk-triage undo stack (how many bulk actions can be reverted).</summary>
+    public int BulkUndoStackDepth => _bulkUndoStack.Count;
+
+    /// <summary>Push a snapshot of the pre-bulk review states (no-op for an empty snapshot).
+    /// Evicts the oldest step once the cap is reached, and stores a defensive copy.</summary>
+    public void PushBulkUndoStep(IReadOnlyDictionary<string, string> previousStates)
+    {
+        if (previousStates.Count == 0)
+        {
+            return;
+        }
+
+        if (_bulkUndoStack.Count >= MaxBulkUndoSteps)
+        {
+            _bulkUndoStack.RemoveAt(0);
+        }
+
+        _bulkUndoStack.Add(previousStates.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value,
+            StringComparer.Ordinal
+        ));
+    }
+
+    /// <summary>The most recent undo snapshot, or null when the stack is empty.</summary>
+    public IReadOnlyDictionary<string, string>? PeekBulkUndoStep() =>
+        _bulkUndoStack.Count == 0 ? null : _bulkUndoStack[^1];
+
+    /// <summary>Drop the most recent undo snapshot (after it has been applied).</summary>
+    public void RemoveLastBulkUndoStep()
+    {
+        if (_bulkUndoStack.Count > 0)
+        {
+            _bulkUndoStack.RemoveAt(_bulkUndoStack.Count - 1);
+        }
+    }
+
+    /// <summary>Clear the undo history (a single-review edit / new run / project switch makes a
+    /// prior bulk undo incoherent).</summary>
+    public void ClearBulkUndoStack() => _bulkUndoStack.Clear();
 
     public void ApplyAiAssistBulkReviewState(int updatedCount, string reviewState, int undoStepsAvailable)
     {
