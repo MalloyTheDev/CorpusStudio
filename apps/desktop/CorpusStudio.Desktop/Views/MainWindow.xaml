@@ -3038,10 +3038,22 @@
                           ToolTip="Masks emails, SSNs, keys/tokens, and cards with [REDACTED:kind] placeholders and writes a redaction manifest. Masks known high-precision patterns only — NOT a guarantee of de-identification; review before publishing."
                           Margin="0,0,0,8"
                           IsChecked="{Binding ExportRedactPii, Mode=TwoWay}" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8" VerticalAlignment="Center">
+                    <TextBlock Text="Format:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <ComboBox AutomationProperties.AutomationId="ExportFormatComboBox"
+                              Width="200"
+                              SelectedValuePath="Tag"
+                              SelectedValue="{Binding ExportFormat, Mode=TwoWay}"
+                              ToolTip="JSONL is model-ready and works for every schema. CSV/TSV is a flat-schema convenience (open in Excel/pandas) — a chat or nested-object schema is refused; export those as JSONL.">
+                        <ComboBoxItem Tag="jsonl" Content="JSONL (model-ready, all schemas)" />
+                        <ComboBoxItem Tag="csv" Content="CSV (flat schemas)" />
+                        <ComboBoxItem Tag="tsv" Content="TSV (flat schemas)" />
+                    </ComboBox>
+                </StackPanel>
                 <Button x:Name="ExportJsonlButton"
                         Style="{StaticResource PrimaryButtonStyle}"
                         AutomationProperties.AutomationId="ExportJsonlButton"
-                        Content="_Export JSONL"
+                        Content="_Export Dataset"
                         Command="{Binding ExportJsonlCommand}" />
                 <Button AutomationProperties.AutomationId="GenerateDatasetCardButton"
                         Content="Generate Dataset Card"

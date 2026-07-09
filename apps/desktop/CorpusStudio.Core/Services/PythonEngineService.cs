@@ -2074,7 +2074,8 @@ public sealed class PythonEngineService : IEngineService
         string schemaId,
         bool removeDuplicates = false,
         bool removeLowInformation = false,
-        bool redactPii = false
+        bool redactPii = false,
+        string format = "jsonl"
     )
     {
         var examplesPath = Path.Combine(projectPath, "examples.jsonl");
@@ -2083,8 +2084,12 @@ public sealed class PythonEngineService : IEngineService
             throw new FileNotFoundException("Project examples file was not found.", examplesPath);
         }
 
+        // Normalize the format to a known extension; unknown falls back to jsonl (the engine
+        // is the authority — it refuses a nested schema for csv/tsv with a clear message).
+        var extension = format?.Trim().ToLowerInvariant() is "csv" or "tsv" ? format!.Trim().ToLowerInvariant() : "jsonl";
+
         var projectId = new DirectoryInfo(projectPath).Name;
-        var outputPath = Path.Combine(ResolveExportRoot(), projectId, "export.jsonl");
+        var outputPath = Path.Combine(ResolveExportRoot(), projectId, $"export.{extension}");
 
         var arguments = new List<string> { "export", examplesPath, outputPath, schemaId };
         if (removeDuplicates)
@@ -2098,6 +2103,11 @@ public sealed class PythonEngineService : IEngineService
         if (redactPii)
         {
             arguments.Add("--redact-pii");
+        }
+        if (extension != "jsonl")
+        {
+            arguments.Add("--format");
+            arguments.Add(extension);
         }
 
         var output = await RunEngineCommandAsync(arguments.ToArray());

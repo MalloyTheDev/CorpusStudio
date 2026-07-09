@@ -51,6 +51,8 @@ a training run of your own installed trainer:
   shared across splits are reported before they inflate eval scores)
 - export with an optional cleaning pass (dedupe / drop low-information) that
   writes a removal manifest; verbatim exports warn when duplicates remain
+- export as JSONL (default, model-ready) or CSV/TSV for flat schemas (a
+  chat/nested-object schema is refused rather than lossy-flattened)
 - preference exports to DPO/KTO/reward with a pair-integrity gate
   (identical/empty/low-contrast pairs reported, `--drop-degenerate` opt-in)
 - an inspectable dataset card summarizing metadata, schema, splits, quality,

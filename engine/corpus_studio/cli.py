@@ -41,6 +41,10 @@ from corpus_studio.evaluation.scorers import LlmJudgeScorer
 from corpus_studio.exporters.cleaning import clean_rows
 from corpus_studio.exporters.redaction import redact_rows
 from corpus_studio.exporters.jsonl_exporter import export_jsonl, write_jsonl
+from corpus_studio.exporters.tabular_exporter import (
+    schema_is_csv_exportable,
+    write_tabular,
+)
 from corpus_studio.exporters.preference_exporter import (
     analyze_preference_pairs,
     drop_degenerate_pairs,
@@ -1742,10 +1746,37 @@ def export(
         "[REDACTED:kind] placeholders. Masks known high-precision patterns only — NOT a guarantee of "
         "de-identification. Writes a redaction manifest; never rewrites the input.",
     ),
+    export_format: str = typer.Option(
+        "jsonl",
+        "--format",
+        help="Output format: jsonl (default, model-ready, all schemas) or csv/tsv. CSV/TSV is a "
+        "flat-schema convenience — a schema with chat messages or nested objects is refused (use jsonl). "
+        "Scalar list fields (e.g. tags) are written as a '; '-joined cell.",
+    ),
 ):
     """Validate and export a JSONL file, optionally cleaning it first."""
+    export_format = export_format.strip().lower()
+    if export_format not in ("jsonl", "csv", "tsv"):
+        typer.echo(f"Unknown --format '{export_format}'; expected jsonl, csv, or tsv.", err=True)
+        raise typer.Exit(code=1)
+
     report = validate_jsonl_file(input_path, schema)
     _exit_if_invalid(report)
+
+    # Fail fast: a nested schema can't become flat columns. Check before any work so
+    # the message is immediate and no partial output is written.
+    tabular_schema = None
+    if export_format in ("csv", "tsv"):
+        tabular_schema = load_builtin_schema(schema)
+        exportable, blocking = schema_is_csv_exportable(tabular_schema)
+        if not exportable:
+            typer.echo(
+                f"Cannot export schema '{schema}' to {export_format}: field(s) {blocking} are nested "
+                "(chat messages / objects / lists of objects) and can't become flat columns. "
+                "Export as JSONL instead.",
+                err=True,
+            )
+            raise typer.Exit(code=2)
 
     # Enforce the export gate BEFORE writing the deliverable: block on PII/secrets (and
     # empty input / schema). Quality issues (duplicates / low-information) only warn — the
@@ -1771,13 +1802,21 @@ def export(
 
     warnings: list[str] = []
 
+    # csv/tsv share the entire validate/redact/gate/clean pipeline above; only the
+    # writer differs. tabular_schema is set (and proven flat) when format is csv/tsv.
+    tabular_columns: list[str] | None = None
+    delimiter = "\t" if export_format == "tsv" else ","
+
     if dedupe or drop_low_information:
         kept, clean_result = clean_rows(
             rows,
             dedupe=dedupe,
             drop_low_information=drop_low_information,
         )
-        write_jsonl(kept, output_path)
+        if tabular_schema is not None:
+            _, tabular_columns = write_tabular(kept, output_path, tabular_schema, delimiter)
+        else:
+            write_jsonl(kept, output_path)
 
         manifest_path = output_path.with_name(output_path.name + ".cleaning_manifest.json")
         manifest_path.write_text(
@@ -1787,6 +1826,7 @@ def export(
         payload = {
             "input_path": str(input_path),
             "output_path": str(output_path),
+            "format": export_format,
             "cleaned": True,
             "input_rows": clean_result.input_rows,
             "output_rows": clean_result.kept_rows,
@@ -1801,7 +1841,9 @@ def export(
         # Verbatim copy, but still surface remaining duplicates so the quality
         # surfaces are not purely advisory when the deliverable is produced.
         quality = build_basic_quality_report(rows)
-        if redaction_result is not None:
+        if tabular_schema is not None:
+            _, tabular_columns = write_tabular(rows, output_path, tabular_schema, delimiter)
+        elif redaction_result is not None:
             # Redaction changed the rows, so the deliverable is the redacted rows — not an input copy.
             write_jsonl(rows, output_path)
         else:
@@ -1815,12 +1857,16 @@ def export(
         payload = {
             "input_path": str(input_path),
             "output_path": str(output_path),
+            "format": export_format,
             "cleaned": False,
             "input_rows": quality.example_count,
             "output_rows": quality.example_count,
             "removed_rows": 0,
             "warnings": warnings,
         }
+
+    if tabular_columns is not None:
+        payload["columns"] = tabular_columns
 
     if redaction_result is not None:
         redaction_manifest_path = output_path.with_name(
