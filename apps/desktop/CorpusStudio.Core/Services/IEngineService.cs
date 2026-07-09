@@ -47,6 +47,12 @@ public interface IEngineService
     /// <summary>Reconcile tracked reviewed-fixes against a fresh evaluation's per-example results.</summary>
     IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, IReadOnlyList<EvaluationExampleResult> results);
 
+    /// <summary>Load the project's saved examples (examples.jsonl → display items).</summary>
+    IReadOnlyList<SavedExampleItem> LoadExamples(string projectPath);
+
+    /// <summary>Restore a dataset version in place (captures an undo version, verifies, atomically swaps).</summary>
+    Task<RestoreResult> RestoreDatasetVersionInPlaceAsync(string projectPath, string versionId, string undoLabel);
+
     /// <summary>Export the visible preference-review ranking to a file; returns the output path.</summary>
     string ExportPreferenceRanking(string projectPath, IReadOnlyList<PreferenceReviewItem> items);
 

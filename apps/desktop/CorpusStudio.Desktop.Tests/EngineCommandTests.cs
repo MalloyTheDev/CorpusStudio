@@ -43,6 +43,9 @@ public sealed class EngineCommandTests
         public Task<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>> GetSuiteHistoryAsync(string projectPath, string suiteName)
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<SuiteHistoryEntry>>(new System.Collections.Generic.List<SuiteHistoryEntry>());
         public Task<BenchmarkReport> RunBenchmarkAsync(string projectPath, string schemaId, string backend, System.Collections.Generic.IReadOnlyList<string> models, string? baseUrl, int? limit, double scoreThreshold, int timeoutSeconds) => Task.FromResult(new BenchmarkReport());
+        public System.Collections.Generic.IReadOnlyList<SavedExampleItem> LoadExamples(string projectPath) => new System.Collections.Generic.List<SavedExampleItem>();
+        public bool RestoreCalled { get; private set; }
+        public Task<RestoreResult> RestoreDatasetVersionInPlaceAsync(string projectPath, string versionId, string undoLabel) { RestoreCalled = true; return Task.FromResult(new RestoreResult()); }
         public string ExportPreferenceRanking(string projectPath, System.Collections.Generic.IReadOnlyList<PreferenceReviewItem> items) => string.Empty;
         public System.Collections.Generic.IReadOnlyList<(ModelArtifactRecord Record, string Integrity)> LoadArtifacts(string projectPath, System.Func<ModelArtifactRecord, string>? integrityOf = null) => new System.Collections.Generic.List<(ModelArtifactRecord, string)>();
         public ModelArtifactRecord RegisterArtifact(string projectPath, string runId, string path, string kind = "adapter", string notes = "") => new ModelArtifactRecord();
@@ -80,12 +83,20 @@ public sealed class EngineCommandTests
         public Task<PreferenceExportResult> ExportPreferenceForTrainingAsync(string projectPath, string format) => Task.FromResult(new PreferenceExportResult());
     }
 
-    private static MainWindowViewModel VmWith(IEngineService engine) => new(
+    private sealed class FakeDialogService : IDialogService
+    {
+        private readonly bool _confirm;
+        public FakeDialogService(bool confirm) => _confirm = confirm;
+        public Task<bool> ConfirmAsync(string message, string title, DialogButtons buttons = DialogButtons.YesNo, DialogSeverity severity = DialogSeverity.Question, bool defaultAffirmative = false) => Task.FromResult(_confirm);
+        public Task ShowAsync(string message, string title, DialogSeverity severity = DialogSeverity.Information) => Task.CompletedTask;
+    }
+
+    private static MainWindowViewModel VmWith(IEngineService engine, IDialogService? dialogs = null) => new(
         new DebtViewModel(), new ArenaViewModel(), new SettingsViewModel(), new VersionsViewModel(),
         new ArtifactsViewModel(), new SuitesViewModel(), new SplitsViewModel(), new PreferenceReviewViewModel(),
         new QuarantineViewModel(), new ExamplesViewModel(), new WritingStudioViewModel(),
         new AiAssistRewriteBatchesViewModel(), new AiAssistConnectionViewModel(),
-        new EvaluationConnectionViewModel(), new QualityViewModel(), engine);
+        new EvaluationConnectionViewModel(), new QualityViewModel(), engine, dialogs ?? new NullDialogService());
 
     private static void SelectFakeProject(MainWindowViewModel vm) => vm.SelectProject(
         new DatasetProjectListItem(
@@ -425,5 +436,41 @@ public sealed class EngineCommandTests
         vm.ExportPreferenceRanking();
 
         Assert.Contains("Create or select a preference project", vm.PreferenceReview.PreferenceReviewSummary);
+    }
+
+    [Fact]
+    public async Task RestoreDatasetVersion_WithoutSelection_SetsVersionError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+
+        await vm.RestoreDatasetVersionAsync();
+
+        Assert.Contains("Select a version to restore", vm.Versions.DatasetVersionSummary + vm.Versions.DatasetVersionDetail);
+    }
+
+    [Fact]
+    public async Task RestoreDatasetVersion_WhenConfirmDeclined_DoesNotCallEngine()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine, new FakeDialogService(confirm: false)); // user clicks No
+        SelectFakeProject(vm);
+        vm.Versions.SelectedDatasetVersion = new DatasetVersionDisplayItem(new DatasetVersionRecord { VersionId = "v1" });
+
+        await vm.RestoreDatasetVersionAsync();
+
+        Assert.False(engine.RestoreCalled); // declining the confirm gates the destructive restore
+    }
+
+    [Fact]
+    public async Task RestoreDatasetVersion_WhenConfirmed_CallsEngine()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine, new FakeDialogService(confirm: true)); // user clicks Yes
+        SelectFakeProject(vm);
+        vm.Versions.SelectedDatasetVersion = new DatasetVersionDisplayItem(new DatasetVersionRecord { VersionId = "v1" });
+
+        await vm.RestoreDatasetVersionAsync();
+
+        Assert.True(engine.RestoreCalled);
     }
 }

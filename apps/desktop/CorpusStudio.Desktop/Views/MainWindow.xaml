@@ -2605,7 +2605,7 @@
                                         Content="Restore this version"
                                         ToolTip="Overwrite the current dataset with this version (your current dataset is captured first so you can undo)"
                                         Margin="0,0,8,0"
-                                        Click="RestoreDatasetVersionButton_Click" />
+                                        Command="{Binding RestoreDatasetVersionCommand}" />
                                 <Button AutomationProperties.AutomationId="SetDiffBaseButton"
                                         Content="Set diff base"
                                         ToolTip="Pin the selected version as the base for a diff"
