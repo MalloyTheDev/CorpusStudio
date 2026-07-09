@@ -189,6 +189,10 @@ public interface IEngineService
     /// <summary>Persist a training run record (the desktop owns the process, so it writes these).</summary>
     void SaveTrainingRunRecord(string projectPath, TrainingRunRecord record);
 
+    /// <summary>Garbage-collect row-store rows no dataset version references. Pass dryRun to report the
+    /// kept/pruned counts without rewriting (fail-closed: never prunes a referenced/unclassifiable row).</summary>
+    Task<RowStoreGcResult> RunRowStoreGcAsync(string projectPath, bool dryRun);
+
     /// <summary>Link an after-training eval report to the newest run (returns that run's id, or null).</summary>
     string? LinkAfterEvalToNewestRun(string projectPath, string afterEvalPath, string? afterEvalModel);
 

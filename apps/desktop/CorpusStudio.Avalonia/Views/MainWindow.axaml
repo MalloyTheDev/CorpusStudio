@@ -231,6 +231,7 @@
             <Button Content="View card" Command="{Binding ViewDatasetVersionCardCommand}" Margin="0,0,6,4"/>
             <Button Content="Diff versions" Command="{Binding DiffVersionsCommand}" Margin="0,0,6,4"/>
             <Button Content="Restore" Command="{Binding RestoreDatasetVersionCommand}" Margin="0,0,6,4"/>
+            <Button Content="Clean up row store" Command="{Binding RunRowStoreGcCommand}" Margin="0,0,6,4"/>
           </WrapPanel>
           <TextBlock Text="{Binding Versions.DatasetDiffBaseLabel}" Foreground="#64748B"/>
           <TextBlock Text="{Binding Versions.DatasetVersionDetail}" TextWrapping="Wrap" Margin="0,8,0,0"/>

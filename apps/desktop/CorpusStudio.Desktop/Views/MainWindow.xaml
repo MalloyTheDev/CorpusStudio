@@ -2653,7 +2653,12 @@
                                         Command="{Binding DiffVersionsCommand}" />
                                 <Button AutomationProperties.AutomationId="RefreshDatasetVersionsButton"
                                         Content="Refresh"
+                                        Margin="0,0,8,0"
                                         Command="{Binding RefreshDatasetVersionsCommand}" />
+                                <Button AutomationProperties.AutomationId="RunRowStoreGcButton"
+                                        Content="Clean up row store"
+                                        ToolTip="Prune row-store rows no dataset version references (dry-run + confirm first; fail-closed — never removes a referenced row)."
+                                        Command="{Binding RunRowStoreGcCommand}" />
                             </WrapPanel>
                             <Grid Grid.Row="2">
                                 <Grid.ColumnDefinitions>

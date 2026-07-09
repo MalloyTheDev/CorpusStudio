@@ -100,6 +100,12 @@ public sealed class EngineCommandTests
         public System.Collections.Generic.IReadOnlyList<TrainingRunRecord> LoadTrainingRunRecords(string projectPath) => new System.Collections.Generic.List<TrainingRunRecord>();
         public int SaveTrainingRunRecordCallCount { get; private set; }
         public void SaveTrainingRunRecord(string projectPath, TrainingRunRecord record) => SaveTrainingRunRecordCallCount++;
+        public List<bool> GcDryRunCalls { get; } = new();
+        public Task<RowStoreGcResult> RunRowStoreGcAsync(string projectPath, bool dryRun)
+        {
+            GcDryRunCalls.Add(dryRun);
+            return Task.FromResult(new RowStoreGcResult { ScannedRows = 10, ReferencedRowIds = 7, KeptRows = 7, PrunedRows = 3, DryRun = dryRun });
+        }
         public string? LinkAfterEvalToNewestRun(string projectPath, string afterEvalPath, string? afterEvalModel) => null;
         public Task<GateReport> RunTrainingRunGateAsync(string projectPath, string runId) => Task.FromResult(new GateReport());
         public Task<EvalHandoffPlan> BuildEvalHandoffAsync(string projectPath, string runId) => Task.FromResult(new EvalHandoffPlan());
@@ -861,6 +867,42 @@ public sealed class EngineCommandTests
         await vm.ImportFromHuggingFaceAsync();
 
         Assert.False(hf.ShowCalled);
+    }
+
+    [Fact]
+    public async Task RunRowStoreGc_DryRunThenConfirm_RunsRealGc()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }); // default result prunes 3
+        var vm = VmWith(engine, new FakeDialogService(confirm: true));
+        SelectFakeProject(vm);
+
+        await vm.RunRowStoreGcAsync();
+
+        // Dry-run first (true), then the real GC (false) after the confirm.
+        Assert.Equal(new[] { true, false }, engine.GcDryRunCalls);
+    }
+
+    [Fact]
+    public async Task RunRowStoreGc_ConfirmDeclined_DoesNotPrune()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine, new FakeDialogService(confirm: false)); // user cancels
+        SelectFakeProject(vm);
+
+        await vm.RunRowStoreGcAsync();
+
+        Assert.Equal(new[] { true }, engine.GcDryRunCalls); // dry-run only, no real GC
+    }
+
+    [Fact]
+    public async Task RunRowStoreGc_WithoutProject_DoesNotRun()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine); // no project
+
+        await vm.RunRowStoreGcAsync();
+
+        Assert.Empty(engine.GcDryRunCalls);
     }
 
     private static void GiveTrainingOutputDir(MainWindowViewModel vm) =>
