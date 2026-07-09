@@ -224,6 +224,29 @@ Configs are always generated before any launch, and the exact command is always
 shown and confirmed first, so users keep inspectable files they can also run
 manually.
 
+### Close the train→eval loop
+
+A finished run *produces* a model; the value comes from **evaluating** it against the
+held-out set you baselined on, so the regression gate can compare before vs after. The
+gate + linkage already exist (`training-run-update`, `training-run-gate`), but producing
+the after-eval means **serving** the trained model — an external, format/stack-specific
+step CorpusStudio deliberately does not automate. `training-eval-plan` closes that gap:
+
+```
+corpus-studio training-eval-plan <project_dir> --run-id <run_id> \
+    [--eval-dataset held-out.jsonl] [--schema <id>] \
+    [--backend ollama|openai-compatible] [--base-url <url>] [--served-model <name>]
+```
+
+It prints the ordered, run-specific recipe: **(1)** serve the produced model (external —
+Ollama/vLLM/TGI, with a clearly-labelled example), **(2)** `eval-run` against the *same*
+held-out set + schema + metric as the baseline (pre-filled from the run's before-eval when
+omitted; writes `eval_reports/after-<run_id>.json`), **(3)** `training-run-update` to link
+that after-eval + the served model to the run, **(4)** `training-run-gate` to compare
+before/after and BLOCK a regressed promote. Honesty boundary: the serve step is a reminder,
+not a guarantee (nothing here runs or serves a model); the eval/link/gate commands are exact
+once served. Only a `succeeded` run is "ready" — you can't evaluate a model a run never produced.
+
 ### Config Targets
 
 Planned targets:
