@@ -187,6 +187,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand RestoreDatasetVersionCommand { get; }
     public System.Windows.Input.ICommand SaveExampleCommand { get; }
     public System.Windows.Input.ICommand ImportDatasetCommand { get; }
+    public System.Windows.Input.ICommand NewSuiteCommand { get; }
     public System.Windows.Input.ICommand RegisterArtifactFromRunCommand { get; }
     public System.Windows.Input.ICommand KeepArtifactCommand { get; }
     public System.Windows.Input.ICommand RejectArtifactCommand { get; }
@@ -302,6 +303,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RestoreDatasetVersionCommand = new AsyncRelayCommand(RestoreDatasetVersionAsync);
         SaveExampleCommand = new AsyncRelayCommand(SaveExampleAsync);
         ImportDatasetCommand = new AsyncRelayCommand(ImportDatasetAsync);
+        NewSuiteCommand = new AsyncRelayCommand(CreateSuiteAsync);
         RegisterArtifactFromRunCommand = new RelayCommand(RegisterArtifactFromRun);
         KeepArtifactCommand = new AsyncRelayCommand(KeepArtifactAsync);
         RejectArtifactCommand = new RelayCommand(() => SetSelectedArtifactStatus("rejected"));
@@ -1321,6 +1323,41 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         return true;
+    }
+
+    /// <summary>Scaffold a new evaluation suite from the name typed into the Suites tab, then refresh the
+    /// list (and clear the box). Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task CreateSuiteAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Suites.SetSuitesError("Create or select a dataset project first.");
+            return;
+        }
+
+        var name = Suites.NewSuiteName?.Trim() ?? string.Empty;
+        if (name.Length == 0)
+        {
+            Suites.SetSuitesError("Enter a suite name to create.");
+            return;
+        }
+
+        try
+        {
+            Suites.IsSuitesBusy = true;
+            await _engine.NewSuiteAsync(ActiveProjectPath, name);
+            Suites.NewSuiteName = string.Empty;
+            Suites.ApplySuites(await _engine.ListSuitesAsync(ActiveProjectPath));
+            Suites.SetSuitesError($"Created suite '{name}'. Open evaluation_suites/{name}.json in Files to edit its cases.");
+        }
+        catch (System.Exception ex)
+        {
+            Suites.SetSuitesError(ex.Message);
+        }
+        finally
+        {
+            Suites.IsSuitesBusy = false;
+        }
     }
 
     /// <summary>Pick a JSONL file and run it through the shared preview/confirm/import flow.

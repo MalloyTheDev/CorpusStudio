@@ -89,6 +89,7 @@ public sealed class EngineCommandTests
         public Task<DatasetCardResult> GenerateDatasetCardAsync(string projectPath, string schemaId) => Task.FromResult(new DatasetCardResult());
         public Task<ValidationReport> ValidateDraftAsync(string draftText, string schemaId) => Task.FromResult(new ValidationReport { Valid = ValidateReturnsValid });
         public Task<TrainingCompatibilityResult> CheckTrainingCompatibilityAsync(string schemaId, string datasetFormat, string target) => Task.FromResult(new TrainingCompatibilityResult());
+        public Task NewSuiteAsync(string projectPath, string name) => Task.CompletedTask;
         public Task<System.Collections.Generic.IReadOnlyList<SuiteSummary>> ListSuitesAsync(string projectPath) => Task.FromResult((System.Collections.Generic.IReadOnlyList<SuiteSummary>)new System.Collections.Generic.List<SuiteSummary>());
         public Task<PreferenceExportResult> ExportPreferenceForTrainingAsync(string projectPath, string format) => Task.FromResult(new PreferenceExportResult());
     }
@@ -544,5 +545,41 @@ public sealed class EngineCommandTests
         await vm.PreviewAndImportJsonlAsync(@"C:\fake\import.jsonl");
 
         Assert.False(engine.CommitCalled);
+    }
+
+    [Fact]
+    public async Task CreateSuite_WithoutProject_SetsError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        vm.Suites.NewSuiteName = "smoke";
+
+        await vm.CreateSuiteAsync();
+
+        Assert.Contains("Create or select a dataset project", vm.Suites.SuiteReportSummary);
+    }
+
+    [Fact]
+    public async Task CreateSuite_WithBlankName_SetsError()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        SelectFakeProject(vm);
+        vm.Suites.NewSuiteName = "   ";
+
+        await vm.CreateSuiteAsync();
+
+        Assert.Contains("Enter a suite name", vm.Suites.SuiteReportSummary);
+    }
+
+    [Fact]
+    public async Task CreateSuite_WithName_CreatesAndClearsTheBox()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        SelectFakeProject(vm);
+        vm.Suites.NewSuiteName = "smoke";
+
+        await vm.CreateSuiteAsync();
+
+        Assert.Equal(string.Empty, vm.Suites.NewSuiteName); // cleared after a successful scaffold
+        Assert.Contains("Created suite 'smoke'", vm.Suites.SuiteReportSummary);
     }
 }

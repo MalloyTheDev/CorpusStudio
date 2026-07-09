@@ -2454,11 +2454,12 @@
                                            TextWrapping="Wrap" Margin="0,0,0,8" />
                             </StackPanel>
                             <WrapPanel Grid.Row="1" Margin="0,0,0,8" VerticalAlignment="Center">
-                                <TextBox x:Name="NewSuiteNameBox" Width="180" Height="30" VerticalContentAlignment="Center"
-                                         AutomationProperties.AutomationId="NewSuiteNameTextBox" Padding="6,0" Margin="0,0,8,0" />
+                                <TextBox Width="180" Height="30" VerticalContentAlignment="Center"
+                                         AutomationProperties.AutomationId="NewSuiteNameTextBox" Padding="6,0" Margin="0,0,8,0"
+                                         Text="{Binding Suites.NewSuiteName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 <Button AutomationProperties.AutomationId="NewSuiteButton" Content="New"
                                         ToolTip="Scaffold evaluation_suites/&lt;name&gt;.json — then edit it in Files"
-                                        Margin="0,0,8,0" Click="NewSuiteButton_Click" />
+                                        Margin="0,0,8,0" Command="{Binding NewSuiteCommand}" />
                                 <Button AutomationProperties.AutomationId="RunSuiteButton" Content="Run"
                                         ToolTip="Run the selected suite (live backend evaluations)"
                                         IsEnabled="{Binding Suites.CanRunSuite}" Margin="0,0,8,0" Command="{Binding RunSuiteCommand}" />

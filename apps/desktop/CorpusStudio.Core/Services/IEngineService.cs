@@ -159,6 +159,9 @@ public interface IEngineService
     /// <summary>Check training-config compatibility for a schema/format/target with warnings.</summary>
     Task<TrainingCompatibilityResult> CheckTrainingCompatibilityAsync(string schemaId, string datasetFormat, string target);
 
+    /// <summary>Scaffold a new evaluation suite file (evaluation_suites/&lt;name&gt;.json).</summary>
+    Task NewSuiteAsync(string projectPath, string name);
+
     /// <summary>List the project's registered evaluation suites (name/case-count/validity).</summary>
     Task<IReadOnlyList<SuiteSummary>> ListSuitesAsync(string projectPath);
 

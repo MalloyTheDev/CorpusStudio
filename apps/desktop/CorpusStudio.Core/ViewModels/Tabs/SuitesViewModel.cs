@@ -25,6 +25,7 @@ public sealed class SuitesViewModel : ViewModelBase, ISuitesViewModel
     private string _suiteOverallStatus = string.Empty;
     private string _suiteOverallColor = SuiteReport.ColorForStatus(null);
     private string _suiteHistorySummary = "Run history appears here after a suite runs.";
+    private string _newSuiteName = string.Empty;
 
     /// <summary>Registered evaluation suites (from `suite-list`).</summary>
     public ObservableCollection<SuiteSummary> Suites { get; } = [];
@@ -78,6 +79,14 @@ public sealed class SuitesViewModel : ViewModelBase, ISuitesViewModel
                 OnPropertyChanged(nameof(CanRunSuite));
             }
         }
+    }
+
+    /// <summary>The name typed into the "New suite" box (bound two-way). The shell's create-suite
+    /// command reads it and clears it after a successful scaffold.</summary>
+    public string NewSuiteName
+    {
+        get => _newSuiteName;
+        set => SetField(ref _newSuiteName, value);
     }
 
     /// <summary>Mirror of the shell's HasActiveProject, pushed on project switch; feeds
