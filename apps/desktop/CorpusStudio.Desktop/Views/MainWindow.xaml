@@ -2231,7 +2231,7 @@
                                 <Button AutomationProperties.AutomationId="RefreshTrainingCheckpointsButton"
                                         Content="Refresh checkpoints"
                                         Margin="0,0,8,0"
-                                        Click="RefreshTrainingCheckpointsButton_Click" />
+                                        Command="{Binding RefreshTrainingCheckpointsCommand}" />
                                 <Button AutomationProperties.AutomationId="CompareTrainingBaselineButton"
                                         Content="Compare vs baseline"
                                         ToolTip="Compare the newest evaluation report against the baseline captured at launch"

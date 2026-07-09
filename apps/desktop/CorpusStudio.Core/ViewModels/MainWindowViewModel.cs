@@ -183,6 +183,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand RunAiAssistCommand { get; }
     public System.Windows.Input.ICommand GenerateSplitsCommand { get; }
     public System.Windows.Input.ICommand GateTrainingRunCommand { get; }
+    public System.Windows.Input.ICommand RefreshTrainingCheckpointsCommand { get; }
     public System.Windows.Input.ICommand RunQualityCommand { get; }
     public System.Windows.Input.ICommand SaveGateThresholdsCommand { get; }
     public System.Windows.Input.ICommand RefreshProviderPoliciesCommand { get; }
@@ -303,6 +304,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RunAiAssistCommand = new AsyncRelayCommand(RunAiAssistAsync);
         GenerateSplitsCommand = new AsyncRelayCommand(GenerateSplitsAsync);
         GateTrainingRunCommand = new AsyncRelayCommand(GateTrainingRunAsync);
+        RefreshTrainingCheckpointsCommand = new AsyncRelayCommand(RefreshTrainingCheckpointsAsync);
         RunQualityCommand = new AsyncRelayCommand(() => RefreshQualityAsync());
         SaveGateThresholdsCommand = new AsyncRelayCommand(SaveGateThresholdsAsync);
         RefreshProviderPoliciesCommand = new AsyncRelayCommand(RefreshProviderPoliciesAsync);
@@ -2106,6 +2108,33 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         finally
         {
             ClearBusy();
+        }
+    }
+
+    /// <summary>List the checkpoints/adapters the current run's output dir contains and surface them.
+    /// Moved from the desktop code-behind (#248); PUBLIC because the live-run poll timer + the run
+    /// finalizer also call it. Advisory — swallows errors and no-ops without an output dir so it can
+    /// never disrupt a run (no busy overlay: it polls silently while training streams).</summary>
+    public async System.Threading.Tasks.Task RefreshTrainingCheckpointsAsync()
+    {
+        var outputDirectory = Training.TrainingOutputDirectory;
+        if (string.IsNullOrWhiteSpace(outputDirectory))
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await _engine.GetTrainingCheckpointsAsync(
+                outputDirectory,
+                string.IsNullOrWhiteSpace(Training.TrainingTarget) ? "axolotl" : Training.TrainingTarget,
+                Training.TrainingConfigPath
+            );
+            Training.ApplyTrainingCheckpoints(result);
+        }
+        catch
+        {
+            // Checkpoint refresh is advisory; never let it disrupt a run.
         }
     }
 

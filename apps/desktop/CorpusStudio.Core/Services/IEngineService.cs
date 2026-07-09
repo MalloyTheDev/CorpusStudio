@@ -146,6 +146,9 @@ public interface IEngineService
     /// <summary>Run the training-run regression gate for a recorded run.</summary>
     Task<GateReport> RunTrainingRunGateAsync(string projectPath, string runId);
 
+    /// <summary>List the checkpoints/adapters a training run has produced under its output dir.</summary>
+    Task<TrainingCheckpointsResult> GetTrainingCheckpointsAsync(string outputDirectory, string target, string? configPath);
+
     /// <summary>Build the close-the-loop plan (serve → eval → link → gate) for a finished run.</summary>
     Task<EvalHandoffPlan> BuildEvalHandoffAsync(string projectPath, string runId);
 
