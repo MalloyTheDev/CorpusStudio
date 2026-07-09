@@ -1,3 +1,5 @@
+import pytest
+
 from corpus_studio.training.config_templates import (
     build_lora_config_template,
     normalize_training_config_target,
@@ -49,6 +51,24 @@ def test_custom_seed_threads_through_to_the_config():
     )
     assert template.to_training_dict()["seed"] == 1234
     assert "seed: 1234" in render_training_config(template)
+
+
+@pytest.mark.parametrize(
+    "target", ["axolotl", "trl", "unsloth", "huggingface", "llama_factory"]
+)
+def test_seed_is_rendered_for_every_target(target: str):
+    # The seed only makes runs reproducible if it actually reaches EVERY target's config,
+    # not just the axolotl YAML — lock that in across the render formats.
+    template = build_lora_config_template(
+        base_model="m",
+        dataset_path="train.jsonl",
+        eval_dataset_path=None,
+        dataset_format="instruction",
+        target=normalize_training_config_target(target),
+        seed=99,
+    )
+    rendered = render_training_config(template).lower()
+    assert "seed" in rendered and "99" in rendered
 
 
 def test_training_config_renderer_returns_inspectable_yaml():

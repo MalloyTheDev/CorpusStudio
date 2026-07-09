@@ -119,6 +119,19 @@ def extract_evaluation_examples(
     raise ValueError("Evaluation Lab MVP supports instruction and chat schemas.")
 
 
+def should_report_progress(completed: int, total: int) -> bool:
+    """Throttle per-example progress to at most ~100 updates (always the first and the
+    last), so a large run streams a readable trickle instead of one line per example.
+
+    A progress *callback* still fires for every example (that is the caller's signal);
+    this only decides when a human-facing *sink* should actually print, so a 10k-row
+    eval doesn't flood a terminal or log file."""
+    if completed <= 1 or completed >= total:
+        return True
+    step = max(1, total // 100)
+    return completed % step == 0
+
+
 def _evaluate_example(
     example: EvaluationDatasetExample,
     backend: ModelBackend,

@@ -170,6 +170,53 @@ def test_cli_export_parquet_flat_schema_round_trips(tmp_path: Path):
     assert rows[0]["instruction"].startswith("Explain recursion")
 
 
+def test_cli_import_convert_corrupt_parquet_reports_clean_error(tmp_path: Path):
+    # A non-Parquet file with a .parquet extension must fail with a clear message
+    # (pyarrow's ArrowInvalid subclasses ValueError, so the CLI catches it), never a traceback.
+    bogus = tmp_path / "bogus.parquet"
+    bogus.write_text("this is not a parquet file", encoding="utf-8")
+    out = tmp_path / "staging.jsonl"
+    result = runner.invoke(app, ["import-convert", str(bogus), str(out)])
+    assert result.exit_code == 1
+    assert "Could not convert" in result.output
+    assert not out.exists()  # no partial staging file written
+
+
+def test_convert_parquet_preserves_typed_scalars(tmp_path: Path):
+    # Typed columns that JSON can't serialise natively (timestamp / decimal / binary) must
+    # convert to valid JSONL via json_default — not crash the import.
+    import decimal
+
+    table = pa_test.table(
+        {
+            "text": pa_test.array(["hi"], type=pa_test.string()),
+            "when": pa_test.array([datetime.datetime(2026, 7, 9, 12, 0, 0)], type=pa_test.timestamp("s")),
+            "amount": pa_test.array([decimal.Decimal("3.50")], type=pa_test.decimal128(5, 2)),
+            "blob": pa_test.array([b"bytes-value"], type=pa_test.binary()),
+        }
+    )
+    path = tmp_path / "typed.parquet"
+    pq_test.write_table(table, str(path))
+    out = tmp_path / "staging.jsonl"
+
+    conversion = convert_parquet_to_jsonl(path, out)
+
+    assert conversion.rows_converted == 1
+    row = json.loads(out.read_text(encoding="utf-8").strip())  # valid JSON (no crash)
+    assert row["text"] == "hi"
+    assert "2026" in row["when"]            # datetime → ISO-ish string
+    assert row["amount"] == "3.50"          # Decimal → string
+    assert row["blob"] == "bytes-value"     # bytes → utf-8 text
+
+
+def test_write_parquet_rejects_a_mixed_type_column(tmp_path: Path):
+    # Rows whose column can't form a consistent Arrow type surface a clear ValueError
+    # (schema-valid export rows never hit this, but a bad hand-built call must not crash raw).
+    rows = [{"x": 1}, {"x": {"nested": "object"}}]
+    with pytest.raises(ValueError, match="JSONL"):
+        write_parquet(rows, tmp_path / "bad.parquet")
+
+
 def test_cli_export_parquet_supports_nested_chat_schema(tmp_path: Path):
     # The key advantage over CSV/TSV: a chat schema exports to Parquet (CSV refuses it).
     input_path = tmp_path / "chat.jsonl"
