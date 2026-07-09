@@ -78,14 +78,17 @@ create dataset
 
 ## Supported dataset types
 
-Available today in both the desktop project-creation flow and the Python engine CLI:
+Available today in both the desktop project-creation flow and the Python engine CLI (nine built-in schemas):
 
 1. raw text
 2. instruction
 3. chat/messages
 4. preference pairs
-
-Future dataset types: code, image-caption, classification, retrieval/embedding, evaluation.
+5. code
+6. image-caption
+7. classification
+8. retrieval / embedding
+9. evaluation
 
 ## Core workflow
 

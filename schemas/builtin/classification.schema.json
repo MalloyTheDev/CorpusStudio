@@ -1,0 +1,29 @@
+{
+  "id": "classification",
+  "name": "Classification Dataset",
+  "version": "0.1.0",
+  "description": "Text classification: an input text paired with its class label (e.g. sentiment, topic, intent). The label set is defined by your project — pin it to a fixed enum in a project copy of this schema if you want validation to reject unknown labels.",
+  "fields": [
+    {
+      "name": "text",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "label",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "tags",
+      "type": "list",
+      "item_type": "string",
+      "required": false
+    }
+  ],
+  "example": {
+    "text": "The delivery was fast and the product works exactly as described.",
+    "label": "positive",
+    "tags": ["sentiment", "product-review"]
+  }
+}

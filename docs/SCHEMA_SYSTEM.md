@@ -133,7 +133,7 @@ _Consolidated from the former SCHEMA_EXAMPLES.md._
 
 ### Schema Examples
 
-Corpus Studio ships eight built-in schemas. Each carries a `description` and a valid `example` row; the desktop new-project dialog shows both and pre-fills the editor with the example so the correct format is obvious. Each line below is a single JSONL row.
+Corpus Studio ships nine built-in schemas. Each carries a `description` and a valid `example` row; the desktop new-project dialog shows both and pre-fills the editor with the example so the correct format is obvious. Each line below is a single JSONL row.
 
 The current validator checks that each row is a JSON object, required fields are present and non-empty, declared field types match, and chat messages include valid role/content structure.
 
@@ -196,6 +196,16 @@ Required fields: `image`, `caption`
 ```
 
 Use image-caption rows for vision-language datasets. `image` is a file path relative to the project.
+
+#### Classification
+
+Required fields: `text`, `label`
+
+```json
+{"text":"The delivery was fast and the product works exactly as described.","label":"positive","tags":["sentiment","product-review"]}
+```
+
+Use classification rows for text classification (sentiment, topic, intent, …). The label set is project-defined; pin `label` to a fixed `enum` in a project copy of the schema if you want validation to reject unknown labels.
 
 #### Retrieval
 
