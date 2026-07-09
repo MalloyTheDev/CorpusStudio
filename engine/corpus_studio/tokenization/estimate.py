@@ -15,11 +15,27 @@ counter available, in order, and never adds a hard dependency:
 Every failure (library absent, no network, gated/unknown model, slow-only
 tokenizer) falls silently to the next tier, and ``estimator_name`` reports which
 tier actually ran so a token budget is never presented as exact when it is not.
+
+Robustness: the model-specific tier is the only one that can touch the network.
+Setting ``CORPUS_STUDIO_TOKENIZER_OFFLINE`` (or the standard ``HF_HUB_OFFLINE``)
+skips it entirely, so estimation is fully offline and deterministic — the
+token-budget step (which ``training-config`` awaits) can never stall on a slow or
+captive network, at the cost of the model-exact count.
 """
 
+import os
 import re
 import unicodedata
 from typing import Any
+
+# Turning any of these on skips the model-specific (network) tokenizer tier entirely, so
+# token estimation is deterministic and never touches the Hub — for air-gapped machines,
+# CI, a flaky/captive network (where a fetch could stall the token-budget step that
+# training-config awaits), or simply preferring a fixed, reproducible estimate.
+# CORPUS_STUDIO_TOKENIZER_OFFLINE is ours; HF_HUB_OFFLINE is the Hugging Face ecosystem
+# standard, honoured here so one flag disables the network everywhere.
+_OFFLINE_ENV_VARS = ("CORPUS_STUDIO_TOKENIZER_OFFLINE", "HF_HUB_OFFLINE")
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 # CJK / kana / Hangul: roughly one (sometimes more) BPE token per character,
 # and no whitespace to split on, so these must be counted directly.
@@ -90,19 +106,33 @@ def _tiktoken_encoder():
 _hf_tokenizer_cache: dict[str, Any] = {}
 
 
+def tokenizer_offline() -> bool:
+    """True when the model-specific (network) tokenizer tier is disabled by env — so
+    estimation is deterministic and never touches the Hub. See ``_OFFLINE_ENV_VARS``."""
+    return any(os.environ.get(name, "").strip().lower() in _TRUTHY for name in _OFFLINE_ENV_VARS)
+
+
+def _fetch_hf_tokenizer(model_id: str) -> Any:  # pragma: no cover - network / optional dep
+    """The actual Hub fetch (kept separate so the offline gate is testable without it)."""
+    from tokenizers import Tokenizer
+
+    return Tokenizer.from_pretrained(model_id)
+
+
 def _load_hf_tokenizer(model_id: str) -> Any:
     """Load a model's fast tokenizer via the optional ``tokenizers`` library.
 
     ``Tokenizer.from_pretrained`` fetches only the model's ``tokenizer.json`` from
     the Hub (far lighter than ``transformers``). Returns ``None`` on ANY failure —
     library not installed, no network, gated/unknown model, or a model that ships
-    only a slow tokenizer — so estimation always falls back and never raises.
+    only a slow tokenizer — so estimation always falls back and never raises. When
+    offline mode is set it returns ``None`` immediately, without any network attempt.
     Kept as a module-level function so tests can inject a fake tokenizer.
     """
-    try:  # pragma: no cover - depends on the environment / network
-        from tokenizers import Tokenizer
-
-        return Tokenizer.from_pretrained(model_id)
+    if tokenizer_offline():
+        return None
+    try:
+        return _fetch_hf_tokenizer(model_id)
     except Exception:  # noqa: BLE001 - optional accuracy boost, never a hard dependency.
         return None
 
