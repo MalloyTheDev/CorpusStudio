@@ -259,4 +259,15 @@ public sealed class WorkspaceSearchTests : IDisposable
         Assert.Equal(1, svc.Calls);    // the guarded second call never reached Search
         Assert.False(vm.IsSearching);
     }
+
+    [Fact]
+    public void ViewModel_RunCommand_IsWiredAndExecutableWhenIdle()
+    {
+        // The Search-panel "Search" button binds this command (converted off the code-behind
+        // SearchRunButton_Click); RunAsync itself is covered by the tests above.
+        var vm = new WorkspaceSearchViewModel();
+
+        Assert.NotNull(vm.RunCommand);
+        Assert.True(vm.RunCommand.CanExecute(null)); // idle → executable
+    }
 }
