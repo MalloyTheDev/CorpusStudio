@@ -201,6 +201,15 @@ user's installed trainer from that command (with explicit confirmation), stream
 logs, stop it, track checkpoints, resume, and compare before/after evaluations —
 see the [Training Launcher Design](#training-launcher-design-v05) section below.
 
+**Reproducibility manifest.** Each run record (`training_runs/<run_id>.json`) now captures a
+`provenance` manifest at run start: the engine's canonical **dataset fingerprint** + row count
+(proves *which data* trained the model, independent of the path or a later edit), the config
+**SHA-256** (proves *which config*, byte-for-byte), and the **engine version** + platform. Together
+with the record's exact `argv`, `base_model`, dataset-version back-link, and before/after eval, that
+is the auditable recipe behind a produced model, surfaced per run in the Training tab's run history.
+Known limitation: the generated config does not yet emit a training **seed**, so the manifest pins the
+*inputs* (data + config + environment), not bit-exact weight initialisation (seed capture is a follow-up).
+
 Configs are always generated before any launch, and the exact command is always
 shown and confirmed first, so users keep inspectable files they can also run
 manually.

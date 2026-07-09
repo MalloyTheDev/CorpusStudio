@@ -84,6 +84,7 @@ public sealed class EngineCommandTests
         public Task<QualityReport> BuildQualityReportAsync(string projectPath) => Task.FromResult(new QualityReport());
         public QualityHistoryEntry SaveQualityHistoryEntry(string projectPath, QualityReport report) => new QualityHistoryEntry();
         public System.Collections.Generic.IReadOnlyList<QualityHistoryEntry> LoadQualityHistory(string projectPath, int maxEntries = 5) => new System.Collections.Generic.List<QualityHistoryEntry>();
+        public Task<RunProvenance> BuildRunProvenanceAsync(string projectPath, string configPath) => Task.FromResult(new RunProvenance());
         public System.Collections.Generic.IReadOnlyList<TrainingRunRecord> LoadTrainingRunRecords(string projectPath) => new System.Collections.Generic.List<TrainingRunRecord>();
         public string? LinkAfterEvalToNewestRun(string projectPath, string afterEvalPath, string? afterEvalModel) => null;
         public Task<GateReport> RunTrainingRunGateAsync(string projectPath, string runId) => Task.FromResult(new GateReport());

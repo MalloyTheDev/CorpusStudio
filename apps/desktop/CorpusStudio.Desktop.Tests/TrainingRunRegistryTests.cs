@@ -84,6 +84,27 @@ public sealed class TrainingRunRegistryTests
     }
 
     [Fact]
+    public void ApplyTrainingRunHistory_ShowsTheReproducibilityManifest()
+    {
+        var vm = new MainWindowViewModel();
+        var record = Record("20260702T183000-abc", "succeeded");
+        record.Provenance = new RunProvenance
+        {
+            DatasetFingerprint = "0123456789abcdef0123456789abcdef",
+            DatasetRowCount = 42,
+            ConfigSha256 = "fedcba9876543210fedcba9876543210",
+            EngineVersion = "1.3.0",
+        };
+
+        vm.Training.ApplyTrainingRunHistory([record]);
+
+        Assert.Contains("provenance:", vm.Training.TrainingRunHistorySummary);
+        Assert.Contains("data 0123456789ab (42 rows)", vm.Training.TrainingRunHistorySummary);
+        Assert.Contains("config fedcba987654", vm.Training.TrainingRunHistorySummary);
+        Assert.Contains("engine 1.3.0", vm.Training.TrainingRunHistorySummary);
+    }
+
+    [Fact]
     public void SaveTrainingRunRecord_RejectsUnsafeRunId()
     {
         var service = new PythonEngineService();

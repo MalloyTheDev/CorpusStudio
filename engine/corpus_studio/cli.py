@@ -344,6 +344,17 @@ def import_preview(path: Path, schema: str):
     typer.echo(report.model_dump_json(indent=2))
 
 
+@app.command("run-provenance")
+def run_provenance(project_dir: Path, config_path: Path):
+    """Build a training run's reproducibility manifest: the dataset fingerprint +
+    row count, the config SHA-256, and the engine version / platform. Best-effort —
+    a missing dataset/config leaves that field null rather than failing."""
+    from corpus_studio.training.provenance import build_run_provenance
+
+    provenance = build_run_provenance(project_dir, config_path)
+    typer.echo(provenance.model_dump_json(indent=2))
+
+
 @app.command("import-convert")
 def import_convert(path: Path, output_path: Path):
     """Convert a CSV/TSV file to a JSONL staging file for import.

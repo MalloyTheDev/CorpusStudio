@@ -1518,7 +1518,23 @@ public partial class MainWindow : Window
 
         // Durable run record (v0.8): recorded to the project's training_runs/.
         var runProjectPath = ViewModel.HasActiveProject ? ViewModel.ActiveProjectPath : null;
-        var runRecord = CreateAndSaveRunRecord(runProjectPath, argv);
+        // Reproducibility manifest (dataset fingerprint / config hash / engine+platform) captured at
+        // run start. Best-effort: a manifest failure must not block the run — it just leaves it absent.
+        RunProvenance? provenance = null;
+        if (!string.IsNullOrWhiteSpace(runProjectPath)
+            && !string.IsNullOrWhiteSpace(ViewModel.Training.TrainingConfigPath))
+        {
+            try
+            {
+                provenance = await _engineService.BuildRunProvenanceAsync(
+                    runProjectPath, ViewModel.Training.TrainingConfigPath);
+            }
+            catch
+            {
+                provenance = null;
+            }
+        }
+        var runRecord = CreateAndSaveRunRecord(runProjectPath, argv, provenance);
         var terminalStatus = "interrupted";
         int? terminalExitCode = null;
         string? terminalNote = null;
@@ -1596,7 +1612,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private TrainingRunRecord? CreateAndSaveRunRecord(string? projectPath, IReadOnlyList<string> argv)
+    private TrainingRunRecord? CreateAndSaveRunRecord(string? projectPath, IReadOnlyList<string> argv, RunProvenance? provenance = null)
     {
         if (string.IsNullOrWhiteSpace(projectPath))
         {
@@ -1616,6 +1632,7 @@ public partial class MainWindow : Window
             OutputDir = ViewModel.Training.TrainingOutputDirectory,
             Argv = argv.ToList(),
             BeforeEvalPath = ViewModel.Training.TrainingBaselineReport?.ReportPath,
+            Provenance = provenance,
         };
         TrySaveRunRecord(projectPath, record);
         return record;

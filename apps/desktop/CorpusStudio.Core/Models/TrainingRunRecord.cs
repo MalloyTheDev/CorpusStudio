@@ -58,6 +58,35 @@ public sealed class TrainingRunRecord
     [JsonPropertyName("after_eval_model")]
     public string? AfterEvalModel { get; set; }
 
+    [JsonPropertyName("provenance")]
+    public RunProvenance? Provenance { get; set; }
+
     [JsonPropertyName("notes")]
     public string Notes { get; set; } = string.Empty;
+}
+
+/// <summary>Reproducibility manifest captured at run start (mirrors the engine's
+/// <c>training/provenance.py</c>): the canonical dataset fingerprint + row count, the config
+/// SHA-256, and the engine version / platform. Together with the record's argv, base model, and
+/// dataset-version back-link, this is the auditable recipe behind a produced model. (Does not yet
+/// pin a training seed — data/config provenance, not bit-exact weight reproduction.)</summary>
+public sealed class RunProvenance
+{
+    [JsonPropertyName("dataset_fingerprint")]
+    public string? DatasetFingerprint { get; set; }
+
+    [JsonPropertyName("dataset_row_count")]
+    public int DatasetRowCount { get; set; }
+
+    [JsonPropertyName("config_sha256")]
+    public string? ConfigSha256 { get; set; }
+
+    [JsonPropertyName("engine_version")]
+    public string EngineVersion { get; set; } = string.Empty;
+
+    [JsonPropertyName("platform")]
+    public string Platform { get; set; } = string.Empty;
+
+    [JsonPropertyName("python_version")]
+    public string PythonVersion { get; set; } = string.Empty;
 }
