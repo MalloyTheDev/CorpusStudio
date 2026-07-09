@@ -122,6 +122,9 @@ public sealed class EngineCommandTests
         public Task NewSuiteAsync(string projectPath, string name) => Task.CompletedTask;
         public Task<System.Collections.Generic.IReadOnlyList<SuiteSummary>> ListSuitesAsync(string projectPath) => Task.FromResult((System.Collections.Generic.IReadOnlyList<SuiteSummary>)new System.Collections.Generic.List<SuiteSummary>());
         public Task<PreferenceExportResult> ExportPreferenceForTrainingAsync(string projectPath, string format) => Task.FromResult(new PreferenceExportResult());
+        public System.Collections.Generic.IReadOnlyList<DatasetSchema> SchemasToReturn { get; set; } =
+            new System.Collections.Generic.List<DatasetSchema> { new("instruction", "Instruction", "1.0", new System.Collections.Generic.List<DatasetField>()) };
+        public Task<System.Collections.Generic.IReadOnlyList<DatasetSchema>> GetSchemasAsync() => Task.FromResult(SchemasToReturn);
         public bool RunAiAssistCalled { get; private set; }
         public string? LastAiAssistDraft { get; private set; }
         public AiAssistRunResult AiAssistRunResultToReturn { get; set; } = new() { ModelOutput = "a suggestion" };
@@ -151,13 +154,29 @@ public sealed class EngineCommandTests
         public Task<string?> PickFolderAsync(string title) => Task.FromResult<string?>(_file);
     }
 
-    private static MainWindowViewModel VmWith(IEngineService engine, IDialogService? dialogs = null, IFilePickerService? filePicker = null) => new(
+    private sealed class FakeHuggingFaceImportDialog : IHuggingFaceImportDialog
+    {
+        private readonly string? _staging;
+        public bool ShowCalled { get; private set; }
+        public FakeHuggingFaceImportDialog(string? staging) => _staging = staging;
+        public Task<string?> ShowAsync(string schemaId, string schemaName, IReadOnlyList<DatasetField> schemaFields)
+        {
+            ShowCalled = true;
+            return Task.FromResult(_staging);
+        }
+    }
+
+    private static MainWindowViewModel VmWith(
+        IEngineService engine,
+        IDialogService? dialogs = null,
+        IFilePickerService? filePicker = null,
+        IHuggingFaceImportDialog? hfImportDialog = null) => new(
         new DebtViewModel(), new ArenaViewModel(), new SettingsViewModel(), new VersionsViewModel(),
         new ArtifactsViewModel(), new SuitesViewModel(), new SplitsViewModel(), new PreferenceReviewViewModel(),
         new QuarantineViewModel(), new ExamplesViewModel(), new WritingStudioViewModel(),
         new AiAssistRewriteBatchesViewModel(), new AiAssistConnectionViewModel(),
         new EvaluationConnectionViewModel(), new QualityViewModel(), engine, dialogs ?? new NullDialogService(),
-        filePicker ?? new NullFilePickerService());
+        filePicker ?? new NullFilePickerService(), hfImportDialog ?? new NullHuggingFaceImportDialog());
 
     private static void SelectFakeProject(MainWindowViewModel vm) => vm.SelectProject(
         new DatasetProjectListItem(
@@ -608,6 +627,63 @@ public sealed class EngineCommandTests
         Assert.True(engine.ConvertTabularCalled);          // CSV was converted to a staging JSONL...
         Assert.Equal(@"C:\fake\data.csv", engine.LastConvertInput);
         Assert.True(engine.CommitCalled);                  // ...then flowed through the shared preview/commit path
+    }
+
+    [Fact]
+    public async Task ImportFromHuggingFace_StagesThenRunsTheSharedImportFlow()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { PreviewAccepted = 2 };
+        var hf = new FakeHuggingFaceImportDialog(@"C:\fake\hf-staging.jsonl"); // user completed the dialog
+        var vm = VmWith(engine, new FakeDialogService(confirm: true), hfImportDialog: hf);
+        SelectFakeProject(vm); // active schema = "instruction" (matches the fake schema list)
+
+        await vm.ImportFromHuggingFaceAsync();
+
+        Assert.True(hf.ShowCalled);       // the modal seam was shown for the active schema...
+        Assert.True(engine.CommitCalled); // ...and the staged file flowed through the shared commit path
+    }
+
+    [Fact]
+    public async Task ImportFromHuggingFace_Cancelled_DoesNotImport()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var hf = new FakeHuggingFaceImportDialog(null); // user cancelled → no staging path
+        var vm = VmWith(engine, new FakeDialogService(confirm: true), hfImportDialog: hf);
+        SelectFakeProject(vm);
+
+        await vm.ImportFromHuggingFaceAsync();
+
+        Assert.True(hf.ShowCalled);
+        Assert.False(engine.CommitCalled); // nothing staged → nothing imported
+    }
+
+    [Fact]
+    public async Task ImportFromHuggingFace_WithoutProject_DoesNotShowTheDialog()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var hf = new FakeHuggingFaceImportDialog(@"C:\fake\hf-staging.jsonl");
+        var vm = VmWith(engine, new FakeDialogService(confirm: true), hfImportDialog: hf); // no project
+
+        await vm.ImportFromHuggingFaceAsync();
+
+        Assert.False(hf.ShowCalled);
+    }
+
+    [Fact]
+    public async Task ImportFromHuggingFace_NonBuiltinSchema_DoesNotShowTheDialog()
+    {
+        // The engine returns no schema matching the active id → HF import can't map to it.
+        var engine = new FakeEngine(new DebtReport { Grade = "A" })
+        {
+            SchemasToReturn = new List<DatasetSchema>(),
+        };
+        var hf = new FakeHuggingFaceImportDialog(@"C:\fake\hf-staging.jsonl");
+        var vm = VmWith(engine, new FakeDialogService(confirm: true), hfImportDialog: hf);
+        SelectFakeProject(vm);
+
+        await vm.ImportFromHuggingFaceAsync();
+
+        Assert.False(hf.ShowCalled);
     }
 
     private static void GiveTrainingOutputDir(MainWindowViewModel vm) =>
