@@ -3509,19 +3509,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
 
-    // ---- Debt trend (v1.2.9) -----------------------------------------------------
-    // A mini-chart of the quality issue rate across recorded quality runs, built from the
-    // existing quality history (nothing new persisted). Not the A-F grade: presence-based
-    // PII/secrets aren't in the history, so only the issue-rate trend is honest to plot.
-
-    /// <summary>Ordered oldest → newest bars for the debt-trend mini-chart.</summary>
-
-    /// <summary>True when there is at least one bar to draw (chart visibility).</summary>
-
-    /// <summary>True when there are ≥2 runs — enough to state a direction.</summary>
-
-
-
+    // Debt-trend mini-chart state + logic extracted to QualityViewModel (bindings use
+    // Quality.DebtTrendSummary); nothing debt-trend lives on the shell.
 
 
 
