@@ -2415,6 +2415,50 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
+    /// <summary>Load everything a project needs into the tabs (splits, lab settings, examples,
+    /// quarantine, AI-Assist queue/views/batches, reviewed fixes, eval filters/history, versions,
+    /// gate thresholds, quality). Moved from the desktop code-behind (#249) — PUBLIC because the
+    /// startup workspace-init and the project-selection change both call it. Each loader reads
+    /// project-local JSON via the engine seam and applies it to the owning tab view-model.</summary>
+    public async System.Threading.Tasks.Task LoadProjectAsync(DatasetProjectListItem project)
+    {
+        SelectProject(project);
+        Splits.ApplySplitSettings(_engine.LoadProjectSplitSettings(project.ProjectPath));
+        ApplyLabSettings(_engine.LoadProjectLabSettings(project.ProjectPath));
+        SetExamples(_engine.LoadExamples(project.ProjectPath));
+        Quarantine.SetItems(_engine.LoadImportQuarantineItems(project.ProjectPath));
+        AiAssist.SetAiAssistReviewQueue(_engine.LoadAiAssistReviewQueue(project.ProjectPath));
+        AiAssist.SetAiAssistQueueViews(_engine.LoadAiAssistQueueViews(project.ProjectPath));
+        RewriteBatches.SetAiAssistRewriteBatches(_engine.LoadAiAssistRewriteBatches(project.ProjectPath));
+        SetReviewedFixes(_engine.LoadReviewedFixes(project.ProjectPath));
+        Evaluation.SetEvaluationFailureFilters(_engine.LoadEvaluationFailureFilters(project.ProjectPath));
+        AiAssist.ClearBulkUndoStack();
+        Evaluation.SetEvaluationReportHistory(_engine.LoadEvaluationReportHistory(project.ProjectPath));
+        await RefreshDatasetVersionsAsync();
+        await RefreshGateThresholdsAsync();
+        await RefreshQualityAsync(recordHistory: false);
+    }
+
+    /// <summary>Load + surface the project's gate thresholds (or an error). Moved from the code-behind
+    /// (single-caller of the project-load flow).</summary>
+    private async System.Threading.Tasks.Task RefreshGateThresholdsAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var thresholds = await _engine.GetGateThresholdsAsync(ActiveProjectPath);
+            Settings.ApplyGateThresholds(thresholds);
+        }
+        catch (System.Exception ex)
+        {
+            Settings.SetGateThresholdsError(ex.Message);
+        }
+    }
+
     /// <summary>Capture the current dataset as a new version. Moved from the desktop code-behind — the
     /// engine computes the fingerprint (never reimplemented in C#), and a fingerprint-less record is
     /// confirmed honestly rather than as a verified success.</summary>

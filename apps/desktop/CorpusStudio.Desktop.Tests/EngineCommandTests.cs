@@ -79,6 +79,7 @@ public sealed class EngineCommandTests
         public Task<ProjectIndexRebuildResult> RebuildProjectIndexAsync() => Task.FromResult(new ProjectIndexRebuildResult());
         public Task<System.Collections.Generic.IReadOnlyList<DatasetProjectListItem>> LoadProjectsFromIndexAsync() => Task.FromResult<System.Collections.Generic.IReadOnlyList<DatasetProjectListItem>>(new System.Collections.Generic.List<DatasetProjectListItem>());
         public Task SetGateThresholdsAsync(string projectPath, GateThresholds thresholds) => Task.CompletedTask;
+        public Task<GateThresholds> GetGateThresholdsAsync(string projectPath) => Task.FromResult(new GateThresholds());
         public Task<System.Collections.Generic.IReadOnlyList<ProviderPolicyItem>> GetProviderPoliciesAsync(string projectPath) => Task.FromResult<System.Collections.Generic.IReadOnlyList<ProviderPolicyItem>>(new System.Collections.Generic.List<ProviderPolicyItem>());
         public bool ApproveCalled { get; private set; }
         public Task ApproveProviderGenerationAsync(string projectPath, string providerId, string modelId, bool revoke = false) { ApproveCalled = true; return Task.CompletedTask; }
@@ -125,6 +126,13 @@ public sealed class EngineCommandTests
         public System.Collections.Generic.IReadOnlyList<DatasetSchema> SchemasToReturn { get; set; } =
             new System.Collections.Generic.List<DatasetSchema> { new("instruction", "Instruction", "1.0", new System.Collections.Generic.List<DatasetField>()) };
         public Task<System.Collections.Generic.IReadOnlyList<DatasetSchema>> GetSchemasAsync() => Task.FromResult(SchemasToReturn);
+        public int ProjectLoadCallCount { get; private set; }
+        public SplitSettings LoadProjectSplitSettings(string projectPath) { ProjectLoadCallCount++; return new SplitSettings(); }
+        public LabBackendSettings LoadProjectLabSettings(string projectPath) => new();
+        public System.Collections.Generic.IReadOnlyList<AiAssistQueueView> LoadAiAssistQueueViews(string projectPath) => new System.Collections.Generic.List<AiAssistQueueView>();
+        public System.Collections.Generic.IReadOnlyList<AiAssistRewriteBatch> LoadAiAssistRewriteBatches(string projectPath, int maxBatches = 20) => new System.Collections.Generic.List<AiAssistRewriteBatch>();
+        public System.Collections.Generic.IReadOnlyList<ReviewedFixRecord> LoadReviewedFixes(string projectPath, int maxRecords = 200) => new System.Collections.Generic.List<ReviewedFixRecord>();
+        public System.Collections.Generic.IReadOnlyList<EvaluationFailureFilter> LoadEvaluationFailureFilters(string projectPath) => new System.Collections.Generic.List<EvaluationFailureFilter>();
         public bool RunAiAssistCalled { get; private set; }
         public string? LastAiAssistDraft { get; private set; }
         public AiAssistRunResult AiAssistRunResultToReturn { get; set; } = new() { ModelOutput = "a suggestion" };
@@ -627,6 +635,22 @@ public sealed class EngineCommandTests
         Assert.True(engine.ConvertTabularCalled);          // CSV was converted to a staging JSONL...
         Assert.Equal(@"C:\fake\data.csv", engine.LastConvertInput);
         Assert.True(engine.CommitCalled);                  // ...then flowed through the shared preview/commit path
+    }
+
+    [Fact]
+    public async Task LoadProject_SelectsTheProjectAndRunsTheLoaders()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine);
+        var project = new DatasetProjectListItem(
+            new DatasetProject("p", "P", "instruction", new DateTime(2026, 1, 1), new DateTime(2026, 1, 1)),
+            @"C:\fake\project");
+
+        await vm.LoadProjectAsync(project);
+
+        Assert.True(vm.HasActiveProject);                 // SelectProject ran
+        Assert.Equal(@"C:\fake\project", vm.ActiveProjectPath);
+        Assert.True(engine.ProjectLoadCallCount > 0);     // the project-local loaders ran through the seam
     }
 
     [Fact]
