@@ -2085,6 +2085,18 @@ public sealed class PythonEngineService : IEngineService
         );
     }
 
+    /// <summary>Map an export format to its output file extension. Known formats
+    /// (csv/tsv/parquet) map to themselves; anything else falls back to jsonl (the
+    /// engine is the authority on whether a format is usable for a given schema).</summary>
+    public static string NormalizeExportExtension(string? format) =>
+        format?.Trim().ToLowerInvariant() switch
+        {
+            "csv" => "csv",
+            "tsv" => "tsv",
+            "parquet" => "parquet",
+            _ => "jsonl",
+        };
+
     public async Task<ExportResult> ExportProjectExamplesAsync(
         string projectPath,
         string schemaId,
@@ -2101,8 +2113,9 @@ public sealed class PythonEngineService : IEngineService
         }
 
         // Normalize the format to a known extension; unknown falls back to jsonl (the engine
-        // is the authority — it refuses a nested schema for csv/tsv with a clear message).
-        var extension = format?.Trim().ToLowerInvariant() is "csv" or "tsv" ? format!.Trim().ToLowerInvariant() : "jsonl";
+        // is the authority — it refuses a nested schema for csv/tsv, and requires the [parquet]
+        // extra for parquet, each with a clear message).
+        var extension = NormalizeExportExtension(format);
 
         var projectId = new DirectoryInfo(projectPath).Name;
         var outputPath = Path.Combine(ResolveExportRoot(), projectId, $"export.{extension}");

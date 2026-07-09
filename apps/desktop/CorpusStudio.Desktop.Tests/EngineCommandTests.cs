@@ -587,6 +587,20 @@ public sealed class EngineCommandTests
     }
 
     [Fact]
+    public async Task ImportDataset_WithParquetFile_ConvertsToJsonlThenRunsTheSharedImportFlow()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { PreviewAccepted = 2 };
+        var vm = VmWith(engine, new FakeDialogService(confirm: true), new FakeFilePickerService(@"C:\fake\data.parquet"));
+        SelectFakeProject(vm);
+
+        await vm.ImportDatasetAsync();
+
+        Assert.True(engine.ConvertTabularCalled);          // .parquet is converted to a staging JSONL...
+        Assert.Equal(@"C:\fake\data.parquet", engine.LastConvertInput);
+        Assert.True(engine.CommitCalled);                  // ...then flows through the shared preview/commit path
+    }
+
+    [Fact]
     public async Task ImportDataset_WithJsonlFile_SkipsConversion()
     {
         var engine = new FakeEngine(new DebtReport { Grade = "A" }) { PreviewAccepted = 1 };
@@ -701,6 +715,32 @@ public sealed class EngineCommandTests
         await vm.ExportJsonlAsync();
 
         Assert.Equal("csv", engine.LastExportFormat); // the format selector drives export --format
+    }
+
+    [Fact]
+    public async Task ExportJsonl_WithParquetFormat_PassesTheFormatToTheEngine()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine);
+        SelectFakeProject(vm);
+        vm.ExportFormat = "parquet";
+
+        await vm.ExportJsonlAsync();
+
+        Assert.Equal("parquet", engine.LastExportFormat);
+    }
+
+    [Theory]
+    [InlineData("jsonl", "jsonl")]
+    [InlineData("csv", "csv")]
+    [InlineData("tsv", "tsv")]
+    [InlineData("parquet", "parquet")]
+    [InlineData("PARQUET", "parquet")] // case-insensitive
+    [InlineData("xml", "jsonl")]       // unknown falls back to jsonl
+    [InlineData(null, "jsonl")]
+    public void NormalizeExportExtension_MapsKnownFormatsAndFallsBack(string? format, string expected)
+    {
+        Assert.Equal(expected, PythonEngineService.NormalizeExportExtension(format));
     }
 
     [Fact]
