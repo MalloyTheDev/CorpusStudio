@@ -290,6 +290,28 @@ public sealed class TrainingViewModel : ViewModelBase, ITrainingViewModel
                 bits.Add($"exit {exit}");
             }
             lines.Add("   " + string.Join("; ", bits));
+
+            // Reproducibility manifest: the recipe (data + config + engine) behind this run.
+            if (record.Provenance is { } prov)
+            {
+                var provBits = new List<string>();
+                if (prov.DatasetFingerprint is { Length: > 0 } fingerprint)
+                {
+                    provBits.Add($"data {fingerprint[..Math.Min(12, fingerprint.Length)]} ({prov.DatasetRowCount} rows)");
+                }
+                if (prov.ConfigSha256 is { Length: > 0 } configHash)
+                {
+                    provBits.Add($"config {configHash[..Math.Min(12, configHash.Length)]}");
+                }
+                if (!string.IsNullOrWhiteSpace(prov.EngineVersion))
+                {
+                    provBits.Add($"engine {prov.EngineVersion}");
+                }
+                if (provBits.Count > 0)
+                {
+                    lines.Add("   provenance: " + string.Join("; ", provBits));
+                }
+            }
         }
 
         TrainingRunHistorySummary = string.Join(Environment.NewLine, lines);

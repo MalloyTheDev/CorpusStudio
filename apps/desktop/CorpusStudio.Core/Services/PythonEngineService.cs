@@ -1316,6 +1316,15 @@ public sealed class PythonEngineService : IEngineService
     /// it was loaded from), so a force-closed/crashed run does not stay `running`
     /// forever. Duplicate-run_id files are tolerated (first wins), so one stray
     /// copy cannot hide the whole history.</summary>
+    /// <summary>Build a training run's reproducibility manifest via the engine (canonical dataset
+    /// fingerprint + config hash + engine/platform), captured into the run record at run start.</summary>
+    public async Task<RunProvenance> BuildRunProvenanceAsync(string projectPath, string configPath)
+    {
+        var output = await RunEngineCommandAsync("run-provenance", projectPath, configPath);
+        return JsonSerializer.Deserialize<RunProvenance>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid run provenance.");
+    }
+
     public IReadOnlyList<TrainingRunRecord> LoadTrainingRunRecords(string projectPath)
     {
         var directory = Path.Combine(projectPath, "training_runs");

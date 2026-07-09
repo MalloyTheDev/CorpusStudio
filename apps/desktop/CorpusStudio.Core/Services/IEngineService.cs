@@ -122,6 +122,10 @@ public interface IEngineService
     /// <summary>Load the project's quality history (newest first) for the trend chart.</summary>
     IReadOnlyList<QualityHistoryEntry> LoadQualityHistory(string projectPath, int maxEntries = 5);
 
+    /// <summary>Build a training run's reproducibility manifest (dataset fingerprint, config hash,
+    /// engine version / platform) to capture at run start.</summary>
+    Task<RunProvenance> BuildRunProvenanceAsync(string projectPath, string configPath);
+
     /// <summary>The project's recorded training runs (newest first).</summary>
     IReadOnlyList<TrainingRunRecord> LoadTrainingRunRecords(string projectPath);
 

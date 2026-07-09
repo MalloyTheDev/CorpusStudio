@@ -20,6 +20,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from corpus_studio.training.provenance import RunProvenance
+
 RUN_REGISTRY_DIRNAME = "training_runs"
 
 PREPARED = "prepared"
@@ -57,6 +59,9 @@ class TrainingRunRecord(BaseModel):
     # Back-link to the dataset version (v1.0) captured for this run, if any. A
     # tolerant default so pre-v1.0 records without the field still load as None.
     source_snapshot_id: str | None = None
+    # Reproducibility manifest (dataset fingerprint / config hash / engine+platform)
+    # captured at run start. Tolerant default so older records load as None.
+    provenance: RunProvenance | None = None
     notes: str = ""
 
     @property
