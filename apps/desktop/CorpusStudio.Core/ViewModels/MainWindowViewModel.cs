@@ -63,6 +63,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     // Evaluation tab core (run + report panes + per-example results + failure filters + report
     // history) extracted to EvaluationViewModel in Phase 2 (backend-cluster slice 3, PR 3b). The
     // shell keeps the bridges (health methods, eval->AiAssist/ReviewedFix, Training-baseline) reaching in.
+    private bool _exportRemoveDuplicates;
+    private bool _exportRemoveLowInformation;
     private string _benchmarkModelsInput = string.Empty;
     private string _benchmarkSummary =
         "Enter one model per line, then benchmark them against this project's examples.";
@@ -190,6 +192,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand SaveExampleCommand { get; }
     public System.Windows.Input.ICommand ImportDatasetCommand { get; }
     public System.Windows.Input.ICommand NewSuiteCommand { get; }
+    public System.Windows.Input.ICommand ExportJsonlCommand { get; }
     public System.Windows.Input.ICommand RegisterArtifactFromRunCommand { get; }
     public System.Windows.Input.ICommand KeepArtifactCommand { get; }
     public System.Windows.Input.ICommand RejectArtifactCommand { get; }
@@ -308,6 +311,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         SaveExampleCommand = new AsyncRelayCommand(SaveExampleAsync);
         ImportDatasetCommand = new AsyncRelayCommand(ImportDatasetAsync);
         NewSuiteCommand = new AsyncRelayCommand(CreateSuiteAsync);
+        ExportJsonlCommand = new AsyncRelayCommand(ExportJsonlAsync);
         RegisterArtifactFromRunCommand = new RelayCommand(RegisterArtifactFromRun);
         KeepArtifactCommand = new AsyncRelayCommand(KeepArtifactAsync);
         RejectArtifactCommand = new RelayCommand(() => SetSelectedArtifactStatus("rejected"));
@@ -1327,6 +1331,46 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         return true;
+    }
+
+    /// <summary>Export the project's examples to JSONL with the two cleaning options, then report the
+    /// result (rows written, cleaning, warnings) via the IDialogService seam. Moved from the code-behind.</summary>
+    public async System.Threading.Tasks.Task ExportJsonlAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            await _dialogs.ShowAsync("Create a dataset project before exporting.", "Corpus Studio", DialogSeverity.Information);
+            return;
+        }
+
+        try
+        {
+            SetBusy("Exporting JSONL...");
+            var exportResult = await _engine.ExportProjectExamplesAsync(
+                ActiveProjectPath, ActiveSchemaId, ExportRemoveDuplicates, ExportRemoveLowInformation);
+
+            var message = $"Exported {exportResult.OutputRows} row(s) to:{System.Environment.NewLine}{exportResult.OutputPath}";
+            if (exportResult.Cleaned && exportResult.RemovedRows > 0)
+            {
+                message += $"{System.Environment.NewLine}Removed {exportResult.RemovedRows} row(s) during cleaning.";
+            }
+            if (exportResult.Warnings.Count > 0)
+            {
+                message += $"{System.Environment.NewLine}{System.Environment.NewLine}Warnings:{System.Environment.NewLine}- "
+                    + string.Join($"{System.Environment.NewLine}- ", exportResult.Warnings);
+            }
+
+            await _dialogs.ShowAsync(message, "Export Complete",
+                exportResult.Warnings.Count > 0 ? DialogSeverity.Warning : DialogSeverity.Information);
+        }
+        catch (System.Exception ex)
+        {
+            SetValidationError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
     }
 
     /// <summary>Scaffold a new evaluation suite from the name typed into the Suites tab, then refresh the
@@ -2756,6 +2800,20 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _benchmarkModelsInput;
         set => SetField(ref _benchmarkModelsInput, value);
+    }
+
+    /// <summary>Export cleaning options (bound to the two Export checkboxes): drop exact-duplicate rows
+    /// and drop low-information rows during a JSONL export.</summary>
+    public bool ExportRemoveDuplicates
+    {
+        get => _exportRemoveDuplicates;
+        set => SetField(ref _exportRemoveDuplicates, value);
+    }
+
+    public bool ExportRemoveLowInformation
+    {
+        get => _exportRemoveLowInformation;
+        set => SetField(ref _exportRemoveLowInformation, value);
     }
 
     public string BenchmarkSummary
