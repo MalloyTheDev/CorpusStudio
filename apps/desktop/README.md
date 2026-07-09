@@ -15,7 +15,7 @@ The desktop workflow supports:
 - JSON example authoring
 - Python-engine validation with selectable issue navigation
 - saving examples to the active project
-- JSONL import preview with failed-row reporting
+- JSONL / CSV / TSV import preview with failed-row reporting (CSV/TSV convert to a staging JSONL through the same preview/quarantine path)
 - quarantine review and retry for rejected import rows
 - quality checks for empty rows, duplicates, low-information examples, and first-pass synthetic-pattern warnings with repair suggestions plus single-row and batch triage-to-rewrite handoffs
 - project-level quality history
@@ -70,7 +70,10 @@ set `CORPUS_STUDIO_ENGINE_DIR`) instead of crashing. Bundling a Python runtime i
 JSONL imports are previewed against the active schema and only fully valid files
 are appended directly to the active project's `examples.jsonl`. Mixed-validity
 imports can append valid rows after confirmation and save rejected rows under
-the project's `import_quarantine` folder for repair.
+the project's `import_quarantine` folder for repair. CSV and TSV files are
+converted to a staging JSONL first (header row → field keys, cells as text) and
+then run through the same preview/quarantine/commit path — so a cell whose schema
+field expects a number or list quarantines like any invalid row.
 
 Split generation lets the user set train and validation percentages plus a
 deterministic seed. The test split uses the remaining percentage, and output is

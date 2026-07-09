@@ -1060,6 +1060,14 @@ public sealed class PythonEngineService : IEngineService
             ?? throw new InvalidOperationException("The Python engine returned an invalid import preview.");
     }
 
+    /// <summary>Convert a CSV/TSV file to a JSONL staging file (header row → keys, cells as text). The
+    /// staging file then flows through the normal import-preview/quarantine/commit path.</summary>
+    public async Task ConvertTabularToJsonlAsync(string inputPath, string outputPath)
+    {
+        // Throws on a non-zero engine exit (empty/headerless/undecodable file), surfaced by the caller.
+        await RunEngineCommandAsync("import-convert", inputPath, outputPath);
+    }
+
     /// <summary>Inspect a public Hugging Face dataset (configs/splits, columns, license).
     /// Read-only; no auth or upload.</summary>
     public async Task<HfDatasetInspection> HfInspectAsync(string datasetId)

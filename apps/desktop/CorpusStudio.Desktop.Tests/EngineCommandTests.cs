@@ -55,6 +55,9 @@ public sealed class EngineCommandTests
             ExportCalled = true; LastRemoveDuplicates = removeDuplicates; LastRemoveLowInformation = removeLowInformation; LastRedactPii = redactPii;
             return Task.FromResult(new ExportResult());
         }
+        public bool ConvertTabularCalled { get; private set; }
+        public string? LastConvertInput { get; private set; }
+        public Task ConvertTabularToJsonlAsync(string inputPath, string outputPath) { ConvertTabularCalled = true; LastConvertInput = inputPath; return Task.CompletedTask; }
         public Task<ImportPreviewReport> PreviewImportAsync(string importPath, string schemaId) => Task.FromResult(new ImportPreviewReport { AcceptedRows = PreviewAccepted, RejectedRows = PreviewRejected });
         public ImportCommitResult CommitJsonlImportToProjectExamples(string projectPath, string importPath, ImportPreviewReport report) { CommitCalled = true; return new ImportCommitResult(0, 0, null); }
         public bool ValidateReturnsValid { get; set; }
@@ -113,13 +116,21 @@ public sealed class EngineCommandTests
         public Task ShowAsync(string message, string title, DialogSeverity severity = DialogSeverity.Information) => Task.CompletedTask;
     }
 
-    private static MainWindowViewModel VmWith(IEngineService engine, IDialogService? dialogs = null) => new(
+    private sealed class FakeFilePickerService : IFilePickerService
+    {
+        private readonly string? _file;
+        public FakeFilePickerService(string? file) => _file = file;
+        public Task<string?> PickFileAsync(string title, params FilePickerFilter[] filters) => Task.FromResult(_file);
+        public Task<string?> PickFolderAsync(string title) => Task.FromResult<string?>(_file);
+    }
+
+    private static MainWindowViewModel VmWith(IEngineService engine, IDialogService? dialogs = null, IFilePickerService? filePicker = null) => new(
         new DebtViewModel(), new ArenaViewModel(), new SettingsViewModel(), new VersionsViewModel(),
         new ArtifactsViewModel(), new SuitesViewModel(), new SplitsViewModel(), new PreferenceReviewViewModel(),
         new QuarantineViewModel(), new ExamplesViewModel(), new WritingStudioViewModel(),
         new AiAssistRewriteBatchesViewModel(), new AiAssistConnectionViewModel(),
         new EvaluationConnectionViewModel(), new QualityViewModel(), engine, dialogs ?? new NullDialogService(),
-        new NullFilePickerService());
+        filePicker ?? new NullFilePickerService());
 
     private static void SelectFakeProject(MainWindowViewModel vm) => vm.SelectProject(
         new DatasetProjectListItem(
@@ -556,6 +567,33 @@ public sealed class EngineCommandTests
         await vm.PreviewAndImportJsonlAsync(@"C:\fake\import.jsonl");
 
         Assert.False(engine.CommitCalled);
+    }
+
+    [Fact]
+    public async Task ImportDataset_WithCsvFile_ConvertsToJsonlThenRunsTheSharedImportFlow()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { PreviewAccepted = 2 };
+        var vm = VmWith(engine, new FakeDialogService(confirm: true), new FakeFilePickerService(@"C:\fake\data.csv"));
+        SelectFakeProject(vm);
+
+        await vm.ImportDatasetAsync();
+
+        Assert.True(engine.ConvertTabularCalled);          // CSV was converted to a staging JSONL...
+        Assert.Equal(@"C:\fake\data.csv", engine.LastConvertInput);
+        Assert.True(engine.CommitCalled);                  // ...then flowed through the shared preview/commit path
+    }
+
+    [Fact]
+    public async Task ImportDataset_WithJsonlFile_SkipsConversion()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { PreviewAccepted = 1 };
+        var vm = VmWith(engine, new FakeDialogService(confirm: true), new FakeFilePickerService(@"C:\fake\data.jsonl"));
+        SelectFakeProject(vm);
+
+        await vm.ImportDatasetAsync();
+
+        Assert.False(engine.ConvertTabularCalled); // .jsonl goes straight to the preview/commit flow
+        Assert.True(engine.CommitCalled);
     }
 
     [Fact]

@@ -1420,15 +1420,66 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         var file = await _filePicker.PickFileAsync(
-            "Import JSONL Dataset",
+            "Import Dataset",
+            new FilePickerFilter("Dataset files (JSONL, CSV, TSV)", "jsonl", "csv", "tsv"),
             new FilePickerFilter("JSONL files", "jsonl"),
+            new FilePickerFilter("CSV / TSV files", "csv", "tsv"),
             new FilePickerFilter("All files", "*"));
         if (file is null)
         {
             return;
         }
 
+        var extension = System.IO.Path.GetExtension(file).TrimStart('.').ToLowerInvariant();
+        if (extension is "csv" or "tsv" or "tab")
+        {
+            await ImportTabularAsync(file);
+            return;
+        }
+
         await PreviewAndImportJsonlAsync(file);
+    }
+
+    /// <summary>Convert a CSV/TSV file to a temp staging JSONL via the engine, then run it through the
+    /// same preview/confirm/quarantine/commit flow as any JSONL import (mirrors the Hugging-Face staging
+    /// path). CSV cells import as text, so a schema type mismatch quarantines like a bad JSONL row.</summary>
+    private async System.Threading.Tasks.Task ImportTabularAsync(string tabularPath)
+    {
+        var staging = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(),
+            $"corpus_studio_import_{System.Guid.NewGuid():N}.jsonl");
+        try
+        {
+            try
+            {
+                SetBusy("Converting to JSONL for import...");
+                await _engine.ConvertTabularToJsonlAsync(tabularPath, staging);
+            }
+            finally
+            {
+                ClearBusy();
+            }
+
+            await PreviewAndImportJsonlAsync(staging);
+        }
+        catch (System.Exception ex)
+        {
+            SetImportError(ex.Message);
+        }
+        finally
+        {
+            try
+            {
+                if (System.IO.File.Exists(staging))
+                {
+                    System.IO.File.Delete(staging);
+                }
+            }
+            catch (System.IO.IOException)
+            {
+                // best-effort temp cleanup
+            }
+        }
     }
 
     /// <summary>Preview a JSONL import, confirm, then append (quarantining rejects) and snapshot the
