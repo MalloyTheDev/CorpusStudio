@@ -1170,6 +1170,22 @@ def training_config(
     warnings.extend(lora_recommendation.warnings)
     warnings.extend(compatibility_warnings)
 
+    # Pre-flight: cheap fail-fast checks so a bad run is caught here, not hours in.
+    from corpus_studio.training.preflight import run_training_preflight
+
+    data_paths = [input_path]
+    if eval_dataset_path is not None:
+        data_paths.append(eval_dataset_path)
+    preflight = run_training_preflight(
+        config_path=output_path,
+        launch_argv=launch_plan.argv,
+        dependencies=launch_plan.dependencies,
+        data_paths=data_paths,
+        dataset_row_count=token_budget.example_count,
+        examples_over_sequence_len=token_budget.examples_over_sequence_len,
+        sequence_len=sequence_len,
+    )
+
     typer.echo(
         json.dumps(
             {
@@ -1183,6 +1199,7 @@ def training_config(
                 "training_output_dir": str(resolved_output_dir),
                 "vram_estimate": vram_estimate.model_dump(),
                 "lora_recommendation": lora_recommendation.model_dump(),
+                "preflight": preflight.model_dump(),
                 "warnings": warnings,
                 "compatibility_warnings": compatibility_warnings,
             },

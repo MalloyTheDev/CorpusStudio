@@ -33,6 +33,61 @@ public sealed class TrainingLaunchViewModelTests
     }
 
     [Fact]
+    public void ApplyTrainingConfig_WithBlockingPreflight_DisablesLaunch()
+    {
+        var vm = new MainWindowViewModel();
+        var result = new TrainingConfigExportResult
+        {
+            Target = "axolotl_yaml",
+            OutputPath = "out/config.yaml",
+            Launch = new TrainingLaunchPlan
+            {
+                Target = "axolotl_yaml",
+                Command = "accelerate launch -m axolotl.cli.train \"out/config.yaml\"",
+                Argv = ["accelerate", "launch", "-m", "axolotl.cli.train", "out/config.yaml"],
+            },
+            Preflight = new TrainingPreflightReport
+            {
+                Status = "block",
+                CanLaunch = false,
+                Checks =
+                [
+                    new TrainingPreflightCheck { Name = "dataset_size", Status = "block", Message = "The dataset has no rows to train on." },
+                ],
+            },
+        };
+
+        vm.Training.ApplyTrainingConfigExportResult(result);
+
+        Assert.False(vm.Training.CanLaunchTraining); // a blocking pre-flight gates the launch button
+        Assert.Contains("Pre-flight: BLOCKED", vm.Training.TrainingSummary);
+        Assert.Contains("no rows to train on", vm.Training.TrainingSummary);
+    }
+
+    [Fact]
+    public void ApplyTrainingConfig_WithPassingPreflight_AllowsLaunch()
+    {
+        var vm = new MainWindowViewModel();
+        var result = new TrainingConfigExportResult
+        {
+            Target = "axolotl_yaml",
+            OutputPath = "out/config.yaml",
+            Launch = new TrainingLaunchPlan
+            {
+                Target = "axolotl_yaml",
+                Command = "accelerate launch -m axolotl.cli.train \"out/config.yaml\"",
+                Argv = ["accelerate", "launch", "-m", "axolotl.cli.train", "out/config.yaml"],
+            },
+            Preflight = new TrainingPreflightReport { Status = "pass", CanLaunch = true },
+        };
+
+        vm.Training.ApplyTrainingConfigExportResult(result);
+
+        Assert.True(vm.Training.CanLaunchTraining);
+        Assert.Contains("Pre-flight: all checks passed", vm.Training.TrainingSummary);
+    }
+
+    [Fact]
     public void ApplyTrainingConfig_ShowsVramEstimateAndLoraSuggestion()
     {
         var vm = new MainWindowViewModel();

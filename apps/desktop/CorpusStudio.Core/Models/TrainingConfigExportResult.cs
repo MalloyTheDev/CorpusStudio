@@ -31,8 +31,46 @@ public sealed class TrainingConfigExportResult
     [JsonPropertyName("lora_recommendation")]
     public LoraRecommendation? LoraRecommendation { get; init; }
 
+    [JsonPropertyName("preflight")]
+    public TrainingPreflightReport? Preflight { get; init; }
+
     [JsonPropertyName("warnings")]
     public List<string> Warnings { get; init; } = [];
+}
+
+/// <summary>Cheap fail-fast checks run at config-generation time (mirrors the engine's
+/// <c>training/preflight.py</c>): trainer on PATH, config/data present, dataset size, truncation.
+/// A pre-flight, not a guarantee — a green result means "nothing obviously wrong", not "this run
+/// will succeed". <see cref="CanLaunch"/> is false only when a check blocks (missing config/data,
+/// empty dataset).</summary>
+public sealed class TrainingPreflightReport
+{
+    [JsonPropertyName("status")]
+    public string Status { get; init; } = "pass"; // pass | warn | block
+
+    [JsonPropertyName("can_launch")]
+    public bool CanLaunch { get; init; } = true;
+
+    [JsonPropertyName("trainer_command")]
+    public string TrainerCommand { get; init; } = string.Empty;
+
+    [JsonPropertyName("trainer_found")]
+    public bool TrainerFound { get; init; }
+
+    [JsonPropertyName("checks")]
+    public List<TrainingPreflightCheck> Checks { get; init; } = [];
+}
+
+public sealed class TrainingPreflightCheck
+{
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = string.Empty;
+
+    [JsonPropertyName("status")]
+    public string Status { get; init; } = string.Empty; // pass | warn | block
+
+    [JsonPropertyName("message")]
+    public string Message { get; init; } = string.Empty;
 }
 
 public sealed class TrainingLaunchPlan
