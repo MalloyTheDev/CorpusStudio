@@ -801,25 +801,6 @@ public partial class MainWindow : Window
 
 
     /// <summary>Load the effective gate thresholds into the Settings editor (issue #198).</summary>
-    private async Task RefreshGateThresholdsAsync()
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            return;
-        }
-
-        try
-        {
-            var thresholds = await _engineService.GetGateThresholdsAsync(ViewModel.ActiveProjectPath);
-            ViewModel.Settings.ApplyGateThresholds(thresholds);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.Settings.SetGateThresholdsError(ex.Message);
-        }
-    }
-
-
     private void PrepareSyntheticRewriteButton_Click(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.PrepareSyntheticIssueRewrite())
@@ -1919,31 +1900,8 @@ public partial class MainWindow : Window
         await LoadProjectAsync(ViewModel.SelectedProject);
     }
 
-    private async Task LoadProjectAsync(DatasetProjectListItem project)
-    {
-        ViewModel.SelectProject(project);
-        ViewModel.Splits.ApplySplitSettings(_engineService.LoadProjectSplitSettings(project.ProjectPath));
-        ViewModel.ApplyLabSettings(_engineService.LoadProjectLabSettings(project.ProjectPath));
-        ViewModel.SetExamples(_engineService.LoadExamples(project.ProjectPath));
-        ViewModel.Quarantine.SetItems(_engineService.LoadImportQuarantineItems(project.ProjectPath));
-        ViewModel.AiAssist.SetAiAssistReviewQueue(_engineService.LoadAiAssistReviewQueue(project.ProjectPath));
-        ViewModel.AiAssist.SetAiAssistQueueViews(_engineService.LoadAiAssistQueueViews(project.ProjectPath));
-        ViewModel.RewriteBatches.SetAiAssistRewriteBatches(
-            _engineService.LoadAiAssistRewriteBatches(project.ProjectPath)
-        );
-        ViewModel.SetReviewedFixes(
-            _engineService.LoadReviewedFixes(project.ProjectPath)
-        );
-        ViewModel.Evaluation.SetEvaluationFailureFilters(
-            _engineService.LoadEvaluationFailureFilters(project.ProjectPath)
-        );
-        ViewModel.AiAssist.ClearBulkUndoStack();
-        ViewModel.Evaluation.SetEvaluationReportHistory(
-            _engineService.LoadEvaluationReportHistory(project.ProjectPath)
-        );
-        await RefreshDatasetVersionsAsync();
-        await RefreshGateThresholdsAsync();
-        await ViewModel.RefreshQualityAsync(recordHistory: false);
-    }
+    // The project-load flow now lives on the shared view-model (startup workspace-init + the
+    // project-selection change both use it); the code-behind callers delegate to it.
+    private Task LoadProjectAsync(DatasetProjectListItem project) => ViewModel.LoadProjectAsync(project);
 
 }

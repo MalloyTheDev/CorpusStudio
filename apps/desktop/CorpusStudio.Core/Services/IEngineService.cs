@@ -16,6 +16,25 @@ public interface IEngineService
     /// <summary>The built-in dataset schemas (for mapping an import to the active project's schema).</summary>
     Task<IReadOnlyList<DatasetSchema>> GetSchemasAsync();
 
+    // --- Project-load loaders (used by the shared project-load flow) ---------------------
+    /// <summary>The project's saved train/validation/test split ratios + seed.</summary>
+    SplitSettings LoadProjectSplitSettings(string projectPath);
+
+    /// <summary>The project's saved Evaluation/AI-Assist lab backend settings.</summary>
+    LabBackendSettings LoadProjectLabSettings(string projectPath);
+
+    /// <summary>The project's saved AI-Assist review-queue views (saved filters).</summary>
+    IReadOnlyList<AiAssistQueueView> LoadAiAssistQueueViews(string projectPath);
+
+    /// <summary>The project's saved AI-Assist synthetic-rewrite batches.</summary>
+    IReadOnlyList<AiAssistRewriteBatch> LoadAiAssistRewriteBatches(string projectPath, int maxBatches = 20);
+
+    /// <summary>The project's tracked reviewed-fixes (versioned per example).</summary>
+    IReadOnlyList<ReviewedFixRecord> LoadReviewedFixes(string projectPath, int maxRecords = 200);
+
+    /// <summary>The project's saved evaluation failure filters.</summary>
+    IReadOnlyList<EvaluationFailureFilter> LoadEvaluationFailureFilters(string projectPath);
+
     /// <summary>Run the dataset gate suite (schema/quality/leakage/PII/eval) over a project.</summary>
     Task<GateReport> RunDatasetGatesAsync(string projectPath, string schemaId, bool exportScope = false);
 
@@ -120,6 +139,9 @@ public interface IEngineService
 
     /// <summary>Persist the edited gate thresholds (engine validates + rejects out-of-range values).</summary>
     Task SetGateThresholdsAsync(string projectPath, GateThresholds thresholds);
+
+    /// <summary>The project's current gate thresholds (defaults when none saved).</summary>
+    Task<GateThresholds> GetGateThresholdsAsync(string projectPath);
 
     /// <summary>List the project's provider generation policies (approved model allow-list).</summary>
     Task<IReadOnlyList<ProviderPolicyItem>> GetProviderPoliciesAsync(string projectPath);
