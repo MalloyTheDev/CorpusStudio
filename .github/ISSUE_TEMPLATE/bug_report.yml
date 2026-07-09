@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a problem in Corpus Studio
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Corpus Studio is local-first — please **do not paste real
+        dataset rows, PII, secrets, or API keys** here; use a minimal synthetic example.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What went wrong, and what you expected instead.
+      placeholder: Running the export blocked on a PII gate even though the rows have no PII…
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The minimal steps (a CLI command or the desktop clicks). Include a tiny synthetic dataset if relevant.
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Where does the bug live?
+      options:
+        - Engine (Python CLI)
+        - Desktop (WPF)
+        - Avalonia head
+        - Evaluation / suites
+        - Training
+        - Import / export
+        - Versioning
+        - Quality / debt / gates
+        - Docs
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Error output / logs
+      description: Any error message, stack trace, or engine stderr (redact anything sensitive). This is rendered as code.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The app/engine version (Settings tab, or `corpus-studio --version`) and OS.
+      placeholder: "1.3.0 · Windows 11"

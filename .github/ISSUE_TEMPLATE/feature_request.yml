@@ -1,0 +1,53 @@
+name: Feature request
+description: Suggest an improvement for Corpus Studio
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: The user problem or workflow gap this solves. What's painful today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What should Corpus Studio do? Keep the first version a small, safe slice.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Engine (Python CLI)
+        - Desktop (WPF)
+        - Avalonia head
+        - Evaluation / suites
+        - Training
+        - Import / export
+        - Versioning
+        - Quality / debt / gates
+        - Schemas
+        - Docs / infra
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: schema
+    attributes:
+      label: Dataset schema affected
+      description: A built-in schema id if this is schema-specific (see `corpus-studio schemas`), or "n/a".
+      placeholder: instruction / chat / classification / n/a
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Simpler options you weighed (prompting, an existing command, config) before proposing this.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links, screenshots (no PII), or anything else useful.
