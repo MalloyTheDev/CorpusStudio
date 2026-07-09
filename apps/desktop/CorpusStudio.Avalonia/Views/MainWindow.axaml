@@ -51,15 +51,30 @@
             <TextBlock DockPanel.Dock="Top" Text="{Binding Explorer.WorkspaceName}"
                        FontWeight="Bold" Margin="0,0,0,6"/>
             <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,6">
+              <Button Content="New File" Command="{Binding Explorer.NewFileCommand}"/>
+              <Button Content="New Folder" Command="{Binding Explorer.NewFolderCommand}"/>
               <Button Content="Refresh" Command="{Binding Explorer.RefreshTreeCommand}"/>
               <Button Content="Collapse" Command="{Binding Explorer.CollapseAllCommand}"/>
             </StackPanel>
             <TextBlock DockPanel.Dock="Bottom" Text="{Binding Explorer.ExplorerStatus}"
                        Foreground="#64748B" FontSize="11" Margin="0,6,0,0"/>
-            <TreeView ItemsSource="{Binding Explorer.RootNode.Children}">
+            <!-- ExplorerTree is named so the per-node context menu (whose DataContext is the node) can
+                 reach the shell VM's file-op commands via an element-name compiled binding (#223). -->
+            <TreeView x:Name="ExplorerTree" ItemsSource="{Binding Explorer.RootNode.Children}">
               <TreeView.ItemTemplate>
                 <TreeDataTemplate x:DataType="models:WorkspaceTreeNode" ItemsSource="{Binding Children}">
                   <StackPanel Orientation="Horizontal" Spacing="6" Height="20">
+                    <StackPanel.ContextMenu>
+                      <ContextMenu>
+                        <MenuItem Header="Rename…"
+                                  Command="{Binding #ExplorerTree.((vm:MainWindowViewModel)DataContext).Explorer.RenameNodeCommand}"
+                                  CommandParameter="{Binding}"/>
+                        <Separator/>
+                        <MenuItem Header="Delete"
+                                  Command="{Binding #ExplorerTree.((vm:MainWindowViewModel)DataContext).Explorer.DeleteNodeCommand}"
+                                  CommandParameter="{Binding}"/>
+                      </ContextMenu>
+                    </StackPanel.ContextMenu>
                     <TextBlock Text="🗀" IsVisible="{Binding IsDirectory}" VerticalAlignment="Center"/>
                     <Border Background="#EEF4FF" CornerRadius="3" Padding="3,0" VerticalAlignment="Center"
                             IsVisible="{Binding !IsDirectory}">

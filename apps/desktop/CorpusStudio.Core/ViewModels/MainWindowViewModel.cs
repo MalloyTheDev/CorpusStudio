@@ -105,8 +105,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public StartCenterViewModel StartCenter { get; } = new();
 
     /// <summary>The Universal Workspace Explorer's own view-model (file tree + documents).
-    /// Operates on the active project's folder.</summary>
-    public WorkspaceExplorerViewModel Explorer { get; } = new();
+    /// Operates on the active project's folder. Constructed in the ctor so it shares the shell's
+    /// dialog seam (its file-op context menu prompts/confirms through it).</summary>
+    public WorkspaceExplorerViewModel Explorer { get; }
 
     /// <summary>The workspace content-search ("find in files") view-model. Shares the active
     /// project's folder as its search root.</summary>
@@ -270,6 +271,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         _dispatcherTimerFactory = dispatcherTimerFactory;
         _trainingRunner = trainingRunner;
         _huggingFaceImportDialog = huggingFaceImportDialog;
+        Explorer = new WorkspaceExplorerViewModel(dialogs: dialogs);
         Debt = debt;
         Arena = arena;
         Settings = settings;

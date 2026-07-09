@@ -19,4 +19,7 @@ public sealed class NullDialogService : IDialogService
 
     public Task ShowAsync(string message, string title, DialogSeverity severity = DialogSeverity.Information)
         => Task.CompletedTask;
+
+    public Task<string?> PromptAsync(string title, string message, string defaultValue = "")
+        => Task.FromResult<string?>(null); // no UI → treated as cancelled
 }

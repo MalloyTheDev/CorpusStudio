@@ -1,3 +1,4 @@
+using System.Threading.Tasks;
 using CorpusStudio.Desktop.ViewModels;
 using Xunit;
 
@@ -62,5 +63,29 @@ public sealed class ShellCommandTests
 
         vm.GoToTrainingCommand.Execute(null);
         Assert.Equal((int)StudioTab.Training, vm.SelectedStudioTabIndex);
+    }
+
+    [Fact]
+    public void AsyncRelayCommandOfT_PassesTypedParameter_AndCoercesMismatchToNull()
+    {
+        string? seen = "unset";
+        var command = new AsyncRelayCommand<string>(p => { seen = p; return Task.CompletedTask; });
+
+        command.Execute("hello");
+        Assert.Equal("hello", seen);
+
+        command.Execute(42); // wrong type → coerced to default(string) = null, not a throw
+        Assert.Null(seen);
+    }
+
+    [Fact]
+    public void AsyncRelayCommandOfT_GuardBlocksExecuteWhenCanExecuteFalse()
+    {
+        var ran = false;
+        var command = new AsyncRelayCommand<string>(_ => { ran = true; return Task.CompletedTask; }, _ => false);
+
+        Assert.False(command.CanExecute("x"));
+        command.Execute("x");
+        Assert.False(ran); // a false guard blocks the run
     }
 }

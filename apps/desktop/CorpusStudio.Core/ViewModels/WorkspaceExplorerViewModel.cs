@@ -18,15 +18,22 @@ public sealed class WorkspaceExplorerViewModel : INotifyPropertyChanged
 {
     private readonly WorkspaceExplorerService _explorer;
     private readonly WorkspaceDocumentService _documents;
+    private readonly IDialogService _dialogs;
 
     public WorkspaceExplorerViewModel(
         WorkspaceExplorerService? explorer = null,
-        WorkspaceDocumentService? documents = null)
+        WorkspaceDocumentService? documents = null,
+        IDialogService? dialogs = null)
     {
         _explorer = explorer ?? new WorkspaceExplorerService();
         _documents = documents ?? new WorkspaceDocumentService();
+        _dialogs = dialogs ?? new NullDialogService();
         RefreshTreeCommand = new RelayCommand(RefreshTree);
         CollapseAllCommand = new RelayCommand(CollapseAll);
+        NewFileCommand = new AsyncRelayCommand(PromptNewFileAsync, () => HasWorkspace);
+        NewFolderCommand = new AsyncRelayCommand(PromptNewFolderAsync, () => HasWorkspace);
+        RenameNodeCommand = new AsyncRelayCommand<WorkspaceTreeNode>(PromptRenameNodeAsync);
+        DeleteNodeCommand = new AsyncRelayCommand<WorkspaceTreeNode>(ConfirmDeleteNodeAsync);
     }
 
     /// <summary>Rebuild the file tree from disk (bindable for either head's toolbar).</summary>
@@ -34,6 +41,20 @@ public sealed class WorkspaceExplorerViewModel : INotifyPropertyChanged
 
     /// <summary>Collapse the file tree.</summary>
     public System.Windows.Input.ICommand CollapseAllCommand { get; }
+
+    /// <summary>Prompt for a name and create a new file at the workspace root (then open it).</summary>
+    public System.Windows.Input.ICommand NewFileCommand { get; }
+
+    /// <summary>Prompt for a name and create a new folder at the workspace root.</summary>
+    public System.Windows.Input.ICommand NewFolderCommand { get; }
+
+    /// <summary>Rename the context-menu's node (prompts for the new name). Bound with
+    /// <c>CommandParameter="{Binding}"</c> so the clicked <see cref="WorkspaceTreeNode"/> flows in.</summary>
+    public System.Windows.Input.ICommand RenameNodeCommand { get; }
+
+    /// <summary>Delete the context-menu's node (confirms first). Bound the same way as
+    /// <see cref="RenameNodeCommand"/>.</summary>
+    public System.Windows.Input.ICommand DeleteNodeCommand { get; }
 
     private string? _workspaceRoot;
     private string _workspaceName = string.Empty;
@@ -148,6 +169,7 @@ public sealed class WorkspaceExplorerViewModel : INotifyPropertyChanged
         ActiveDocument = null;
         RefreshTree();
         OnChanged(nameof(HasWorkspace));
+        RaiseFileOpCommandsCanExecuteChanged();
     }
 
     /// <summary>Clear all explorer state (e.g. on project switch) so a stale tree/tabs
@@ -161,6 +183,13 @@ public sealed class WorkspaceExplorerViewModel : INotifyPropertyChanged
         RootNode = null;
         ExplorerStatus = "Open or create a project to browse its files.";
         OnChanged(nameof(HasWorkspace));
+        RaiseFileOpCommandsCanExecuteChanged();
+    }
+
+    private void RaiseFileOpCommandsCanExecuteChanged()
+    {
+        (NewFileCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (NewFolderCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
     }
 
     public void RefreshTree()
@@ -224,6 +253,86 @@ public sealed class WorkspaceExplorerViewModel : INotifyPropertyChanged
         OpenDocuments.Add(result.Document);
         ActiveDocument = result.Document;
     }
+
+    // ---- Context-menu / toolbar file-op commands ---------------------------------
+    // Each prompts/confirms through the head-agnostic dialog seam, calls the pure model
+    // method, and surfaces any error via ShowAsync (so the failure isn't silently swallowed).
+    // Public so both heads' bindings and the tests drive the same dialog-integrated flow.
+
+    /// <summary>Prompt for a file name and create it at the workspace root (opening it on success).
+    /// Cancelling the prompt is a no-op; a create error is surfaced through the dialog seam.</summary>
+    public async Task PromptNewFileAsync()
+    {
+        var name = await _dialogs.PromptAsync("New File", "File name (e.g. notes.md):");
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        var error = await CreateFileAsync(name.Trim());
+        await ReportIfErrorAsync(error, "New File");
+    }
+
+    /// <summary>Prompt for a folder name and create it at the workspace root.</summary>
+    public async Task PromptNewFolderAsync()
+    {
+        var name = await _dialogs.PromptAsync("New Folder", "Folder name:");
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        var error = CreateFolder(name.Trim());
+        await ReportIfErrorAsync(error, "New Folder");
+    }
+
+    /// <summary>Prompt (pre-filled with the current name) and rename the node. An unchanged or
+    /// cancelled name is a no-op; a rename error (incl. dataset-core refusal) is surfaced.</summary>
+    public async Task PromptRenameNodeAsync(WorkspaceTreeNode? node)
+    {
+        if (node is null)
+        {
+            return;
+        }
+
+        var newName = await _dialogs.PromptAsync("Rename", $"New name for “{node.Name}”:", node.Name);
+        if (string.IsNullOrWhiteSpace(newName) || newName.Trim() == node.Name)
+        {
+            return;
+        }
+
+        var error = RenameNode(node, newName.Trim());
+        await ReportIfErrorAsync(error, "Rename");
+    }
+
+    /// <summary>Confirm, then delete the node. Declining the confirm is a no-op; a delete error
+    /// (incl. dataset-core refusal) is surfaced through the dialog seam.</summary>
+    public async Task ConfirmDeleteNodeAsync(WorkspaceTreeNode? node)
+    {
+        if (node is null)
+        {
+            return;
+        }
+
+        var kind = node.IsDirectory ? "folder" : "file";
+        var confirmed = await _dialogs.ConfirmAsync(
+            $"Permanently delete the {kind} “{node.Name}”? This can't be undone.",
+            "Delete",
+            DialogButtons.OkCancel,
+            DialogSeverity.Warning);
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var error = DeleteNode(node);
+        await ReportIfErrorAsync(error, "Delete");
+    }
+
+    private Task ReportIfErrorAsync(string? error, string title) =>
+        string.IsNullOrEmpty(error)
+            ? Task.CompletedTask
+            : _dialogs.ShowAsync(error, title, DialogSeverity.Warning);
 
     /// <summary>Create a file inside the workspace and open it. Returns an error string
     /// (never throws for expected problems); null on success.</summary>

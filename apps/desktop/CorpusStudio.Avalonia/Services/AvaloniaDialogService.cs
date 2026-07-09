@@ -58,6 +58,41 @@ public sealed class AvaloniaDialogService : IDialogService
         await dialog.ShowDialog(owner);
     }
 
+    public async Task<string?> PromptAsync(string title, string message, string defaultValue = "")
+    {
+        var owner = Owner;
+        if (owner is null)
+        {
+            return null;
+        }
+
+        string? result = null;
+        var dialog = NewDialog(title);
+        var input = new TextBox { Text = defaultValue, MinWidth = 300 };
+        var ok = new Button { Content = "OK", IsDefault = true, MinWidth = 84, Margin = new Thickness(0, 0, 8, 0) };
+        var cancel = new Button { Content = "Cancel", IsCancel = true, MinWidth = 84 };
+        ok.Click += (_, _) => { result = input.Text ?? string.Empty; dialog.Close(); };
+        cancel.Click += (_, _) => { result = null; dialog.Close(); };
+
+        var buttonRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 14, 0, 0),
+        };
+        buttonRow.Children.Add(ok);
+        buttonRow.Children.Add(cancel);
+        var panel = new StackPanel { Margin = new Thickness(20), MaxWidth = 420 };
+        panel.Children.Add(new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(input);
+        panel.Children.Add(buttonRow);
+        dialog.Content = panel;
+
+        input.Loaded += (_, _) => { input.SelectAll(); input.Focus(); };
+        await dialog.ShowDialog(owner);
+        return result;
+    }
+
     private static Window NewDialog(string title) => new()
     {
         Title = title,
