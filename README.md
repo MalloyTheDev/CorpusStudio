@@ -1,5 +1,7 @@
 # Corpus Studio
 
+[![Engine coverage](https://codecov.io/gh/MalloyTheDev/CorpusStudio/branch/main/graph/badge.svg)](https://codecov.io/gh/MalloyTheDev/CorpusStudio)
+
 **Corpus Studio** is a local-first dataset creation studio for AI builders.
 
 It is designed to be a one-stop shop for authoring, importing, cleaning, validating, splitting, versioning, and exporting model-ready datasets across multiple schemas:
