@@ -139,10 +139,12 @@ evaluation report with a `metric` field, a `run_settings` object, plus derived
 `tag_summary`, `failure_reason_summary`, and `score_band_summary` arrays. This
 command requires the chosen local backend to already be running.
 
-Add **`--progress`** to stream per-example progress (`[k/N] evaluated`) to **stderr**
-during a long run — the report JSON on stdout is unchanged, so `--output-path` and
-piping still work. (The desktop Evaluation tab surfacing this as a live progress bar
-is a follow-up — it needs the streaming process seam the launcher uses.)
+Add **`--progress`** to stream progress (`[k/N] evaluated`) to **stderr** during a long
+run — the report JSON on stdout is unchanged, so `--output-path` and piping still work.
+Output is throttled to ~100 updates (always the first and last), so a 10k-row run streams
+a readable trickle instead of one line per example. (The desktop Evaluation tab surfacing
+this as a live progress bar is a follow-up — it needs the streaming process seam the
+launcher uses.)
 
 ### Scoring metric (read this)
 

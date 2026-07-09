@@ -36,6 +36,7 @@ from corpus_studio.evaluation.evaluator import (
     EvaluationRunConfig,
     extract_evaluation_examples,
     run_evaluation,
+    should_report_progress,
 )
 from corpus_studio.evaluation.scorers import LlmJudgeScorer
 from corpus_studio.exporters.cleaning import clean_rows
@@ -664,8 +665,10 @@ def eval_run(
 
     def _emit_progress(completed: int, total: int) -> None:
         # Progress goes to stderr so stdout stays the pure report JSON (mirrors suite-run's
-        # "Running N case(s)" note). Carriage-return-free lines so a log file stays readable.
-        typer.echo(f"[{completed}/{total}] evaluated", err=True)
+        # "Running N case(s)" note). Throttled to ~100 updates so a large run doesn't flood
+        # stderr with one line per example (a raising sink is swallowed by run_evaluation).
+        if should_report_progress(completed, total):
+            typer.echo(f"[{completed}/{total}] evaluated", err=True)
 
     report = run_evaluation(
         EvaluationRunConfig(

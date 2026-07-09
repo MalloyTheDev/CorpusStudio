@@ -4,6 +4,7 @@ from corpus_studio.evaluation.evaluator import (
     EvaluationRunConfig,
     extract_evaluation_examples,
     run_evaluation,
+    should_report_progress,
 )
 from corpus_studio.model_backends.base import BackendGenerateResponse
 
@@ -71,6 +72,30 @@ def test_progress_callback_errors_do_not_abort_the_run():
 def test_no_callback_still_runs():
     report = run_evaluation(_config(), _examples(2), _OkBackend())
     assert report.examples_tested == 2
+
+
+# --- Throttle: large runs must not flood the progress sink -------------------
+
+
+def test_small_runs_report_every_example():
+    assert [c for c in range(1, 6) if should_report_progress(c, 5)] == [1, 2, 3, 4, 5]
+
+
+def test_large_runs_are_capped_and_always_report_first_and_last():
+    total = 10_000
+    reported = [c for c in range(1, total + 1) if should_report_progress(c, total)]
+    assert reported[0] == 1          # always the first
+    assert reported[-1] == total     # always the last
+    assert len(reported) <= 102      # ~100 updates, not 10,000
+    assert should_report_progress(1, total)
+    assert not should_report_progress(2, total)  # in-between rows are skipped
+
+
+def test_step_is_one_percent():
+    total = 1000
+    reported = [c for c in range(1, total + 1) if should_report_progress(c, total)]
+    # step = total // 100 = 10 → reports at 1, 10, 20, ..., 1000.
+    assert 10 in reported and 20 in reported and 15 not in reported
 
 
 # --- CLI wiring: --progress passes a callback (and emits without error) ------
