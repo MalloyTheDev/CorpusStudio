@@ -49,9 +49,10 @@ public sealed class EngineCommandTests
         public bool ExportCalled { get; private set; }
         public bool LastRemoveDuplicates { get; private set; }
         public bool LastRemoveLowInformation { get; private set; }
-        public Task<ExportResult> ExportProjectExamplesAsync(string projectPath, string schemaId, bool removeDuplicates = false, bool removeLowInformation = false)
+        public bool LastRedactPii { get; private set; }
+        public Task<ExportResult> ExportProjectExamplesAsync(string projectPath, string schemaId, bool removeDuplicates = false, bool removeLowInformation = false, bool redactPii = false)
         {
-            ExportCalled = true; LastRemoveDuplicates = removeDuplicates; LastRemoveLowInformation = removeLowInformation;
+            ExportCalled = true; LastRemoveDuplicates = removeDuplicates; LastRemoveLowInformation = removeLowInformation; LastRedactPii = redactPii;
             return Task.FromResult(new ExportResult());
         }
         public Task<ImportPreviewReport> PreviewImportAsync(string importPath, string schemaId) => Task.FromResult(new ImportPreviewReport { AcceptedRows = PreviewAccepted, RejectedRows = PreviewRejected });
@@ -644,5 +645,19 @@ public sealed class EngineCommandTests
         Assert.True(engine.ExportCalled);
         Assert.True(engine.LastRemoveDuplicates);
         Assert.False(engine.LastRemoveLowInformation);
+        Assert.False(engine.LastRedactPii); // off by default
+    }
+
+    [Fact]
+    public async Task ExportJsonl_WithRedactPiiToggle_PassesRedactionToTheEngine()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine);
+        SelectFakeProject(vm);
+        vm.ExportRedactPii = true;
+
+        await vm.ExportJsonlAsync();
+
+        Assert.True(engine.LastRedactPii); // the desktop toggle drives the engine's --redact-pii (#222)
     }
 }

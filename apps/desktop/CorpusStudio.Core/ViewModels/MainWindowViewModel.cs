@@ -65,6 +65,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     // shell keeps the bridges (health methods, eval->AiAssist/ReviewedFix, Training-baseline) reaching in.
     private bool _exportRemoveDuplicates;
     private bool _exportRemoveLowInformation;
+    private bool _exportRedactPii;
     private string _benchmarkModelsInput = string.Empty;
     private string _benchmarkSummary =
         "Enter one model per line, then benchmark them against this project's examples.";
@@ -1347,7 +1348,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             SetBusy("Exporting JSONL...");
             var exportResult = await _engine.ExportProjectExamplesAsync(
-                ActiveProjectPath, ActiveSchemaId, ExportRemoveDuplicates, ExportRemoveLowInformation);
+                ActiveProjectPath, ActiveSchemaId, ExportRemoveDuplicates, ExportRemoveLowInformation, ExportRedactPii);
 
             var message = $"Exported {exportResult.OutputRows} row(s) to:{System.Environment.NewLine}{exportResult.OutputPath}";
             if (exportResult.Cleaned && exportResult.RemovedRows > 0)
@@ -2814,6 +2815,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _exportRemoveLowInformation;
         set => SetField(ref _exportRemoveLowInformation, value);
+    }
+
+    /// <summary>Opt-in: mask detected PII/secrets in the export with typed [REDACTED:kind] placeholders.
+    /// Known high-precision patterns only — NOT a guarantee of de-identification (the engine records a
+    /// manifest and appends an honest warning to the export result). See issue #222 / #194.</summary>
+    public bool ExportRedactPii
+    {
+        get => _exportRedactPii;
+        set => SetField(ref _exportRedactPii, value);
     }
 
     public string BenchmarkSummary

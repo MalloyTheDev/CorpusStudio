@@ -3031,8 +3031,13 @@
                           IsChecked="{Binding ExportRemoveDuplicates, Mode=TwoWay}" />
                 <CheckBox AutomationProperties.AutomationId="ExportRemoveLowInformationCheckBox"
                           Content="Remove low-information rows"
-                          Margin="0,0,0,8"
+                          Margin="0,0,0,4"
                           IsChecked="{Binding ExportRemoveLowInformation, Mode=TwoWay}" />
+                <CheckBox AutomationProperties.AutomationId="ExportRedactPiiCheckBox"
+                          Content="Redact detected PII/secrets in the export"
+                          ToolTip="Masks emails, SSNs, keys/tokens, and cards with [REDACTED:kind] placeholders and writes a redaction manifest. Masks known high-precision patterns only — NOT a guarantee of de-identification; review before publishing."
+                          Margin="0,0,0,8"
+                          IsChecked="{Binding ExportRedactPii, Mode=TwoWay}" />
                 <Button x:Name="ExportJsonlButton"
                         Style="{StaticResource PrimaryButtonStyle}"
                         AutomationProperties.AutomationId="ExportJsonlButton"

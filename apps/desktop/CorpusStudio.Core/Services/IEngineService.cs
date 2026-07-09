@@ -47,8 +47,9 @@ public interface IEngineService
     /// <summary>Reconcile tracked reviewed-fixes against a fresh evaluation's per-example results.</summary>
     IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, IReadOnlyList<EvaluationExampleResult> results);
 
-    /// <summary>Export the project's examples to JSONL (optionally dedupe / drop low-information rows).</summary>
-    Task<ExportResult> ExportProjectExamplesAsync(string projectPath, string schemaId, bool removeDuplicates = false, bool removeLowInformation = false);
+    /// <summary>Export the project's examples to JSONL (optionally dedupe / drop low-information rows;
+    /// optionally mask detected PII/secrets in the export — known patterns only, not de-identification).</summary>
+    Task<ExportResult> ExportProjectExamplesAsync(string projectPath, string schemaId, bool removeDuplicates = false, bool removeLowInformation = false, bool redactPii = false);
 
     /// <summary>Preview a JSONL import against a schema (accepted/rejected rows, no write).</summary>
     Task<ImportPreviewReport> PreviewImportAsync(string importPath, string schemaId);
