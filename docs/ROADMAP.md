@@ -21,9 +21,9 @@ On top of that loop, v1.2.1–v1.2.15 added an **IDE-like workspace shell** (Sta
 Center, Universal Explorer, Problems + Output panels, one New Project wizard) and
 desktop polish; a deep-review pass shipped an **opt-in LLM-judge evaluation
 scorer**, a **crash-safe / self-contained distributable** build, an **Avalonia
-cross-platform assessment** and the **view-model decomposition** now in progress (a shared
-`ViewModelBase` + 13 of 15 tabs extracted behind interfaces + DI, shrinking the god object from
-~5,609 to ~2,947 lines), a
+cross-platform assessment** and the **view-model decomposition** (a shared
+`ViewModelBase` + all tabs extracted behind interfaces + DI, then run-orchestration consolidated
+into the VMs as testable commands behind an `IEngineService` seam), a
 **unified streaming JSONL reader** (soft-`orjson` accelerated, off-thread document
 opens), and **backend resilience** (retry/backoff + per-item error isolation). A
 subsequent **deep bug/security audit** hardened 19 data-integrity, gate/policy,
@@ -96,12 +96,13 @@ resulting features in full.
   engine; the estimate is documented as a heuristic).
 - **Hugging Face Hub export/push** (upload/publishing) — stays a deliberate
   non-goal for now; read-only Hub *import* already ships.
-- **Finish the Avalonia cross-platform port.** Phase 0 (platform seams + venv fix) and the
-  Phase 1 spike are **done** — a shared `CorpusStudio.Core` (`net8.0`) holds the view-models
-  and an Avalonia head binds the Debt + Arena tabs over them (GO). **Phase 2 is in progress** —
-  13 of 15 tab view-models are decomposed out of `MainWindowViewModel` (Dashboard + Training
-  remain); then each view is re-authored as `.axaml` (Phase 3) and per-OS packaging follows.
-  See [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md) and
-  [`CROSS_PLATFORM_ASSESSMENT.md`](CROSS_PLATFORM_ASSESSMENT.md).
+- **Finish the Avalonia cross-platform port.** Phases 0–3 are **done** — a shared
+  `CorpusStudio.Core` (`net8.0`) holds all the extracted view-models behind interfaces, and the
+  Avalonia head re-authors the whole app as `.axaml` over them (compiled bindings, same DI). The
+  **`ICommand` conversion is in progress** (WPF code-behind engine handlers → shared testable
+  commands behind `IEngineService`/`IDialogService`/`IFilePickerService`); the remaining handlers
+  need a process-streaming seam, timer decoupling, and undo-state migration, after which Fluent-theme
+  styling and per-OS packaging follow. See [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md)
+  and [`CROSS_PLATFORM_ASSESSMENT.md`](CROSS_PLATFORM_ASSESSMENT.md).
 - Smaller: dataset-version reorder detection and a normalized row identity. (Row-store GC,
   PII redaction on export, and the desktop gate-threshold editor now ship.)

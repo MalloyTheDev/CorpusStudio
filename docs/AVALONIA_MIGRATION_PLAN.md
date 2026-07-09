@@ -20,14 +20,23 @@ concrete, phased, slice-by-slice plan grounded in the current decomposition stat
   Settings, Versions, Artifacts, Suites, Splits, Preference Review, Quarantine, Examples, Writing Studio,
   AI Assist, Evaluation, Training; the last several via multi-PR splits through backend-connection
   sub-VMs) plus the **Quality panel**. (Dashboard is a composition view over the extracted children, not
-  its own VM.) The god object dropped from **5,609 to ~2,165 lines** — what remains is legitimate shell
-  orchestration (shell mode, project list, active-project, engine-unavailable, output log).
+  its own VM.) Tab extraction dropped the VM from **5,609 to ~2,165 lines** — what remained was legitimate
+  shell orchestration (shell mode, project list, active-project, engine-unavailable, output log). The
+  later command conversion (below) then intentionally grew it back to **~4,300 lines** by consolidating
+  per-head run-orchestration *into* the VM as testable bindable commands, shrinking the WPF code-behind.
 - **Phase 3 — DONE (structural).** Re-authored the whole app as `.axaml` on the Avalonia head over the
   *unchanged* Core VMs: all 14 tab views + the shell chrome (activity bar, Start Center, Universal
   Explorer, docked Problems/Output panels, the Studio hero + Quality panel), plus a `StringToBrush`
   converter for the VMs' hex-string status colours. Compiled bindings validate every path at build time,
-  so the green build is the proof. Not shipped; WPF stays the product head. Remaining: real Explorer file
-  tree, `ICommand` conversion, and Fluent-theme styling; then Phase 4 packaging.
+  so the green build is the proof. Not shipped; WPF stays the product head.
+- **`ICommand` conversion (#184) — in progress.** Converting the WPF code-behind `_Click` engine
+  handlers into shared `AsyncRelayCommand`/`RelayCommand`s on the view-models, behind the `IEngineService`
+  seam so run-orchestration is head-agnostic and unit-testable with a fake engine. The mechanical,
+  dialog (`IDialogService`), file-picker (`IFilePickerService`), and named-control input-binding tiers are
+  **done** (code-behind `_Click` handlers **108 → 59**, `ICommand` count **0 → ~55**). Remaining handlers
+  need per-handler refactors first: a process-streaming seam (Launch/Resume training), timer decoupling
+  (checkpoint polling), the AI-Assist bulk-undo state migration, and workspace-init extraction
+  (Locate/Retry engine). Then: real Explorer file tree, Fluent-theme styling, and Phase 4 packaging.
 
 The Avalonia head, running (Phase 3): the **full workspace shell** — activity bar, the Studio hero with
 the colour-coded Debt grade badge, the Projects sidebar, all 14 Studio tabs, the docked Quality panel —
@@ -36,17 +45,18 @@ What began as a two-tab spike now binds the whole app; compiled bindings validat
 
 ![The Avalonia head rendering the full Corpus Studio shell (activity bar, Studio hero + Debt badge, all 14 tabs, and the Quality panel) over the shared CorpusStudio.Core view-models.](screenshots/avalonia-spike.png)
 
-Ground-truth measured 2026-07-05 (Phase 2 mid-flight, after the Evaluation-core slice):
+Ground-truth measured 2026-07-08 (Phases 0–3 done; `ICommand` conversion in progress):
 
 | Fact | Value |
 |---|---|
 | Studio tabs | **15** (Dashboard, Writing Studio, Examples, Preference Review, Quarantine, Splits, Evaluation, AI Assist, Training, Arena, Artifacts, Suites, Versions, Debt, Settings) |
-| Per-tab VMs extracted | **13 of 15** (each `IXxxViewModel` + `XxxViewModel : ViewModelBase`): Debt, Arena, Settings, Versions, Artifacts, Suites, Splits, Preference Review, Quarantine, Examples, Writing Studio, AI Assist, Evaluation. **Remaining: Dashboard, Training** (+ residual Quality/Validation + the Lab-settings orchestrator on the shell) |
-| `MainWindowViewModel.cs` | **~2,947 lines** (down from 5,609 at Phase-1 start) |
-| Code-behind `_Click` handlers | **108**, `ICommand` count: **0** — handlers now delegate to the extracted VMs; the command conversion is deferred to the per-tab `.axaml` port (Phase 3) |
-| DI | `App.xaml.cs` (WPF) + `App.axaml.cs` (Avalonia) → `ServiceCollection` register all 13 extracted `IXxxViewModel`s + sub-VMs + `<MainWindowViewModel>`; ctor injection with a parameterless design-time/test ctor |
+| Per-tab VMs extracted | **All done** — 18 `IXxxViewModel` + `XxxViewModel : ViewModelBase` (the 14 real tabs incl. Training + Evaluation, plus the Quality panel, and the AI-Assist/Evaluation connection + AI-Assist rewrite-batches sub-VMs). Dashboard stays a composition view over the extracted children, not its own VM. |
+| `MainWindowViewModel.cs` | **~4,316 lines** — fell to ~2,165 after tab extraction, then grew back as the `ICommand` conversion consolidated per-head run-orchestration into it (as testable commands behind `IEngineService`) |
+| Code-behind `_Click` handlers | **59** (down from 108), `ICommand` count: **~55** — the mechanical/dialog/picker/input-binding tiers are converted; remaining handlers need per-handler refactors (process streaming, timer, undo-state, workspace-init) |
+| Head-agnostic seams on the VM | `IEngineService` (**57 methods**, faked in tests), `IDialogService` (confirm/message), `IFilePickerService` (file/folder pick) — all with Core `Null*` defaults for the parameterless design-time ctor |
+| DI | `App.xaml.cs` (WPF) + `App.axaml.cs` (Avalonia) → `ServiceCollection` register all extracted `IXxxViewModel`s + sub-VMs + `IEngineService`/`IDialogService`/`IFilePickerService` + `<MainWindowViewModel>`; ctor injection with a parameterless design-time/test ctor |
 | WPF-only surface (from the assessment) | ~3,383 XAML lines · 40 Triggers · 93 `Visibility` bindings · 42 ControlTemplates · `MessageBox.Show`/file dialogs now behind `IDialogService`/`IFilePickerService` |
-| Already portable | engine bridge (`Process`), all Models/Services/VMs in `CorpusStudio.Core`, 0 `DllImport`, 0 third-party UI pkgs, the whole 492-test desktop suite |
+| Already portable | engine bridge (`Process`), all Models/Services/VMs in `CorpusStudio.Core`, 0 `DllImport`, 0 third-party UI pkgs, the whole **571-test** desktop suite |
 
 ## Critique (read before committing)
 
@@ -117,7 +127,7 @@ first** to build momentum and keep each slice low-risk (✓ = extracted):
    **Training** (remaining) — the big, coupled ones, done with the pattern fully grooved. (Debt/Arena's
    residual state still to finish.)
 - Each slice: `IXxxViewModel` + `XxxViewModel : ViewModelBase` + DI registration + move the
-  code-behind handlers to VM methods + tests. The desktop suite (**492 tests** and growing) guards
+  code-behind handlers to VM methods + tests. The desktop suite (**571 tests** and growing) guards
   every move; add per-VM tests as logic lands in a testable seam.
 - *Effort:* the bulk — multiple weeks, but each tab is a clean, independently-reviewable PR.
 

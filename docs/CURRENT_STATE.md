@@ -3,14 +3,16 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-07-05 (through **v1.3** — Evaluation Suites & Chat Gates —
+Last reconciled: 2026-07-08 (through **v1.3** — Evaluation Suites & Chat Gates —
 plus the deep bug/security audit, 19 fixes across data integrity, gate/policy
 hardening, and quality/split correctness, PRs #104–118; a residual-audit pass
-hardening the v1.3 surface, PRs #133–142; and the CI dependency refresh, PRs
-#94–101). Earlier
+hardening the v1.3 surface, PRs #133–142; the CI dependency refresh, PRs
+#94–101; and the Avalonia-migration decomposition — **all per-tab view-models
+extracted** and the WPF code-behind engine handlers being converted to shared
+testable commands behind `IEngineService`/`IDialogService`/`IFilePickerService`
+seams, PRs #146–243). Earlier
 milestones: the Workspace shell, desktop polish, the LLM-judge evaluation scorer,
-a crash-safe / distributable build, the Avalonia-prep god-object decomposition
-(now 13 of 15 tab view-models extracted), a unified JSONL reader, backend retry +
+a crash-safe / distributable build, a unified JSONL reader, backend retry +
 per-item error isolation, and off-thread document opens.
 
 ## What works today (implemented and tested)
@@ -221,20 +223,21 @@ per-item error isolation, and off-thread document opens.
   malformed-line handling can't drift; a declared-but-optional `orjson` accelerates
   the hot path when present with a stdlib fallback. Opening a document in the Explorer
   runs the read **off the UI thread** so a large file never stalls the window.
-- Architecture: the desktop view-model is being decomposed from a single god-object
+- Architecture: the desktop view-model has been decomposed from a single god-object
   into per-tab view-models behind interfaces, composed via a DI container
-  (`Microsoft.Extensions.DependencyInjection`) with a shared `ViewModelBase`; **13 of 15
-  tabs are extracted** (Debt, Arena, Settings, Versions, Artifacts, Suites, Splits,
-  Preference Review, Quarantine, Examples, Writing Studio, AI Assist, Evaluation), shrinking
-  `MainWindowViewModel` from ~5,609 to ~2,947 lines; **Dashboard and Training** remain (see
-  [`CROSS_PLATFORM_ASSESSMENT.md`](CROSS_PLATFORM_ASSESSMENT.md), which relies on it).
-- Cross-platform (Avalonia) migration — **Phase 0 + Phase 1 spike done; Phase 2 in progress**
-  (not shipped; WPF stays the product head). Platform seams are behind interfaces
-  (`IDialogService`, `IFilePickerService`) with a cross-platform venv-path fix; all Models +
-  view-models + WPF-free services live in a shared **`CorpusStudio.Core`** (`net8.0`) library;
-  and a proof **`CorpusStudio.Avalonia`** head binds the Debt + Arena tabs over those unchanged
-  view-models with compiled bindings — the GO/NO-GO spike **passed**. Phase 2 (the per-tab
-  decomposition) is 13/15 done; the per-tab `.axaml` view ports (Phase 3) are pending. See
+  (`Microsoft.Extensions.DependencyInjection`) with a shared `ViewModelBase`; **all tabs are
+  extracted** (18 `IXxxViewModel` + `XxxViewModel`, incl. Training + Evaluation, the Quality
+  panel, and the connection/rewrite-batch sub-VMs). Dashboard stays a composition view over the
+  extracted children. Run-orchestration is being consolidated off the per-head code-behind into
+  the VM as testable commands behind an **`IEngineService`** seam (issue #184): code-behind
+  `_Click` handlers are down from 108 to ~59, with ~55 `ICommand`s.
+- Cross-platform (Avalonia) migration — **Phases 0–3 done; `ICommand` conversion in progress**
+  (not shipped; WPF stays the product head). Head-agnostic seams live on the view-models —
+  `IEngineService`, `IDialogService`, `IFilePickerService` (each with a Core `Null*` default and
+  WPF/Avalonia DI adapters) — plus a cross-platform venv-path fix; all Models + view-models +
+  WPF-free services live in a shared **`CorpusStudio.Core`** (`net8.0`) library; and the proof
+  **`CorpusStudio.Avalonia`** head re-authors the *whole* app as `.axaml` over those unchanged
+  view-models with compiled bindings (the GO/NO-GO spike passed, then grew to the full shell). See
   [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md).
 
 ## Hard boundaries (by design)
@@ -261,11 +264,11 @@ per-item error isolation, and off-thread document opens.
   engine, and the current estimate is documented as a heuristic.
 - **HF export/push** (upload/publishing) — see the hard boundary above; it stays a
   deliberate non-goal for now. (Read-only Hub *import* already ships.)
-- **Finish the Avalonia port** — the Phase 1 spike proved the approach (Debt + Arena bind
-  in an Avalonia head over the shared `CorpusStudio.Core`); **Phase 2 is in progress** (13 of 15
-  tab view-models decomposed out of `MainWindowViewModel`; Dashboard + Training remain), after
-  which each view is re-authored as `.axaml` (Phase 3). The Avalonia head is not shipped yet.
-  See `AVALONIA_MIGRATION_PLAN.md`.
+- **Finish the Avalonia port** — Phases 0–3 are done (all view-models extracted; the whole app
+  re-authored as `.axaml` over the shared `CorpusStudio.Core`); the **`ICommand` conversion is in
+  progress** (WPF code-behind engine handlers → shared testable commands behind `IEngineService`),
+  with the process-streaming/timer/undo-state handlers and Fluent-theme styling + per-OS packaging
+  still to do. The Avalonia head is not shipped yet. See `AVALONIA_MIGRATION_PLAN.md`.
 - **Row-store garbage collection** (`dataset-version-gc`): prunes row-store rows no version
   references, keeping the union of every version manifest. Fail-closed — it aborts on an unreadable
   manifest and keeps any line it can't identify, so it never removes a referenced row; `--dry-run`

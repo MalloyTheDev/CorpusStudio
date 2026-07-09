@@ -55,15 +55,18 @@ The desktop layer is responsible for:
 The desktop is a .NET solution with the UI logic being decomposed for cross-platform reuse:
 
 - **`CorpusStudio.Core`** (`net8.0`) — WPF-free shared library: all Models, Services, and the
-  per-tab view-models (each `IXxxViewModel` + `XxxViewModel : ViewModelBase`), plus platform seams
-  (`IDialogService`, `IFilePickerService`) resolved via a DI container.
+  per-tab view-models (each `IXxxViewModel` + `XxxViewModel : ViewModelBase`), plus the head-agnostic
+  seams — `IEngineService` (engine run-orchestration, faked in tests), `IDialogService`, and
+  `IFilePickerService` — resolved via a DI container (each with a Core `Null*` default).
 - **`CorpusStudio.Desktop`** (`net8.0-windows`) — the shipping WPF head: Views + `App` + the WPF
-  seam adapters, referencing Core.
-- **`CorpusStudio.Avalonia`** (`net8.0`) — a proof cross-platform head binding a subset of tabs over
+  seam adapters (`MessageBoxDialogService`, `Win32FilePickerService`, `PythonEngineService`), referencing Core.
+- **`CorpusStudio.Avalonia`** (`net8.0`) — a proof cross-platform head binding the full tab set over
   the *unchanged* Core view-models (not shipped).
 
-The former single `MainWindowViewModel` god-object is being split one tab at a time into these per-tab
-view-models (13 of 15 done). See [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md).
+All per-tab view-models are now extracted out of the former `MainWindowViewModel` god-object; what
+remains on the shell is legitimate orchestration (shell mode, project list, active project, output log)
+plus the engine-run commands being consolidated off the per-head code-behind (issue #184). See
+[`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md).
 
 ## Engine layer
 

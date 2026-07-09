@@ -1,16 +1,18 @@
 # Cross-Platform Assessment (Avalonia migration)
 
 **Status:** the *whether/why* record for the cross-platform move. Its recommendation was
-adopted and is now being executed — Phase 0/1 are done (seams + venv fix + the shared
-`CorpusStudio.Core` + an Avalonia spike that passed GO) and Phase 2 (the per-tab
-decomposition) is 13/15 done. For live progress see
+adopted and is now being executed — Phases 0–3 are done (seams + venv fix + the shared
+`CorpusStudio.Core` + an Avalonia spike that passed GO + **all per-tab view-models extracted**
++ the whole app re-authored as `.axaml` on the Avalonia head), and the `ICommand` conversion
+(issue #184) is in progress. For live progress see
 [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md); this doc is kept as the original
 analysis of how the Windows-only WPF desktop (`apps/desktop`) could become cross-platform
 (macOS/Linux), where the local trainers the app orchestrates actually run.
 
 All figures below were measured against the code (not docs) on 2026-07-03 — a **pre-decomposition
-snapshot** (e.g. the 5,549-line god object has since dropped to ~2,947); the *analysis* holds,
-the raw counts are historical.
+snapshot**; the decomposition is now complete and orchestration is being consolidated into the
+view-models (see the plan for current line counts). The *analysis* holds; the raw counts here are
+historical.
 
 ## TL;DR / recommendation
 

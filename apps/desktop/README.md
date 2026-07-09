@@ -1,8 +1,10 @@
 # Corpus Studio Desktop
 
-C# WPF desktop app for Corpus Studio.
+C# WPF desktop app for Corpus Studio. (A proof `CorpusStudio.Avalonia` head binds the same
+`CorpusStudio.Core` view-models cross-platform; WPF stays the shipping head — see
+[`../../docs/AVALONIA_MIGRATION_PLAN.md`](../../docs/AVALONIA_MIGRATION_PLAN.md).)
 
-The current v0.1 workflow supports:
+The desktop workflow supports:
 
 - a Dashboard landing tab with quick-action buttons (author, run quality,
   generate splits, run evaluation, training config, new project) and
@@ -22,10 +24,15 @@ The current v0.1 workflow supports:
 - "Rebuild Index" action that rebuilds the optional engine SQLite project index
   and re-lists projects from it (JSON/JSONL stay authoritative)
 - train/validation/test split generation with saved ratios, seed, and tiny-split warnings
-- Evaluation Lab MVP runs, backend checks, pre-run health gates, report history, two-report comparison, saved regression reruns, report summaries by tag/failure reason/score band, failed-example review filtering, failed-row edit handoff to Writing Studio, failed-example AI Assist triage preparation, and manual per-example notes/scores for configured Ollama or OpenAI-compatible local endpoints
-- AI Assist MVP backend checks plus schema-aware action presets, persistent review queue, filters, search, sorting, saved queue views, persistent rewrite batches, bulk triage with multi-step undo, accept/reject states, source/suggestion comparison, batch synthetic rewrite preparation, preference-pair judge handoff, preference ranking export, and visible batch judge preparation
-- Training Lab MVP config export for inspectable trainer config files
-- JSONL export
+- Evaluation Lab runs, backend checks, pre-run health gates, report history, two-report comparison, saved regression reruns, report summaries by tag/failure reason/score band, failed-example review filtering, failed-row edit handoff to Writing Studio, failed-example AI Assist triage preparation, manual per-example notes/scores, and **multi-model benchmark comparison**, for configured Ollama or OpenAI-compatible local endpoints (optional LLM-judge scorer)
+- Evaluation **Suites** tab: register, scaffold, and run named evaluation suites with per-metric roll-ups, per-case results, and run history/trend
+- AI Assist backend checks plus schema-aware action presets, persistent review queue, filters, search, sorting, saved queue views, persistent rewrite batches, bulk triage with multi-step undo, accept/reject states, source/suggestion comparison, batch synthetic rewrite preparation, preference-pair judge handoff, preference ranking export, and visible batch judge preparation
+- Training Lab: config export **and launching your installed trainer with live streamed logs, checkpoint listing, run history, a training-run regression gate, and resume-from-checkpoint**
+- model **Artifacts** registry (register a run's output, promote-gate to keep, reject) and dataset **Versions** (capture, card, diff, restore-in-place with an undo capture)
+- prompt **Arena** for side-by-side model comparison, and a **Debt** tab (graded A–F dataset-debt ledger with ranked remediation)
+- Hugging Face Hub dataset import (read-only, public) through the normal import-preview/quarantine flow
+- gate runs (schema/quality/leakage/PII/eval + chat-structure) with an editable per-project gate-threshold editor and a provider generation-policy approve/revoke surface
+- JSONL export (with optional dedupe / drop-low-information cleaning)
 - local settings inspection and per-project lab backend settings persistence
 - polished desktop shell styling, a workflow stage strip, and a wired sidebar
   Export Center affordance
@@ -91,9 +98,10 @@ can also be prepared for AI Assist triage, which loads a draft from the
 expected answer and copies the prompt, expected output, model output, and score
 into the AI Assist instruction.
 Evaluation runs and regression reruns perform a pre-run backend health check
-and require the selected local backend to already be running. It does not
-implement multi-model benchmark comparison, hosted-provider setup, or training
-launch.
+and require the selected local backend to already be running. It also runs a
+multi-model benchmark comparison across several models. It does not implement
+hosted-provider setup (cloud providers stay evaluator-only by policy and their
+transports are not embedded — see [`../../docs/PROVIDER_POLICY.md`](../../docs/PROVIDER_POLICY.md)).
 
 The Settings tab can save the current Evaluation and AI Assist backend, model,
 base URL, and timeout into the active project's `project.json` under
@@ -141,8 +149,13 @@ It prefers generated train/validation split files when they exist, falls back to
 the project's saved examples for config preview, and writes rendered config
 files under the configured export directory. A "Check Compatibility" button runs
 the engine's `training-compat` pre-check and reports schema/format/target
-mismatches before generating, so problems surface early. It does not launch
-trainers, install ML packages, show logs, manage checkpoints, or resume runs.
+mismatches before generating, so problems surface early. It then **launches your
+installed trainer** with the generated command (after a confirm), streaming its
+stdout/stderr live, lists produced checkpoints, records each run, can **resume
+from a checkpoint**, and runs a **regression gate** that links the newest
+post-training eval to the run to check for regression against the baseline.
+It does **not** install ML packages or implement a training framework — it
+orchestrates the trainer you already have (no CUDA/PyTorch internals).
 
 The desktop shell uses shared WPF styles for controls, tabs, side rails, and
 the project header so new lab surfaces should reuse the existing visual frame
