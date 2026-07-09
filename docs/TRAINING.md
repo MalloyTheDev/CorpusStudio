@@ -247,6 +247,10 @@ before/after and BLOCK a regressed promote. Honesty boundary: the serve step is 
 not a guarantee (nothing here runs or serves a model); the eval/link/gate commands are exact
 once served. Only a `succeeded` run is "ready" — you can't evaluate a model a run never produced.
 
+The desktop **Training tab surfaces this plan in-app**: when a run finishes successfully (and on
+each run-history refresh, for the newest run) the ordered steps + copy-pasteable commands appear
+below the run history, so the one-stop-shop closes the loop without dropping to the CLI.
+
 ### Config Targets
 
 Planned targets:

@@ -1691,6 +1691,26 @@ public partial class MainWindow : Window
             record.Notes = note;
         }
         TrySaveRunRecord(projectPath, record);
+
+        // Close the train→eval loop: a succeeded run produced a model, so surface the
+        // ordered plan to evaluate it (serve → eval → link → gate). Best-effort.
+        if (status == "succeeded")
+        {
+            await ShowEvalHandoffAsync(projectPath, record.RunId);
+        }
+    }
+
+    private async Task ShowEvalHandoffAsync(string projectPath, string runId)
+    {
+        try
+        {
+            var plan = await _engineService.BuildEvalHandoffAsync(projectPath, runId);
+            ViewModel.Training.ApplyEvalHandoff(plan);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.Training.SetEvalHandoffError(ex.Message);
+        }
     }
 
     private void TrySaveRunRecord(string projectPath, TrainingRunRecord record)
@@ -1727,7 +1747,7 @@ public partial class MainWindow : Window
     private Task RefreshDatasetVersionsAsync() => ViewModel.RefreshDatasetVersionsAsync();
 
 
-    private void RefreshTrainingRunsButton_Click(object sender, RoutedEventArgs e)
+    private async void RefreshTrainingRunsButton_Click(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
         {
@@ -1735,14 +1755,23 @@ public partial class MainWindow : Window
             return;
         }
 
+        IReadOnlyList<TrainingRunRecord> records;
         try
         {
-            var records = _engineService.LoadTrainingRunRecords(ViewModel.ActiveProjectPath);
+            records = _engineService.LoadTrainingRunRecords(ViewModel.ActiveProjectPath);
             ViewModel.Training.ApplyTrainingRunHistory(records);
         }
         catch (Exception ex)
         {
             ViewModel.Training.SetTrainingRunHistoryError(ex.Message);
+            return;
+        }
+
+        // Also refresh the close-the-loop plan for the newest run (the plan itself is
+        // honest about a run that hasn't succeeded yet).
+        if (records.Count > 0)
+        {
+            await ShowEvalHandoffAsync(ViewModel.ActiveProjectPath, records[0].RunId);
         }
     }
 

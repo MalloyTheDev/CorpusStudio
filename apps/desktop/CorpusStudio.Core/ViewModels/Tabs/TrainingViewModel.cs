@@ -64,6 +64,9 @@ public sealed class TrainingViewModel : ViewModelBase, ITrainingViewModel
 
     private string _trainingRunGateSummary = "Gate a run to check for regression vs its baseline.";
 
+    private string _trainingEvalHandoffSummary =
+        "Finish a run to see how to evaluate the model it produced (close the train→eval loop).";
+
     private string _trainingCheckpointsSummary =
         "Checkpoints appear here after a training run writes them.";
 
@@ -265,6 +268,50 @@ public sealed class TrainingViewModel : ViewModelBase, ITrainingViewModel
     public void SetTrainingRunHistoryError(string message)
     {
         TrainingRunHistorySummary = $"Run history could not load.{Environment.NewLine}{message}";
+    }
+
+    public string TrainingEvalHandoffSummary
+    {
+        get => _trainingEvalHandoffSummary;
+        private set => SetField(ref _trainingEvalHandoffSummary, value);
+    }
+
+    public void SetEvalHandoffError(string message)
+    {
+        TrainingEvalHandoffSummary = $"The eval plan could not load.{Environment.NewLine}{message}";
+    }
+
+    /// <summary>Render the close-the-loop plan for a finished run. Not-ready runs (still
+    /// running / failed) show the plan's honest note instead of steps. Pure + testable.</summary>
+    public void ApplyEvalHandoff(EvalHandoffPlan plan)
+    {
+        if (!plan.Ready)
+        {
+            TrainingEvalHandoffSummary = string.IsNullOrWhiteSpace(plan.Note)
+                ? "No finished run to evaluate yet."
+                : plan.Note;
+            return;
+        }
+
+        var lines = new List<string>
+        {
+            $"Evaluate the model from run {plan.RunId} — serving is external; the eval/link/gate commands are exact:",
+            string.Empty,
+        };
+        var index = 1;
+        foreach (var step in plan.Steps)
+        {
+            lines.Add($"{index}. {step.Title}");
+            lines.Add($"   {step.Detail}");
+            if (!string.IsNullOrWhiteSpace(step.Command))
+            {
+                lines.Add($"   $ {step.Command}");
+            }
+            lines.Add(string.Empty);
+            index++;
+        }
+
+        TrainingEvalHandoffSummary = string.Join(Environment.NewLine, lines).TrimEnd();
     }
 
     public void ApplyTrainingRunHistory(IReadOnlyList<TrainingRunRecord> records)

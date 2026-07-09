@@ -103,6 +103,53 @@ public sealed class TrainingRunViewModelTests
     }
 
     [Fact]
+    public void ApplyEvalHandoff_ReadyPlan_RendersNumberedStepsAndCommands()
+    {
+        var vm = new MainWindowViewModel();
+        var plan = new EvalHandoffPlan
+        {
+            RunId = "20260709-r1",
+            Status = "succeeded",
+            Ready = true,
+            Steps =
+            [
+                new HandoffStep { Title = "Serve the trained model", Detail = "external step" },
+                new HandoffStep
+                {
+                    Title = "Evaluate",
+                    Detail = "same held-out set",
+                    Command = "corpus-studio eval-run \"held.jsonl\" instruction --model tuned",
+                },
+            ],
+        };
+
+        vm.Training.ApplyEvalHandoff(plan);
+
+        Assert.Contains("20260709-r1", vm.Training.TrainingEvalHandoffSummary);
+        Assert.Contains("1. Serve the trained model", vm.Training.TrainingEvalHandoffSummary);
+        Assert.Contains("2. Evaluate", vm.Training.TrainingEvalHandoffSummary);
+        Assert.Contains("$ corpus-studio eval-run", vm.Training.TrainingEvalHandoffSummary);
+    }
+
+    [Fact]
+    public void ApplyEvalHandoff_NotReady_ShowsNoteNotSteps()
+    {
+        var vm = new MainWindowViewModel();
+        var plan = new EvalHandoffPlan
+        {
+            RunId = "r2",
+            Status = "running",
+            Ready = false,
+            Note = "This run's status is 'running', not 'succeeded'.",
+        };
+
+        vm.Training.ApplyEvalHandoff(plan);
+
+        Assert.Equal("This run's status is 'running', not 'succeeded'.", vm.Training.TrainingEvalHandoffSummary);
+        Assert.DoesNotContain("1.", vm.Training.TrainingEvalHandoffSummary);
+    }
+
+    [Fact]
     public void AppendTrainingRunLog_CapsAtMaxLines()
     {
         var vm = new MainWindowViewModel();

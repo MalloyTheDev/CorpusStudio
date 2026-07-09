@@ -1622,6 +1622,13 @@ public sealed class PythonEngineService : IEngineService
             ?? throw new InvalidOperationException("The Python engine returned an invalid gate report.");
     }
 
+    public async Task<EvalHandoffPlan> BuildEvalHandoffAsync(string projectPath, string runId)
+    {
+        var output = await RunEngineCommandAsync("training-eval-plan", projectPath, "--run-id", runId, "--json");
+        return JsonSerializer.Deserialize<EvalHandoffPlan>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid eval handoff plan.");
+    }
+
     /// <summary>Flip any `running` record that is not alive to `interrupted`.
     /// Pure over an injected liveness check so it is unit-testable.</summary>
     public static IReadOnlyList<TrainingRunRecord> ReconcileRunningRecords(

@@ -135,6 +135,9 @@ public interface IEngineService
     /// <summary>Run the training-run regression gate for a recorded run.</summary>
     Task<GateReport> RunTrainingRunGateAsync(string projectPath, string runId);
 
+    /// <summary>Build the close-the-loop plan (serve → eval → link → gate) for a finished run.</summary>
+    Task<EvalHandoffPlan> BuildEvalHandoffAsync(string projectPath, string runId);
+
     /// <summary>Generate deterministic train/validation/test splits over the project's examples.</summary>
     Task<SplitReport> GenerateProjectSplitsAsync(string projectPath, string schemaId, double trainRatio, double validationRatio, int seed);
 
