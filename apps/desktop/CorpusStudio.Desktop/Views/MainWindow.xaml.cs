@@ -875,37 +875,6 @@ public partial class MainWindow : Window
     // ---- Evaluation Suites tab (v1.3 M2) ---------------------------------------------
 
 
-    private async void NewSuiteButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.HasActiveProject || string.IsNullOrWhiteSpace(ViewModel.ActiveProjectPath))
-        {
-            ViewModel.Suites.SetSuitesError("Create or select a dataset project first.");
-            return;
-        }
-        var name = NewSuiteNameBox.Text?.Trim() ?? string.Empty;
-        if (name.Length == 0)
-        {
-            ViewModel.Suites.SetSuitesError("Enter a suite name to create.");
-            return;
-        }
-        try
-        {
-            ViewModel.Suites.IsSuitesBusy = true;
-            await _engineService.NewSuiteAsync(ViewModel.ActiveProjectPath, name);
-            NewSuiteNameBox.Clear();
-            ViewModel.Suites.ApplySuites(await _engineService.ListSuitesAsync(ViewModel.ActiveProjectPath));
-            ViewModel.Suites.SetSuitesError($"Created suite '{name}'. Open evaluation_suites/{name}.json in Files to edit its cases.");
-        }
-        catch (Exception ex)
-        {
-            ViewModel.Suites.SetSuitesError(ex.Message);
-        }
-        finally
-        {
-            ViewModel.Suites.IsSuitesBusy = false;
-        }
-    }
-
 
     /// <summary>Load the effective gate thresholds into the Settings editor (issue #198).</summary>
     private async Task RefreshGateThresholdsAsync()

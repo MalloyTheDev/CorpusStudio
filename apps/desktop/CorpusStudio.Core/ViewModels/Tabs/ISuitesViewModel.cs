@@ -29,6 +29,9 @@ public interface ISuitesViewModel : INotifyPropertyChanged
     SuiteSummary? SelectedSuite { get; set; }
     bool IsSuitesBusy { get; set; }
 
+    /// <summary>The name typed into the "New suite" box (bound two-way).</summary>
+    string NewSuiteName { get; set; }
+
     /// <summary>Mirror of the shell's HasActiveProject, pushed on project switch. Feeds
     /// <see cref="CanRunSuite"/> (Run needs an open project).</summary>
     bool HasActiveProject { get; set; }
