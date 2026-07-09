@@ -134,30 +134,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void RebuildProjectIndexButton_Click(object sender, RoutedEventArgs e)
-    {
-        var selectedId = ViewModel.SelectedProject?.Id;
-        try
-        {
-            Mouse.OverrideCursor = Cursors.Wait;
-            ViewModel.SetBusy("Rebuilding project index...");
-            var result = await _engineService.RebuildProjectIndexAsync();
-            ViewModel.SetProjects(await _engineService.LoadProjectsFromIndexAsync());
-            ViewModel.SelectedProject = ViewModel.Projects
-                .FirstOrDefault(project => project.Id == selectedId);
-            ViewModel.ApplyProjectIndexRebuilt(result);
-        }
-        catch (Exception ex)
-        {
-            ViewModel.SetProjectIndexError(ex.Message);
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-            ViewModel.ClearBusy();
-        }
-    }
-
     // The Studio-sidebar "New Dataset Project" button and the Start Center both open the
     // single workspace wizard (v1.2.5 unification) — one creation UX, one on-disk result.
     private async void NewDatasetProjectButton_Click(object sender, RoutedEventArgs e) =>
