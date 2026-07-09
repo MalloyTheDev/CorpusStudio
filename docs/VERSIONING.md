@@ -91,8 +91,10 @@ can later be diffed (and, in a future slice, restored):
 - **Content-addressed store** — `dataset_versions/row_store.jsonl`, one line per
   *unique* row (`{"row_id": <sha256>, "row": <canonical>}`). `row_id` is the
   SHA-256 of the same `exact_row_signature` used for identity, so identical rows
-  across versions are stored once. It is line-inspectable and only grows (no GC
-  of orphaned blobs in this slice).
+  across versions are stored once. It is line-inspectable and grows as versions are
+  captured; **row-store GC** (`dataset-version-gc`, or the Versions tab's "Clean up
+  row store" action — a dry-run + confirm) prunes rows no version manifest references,
+  fail-closed (an unclassifiable/unreadable case keeps the rows rather than risk data loss).
 - **Ordered manifest** — a per-version sidecar `dataset_versions/<version_id>.rows`
   (one `row_id` per line, in order). The record carries `rows_stored`,
   `stored_row_count`, and `row_manifest_algo` (`sha256-exact-v1`, versioned).

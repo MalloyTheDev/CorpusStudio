@@ -205,6 +205,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand ExportPreferenceRankingCommand { get; }
     public System.Windows.Input.ICommand RefreshDatasetVersionsCommand { get; }
     public System.Windows.Input.ICommand RestoreDatasetVersionCommand { get; }
+    public System.Windows.Input.ICommand RunRowStoreGcCommand { get; }
     public System.Windows.Input.ICommand SaveExampleCommand { get; }
     public System.Windows.Input.ICommand ImportDatasetCommand { get; }
     public System.Windows.Input.ICommand ImportFromHuggingFaceCommand { get; }
@@ -338,6 +339,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RebuildProjectIndexCommand = new AsyncRelayCommand(RebuildProjectIndexAsync);
         ExportPreferenceRankingCommand = new RelayCommand(ExportPreferenceRanking);
         RefreshDatasetVersionsCommand = new AsyncRelayCommand(RefreshDatasetVersionsAsync);
+        RunRowStoreGcCommand = new AsyncRelayCommand(RunRowStoreGcAsync);
         RestoreDatasetVersionCommand = new AsyncRelayCommand(RestoreDatasetVersionAsync);
         SaveExampleCommand = new AsyncRelayCommand(SaveExampleAsync);
         ImportDatasetCommand = new AsyncRelayCommand(ImportDatasetAsync);
@@ -2784,6 +2786,55 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         catch (System.Exception ex)
         {
             Versions.SetDatasetVersionError(ex.Message);
+        }
+    }
+
+    /// <summary>Clean up the row store: dry-run first to show what would be pruned, then (on confirm) run
+    /// the real GC. The engine is fail-closed — only rows no version references are pruned. Moved-in from
+    /// the code-behind pattern; routes the destructive action through the confirm dialog (#225).</summary>
+    public async System.Threading.Tasks.Task RunRowStoreGcAsync()
+    {
+        if (!HasActiveProject || string.IsNullOrWhiteSpace(ActiveProjectPath))
+        {
+            Versions.SetDatasetVersionError("Create or select a dataset project first.");
+            return;
+        }
+
+        try
+        {
+            SetBusy("Checking the row store...");
+            var preview = await _engine.RunRowStoreGcAsync(ActiveProjectPath, dryRun: true);
+
+            if (preview.PrunedRows <= 0)
+            {
+                await _dialogs.ShowAsync(
+                    $"Row store is already clean — {preview.ScannedRows} row(s), all {preview.ReferencedRowIds} referenced. Nothing to prune.",
+                    "Clean up row store", DialogSeverity.Information);
+                return;
+            }
+
+            var confirmed = await _dialogs.ConfirmAsync(
+                $"This will prune {preview.PrunedRows} unreferenced row(s) from the row store "
+                + $"(keeping {preview.KeptRows} referenced of {preview.ScannedRows} scanned). "
+                + "Only rows no dataset version references are removed. Continue?",
+                "Clean up row store", DialogButtons.OkCancel, DialogSeverity.Warning);
+            if (!confirmed)
+            {
+                return;
+            }
+
+            var result = await _engine.RunRowStoreGcAsync(ActiveProjectPath, dryRun: false);
+            await _dialogs.ShowAsync(
+                $"Row store cleaned: pruned {result.PrunedRows}, kept {result.KeptRows} referenced (of {result.ScannedRows} scanned).",
+                "Clean up row store", DialogSeverity.Information);
+        }
+        catch (System.Exception ex)
+        {
+            Versions.SetDatasetVersionError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
         }
     }
 

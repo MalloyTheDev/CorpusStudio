@@ -1311,6 +1311,19 @@ public sealed class PythonEngineService : IEngineService
         WriteAllTextAtomic(path, JsonSerializer.Serialize(record, JsonOptions) + "\n", encoding: Utf8NoBom);
     }
 
+    public async Task<RowStoreGcResult> RunRowStoreGcAsync(string projectPath, bool dryRun)
+    {
+        var arguments = new List<string> { "dataset-version-gc", projectPath, "--json" };
+        if (dryRun)
+        {
+            arguments.Add("--dry-run");
+        }
+
+        var output = await RunEngineCommandAsync(arguments.ToArray());
+        return JsonSerializer.Deserialize<RowStoreGcResult>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The engine returned an invalid GC result.");
+    }
+
     /// <summary>Load run records (newest first). A run left in `running` whose
     /// process is gone is reconciled to `interrupted` and persisted (to the file
     /// it was loaded from), so a force-closed/crashed run does not stay `running`
