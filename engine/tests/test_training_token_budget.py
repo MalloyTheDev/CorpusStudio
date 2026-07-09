@@ -5,8 +5,10 @@ from typer.testing import CliRunner
 
 from corpus_studio.cli import app
 from corpus_studio.tokenization import estimate as estimate_mod
+from corpus_studio.tokenization.estimate import estimate_tokens
 from corpus_studio.training.estimators import (
     build_training_token_budget,
+    estimate_row_tokens,
     estimate_token_budget,
 )
 
@@ -45,6 +47,29 @@ def test_budget_falls_back_without_a_model_tokenizer(monkeypatch):
     )
 
     assert budget.method == "heuristic"  # no tokenizer + no tiktoken -> heuristic
+
+
+def test_chat_row_counts_the_template_overhead():
+    row = {
+        "messages": [
+            {"role": "system", "content": "Be concise."},
+            {"role": "user", "content": "What is recursion?"},
+            {"role": "assistant", "content": "A function calling itself."},
+        ]
+    }
+    # Raw content-only count (what the old flat extraction produced) vs the chat-aware
+    # count, which must be higher by the per-message + per-conversation overhead.
+    content_only = sum(estimate_tokens(m["content"]) for m in row["messages"])
+    chat_aware = estimate_row_tokens(row)
+
+    assert chat_aware > content_only
+    assert chat_aware == content_only + 4 * 3 + 3  # 3 messages * 4 + 3 per conversation
+
+
+def test_non_chat_row_is_unchanged():
+    row = {"instruction": "Explain variables.", "output": "A variable stores a value."}
+    # A non-chat row keeps the flat text-extraction estimate (no chat overhead applied).
+    assert estimate_row_tokens(row) == estimate_tokens("Explain variables. A variable stores a value.")
 
 
 def _write(path: Path, rows: list[dict]) -> None:

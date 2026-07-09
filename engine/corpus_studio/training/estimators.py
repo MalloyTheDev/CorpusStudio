@@ -71,6 +71,47 @@ def _row_text(value: Any) -> str:
     return " ".join(parts)
 
 
+# Chat-template overhead. Real chat templates wrap each turn (e.g.
+# ``<|im_start|>role\n…<|im_end|>\n``) — a handful of special tokens per message —
+# plus BOS/EOS bookends per conversation. Counting only the raw message *content*
+# under-estimates chat/instruction rows and under-predicts truncation, so a chat
+# row adds this conservative, model-agnostic overhead. It is a heuristic; exact
+# per-model template rendering would need the model's ``tokenizer_config`` +
+# ``transformers`` (a heavier optional follow-up).
+_CHAT_TOKENS_PER_MESSAGE = 4
+_CHAT_TOKENS_PER_CONVERSATION = 3
+
+
+def _is_chat_row(row: Any) -> bool:
+    if not isinstance(row, dict):
+        return False
+    messages = row.get("messages")
+    return (
+        isinstance(messages, list)
+        and len(messages) > 0
+        and all(isinstance(message, dict) and "content" in message for message in messages)
+    )
+
+
+def estimate_row_tokens(row: Any, model_id: str | None = None) -> int:
+    """Token estimate for one training row, aware of chat structure.
+
+    A chat row (a ``messages`` list of role/content turns) is counted as the sum of
+    each turn's content tokens PLUS the per-message role/turn markers and the
+    per-conversation BOS/EOS a chat template adds — so a chat budget doesn't
+    under-count and under-predict truncation. Any other row falls back to the flat
+    text extraction. ``model_id`` selects the model's tokenizer when available.
+    """
+    if _is_chat_row(row):
+        messages = row["messages"]
+        content_tokens = sum(
+            estimate_tokens(str(message.get("content", "")), model_id) for message in messages
+        )
+        overhead = _CHAT_TOKENS_PER_MESSAGE * len(messages) + _CHAT_TOKENS_PER_CONVERSATION
+        return content_tokens + overhead
+    return estimate_tokens(_row_text(row), model_id)
+
+
 def estimate_token_budget(
     text_samples: list[str], model_id: str | None = None
 ) -> TokenBudgetEstimate:
@@ -100,7 +141,7 @@ def build_training_token_budget(
     is available, the counts are exact for that target model.
     """
 
-    counts = [estimate_tokens(_row_text(row), model_id) for row in rows]
+    counts = [estimate_row_tokens(row, model_id) for row in rows]
     if not counts:
         return TokenBudgetEstimate(sequence_len=sequence_len, method=estimator_name(model_id))
 

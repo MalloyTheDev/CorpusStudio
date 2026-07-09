@@ -196,7 +196,13 @@ guarantee — it never runs the trainer or inspects the GPU, so a green pre-flig
 >
 > Each tier falls silently to the next on any failure (library absent, no network,
 > gated/unknown model). Treat the token budget and VRAM numbers as planning figures unless
-> `method` names a real tokenizer. As of v0.5 the desktop can also launch the
+> `method` names a real tokenizer.
+>
+> **Chat-aware counting.** A chat row (`messages` turns) is counted as each turn's content
+> tokens *plus* the per-message role/turn markers and per-conversation BOS/EOS a chat template
+> adds — so the budget doesn't under-count chat/instruction rows and under-predict truncation.
+> That overhead is a dependency-free heuristic; exact per-model chat-template rendering (which
+> needs `transformers`) is a follow-up. As of v0.5 the desktop can also launch the
 user's installed trainer from that command (with explicit confirmation), stream
 logs, stop it, track checkpoints, resume, and compare before/after evaluations —
 see the [Training Launcher Design](#training-launcher-design-v05) section below.
