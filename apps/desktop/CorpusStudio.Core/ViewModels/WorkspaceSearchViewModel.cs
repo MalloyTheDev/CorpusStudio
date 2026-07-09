@@ -18,7 +18,11 @@ public sealed class WorkspaceSearchViewModel : INotifyPropertyChanged
     public WorkspaceSearchViewModel(IWorkspaceSearchService? search = null)
     {
         _search = search ?? new WorkspaceSearchService();
+        RunCommand = new AsyncRelayCommand(RunAsync);
     }
+
+    /// <summary>Runs the search (bound by the panel's Run button and the query box's Enter key).</summary>
+    public System.Windows.Input.ICommand RunCommand { get; }
 
     private string? _workspaceRoot;
     private string _query = string.Empty;

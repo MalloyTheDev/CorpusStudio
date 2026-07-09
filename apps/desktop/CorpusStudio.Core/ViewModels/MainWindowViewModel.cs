@@ -181,6 +181,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand RefreshProviderPoliciesCommand { get; }
     public System.Windows.Input.ICommand RebuildProjectIndexCommand { get; }
     public System.Windows.Input.ICommand ExportPreferenceRankingCommand { get; }
+    public System.Windows.Input.ICommand RefreshDatasetVersionsCommand { get; }
     public System.Windows.Input.ICommand RegisterArtifactFromRunCommand { get; }
     public System.Windows.Input.ICommand KeepArtifactCommand { get; }
     public System.Windows.Input.ICommand RejectArtifactCommand { get; }
@@ -288,6 +289,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RefreshProviderPoliciesCommand = new AsyncRelayCommand(RefreshProviderPoliciesAsync);
         RebuildProjectIndexCommand = new AsyncRelayCommand(RebuildProjectIndexAsync);
         ExportPreferenceRankingCommand = new RelayCommand(ExportPreferenceRanking);
+        RefreshDatasetVersionsCommand = new AsyncRelayCommand(RefreshDatasetVersionsAsync);
         RegisterArtifactFromRunCommand = new RelayCommand(RegisterArtifactFromRun);
         KeepArtifactCommand = new AsyncRelayCommand(KeepArtifactAsync);
         RejectArtifactCommand = new RelayCommand(() => SetSelectedArtifactStatus("rejected"));

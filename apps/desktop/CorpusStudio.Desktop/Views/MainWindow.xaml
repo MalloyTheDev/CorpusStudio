@@ -2618,7 +2618,7 @@
                                         Command="{Binding DiffVersionsCommand}" />
                                 <Button AutomationProperties.AutomationId="RefreshDatasetVersionsButton"
                                         Content="Refresh"
-                                        Click="RefreshDatasetVersionsButton_Click" />
+                                        Command="{Binding RefreshDatasetVersionsCommand}" />
                             </WrapPanel>
                             <Grid Grid.Row="2">
                                 <Grid.ColumnDefinitions>
@@ -3237,7 +3237,7 @@
                                              KeyDown="SearchQueryBox_KeyDown" Padding="6,0" />
                                     <CheckBox Content="Aa" ToolTip="Match case" VerticalAlignment="Center" Margin="10,0,0,0"
                                               IsChecked="{Binding Search.CaseSensitive}" />
-                                    <Button Content="Search" Click="SearchRunButton_Click" Padding="12,4" Margin="10,0,0,0"
+                                    <Button Content="Search" Command="{Binding Search.RunCommand}" Padding="12,4" Margin="10,0,0,0"
                                             IsEnabled="{Binding HasActiveProject}" />
                                     <TextBlock Text="{Binding Search.Status}" FontSize="11.5" Foreground="#475569"
                                                Margin="14,0,0,0" VerticalAlignment="Center"

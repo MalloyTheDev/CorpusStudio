@@ -162,9 +162,6 @@ public partial class MainWindow : Window
     private void SearchCloseButton_Click(object sender, RoutedEventArgs e) =>
         ViewModel.ToggleSearchPanel();
 
-    private async void SearchRunButton_Click(object sender, RoutedEventArgs e) =>
-        await ViewModel.Search.RunAsync();
-
     private async void SearchQueryBox_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter)
@@ -2089,11 +2086,6 @@ public partial class MainWindow : Window
         ViewModel.Versions.SetDatasetDiffBase(selected);
     }
 
-
-    private async void RefreshDatasetVersionsButton_Click(object sender, RoutedEventArgs e)
-    {
-        await RefreshDatasetVersionsAsync();
-    }
 
     // Version refresh now lives on the shared view-model (used by CaptureDatasetVersionCommand and the
     // project-switch load); the code-behind callers delegate to it.
