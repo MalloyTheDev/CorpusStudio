@@ -179,6 +179,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand RunQualityCommand { get; }
     public System.Windows.Input.ICommand SaveGateThresholdsCommand { get; }
     public System.Windows.Input.ICommand RefreshProviderPoliciesCommand { get; }
+    public System.Windows.Input.ICommand RebuildProjectIndexCommand { get; }
     public System.Windows.Input.ICommand DiffVersionsCommand { get; }
     public System.Windows.Input.ICommand ViewArtifactCardCommand { get; }
     public System.Windows.Input.ICommand GenerateDatasetCardCommand { get; }
@@ -280,6 +281,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RunQualityCommand = new AsyncRelayCommand(() => RefreshQualityAsync());
         SaveGateThresholdsCommand = new AsyncRelayCommand(SaveGateThresholdsAsync);
         RefreshProviderPoliciesCommand = new AsyncRelayCommand(RefreshProviderPoliciesAsync);
+        RebuildProjectIndexCommand = new AsyncRelayCommand(RebuildProjectIndexAsync);
         DiffVersionsCommand = new AsyncRelayCommand(DiffVersionsAsync);
         ViewArtifactCardCommand = new AsyncRelayCommand(ViewArtifactCardAsync);
         GenerateDatasetCardCommand = new AsyncRelayCommand(GenerateDatasetCardAsync);
@@ -1295,6 +1297,29 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         return true;
+    }
+
+    /// <summary>Rebuild the project index from disk and reload the project list (preserving the
+    /// current selection where possible). Moved from the desktop code-behind.</summary>
+    public async System.Threading.Tasks.Task RebuildProjectIndexAsync()
+    {
+        var selectedId = SelectedProject?.Id;
+        try
+        {
+            SetBusy("Rebuilding project index...");
+            var result = await _engine.RebuildProjectIndexAsync();
+            SetProjects(await _engine.LoadProjectsFromIndexAsync());
+            SelectedProject = Projects.FirstOrDefault(project => project.Id == selectedId);
+            ApplyProjectIndexRebuilt(result);
+        }
+        catch (System.Exception ex)
+        {
+            SetProjectIndexError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
     }
 
     /// <summary>Save the edited gate thresholds (the engine validates ranges and rejects bad values).

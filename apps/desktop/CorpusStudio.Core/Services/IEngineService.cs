@@ -47,6 +47,12 @@ public interface IEngineService
     /// <summary>Reconcile tracked reviewed-fixes against a fresh evaluation's per-example results.</summary>
     IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, IReadOnlyList<EvaluationExampleResult> results);
 
+    /// <summary>Rebuild the on-disk project index (rescans the project root).</summary>
+    Task<ProjectIndexRebuildResult> RebuildProjectIndexAsync();
+
+    /// <summary>Load the project list from the index (newest first).</summary>
+    Task<IReadOnlyList<DatasetProjectListItem>> LoadProjectsFromIndexAsync();
+
     /// <summary>Persist the edited gate thresholds (engine validates + rejects out-of-range values).</summary>
     Task SetGateThresholdsAsync(string projectPath, GateThresholds thresholds);
 
