@@ -168,8 +168,19 @@ split, evaluated dataset into config files for established training tools.
 Current status: Corpus Studio generates a config from the engine
 `training-config` command and the desktop Training tab. The export path writes
 an inspectable file and returns a JSON summary that now also includes a real
-token budget, a rough VRAM planning estimate, a LoRA rank/alpha suggestion, and
-the exact per-target launch command.
+token budget, a rough VRAM planning estimate, a LoRA rank/alpha suggestion,
+the exact per-target launch command, and a **pre-flight** verdict.
+
+**Pre-flight (fail fast before a long run).** A trainer run can take hours and a lot
+of GPU, so `training-config` runs cheap deterministic checks and returns a
+`preflight` verdict (`pass` / `warn` / `block`): is the trainer command on `PATH`
+(warn + which packages to install), are the config and referenced data files present
+and non-empty (**block** if missing), does the dataset have a usable number of rows
+(**block** if empty, warn if tiny), and will rows be truncated at `sequence_len`
+(warn). The desktop surfaces each check and **disables the Launch button when a check
+blocks**, so a run that is certain to fail can't be started. It is a pre-flight, not a
+guarantee — it never runs the trainer or inspects the GPU, so a green pre-flight means
+"nothing obviously wrong", not "this run will succeed".
 
 > **Token counts are an estimate by default, and the budget says which counter ran.**
 > To stay dependency-light the engine picks the most exact counter available, in order,

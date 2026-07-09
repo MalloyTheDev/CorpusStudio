@@ -50,6 +50,7 @@ public sealed class TrainingViewModel : ViewModelBase, ITrainingViewModel
     private string _trainingLaunchCommand = string.Empty;
 
     private IReadOnlyList<string> _trainingLaunchArgv = [];
+    private bool _preflightCanLaunch = true;
 
     private string _trainingLaunchWorkingDirectory = string.Empty;
 
@@ -482,6 +483,29 @@ public sealed class TrainingViewModel : ViewModelBase, ITrainingViewModel
             _trainingLaunchWorkingDirectory = string.Empty;
         }
 
+        // Pre-flight: cheap fail-fast checks; a BLOCK (missing config/data, empty dataset)
+        // disables the Launch button so a certain-to-fail run can't be started.
+        _preflightCanLaunch = result.Preflight?.CanLaunch ?? true;
+        if (result.Preflight is { } preflight)
+        {
+            lines.Add("");
+            lines.Add(preflight.Status switch
+            {
+                "block" => "Pre-flight: BLOCKED — fix the item(s) below before launching:",
+                "warn" => "Pre-flight (warnings — review before launching):",
+                _ => "Pre-flight: all checks passed.",
+            });
+            foreach (var check in preflight.Checks)
+            {
+                var mark = check.Status switch { "block" => "[x]", "warn" => "[!]", _ => "[ok]" };
+                lines.Add($"  {mark} {check.Message}");
+            }
+            if (!preflight.CanLaunch)
+            {
+                lines.Add("  Launch is disabled until the blocking item(s) are resolved.");
+            }
+        }
+
         OnPropertyChanged(nameof(CanLaunchTraining));
 
         if (result.Warnings.Count > 0)
@@ -546,7 +570,7 @@ public sealed class TrainingViewModel : ViewModelBase, ITrainingViewModel
         }
     }
 
-    public bool CanLaunchTraining => !_isTrainingRunning && _trainingLaunchArgv.Count > 0;
+    public bool CanLaunchTraining => !_isTrainingRunning && _trainingLaunchArgv.Count > 0 && _preflightCanLaunch;
 
     public bool CanResumeTraining => !_isTrainingRunning && _trainingResumeArgv.Count > 0;
 }
