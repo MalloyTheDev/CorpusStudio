@@ -2567,6 +2567,30 @@
                                                        FontSize="11" Margin="0,14,0,3" />
                                             <TextBlock Text="{Binding Suites.SuiteHistorySummary}" Foreground="#94A3B8"
                                                        FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4" />
+                                            <!-- Pass-rate trend sparkline: one bar per run (oldest → newest), height = pass rate,
+                                                 colour = overall verdict. Hover a bar for the run detail. -->
+                                            <Border Height="44"
+                                                    Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1"
+                                                    CornerRadius="4" Padding="5,4" Margin="0,0,0,6"
+                                                    HorizontalAlignment="Left"
+                                                    Visibility="{Binding Suites.HasSuiteHistory, Converter={StaticResource BoolToVis}}">
+                                                <ItemsControl AutomationProperties.AutomationId="SuiteHistorySparkline"
+                                                              ItemsSource="{Binding Suites.SuiteHistory}">
+                                                    <ItemsControl.ItemsPanel>
+                                                        <ItemsPanelTemplate>
+                                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom" />
+                                                        </ItemsPanelTemplate>
+                                                    </ItemsControl.ItemsPanel>
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Border Width="7" Height="{Binding SparkBarHeight}"
+                                                                    Background="{Binding StatusColor}" CornerRadius="1"
+                                                                    Margin="1,0" VerticalAlignment="Bottom"
+                                                                    ToolTip="{Binding DisplayLine}" />
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </Border>
                                             <ItemsControl AutomationProperties.AutomationId="SuiteHistoryList"
                                                           ItemsSource="{Binding Suites.SuiteHistory}">
                                                 <ItemsControl.ItemTemplate>

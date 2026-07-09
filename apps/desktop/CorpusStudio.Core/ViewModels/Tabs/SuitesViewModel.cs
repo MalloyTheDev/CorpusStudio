@@ -36,8 +36,11 @@ public sealed class SuitesViewModel : ViewModelBase, ISuitesViewModel
     /// <summary>The last run's per-case results.</summary>
     public ObservableCollection<SuiteCaseResult> SuiteCaseRows { get; } = [];
 
-    /// <summary>The selected suite's run history (newest first) for the trend (#190).</summary>
+    /// <summary>The selected suite's run history (oldest → newest) for the trend (#190).</summary>
     public ObservableCollection<SuiteHistoryEntry> SuiteHistory { get; } = [];
+
+    /// <summary>True when there is at least one run to plot — drives the trend sparkline's visibility (#226).</summary>
+    public bool HasSuiteHistory => SuiteHistory.Count > 0;
 
     public string SuiteHistorySummary
     {
@@ -201,7 +204,8 @@ public sealed class SuitesViewModel : ViewModelBase, ISuitesViewModel
         }
         SuiteHistorySummary = SuiteHistory.Count == 0
             ? "No run history yet — run this suite to start a trend."
-            : $"{SuiteHistory.Count} run(s), newest first (a count over time, not a quality score).";
+            : $"{SuiteHistory.Count} run(s), oldest → newest (a pass-rate trend over time, not a quality score).";
+        OnPropertyChanged(nameof(HasSuiteHistory));
     }
 
     /// <summary>Reset all suite state on a project switch so it can't leak across projects. The
