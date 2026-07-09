@@ -2296,6 +2296,17 @@
                                                    Foreground="#334155"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,6" />
+                                        <TextBox DockPanel.Dock="Bottom"
+                                                 AutomationProperties.AutomationId="TrainingEvalHandoffTextBox"
+                                                 Text="{Binding Training.TrainingEvalHandoffSummary, Mode=OneWay}"
+                                                 IsReadOnly="True"
+                                                 AcceptsReturn="True"
+                                                 FontFamily="Consolas"
+                                                 FontSize="11"
+                                                 MaxHeight="180"
+                                                 TextWrapping="Wrap"
+                                                 VerticalScrollBarVisibility="Auto"
+                                                 Margin="0,8,0,0" />
                                         <TextBox AutomationProperties.AutomationId="TrainingRunHistoryTextBox"
                                                  Text="{Binding Training.TrainingRunHistorySummary, Mode=OneWay}"
                                                  IsReadOnly="True"

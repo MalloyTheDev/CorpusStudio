@@ -38,6 +38,7 @@ public interface ITrainingViewModel : INotifyPropertyChanged
     string TrainingLaunchWorkingDirectory { get; }
     string TrainingRunHistorySummary { get; }
     string TrainingRunGateSummary { get; }
+    string TrainingEvalHandoffSummary { get; }
     string TrainingOutputDirectory { get; }
     string TrainingConfigPath { get; }
     string TrainingCheckpointsSummary { get; }
@@ -62,6 +63,8 @@ public interface ITrainingViewModel : INotifyPropertyChanged
     void ApplyTrainingRunGate(GateReport report);
     void SetTrainingRunHistoryError(string message);
     void ApplyTrainingRunHistory(IReadOnlyList<TrainingRunRecord> records);
+    void SetEvalHandoffError(string message);
+    void ApplyEvalHandoff(EvalHandoffPlan plan);
     void SetTrainingBaseline(EvaluationReportHistoryItem? baseline);
     void CompareTrainingBaseline(IReadOnlyList<EvaluationReportHistoryItem> history);
     void ApplyTrainingCheckpoints(TrainingCheckpointsResult result);
