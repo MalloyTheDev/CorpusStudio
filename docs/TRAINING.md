@@ -2,8 +2,9 @@
 
 Everything about preparing, configuring, and launching training in Corpus
 Studio. Consolidated from the former TRAINING_LAB, TRAINING_CONFIGS,
-TRAINING_PREP, and TRAINING_LAUNCHER_DESIGN docs. Corpus Studio orchestrates the
-user's installed trainer; it never bundles CUDA/PyTorch or runs training itself.
+TRAINING_PREP, and TRAINING_LAUNCHER_DESIGN docs. The dependency-light core never
+bundles CUDA/PyTorch; training is opt-in — either Corpus Studio's own first-party
+QLoRA trainer (the `[train]` extra) or the user's installed external trainer.
 
 
 ---
@@ -46,12 +47,13 @@ launches the user's installed trainer with that config.
 
 Current status: the Python engine has a `training-config` command and the
 desktop Training tab writes a rendered config file under the configured export
-directory, **then launches your installed trainer** with the generated command
-(after a confirm), streaming its logs live, listing checkpoints, recording each
-run, supporting resume-from-checkpoint, and running a post-training regression
-gate. It orchestrates the trainer you already have — it never bundles or installs
-CUDA/PyTorch/Transformers or implements a training loop itself. (Config-export
-came first; the launcher followed — see the launcher section below.)
+directory, **then launches the trainer** with the generated command (after a
+confirm) — the first-party `corpus_studio` trainer, or the external trainer you
+already have — streaming its logs live, listing checkpoints, recording each run,
+supporting resume-from-checkpoint, and running a post-training regression gate.
+The dependency-light core bundles no CUDA/PyTorch/Transformers; those are opt-in
+via the `[train]` extra (which delegates to TRL/peft rather than implementing a
+raw loop). (Config-export came first; the launcher followed — see below.)
 
 Config generation should include:
 

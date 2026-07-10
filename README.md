@@ -23,9 +23,9 @@ covering the full dataset-to-model workflow: create datasets, validate them,
 clean and measure them, grade their outstanding debt, run pass/warn/block gates,
 generate or rewrite candidates only with policy-approved providers under human
 review, test and compare models, export them, version/diff/restore the dataset,
-generate training configs, launch your installed trainer with live logs and
-checkpoints, track every run and the model artifacts it produces, and measure the
-before/after improvement.
+generate training configs, run the QLoRA yourself (the opt-in first-party trainer)
+or launch your own installed trainer with live logs and checkpoints, track every
+run and the model artifacts it produces, and measure the before/after improvement.
 
 The single source of truth for what is implemented today is
 [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md).
@@ -34,7 +34,7 @@ The single source of truth for what is implemented today is
 
 Corpus Studio covers the full local loop from authoring, through governed
 cleaning and gating, evaluation and model comparison, to launching and tracking
-a training run of your own installed trainer:
+a training run — its own opt-in first-party trainer, or your installed trainer:
 
 **Author & validate**
 - create projects from built-in schema templates with pre-filled examples
@@ -123,13 +123,17 @@ a training run of your own installed trainer:
   before generation
 
 **Train & track**
-- training config export for axolotl / TRL / Unsloth / Hugging Face /
-  LLaMA-Factory with compatibility warnings, a real token budget
-  (tokens-per-epoch after truncation, over-length counts), a rough VRAM
+- training config export for the first-party `corpus_studio` trainer or axolotl /
+  TRL / Unsloth / Hugging Face / LLaMA-Factory, with compatibility warnings, a real
+  token budget (tokens-per-epoch after truncation, over-length counts), a rough VRAM
   planning estimate, a LoRA rank/alpha suggestion, and the exact launch command
-- in-app launch of your installed trainer (explicit confirmation showing the
-  exact command, no shell), live log streaming, and a Stop that kills the
-  process tree
+- an **opt-in first-party QLoRA trainer** (the `[train]` extra): `train-check`
+  preflights the runtime, `train-run` runs a 4-bit QLoRA in-process and writes the
+  adapter + a model card, `train-merge` merges it back (with a small-VRAM fallback),
+  and `model-fetch` reliably downloads a permissive base model with its license
+- in-app launch of the first-party trainer or your installed trainer (explicit
+  confirmation showing the exact command, no shell), live log streaming, and a Stop
+  that kills the process tree
 - checkpoint tracking during and after runs, resume-from-latest for targets
   with a CLI resume flag, and before/after evaluation comparison against the
   baseline captured at launch
@@ -143,10 +147,11 @@ a training run of your own installed trainer:
   and a promote gate that refuses to keep a modified/missing or regressed
   artifact
 
-Corpus Studio orchestrates your installed trainer — it never bundles CUDA,
-PyTorch, or trainer packages, never hides the command it runs, enforces who may
-generate trainable data, and does not publish datasets or auto-accept generated
-rows.
+Corpus Studio's dependency-light core never bundles CUDA, PyTorch, or trainer
+packages — training deps are opt-in via the `[train]` extra, which adds the
+first-party trainer; you can also launch your own installed trainer. It never
+hides the command it runs, enforces who may generate trainable data, and does not
+publish datasets or auto-accept generated rows.
 
 ## License
 

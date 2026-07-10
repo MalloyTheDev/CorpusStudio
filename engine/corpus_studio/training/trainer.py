@@ -338,39 +338,40 @@ def run_training(config: TrainRunConfig, *, progress_callback: ProgressCallback 
     elif "tokenizer" in trainer_params:
         trainer_kwargs["tokenizer"] = tokenizer
     trainer = SFTTrainer(**trainer_kwargs)
-    # Training frameworks print metrics/tqdm to STDOUT; redirect that to stderr so this command's
-    # stdout stays the pure JSON result the desktop parses. Progress still reaches stderr.
+    # Training frameworks print metrics/tqdm to STDOUT — and transformers can log to stdout during
+    # SAVE too — so redirect the whole train+save block to stderr. Only the CLI's final JSON echo then
+    # writes to stdout, keeping it the pure JSON result the desktop/WBG parses. Progress reaches stderr.
     with contextlib.redirect_stdout(sys.stderr):
         train_output = trainer.train()
 
-    output_dir = Path(config.output_dir)
-    trainer.save_model(str(output_dir))  # saves the LoRA adapter
-    tokenizer.save_pretrained(str(output_dir))
+        output_dir = Path(config.output_dir)
+        trainer.save_model(str(output_dir))  # saves the LoRA adapter
+        tokenizer.save_pretrained(str(output_dir))
 
-    metrics = getattr(train_output, "metrics", {}) or {}
-    steps = int(getattr(trainer.state, "global_step", 0) or 0)
+        metrics = getattr(train_output, "metrics", {}) or {}
+        steps = int(getattr(trainer.state, "global_step", 0) or 0)
 
-    # Self-documenting run: write a model card next to the adapter (recipe + honesty + base-model
-    # license reminder). Best-effort — the card is a convenience and must NEVER fail a completed run.
-    try:
-        from corpus_studio.training.model_card import build_model_card, write_model_card  # noqa: PLC0415
+        # Self-documenting run: write a model card next to the adapter (recipe + honesty + base-model
+        # license reminder). Best-effort — the card is a convenience and must NEVER fail a completed run.
+        try:
+            from corpus_studio.training.model_card import build_model_card, write_model_card  # noqa: PLC0415
 
-        write_model_card(
-            output_dir,
-            build_model_card(
+            write_model_card(
                 output_dir,
-                base_model=config.base_model,
-                training_config={
-                    "format": config.dataset_format,
-                    "sequence_len": config.sequence_len,
-                    "learning_rate": config.learning_rate,
-                    "seed": config.seed,
-                },
-                train_result={"steps": steps, "final_loss": metrics.get("train_loss"), "cpu_toy": config.cpu_toy},
-            ),
-        )
-    except Exception:  # noqa: BLE001 - never let card-writing break a finished training run.
-        pass
+                build_model_card(
+                    output_dir,
+                    base_model=config.base_model,
+                    training_config={
+                        "format": config.dataset_format,
+                        "sequence_len": config.sequence_len,
+                        "learning_rate": config.learning_rate,
+                        "seed": config.seed,
+                    },
+                    train_result={"steps": steps, "final_loss": metrics.get("train_loss"), "cpu_toy": config.cpu_toy},
+                ),
+            )
+        except Exception:  # noqa: BLE001 - never let card-writing break a finished training run.
+            pass
 
     return TrainResult(
         output_dir=str(output_dir),
