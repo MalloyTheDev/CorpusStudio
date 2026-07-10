@@ -241,10 +241,10 @@ def resolve_run_plan(config: TrainRunConfig, report: Any) -> dict[str, Any]:
     return {"device": "cuda", "quantize": True}
 
 
-# GPU compute capability at/above which the fused SDPA kernels are known to deadlock — NVIDIA Blackwell
-# (RTX 50-series) is sm_120 → major 12. On these, the flash / mem-efficient SDPA backward hangs on the
-# first step in current torch (bnb 4-bit + the math attention path are both fine — only the fused
-# kernels hang), so the trainer forces the math SDPA path there.
+# GPU compute capability at/above which the fused FLASH SDPA kernel is known to deadlock — NVIDIA
+# Blackwell (RTX 50-series) is sm_120 → major 12. Verified on a real 5070: bnb 4-bit, the mem-efficient
+# SDPA kernel, and the math path all work; only the fused FLASH backward hangs on the first step in
+# current torch. So the trainer disables just the flash backend there (not mem-efficient).
 _FUSED_SDPA_UNSAFE_CAPABILITY_MAJOR = 12
 
 
@@ -253,12 +253,12 @@ def resolve_attention_implementation(
 ) -> tuple[str | None, bool]:
     """Decide the attention backend for ``from_pretrained``. PURE + unit-tested.
 
-    Returns ``(attn_implementation, disable_fused_sdp)``:
-    * an **explicit** choice (config / CLI ``--attn-implementation``) always wins, with no fused-SDP
-      toggling — the user owns it;
+    Returns ``(attn_implementation, disable_flash_sdp)``:
+    * an **explicit** choice (config / CLI ``--attn-implementation``) always wins, with no SDP toggling
+      — the user owns it;
     * else on **Blackwell** (capability major ≥ 12, i.e. sm_120) → ``(None, True)``: keep transformers'
-      default SDPA but signal the caller to DISABLE the fused flash/mem-efficient SDP backends so SDPA
-      falls back to its sm_120-safe math kernel (math uses more VRAM than flash but does not deadlock);
+      default SDPA but signal the caller to DISABLE the fused flash SDP backend (the only one that hangs
+      on sm_120; mem-efficient + math are safe), so SDPA uses a non-deadlocking kernel;
     * else ``(None, False)`` — no change on older, working architectures.
     """
     if explicit:
@@ -323,28 +323,32 @@ def run_training(config: TrainRunConfig, *, progress_callback: ProgressCallback 
             # torch_dtype (not dtype) for compat across transformers 4.44+ and 5.x (the [train] floor).
             model_kwargs["torch_dtype"] = torch.float32
 
-        # Attention backend. On Blackwell (RTX 50-series, sm_120) the fused flash/mem-efficient SDPA
-        # kernels DEADLOCK on the first backward pass in current torch (bnb 4-bit + the math attention
-        # path are both fine — only the fused kernels hang). Honor an explicit choice; else on sm_120
-        # disable the fused SDP backends so SDPA uses its safe math kernel.
+        # Attention backend. On Blackwell (RTX 50-series, sm_120) the fused FLASH SDPA kernel DEADLOCKS
+        # on the first backward pass in current torch — verified on a real 5070: bnb 4-bit, the
+        # mem-efficient kernel, and the math path are all fine; only flash hangs. So disable ONLY flash
+        # (not mem-efficient). NOTE: torch's mem-efficient SDPA works on sm_120 in isolation (O(seq)) but
+        # the transformers model falls back to the math kernel (O(seq²)) for its masked attention today,
+        # so a *fast full-length* path still needs a Blackwell flash-attn wheel or xformers — until then
+        # keep sequence_len modest, or pass --attn-implementation when a working kernel exists. An
+        # explicit choice always wins.
         try:
             capability_major = torch.cuda.get_device_capability()[0] if torch.cuda.is_available() else None
         except Exception:  # noqa: BLE001 - a probe failure just means "don't special-case".
             capability_major = None
-        attn_impl, disable_fused_sdp = resolve_attention_implementation(
+        attn_impl, disable_flash_sdp = resolve_attention_implementation(
             config.attn_implementation, capability_major
         )
-        if disable_fused_sdp:
+        if disable_flash_sdp:
             try:
-                torch.backends.cuda.enable_flash_sdp(False)
-                torch.backends.cuda.enable_mem_efficient_sdp(False)
+                torch.backends.cuda.enable_flash_sdp(False)  # the only SDPA kernel that hangs on sm_120
                 print(
-                    "[note] Blackwell GPU (sm_120) detected — disabled the fused flash/mem-efficient SDPA "
-                    "backends (they deadlock on the first backward on this arch) and using the math SDPA "
-                    "kernel. Math attention uses more VRAM than flash, so lower sequence_len if you OOM.",
+                    "[note] Blackwell GPU (sm_120) detected — disabled the fused FLASH SDPA kernel (it "
+                    "deadlocks on the first backward on this arch). SDPA uses mem-efficient/math; the "
+                    "model's masked attention runs on the math kernel (more VRAM), so lower sequence_len "
+                    "if it spills to system RAM. --attn-implementation overrides.",
                     file=sys.stderr,
                 )
-            except Exception:  # noqa: BLE001 - if the backend toggles are unavailable, fall back to eager.
+            except Exception:  # noqa: BLE001 - if the backend toggle is unavailable, fall back to eager.
                 attn_impl = "eager"
         if attn_impl is not None:
             model_kwargs["attn_implementation"] = attn_impl
