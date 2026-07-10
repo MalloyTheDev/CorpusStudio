@@ -122,7 +122,9 @@ def _merge_on_device(base_model: str, adapter_path: Path, output_dir: Path, devi
     from peft import PeftModel  # noqa: PLC0415
     from transformers import AutoModelForCausalLM, AutoTokenizer  # noqa: PLC0415
 
-    load_kwargs: dict[str, Any] = {"dtype": torch.float16}
+    # SECURITY: trust_remote_code=False so merging an adapter never executes the base repo's code.
+    # torch_dtype (not dtype) for compat across transformers 4.44+ and 5.x.
+    load_kwargs: dict[str, Any] = {"torch_dtype": torch.float16, "trust_remote_code": False}
     if device == "cuda":
         load_kwargs["device_map"] = {"": 0}
     base = AutoModelForCausalLM.from_pretrained(base_model, **load_kwargs)
@@ -131,4 +133,4 @@ def _merge_on_device(base_model: str, adapter_path: Path, output_dir: Path, devi
     merged.save_pretrained(str(output_dir))
     # Prefer the adapter dir's tokenizer (saved by train-run), else the base's.
     tokenizer_source = adapter_path if (adapter_path / "tokenizer_config.json").exists() else base_model
-    AutoTokenizer.from_pretrained(str(tokenizer_source)).save_pretrained(str(output_dir))
+    AutoTokenizer.from_pretrained(str(tokenizer_source), trust_remote_code=False).save_pretrained(str(output_dir))

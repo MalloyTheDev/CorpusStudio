@@ -165,9 +165,10 @@ Desktop Evaluation tab -> evaluation_failure_filters.json -> saved status/tag/fa
 Desktop Settings tab -> project.json lab_settings -> Evaluation/AI Assist backend defaults
 ```
 
-The selected backend must already be running locally. Corpus Studio does not
-embed model runtimes, CUDA, PyTorch, Transformers, or trainer orchestration in
-this pass.
+The selected backend must already be running locally. The evaluation / AI-Assist
+path embeds no model runtimes, CUDA, PyTorch, or Transformers — it talks to an
+external backend. (First-party *training* is a separate, opt-in `[train]` extra;
+the dependency-light core still pulls none of those. See `TRAINING.md`.)
 
 AI Assist uses the same boundary and remains review-first:
 

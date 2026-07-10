@@ -161,13 +161,23 @@ def fetch_model(
 
     weight_files: list[str] = []
     total_bytes = 0
+    has_safetensors = False
+    has_pickle = False
     for file in path.rglob("*"):
         if file.is_file():
             total_bytes += file.stat().st_size
             if file.suffix in {".safetensors", ".bin", ".gguf"}:
                 weight_files.append(file.name)
+                has_safetensors = has_safetensors or file.suffix == ".safetensors"
+                has_pickle = has_pickle or file.suffix == ".bin"
     if not weight_files:
         warnings.append("No weight files (.safetensors/.bin) found in the download — the model may be incomplete.")
+    elif has_pickle and not has_safetensors:
+        # SECURITY: PyTorch .bin weights are Python pickles — loading them can execute arbitrary code.
+        warnings.append(
+            "SECURITY: this model ships only pickle (.bin) weights, not safetensors — loading it can "
+            "run arbitrary code. Prefer a model with .safetensors, or vet this repo before training."
+        )
 
     return ModelFetchResult(
         repo_id=repo_id,

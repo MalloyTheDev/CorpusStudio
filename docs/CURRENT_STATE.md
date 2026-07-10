@@ -260,9 +260,12 @@ per-item error isolation, and off-thread document opens.
 
 ## Hard boundaries (by design)
 
-- Corpus Studio orchestrates the user's installed tools; it is **not** a deep
-  learning framework. No CUDA, PyTorch internals, backprop, optimizers,
-  distributed training, or custom training loops.
+- The engine **core** is dependency-light and is **not** a deep-learning framework
+  (no backprop/optimizers/distributed training of its own). CUDA/PyTorch/Transformers
+  are **opt-in** via the `[train]` extra, which adds a first-party TRL/peft QLoRA
+  trainer (`train-run`/`train-merge`, all heavy imports lazy) — it delegates to those
+  libraries rather than implementing a training loop. Without the extra the core pulls
+  none of them. See [`TRAINING.md`](TRAINING.md).
 - Trainer launches show the exact argv, require explicit confirmation, use no
   shell, and write inspectable run metadata. No hidden trainer behavior.
 - The engine never moves, copies, or deletes the user's weight files or

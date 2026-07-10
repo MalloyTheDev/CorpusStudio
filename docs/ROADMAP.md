@@ -29,9 +29,11 @@ opens), and **backend resilience** (retry/backoff + per-item error isolation). A
 subsequent **deep bug/security audit** hardened 19 data-integrity, gate/policy,
 and quality/split-correctness issues (PRs #104–118).
 
-Milestones v0.1–v1.2 are complete. CUDA, PyTorch, Transformers, and cloud
-publishing remain deliberately outside the app — Corpus Studio orchestrates the
-user's installed trainer, it does not embed a training framework.
+Milestones v0.1–v1.2 are complete. The dependency-light **core** pulls no CUDA /
+PyTorch / Transformers; those now ship as an **opt-in `[train]` extra** that adds a
+first-party TRL/peft QLoRA trainer + adapter merge + model download (`train-run` /
+`train-merge` / `model-fetch`), alongside the original bring-your-own-trainer path.
+Cloud publishing remains out of scope.
 
 ## Shipped milestones (v0.1 → v1.2)
 
