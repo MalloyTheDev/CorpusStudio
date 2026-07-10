@@ -9,20 +9,27 @@
         Title="Corpus Studio — Avalonia (full shell over the shared view-models)">
   <Grid ColumnDefinitions="52,*">
 
-    <!-- Activity bar: mode switches + panel toggles bound to the shell VM's ICommands (RelayCommand),
-         so there is NO code-behind here — the cross-platform pattern the port moves toward. -->
-    <StackPanel Grid.Column="0" Background="#0F172A" Spacing="2">
-      <Button Content="⌂" Command="{Binding ShowStartCenterCommand}" Background="Transparent" Foreground="White"
-              FontSize="18" Width="52" Height="44" HorizontalContentAlignment="Center"/>
-      <Button Content="🗀" Command="{Binding ShowFilesCommand}" Background="Transparent" Foreground="White"
-              FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
-      <Button Content="▦" Command="{Binding ShowStudioCommand}" Background="Transparent" Foreground="White"
-              FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
-      <Button Content="⚠" Command="{Binding ToggleProblemsPanelCommand}" Background="Transparent" Foreground="White"
-              FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
-      <Button Content="≡" Command="{Binding ToggleOutputPanelCommand}" Background="Transparent" Foreground="White"
-              FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
-    </StackPanel>
+    <!-- Activity bar: mode switches + panel toggles bound to the shell VM's ICommands (RelayCommand).
+         The lone code-behind is the theme toggle — switching the app's light/dark variant is an
+         Application/View concern (Application.Current.RequestedThemeVariant), not shared VM state. -->
+    <DockPanel Grid.Column="0" Background="#0F172A">
+      <StackPanel DockPanel.Dock="Top" Spacing="2">
+        <Button Content="⌂" Command="{Binding ShowStartCenterCommand}" Background="Transparent" Foreground="White"
+                FontSize="18" Width="52" Height="44" HorizontalContentAlignment="Center"/>
+        <Button Content="🗀" Command="{Binding ShowFilesCommand}" Background="Transparent" Foreground="White"
+                FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
+        <Button Content="▦" Command="{Binding ShowStudioCommand}" Background="Transparent" Foreground="White"
+                FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
+        <Button Content="⚠" Command="{Binding ToggleProblemsPanelCommand}" Background="Transparent" Foreground="White"
+                FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
+        <Button Content="≡" Command="{Binding ToggleOutputPanelCommand}" Background="Transparent" Foreground="White"
+                FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
+      </StackPanel>
+      <!-- Pinned to the bottom of the bar. Cycles System → Light → Dark. -->
+      <Button DockPanel.Dock="Bottom" Content="◐" Click="CycleTheme_Click" Background="Transparent" Foreground="White"
+              FontSize="16" Width="52" Height="44" HorizontalContentAlignment="Center" VerticalAlignment="Bottom"
+              ToolTip.Tip="Theme: System → Light → Dark"/>
+    </DockPanel>
 
     <Grid Grid.Column="1" RowDefinitions="*,Auto">
       <Panel Grid.Row="0">
@@ -31,13 +38,13 @@
         <ScrollViewer IsVisible="{Binding IsStartCenter}">
           <StackPanel Margin="28" Spacing="10">
             <TextBlock Text="Start a workspace" FontSize="26" FontWeight="Bold"/>
-            <TextBlock Text="{Binding StartCenter.RecentCountLabel}" Foreground="#64748B"/>
+            <TextBlock Text="{Binding StartCenter.RecentCountLabel}" Foreground="{DynamicResource AppTextMuted}"/>
             <ListBox ItemsSource="{Binding StartCenter.Recents}" MaxWidth="680" HorizontalAlignment="Left">
               <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="vm:RecentWorkspaceDisplayItem">
                   <StackPanel Margin="0,3">
                     <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
-                    <TextBlock Text="{Binding Path}" Foreground="#64748B" FontSize="11"/>
+                    <TextBlock Text="{Binding Path}" Foreground="{DynamicResource AppTextMuted}" FontSize="11"/>
                   </StackPanel>
                 </DataTemplate>
               </ListBox.ItemTemplate>
@@ -58,7 +65,7 @@
               <Button Content="Collapse" Command="{Binding Explorer.CollapseAllCommand}"/>
             </StackPanel>
             <TextBlock DockPanel.Dock="Bottom" Text="{Binding Explorer.ExplorerStatus}"
-                       Foreground="#64748B" FontSize="11" Margin="0,6,0,0"/>
+                       Foreground="{DynamicResource AppTextMuted}" FontSize="11" Margin="0,6,0,0"/>
             <!-- ExplorerTree is named so the per-node context menu (whose DataContext is the node) can
                  reach the shell VM's file-op commands via an element-name compiled binding (#223). -->
             <TreeView x:Name="ExplorerTree" ItemsSource="{Binding Explorer.RootNode.Children}">
@@ -77,10 +84,10 @@
                       </ContextMenu>
                     </StackPanel.ContextMenu>
                     <TextBlock Text="🗀" IsVisible="{Binding IsDirectory}" VerticalAlignment="Center"/>
-                    <Border Background="#EEF4FF" CornerRadius="3" Padding="3,0" VerticalAlignment="Center"
+                    <Border Background="{DynamicResource AppChipBg}" CornerRadius="3" Padding="3,0" VerticalAlignment="Center"
                             IsVisible="{Binding !IsDirectory}">
                       <TextBlock Text="{Binding ChipLabel}" FontSize="8" FontWeight="Bold"
-                                 Foreground="#1D4ED8" VerticalAlignment="Center"/>
+                                 Foreground="{DynamicResource AppChipText}" VerticalAlignment="Center"/>
                     </Border>
                     <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
                     <Ellipse Width="6" Height="6" Fill="#F59E0B" VerticalAlignment="Center"
@@ -106,11 +113,11 @@
 
         <!-- Studio mode (IsVisible←IsStudio): hero + projects sidebar + the 14-tab TabControl + Quality panel. -->
         <Grid IsVisible="{Binding IsStudio}" RowDefinitions="Auto,*" ColumnDefinitions="170,*,300">
-          <Border Grid.Row="0" Grid.ColumnSpan="3" Background="#F8FAFC" Padding="14,10" Margin="0,0,0,6">
+          <Border Grid.Row="0" Grid.ColumnSpan="3" Background="{DynamicResource AppBackground}" Padding="14,10" Margin="0,0,0,6">
             <StackPanel Spacing="8">
               <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
                 <TextBlock Text="{Binding ActiveProjectTitle}" FontSize="18" FontWeight="Bold" VerticalAlignment="Center"/>
-                <TextBlock Text="{Binding ActiveSchemaDescription}" Foreground="#64748B" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding ActiveSchemaDescription}" Foreground="{DynamicResource AppTextMuted}" VerticalAlignment="Center"/>
                 <Border CornerRadius="6" Padding="10,4" VerticalAlignment="Center"
                         Background="{Binding Debt.DebtGradeColor, Converter={StaticResource StringToBrush}}">
                   <TextBlock Text="{Binding Debt.DebtGrade}" Foreground="White" FontWeight="Bold"/>
@@ -150,12 +157,12 @@
               </WrapPanel>
               <!-- Engine setup (shown when the engine is not located) + the error-banner dismiss. -->
               <WrapPanel IsVisible="{Binding IsEngineUnavailable}">
-                <TextBlock Text="{Binding EngineUnavailableMessage}" Foreground="#B45309" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBlock Text="{Binding EngineUnavailableMessage}" Foreground="{DynamicResource AppWarn}" VerticalAlignment="Center" Margin="0,0,8,0"/>
                 <Button Content="Locate engine…" Command="{Binding LocateEngineCommand}" Margin="0,0,6,0"/>
                 <Button Content="Retry" Command="{Binding RetryEngineCommand}" Margin="0,0,6,0"/>
               </WrapPanel>
               <WrapPanel IsVisible="{Binding HasError}">
-                <TextBlock Text="{Binding ErrorMessage}" Foreground="#B91C1C" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBlock Text="{Binding ErrorMessage}" Foreground="{DynamicResource AppError}" VerticalAlignment="Center" Margin="0,0,8,0"/>
                 <Button Content="Dismiss" Command="{Binding DismissErrorCommand}"/>
               </WrapPanel>
             </StackPanel>
@@ -178,7 +185,7 @@
           <StackPanel Orientation="Horizontal" Spacing="12">
             <TextBlock Text="{Binding Debt.DebtGrade}" FontSize="44" FontWeight="Bold"
                        Foreground="{Binding Debt.DebtGradeColor, Converter={StaticResource StringToBrush}}"/>
-            <TextBlock Text="stale" VerticalAlignment="Center" Foreground="#B45309"
+            <TextBlock Text="stale" VerticalAlignment="Center" Foreground="{DynamicResource AppWarn}"
                        IsVisible="{Binding Debt.DebtStale}"/>
           </StackPanel>
           <!-- The same shared async engine command the WPF head binds — one run, both heads. -->
@@ -187,7 +194,7 @@
           <ItemsControl ItemsSource="{Binding Debt.DebtItems}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="models:DebtDisplayItem">
-                <Border Padding="8" Margin="0,2" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="6">
+                <Border Padding="8" Margin="0,2" BorderBrush="{DynamicResource AppBorder}" BorderThickness="1" CornerRadius="6">
                   <TextBlock Text="{Binding DisplayName}" TextWrapping="Wrap"/>
                 </Border>
               </DataTemplate>
@@ -243,7 +250,7 @@
               <DataTemplate x:DataType="models:DatasetVersionDisplayItem">
                 <StackPanel Margin="0,2">
                   <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"/>
-                  <TextBlock Text="{Binding Integrity}" Foreground="#64748B" FontSize="11"/>
+                  <TextBlock Text="{Binding Integrity}" Foreground="{DynamicResource AppTextMuted}" FontSize="11"/>
                 </StackPanel>
               </DataTemplate>
             </ListBox.ItemTemplate>
@@ -260,7 +267,7 @@
             <Button Content="Restore" Command="{Binding RestoreDatasetVersionCommand}" Margin="0,0,6,4"/>
             <Button Content="Clean up row store" Command="{Binding RunRowStoreGcCommand}" Margin="0,0,6,4"/>
           </WrapPanel>
-          <TextBlock Text="{Binding Versions.DatasetDiffBaseLabel}" Foreground="#64748B"/>
+          <TextBlock Text="{Binding Versions.DatasetDiffBaseLabel}" Foreground="{DynamicResource AppTextMuted}"/>
           <TextBlock Text="{Binding Versions.DatasetVersionDetail}" TextWrapping="Wrap" Margin="0,8,0,0"/>
         </StackPanel>
       </Grid>
@@ -304,7 +311,7 @@
             </ItemsControl.ItemTemplate>
           </ItemsControl>
           <TextBlock Text="{Binding Suites.SuiteHonestyNote}" TextWrapping="Wrap"
-                     Foreground="#64748B" FontSize="11" Margin="0,8,0,0"/>
+                     Foreground="{DynamicResource AppTextMuted}" FontSize="11" Margin="0,8,0,0"/>
         </StackPanel>
       </Grid>
     </TabItem>
@@ -349,7 +356,7 @@
             <DataTemplate x:DataType="models:ImportQuarantineItem">
               <StackPanel Margin="0,2">
                 <TextBlock Text="{Binding SourcePath}" FontWeight="SemiBold"/>
-                <TextBlock Text="{Binding RowNumber}" Foreground="#64748B" FontSize="11"/>
+                <TextBlock Text="{Binding RowNumber}" Foreground="{DynamicResource AppTextMuted}" FontSize="11"/>
               </StackPanel>
             </DataTemplate>
           </ListBox.ItemTemplate>
@@ -391,7 +398,7 @@
           <TextBlock Text="Rejected" FontWeight="SemiBold" Margin="0,6,0,0"/>
           <TextBlock Text="{Binding PreferenceReview.PreferenceRejectedText}" TextWrapping="Wrap"/>
           <TextBlock Text="{Binding PreferenceReview.PreferenceReviewSummary}" TextWrapping="Wrap"
-                     Foreground="#64748B" Margin="0,8,0,0"/>
+                     Foreground="{DynamicResource AppTextMuted}" Margin="0,8,0,0"/>
         </StackPanel>
       </Grid>
     </TabItem>
@@ -403,7 +410,7 @@
           <Button Content="Validate draft" Command="{Binding ValidateDraftCommand}" Margin="0,0,6,0"/>
           <Button Content="Save example" Command="{Binding SaveExampleCommand}" Margin="0,0,6,0"/>
         </WrapPanel>
-        <TextBlock DockPanel.Dock="Top" Text="Unsaved changes" Foreground="#B45309" Margin="0,0,0,6"
+        <TextBlock DockPanel.Dock="Top" Text="Unsaved changes" Foreground="{DynamicResource AppWarn}" Margin="0,0,0,6"
                    IsVisible="{Binding WritingStudio.IsDraftDirty}"/>
         <TextBox Text="{Binding WritingStudio.DraftText}" AcceptsReturn="True"
                  FontFamily="Consolas" TextWrapping="NoWrap"
@@ -420,7 +427,7 @@
           <TextBox Text="{Binding AiAssistConnection.AiAssistModel}"/>
           <TextBox Text="{Binding AiAssistConnection.AiAssistBaseUrl}"/>
           <TextBlock Text="{Binding AiAssistConnection.AiAssistModelListSummary}"
-                     Foreground="#64748B" FontSize="11" TextWrapping="Wrap"/>
+                     Foreground="{DynamicResource AppTextMuted}" FontSize="11" TextWrapping="Wrap"/>
           <TextBlock Text="Action" Margin="0,6,0,0"/>
           <ComboBox HorizontalAlignment="Stretch"
                     ItemsSource="{Binding AiAssist.AiAssistActionPresets}"
@@ -436,7 +443,7 @@
               <DataTemplate x:DataType="models:AiAssistReviewQueueItem">
                 <StackPanel Margin="0,2">
                   <TextBlock Text="{Binding ReviewId}" FontWeight="SemiBold"/>
-                  <TextBlock Text="{Binding ReviewState}" Foreground="#64748B" FontSize="11"/>
+                  <TextBlock Text="{Binding ReviewState}" Foreground="{DynamicResource AppTextMuted}" FontSize="11"/>
                 </StackPanel>
               </DataTemplate>
             </ListBox.ItemTemplate>
@@ -470,7 +477,7 @@
           <TextBlock Text="Limit / score threshold"/>
           <TextBox Text="{Binding Evaluation.EvaluationLimit}"/>
           <TextBox Text="{Binding Evaluation.EvaluationScoreThreshold}"/>
-          <TextBlock Text="Judge (optional): model / backend / base-url" FontSize="11" Foreground="#64748B"/>
+          <TextBlock Text="Judge (optional): model / backend / base-url" FontSize="11" Foreground="{DynamicResource AppTextMuted}"/>
           <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeModel}" Watermark="judge model"/>
           <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeBackend}" Watermark="judge backend (blank = eval backend)"/>
           <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeBaseUrl}" Watermark="judge base url (blank = eval base url)"/>
@@ -496,7 +503,7 @@
               <DataTemplate x:DataType="models:EvaluationExampleResult">
                 <StackPanel Margin="0,2">
                   <TextBlock Text="{Binding ExampleId}" FontWeight="SemiBold"/>
-                  <TextBlock Text="{Binding Score}" Foreground="#64748B" FontSize="11"/>
+                  <TextBlock Text="{Binding Score}" Foreground="{DynamicResource AppTextMuted}" FontSize="11"/>
                 </StackPanel>
               </DataTemplate>
             </ListBox.ItemTemplate>
@@ -507,7 +514,7 @@
           <TextBlock Text="Manual score / notes" Margin="0,6,0,0"/>
           <TextBox Text="{Binding Evaluation.EvaluationManualScore}"/>
           <TextBox Text="{Binding Evaluation.EvaluationManualNotes}" AcceptsReturn="True" Height="50"/>
-          <TextBlock Text="{Binding Evaluation.EvaluationReviewSummary}" Foreground="#64748B" TextWrapping="Wrap"/>
+          <TextBlock Text="{Binding Evaluation.EvaluationReviewSummary}" Foreground="{DynamicResource AppTextMuted}" TextWrapping="Wrap"/>
           <TextBlock Text="Report comparison" FontWeight="SemiBold" Margin="0,8,0,0"/>
           <ComboBox HorizontalAlignment="Stretch"
                     ItemsSource="{Binding Evaluation.EvaluationReportHistory}"
@@ -548,7 +555,7 @@
           <StackPanel Orientation="Horizontal" Spacing="8">
             <TextBlock Text="Status:" FontWeight="Bold"/>
             <TextBlock Text="{Binding Training.TrainingRunStatus}"/>
-            <TextBlock Text="running" Foreground="#B45309" IsVisible="{Binding Training.IsTrainingRunning}"/>
+            <TextBlock Text="running" Foreground="{DynamicResource AppWarn}" IsVisible="{Binding Training.IsTrainingRunning}"/>
           </StackPanel>
           <WrapPanel>
             <Button Content="Launch" Command="{Binding LaunchTrainingCommand}" IsEnabled="{Binding Training.CanLaunchTraining}" Margin="0,0,6,4"/>
@@ -586,7 +593,7 @@
               <DataTemplate x:DataType="models:ArtifactDisplayItem">
                 <StackPanel Margin="0,2">
                   <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"/>
-                  <TextBlock Text="{Binding Integrity}" Foreground="#64748B" FontSize="11"/>
+                  <TextBlock Text="{Binding Integrity}" Foreground="{DynamicResource AppTextMuted}" FontSize="11"/>
                 </StackPanel>
               </DataTemplate>
             </ListBox.ItemTemplate>
@@ -626,7 +633,7 @@
       </Panel>
 
       <!-- Docked panels (mutually exclusive), toggled from the activity bar. -->
-      <Border Grid.Row="1" Height="180" Background="#F8FAFC" BorderBrush="#E2E8F0"
+      <Border Grid.Row="1" Height="180" Background="{DynamicResource AppBackground}" BorderBrush="{DynamicResource AppBorder}"
               BorderThickness="0,1,0,0" IsVisible="{Binding ProblemsPanelVisible}">
         <DockPanel Margin="12,8">
           <TextBlock DockPanel.Dock="Top" Text="{Binding ProblemsSummary}" FontWeight="Bold" Margin="0,0,0,6"/>
@@ -637,7 +644,7 @@
                   <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
                              Foreground="{Binding SeverityColor, Converter={StaticResource StringToBrush}}"/>
                   <TextBlock Text="{Binding Message}" FontSize="11"/>
-                  <TextBlock Text="{Binding Fix}" FontSize="11" Foreground="#2563EB"/>
+                  <TextBlock Text="{Binding Fix}" FontSize="11" Foreground="{DynamicResource AppAccent}"/>
                 </StackPanel>
               </DataTemplate>
             </ListBox.ItemTemplate>
@@ -652,7 +659,7 @@
             <ListBox.ItemTemplate>
               <DataTemplate x:DataType="models:EngineLogEntry">
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                  <TextBlock Text="{Binding Timestamp}" Foreground="#64748B" FontFamily="Consolas" FontSize="11"/>
+                  <TextBlock Text="{Binding Timestamp}" Foreground="{DynamicResource AppTextMuted}" FontFamily="Consolas" FontSize="11"/>
                   <TextBlock Text="{Binding Command}" Foreground="White" FontFamily="Consolas" FontSize="11"/>
                   <TextBlock Text="{Binding ArgsSummary}" Foreground="#94A3B8" FontFamily="Consolas" FontSize="11"/>
                 </StackPanel>
