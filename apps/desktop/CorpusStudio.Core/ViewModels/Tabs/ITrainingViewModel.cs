@@ -53,6 +53,21 @@ public interface ITrainingViewModel : INotifyPropertyChanged
     bool CanLaunchTraining { get; }
     bool CanResumeTraining { get; }
 
+    // First-party trainer (the opt-in [train] extra; runs in-process, no external trainer).
+    /// <summary>True when the selected target is Corpus Studio's own trainer (corpus_studio).</summary>
+    bool IsFirstPartyTarget { get; }
+    /// <summary>Run the tiny CPU smoke path instead of a real GPU run (proves the pipeline, not quality).</summary>
+    bool CpuToyMode { get; set; }
+    string TrainingRuntimeSummary { get; }
+    string TrainingMergeSummary { get; }
+    /// <summary>True when a first-party run's output dir exists and no run is active (the merge target).</summary>
+    bool CanMergeAdapter { get; }
+    void ApplyTrainingRuntime(TrainingRuntimeReport report);
+    void SetTrainingRuntimeError(string message);
+    void SetMergeInProgress();
+    void ApplyMergeResult(MergeResult result);
+    void SetMergeError(string message);
+
     int BeginTrainingRun();
     void AppendTrainingRunLog(string line);
     void AppendTrainingRunLogBatch(int runId, IReadOnlyList<string> lines);

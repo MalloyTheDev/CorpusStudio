@@ -1,11 +1,11 @@
-"""Launch-command generation for the Training Lab (guided, not executed).
+"""Launch-command generation for the Training Lab.
 
-Corpus Studio does not run trainers itself. Given a rendered config and a
-target, this emits the exact command the user would run with their own
-installed trainer (axolotl / TRL / Unsloth / Hugging Face / LLaMA-Factory),
-the resume variant, and the dependencies to install. It also lists checkpoints
-found in an output directory so a resume command can point at the latest one.
-Everything here is pure string/path work — no ML frameworks are imported.
+For an *external* target (axolotl / TRL / Unsloth / Hugging Face / LLaMA-Factory) this emits the exact
+command the user would run with their own installed trainer, the resume variant, and the dependencies
+to install — Corpus Studio does not run those. For the **first-party** ``corpus_studio`` target it emits
+the ``corpus-studio train-run`` command, which Corpus Studio *does* run itself in-process via the opt-in
+``[train]`` extra. It also lists checkpoints found in an output directory so a resume command can point
+at the latest one. Everything here is pure string/path work — no ML frameworks are imported.
 """
 
 from __future__ import annotations
@@ -34,8 +34,22 @@ _REVIEW_NOTE = (
 
 # Per-target launch metadata. ``resume_flag`` is a format string with a
 # ``{checkpoint}`` placeholder when the trainer CLI supports a resume flag, else
-# ``None`` (resume is config-driven for that target).
+# ``None`` (resume is config-driven for that target). ``review_note`` overrides
+# the default "review before running" note for a target when present.
 _TARGET_LAUNCH: dict[str, dict] = {
+    "corpus_studio": {
+        # First-party: Corpus Studio runs this itself (the opt-in [train] extra), no external trainer.
+        "template": 'corpus-studio train-run "{config}"',
+        "argv_prefix": ["corpus-studio", "train-run"],
+        "resume_flag": None,
+        "resume_argv_flag": None,
+        "dependencies": ["corpus-studio-engine[train]"],
+        "review_note": (
+            "This runs Corpus Studio's own first-party QLoRA trainer in-process (the opt-in [train] "
+            "extra) — no external trainer needed. Preflight with `train-check`; after training, merge "
+            "the adapter into the base with `train-merge`."
+        ),
+    },
     "axolotl_yaml": {
         "template": 'accelerate launch -m axolotl.cli.train "{config}"',
         "argv_prefix": ["accelerate", "launch", "-m", "axolotl.cli.train"],
@@ -90,7 +104,7 @@ def build_launch_plan(
 
     command = meta["template"].format(config=config_path)
     argv = [*meta["argv_prefix"], config_path]
-    notes = [_REVIEW_NOTE, f"Requires: {', '.join(meta['dependencies'])}."]
+    notes = [meta.get("review_note", _REVIEW_NOTE), f"Requires: {', '.join(meta['dependencies'])}."]
 
     resume_flag = meta["resume_flag"]
     if resume_flag is not None:
@@ -103,7 +117,9 @@ def build_launch_plan(
         resume_argv = list(argv)
         resume_supported = False
         notes.append(
-            "Resume is config-driven for this target; set the checkpoint path in the config."
+            "The first-party trainer has no resume flag yet; re-run to retrain."
+            if target == "corpus_studio"
+            else "Resume is config-driven for this target; set the checkpoint path in the config."
         )
 
     return LaunchPlan(

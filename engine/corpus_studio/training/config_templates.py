@@ -13,6 +13,9 @@ from pydantic import BaseModel, Field
 
 
 TrainingConfigTarget = Literal[
+    # Corpus Studio's own first-party trainer (opt-in ``[train]`` extra): the config is run in-process
+    # by ``train-run`` — no external trainer needed. Renders as JSON (the shape ``train-run`` reads).
+    "corpus_studio",
     "axolotl_yaml",
     "trl_config",
     "unsloth_script",
@@ -95,6 +98,11 @@ def normalize_training_config_target(target: str) -> TrainingConfigTarget:
 
     normalized = target.strip().lower().replace("-", "_")
     aliases = {
+        "corpus_studio": "corpus_studio",
+        "corpusstudio": "corpus_studio",
+        "corpus": "corpus_studio",
+        "first_party": "corpus_studio",
+        "firstparty": "corpus_studio",
         "axolotl": "axolotl_yaml",
         "axolotl_yaml": "axolotl_yaml",
         "trl": "trl_config",
