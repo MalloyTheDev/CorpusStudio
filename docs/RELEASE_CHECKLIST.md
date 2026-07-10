@@ -1,9 +1,10 @@
 # Release Checklist
 
 A pre-release gate for public-repo hygiene, reproducible evidence, and honest
-scope. Corpus Studio is local-first: it can launch a user's installed trainer
-(with explicit confirmation of the exact command) but never bundles CUDA/PyTorch
-or calls hosted services on its own, so "release" here means a clean,
+scope. Corpus Studio is local-first: it can run its own opt-in first-party trainer
+or launch a user's installed trainer (with explicit confirmation of the exact
+command), but the dependency-light core / distributable bundles no CUDA/PyTorch
+and calls no hosted services on its own, so "release" here means a clean,
 inspectable, buildable snapshot — not a deployment.
 
 Work top to bottom. Every box should be checked or explicitly waived with a note
@@ -68,9 +69,10 @@ These are the paths a first-time user exercises; capture output as evidence.
 Corpus Studio deliberately does **not** do these. Keep this list in the release
 notes so expectations are set:
 
-- No embedded training framework — Corpus Studio launches the user's installed
-  trainer (with explicit confirmation of the exact argv) but bundles no
-  CUDA/PyTorch/Transformers and runs no training itself.
+- No training deps in the dependency-light core / distributable — it bundles no
+  CUDA/PyTorch/Transformers. Training is opt-in via the `[train]` extra (the
+  first-party QLoRA trainer, which delegates to TRL/peft), or launch your own
+  installed trainer; either way the exact argv is shown and confirmed first.
 - No cloud/hosted-provider *generation* or credential management: local backends
   (Ollama, OpenAI-compatible) do the generating; OpenAI/Anthropic are
   evaluator-only and only when the user configures them. Nothing is called on its
