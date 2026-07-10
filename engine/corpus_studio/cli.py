@@ -1675,6 +1675,56 @@ def train_check(
         typer.echo(render_training_runtime_text(report))
 
 
+@app.command("train-run")
+def train_run(
+    config_path: Path,
+    project_dir: Optional[Path] = typer.Option(None, "--project-dir", help="Project root (for defaults/records)."),
+    dataset_path: Optional[Path] = typer.Option(None, "--dataset-path", help="Override the config's dataset_path (e.g. the train split)."),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir", help="Override where the adapter/checkpoints are written."),
+    base_model: Optional[str] = typer.Option(None, "--base-model", help="Override the base model."),
+    cpu_toy: bool = typer.Option(False, "--cpu-toy", help="Run the tiny CPU smoke path (a small model, a few steps, no GPU/bitsandbytes)."),
+    max_steps: Optional[int] = typer.Option(None, "--max-steps", help="Cap the number of training steps."),
+):
+    """RUN the training in-process (first-party trainer, opt-in [train] extra): read a CorpusStudio
+    training config + dataset, build a TRL SFTTrainer with peft LoRA (4-bit QLoRA on GPU), train, and
+    save the adapter + tokenizer + checkpoints. Preflighted by train-check — refuses with an install
+    hint if the runtime is missing. Progress ('[step/total]') goes to stderr; the JSON result to stdout.
+
+    A real GPU QLoRA cannot be run without a CUDA GPU + bitsandbytes; --cpu-toy proves the pipeline on
+    CPU. Exit 2 when the runtime can't run the request."""
+
+    from corpus_studio.training.trainer import (
+        TrainerError,
+        load_run_config_from_file,
+        run_training,
+    )
+
+    try:
+        run_config = load_run_config_from_file(
+            config_path,
+            dataset_path=str(dataset_path) if dataset_path else None,
+            output_dir=str(output_dir) if output_dir else None,
+            base_model=base_model,
+            cpu_toy=cpu_toy,
+            max_steps=max_steps,
+        )
+    except (TrainerError, ValueError, json.JSONDecodeError, OSError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    def _progress(step: int, total: int, loss: Optional[float]) -> None:
+        line = f"[{step}/{total}] step" + (f" loss={loss:.4f}" if loss is not None else "")
+        typer.echo(line, err=True)
+
+    try:
+        result = run_training(run_config, progress_callback=_progress)
+    except TrainerError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    typer.echo(result.model_dump_json(indent=2))
+
+
 @app.command("training-compat")
 def training_compat(
     schema: str = typer.Option(..., "--schema", help="Dataset schema id."),

@@ -33,8 +33,9 @@ _TRAIN_PACKAGES: tuple[str, ...] = (
     "datasets",
     "bitsandbytes",
 )
-# The subset needed for the CPU toy path (no quantization, no GPU).
-_CPU_TOY_PACKAGES: tuple[str, ...] = ("torch", "transformers", "peft", "trl", "datasets")
+# The subset needed for the CPU toy path (no quantization, no GPU). accelerate is required because
+# the HuggingFace Trainer/TRL SFTTrainer depend on it even on CPU.
+_CPU_TOY_PACKAGES: tuple[str, ...] = ("torch", "transformers", "peft", "trl", "datasets", "accelerate")
 # A 7B in fp16 ≈ 14 GB, so the final fp16 MERGE won't fit a card below ~16 GB (4-bit QLoRA training
 # itself needs far less). Below this we warn that the merge may OOM and the fallback kicks in.
 _MERGE_TIGHT_VRAM_GB = 16.0

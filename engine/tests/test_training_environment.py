@@ -59,12 +59,16 @@ def test_nothing_installed_is_not_ready(monkeypatch):
 
 
 def test_cpu_toy_set_without_bitsandbytes_or_gpu(monkeypatch):
-    present = {"torch": "2.3", "transformers": "4.44", "peft": "0.11", "trl": "0.9", "datasets": "2.19"}
+    # The CPU toy path needs accelerate (Trainer dep) but NOT bitsandbytes/GPU.
+    present = {
+        "torch": "2.3", "transformers": "4.44", "peft": "0.11",
+        "trl": "0.9", "datasets": "2.19", "accelerate": "0.30",
+    }
     _patch(monkeypatch, present, env.GpuInfo(available=False))
     r = env.probe_training_runtime()
     assert r.cpu_toy_ready is True  # the CPU toy path works
     assert r.ready is False
-    assert "bitsandbytes" in r.missing and "accelerate" in r.missing
+    assert "bitsandbytes" in r.missing
     assert any("bitsandbytes" in n for n in r.notes)
 
 
