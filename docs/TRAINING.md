@@ -195,17 +195,23 @@ Verified on a real RTX 5070: bitsandbytes 4-bit, the *mem-efficient* SDPA kernel
 and disables just the flash backend** (`train-check` notes this when it sees a Blackwell
 card).
 
-Trade-off, and the real ceiling: torch's mem-efficient SDPA is O(seq) in isolation, but the
-transformers model **falls back to the math kernel (O(seq²)) for its masked attention**
-today, so on a **12 GB** card the memory wall is real — measured peak on a 7B 4-bit QLoRA:
-~10.8 GB @ `sequence_len` 1024 → 13.8 GB @ 2048. Above ~seq 1280 the training peak exceeds
-12 GB; on Windows the driver then silently **spills to system RAM and thrashes over PCIe**
-(steps 10–25× slower, *looks* frozen but is crawling; Linux OOMs). The pre-flight warns
-about this. To train **fast full-length rows** you need a memory-efficient attention that
-works on sm_120 (a Blackwell flash-attn wheel or xformers — not available in the stock
-stack yet); until then keep `sequence_len` modest (≤ ~1280 on 12 GB), shorten a long system
-prompt, or use a smaller base. Override the backend explicitly with `train-run
---attn-implementation eager|sdpa|flash_attention_2` (or `attn_implementation` in the config).
+The real ceiling (measured, and it is **not** an attention-kernel problem): on a **12 GB** card
+the 7B 4-bit QLoRA training peak is ~10.8 GB @ `sequence_len` 1024 → 13.8 GB @ 2048, so above
+~seq 1280 the run exceeds 12 GB. On Windows (and WSL2, which shares the same WDDM driver) the
+driver then silently **spills to system RAM and thrashes over PCIe** — steps 10–25× slower,
+*looks* frozen but is crawling; native Linux OOMs. The pre-flight warns about this.
+
+**A faster attention kernel does NOT lift this ceiling.** We tested `flash_attention_2` (the
+Dao flash-attn Blackwell wheel) against the real 7B on the actual sm_120 card: it is **faster**
+but the peak is **identical to math** (13.8 GB @ seq2048). With **gradient checkpointing** the
+peak is dominated by the checkpointed layer-boundary activations (linear in seq), not the
+transient attention scores that flash/mem-efficient attention save — so a memory-efficient
+kernel barely moves the peak. To fit **full-length rows on 12 GB**, reduce the memory that
+actually dominates: keep `sequence_len` ≤ ~1280, shorten a long training system prompt (~700 →
+~80 tokens — also the correct fine-tuning design; the student internalises the rules and doesn't
+need the teacher preamble), or use a **smaller base** (Qwen2.5-3B fits full-length comfortably).
+Override the backend explicitly with `train-run --attn-implementation
+eager|sdpa|flash_attention_2` (or `attn_implementation` in the config).
 
 Security: model loading uses `trust_remote_code=False` (a fetched repo can't execute
 code), and `model-fetch` warns when a model ships only pickle (`.bin`) weights
