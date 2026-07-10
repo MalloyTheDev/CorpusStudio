@@ -38,6 +38,30 @@ def _run(tmp_path, **overrides):
     return run_training_preflight(**kwargs)
 
 
+def test_first_party_trainer_passes_without_a_path_check(tmp_path: Path):
+    # For the corpus_studio target the "trainer" is Corpus Studio itself (run via -m corpus_studio.cli),
+    # not an executable on the global PATH — the check should PASS (and point at train-check), not warn.
+    report = _run(
+        tmp_path,
+        launch_argv=["corpus-studio", "train-run", "config.json"],
+        dependencies=["corpus-studio-engine[train]"],
+    )
+    check = next(c for c in report.checks if c.name == "trainer_available")
+    assert check.status == PASS
+    assert "train-check" in check.message
+    assert report.trainer_found is True
+
+
+def test_external_trainer_not_on_path_still_warns(tmp_path: Path):
+    report = _run(
+        tmp_path,
+        launch_argv=["definitely-not-a-real-trainer-xyz-123", "c.yaml"],
+        dependencies=["axolotl"],
+    )
+    check = next(c for c in report.checks if c.name == "trainer_available")
+    assert check.status == WARN
+
+
 def test_all_good_passes_and_can_launch(tmp_path: Path):
     report = _run(tmp_path)
     assert report.status == PASS

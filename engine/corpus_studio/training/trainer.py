@@ -70,6 +70,30 @@ class TrainResult(BaseModel):
     checkpoints: list[str] = Field(default_factory=list)
 
 
+def _parse_config_text(text: str) -> dict[str, Any]:
+    """Parse a training config that may be JSON **or** YAML. The ``corpus_studio`` target renders JSON,
+    but a user can point ``train-run`` at a YAML config (e.g. one named ``*.yaml``, or an axolotl-style
+    file) — so a valid config never dies on format. Tries JSON first (fast, no dep); on failure falls
+    back to YAML (PyYAML ships with the ``[train]`` deps that ``train-run`` needs anyway)."""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            import yaml  # noqa: PLC0415 - lazy; PyYAML is a transitive [train] dep (transformers/datasets).
+        except ImportError as exc:
+            raise TrainerError(
+                "The training config is not valid JSON, and PyYAML isn't available to parse it as YAML. "
+                "Use a JSON config (the corpus_studio target emits one) or install pyyaml."
+            ) from exc
+        try:
+            data = yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            raise TrainerError(f"The training config is neither valid JSON nor valid YAML: {exc}") from exc
+    if not isinstance(data, dict):
+        raise TrainerError("The training config must be a JSON object / YAML mapping of fields.")
+    return data
+
+
 def load_run_config_from_file(
     config_path: Path | str,
     *,
@@ -79,12 +103,13 @@ def load_run_config_from_file(
     cpu_toy: bool = False,
     max_steps: int | None = None,
 ) -> TrainRunConfig:
-    """Build a :class:`TrainRunConfig` from a CorpusStudio training config JSON (the ``training-config``
+    """Build a :class:`TrainRunConfig` from a CorpusStudio training config (the ``training-config``
     output: base_model / dataset_path / format / sequence_len / lora_* / seed …), applying overrides.
+    Accepts JSON or YAML so a config never dies on format.
 
     The CPU toy path forces a tiny model + a short sequence + a few steps so it runs in seconds,
     unless the caller overrides them explicitly."""
-    data: dict[str, Any] = json.loads(Path(config_path).read_text(encoding="utf-8-sig"))
+    data: dict[str, Any] = _parse_config_text(Path(config_path).read_text(encoding="utf-8-sig"))
 
     resolved_base = base_model or data.get("base_model") or ""
     resolved_dataset = dataset_path or data.get("dataset_path") or ""

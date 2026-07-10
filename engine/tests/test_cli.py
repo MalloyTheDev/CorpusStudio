@@ -700,3 +700,14 @@ def test_training_config_command_rejects_invalid_lora_values(tmp_path: Path):
 
     assert result.exit_code == 1
     assert not output_path.exists()
+
+
+def test_main_forces_utf8_stdio_before_running(monkeypatch):
+    # The `corpus-studio` console script points at main(), which must reconfigure stdio to UTF-8
+    # BEFORE the CLI runs so `corpus-studio --help` (contains → arrows) doesn't crash on a Windows
+    # cp1252 console. (app() directly — the old entry point — skipped this.)
+    order: list[str] = []
+    monkeypatch.setattr(cli, "_ensure_utf8_stdio", lambda: order.append("utf8"))
+    monkeypatch.setattr(cli, "app", lambda: order.append("app"))
+    cli.main()
+    assert order == ["utf8", "app"]  # UTF-8 first, then the CLI

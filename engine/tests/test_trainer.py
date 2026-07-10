@@ -78,6 +78,30 @@ def test_missing_base_or_dataset_raises(tmp_path):
         load_run_config_from_file(_config(tmp_path, base_model="", dataset_path=""))
 
 
+def test_load_config_accepts_yaml_so_a_named_yaml_does_not_die(tmp_path):
+    # train-run parses JSON, but a config named *.yaml (or a hand-written YAML) must still load —
+    # the WBG run pointed train-run at wbg7b_corpus.yaml. JSON is a YAML subset, but real YAML too:
+    config = tmp_path / "wbg7b_corpus.yaml"
+    config.write_text(
+        "base_model: Qwen/Qwen2.5-7B\ndataset_path: train.jsonl\nformat: chat\nsequence_len: 4096\nlora_r: 16\n",
+        encoding="utf-8",
+    )
+    cfg = load_run_config_from_file(config)
+    assert cfg.base_model == "Qwen/Qwen2.5-7B"
+    assert cfg.dataset_path == "train.jsonl"
+    assert cfg.dataset_format == "chat"
+    assert cfg.sequence_len == 4096 and cfg.lora_r == 16
+
+
+def test_load_config_non_mapping_raises_trainer_error(tmp_path):
+    # A file that is neither a JSON object nor a YAML mapping is a clean TrainerError (→ CLI exit 2),
+    # not a cryptic parser traceback.
+    config = tmp_path / "bad.yaml"
+    config.write_text("just a plain string, not a config mapping\n", encoding="utf-8")
+    with pytest.raises(TrainerError):
+        load_run_config_from_file(config)
+
+
 # ---- formatting --------------------------------------------------------------
 
 
