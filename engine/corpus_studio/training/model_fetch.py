@@ -13,6 +13,7 @@ The license classification is honest: an unknown or missing license is treated a
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -20,6 +21,11 @@ from pydantic import BaseModel, Field
 
 FetchProgress = Callable[[str], None]
 INSTALL_HINT = "pip install corpus-studio-engine[train]"
+
+# A large model over a flaky link (e.g. Windows WinError 10054 resetting most attempts) needs several
+# tries — each RESUMES where the last left off — before it completes. Bounded so a genuinely broken
+# fetch still fails fast-ish.
+_MAX_FETCH_ATTEMPTS = 5
 
 # License ids (SPDX-ish, lowercased) that are safe to train on AND redistribute the result under.
 _PERMISSIVE = frozenset(
@@ -132,6 +138,13 @@ def fetch_model(
     if progress is not None:
         progress(f"downloading {repo_id} (resumable)…")
 
+    # hf_transfer (the Rust fast-downloader) does NOT survive flaky connections — on a Windows
+    # WinError 10054 reset it aborts instead of resuming, so a big model never finishes. Default it
+    # OFF so the pure-Python downloader (which resumes + retries) is used. Set BEFORE importing the
+    # hub, which reads this into a module constant at import. A user on a solid link can still opt in
+    # by exporting HF_HUB_ENABLE_HF_TRANSFER=1 themselves (setdefault respects an explicit choice).
+    os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "0")
+
     try:
         from huggingface_hub import snapshot_download  # noqa: PLC0415 - lazy heavy import.
     except ImportError as exc:
@@ -151,7 +164,25 @@ def fetch_model(
             if keep not in patterns:
                 patterns.append(keep)
         kwargs["allow_patterns"] = patterns
-    path = Path(snapshot_download(**kwargs))  # resume is the default in recent huggingface_hub
+
+    # Resilient resume-loop: snapshot_download resumes, so on a connection that resets most attempts we
+    # just try again (up to _MAX_FETCH_ATTEMPTS) and each try continues where the last left off. Only
+    # after exhausting the attempts do we surface the failure (a clean RuntimeError → the CLI exits 2).
+    path: Path | None = None
+    last_error: Exception | None = None
+    for attempt in range(1, _MAX_FETCH_ATTEMPTS + 1):
+        try:
+            if progress is not None and attempt > 1:
+                progress(f"retry {attempt}/{_MAX_FETCH_ATTEMPTS} (resuming the partial download)…")
+            path = Path(snapshot_download(**kwargs))
+            break
+        except Exception as exc:  # noqa: BLE001 - retry any transient network/hub error; resume continues.
+            last_error = exc
+    if path is None:
+        raise RuntimeError(
+            f"Failed to download {repo_id} after {_MAX_FETCH_ATTEMPTS} attempts: {last_error}. The "
+            "partial download is cached — re-run to resume from where it stopped."
+        ) from last_error
 
     # License: the downloaded card first (robust, no network), the Hub API only as a fallback.
     license_id = license_from_readme(path) or _read_license(repo_id, revision, warnings)
@@ -171,8 +202,14 @@ def fetch_model(
                 has_safetensors = has_safetensors or file.suffix == ".safetensors"
                 has_pickle = has_pickle or file.suffix == ".bin"
     if not weight_files:
-        warnings.append("No weight files (.safetensors/.bin) found in the download — the model may be incomplete.")
-    elif has_pickle and not has_safetensors:
+        # A fetch that produced no weights is a FAILED fetch (the command promises "exit 2 on failure"),
+        # not a success-with-warning — usually a dropped connection after the config/tokenizer landed.
+        raise RuntimeError(
+            f"No weight files (.safetensors/.bin/.gguf) were downloaded for {repo_id} — the fetch is "
+            "incomplete (often a dropped connection after the config/tokenizer). The partial download "
+            "is cached; re-run to resume."
+        )
+    if has_pickle and not has_safetensors:
         # SECURITY: PyTorch .bin weights are Python pickles — loading them can execute arbitrary code.
         warnings.append(
             "SECURITY: this model ships only pickle (.bin) weights, not safetensors — loading it can "

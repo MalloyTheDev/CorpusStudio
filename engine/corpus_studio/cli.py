@@ -3270,6 +3270,15 @@ def _ensure_utf8_stdio() -> None:
             pass
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Console-script + ``-m`` entry point. Forces UTF-8 stdio BEFORE the CLI runs so
+    non-ASCII output — including the ``→`` arrows in ``--help`` — never dies on a Windows
+    cp1252 console (``UnicodeEncodeError``). The ``corpus-studio`` script points here so it
+    gets the same UTF-8 handling as ``python -m corpus_studio.cli`` (previously only the
+    ``__main__`` path reconfigured, so the bare ``corpus-studio --help`` crashed)."""
     _ensure_utf8_stdio()
     app()
+
+
+if __name__ == "__main__":
+    main()

@@ -205,12 +205,33 @@ def _collect_text_values(value: Any) -> list[str]:
     return [str(value)]
 
 
+def _synthetic_pattern_text(row: Any) -> str:
+    """Flat text for synthetic-pattern detection. For a CHAT row, DROP system-role message(s): an
+    identical shared system prompt across chat rows is intentional (the dataset's system instruction),
+    not a synthetic 'repeated opening/closing' — flagging it is a false positive. The user/assistant
+    turns are still checked. Non-chat rows (and chat rows with no system message) are unchanged."""
+    if isinstance(row, dict):
+        messages = row.get("messages")
+        if isinstance(messages, list) and any(
+            isinstance(message, dict) and message.get("role") == "system" for message in messages
+        ):
+            without_system = {key: value for key, value in row.items() if key != "messages"}
+            without_system["messages"] = [
+                message
+                for message in messages
+                if not (isinstance(message, dict) and message.get("role") == "system")
+            ]
+            return " ".join(_tokenize_text_values(without_system))
+    return " ".join(_tokenize_text_values(row))
+
+
 def _synthetic_pattern_issues(rows: list[dict]) -> list[SyntheticPatternIssue]:
     issues: list[SyntheticPatternIssue] = []
     # Synthetic-pattern detection reads the flat surface text (openings/closings/phrases),
     # NOT the field-aware dedup signature — field prefixes/separators would corrupt n-grams.
+    # The shared chat system prompt is excluded so it isn't flagged as a repeated opening.
     row_texts = [
-        (row_number, " ".join(_tokenize_text_values(row)))
+        (row_number, _synthetic_pattern_text(row))
         for row_number, row in enumerate(rows, start=1)
     ]
     row_texts = [(row_number, text) for row_number, text in row_texts if text]

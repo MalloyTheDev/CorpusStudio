@@ -85,23 +85,36 @@ def run_training_preflight(
     # 1. Trainer on PATH. A missing trainer makes the launch fail immediately, but the
     #    desktop may spawn it in a differently-activated env, so warn (don't hard-block).
     trainer = launch_argv[0] if launch_argv else ""
-    trainer_found = bool(trainer) and shutil.which(trainer) is not None
-    if trainer_found:
-        checks.append(
-            PreflightCheck(name="trainer_available", status=PASS, message=f"Trainer '{trainer}' found on PATH.")
-        )
-    else:
-        deps = ", ".join(dependencies) if dependencies else "the target's tools"
+    if trainer == "corpus-studio":
+        # First-party trainer: Corpus Studio itself, run via `<python> -m corpus_studio.cli`, not a
+        # separate executable on the GLOBAL PATH — so a PATH check is meaningless (and misleadingly
+        # warns for a venv install). Whether the [train] RUNTIME is present is train-check's job.
+        trainer_found = True
         checks.append(
             PreflightCheck(
                 name="trainer_available",
-                status=WARN,
-                message=(
-                    f"Trainer command '{trainer}' was not found on PATH. Install your trainer "
-                    f"(requires: {deps}) or check PATH before launching."
-                ),
+                status=PASS,
+                message="First-party trainer (corpus_studio) — run `train-check` to confirm the training runtime.",
             )
         )
+    else:
+        trainer_found = bool(trainer) and shutil.which(trainer) is not None
+        if trainer_found:
+            checks.append(
+                PreflightCheck(name="trainer_available", status=PASS, message=f"Trainer '{trainer}' found on PATH.")
+            )
+        else:
+            deps = ", ".join(dependencies) if dependencies else "the target's tools"
+            checks.append(
+                PreflightCheck(
+                    name="trainer_available",
+                    status=WARN,
+                    message=(
+                        f"Trainer command '{trainer}' was not found on PATH. Install your trainer "
+                        f"(requires: {deps}) or check PATH before launching."
+                    ),
+                )
+            )
 
     # 2. Config file present + non-empty (definitely fatal if missing).
     if _nonempty_file(config_path):

@@ -61,3 +61,46 @@ def test_synthetic_pattern_count_reports_true_total_beyond_display_cap():
     assert report.synthetic_pattern_count == 22               # true total
     assert len(report.synthetic_pattern_issues) == SYNTHETIC_WARNING_LIMIT  # displayed sample bounded
     assert report.synthetic_pattern_count > len(report.synthetic_pattern_issues)
+
+
+# --- WBG tester run: the intentional shared chat system prompt is not a synthetic 'repeated opening' ----
+
+def _chat_row(system: str, user: str, assistant: str) -> dict:
+    return {
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+            {"role": "assistant", "content": assistant},
+        ]
+    }
+
+
+def test_shared_chat_system_prompt_is_not_flagged_as_repeated_opening():
+    # Every chat row carries the SAME system prompt (by design). It must not be flagged as a synthetic
+    # repeated opening — that was a real WBG false positive on a clean 500-row set.
+    system = "You are the world bible assistant follow the canon strictly and answer precisely"
+    nouns = ["climate", "flora", "fauna", "rivers", "mountains", "cities", "myths", "trade", "ruins", "feasts"]
+    rows = [
+        _chat_row(system, f"Describe the {noun} of the northern reaches in careful detail", f"The {noun} shows unique trait {i}.")
+        for i, noun in enumerate(nouns)
+    ]
+
+    report = build_basic_quality_report(rows)
+
+    assert not any(
+        issue.kind == "repeated_opening" and "world bible assistant" in issue.pattern
+        for issue in report.synthetic_pattern_issues
+    )
+
+
+def test_repeated_user_opening_in_chat_is_still_flagged():
+    # Dropping the system message must NOT disable detection — an identical USER opening is still caught.
+    system = "You are the world bible assistant."
+    rows = [
+        _chat_row(system, "Tell me about the region in great detail please right now", f"Distinct answer number {i} here.")
+        for i in range(10)
+    ]
+
+    report = build_basic_quality_report(rows)
+
+    assert any(issue.kind == "repeated_opening" for issue in report.synthetic_pattern_issues)

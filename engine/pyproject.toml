@@ -62,7 +62,9 @@ train = [
 ]
 
 [project.scripts]
-corpus-studio = "corpus_studio.cli:app"
+# main() forces UTF-8 stdio before running the CLI so `corpus-studio --help` (which contains → arrows)
+# doesn't crash on a Windows cp1252 console. app() directly would skip that.
+corpus-studio = "corpus_studio.cli:main"
 
 [tool.ruff]
 line-length = 100
