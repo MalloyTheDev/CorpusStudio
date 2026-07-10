@@ -66,6 +66,35 @@ def test_commands_are_grounded_in_the_run_and_inputs():
     assert "mistralai/Mistral-7B" in plan.steps[2].detail
 
 
+def test_first_party_run_serve_step_recommends_merge_not_ollama():
+    # A corpus_studio run produces a LoRA adapter → the serve guidance should point at train-merge /
+    # adapter serving, not the generic Ollama/GGUF example used for external trainers.
+    plan = build_eval_handoff(
+        _run(target="corpus_studio"),
+        project_dir="/proj",
+        eval_dataset_path="/proj/heldout.jsonl",
+        schema_id="instruction",
+        served_model="tuned",
+    )
+    serve_detail = plan.steps[0].detail
+    assert "train-merge" in serve_detail
+    assert "adapter" in serve_detail.lower()
+    assert "ollama" not in serve_detail.lower()  # not the external-trainer example
+    # The rest of the loop (eval/link/gate) is unchanged.
+    assert "eval-run" in plan.steps[1].command
+
+
+def test_external_target_serve_step_keeps_the_generic_example():
+    plan = build_eval_handoff(
+        _run(target="axolotl_yaml"),
+        project_dir="/proj",
+        eval_dataset_path="/proj/heldout.jsonl",
+        schema_id="instruction",
+        served_model="tuned",
+    )
+    assert "ollama" in plan.steps[0].detail.lower()  # unchanged for external trainers
+
+
 def test_openai_compatible_backend_includes_the_base_url_flag():
     plan = build_eval_handoff(
         _run(),
