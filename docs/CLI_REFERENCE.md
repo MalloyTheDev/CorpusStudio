@@ -114,7 +114,7 @@ The engine generates + inspects configs and records runs; it **never runs the tr
 
 | Command | What it does |
 |---|---|
-| `export <input.jsonl> <output> <schema> [--format jsonl\|csv\|tsv\|parquet] [--dedupe --drop-low-information --redact-pii]` | Validate + export (optionally clean / mask PII). CSV/TSV = flat schemas; JSONL/Parquet = all schemas. |
+| `export <input.jsonl> <output> <schema> [--format jsonl\|csv\|tsv\|parquet] [--dedupe --drop-low-information --redact-pii --check-provenance]` | Validate + export (optionally clean / mask PII / enforce provenance). `--check-provenance` BLOCKs the export (exit 2) if any row's `meta.teacher` is a restricted provider (`--provenance-strict` also blocks unknown; `--allow-teacher` clears one). CSV/TSV = flat schemas; JSONL/Parquet = all schemas. |
 | `preference-export <input.jsonl> <output> [--format dpo\|kto\|reward]` | Export preference rows into a trainer-ready format. |
 | `dataset-card <project_dir> <schema>` | Build an inspectable dataset card from a project's existing artifacts. |
 
