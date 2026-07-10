@@ -15,22 +15,14 @@
          view-model can compose child per-tab view-models via constructor injection. -->
 
     <Window.Resources>
-        <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F4F7FB" />
-        <SolidColorBrush x:Key="PanelBrush" Color="#FFFFFF" />
-        <SolidColorBrush x:Key="PanelBorderBrush" Color="#D8E0EA" />
-        <SolidColorBrush x:Key="SidebarBrush" Color="#101828" />
-        <SolidColorBrush x:Key="PrimaryBrush" Color="#2563EB" />
-        <SolidColorBrush x:Key="PrimaryHoverBrush" Color="#1D4ED8" />
-        <SolidColorBrush x:Key="MutedTextBrush" Color="#64748B" />
-        <SolidColorBrush x:Key="ControlBackgroundBrush" Color="#F8FAFC" />
 
         <Style TargetType="{x:Type Button}">
             <Setter Property="MinHeight" Value="34" />
             <Setter Property="Padding" Value="12,7" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Foreground" Value="#102033" />
-            <Setter Property="Background" Value="#F8FAFC" />
-            <Setter Property="BorderBrush" Value="#B8C4D4" />
+            <Setter Property="Foreground" Value="{DynamicResource Fg102033}" />
+            <Setter Property="Background" Value="{DynamicResource BgF8FAFC}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BdB8C4D4}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -48,13 +40,13 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="ButtonBorder" Property="Background" Value="#EEF4FF" />
-                                <Setter Property="BorderBrush" Value="#93B4F8" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource Bd93B4F8}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="ButtonBorder" Property="Background" Value="#DBEAFE" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Foreground" Value="#94A3B8" />
+                                <Setter Property="Foreground" Value="{DynamicResource Fg94A3B8}" />
                                 <Setter TargetName="ButtonBorder" Property="Background" Value="#EEF2F7" />
                                 <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#D8E0EA" />
                             </Trigger>
@@ -65,23 +57,23 @@
         </Style>
 
         <Style TargetType="{x:Type TextBox}">
-            <Setter Property="Background" Value="{StaticResource ControlBackgroundBrush}" />
-            <Setter Property="BorderBrush" Value="#CAD5E3" />
+            <Setter Property="Background" Value="{DynamicResource ControlBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BdCAD5E3}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Padding" Value="9,7" />
-            <Setter Property="SelectionBrush" Value="#BBD3FF" />
+            <Setter Property="SelectionBrush" Value="{DynamicResource FgBBD3FF}" />
         </Style>
 
         <Style TargetType="{x:Type ComboBox}">
             <Setter Property="MinHeight" Value="34" />
             <Setter Property="Padding" Value="8,6" />
-            <Setter Property="Background" Value="{StaticResource ControlBackgroundBrush}" />
-            <Setter Property="BorderBrush" Value="#CAD5E3" />
+            <Setter Property="Background" Value="{DynamicResource ControlBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BdCAD5E3}" />
         </Style>
 
         <Style TargetType="{x:Type ListBox}">
-            <Setter Property="Background" Value="{StaticResource ControlBackgroundBrush}" />
-            <Setter Property="BorderBrush" Value="#CAD5E3" />
+            <Setter Property="Background" Value="{DynamicResource ControlBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BdCAD5E3}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Padding" Value="6" />
         </Style>
@@ -94,7 +86,7 @@
         <Style TargetType="{x:Type TabItem}">
             <Setter Property="Padding" Value="13,8" />
             <Setter Property="Margin" Value="0,0,6,8" />
-            <Setter Property="Foreground" Value="#64748B" />
+            <Setter Property="Foreground" Value="{DynamicResource Fg64748B}" />
             <Setter Property="FontSize" Value="12.5" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -115,12 +107,12 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="TabBorder" Property="Background" Value="#E7EEF8" />
-                                <Setter Property="Foreground" Value="#334155" />
+                                <Setter Property="Foreground" Value="{DynamicResource Fg334155}" />
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="TabBorder" Property="Background" Value="{StaticResource PanelBrush}" />
+                                <Setter TargetName="TabBorder" Property="Background" Value="{DynamicResource PanelBrush}" />
                                 <Setter TargetName="TabBorder" Property="BorderBrush" Value="#DCE5F0" />
-                                <Setter Property="Foreground" Value="#1D4ED8" />
+                                <Setter Property="Foreground" Value="{DynamicResource Fg1D4ED8}" />
                                 <Setter Property="FontWeight" Value="SemiBold" />
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -130,24 +122,22 @@
         </Style>
 
         <Style x:Key="StagePillStyle" TargetType="{x:Type Border}">
-            <Setter Property="Background" Value="#EEF4FF" />
-            <Setter Property="BorderBrush" Value="#C7D7FE" />
+            <Setter Property="Background" Value="{DynamicResource BgEEF4FF}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BdC7D7FE}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="12" />
             <Setter Property="Padding" Value="11,6" />
             <Setter Property="Margin" Value="0,0,8,8" />
         </Style>
 
-        <SolidColorBrush x:Key="HeadingTextBrush" Color="#0F172A" />
-
         <Style x:Key="PrimaryButtonStyle" TargetType="{x:Type Button}">
             <Setter Property="MinHeight" Value="34" />
             <Setter Property="Padding" Value="16,7" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="Foreground" Value="{DynamicResource FgFFFFFF}" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Background" Value="{StaticResource PrimaryBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PrimaryBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PrimaryBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -164,14 +154,14 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ButtonBorder" Property="Background" Value="{StaticResource PrimaryHoverBrush}" />
-                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{StaticResource PrimaryHoverBrush}" />
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource PrimaryHoverBrush}" />
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource PrimaryHoverBrush}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="ButtonBorder" Property="Background" Value="#1E40AF" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Foreground" Value="#E2E8F0" />
+                                <Setter Property="Foreground" Value="{DynamicResource FgE2E8F0}" />
                                 <Setter TargetName="ButtonBorder" Property="Background" Value="#93B4F8" />
                                 <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#93B4F8" />
                             </Trigger>
@@ -184,19 +174,19 @@
         <Style x:Key="SectionHeaderTextStyle" TargetType="{x:Type TextBlock}">
             <Setter Property="FontSize" Value="13" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="{StaticResource HeadingTextBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource HeadingTextBrush}" />
             <Setter Property="Margin" Value="0,0,0,9" />
         </Style>
 
         <Style x:Key="CaptionTextStyle" TargetType="{x:Type TextBlock}">
             <Setter Property="FontSize" Value="12" />
-            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
 
         <Style x:Key="CardBorderStyle" TargetType="{x:Type Border}">
-            <Setter Property="Background" Value="{StaticResource PanelBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource PanelBorderBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="Padding" Value="14" />
@@ -205,8 +195,8 @@
         <!-- Dashboard (v1.2.10) — roomier, softer cards + a bigger section header + a large
              metric value, so the overview reads as a calm dashboard instead of dense boxes. -->
         <Style x:Key="DashboardCardStyle" TargetType="{x:Type Border}">
-            <Setter Property="Background" Value="{StaticResource PanelBrush}" />
-            <Setter Property="BorderBrush" Value="#E6EDF5" />
+            <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BdE6EDF5}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="12" />
             <Setter Property="Padding" Value="18" />
@@ -221,26 +211,26 @@
         <Style x:Key="DashboardSectionHeaderStyle" TargetType="{x:Type TextBlock}">
             <Setter Property="FontSize" Value="15" />
             <Setter Property="FontWeight" Value="Bold" />
-            <Setter Property="Foreground" Value="{StaticResource HeadingTextBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource HeadingTextBrush}" />
             <Setter Property="Margin" Value="2,0,0,12" />
         </Style>
 
         <Style x:Key="DashboardCardLabelStyle" TargetType="{x:Type TextBlock}">
             <Setter Property="FontSize" Value="12.5" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="#334155" />
+            <Setter Property="Foreground" Value="{DynamicResource Fg334155}" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
 
         <Style x:Key="DashboardMetricStyle" TargetType="{x:Type TextBlock}">
             <Setter Property="FontSize" Value="32" />
             <Setter Property="FontWeight" Value="Bold" />
-            <Setter Property="Foreground" Value="{StaticResource HeadingTextBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource HeadingTextBrush}" />
         </Style>
 
         <Style x:Key="FilterGroupBorderStyle" TargetType="{x:Type Border}">
-            <Setter Property="Background" Value="#FBFCFE" />
-            <Setter Property="BorderBrush" Value="{StaticResource PanelBorderBrush}" />
+            <Setter Property="Background" Value="{DynamicResource BgFBFCFE}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="6" />
             <Setter Property="Padding" Value="10,8" />
@@ -251,7 +241,7 @@
         <local:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVis" />
 
         <Style x:Key="ListEmptyPlaceholderStyle" TargetType="{x:Type TextBlock}">
-            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
             <Setter Property="FontSize" Value="12" />
             <Setter Property="TextWrapping" Value="Wrap" />
             <Setter Property="TextAlignment" Value="Center" />
@@ -267,7 +257,7 @@
             <Setter Property="Height" Value="40" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#94A3B8" />
+            <Setter Property="Foreground" Value="{DynamicResource Fg94A3B8}" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -278,7 +268,7 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="ActivityBorder" Property="Background" Value="#1F2937" />
-                                <Setter Property="Foreground" Value="#FFFFFF" />
+                                <Setter Property="Foreground" Value="{DynamicResource FgFFFFFF}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -290,7 +280,7 @@
             <Setter Property="Width" Value="36" />
             <Setter Property="Height" Value="36" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="Foreground" Value="{DynamicResource FgFFFFFF}" />
             <Setter Property="FontWeight" Value="Bold" />
             <Setter Property="FontSize" Value="15" />
             <Setter Property="Template">
@@ -317,7 +307,7 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type Button}">
-                        <Border x:Name="StartBorder" CornerRadius="9" Padding="15,13" Background="#2563EB" BorderBrush="#2563EB" BorderThickness="1">
+                        <Border x:Name="StartBorder" CornerRadius="9" Padding="15,13" Background="{DynamicResource Bg2563EB}" BorderBrush="{DynamicResource Bd2563EB}" BorderThickness="1">
                             <ContentPresenter />
                         </Border>
                         <ControlTemplate.Triggers>
@@ -337,7 +327,7 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type Button}">
-                        <Border x:Name="StartBorder" CornerRadius="9" Padding="15,13" Background="#FFFFFF" BorderBrush="#CAD5E3" BorderThickness="1">
+                        <Border x:Name="StartBorder" CornerRadius="9" Padding="15,13" Background="{DynamicResource BgFFFFFF}" BorderBrush="{DynamicResource BdCAD5E3}" BorderThickness="1">
                             <ContentPresenter />
                         </Border>
                         <ControlTemplate.Triggers>
@@ -357,7 +347,7 @@
             <Setter Property="Height" Value="26" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#475569" />
+            <Setter Property="Foreground" Value="{DynamicResource Fg475569}" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -368,7 +358,7 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="ExplorerIconBorder" Property="Background" Value="#EEF4FF" />
-                                <Setter Property="Foreground" Value="#2563EB" />
+                                <Setter Property="Foreground" Value="{DynamicResource Fg2563EB}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -382,7 +372,7 @@
             <Setter Property="Padding" Value="10,7" />
             <Setter Property="Margin" Value="0,1" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-            <Setter Property="Foreground" Value="#E2E8F0" />
+            <Setter Property="Foreground" Value="{DynamicResource FgE2E8F0}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type ListBoxItem}">
@@ -396,7 +386,7 @@
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter TargetName="ItemBorder" Property="Background" Value="#1D4ED8" />
-                                <Setter Property="Foreground" Value="#FFFFFF" />
+                                <Setter Property="Foreground" Value="{DynamicResource FgFFFFFF}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -405,7 +395,7 @@
         </Style>
     </Window.Resources>
 
-    <Grid Background="{StaticResource AppBackgroundBrush}">
+    <Grid Background="{DynamicResource AppBackgroundBrush}">
 
         <!-- ===================== WORKSPACE SHELL (activity bar + Studio/Files) ===================== -->
         <!-- Visible unless the full-window Start Center is showing. -->
@@ -416,7 +406,7 @@
             </Grid.ColumnDefinitions>
 
             <!-- activity bar -->
-            <Border Grid.Column="0" Background="{StaticResource SidebarBrush}">
+            <Border Grid.Column="0" Background="{DynamicResource SidebarBrush}">
                 <DockPanel Margin="0,10">
                     <Button x:Name="ActivitySettingsButton" DockPanel.Dock="Bottom" Click="ActivitySettingsButton_Click"
                             ToolTip="Settings" Style="{StaticResource ActivityButtonStyle}" HorizontalAlignment="Center">
@@ -436,7 +426,7 @@
                             <Path Data="M4,4 H10 V11 H4 Z M14,4 H20 V9 H14 Z M14,13 H20 V20 H14 Z M4,15 H10 V20 H4 Z"
                                   Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7" Fill="Transparent" Width="20" Height="20" Stretch="Uniform" />
                         </Button>
-                        <Border Width="22" Height="1" Background="#1F2937" Margin="0,8" />
+                        <Border Width="22" Height="1" Background="{DynamicResource Bg1F2937}" Margin="0,8" />
                         <Button x:Name="SearchButton" Click="ActivitySearchButton_Click" ToolTip="Search (find in files)" Style="{StaticResource ActivityButtonStyle}" Margin="0,2">
                             <Path Data="M11,4 A7,7 0 1 0 11.001,4 M16.5,16.5 L21,21"
                                   Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" Fill="Transparent" Width="18" Height="18" Stretch="Uniform" />
@@ -465,18 +455,18 @@
             <Grid Grid.Column="1">
 
                 <!-- FILES VIEW — Universal Workspace Explorer -->
-                <Grid Visibility="{Binding IsFiles, Converter={StaticResource BoolToVis}}" Background="{StaticResource AppBackgroundBrush}">
+                <Grid Visibility="{Binding IsFiles, Converter={StaticResource BoolToVis}}" Background="{DynamicResource AppBackgroundBrush}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="266" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
 
                     <!-- explorer sidebar -->
-                    <Border Grid.Column="0" Background="#FBFCFE" BorderBrush="#E2E8F0" BorderThickness="0,0,1,0">
+                    <Border Grid.Column="0" Background="{DynamicResource BgFBFCFE}" BorderBrush="{DynamicResource BdE2E8F0}" BorderThickness="0,0,1,0">
                         <DockPanel>
                             <!-- header -->
                             <Grid DockPanel.Dock="Top" Margin="12,11,8,8">
-                                <TextBlock Text="EXPLORER" FontSize="11" FontWeight="Bold" Foreground="#64748B" VerticalAlignment="Center" />
+                                <TextBlock Text="EXPLORER" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource Fg64748B}" VerticalAlignment="Center" />
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                     <Button ToolTip="New File" Click="ExplorerNewFile_Click" Style="{StaticResource ExplorerIconStyle}">
                                         <Path Data="M14,3 H7 A2,2 0 0 0 5,5 V19 A2,2 0 0 0 7,21 H17 A2,2 0 0 0 19,19 V8 Z M14,3 V8 H19 M12,12 V17 M9.5,14.5 H14.5" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7" Fill="Transparent" Width="15" Height="15" Stretch="Uniform" />
@@ -494,7 +484,7 @@
                             </Grid>
 
                             <!-- workspace root row -->
-                            <Border DockPanel.Dock="Top" BorderBrush="#EEF2F7" BorderThickness="0,0,0,1" Padding="12,2,12,8">
+                            <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource BdEEF2F7}" BorderThickness="0,0,0,1" Padding="12,2,12,8">
                                 <StackPanel Orientation="Horizontal">
                                     <Border Width="20" Height="20" CornerRadius="5" Margin="0,0,7,0">
                                         <Border.Background>
@@ -505,13 +495,13 @@
                                         </Border.Background>
                                         <TextBlock Text="C" Foreground="White" FontWeight="Bold" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     </Border>
-                                    <TextBlock Text="{Binding Explorer.WorkspaceName}" FontSize="12" FontWeight="Bold" Foreground="#0F172A" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Explorer.WorkspaceName}" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource Fg0F172A}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
                             </Border>
 
                             <!-- status bar -->
-                            <Border DockPanel.Dock="Bottom" BorderBrush="#EEF2F7" BorderThickness="0,1,0,0" Padding="12,7">
-                                <TextBlock Text="{Binding Explorer.ExplorerStatus}" FontSize="11" Foreground="#94A3B8" TextTrimming="CharacterEllipsis" />
+                            <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource BdEEF2F7}" BorderThickness="0,1,0,0" Padding="12,7">
+                                <TextBlock Text="{Binding Explorer.ExplorerStatus}" FontSize="11" Foreground="{DynamicResource Fg94A3B8}" TextTrimming="CharacterEllipsis" />
                             </Border>
 
                             <!-- tree -->
@@ -535,14 +525,14 @@
                                                 </ContextMenu>
                                             </StackPanel.ContextMenu>
                                             <Path Data="M3,7 A1,1 0 0 1 4,6 H8 L10,8 H20 A1,1 0 0 1 21,9 V17 A1,1 0 0 1 20,18 H4 A1,1 0 0 1 3,17 Z"
-                                                  Stroke="#94A3B8" StrokeThickness="1.3" Fill="#EEF2F7" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
+                                                  Stroke="{DynamicResource Fg94A3B8}" StrokeThickness="1.3" Fill="{DynamicResource FgEEF2F7}" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
                                                   Visibility="{Binding IsDirectory, Converter={StaticResource BoolToVis}}" />
-                                            <Border Width="22" Height="14" CornerRadius="3" Background="#EEF4FF" VerticalAlignment="Center"
+                                            <Border Width="22" Height="14" CornerRadius="3" Background="{DynamicResource BgEEF4FF}" VerticalAlignment="Center"
                                                     Visibility="{Binding IsDirectory, Converter={StaticResource InverseBoolToVis}}">
-                                                <TextBlock Text="{Binding ChipLabel}" FontSize="7.5" FontWeight="Bold" Foreground="#1D4ED8" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding ChipLabel}" FontSize="7.5" FontWeight="Bold" Foreground="{DynamicResource Fg1D4ED8}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                             </Border>
-                                            <TextBlock Text="{Binding Name}" FontSize="12.5" Foreground="#334155" VerticalAlignment="Center" Margin="6,0,0,0" />
-                                            <Ellipse Width="6" Height="6" Fill="#F59E0B" VerticalAlignment="Center" Margin="6,0,0,0" ToolTip="Generated · opens read-only"
+                                            <TextBlock Text="{Binding Name}" FontSize="12.5" Foreground="{DynamicResource Fg334155}" VerticalAlignment="Center" Margin="6,0,0,0" />
+                                            <Ellipse Width="6" Height="6" Fill="{DynamicResource FgF59E0B}" VerticalAlignment="Center" Margin="6,0,0,0" ToolTip="Generated · opens read-only"
                                                      Visibility="{Binding IsGeneratedArtifact, Converter={StaticResource BoolToVis}}" />
                                         </StackPanel>
                                     </HierarchicalDataTemplate>
@@ -552,7 +542,7 @@
                     </Border>
 
                     <!-- editor column -->
-                    <Grid Grid.Column="1" Background="#FFFFFF">
+                    <Grid Grid.Column="1" Background="{DynamicResource BgFFFFFF}">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -561,7 +551,7 @@
                         </Grid.RowDefinitions>
 
                         <!-- document tabs -->
-                        <Border Grid.Row="0" Height="38" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="0,0,0,1">
+                        <Border Grid.Row="0" Height="38" Background="{DynamicResource BgF1F5F9}" BorderBrush="{DynamicResource BdE2E8F0}" BorderThickness="0,0,0,1">
                             <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
                                 <ItemsControl ItemsSource="{Binding Explorer.OpenDocuments}">
                                     <ItemsControl.ItemsPanel>
@@ -570,21 +560,21 @@
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
                                             <Grid>
-                                                <Border x:Name="Tab" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="0,0,1,0" Cursor="Hand"
+                                                <Border x:Name="Tab" Background="{DynamicResource BgF1F5F9}" BorderBrush="{DynamicResource BdE2E8F0}" BorderThickness="0,0,1,0" Cursor="Hand"
                                                         MouseLeftButtonDown="DocTab_Click" Padding="13,0,8,0">
                                                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding DisplayName}" FontSize="12.5" Foreground="#0F172A" VerticalAlignment="Center" />
-                                                        <Path Data="M5,11 H19 V20 H5 Z M8,11 V8 A4,4 0 0 1 16,8 V11" Stroke="#94A3B8" StrokeThickness="1.5" Fill="Transparent" Width="11" Height="11" Stretch="Uniform" Margin="6,0,0,0" VerticalAlignment="Center"
+                                                        <TextBlock Text="{Binding DisplayName}" FontSize="12.5" Foreground="{DynamicResource Fg0F172A}" VerticalAlignment="Center" />
+                                                        <Path Data="M5,11 H19 V20 H5 Z M8,11 V8 A4,4 0 0 1 16,8 V11" Stroke="{DynamicResource Fg94A3B8}" StrokeThickness="1.5" Fill="Transparent" Width="11" Height="11" Stretch="Uniform" Margin="6,0,0,0" VerticalAlignment="Center"
                                                               Visibility="{Binding IsReadOnly, Converter={StaticResource BoolToVis}}" />
                                                         <Border MouseLeftButtonDown="DocTabClose_Click" Width="18" Height="18" CornerRadius="4" Background="Transparent" Margin="6,0,0,0" Cursor="Hand">
                                                             <Grid>
-                                                                <Ellipse Width="8" Height="8" Fill="#2563EB" Visibility="{Binding IsDirty, Converter={StaticResource BoolToVis}}" />
-                                                                <TextBlock Text="✕" FontSize="11" Foreground="#64748B" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding IsDirty, Converter={StaticResource InverseBoolToVis}}" />
+                                                                <Ellipse Width="8" Height="8" Fill="{DynamicResource Fg2563EB}" Visibility="{Binding IsDirty, Converter={StaticResource BoolToVis}}" />
+                                                                <TextBlock Text="✕" FontSize="11" Foreground="{DynamicResource Fg64748B}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding IsDirty, Converter={StaticResource InverseBoolToVis}}" />
                                                             </Grid>
                                                         </Border>
                                                     </StackPanel>
                                                 </Border>
-                                                <Border x:Name="Accent" Height="2" VerticalAlignment="Top" Background="#2563EB" Visibility="Collapsed" />
+                                                <Border x:Name="Accent" Height="2" VerticalAlignment="Top" Background="{DynamicResource Bg2563EB}" Visibility="Collapsed" />
                                             </Grid>
                                             <DataTemplate.Triggers>
                                                 <DataTrigger Binding="{Binding IsActive}" Value="True">
@@ -599,13 +589,13 @@
                         </Border>
 
                         <!-- editor toolbar -->
-                        <Border Grid.Row="1" Height="40" Background="#FBFCFE" BorderBrush="#EEF2F7" BorderThickness="0,0,0,1">
+                        <Border Grid.Row="1" Height="40" Background="{DynamicResource BgFBFCFE}" BorderBrush="{DynamicResource BdEEF2F7}" BorderThickness="0,0,0,1">
                             <Grid Margin="14,0">
-                                <TextBlock Text="{Binding Explorer.ActiveRelPath}" FontFamily="Consolas" FontSize="11" Foreground="#94A3B8" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding Explorer.ActiveRelPath}" FontFamily="Consolas" FontSize="11" Foreground="{DynamicResource Fg94A3B8}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                                    <Border Background="#FFF7ED" BorderBrush="#FED7AA" BorderThickness="1" CornerRadius="11" Padding="9,2" Margin="0,0,8,0" VerticalAlignment="Center"
+                                    <Border Background="{DynamicResource BgFFF7ED}" BorderBrush="{DynamicResource BdFED7AA}" BorderThickness="1" CornerRadius="11" Padding="9,2" Margin="0,0,8,0" VerticalAlignment="Center"
                                             Visibility="{Binding Explorer.ActiveDocument.IsReadOnly, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
-                                        <TextBlock Text="Read-only" Foreground="#9A3412" FontSize="10.5" FontWeight="SemiBold" />
+                                        <TextBlock Text="Read-only" Foreground="{DynamicResource Fg9A3412}" FontSize="10.5" FontWeight="SemiBold" />
                                     </Border>
                                     <Button Content="Reveal" Click="ExplorerReveal_Click" Height="28" Padding="10,0" Margin="0,0,8,0" />
                                     <Button Content="Copy path" Click="ExplorerCopyPath_Click" Height="28" Padding="10,0" Margin="0,0,8,0" />
@@ -616,9 +606,9 @@
                         </Border>
 
                         <!-- examples.jsonl caution -->
-                        <Border Grid.Row="2" Background="#FFFBEB" BorderBrush="#FDE68A" BorderThickness="0,0,0,1" Padding="14,8"
+                        <Border Grid.Row="2" Background="{DynamicResource BgFFFBEB}" BorderBrush="{DynamicResource BdFDE68A}" BorderThickness="0,0,0,1" Padding="14,8"
                                 Visibility="{Binding Explorer.IsExamplesFile, Converter={StaticResource BoolToVis}}">
-                            <TextBlock Foreground="#92400E" FontSize="12" TextWrapping="Wrap"
+                            <TextBlock Foreground="{DynamicResource Fg92400E}" FontSize="12" TextWrapping="Wrap"
                                        Text="This is the dataset's single source of rows. The desktop is its only writer — edits here are explicit and never auto-formatted. Use Writing Studio / Import for row-level changes." />
                         </Border>
 
@@ -636,44 +626,44 @@
                                          IsReadOnly="{Binding Explorer.ActiveDocument.IsReadOnly, FallbackValue=True}"
                                          FontFamily="Consolas" FontSize="13" AcceptsReturn="True" AcceptsTab="True" TextWrapping="NoWrap"
                                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                                         BorderThickness="0" Padding="14" Background="#FFFFFF" />
+                                         BorderThickness="0" Padding="14" Background="{DynamicResource BgFFFFFF}" />
                                 <!-- image -->
-                                <Grid Visibility="{Binding Explorer.IsImageDocument, Converter={StaticResource BoolToVis}}" Background="#F1F5F9">
+                                <Grid Visibility="{Binding Explorer.IsImageDocument, Converter={StaticResource BoolToVis}}" Background="{DynamicResource BgF1F5F9}">
                                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                                        <Border BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="8" MaxWidth="480">
+                                        <Border BorderBrush="{DynamicResource BdCBD5E1}" BorderThickness="1" CornerRadius="8" MaxWidth="480">
                                             <Image Source="{Binding Explorer.ActiveDocument.ImagePreviewPath}" Stretch="Uniform" MaxHeight="320" />
                                         </Border>
-                                        <TextBlock Text="Preview only — opening an image never creates a dataset row." Foreground="#64748B" FontSize="11" Margin="0,12,0,0" HorizontalAlignment="Center" />
+                                        <TextBlock Text="Preview only — opening an image never creates a dataset row." Foreground="{DynamicResource Fg64748B}" FontSize="11" Margin="0,12,0,0" HorizontalAlignment="Center" />
                                     </StackPanel>
                                 </Grid>
                                 <!-- binary / unknown -->
-                                <Grid Visibility="{Binding Explorer.IsBinaryDocument, Converter={StaticResource BoolToVis}}" Background="#F8FAFC">
+                                <Grid Visibility="{Binding Explorer.IsBinaryDocument, Converter={StaticResource BoolToVis}}" Background="{DynamicResource BgF8FAFC}">
                                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="360">
-                                        <TextBlock Text="Binary file — no text preview" FontWeight="SemiBold" Foreground="#334155" HorizontalAlignment="Center" />
-                                        <TextBlock Text="Weight/artifact files are referenced by path and never modified by Corpus Studio. See metadata on the right." Foreground="#64748B" FontSize="12" Margin="0,5,0,0" TextWrapping="Wrap" TextAlignment="Center" />
+                                        <TextBlock Text="Binary file — no text preview" FontWeight="SemiBold" Foreground="{DynamicResource Fg334155}" HorizontalAlignment="Center" />
+                                        <TextBlock Text="Weight/artifact files are referenced by path and never modified by Corpus Studio. See metadata on the right." Foreground="{DynamicResource Fg64748B}" FontSize="12" Margin="0,5,0,0" TextWrapping="Wrap" TextAlignment="Center" />
                                     </StackPanel>
                                 </Grid>
                                 <!-- empty -->
                                 <TextBlock Visibility="{Binding Explorer.IsNoDocument, Converter={StaticResource BoolToVis}}"
-                                           Text="Select a file in the Explorer to open it." Foreground="#94A3B8" FontSize="13"
+                                           Text="Select a file in the Explorer to open it." Foreground="{DynamicResource Fg94A3B8}" FontSize="13"
                                            HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Grid>
 
                             <!-- metadata panel -->
-                            <Border Grid.Column="1" Background="#FBFCFE" BorderBrush="#EEF2F7" BorderThickness="1,0,0,0" Padding="14">
+                            <Border Grid.Column="1" Background="{DynamicResource BgFBFCFE}" BorderBrush="{DynamicResource BdEEF2F7}" BorderThickness="1,0,0,0" Padding="14">
                                 <StackPanel>
-                                    <TextBlock Text="SELECTED FILE" FontSize="11" FontWeight="Bold" Foreground="#64748B" Margin="0,0,0,10" />
+                                    <TextBlock Text="SELECTED FILE" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource Fg64748B}" Margin="0,0,0,10" />
                                     <ItemsControl ItemsSource="{Binding Explorer.MetadataRows}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
                                                 <StackPanel Margin="0,0,0,11">
-                                                    <TextBlock Text="{Binding Key}" FontSize="10.5" Foreground="#94A3B8" />
-                                                    <TextBlock Text="{Binding Value}" FontSize="12" Foreground="#334155" TextWrapping="Wrap" Margin="0,2,0,0" />
+                                                    <TextBlock Text="{Binding Key}" FontSize="10.5" Foreground="{DynamicResource Fg94A3B8}" />
+                                                    <TextBlock Text="{Binding Value}" FontSize="12" Foreground="{DynamicResource Fg334155}" TextWrapping="Wrap" Margin="0,2,0,0" />
                                                 </StackPanel>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
-                                    <TextBlock Text="Select a file to see its details." Foreground="#94A3B8" FontSize="11" TextWrapping="Wrap"
+                                    <TextBlock Text="Select a file to see its details." Foreground="{DynamicResource Fg94A3B8}" FontSize="11" TextWrapping="Wrap"
                                                Visibility="{Binding Explorer.IsNoDocument, Converter={StaticResource BoolToVis}}" />
                                 </StackPanel>
                             </Border>
@@ -682,7 +672,7 @@
                 </Grid>
 
                 <!-- STUDIO = the existing 14-tab app, preserved intact -->
-                <Grid Visibility="{Binding IsStudio, Converter={StaticResource BoolToVis}}" Background="{StaticResource AppBackgroundBrush}">
+                <Grid Visibility="{Binding IsStudio, Converter={StaticResource BoolToVis}}" Background="{DynamicResource AppBackgroundBrush}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="270" />
             <ColumnDefinition Width="*" />
@@ -690,18 +680,18 @@
         </Grid.ColumnDefinitions>
 
         <Border Grid.Column="0"
-                Background="{StaticResource SidebarBrush}"
-                BorderBrush="#1F2937"
+                Background="{DynamicResource SidebarBrush}"
+                BorderBrush="{DynamicResource Bd1F2937}"
                 BorderThickness="0,0,1,0"
                 Padding="20,22">
             <StackPanel>
                 <TextBlock Text="Corpus Studio"
                            FontSize="24"
                            FontWeight="Bold"
-                           Foreground="#F8FAFC" />
+                           Foreground="{DynamicResource FgF8FAFC}" />
                 <TextBlock Text="Dataset Creation Studio"
                            Margin="0,5,0,28"
-                           Foreground="#CBD5E1" />
+                           Foreground="{DynamicResource FgCBD5E1}" />
 
                 <Button Style="{StaticResource PrimaryButtonStyle}"
                         AutomationProperties.AutomationId="NewDatasetProjectButton"
@@ -723,17 +713,17 @@
 
                 <TextBlock Text="Projects"
                            FontWeight="Bold"
-                           Foreground="#E2E8F0"
+                           Foreground="{DynamicResource FgE2E8F0}"
                            Margin="0,0,0,10" />
                 <Grid Margin="0,0,0,8">
                     <TextBox x:Name="ProjectSearchBox"
                              AutomationProperties.AutomationId="ProjectSearchTextBox"
                              Text="{Binding ProjectSearch, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                              ToolTip="Filter projects by name, id, or schema"
-                             Background="#0B1220" Foreground="#E2E8F0" BorderBrush="#293548"
+                             Background="{DynamicResource Bg0B1220}" Foreground="{DynamicResource FgE2E8F0}" BorderBrush="{DynamicResource Bd293548}"
                              CaretBrush="#E2E8F0" Padding="9,6" />
                     <TextBlock Text="Filter projects…" IsHitTestVisible="False"
-                               Foreground="#64748B" Margin="11,0,0,0" VerticalAlignment="Center">
+                               Foreground="{DynamicResource Fg64748B}" Margin="11,0,0,0" VerticalAlignment="Center">
                         <TextBlock.Style>
                             <Style TargetType="{x:Type TextBlock}">
                                 <Setter Property="Visibility" Value="Collapsed" />
@@ -761,7 +751,7 @@
                                 <TextBlock Text="{Binding Name}" FontSize="12.5" FontWeight="SemiBold"
                                            TextTrimming="CharacterEllipsis"
                                            Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" />
-                                <TextBlock Text="{Binding SchemaId}" FontSize="10.5" Foreground="#94A3B8"
+                                <TextBlock Text="{Binding SchemaId}" FontSize="10.5" Foreground="{DynamicResource Fg94A3B8}"
                                            TextTrimming="CharacterEllipsis" Margin="0,1,0,0" />
                             </StackPanel>
                         </DataTemplate>
@@ -774,7 +764,7 @@
                         Command="{Binding RebuildProjectIndexCommand}" />
                 <TextBlock AutomationProperties.AutomationId="ProjectIndexSummaryTextBlock"
                            Text="{Binding ProjectIndexSummary, Mode=OneWay}"
-                           Foreground="#94A3B8"
+                           Foreground="{DynamicResource Fg94A3B8}"
                            FontSize="11"
                            TextWrapping="Wrap" />
             </StackPanel>
@@ -782,7 +772,7 @@
 
         <Border Grid.Column="1"
                 Padding="26,24"
-                Background="{StaticResource AppBackgroundBrush}">
+                Background="{DynamicResource AppBackgroundBrush}">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -791,8 +781,8 @@
                 </Grid.RowDefinitions>
 
                 <Border Grid.Row="0"
-                        Background="{StaticResource PanelBrush}"
-                        BorderBrush="{StaticResource PanelBorderBrush}"
+                        Background="{DynamicResource PanelBrush}"
+                        BorderBrush="{DynamicResource PanelBorderBrush}"
                         BorderThickness="1"
                         CornerRadius="10"
                         Padding="22,20"
@@ -806,46 +796,51 @@
                             <TextBlock Text="{Binding ActiveProjectTitle}"
                                        FontSize="22"
                                        FontWeight="SemiBold"
-                                       Foreground="#0F172A" />
+                                       Foreground="{DynamicResource Fg0F172A}" />
                             <TextBlock Text="{Binding ActiveSchemaDescription}"
-                                       Foreground="{StaticResource MutedTextBrush}"
+                                       Foreground="{DynamicResource MutedTextBrush}"
                                        TextWrapping="Wrap" />
                             <WrapPanel Margin="0,10,0,0">
                                 <Border Style="{StaticResource StagePillStyle}">
-                                    <TextBlock Text="Dataset" Foreground="#1D4ED8" FontWeight="SemiBold" />
+                                    <TextBlock Text="Dataset" Foreground="{DynamicResource Fg1D4ED8}" FontWeight="SemiBold" />
                                 </Border>
                                 <Border Style="{StaticResource StagePillStyle}">
-                                    <TextBlock Text="Validate" Foreground="#1D4ED8" FontWeight="SemiBold" />
+                                    <TextBlock Text="Validate" Foreground="{DynamicResource Fg1D4ED8}" FontWeight="SemiBold" />
                                 </Border>
                                 <Border Style="{StaticResource StagePillStyle}">
-                                    <TextBlock Text="Split" Foreground="#1D4ED8" FontWeight="SemiBold" />
+                                    <TextBlock Text="Split" Foreground="{DynamicResource Fg1D4ED8}" FontWeight="SemiBold" />
                                 </Border>
                                 <Border Style="{StaticResource StagePillStyle}">
-                                    <TextBlock Text="Evaluate" Foreground="#1D4ED8" FontWeight="SemiBold" />
+                                    <TextBlock Text="Evaluate" Foreground="{DynamicResource Fg1D4ED8}" FontWeight="SemiBold" />
                                 </Border>
                                 <Border Style="{StaticResource StagePillStyle}">
-                                    <TextBlock Text="Assist" Foreground="#1D4ED8" FontWeight="SemiBold" />
+                                    <TextBlock Text="Assist" Foreground="{DynamicResource Fg1D4ED8}" FontWeight="SemiBold" />
                                 </Border>
                                 <Border Style="{StaticResource StagePillStyle}">
-                                    <TextBlock Text="Export" Foreground="#1D4ED8" FontWeight="SemiBold" />
+                                    <TextBlock Text="Export" Foreground="{DynamicResource Fg1D4ED8}" FontWeight="SemiBold" />
                                 </Border>
                                 <Border Style="{StaticResource StagePillStyle}">
-                                    <TextBlock Text="Train Config" Foreground="#1D4ED8" FontWeight="SemiBold" />
+                                    <TextBlock Text="Train Config" Foreground="{DynamicResource Fg1D4ED8}" FontWeight="SemiBold" />
                                 </Border>
                             </WrapPanel>
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top" Margin="16,0,0,0">
+                        <!-- Light/dark theme toggle (#187/#201). Swaps the theme dictionary live. -->
+                        <Button AutomationProperties.AutomationId="ThemeToggleButton"
+                                Content="◐" ToolTip="Toggle light / dark theme"
+                                Width="34" Height="30" FontSize="15" VerticalAlignment="Top"
+                                Margin="0,0,8,0" Click="ThemeToggle_Click" />
                         <!-- Dataset debt grade badge (v1.2.8). At-a-glance grade in the header;
                              passive (reflects the last debt check, invalidates on dataset change,
                              never auto-runs); click opens the Debt tab to run / see the ledger. -->
                         <Button Command="{Binding GoToDebtCommand}" ToolTip="Dataset debt grade — click for the debt ledger"
                                 Cursor="Hand" Background="Transparent" BorderThickness="0" Padding="0" Margin="0,0,10,0"
                                 VerticalAlignment="Top">
-                            <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1"
+                            <Border Background="{DynamicResource BgF8FAFC}" BorderBrush="{DynamicResource BdE2E8F0}" BorderThickness="1"
                                     CornerRadius="8" Padding="12,8">
                                 <StackPanel>
                                     <TextBlock Text="Dataset debt" FontWeight="SemiBold" FontSize="11"
-                                               Foreground="#475569" HorizontalAlignment="Center" />
+                                               Foreground="{DynamicResource Fg475569}" HorizontalAlignment="Center" />
                                     <Border Width="34" Height="34" CornerRadius="8" Margin="0,5,0,0"
                                             Background="{Binding Debt.DebtGradeColor, Mode=OneWay}" HorizontalAlignment="Center">
                                         <TextBlock AutomationProperties.AutomationId="DashboardDebtGradeBadge"
@@ -853,14 +848,14 @@
                                                    Foreground="White" FontSize="17" FontWeight="Bold"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     </Border>
-                                    <TextBlock Text="stale" FontSize="9" FontWeight="SemiBold" Foreground="#D97706"
+                                    <TextBlock Text="stale" FontSize="9" FontWeight="SemiBold" Foreground="{DynamicResource FgD97706}"
                                                HorizontalAlignment="Center" Margin="0,3,0,0"
                                                Visibility="{Binding Debt.DebtStale, Converter={StaticResource BoolToVis}}" />
                                 </StackPanel>
                             </Border>
                         </Button>
-                        <Border Background="#ECFDF5"
-                                BorderBrush="#BBF7D0"
+                        <Border Background="{DynamicResource BgECFDF5}"
+                                BorderBrush="{DynamicResource BdBBF7D0}"
                                 BorderThickness="1"
                                 CornerRadius="8"
                                 Padding="12,8"
@@ -868,9 +863,9 @@
                             <StackPanel>
                                 <TextBlock Text="Local-first"
                                            FontWeight="SemiBold"
-                                           Foreground="#166534" />
+                                           Foreground="{DynamicResource Fg166534}" />
                                 <TextBlock Text="Files stay inspectable"
-                                           Foreground="#166534" />
+                                           Foreground="{DynamicResource Fg166534}" />
                             </StackPanel>
                         </Border>
                         </StackPanel>
@@ -878,8 +873,8 @@
                 </Border>
 
                 <Border Grid.Row="1"
-                        Background="#FEF2F2"
-                        BorderBrush="#FCA5A5"
+                        Background="{DynamicResource BgFEF2F2}"
+                        BorderBrush="{DynamicResource BdFCA5A5}"
                         BorderThickness="1"
                         CornerRadius="8"
                         Padding="14,10"
@@ -893,12 +888,12 @@
                         <StackPanel Grid.Column="0" Orientation="Horizontal">
                             <TextBlock Text="&#x26A0;"
                                        FontSize="15"
-                                       Foreground="#B91C1C"
+                                       Foreground="{DynamicResource FgB91C1C}"
                                        VerticalAlignment="Top"
                                        Margin="0,0,10,0" />
                             <TextBlock AutomationProperties.AutomationId="ErrorBannerTextBlock"
                                        Text="{Binding ErrorMessage, Mode=OneWay}"
-                                       Foreground="#7F1D1D"
+                                       Foreground="{DynamicResource Fg7F1D1D}"
                                        TextWrapping="Wrap"
                                        VerticalAlignment="Center" />
                         </StackPanel>
@@ -957,9 +952,9 @@
                                             Margin="0,0,0,14">
                                         <StackPanel>
                                             <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
-                                                <Border Width="34" Height="34" CornerRadius="9" Background="#EFF6FF">
+                                                <Border Width="34" Height="34" CornerRadius="9" Background="{DynamicResource BgEFF6FF}">
                                                     <Path Data="M12,3 L21,8 L12,13 L3,8 Z M3,12 L12,17 L21,12 M3,16 L12,21 L21,16"
-                                                          Stroke="#2563EB" StrokeThickness="1.5" Fill="Transparent"
+                                                          Stroke="{DynamicResource Fg2563EB}" StrokeThickness="1.5" Fill="Transparent"
                                                           Width="18" Height="18" Stretch="Uniform"
                                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                 </Border>
@@ -982,9 +977,9 @@
                                             Margin="0,0,0,14">
                                         <StackPanel>
                                             <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
-                                                <Border Width="34" Height="34" CornerRadius="9" Background="#ECFDF5">
+                                                <Border Width="34" Height="34" CornerRadius="9" Background="{DynamicResource BgECFDF5}">
                                                     <Path Data="M12,3 L20,6 V11 C20,16 16,20 12,21 C8,20 4,16 4,11 V6 Z M9,11.5 L11,13.5 L15,9.5"
-                                                          Stroke="#16A34A" StrokeThickness="1.5" Fill="Transparent"
+                                                          Stroke="{DynamicResource Fg16A34A}" StrokeThickness="1.5" Fill="Transparent"
                                                           Width="18" Height="18" Stretch="Uniform"
                                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                 </Border>
@@ -1000,9 +995,9 @@
                                             Margin="0,0,0,14">
                                         <StackPanel>
                                             <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
-                                                <Border Width="34" Height="34" CornerRadius="9" Background="#F5F3FF">
+                                                <Border Width="34" Height="34" CornerRadius="9" Background="{DynamicResource BgF5F3FF}">
                                                     <Path Data="M4,6 H20 V18 H4 Z M11,6 V18 M15.5,6 V18"
-                                                          Stroke="#7C3AED" StrokeThickness="1.5" Fill="Transparent"
+                                                          Stroke="{DynamicResource Fg7C3AED}" StrokeThickness="1.5" Fill="Transparent"
                                                           Width="18" Height="18" Stretch="Uniform"
                                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                 </Border>
@@ -1018,9 +1013,9 @@
                                             Margin="0,0,0,14">
                                         <StackPanel>
                                             <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
-                                                <Border Width="34" Height="34" CornerRadius="9" Background="#FFF7ED">
+                                                <Border Width="34" Height="34" CornerRadius="9" Background="{DynamicResource BgFFF7ED}">
                                                     <Path Data="M5,20 V11 M11,20 V5 M17,20 V14 M4,20 H20"
-                                                          Stroke="#EA580C" StrokeThickness="1.6" Fill="Transparent"
+                                                          Stroke="{DynamicResource FgEA580C}" StrokeThickness="1.6" Fill="Transparent"
                                                           Width="18" Height="18" Stretch="Uniform"
                                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                 </Border>
@@ -1414,7 +1409,7 @@
                                         Visibility="{Binding Evaluation.IsEvaluationInProgress, Converter={StaticResource BoolToVis}}">
                                 <TextBlock AutomationProperties.AutomationId="EvaluationProgressText"
                                            Text="{Binding Evaluation.EvaluationProgressText, Mode=OneWay}"
-                                           Foreground="#334155"
+                                           Foreground="{DynamicResource Fg334155}"
                                            FontSize="12"
                                            Margin="0,0,0,4" />
                                 <ProgressBar AutomationProperties.AutomationId="EvaluationProgressBar"
@@ -1424,7 +1419,7 @@
                             </StackPanel>
                             <TextBlock Text="Judge model (optional): scores each answer 0–100 with a rationale via an evaluator model (metric llm_judge, evaluator-only). A high judge score is not a guarantee of quality — manual scoring stays the human-trustworthy path. Blank keeps the default keyword-overlap recall."
                                        TextWrapping="Wrap"
-                                       Foreground="#64748B"
+                                       Foreground="{DynamicResource Fg64748B}"
                                        FontSize="11"
                                        Margin="0,6,0,0" />
 
@@ -2281,7 +2276,7 @@
                                            Margin="0,0,12,0" />
                                 <TextBlock AutomationProperties.AutomationId="TrainingCheckpointsSummaryTextBlock"
                                            Text="{Binding Training.TrainingCheckpointsSummary, Mode=OneWay}"
-                                           Foreground="#475569"
+                                           Foreground="{DynamicResource Fg475569}"
                                            VerticalAlignment="Center" />
                             </WrapPanel>
 
@@ -2317,7 +2312,7 @@
                                         <TextBlock DockPanel.Dock="Top"
                                                    AutomationProperties.AutomationId="TrainingRunGateSummaryTextBlock"
                                                    Text="{Binding Training.TrainingRunGateSummary, Mode=OneWay}"
-                                                   Foreground="#334155"
+                                                   Foreground="{DynamicResource Fg334155}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,6" />
                                         <TextBox DockPanel.Dock="Bottom"
@@ -2356,14 +2351,14 @@
                                 <TextBlock Text="Model Arena"
                                            FontSize="18"
                                            FontWeight="Bold"
-                                           Foreground="#0F172A" />
+                                           Foreground="{DynamicResource Fg0F172A}" />
                                 <TextBlock Text="Compare how models answer the same prompts. Responses are comparison artifacts, not dataset rows."
-                                           Foreground="#475569"
+                                           Foreground="{DynamicResource Fg475569}"
                                            TextWrapping="Wrap"
                                            Margin="0,4,0,8" />
                                 <TextBlock Text="Prompts (one per line)"
                                            FontWeight="SemiBold"
-                                           Foreground="#334155" />
+                                           Foreground="{DynamicResource Fg334155}" />
                                 <TextBox AutomationProperties.AutomationId="ArenaPromptsTextBox"
                                          Text="{Binding Arena.ArenaPromptsInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                          AcceptsReturn="True"
@@ -2373,7 +2368,7 @@
                                          VerticalScrollBarVisibility="Auto" />
                                 <TextBlock Text="Models (comma or newline separated)"
                                            FontWeight="SemiBold"
-                                           Foreground="#334155" />
+                                           Foreground="{DynamicResource Fg334155}" />
                                 <TextBox AutomationProperties.AutomationId="ArenaModelsTextBox"
                                          Text="{Binding Arena.ArenaModelsInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                          AcceptsReturn="True"
@@ -2382,7 +2377,7 @@
                                          TextWrapping="Wrap" />
                                 <TextBlock Text="Judge model (optional, evaluator)"
                                            FontWeight="SemiBold"
-                                           Foreground="#334155" />
+                                           Foreground="{DynamicResource Fg334155}" />
                                 <TextBox AutomationProperties.AutomationId="ArenaJudgeModelTextBox"
                                          Text="{Binding Arena.ArenaJudgeModelInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                          Margin="0,4,0,8"
@@ -2415,14 +2410,14 @@
                                 <TextBlock Text="Model Artifacts"
                                            FontSize="18"
                                            FontWeight="Bold"
-                                           Foreground="#0F172A" />
+                                           Foreground="{DynamicResource Fg0F172A}" />
                                 <TextBlock Text="Track adapters/checkpoints a run produced, and keep or reject them. Paths are referenced, never moved — a record flags 'modified' or 'missing' if the weights change on disk."
-                                           Foreground="#475569"
+                                           Foreground="{DynamicResource Fg475569}"
                                            TextWrapping="Wrap"
                                            Margin="0,4,0,8" />
                                 <TextBlock AutomationProperties.AutomationId="ArtifactSummaryTextBlock"
                                            Text="{Binding Artifacts.ArtifactSummary, Mode=OneWay}"
-                                           Foreground="#334155"
+                                           Foreground="{DynamicResource Fg334155}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,8" />
                             </StackPanel>
@@ -2481,11 +2476,11 @@
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
                             <StackPanel Grid.Row="0">
-                                <TextBlock Text="Evaluation Suites" FontSize="18" FontWeight="Bold" Foreground="#0F172A" />
+                                <TextBlock Text="Evaluation Suites" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource Fg0F172A}" />
                                 <TextBlock Text="Run a reusable set of evaluation cases as one unit. Create a suite, edit its cases in Files, then Run — each case is a live backend evaluation. Verdicts case structure + score thresholds, not model quality."
-                                           Foreground="#475569" TextWrapping="Wrap" Margin="0,4,0,8" />
+                                           Foreground="{DynamicResource Fg475569}" TextWrapping="Wrap" Margin="0,4,0,8" />
                                 <TextBlock AutomationProperties.AutomationId="SuitesStatusTextBlock"
-                                           Text="{Binding Suites.SuitesStatus, Mode=OneWay}" Foreground="#334155"
+                                           Text="{Binding Suites.SuitesStatus, Mode=OneWay}" Foreground="{DynamicResource Fg334155}"
                                            TextWrapping="Wrap" Margin="0,0,0,8" />
                             </StackPanel>
                             <WrapPanel Grid.Row="1" Margin="0,0,0,8" VerticalAlignment="Center">
@@ -2527,22 +2522,22 @@
                                         <Border Background="{Binding Suites.SuiteOverallColor}" CornerRadius="4" Padding="10,3">
                                             <TextBlock Text="{Binding Suites.SuiteOverallStatus}" Foreground="White" FontWeight="Bold" FontSize="12" />
                                         </Border>
-                                        <TextBlock Text="{Binding Suites.SuiteReportSummary}" Foreground="#334155"
+                                        <TextBlock Text="{Binding Suites.SuiteReportSummary}" Foreground="{DynamicResource Fg334155}"
                                                    VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap" />
                                     </StackPanel>
                                     <!-- empty / not-run-yet state -->
-                                    <TextBlock Grid.Row="0" Text="{Binding Suites.SuiteReportSummary}" Foreground="#64748B"
+                                    <TextBlock Grid.Row="0" Text="{Binding Suites.SuiteReportSummary}" Foreground="{DynamicResource Fg64748B}"
                                                TextWrapping="Wrap"
                                                Visibility="{Binding Suites.HasSuiteReport, Converter={StaticResource InverseBoolToVis}}" />
                                     <!-- per-metric roll-up -->
-                                    <TextBlock Grid.Row="1" Text="Per metric" FontWeight="SemiBold" Foreground="#64748B"
+                                    <TextBlock Grid.Row="1" Text="Per metric" FontWeight="SemiBold" Foreground="{DynamicResource Fg64748B}"
                                                FontSize="11" Margin="0,10,0,3"
                                                Visibility="{Binding Suites.HasSuiteReport, Converter={StaticResource BoolToVis}}" />
                                     <ItemsControl Grid.Row="2" ItemsSource="{Binding Suites.SuiteMetricRows}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
                                                 <TextBlock Text="{Binding DisplayLabel}" FontFamily="Consolas"
-                                                           FontSize="12" Foreground="#334155" Margin="0,1" />
+                                                           FontSize="12" Foreground="{DynamicResource Fg334155}" Margin="0,1" />
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
@@ -2552,26 +2547,26 @@
                                             <ItemsControl ItemsSource="{Binding Suites.SuiteCaseRows}">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Border BorderBrush="#F1F5F9" BorderThickness="0,0,0,1" Padding="0,4">
+                                                        <Border BorderBrush="{DynamicResource BdF1F5F9}" BorderThickness="0,0,0,1" Padding="0,4">
                                                             <StackPanel Orientation="Horizontal">
                                                                 <Border Background="{Binding StatusColor}" CornerRadius="3" Padding="5,1" Margin="0,0,8,0" VerticalAlignment="Center">
                                                                     <TextBlock Text="{Binding Status}" Foreground="White" FontSize="10" />
                                                                 </Border>
                                                                 <TextBlock Text="{Binding CaseLine}" FontFamily="Consolas" FontSize="12"
-                                                                           Foreground="#1E293B" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                                           Foreground="{DynamicResource Fg1E293B}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                             </StackPanel>
                                                         </Border>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
-                                            <TextBlock Text="Run history (trend)" FontWeight="SemiBold" Foreground="#64748B"
+                                            <TextBlock Text="Run history (trend)" FontWeight="SemiBold" Foreground="{DynamicResource Fg64748B}"
                                                        FontSize="11" Margin="0,14,0,3" />
-                                            <TextBlock Text="{Binding Suites.SuiteHistorySummary}" Foreground="#94A3B8"
+                                            <TextBlock Text="{Binding Suites.SuiteHistorySummary}" Foreground="{DynamicResource Fg94A3B8}"
                                                        FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4" />
                                             <!-- Pass-rate trend sparkline: one bar per run (oldest → newest), height = pass rate,
                                                  colour = overall verdict. Hover a bar for the run detail. -->
                                             <Border Height="44"
-                                                    Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1"
+                                                    Background="{DynamicResource BgF8FAFC}" BorderBrush="{DynamicResource BdE2E8F0}" BorderThickness="1"
                                                     CornerRadius="4" Padding="5,4" Margin="0,0,0,6"
                                                     HorizontalAlignment="Left"
                                                     Visibility="{Binding Suites.HasSuiteHistory, Converter={StaticResource BoolToVis}}">
@@ -2601,14 +2596,14 @@
                                                                 <TextBlock Text="{Binding OverallStatus}" Foreground="White" FontSize="10" />
                                                             </Border>
                                                             <TextBlock Text="{Binding DisplayLine}" FontFamily="Consolas" FontSize="12"
-                                                                       Foreground="#334155" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                                       Foreground="{DynamicResource Fg334155}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                         </StackPanel>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
                                         </StackPanel>
                                     </ScrollViewer>
-                                    <TextBlock Grid.Row="4" Text="{Binding Suites.SuiteHonestyNote}" Foreground="#94A3B8"
+                                    <TextBlock Grid.Row="4" Text="{Binding Suites.SuiteHonestyNote}" Foreground="{DynamicResource Fg94A3B8}"
                                                FontSize="11" FontStyle="Italic" TextWrapping="Wrap" Margin="0,8,0,0" />
                                 </Grid>
                             </Grid>
@@ -2625,26 +2620,26 @@
                                 <TextBlock Text="Dataset Version History"
                                            FontSize="18"
                                            FontWeight="Bold"
-                                           Foreground="#0F172A" />
+                                           Foreground="{DynamicResource Fg0F172A}" />
                                 <TextBlock Text="A version records the dataset's fingerprint + row count and links to the runs, artifacts, and evaluations from that state. Capture is opt-in and goes through the engine, so integrity is verified — not guessed."
-                                           Foreground="#475569"
+                                           Foreground="{DynamicResource Fg475569}"
                                            TextWrapping="Wrap"
                                            Margin="0,4,0,8" />
                                 <TextBlock AutomationProperties.AutomationId="DatasetVersionSummaryTextBlock"
                                            Text="{Binding Versions.DatasetVersionSummary, Mode=OneWay}"
-                                           Foreground="#334155"
+                                           Foreground="{DynamicResource Fg334155}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,8" />
                                 <TextBlock AutomationProperties.AutomationId="DatasetDiffBaseTextBlock"
                                            Text="{Binding Versions.DatasetDiffBaseLabel, Mode=OneWay}"
-                                           Foreground="#64748B"
+                                           Foreground="{DynamicResource Fg64748B}"
                                            FontStyle="Italic"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,8" />
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                     <TextBlock Text="Label (optional):"
                                                VerticalAlignment="Center"
-                                               Foreground="#334155"
+                                               Foreground="{DynamicResource Fg334155}"
                                                Margin="0,0,8,0" />
                                     <TextBox AutomationProperties.AutomationId="DatasetVersionLabelTextBox"
                                              Text="{Binding Versions.DatasetVersionLabel, UpdateSourceTrigger=PropertyChanged}"
@@ -2722,15 +2717,15 @@
                                 <TextBlock Text="Dataset Debt"
                                            FontSize="18"
                                            FontWeight="Bold"
-                                           Foreground="#0F172A" />
+                                           Foreground="{DynamicResource Fg0F172A}" />
                                 <TextBlock Text="Debt normalizes the quality signals by dataset size, ranks them, and grades the dataset so you know what to fix first. Secrets/PII are graded by presence, not rate. Re-run after changing the dataset."
-                                           Foreground="#475569"
+                                           Foreground="{DynamicResource Fg475569}"
                                            TextWrapping="Wrap"
                                            Margin="0,4,0,8" />
                             </StackPanel>
                             <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8" VerticalAlignment="Center">
                                 <TextBlock Text="Grade"
-                                           Foreground="#64748B"
+                                           Foreground="{DynamicResource Fg64748B}"
                                            VerticalAlignment="Bottom"
                                            Margin="0,0,10,6" />
                                 <TextBlock AutomationProperties.AutomationId="DebtGradeTextBlock"
@@ -2742,7 +2737,7 @@
                             <StackPanel Grid.Row="2">
                                 <TextBlock AutomationProperties.AutomationId="DebtSummaryTextBlock"
                                            Text="{Binding Debt.DebtSummary, Mode=OneWay}"
-                                           Foreground="#334155"
+                                           Foreground="{DynamicResource Fg334155}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,8" />
                                 <Button AutomationProperties.AutomationId="RunDatasetDebtButton"
@@ -2781,10 +2776,10 @@
                             <TextBlock Text="Provider Generation Policy"
                                        FontSize="16"
                                        FontWeight="Bold"
-                                       Foreground="#0F172A"
+                                       Foreground="{DynamicResource Fg0F172A}"
                                        Margin="0,20,0,4" />
                             <TextBlock Text="OpenAI/Anthropic are evaluator-only. Approve a local model (Ollama or a local OpenAI-compatible server) to let AI Assist use it for trainable generation — always review-required."
-                                       Foreground="#475569"
+                                       Foreground="{DynamicResource Fg475569}"
                                        TextWrapping="Wrap"
                                        Margin="0,0,0,8" />
                             <TextBox AutomationProperties.AutomationId="ProviderPolicySummaryTextBox"
@@ -2828,7 +2823,7 @@
                                        FontWeight="SemiBold" FontSize="14" Margin="0,22,0,4" />
                             <TextBlock Text="{Binding Settings.GateThresholdsSummary, Mode=OneWay}"
                                        AutomationProperties.AutomationId="GateThresholdsSummaryTextBlock"
-                                       Foreground="#475569" TextWrapping="Wrap" Margin="0,0,0,8" />
+                                       Foreground="{DynamicResource Fg475569}" TextWrapping="Wrap" Margin="0,0,0,8" />
                             <StackPanel>
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                                     <TextBlock Text="Exact duplicates — max" Width="210" VerticalAlignment="Center" />
@@ -2885,8 +2880,8 @@
         </Border>
 
         <Border Grid.Column="2"
-                Background="{StaticResource PanelBrush}"
-                BorderBrush="{StaticResource PanelBorderBrush}"
+                Background="{DynamicResource PanelBrush}"
+                BorderBrush="{DynamicResource PanelBorderBrush}"
                 BorderThickness="1,0,0,0"
                 Padding="22,20">
             <ScrollViewer VerticalScrollBarVisibility="Auto"
@@ -2898,7 +2893,7 @@
                 <TextBlock Text="Validation"
                            FontSize="18"
                            FontWeight="Bold"
-                           Foreground="#0F172A" />
+                           Foreground="{DynamicResource Fg0F172A}" />
                 <TextBox AutomationProperties.AutomationId="ValidationSummaryTextBox"
                          Text="{Binding ValidationSummary, Mode=OneWay}"
                          Margin="0,8,0,8"
@@ -2908,7 +2903,7 @@
                          VerticalScrollBarVisibility="Auto" />
                 <TextBlock Text="Issues"
                            FontWeight="SemiBold"
-                           Foreground="#334155" />
+                           Foreground="{DynamicResource Fg334155}" />
                 <Grid Margin="0,8,0,24">
                     <ListBox x:Name="ValidationIssuesListBox"
                              AutomationProperties.AutomationId="ValidationIssuesListBox"
@@ -2925,7 +2920,7 @@
                 <TextBlock Text="Quality"
                            FontSize="18"
                            FontWeight="Bold"
-                           Foreground="#0F172A"
+                           Foreground="{DynamicResource Fg0F172A}"
                            Margin="0,22,0,0" />
                 <!-- Structured quality metrics (v1.2.12). Before a run (or on error) the panel
                      falls back to the QualitySummary text; after a run it shows a PII-aware status
@@ -2957,7 +2952,7 @@
                                         <ColumnDefinition Width="18" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="{Binding Label}" FontSize="12.5"
-                                               Foreground="#334155" VerticalAlignment="Center" />
+                                               Foreground="{DynamicResource Fg334155}" VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="1" Text="{Binding Value}" FontSize="12.5"
                                                FontWeight="SemiBold" Foreground="{Binding StatusColor}"
                                                VerticalAlignment="Center" Margin="0,0,8,0" />
@@ -2980,7 +2975,7 @@
                         Command="{Binding RunQualityCommand}" />
                 <TextBlock Text="Gates"
                            FontWeight="SemiBold"
-                           Foreground="#334155"
+                           Foreground="{DynamicResource Fg334155}"
                            Margin="0,18,0,0" />
                 <TextBox AutomationProperties.AutomationId="GateSummaryTextBox"
                          Text="{Binding GateSummary, Mode=OneWay}"
@@ -3003,7 +2998,7 @@
                         Visibility="{Binding IsChatProject, Converter={StaticResource BoolToVis}}"
                         Command="{Binding RunChatGatesCommand}" />
                 <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
-                    <TextBlock Text="Provenance" FontWeight="SemiBold" Foreground="#334155" VerticalAlignment="Center" />
+                    <TextBlock Text="Provenance" FontWeight="SemiBold" Foreground="{DynamicResource Fg334155}" VerticalAlignment="Center" />
                     <Border Margin="8,0,0,0" CornerRadius="4" Padding="7,1"
                             Background="{Binding ProvenanceGateColor}"
                             Visibility="{Binding HasProvenanceGateReport, Converter={StaticResource BoolToVis}}">
@@ -3029,7 +3024,7 @@
                         Command="{Binding RunProvenanceGateCommand}" />
                 <TextBlock Text="Synthetic Triage"
                            FontWeight="SemiBold"
-                           Foreground="#334155"
+                           Foreground="{DynamicResource Fg334155}"
                            Margin="0,18,0,0" />
                 <Grid Margin="0,8,0,8">
                     <ListBox x:Name="SyntheticPatternIssuesListBox"
@@ -3056,7 +3051,7 @@
                         Click="PrepareSyntheticBatchRewriteButton_Click" />
                 <TextBlock Text="History"
                            FontWeight="SemiBold"
-                           Foreground="#334155"
+                           Foreground="{DynamicResource Fg334155}"
                            Margin="0,18,0,0" />
                 <TextBox AutomationProperties.AutomationId="QualityHistoryTextBox"
                          Text="{Binding Quality.QualityHistorySummary, Mode=OneWay}"
@@ -3068,7 +3063,7 @@
 
                 <!-- Debt trend mini-chart (v1.2.9): quality issue rate per run over time. -->
                 <StackPanel Orientation="Horizontal" Margin="0,18,0,4">
-                    <TextBlock Text="Debt trend" FontWeight="SemiBold" Foreground="#334155"
+                    <TextBlock Text="Debt trend" FontWeight="SemiBold" Foreground="{DynamicResource Fg334155}"
                                VerticalAlignment="Center" />
                     <TextBlock Text="{Binding Quality.DebtTrendDirection}" FontWeight="SemiBold" FontSize="12"
                                Foreground="{Binding Quality.DebtTrendDirectionColor}" Margin="10,0,0,0"
@@ -3078,7 +3073,7 @@
                 <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
                               HorizontalAlignment="Left" MaxWidth="520"
                               Visibility="{Binding Quality.HasDebtTrendPoints, Converter={StaticResource BoolToVis}}">
-                    <Border Height="64" Background="#F8FAFC" BorderBrush="#EEF2F7" BorderThickness="1"
+                    <Border Height="64" Background="{DynamicResource BgF8FAFC}" BorderBrush="{DynamicResource BdEEF2F7}" BorderThickness="1"
                             CornerRadius="6" Padding="8,4">
                         <ItemsControl AutomationProperties.AutomationId="DebtTrendChart"
                                       ItemsSource="{Binding Quality.DebtTrend}" VerticalAlignment="Bottom">
@@ -3104,14 +3099,14 @@
                 <TextBlock Text="Export"
                            FontSize="18"
                            FontWeight="Bold"
-                           Foreground="#0F172A"
+                           Foreground="{DynamicResource Fg0F172A}"
                            Margin="0,24,0,0" />
                 <Button AutomationProperties.AutomationId="ValidateButton"
                         Content="_Validate"
                         Margin="0,8,0,8"
                         Command="{Binding ValidateDraftCommand}" />
                 <TextBlock Text="Cleaning (applied only to the exported file):"
-                           Foreground="#475569"
+                           Foreground="{DynamicResource Fg475569}"
                            Margin="0,4,0,4"
                            TextWrapping="Wrap" />
                 <CheckBox AutomationProperties.AutomationId="ExportRemoveDuplicatesCheckBox"
@@ -3172,8 +3167,8 @@
                 Panel.ZIndex="100"
                 Background="#73101828"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}">
-            <Border Background="{StaticResource PanelBrush}"
-                    BorderBrush="{StaticResource PanelBorderBrush}"
+            <Border Background="{DynamicResource PanelBrush}"
+                    BorderBrush="{DynamicResource PanelBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="10"
                     Padding="28,22"
@@ -3183,7 +3178,7 @@
                     <TextBlock AutomationProperties.AutomationId="BusyStatusTextBlock"
                                Text="{Binding BusyStatus, Mode=OneWay}"
                                FontWeight="SemiBold"
-                               Foreground="{StaticResource HeadingTextBrush}"
+                               Foreground="{DynamicResource HeadingTextBrush}"
                                HorizontalAlignment="Center"
                                Margin="0,0,0,14" />
                     <ProgressBar IsIndeterminate="True" Width="240" Height="6" />
@@ -3201,32 +3196,32 @@
 
                 <!-- PROBLEMS PANEL — bottom-docked gate findings (v1.2.6). Overlays the bottom
                      of whichever view is active; toggled from the activity-bar Problems button. -->
-                <Border VerticalAlignment="Bottom" Height="248" Background="#FFFFFF"
-                        BorderBrush="#E2E8F0" BorderThickness="0,1,0,0" Panel.ZIndex="50"
+                <Border VerticalAlignment="Bottom" Height="248" Background="{DynamicResource BgFFFFFF}"
+                        BorderBrush="{DynamicResource BdE2E8F0}" BorderThickness="0,1,0,0" Panel.ZIndex="50"
                         Visibility="{Binding ProblemsPanelVisible, Converter={StaticResource BoolToVis}}">
                     <DockPanel>
                         <!-- header -->
-                        <Border DockPanel.Dock="Top" Height="38" Background="#F8FAFC"
-                                BorderBrush="#EEF2F7" BorderThickness="0,0,0,1">
+                        <Border DockPanel.Dock="Top" Height="38" Background="{DynamicResource BgF8FAFC}"
+                                BorderBrush="{DynamicResource BdEEF2F7}" BorderThickness="0,0,0,1">
                             <Grid Margin="14,0">
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBlock Text="PROBLEMS" FontSize="11" FontWeight="Bold"
-                                               Foreground="#64748B" VerticalAlignment="Center" />
-                                    <TextBlock Text="{Binding ProblemsSummary}" FontSize="11.5" Foreground="#475569"
+                                               Foreground="{DynamicResource Fg64748B}" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding ProblemsSummary}" FontSize="11.5" Foreground="{DynamicResource Fg475569}"
                                                Margin="14,0,0,0" VerticalAlignment="Center" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                                     <Button Content="Run gates" Command="{Binding RunGatesCommand}" Padding="12,5" Margin="0,0,8,0"
                                             IsEnabled="{Binding HasActiveProject}" />
                                     <Button Click="ProblemsButton_Click" ToolTip="Close panel" Style="{StaticResource ExplorerIconStyle}">
-                                        <Path Data="M5,5 L15,15 M15,5 L5,15" Stroke="#64748B" StrokeThickness="1.6"
+                                        <Path Data="M5,5 L15,15 M15,5 L5,15" Stroke="{DynamicResource Fg64748B}" StrokeThickness="1.6"
                                               Width="14" Height="14" Stretch="Uniform" />
                                     </Button>
                                 </StackPanel>
                             </Grid>
                         </Border>
                         <!-- empty state (no problems / gates not run) -->
-                        <TextBlock DockPanel.Dock="Top" Margin="16,16" TextWrapping="Wrap" Foreground="#64748B" FontSize="12.5"
+                        <TextBlock DockPanel.Dock="Top" Margin="16,16" TextWrapping="Wrap" Foreground="{DynamicResource Fg64748B}" FontSize="12.5"
                                    Visibility="{Binding IsNoProblems, Converter={StaticResource BoolToVis}}"
                                    Text="No problems to show. Run gates to check this dataset — any schema, quality, PII, or leakage findings appear here. A clean gate means all checks passed; it is not approval." />
                         <!-- findings list (block-first) -->
@@ -3235,7 +3230,7 @@
                             <ItemsControl ItemsSource="{Binding Problems}" Margin="0,4">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Padding="14,7" BorderBrush="#F1F5F9" BorderThickness="0,0,0,1">
+                                        <Border Padding="14,7" BorderBrush="{DynamicResource BdF1F5F9}" BorderThickness="0,0,0,1">
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
@@ -3246,9 +3241,9 @@
                                                 <StackPanel Grid.Column="1">
                                                     <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12.5"
                                                                Foreground="{Binding SeverityColor}" />
-                                                    <TextBlock Text="{Binding Message}" FontSize="12" Foreground="#334155"
+                                                    <TextBlock Text="{Binding Message}" FontSize="12" Foreground="{DynamicResource Fg334155}"
                                                                TextWrapping="Wrap" Margin="0,1,0,0" />
-                                                    <TextBlock FontSize="11.5" Foreground="#2563EB" TextWrapping="Wrap" Margin="0,2,0,0"
+                                                    <TextBlock FontSize="11.5" Foreground="{DynamicResource Fg2563EB}" TextWrapping="Wrap" Margin="0,2,0,0"
                                                                Visibility="{Binding HasFix, Converter={StaticResource BoolToVis}}">
                                                         <Run Text="fix:" FontWeight="SemiBold" /><Run Text=" " /><Run Text="{Binding Fix}" />
                                                     </TextBlock>
@@ -3264,32 +3259,32 @@
 
                 <!-- OUTPUT / LOGS PANEL — bottom-docked engine activity (v1.2.7). Shares the dock
                      with Problems (only one open at a time); toggled from the activity bar. -->
-                <Border VerticalAlignment="Bottom" Height="248" Background="#FFFFFF"
-                        BorderBrush="#E2E8F0" BorderThickness="0,1,0,0" Panel.ZIndex="50"
+                <Border VerticalAlignment="Bottom" Height="248" Background="{DynamicResource BgFFFFFF}"
+                        BorderBrush="{DynamicResource BdE2E8F0}" BorderThickness="0,1,0,0" Panel.ZIndex="50"
                         Visibility="{Binding OutputPanelVisible, Converter={StaticResource BoolToVis}}">
                     <DockPanel>
                         <!-- header -->
-                        <Border DockPanel.Dock="Top" Height="38" Background="#F8FAFC"
-                                BorderBrush="#EEF2F7" BorderThickness="0,0,0,1">
+                        <Border DockPanel.Dock="Top" Height="38" Background="{DynamicResource BgF8FAFC}"
+                                BorderBrush="{DynamicResource BdEEF2F7}" BorderThickness="0,0,0,1">
                             <Grid Margin="14,0">
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBlock Text="OUTPUT" FontSize="11" FontWeight="Bold"
-                                               Foreground="#64748B" VerticalAlignment="Center" />
-                                    <TextBlock Text="{Binding OutputSummary}" FontSize="11.5" Foreground="#475569"
+                                               Foreground="{DynamicResource Fg64748B}" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding OutputSummary}" FontSize="11.5" Foreground="{DynamicResource Fg475569}"
                                                Margin="14,0,0,0" VerticalAlignment="Center" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                                     <Button Content="Clear" Click="ClearOutputButton_Click" Padding="12,5" Margin="0,0,8,0"
                                             IsEnabled="{Binding HasOutput}" />
                                     <Button Click="OutputButton_Click" ToolTip="Close panel" Style="{StaticResource ExplorerIconStyle}">
-                                        <Path Data="M5,5 L15,15 M15,5 L5,15" Stroke="#64748B" StrokeThickness="1.6"
+                                        <Path Data="M5,5 L15,15 M15,5 L5,15" Stroke="{DynamicResource Fg64748B}" StrokeThickness="1.6"
                                               Width="14" Height="14" Stretch="Uniform" />
                                     </Button>
                                 </StackPanel>
                             </Grid>
                         </Border>
                         <!-- empty state -->
-                        <TextBlock DockPanel.Dock="Top" Margin="16,16" TextWrapping="Wrap" Foreground="#64748B" FontSize="12.5"
+                        <TextBlock DockPanel.Dock="Top" Margin="16,16" TextWrapping="Wrap" Foreground="{DynamicResource Fg64748B}" FontSize="12.5"
                                    Visibility="{Binding IsNoOutput, Converter={StaticResource BoolToVis}}"
                                    Text="No engine activity yet. Each command the app runs (validate, quality, gates, export, evaluation, AI Assist, …) is logged here with its outcome and timing. Local diagnostics only — nothing is sent anywhere." />
                         <!-- log list (newest last) -->
@@ -3298,22 +3293,22 @@
                             <ItemsControl ItemsSource="{Binding OutputLog}" Margin="0,4">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Padding="14,5" BorderBrush="#F1F5F9" BorderThickness="0,0,0,1">
+                                        <Border Padding="14,5" BorderBrush="{DynamicResource BdF1F5F9}" BorderThickness="0,0,0,1">
                                             <StackPanel>
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBlock Text="{Binding Timestamp}" FontFamily="Consolas" FontSize="11"
-                                                               Foreground="#94A3B8" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                                               Foreground="{DynamicResource Fg94A3B8}" VerticalAlignment="Center" Margin="0,0,10,0" />
                                                     <TextBlock Text="{Binding StatusIcon}" FontSize="12" Foreground="{Binding StatusColor}"
                                                                VerticalAlignment="Center" Margin="0,0,8,0" />
                                                     <TextBlock Text="{Binding Command}" FontFamily="Consolas" FontSize="12" FontWeight="SemiBold"
-                                                               Foreground="#1E293B" VerticalAlignment="Center" />
+                                                               Foreground="{DynamicResource Fg1E293B}" VerticalAlignment="Center" />
                                                     <TextBlock Text="{Binding ArgsSummary}" FontFamily="Consolas" FontSize="11.5"
-                                                               Foreground="#64748B" VerticalAlignment="Center" Margin="8,0,0,0"
+                                                               Foreground="{DynamicResource Fg64748B}" VerticalAlignment="Center" Margin="8,0,0,0"
                                                                TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Text="{Binding DurationLabel}" FontSize="11" Foreground="#94A3B8"
+                                                    <TextBlock Text="{Binding DurationLabel}" FontSize="11" Foreground="{DynamicResource Fg94A3B8}"
                                                                VerticalAlignment="Center" Margin="10,0,0,0" />
                                                 </StackPanel>
-                                                <TextBlock Text="{Binding Detail}" FontFamily="Consolas" FontSize="11" Foreground="#B91C1C"
+                                                <TextBlock Text="{Binding Detail}" FontFamily="Consolas" FontSize="11" Foreground="{DynamicResource FgB91C1C}"
                                                            TextWrapping="Wrap" Margin="34,2,0,0"
                                                            Visibility="{Binding HasDetail, Converter={StaticResource BoolToVis}}" />
                                             </StackPanel>
@@ -3328,17 +3323,17 @@
                 <!-- SEARCH PANEL — bottom-docked workspace content search ("find in files").
                      Shares the dock with Problems/Output (only one open); toggled from the
                      activity-bar Search button. Double-click a result to open the file. -->
-                <Border VerticalAlignment="Bottom" Height="248" Background="#FFFFFF"
-                        BorderBrush="#E2E8F0" BorderThickness="0,1,0,0" Panel.ZIndex="50"
+                <Border VerticalAlignment="Bottom" Height="248" Background="{DynamicResource BgFFFFFF}"
+                        BorderBrush="{DynamicResource BdE2E8F0}" BorderThickness="0,1,0,0" Panel.ZIndex="50"
                         Visibility="{Binding SearchPanelVisible, Converter={StaticResource BoolToVis}}">
                     <DockPanel>
                         <!-- header: query box + case toggle + run + close -->
-                        <Border DockPanel.Dock="Top" Height="44" Background="#F8FAFC"
-                                BorderBrush="#EEF2F7" BorderThickness="0,0,0,1">
+                        <Border DockPanel.Dock="Top" Height="44" Background="{DynamicResource BgF8FAFC}"
+                                BorderBrush="{DynamicResource BdEEF2F7}" BorderThickness="0,0,0,1">
                             <Grid Margin="14,0">
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBlock Text="SEARCH" FontSize="11" FontWeight="Bold"
-                                               Foreground="#64748B" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                               Foreground="{DynamicResource Fg64748B}" VerticalAlignment="Center" Margin="0,0,12,0" />
                                     <TextBox x:Name="SearchQueryBox" Width="280" Height="26" VerticalContentAlignment="Center"
                                              AutomationProperties.AutomationId="WorkspaceSearchTextBox"
                                              Text="{Binding Search.Query, UpdateSourceTrigger=PropertyChanged}"
@@ -3347,19 +3342,19 @@
                                               IsChecked="{Binding Search.CaseSensitive}" />
                                     <Button Content="Search" Command="{Binding Search.RunCommand}" Padding="12,4" Margin="10,0,0,0"
                                             IsEnabled="{Binding HasActiveProject}" />
-                                    <TextBlock Text="{Binding Search.Status}" FontSize="11.5" Foreground="#475569"
+                                    <TextBlock Text="{Binding Search.Status}" FontSize="11.5" Foreground="{DynamicResource Fg475569}"
                                                Margin="14,0,0,0" VerticalAlignment="Center"
                                                TextTrimming="CharacterEllipsis" MaxWidth="360" />
                                 </StackPanel>
                                 <Button HorizontalAlignment="Right" VerticalAlignment="Center"
                                         Click="SearchCloseButton_Click" ToolTip="Close panel" Style="{StaticResource ExplorerIconStyle}">
-                                    <Path Data="M5,5 L15,15 M15,5 L5,15" Stroke="#64748B" StrokeThickness="1.6"
+                                    <Path Data="M5,5 L15,15 M15,5 L5,15" Stroke="{DynamicResource Fg64748B}" StrokeThickness="1.6"
                                           Width="14" Height="14" Stretch="Uniform" />
                                 </Button>
                             </Grid>
                         </Border>
                         <!-- empty state -->
-                        <TextBlock DockPanel.Dock="Top" Margin="16,16" TextWrapping="Wrap" Foreground="#64748B" FontSize="12.5"
+                        <TextBlock DockPanel.Dock="Top" Margin="16,16" TextWrapping="Wrap" Foreground="{DynamicResource Fg64748B}" FontSize="12.5"
                                    Visibility="{Binding Search.HasResults, Converter={StaticResource InverseBoolToVis}}"
                                    Text="Type a term and press Enter to find it across this workspace's text files (datasets, reports, docs, configs). Binaries, oversize files, and build/VCS folders are skipped. Double-click a result to open the file." />
                         <!-- results list; double-click opens the file in the Explorer -->
@@ -3372,9 +3367,9 @@
                                 <DataTemplate>
                                     <StackPanel Margin="4,3">
                                         <TextBlock Text="{Binding Location}" FontFamily="Consolas" FontSize="11.5"
-                                                   FontWeight="SemiBold" Foreground="#2563EB" />
-                                        <TextBlock FontFamily="Consolas" FontSize="11.5" Foreground="#334155"
-                                                   TextTrimming="CharacterEllipsis" Margin="0,1,0,0"><Run Text="{Binding BeforeMatch}" /><Run Text="{Binding MatchText}" FontWeight="Bold" Foreground="#B45309" Background="#FEF3C7" /><Run Text="{Binding AfterMatch}" /></TextBlock>
+                                                   FontWeight="SemiBold" Foreground="{DynamicResource Fg2563EB}" />
+                                        <TextBlock FontFamily="Consolas" FontSize="11.5" Foreground="{DynamicResource Fg334155}"
+                                                   TextTrimming="CharacterEllipsis" Margin="0,1,0,0"><Run Text="{Binding BeforeMatch}" /><Run Text="{Binding MatchText}" FontWeight="Bold" Foreground="{DynamicResource FgB45309}" Background="{DynamicResource BgFEF3C7}" /><Run Text="{Binding AfterMatch}" /></TextBlock>
                                     </StackPanel>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
@@ -3385,10 +3380,10 @@
         </Grid>
 
         <!-- ===================== START CENTER (full window, no workspace) ===================== -->
-        <Grid Visibility="{Binding IsStartCenter, Converter={StaticResource BoolToVis}}" Background="{StaticResource AppBackgroundBrush}">
+        <Grid Visibility="{Binding IsStartCenter, Converter={StaticResource BoolToVis}}" Background="{DynamicResource AppBackgroundBrush}">
             <DockPanel>
                 <!-- brand strip -->
-                <Border DockPanel.Dock="Top" Height="52" Background="{StaticResource SidebarBrush}">
+                <Border DockPanel.Dock="Top" Height="52" Background="{DynamicResource SidebarBrush}">
                     <Grid Margin="22,0">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <Border Width="26" Height="26" CornerRadius="6" Margin="0,0,12,0">
@@ -3400,12 +3395,12 @@
                                 </Border.Background>
                                 <TextBlock Text="C" Foreground="White" FontWeight="Bold" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Border>
-                            <TextBlock Text="Corpus Studio" Foreground="#F8FAFC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
-                            <TextBlock Text="Dataset Creation Studio" Foreground="#94A3B8" FontSize="12" VerticalAlignment="Center" Margin="10,0,0,0" />
+                            <TextBlock Text="Corpus Studio" Foreground="{DynamicResource FgF8FAFC}" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
+                            <TextBlock Text="Dataset Creation Studio" Foreground="{DynamicResource Fg94A3B8}" FontSize="12" VerticalAlignment="Center" Margin="10,0,0,0" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                            <Ellipse Width="7" Height="7" Fill="#34D399" Margin="0,0,7,0" />
-                            <TextBlock Text="Local-first · nothing leaves this machine" Foreground="#94A3B8" FontSize="11" VerticalAlignment="Center" />
+                            <Ellipse Width="7" Height="7" Fill="{DynamicResource Fg34D399}" Margin="0,0,7,0" />
+                            <TextBlock Text="Local-first · nothing leaves this machine" Foreground="{DynamicResource Fg94A3B8}" FontSize="11" VerticalAlignment="Center" />
                         </StackPanel>
                     </Grid>
                 </Border>
@@ -3422,50 +3417,50 @@
 
                             <!-- LEFT: hero + actions -->
                             <StackPanel Grid.Column="0">
-                                <TextBlock Text="Start a workspace" FontSize="30" FontWeight="Bold" Foreground="#0F172A" />
-                                <TextBlock Foreground="{StaticResource MutedTextBrush}" FontSize="14" Margin="0,8,0,0" TextWrapping="Wrap"
+                                <TextBlock Text="Start a workspace" FontSize="30" FontWeight="Bold" Foreground="{DynamicResource Fg0F172A}" />
+                                <TextBlock Foreground="{DynamicResource MutedTextBrush}" FontSize="14" Margin="0,8,0,0" TextWrapping="Wrap"
                                            Text="A dataset is a workspace, not just rows. Create a new dataset project from a template, or open an existing folder — Corpus Studio never mutates your files without asking." />
 
                                 <Button Style="{StaticResource StartActionPrimaryStyle}" Click="StartNewProject_Click" Margin="0,26,0,0">
                                     <StackPanel Orientation="Horizontal">
-                                        <Border Width="34" Height="34" CornerRadius="8" Background="#3B82F6" Margin="0,0,13,0">
+                                        <Border Width="34" Height="34" CornerRadius="8" Background="{DynamicResource Bg3B82F6}" Margin="0,0,13,0">
                                             <TextBlock Text="+" Foreground="White" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Border>
                                         <StackPanel VerticalAlignment="Center">
                                             <TextBlock Text="New Dataset Project" Foreground="White" FontWeight="SemiBold" FontSize="14" />
-                                            <TextBlock Text="Pick a schema + template, preview the structure" Foreground="#DBEAFE" FontSize="12" Margin="0,1,0,0" />
+                                            <TextBlock Text="Pick a schema + template, preview the structure" Foreground="{DynamicResource FgDBEAFE}" FontSize="12" Margin="0,1,0,0" />
                                         </StackPanel>
                                     </StackPanel>
                                 </Button>
 
                                 <Button Style="{StaticResource StartActionSecondaryStyle}" Click="StartOpenFolder_Click" Margin="0,10,0,0">
                                     <StackPanel Orientation="Horizontal">
-                                        <Border Width="34" Height="34" CornerRadius="8" Background="#EEF4FF" Margin="0,0,13,0">
-                                            <Path Data="M3,7 A2,2 0 0 1 5,5 H9 L11,7 H19 A2,2 0 0 1 21,9 V17 A2,2 0 0 1 19,19 H5 A2,2 0 0 1 3,17 Z" Stroke="#2563EB" StrokeThickness="1.8" Fill="Transparent" Width="18" Height="18" Stretch="Uniform" />
+                                        <Border Width="34" Height="34" CornerRadius="8" Background="{DynamicResource BgEEF4FF}" Margin="0,0,13,0">
+                                            <Path Data="M3,7 A2,2 0 0 1 5,5 H9 L11,7 H19 A2,2 0 0 1 21,9 V17 A2,2 0 0 1 19,19 H5 A2,2 0 0 1 3,17 Z" Stroke="{DynamicResource Fg2563EB}" StrokeThickness="1.8" Fill="Transparent" Width="18" Height="18" Stretch="Uniform" />
                                         </Border>
                                         <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="Open Existing Folder" Foreground="#0F172A" FontWeight="SemiBold" FontSize="14" />
-                                            <TextBlock Text="Detects manifest / dataset / empty / other" Foreground="{StaticResource MutedTextBrush}" FontSize="12" Margin="0,1,0,0" />
+                                            <TextBlock Text="Open Existing Folder" Foreground="{DynamicResource Fg0F172A}" FontWeight="SemiBold" FontSize="14" />
+                                            <TextBlock Text="Detects manifest / dataset / empty / other" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" Margin="0,1,0,0" />
                                         </StackPanel>
                                     </StackPanel>
                                 </Button>
 
                                 <Button Style="{StaticResource StartActionSecondaryStyle}" Click="StartImport_Click" Margin="0,10,0,0">
                                     <StackPanel Orientation="Horizontal">
-                                        <Border Width="34" Height="34" CornerRadius="8" Background="#EEF4FF" Margin="0,0,13,0">
-                                            <Path Data="M12,3 V15 M8,11 L12,15 L16,11 M5,21 H19" Stroke="#2563EB" StrokeThickness="1.8" Fill="Transparent" Width="18" Height="18" Stretch="Uniform" />
+                                        <Border Width="34" Height="34" CornerRadius="8" Background="{DynamicResource BgEEF4FF}" Margin="0,0,13,0">
+                                            <Path Data="M12,3 V15 M8,11 L12,15 L16,11 M5,21 H19" Stroke="{DynamicResource Fg2563EB}" StrokeThickness="1.8" Fill="Transparent" Width="18" Height="18" Stretch="Uniform" />
                                         </Border>
                                         <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="Import Dataset" Foreground="#0F172A" FontWeight="SemiBold" FontSize="14" />
-                                            <TextBlock Text="Preview + quarantine rows into a workspace" Foreground="{StaticResource MutedTextBrush}" FontSize="12" Margin="0,1,0,0" />
+                                            <TextBlock Text="Import Dataset" Foreground="{DynamicResource Fg0F172A}" FontWeight="SemiBold" FontSize="14" />
+                                            <TextBlock Text="Preview + quarantine rows into a workspace" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" Margin="0,1,0,0" />
                                         </StackPanel>
                                     </StackPanel>
                                 </Button>
 
-                                <Border Margin="0,24,0,0" Padding="12" CornerRadius="8" Background="#ECFDF5" BorderBrush="#BBF7D0" BorderThickness="1">
+                                <Border Margin="0,24,0,0" Padding="12" CornerRadius="8" Background="{DynamicResource BgECFDF5}" BorderBrush="{DynamicResource BdBBF7D0}" BorderThickness="1">
                                     <StackPanel>
-                                        <TextBlock Text="Safe by default" Foreground="#166534" FontWeight="SemiBold" FontSize="12" />
-                                        <TextBlock Foreground="#166534" FontSize="12" Margin="0,3,0,0" TextWrapping="Wrap"
+                                        <TextBlock Text="Safe by default" Foreground="{DynamicResource Fg166534}" FontWeight="SemiBold" FontSize="12" />
+                                        <TextBlock Foreground="{DynamicResource Fg166534}" FontSize="12" Margin="0,3,0,0" TextWrapping="Wrap"
                                                    Text="Generated reports open read-only · examples.jsonl has one writer · no path escapes the workspace root · nothing is deleted." />
                                     </StackPanel>
                                 </Border>
@@ -3474,12 +3469,12 @@
                             <!-- RIGHT: recent workspaces -->
                             <StackPanel Grid.Column="2">
                                 <Grid Margin="0,0,0,12">
-                                    <TextBlock Text="Recent Workspaces" FontSize="13" FontWeight="SemiBold" Foreground="#0F172A" VerticalAlignment="Center" />
-                                    <TextBlock Text="{Binding StartCenter.RecentCountLabel}" Foreground="#94A3B8" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    <TextBlock Text="Recent Workspaces" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource Fg0F172A}" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding StartCenter.RecentCountLabel}" Foreground="{DynamicResource Fg94A3B8}" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Center" />
                                 </Grid>
 
                                 <TextBlock Text="No recent workspaces yet. Create or open one to see it here."
-                                           Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap"
                                            Visibility="{Binding StartCenter.HasRecents, Converter={StaticResource InverseBoolToVis}}" />
 
                                 <ItemsControl ItemsSource="{Binding StartCenter.Recents}">
@@ -3488,7 +3483,7 @@
                                             <Button Click="RecentOpen_Click" HorizontalContentAlignment="Stretch" Margin="0,0,0,9" Cursor="Hand">
                                                 <Button.Template>
                                                     <ControlTemplate TargetType="{x:Type Button}">
-                                                        <Border x:Name="Card" Background="#FFFFFF" BorderBrush="#D8E0EA" BorderThickness="1" CornerRadius="9" Padding="12,11">
+                                                        <Border x:Name="Card" Background="{DynamicResource BgFFFFFF}" BorderBrush="{DynamicResource BdD8E0EA}" BorderThickness="1" CornerRadius="9" Padding="12,11">
                                                             <ContentPresenter />
                                                         </Border>
                                                         <ControlTemplate.Triggers>
@@ -3506,29 +3501,29 @@
                                                         <ColumnDefinition Width="Auto" />
                                                         <ColumnDefinition Width="Auto" />
                                                     </Grid.ColumnDefinitions>
-                                                    <Border Grid.Column="0" Width="36" Height="36" CornerRadius="8" Background="#EEF4FF" Margin="0,0,12,0">
-                                                        <TextBlock Text="{Binding SchemaTag}" Foreground="#1D4ED8" FontWeight="Bold" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    <Border Grid.Column="0" Width="36" Height="36" CornerRadius="8" Background="{DynamicResource BgEEF4FF}" Margin="0,0,12,0">
+                                                        <TextBlock Text="{Binding SchemaTag}" Foreground="{DynamicResource Fg1D4ED8}" FontWeight="Bold" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                     </Border>
                                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                         <StackPanel Orientation="Horizontal">
-                                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13" Foreground="#0F172A" TextTrimming="CharacterEllipsis" />
-                                                            <Border Background="#EEF4FF" BorderBrush="#C7D7FE" BorderThickness="1" CornerRadius="10" Padding="7,1" Margin="8,0,0,0"
+                                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource Fg0F172A}" TextTrimming="CharacterEllipsis" />
+                                                            <Border Background="{DynamicResource BgEEF4FF}" BorderBrush="{DynamicResource BdC7D7FE}" BorderThickness="1" CornerRadius="10" Padding="7,1" Margin="8,0,0,0"
                                                                     Visibility="{Binding IsPinned, Converter={StaticResource BoolToVis}}">
-                                                                <TextBlock Text="Pinned" Foreground="#1D4ED8" FontSize="10" />
+                                                                <TextBlock Text="Pinned" Foreground="{DynamicResource Fg1D4ED8}" FontSize="10" />
                                                             </Border>
-                                                            <Border Background="#FFF7ED" BorderBrush="#FED7AA" BorderThickness="1" CornerRadius="10" Padding="7,1" Margin="8,0,0,0"
+                                                            <Border Background="{DynamicResource BgFFF7ED}" BorderBrush="{DynamicResource BdFED7AA}" BorderThickness="1" CornerRadius="10" Padding="7,1" Margin="8,0,0,0"
                                                                     Visibility="{Binding IsMissing, Converter={StaticResource BoolToVis}}">
-                                                                <TextBlock Text="Missing" Foreground="#9A3412" FontSize="10" />
+                                                                <TextBlock Text="Missing" Foreground="{DynamicResource Fg9A3412}" FontSize="10" />
                                                             </Border>
                                                         </StackPanel>
-                                                        <TextBlock Text="{Binding Path}" FontFamily="Consolas" FontSize="11" Foreground="#94A3B8" TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                                                        <TextBlock Text="{Binding Path}" FontFamily="Consolas" FontSize="11" Foreground="{DynamicResource Fg94A3B8}" TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
                                                     </StackPanel>
-                                                    <TextBlock Grid.Column="2" Text="{Binding WhenText}" Foreground="#94A3B8" FontSize="11" VerticalAlignment="Center" Margin="10,0" />
+                                                    <TextBlock Grid.Column="2" Text="{Binding WhenText}" Foreground="{DynamicResource Fg94A3B8}" FontSize="11" VerticalAlignment="Center" Margin="10,0" />
                                                     <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
                                                         <Button Click="RecentPin_Click" ToolTip="{Binding PinTitle}" Width="28" Height="28" Padding="0"
                                                                 Background="Transparent" BorderThickness="0" Content="📌" FontSize="12" />
                                                         <Button Click="RecentRemove_Click" ToolTip="Remove from Recent" Width="28" Height="28" Padding="0"
-                                                                Background="Transparent" BorderThickness="0" Content="✕" FontSize="12" Foreground="#94A3B8" />
+                                                                Background="Transparent" BorderThickness="0" Content="✕" FontSize="12" Foreground="{DynamicResource Fg94A3B8}" />
                                                     </StackPanel>
                                                 </Grid>
                                             </Button>
@@ -3536,7 +3531,7 @@
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
 
-                                <TextBlock Margin="0,14,0,0" Foreground="#94A3B8" FontSize="11" TextWrapping="Wrap"
+                                <TextBlock Margin="0,14,0,0" Foreground="{DynamicResource Fg94A3B8}" FontSize="11" TextWrapping="Wrap"
                                            Text="Registry stored under %LOCALAPPDATA%/CorpusStudio/recent_workspaces.json. Missing folders are kept and flagged, never dropped. Pinned entries survive the 50-entry cap." />
                             </StackPanel>
                         </Grid>
@@ -3547,28 +3542,28 @@
 
         <!-- ENGINE NOT FOUND — setup screen (v1.2.15). Covers everything when the Python
              engine tree can't be located, so the app never launches into a broken shell. -->
-        <Border Panel.ZIndex="200" Background="{StaticResource AppBackgroundBrush}"
+        <Border Panel.ZIndex="200" Background="{DynamicResource AppBackgroundBrush}"
                 Visibility="{Binding IsEngineUnavailable, Converter={StaticResource BoolToVis}}">
             <Border Style="{StaticResource CardBorderStyle}" Width="560" MaxWidth="560"
                     VerticalAlignment="Center" HorizontalAlignment="Center" Padding="30,28">
                 <StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                        <Border Width="40" Height="40" CornerRadius="10" Background="#FEF2F2">
-                            <Path Data="M12,3 L21,20 H3 Z M12,9 V14 M12,17 H12.01" Stroke="#DC2626"
+                        <Border Width="40" Height="40" CornerRadius="10" Background="{DynamicResource BgFEF2F2}">
+                            <Path Data="M12,3 L21,20 H3 Z M12,9 V14 M12,17 H12.01" Stroke="{DynamicResource FgDC2626}"
                                   StrokeThickness="1.8" Fill="Transparent" Width="22" Height="22"
                                   Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <TextBlock Text="Python engine not found" FontSize="19" FontWeight="Bold"
-                                   Foreground="#0F172A" VerticalAlignment="Center" Margin="12,0,0,0" />
+                                   Foreground="{DynamicResource Fg0F172A}" VerticalAlignment="Center" Margin="12,0,0,0" />
                     </StackPanel>
-                    <TextBlock TextWrapping="Wrap" Foreground="#334155" FontSize="13" Margin="0,0,0,10"
+                    <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource Fg334155}" FontSize="13" Margin="0,0,0,10"
                                Text="Corpus Studio drives a local Python engine (the engine/ folder). It couldn't be located next to the app or up the folder tree." />
-                    <Border Background="#F8FAFC" BorderBrush="#E6EDF5" BorderThickness="1" CornerRadius="8"
+                    <Border Background="{DynamicResource BgF8FAFC}" BorderBrush="{DynamicResource BdE6EDF5}" BorderThickness="1" CornerRadius="8"
                             Padding="12,9" Margin="0,0,0,14">
                         <TextBlock Text="{Binding EngineUnavailableMessage}" TextWrapping="Wrap"
-                                   FontFamily="Consolas" FontSize="11.5" Foreground="#64748B" />
+                                   FontFamily="Consolas" FontSize="11.5" Foreground="{DynamicResource Fg64748B}" />
                     </Border>
-                    <TextBlock TextWrapping="Wrap" Foreground="#475569" FontSize="12.5" Margin="0,0,0,16"
+                    <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource Fg475569}" FontSize="12.5" Margin="0,0,0,16"
                                Text="Locate the engine folder below, or set the CORPUS_STUDIO_ENGINE_DIR environment variable and retry. See docs/DEVELOPMENT_SETUP.md." />
                     <StackPanel Orientation="Horizontal">
                         <Button Style="{StaticResource PrimaryButtonStyle}"

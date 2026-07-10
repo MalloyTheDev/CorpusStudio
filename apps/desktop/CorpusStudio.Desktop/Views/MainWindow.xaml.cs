@@ -505,6 +505,10 @@ public partial class MainWindow : Window
 
     private void ExplorerCollapseAll_Click(object sender, RoutedEventArgs e) => ViewModel.Explorer.CollapseAll();
 
+    // Light/dark theme toggle (#187/#201). Theme is an Application/View concern (swaps a merged
+    // ResourceDictionary), kept out of the shared view-models.
+    private void ThemeToggle_Click(object sender, RoutedEventArgs e) => ThemeManager.Toggle();
+
     private async void ExplorerSave_Click(object sender, RoutedEventArgs e)
     {
         // Capture the target BEFORE saving (the active doc doesn't change on save, but be safe).
