@@ -1756,6 +1756,43 @@ def train_merge(
     typer.echo(result.model_dump_json(indent=2))
 
 
+@app.command("model-fetch")
+def model_fetch(
+    repo_id: str,
+    local_dir: Optional[Path] = typer.Option(None, "--local-dir", help="Download here (default: the HF cache, so `train-run --base-model <repo>` finds it offline)."),
+    revision: Optional[str] = typer.Option(None, "--revision", help="Branch / tag / commit to fetch."),
+    allow: Optional[list[str]] = typer.Option(None, "--allow", help="Only fetch files matching these glob(s), e.g. --allow '*.safetensors' --allow '*.json'. Repeatable."),
+):
+    """Reliably download a base model from the Hugging Face Hub — RESUMABLE, so it survives dropped
+    connections — and report its LICENSE. Prefer MIT/Apache/permissive base models: the base model's
+    license governs what you can do with the trained result (data availability ≠ permission). JSON
+    result → stdout, progress → stderr; exit 2 if the fetch fails or the training runtime is missing."""
+
+    from corpus_studio.training.model_fetch import fetch_model
+
+    def _progress(message: str) -> None:
+        typer.echo(message, err=True)
+
+    try:
+        result = fetch_model(
+            repo_id,
+            local_dir=str(local_dir) if local_dir else None,
+            revision=revision,
+            allow_patterns=list(allow) if allow else None,
+            progress=_progress,
+        )
+    except (RuntimeError, OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    if not result.license_permissive:
+        typer.echo(
+            f"⚠ License: {result.license or 'none declared'} — not clearly permissive; review before training.",
+            err=True,
+        )
+    typer.echo(result.model_dump_json(indent=2))
+
+
 @app.command("training-compat")
 def training_compat(
     schema: str = typer.Option(..., "--schema", help="Dataset schema id."),
