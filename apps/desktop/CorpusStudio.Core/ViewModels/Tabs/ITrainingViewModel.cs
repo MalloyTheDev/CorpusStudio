@@ -68,6 +68,22 @@ public interface ITrainingViewModel : INotifyPropertyChanged
     void ApplyMergeResult(MergeResult result);
     void SetMergeError(string message);
 
+    // Base-model download (model-fetch) + adapter model card (model-card).
+    /// <summary>The HF repo id to download (e.g. an MIT/Apache base model to train on).</summary>
+    string ModelFetchRepoId { get; set; }
+    string ModelFetchSummary { get; }
+    bool IsFetchingModel { get; }
+    /// <summary>True when a repo id is entered and no download is in flight.</summary>
+    bool CanFetchModel { get; }
+    string ModelCardText { get; }
+    void SetModelFetchInProgress();
+    void AppendModelFetchProgress(string line);
+    void ApplyModelFetch(ModelFetchResult result);
+    void SetModelFetchError(string message);
+    void SetModelCardInProgress();
+    void ApplyModelCard(string cardMarkdown);
+    void SetModelCardError(string message);
+
     int BeginTrainingRun();
     void AppendTrainingRunLog(string line);
     void AppendTrainingRunLogBatch(int runId, IReadOnlyList<string> lines);

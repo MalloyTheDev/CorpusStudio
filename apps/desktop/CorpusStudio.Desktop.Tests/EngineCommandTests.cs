@@ -176,6 +176,21 @@ public sealed class EngineCommandTests
         public bool MergeCalled { get; private set; }
         public string? LastMergeStrategy { get; private set; }
         public Task<MergeResult> MergeAdapterAsync(string adapterPath, string strategy) { MergeCalled = true; LastMergeStrategy = strategy; return Task.FromResult(MergeResultToReturn); }
+        public ModelFetchResult ModelFetchResultToReturn { get; set; } = new();
+        public string? LastFetchRepoId { get; private set; }
+        public Task<ModelFetchResult> FetchModelAsync(string repoId, string? revision, string? localDir, IProgress<string>? progress = null)
+        {
+            LastFetchRepoId = repoId;
+            progress?.Report("downloading…");
+            return Task.FromResult(ModelFetchResultToReturn);
+        }
+        public string ModelCardToReturn { get; set; } = "# Model card";
+        public string? LastModelCardAdapter { get; private set; }
+        public Task<string> GenerateModelCardAsync(string adapterPath, string? baseModel = null, string? configPath = null)
+        {
+            LastModelCardAdapter = adapterPath;
+            return Task.FromResult(ModelCardToReturn);
+        }
         public Task<System.Collections.Generic.IReadOnlyList<DatasetVersionDisplayItem>> LoadDatasetVersionsAsync(string projectPath)
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<DatasetVersionDisplayItem>>(new System.Collections.Generic.List<DatasetVersionDisplayItem>());
         public Task<DatasetVersionRecord> CreateDatasetVersionAsync(string projectPath, string label, string trigger) => Task.FromResult(new DatasetVersionRecord());
@@ -1370,6 +1385,92 @@ public sealed class EngineCommandTests
         await runTask;
         Assert.False(vm.Training.IsTrainingRunning);
         Assert.False(logTimer.IsRunning);      // the timer is stopped after the run
+    }
+
+    // ---- Base-model download (model-fetch) + adapter model card (model-card) ----
+
+    [Fact]
+    public void CanFetchModel_RequiresARepoId()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+        Assert.False(vm.Training.CanFetchModel);          // empty by default
+        vm.Training.ModelFetchRepoId = "org/model";
+        Assert.True(vm.Training.CanFetchModel);
+    }
+
+    [Fact]
+    public void ApplyModelFetch_RendersLicenseAndWarnings()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+
+        vm.Training.ApplyModelFetch(new ModelFetchResult
+        {
+            RepoId = "org/model",
+            License = "apache-2.0",
+            LicensePermissive = true,
+            LocalPath = @"C:\cache\org\model",
+            WeightFiles = ["model.safetensors"],
+            TotalSizeMb = 272.0,
+            Warnings = ["heads up"],
+        });
+
+        Assert.Contains("org/model", vm.Training.ModelFetchSummary);
+        Assert.Contains("apache-2.0", vm.Training.ModelFetchSummary);
+        Assert.Contains("permissive", vm.Training.ModelFetchSummary);
+        Assert.Contains("⚠ heads up", vm.Training.ModelFetchSummary);
+        Assert.False(vm.Training.IsFetchingModel); // cleared on apply
+    }
+
+    [Fact]
+    public async Task FetchModel_WithRepoId_CallsEngineAndAppliesResult()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" })
+        {
+            ModelFetchResultToReturn = new ModelFetchResult { RepoId = "org/model", License = "mit", LicensePermissive = true },
+        };
+        var vm = VmWith(engine);
+        vm.Training.ModelFetchRepoId = "org/model";
+
+        await vm.FetchModelAsync();
+
+        Assert.Equal("org/model", engine.LastFetchRepoId);
+        Assert.Contains("mit", vm.Training.ModelFetchSummary);
+    }
+
+    [Fact]
+    public async Task FetchModel_WithoutRepoId_DoesNotCallEngine()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine); // no repo id entered
+
+        await vm.FetchModelAsync();
+
+        Assert.Null(engine.LastFetchRepoId);
+    }
+
+    [Fact]
+    public async Task ShowModelCard_WithOutputDir_CallsEngineAndShowsCard()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { ModelCardToReturn = "# Model card: run1" };
+        var vm = VmWith(engine);
+        SelectFakeProject(vm);
+        SetFirstPartyConfig(vm); // gives an output dir
+
+        await vm.ShowModelCardAsync();
+
+        Assert.NotNull(engine.LastModelCardAdapter);
+        Assert.Contains("Model card: run1", vm.Training.ModelCardText);
+    }
+
+    [Fact]
+    public async Task ShowModelCard_WithoutOutputDir_DoesNotCallEngine()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine); // no config → no output dir
+
+        await vm.ShowModelCardAsync();
+
+        Assert.Null(engine.LastModelCardAdapter);
     }
 
     [Fact]

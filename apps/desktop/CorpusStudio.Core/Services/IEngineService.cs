@@ -249,6 +249,16 @@ public interface IEngineService
     /// resolves. Runs in the engine's interpreter; returns the parsed result.</summary>
     Task<MergeResult> MergeAdapterAsync(string adapterPath, string strategy);
 
+    /// <summary>Download a base model from the Hugging Face Hub (<c>model-fetch</c>) — resumable, so it
+    /// survives dropped connections — and report its LICENSE (the base model's license governs what you
+    /// may do with anything trained from it). Progress lines stream to <paramref name="progress"/>.</summary>
+    Task<ModelFetchResult> FetchModelAsync(string repoId, string? revision, string? localDir, IProgress<string>? progress = null);
+
+    /// <summary>Render a trained adapter's Markdown model card (<c>model-card</c>): base model + the
+    /// license reminder, the LoRA hyper-parameters, training settings, and honesty notes. Reads only
+    /// local files.</summary>
+    Task<string> GenerateModelCardAsync(string adapterPath, string? baseModel = null, string? configPath = null);
+
     /// <summary>List the project's dataset versions (newest first) with live integrity.</summary>
     Task<IReadOnlyList<DatasetVersionDisplayItem>> LoadDatasetVersionsAsync(string projectPath);
 
