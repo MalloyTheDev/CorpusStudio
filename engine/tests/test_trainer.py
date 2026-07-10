@@ -80,7 +80,10 @@ def test_missing_base_or_dataset_raises(tmp_path):
 
 def test_load_config_accepts_yaml_so_a_named_yaml_does_not_die(tmp_path):
     # train-run parses JSON, but a config named *.yaml (or a hand-written YAML) must still load —
-    # the WBG run pointed train-run at wbg7b_corpus.yaml. JSON is a YAML subset, but real YAML too:
+    # the WBG run pointed train-run at wbg7b_corpus.yaml. JSON is a YAML subset, but real YAML too.
+    # PyYAML is only needed for the YAML fallback and ships with the [train] extra (transformers/
+    # datasets) — where train-run actually runs — so skip when it's absent (the dependency-light gate).
+    pytest.importorskip("yaml")
     config = tmp_path / "wbg7b_corpus.yaml"
     config.write_text(
         "base_model: Qwen/Qwen2.5-7B\ndataset_path: train.jsonl\nformat: chat\nsequence_len: 4096\nlora_r: 16\n",
