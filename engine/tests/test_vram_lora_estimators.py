@@ -70,6 +70,19 @@ def test_activation_scales_with_sequence_and_batch():
     assert large.activation_overhead_gb > small.activation_overhead_gb
 
 
+def test_7b_4bit_seq4096_estimate_is_realistic_not_undercounted():
+    # Regression guard for the calibration: a real Qwen2.5-7B 4-bit QLoRA at seq 4096 peaked ~11.9 GB
+    # and VRAM-DEADLOCKED a 12 GB card — the OLD estimate said ~6.7 GB and green-lit it. The calibrated
+    # estimate must be realistic (~10-13 GB) so the preflight can warn; a shorter sequence must give
+    # real headroom (the reliable lever).
+    at_4096 = build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", lora_r=16, sequence_len=4096, micro_batch_size=1)
+    assert 10.0 <= at_4096.total_gb_int4 <= 13.0
+    at_3072 = build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", lora_r=16, sequence_len=3072, micro_batch_size=1)
+    assert at_3072.total_gb_int4 < at_4096.total_gb_int4 - 0.5
+    # Quantized paths carry the bitsandbytes runtime overhead that fp16 does not.
+    assert any("bitsandbytes" in a for a in at_4096.assumptions)
+
+
 def test_lora_overhead_scales_with_rank():
     low = build_vram_estimate("7B", lora_r=8)
     high = build_vram_estimate("7B", lora_r=64)
