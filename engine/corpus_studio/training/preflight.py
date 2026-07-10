@@ -199,8 +199,8 @@ def run_training_preflight(
     #    estimate is arithmetic-only and this is skipped rather than guessing).
     gpu = gpu_probe.probe_gpu_memory()
     if gpu is not None and vram_min_gb is not None:
-        # Blackwell (sm_120) is forced onto the math attention path (the fused kernels deadlock), which
-        # uses more VRAM (seq² scores) — use the higher math-path estimate there when we have it.
+        # Blackwell (sm_120) is forced onto the math attention path (the fused kernels hang), which uses
+        # far more VRAM than flash — use the higher math-path estimate there when we have it.
         is_blackwell = gpu_probe._capability_major(gpu.compute_capability) >= 12
         if is_blackwell and vram_min_gb_math is not None:
             effective_min_gb = vram_min_gb_math
@@ -214,9 +214,10 @@ def run_training_preflight(
                     name="gpu_memory",
                     status=WARN,
                     message=(
-                        f"Likely OOM/deadlock: the 4-bit estimate is ~{effective_min_gb:.1f} GB{path} but the GPU has "
-                        f"~{gpu.free_gb:.1f} GB free (of ~{gpu.total_gb:.1f} GB). Lower sequence_len / micro-batch, or use "
-                        "a smaller base model — a run over the ceiling can VRAM-pressure DEADLOCK (spin), not just error."
+                        f"Won't fit fast: the 4-bit training peak is ~{effective_min_gb:.1f} GB{path} but the GPU has "
+                        f"~{gpu.free_gb:.1f} GB free (of ~{gpu.total_gb:.1f} GB). On Windows the driver silently SPILLS the "
+                        "overflow to system RAM and thrashes over PCIe — steps run 10-25x slower (looks frozen but is "
+                        "crawling); on Linux it OOMs. Lower sequence_len / micro-batch, or use a smaller base model."
                     ),
                 )
             )
@@ -226,10 +227,10 @@ def run_training_preflight(
                     name="gpu_memory",
                     status=WARN,
                     message=(
-                        f"Tight VRAM: the 4-bit estimate ~{effective_min_gb:.1f} GB{path} leaves under "
-                        f"~{_VRAM_SAFETY_MARGIN_GB:.0f} GB free of ~{gpu.free_gb:.1f} GB — this close to the edge a run can "
-                        "VRAM-pressure DEADLOCK (not just OOM); the peak is dominated by sequence_len activations. Lower "
-                        "sequence_len or micro-batch for headroom."
+                        f"Tight VRAM: the 4-bit training peak ~{effective_min_gb:.1f} GB{path} leaves under "
+                        f"~{_VRAM_SAFETY_MARGIN_GB:.0f} GB of ~{gpu.free_gb:.1f} GB free — close to the edge the run can start "
+                        "SPILLING to system RAM (Windows) and crawl at 10-25x slower. The peak is ~linear in sequence_len; "
+                        "lower sequence_len or micro-batch for headroom."
                     ),
                 )
             )

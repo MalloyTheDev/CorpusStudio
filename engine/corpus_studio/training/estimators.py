@@ -172,20 +172,20 @@ _PARAM_COUNT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*b(\d+)?(?![a-z])", re.IGNORECAS
 _LORA_FRACTION_AT_R16 = 0.006
 # Bytes per trainable LoRA param: fp16 weight+grad plus fp32 AdamW states.
 _LORA_BYTES_PER_PARAM = 16
-# Activation memory for a 7B model at seq 4096, micro-batch 1, WITH gradient checkpointing — scales with
-# params, sequence_len, and micro-batch. CALIBRATED to a real Qwen2.5-7B 4-bit QLoRA run that peaked
-# ~11.9 GB at seq 4096 and ~10.7 GB at seq 3072: the previous 1.5 badly under-counted activations (they
-# grow with sequence_len), which green-lit a run that then VRAM-deadlocked at the 12 GB edge.
-_ACTIVATION_BASE_GB = 5.0
 # Fixed CUDA context / framework overhead.
 _RUNTIME_OVERHEAD_GB = 1.0
 # Extra GB per billion params for a QUANTIZED (4-bit/8-bit) base: bitsandbytes keeps dequant/compute
 # buffers + quant state beyond the raw packed weights, so the real footprint exceeds bytes×params.
-_QUANT_RUNTIME_GB_PER_B = 0.25
-# Math-attention seq²-scores memory for a 7B at seq 4096 (scaled by params ÷7 and (seq/4096)²). The
-# math/eager attention path materializes the seq×seq scores that flash/mem-efficient attention avoids;
-# calibrated so a 7B/4-bit math run lands near its real peak (~11.9 GB @ seq 3072).
-_MATH_ATTENTION_BASE_GB = 2.5
+# Calibrated so a 7B 4-bit QLoRA BASE (weights + LoRA + AdamW, no activations) lands at ~7.9 GB.
+_QUANT_RUNTIME_GB_PER_B = 0.39
+# Activation memory for a 7B at seq 4096, micro-batch 1, WITH gradient checkpointing — LINEAR in
+# sequence_len (checkpointing makes the peak scale linearly, not seq²), scaled by params ÷7 and batch.
+# CALIBRATED to a real Qwen2.5-7B 4-bit QLoRA memory sweep on an RTX 5070 (torch max_memory_allocated,
+# which counts the WDDM shared-memory spill): peak = 7.91 GB base + ~2.85 GB per 1024 tokens →
+# 10.83 GB @ seq1024, 13.76 @ seq2048. Two coefficients: the math/eager attention path (what Blackwell
+# is forced onto) materializes far more than flash/mem-efficient attention (~5×).
+_ACTIVATION_GB_MATH = 11.4  # math/eager SDPA, seq 4096, 7B (the measured path)
+_ACTIVATION_GB_FLASH = 2.2  # flash/mem-efficient SDPA, seq 4096, 7B (memory-efficient; ~9 GB @ seq2048)
 
 
 def parse_parameter_count(base_model: str) -> float | None:
@@ -253,8 +253,11 @@ def build_vram_estimate(
     lora_params = params * _LORA_FRACTION_AT_R16 * (lora_r / 16)
     lora_overhead = lora_params * _LORA_BYTES_PER_PARAM / 1e9
 
+    # Linear in sequence_len (gradient checkpointing makes the peak scale linearly, not seq²). The math
+    # path (Blackwell is forced onto it) materializes far more than flash/mem-efficient attention.
+    activation_base = _ACTIVATION_GB_MATH if math_attention else _ACTIVATION_GB_FLASH
     activation_overhead = (
-        _ACTIVATION_BASE_GB
+        activation_base
         * (params_b / 7)
         * (sequence_len / 4096)
         * max(1, micro_batch_size)
@@ -262,16 +265,8 @@ def build_vram_estimate(
 
     quant_overhead = params_b * _QUANT_RUNTIME_GB_PER_B
 
-    # Math attention materializes the seq×seq attention scores that flash/mem-efficient attention avoids
-    # — a seq²-scaling cost, present only on the math path (which Blackwell/sm_120 is forced onto). Scale
-    # by params (÷7) and (seq/4096)². Calibrated to a real 7B/4-bit run: math @ seq-3072 peaked ~11.9 GB
-    # (vs the ~10.7 GB flash-path estimate) → this adds ~1.4 GB there.
-    math_attention_overhead = (
-        _MATH_ATTENTION_BASE_GB * (params_b / 7) * (sequence_len / 4096) ** 2 if math_attention else 0.0
-    )
-
     def _total(weights: float, quantized: bool) -> float:
-        base = weights + lora_overhead + activation_overhead + _RUNTIME_OVERHEAD_GB + math_attention_overhead
+        base = weights + lora_overhead + activation_overhead + _RUNTIME_OVERHEAD_GB
         return round(base + (quant_overhead if quantized else 0.0), 1)
 
     return VramEstimate(
@@ -291,15 +286,12 @@ def build_vram_estimate(
             "Weights: fp16 2 bytes/param, 8-bit 1, 4-bit 0.5.",
             f"LoRA overhead: ~{_LORA_FRACTION_AT_R16:.1%} of params at r=16, scaled by r={lora_r}, "
             f"{_LORA_BYTES_PER_PARAM} bytes/trainable param (weight+grad+AdamW states).",
-            f"Activations (~{activation_overhead:.1f} GB): gradient checkpointing, seq_len {sequence_len}, "
-            f"micro-batch {micro_batch_size} — they scale with seq_len, so a long sequence dominates.",
+            f"Activations (~{activation_overhead:.1f} GB, {'math/eager' if math_attention else 'flash/mem-efficient'} "
+            f"attention): gradient checkpointing, seq_len {sequence_len}, micro-batch {micro_batch_size} — LINEAR "
+            "in seq_len; the math path (forced on Blackwell) uses ~5× more than flash.",
             f"Quantized paths add ~{quant_overhead:.1f} GB for bitsandbytes dequant/compute buffers.",
-            *(
-                [f"Math attention (Blackwell/sm_120) adds ~{math_attention_overhead:.1f} GB of seq²-scaling "
-                 "attention scores that flash attention avoids."]
-                if math_attention else []
-            ),
             f"+{_RUNTIME_OVERHEAD_GB:.0f} GB fixed runtime overhead.",
+            "Calibrated to a real Qwen2.5-7B 4-bit QLoRA memory sweep (base ~7.9 GB + ~2.85 GB/1024 tokens).",
         ],
         note="Rough planning estimate only; real usage varies by architecture and trainer.",
     )

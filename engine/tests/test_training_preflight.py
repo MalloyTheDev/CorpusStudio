@@ -129,8 +129,9 @@ def test_oom_warns_when_the_estimate_exceeds_free_vram(tmp_path: Path, monkeypat
     report = _run(tmp_path, vram_min_gb=40.0)  # 40 GB needed, 23 free
     gpu_check = next(c for c in report.checks if c.name == "gpu_memory")
     assert gpu_check.status == WARN
-    assert "Likely OOM" in gpu_check.message
-    assert report.can_launch is True  # OOM is a warning, not a hard block
+    assert "Won't fit" in gpu_check.message
+    assert "SPILLS" in gpu_check.message  # Windows WDDM spill, not a clean OOM/deadlock
+    assert report.can_launch is True  # a warning, not a hard block
 
 
 def test_oom_passes_when_it_fits(tmp_path: Path, monkeypatch):
