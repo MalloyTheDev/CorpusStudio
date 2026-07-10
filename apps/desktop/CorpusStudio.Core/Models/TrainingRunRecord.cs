@@ -68,8 +68,10 @@ public sealed class TrainingRunRecord
 /// <summary>Reproducibility manifest captured at run start (mirrors the engine's
 /// <c>training/provenance.py</c>): the canonical dataset fingerprint + row count, the config
 /// SHA-256, and the engine version / platform. Together with the record's argv, base model, and
-/// dataset-version back-link, this is the auditable recipe behind a produced model. (Does not yet
-/// pin a training seed — data/config provenance, not bit-exact weight reproduction.)</summary>
+/// dataset-version back-link, this is the auditable recipe behind a produced model. The config
+/// emits a fixed seed (default 42) that the config SHA-256 hashes with it, so weight initialisation
+/// is reproducible for trainers that honor the seed; bit-exactness still depends on the
+/// trainer/library/hardware, which this manifest does not capture.</summary>
 public sealed class RunProvenance
 {
     [JsonPropertyName("dataset_fingerprint")]
