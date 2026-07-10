@@ -29,3 +29,17 @@ jobs:
       # green build here IS the spike's guard. See docs/AVALONIA_MIGRATION_PLAN.md.
       - name: Build Avalonia head (Release)
         run: dotnet build apps/desktop/CorpusStudio.Avalonia/CorpusStudio.Avalonia.csproj -c Release
+
+  # Prove the cross-platform Avalonia head (the mac/Linux distributable, issue #188) actually builds
+  # on Linux every PR — so a platform-specific break is caught here, not first at release time.
+  avalonia-linux-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build Avalonia head on Linux (Release)
+        run: dotnet build apps/desktop/CorpusStudio.Avalonia/CorpusStudio.Avalonia.csproj -c Release
