@@ -20,10 +20,32 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
+from corpus_studio.training import gpu_probe
 from corpus_studio.training.environment import probe_training_runtime
+from corpus_studio.training.estimators import parse_parameter_count
 
 MergeProgress = Callable[[str], None]
 VALID_STRATEGIES = ("auto", "gpu", "cpu", "adapter-only")
+# fp16-merge working memory beyond the raw weights (the base load + the merged copy during unload).
+_MERGE_VRAM_OVERHEAD_GB = 2.0
+
+
+def gpu_merge_fits(base_model: str) -> tuple[bool, str]:
+    """Whether an fp16 merge of ``base_model`` fits the GPU's FREE VRAM. Returns ``(fits, reason)``.
+
+    Unknown (no nvidia-smi, or the size isn't parseable from the name) → ``(True, "")`` so the GPU
+    merge is still attempted. This exists because on **Windows (WDDM)** a GPU merge too big for VRAM does
+    NOT cleanly OOM — the driver spills to system RAM and grinds through over PCIe — so ``auto``'s
+    OOM-triggered fallback never trips. Checking fit up front lets ``auto`` skip the GPU merge when it
+    won't fit (correct on Linux too, where it would just OOM) and take the CPU / adapter-only path."""
+    params_b = parse_parameter_count(base_model)
+    gpu = gpu_probe.probe_gpu_memory()
+    if params_b is None or gpu is None:
+        return (True, "")
+    need_gb = params_b * 2 + _MERGE_VRAM_OVERHEAD_GB  # fp16 weights (2 bytes/param) + working copy
+    if need_gb > gpu.free_gb:
+        return (False, f"the fp16 merge needs ~{need_gb:.0f} GB but only ~{gpu.free_gb:.1f} GB VRAM is free")
+    return (True, "")
 
 
 class MergeError(Exception):
@@ -38,15 +60,18 @@ class MergeResult(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
-def resolve_merge_plan(strategy: str, gpu_available: bool) -> list[str]:
-    """The ordered strategies to try. ``auto`` = gpu (if present) → cpu → adapter-only; an explicit
-    strategy is tried alone. adapter-only is always the terminal fallback for ``auto``."""
+def resolve_merge_plan(strategy: str, gpu_available: bool, gpu_fits: bool = True) -> list[str]:
+    """The ordered strategies to try. ``auto`` = gpu (only if present AND the merge fits VRAM) → cpu →
+    adapter-only; an explicit strategy is tried alone. adapter-only is always the terminal fallback for
+    ``auto``. ``gpu_fits`` skips the GPU merge when the fp16 model won't fit free VRAM — otherwise on
+    Windows the GPU attempt spills to system RAM and crawls instead of failing over to CPU."""
     if strategy not in VALID_STRATEGIES:
         raise MergeError(f"Unknown merge strategy '{strategy}'; expected one of {VALID_STRATEGIES}.")
     if strategy != "auto":
         return [strategy]
-    plan = ["gpu", "cpu", "adapter-only"] if gpu_available else ["cpu", "adapter-only"]
-    return plan
+    if gpu_available and gpu_fits:
+        return ["gpu", "cpu", "adapter-only"]
+    return ["cpu", "adapter-only"]
 
 
 def base_model_from_adapter(adapter_path: Path | str, override: str | None = None) -> str:
@@ -88,9 +113,16 @@ def merge_adapter(
     adapter_path = Path(adapter_path)
     base = base_model_from_adapter(adapter_path, base_model)
     out = Path(output_dir) if output_dir else adapter_path.parent / "merged"
-    plan = resolve_merge_plan(strategy, probe_training_runtime().gpu.available)
 
     notes: list[str] = []
+    gpu_available = probe_training_runtime().gpu.available
+    fits, fit_reason = gpu_merge_fits(base) if strategy == "auto" and gpu_available else (True, "")
+    if strategy == "auto" and gpu_available and not fits:
+        notes.append(
+            f"Skipping the GPU merge ({fit_reason}) — on Windows it would spill to system RAM and crawl; "
+            "on Linux it would OOM. Using CPU-offload, then adapter-only."
+        )
+    plan = resolve_merge_plan(strategy, gpu_available, gpu_fits=fits)
     for attempt in plan:
         if progress is not None:
             progress(f"merge attempt: {attempt}")
