@@ -1,10 +1,37 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:conv="clr-namespace:CorpusStudio.Avalonia.Converters"
-             x:Class="CorpusStudio.Avalonia.App"
-             RequestedThemeVariant="Light">
+             x:Class="CorpusStudio.Avalonia.App">
+  <!-- No RequestedThemeVariant → follows the OS light/dark setting by default; the activity-bar
+       toggle overrides it. FluentTheme themes the built-in control chrome per variant; the
+       ThemeDictionaries below theme the app's OWN custom colors (backgrounds, borders, muted text,
+       chips, status accents) so nothing light-coloured bleeds through in dark mode. -->
   <Application.Resources>
-    <conv:StringToBrushConverter x:Key="StringToBrush" />
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="AppBackground" Color="#F8FAFC"/>
+          <SolidColorBrush x:Key="AppBorder" Color="#E2E8F0"/>
+          <SolidColorBrush x:Key="AppTextMuted" Color="#64748B"/>
+          <SolidColorBrush x:Key="AppWarn" Color="#B45309"/>
+          <SolidColorBrush x:Key="AppError" Color="#B91C1C"/>
+          <SolidColorBrush x:Key="AppChipBg" Color="#EEF4FF"/>
+          <SolidColorBrush x:Key="AppChipText" Color="#1D4ED8"/>
+          <SolidColorBrush x:Key="AppAccent" Color="#2563EB"/>
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="AppBackground" Color="#0B1220"/>
+          <SolidColorBrush x:Key="AppBorder" Color="#26324A"/>
+          <SolidColorBrush x:Key="AppTextMuted" Color="#94A3B8"/>
+          <SolidColorBrush x:Key="AppWarn" Color="#FBBF24"/>
+          <SolidColorBrush x:Key="AppError" Color="#F87171"/>
+          <SolidColorBrush x:Key="AppChipBg" Color="#1E293B"/>
+          <SolidColorBrush x:Key="AppChipText" Color="#93C5FD"/>
+          <SolidColorBrush x:Key="AppAccent" Color="#60A5FA"/>
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+      <conv:StringToBrushConverter x:Key="StringToBrush" />
+    </ResourceDictionary>
   </Application.Resources>
   <Application.Styles>
     <FluentTheme />
