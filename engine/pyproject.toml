@@ -43,6 +43,23 @@ model-tokenizer = [
 parquet = [
     "pyarrow>=15"
 ]
+# Optional FIRST-PARTY TRAINING runtime. Heavy, GPU-oriented deps so the engine stays
+# dependency-light by default — data prep, gates, and config export need NONE of these.
+# Installing `train` lets CorpusStudio RUN the QLoRA itself (corpus_studio.training.trainer)
+# instead of only exporting a config. bitsandbytes (4-bit QLoRA) is CUDA-only, so it is skipped
+# on macOS via an environment marker; run `corpus-studio train-check` to see what's available and
+# whether a real GPU run (vs the CPU toy path) is possible. `pip install corpus-studio-engine[train]`.
+# See corpus_studio/training/environment.py. NOTE: a default `pip` pulls the CPU build of torch;
+# GPU training needs the CUDA build (https://pytorch.org) — train-check reports this.
+train = [
+    "torch>=2.1",
+    "transformers>=4.44",
+    "peft>=0.11",
+    "trl>=0.9",
+    "accelerate>=0.30",
+    "datasets>=2.19",
+    "bitsandbytes>=0.43; platform_system != 'Darwin'",
+]
 
 [project.scripts]
 corpus-studio = "corpus_studio.cli:app"
