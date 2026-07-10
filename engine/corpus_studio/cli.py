@@ -1725,6 +1725,37 @@ def train_run(
     typer.echo(result.model_dump_json(indent=2))
 
 
+@app.command("train-merge")
+def train_merge(
+    adapter_path: Path,
+    base_model: Optional[str] = typer.Option(None, "--base-model", help="Base to merge into (default: the adapter's recorded base)."),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir", help="Where to write the merged model (default: <adapter>/../merged)."),
+    strategy: str = typer.Option("auto", "--strategy", help="auto | gpu | cpu | adapter-only. auto = gpu→cpu→adapter-only."),
+):
+    """Merge a trained LoRA adapter into its base model, with a fallback for small-VRAM cards: a 7B
+    fp16 merge (~14 GB) won't fit a 12 GB GPU, so `auto` tries GPU → CPU-offload → adapter-only (serve
+    base+adapter unmerged). Progress → stderr; the JSON result → stdout. Exit 2 if every strategy fails."""
+
+    from corpus_studio.training.merge import MergeError, merge_adapter
+
+    def _progress(message: str) -> None:
+        typer.echo(message, err=True)
+
+    try:
+        result = merge_adapter(
+            adapter_path,
+            base_model=base_model,
+            output_dir=str(output_dir) if output_dir else None,
+            strategy=strategy,
+            progress=_progress,
+        )
+    except MergeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    typer.echo(result.model_dump_json(indent=2))
+
+
 @app.command("training-compat")
 def training_compat(
     schema: str = typer.Option(..., "--schema", help="Dataset schema id."),
