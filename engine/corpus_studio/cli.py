@@ -1755,6 +1755,46 @@ def train_merge(
     typer.echo(result.model_dump_json(indent=2))
 
 
+@app.command("model-card")
+def model_card(
+    adapter_path: Path,
+    base_model: Optional[str] = typer.Option(None, "--base-model", help="Override the base model recorded in the adapter."),
+    config_path: Optional[Path] = typer.Option(None, "--config", help="A CorpusStudio training config JSON to fold in (format / seq-len / lr / seed)."),
+    output: Optional[Path] = typer.Option(None, "--output", help="Write the card here (default: print to stdout). train-run already writes <adapter>/MODEL_CARD.md."),
+):
+    """Render a Markdown model card for a trained LoRA adapter: the base model (+ the reminder that ITS
+    license governs the result), the LoRA hyper-parameters (read from the adapter's adapter_config.json),
+    the training settings, and honesty notes. train-run already writes MODEL_CARD.md next to the adapter;
+    this regenerates it (e.g. with a training config or a base-model override). Reads only local files."""
+
+    from corpus_studio.training.model_card import build_model_card
+
+    training_config = None
+    if config_path is not None:
+        try:
+            training_config = json.loads(Path(config_path).read_text(encoding="utf-8-sig"))
+        except (json.JSONDecodeError, OSError) as exc:
+            typer.echo(f"Could not read the training config {config_path}: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
+
+    card = build_model_card(
+        adapter_path,
+        base_model=base_model,
+        training_config=training_config,
+        generated_at=_utc_now_iso(),
+    )
+
+    if output is not None:
+        try:
+            Path(output).write_text(card, encoding="utf-8")
+        except OSError as exc:
+            typer.echo(f"Could not write the model card to {output}: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
+        typer.echo(str(output))
+    else:
+        typer.echo(card)
+
+
 @app.command("model-fetch")
 def model_fetch(
     repo_id: str,

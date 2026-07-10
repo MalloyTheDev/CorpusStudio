@@ -323,12 +323,36 @@ def run_training(config: TrainRunConfig, *, progress_callback: ProgressCallback 
     tokenizer.save_pretrained(str(output_dir))
 
     metrics = getattr(train_output, "metrics", {}) or {}
+    steps = int(getattr(trainer.state, "global_step", 0) or 0)
+
+    # Self-documenting run: write a model card next to the adapter (recipe + honesty + base-model
+    # license reminder). Best-effort — the card is a convenience and must NEVER fail a completed run.
+    try:
+        from corpus_studio.training.model_card import build_model_card, write_model_card  # noqa: PLC0415
+
+        write_model_card(
+            output_dir,
+            build_model_card(
+                output_dir,
+                base_model=config.base_model,
+                training_config={
+                    "format": config.dataset_format,
+                    "sequence_len": config.sequence_len,
+                    "learning_rate": config.learning_rate,
+                    "seed": config.seed,
+                },
+                train_result={"steps": steps, "final_loss": metrics.get("train_loss"), "cpu_toy": config.cpu_toy},
+            ),
+        )
+    except Exception:  # noqa: BLE001 - never let card-writing break a finished training run.
+        pass
+
     return TrainResult(
         output_dir=str(output_dir),
         adapter_path=str(output_dir),
         base_model=config.base_model,
         cpu_toy=config.cpu_toy,
-        steps=int(getattr(trainer.state, "global_step", 0) or 0),
+        steps=steps,
         final_loss=metrics.get("train_loss"),
         checkpoints=_list_checkpoints(output_dir),
     )
