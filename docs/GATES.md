@@ -107,6 +107,28 @@ is in the report. Rows without a `messages` list are skipped (a missing field is
 schema gate's concern), and a dataset with no conversations warns rather than
 faking a pass.
 
+## Provenance gate (per-row licensing)
+
+`provenance-gate <path> [--teacher-field meta.teacher] [--strict] [--allow-teacher <name>] [--project-dir <p>]`
+reads each row's declared **teacher** — the model/provider that *generated* the row — and
+buckets it: **quarantined** (a known restricted provider whose terms forbid training on its
+outputs, e.g. Anthropic/OpenAI), **pass** (a recognized open/local provider, or a teacher the
+user allow-listed), or **unknown** (untagged / unrecognized → *quarantine-until-verified*). The
+verdict **blocks** on any quarantined row (and, under `--strict`, any unknown); unknown rows
+otherwise **warn**. It reuses the provider policy (`resolve_policy`) — the licensing counterpart
+to `provider-policy` (which gates generation-*time*) and `run-provenance` (a run fingerprint);
+neither of those walks a dataset per row. A project `provenance_allowlist.json` (or repeated
+`--allow-teacher`) declares an open/MIT teacher trainable-clean.
+
+Standalone it is **advisory** (exit 0, verdict in the report + a human table on stderr). It
+becomes an **enforcement point** via `export --check-provenance`, which **refuses the export
+(exit 2)** if any row is quarantined — `--provenance-strict` also blocks unknown provenance —
+exactly like the PII export gate refuses an export with unmasked secrets.
+
+**Honesty**: the verdict trusts each row's *declared* teacher — a mislabeled or omitted teacher
+is not caught by content, `unknown ≠ safe` (it is quarantine-until-verified), and a `pass`
+reflects a declared/allow-listed license, not a proof of origin.
+
 ## Per-project thresholds
 
 Gate thresholds default to the values in `GateThresholds`, but a project can
