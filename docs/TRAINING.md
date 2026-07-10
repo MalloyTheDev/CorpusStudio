@@ -165,14 +165,30 @@ train. All heavy imports are lazy — importing the engine never pulls torch.
 |---|---|
 | `train-check [--json]` | Preflight: which deps are present, the CUDA GPU + VRAM, and whether a real 4-bit QLoRA run — or only the CPU toy path — is possible. |
 | `model-fetch <repo> [--local-dir …]` | Resumably download a base model from the HF Hub and report its **license** (read from the downloaded card). Prefer MIT/Apache/permissive models. |
-| `train-run <config> [--cpu-toy --max-steps N …]` | Run the QLoRA in-process (TRL `SFTTrainer` + peft LoRA, 4-bit on GPU); saves the adapter + tokenizer + checkpoints. `--cpu-toy` is a tiny-model CPU smoke test, not a real train. |
+| `train-run <config> [--cpu-toy --max-steps N …]` | Run the QLoRA in-process (TRL `SFTTrainer` + peft LoRA, 4-bit on GPU); saves the adapter + tokenizer + checkpoints, and writes a `MODEL_CARD.md` next to the adapter. `--cpu-toy` is a tiny-model CPU smoke test, not a real train. |
 | `train-merge <adapter> [--strategy auto\|gpu\|cpu\|adapter-only]` | Merge the adapter into the base. A 7B fp16 merge (~14 GB) won't fit 12 GB, so `auto` walks GPU → CPU-offload → adapter-only. |
+| `model-card <adapter> [--base-model … --config … --output …]` | (Re)render the adapter's Markdown model card — base model + the reminder that ITS license governs the result, the LoRA hyper-parameters (from `adapter_config.json`), the training settings, and honesty notes. `train-run` already writes it; this regenerates it. |
+
+**End-to-end (the config comes from the Training tab's `training-config`, target
+`corpus_studio`):** `model-fetch Qwen/Qwen2.5-7B` → `train-check` → `train-run
+<config>` → `train-merge <adapter>` → the adapter's `MODEL_CARD.md` documents the run.
+
+### From the desktop
+
+The **Training tab** runs all of this for you when the target is `corpus_studio`:
+**Check runtime** (train-check) reports whether a real GPU QLoRA — or only the CPU
+toy path — can run; **Launch** preflights and streams `[step/total]` progress into
+the live log (a real GPU run needs `ready`; tick **CPU toy** for the smoke path);
+**Merge adapter** runs `train-merge` with the small-VRAM fallback. The launcher runs
+the trainer with the engine's own interpreter, so the run always matches what
+train-check probed.
 
 Security: model loading uses `trust_remote_code=False` (a fetched repo can't execute
 code), and `model-fetch` warns when a model ships only pickle (`.bin`) weights
 instead of safetensors. Honesty: `train-check`'s verdict is a capability check, the
-CPU-toy path proves the *pipeline* (not a trained model), and license classification
-is fail-closed (unknown/custom/non-commercial → restricted-until-verified).
+CPU-toy path proves the *pipeline* (not a trained model), the model card states a
+completed run is not a quality signal, and license classification is fail-closed
+(unknown/custom/non-commercial → restricted-until-verified).
 
 ### Rule
 
