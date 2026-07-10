@@ -61,6 +61,11 @@ public interface IEngineService
     /// <summary>Run the chat conversation-structure gate over a chat project.</summary>
     Task<GateReport> RunChatGatesAsync(string projectPath);
 
+    /// <summary>Run the per-row provenance gate over a project: read each row's declared teacher
+    /// (meta.teacher) and bucket into trainable / quarantined / unknown, applying the project's
+    /// provenance_allowlist.json. <paramref name="strict"/> makes unknown-provenance rows BLOCK too.</summary>
+    Task<ProvenanceGateReport> RunProvenanceGateAsync(string projectPath, bool strict = false);
+
     /// <summary>Run a prompt suite across several models (comparison artifacts, not trainable rows).</summary>
     Task<ArenaReport> RunArenaAsync(string promptsText, IReadOnlyList<string> models,
         string? judgeModel = null, string? projectPath = null);

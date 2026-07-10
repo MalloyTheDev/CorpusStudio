@@ -48,6 +48,15 @@ public sealed class EngineCommandTests
         }
 
         public Task<GateReport> RunChatGatesAsync(string projectPath) => Task.FromResult(_gate);
+
+        public ProvenanceGateReport ProvenanceGate { get; set; } = new();
+        public bool LastProvenanceStrict { get; private set; }
+        public Task<ProvenanceGateReport> RunProvenanceGateAsync(string projectPath, bool strict = false)
+        {
+            LastProjectPath = projectPath;
+            LastProvenanceStrict = strict;
+            return Task.FromResult(ProvenanceGate);
+        }
         public Task<ArenaReport> RunArenaAsync(string promptsText, System.Collections.Generic.IReadOnlyList<string> models,
             string? judgeModel = null, string? projectPath = null) => Task.FromResult(new ArenaReport());
         public Task<SuiteReport> RunSuiteAsync(string projectPath, string suiteName) => Task.FromResult(new SuiteReport());
@@ -311,6 +320,51 @@ public sealed class EngineCommandTests
         await vm.RunGatesAsync();
 
         Assert.Equal(@"C:\fake\project", engine.LastProjectPath);
+    }
+
+    [Fact]
+    public async Task RunProvenanceGate_WithProject_PassesStrictFlagAndAppliesReport()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" })
+        {
+            ProvenanceGate = new ProvenanceGateReport
+            {
+                OverallStatus = "block",
+                TotalRows = 2,
+                QuarantinedRows = 1,
+                UnknownRows = 1,
+                Summary = "BLOCK — 1 row(s) from restricted teacher(s)…",
+                Buckets =
+                [
+                    new TeacherProvenanceBucket { Teacher = "claude-opus-4-8", Status = "quarantined", RowCount = 1, Note = "Anthropic" },
+                    new TeacherProvenanceBucket { Teacher = "(untagged)", Status = "unknown", RowCount = 1 },
+                ],
+            },
+        };
+        var vm = VmWith(engine);
+        SelectFakeProject(vm);
+        vm.ProvenanceGateStrict = true;
+
+        await vm.RunProvenanceGateAsync();
+
+        Assert.Equal(@"C:\fake\project", engine.LastProjectPath);
+        Assert.True(engine.LastProvenanceStrict); // --strict threaded through
+        Assert.True(vm.HasProvenanceGateReport);
+        Assert.Equal("BLOCK", vm.ProvenanceGateStatus);
+        Assert.Equal(GateReport.StatusColor("block"), vm.ProvenanceGateColor);
+        Assert.Contains("claude-opus-4-8", vm.ProvenanceGateSummary);
+        Assert.Contains("DECLARED teacher", vm.ProvenanceGateSummary); // honesty note present
+    }
+
+    [Fact]
+    public async Task RunProvenanceGate_WithoutProject_SetsErrorAndDoesNotClaimAReport()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" })); // no project selected
+
+        await vm.RunProvenanceGateAsync();
+
+        Assert.False(vm.HasProvenanceGateReport);
+        Assert.Contains("project", vm.ProvenanceGateSummary);
     }
 
     [Fact]
