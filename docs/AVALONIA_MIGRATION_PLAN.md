@@ -137,9 +137,12 @@ converting Triggers→selectors and Visibility→`IsVisible` per view. Dual-head
 - *Effort:* proportional to XAML per tab; overlaps Phase 2.
 
 ### Phase 4 — Per-OS engine + packaging story
-The engine stays a runtime prerequisite (unchanged hard boundary). Decide the macOS/Linux
-setup/packaging story (the "engine not found" setup screen already guides this). Orthogonal to the
-UI port.
+The engine stays a runtime prerequisite (unchanged hard boundary), and the "engine not found" setup
+screen guides that step on every OS. **Packaging is shipped (#188):** `release.yml`'s `avalonia-dist`
+job publishes self-contained Avalonia builds for `linux-x64` + `osx-arm64`/`osx-x64` on native
+runners and attaches them to the GitHub Release beside the Windows (WPF) build; `desktop-tests.yml`
+also builds the Avalonia head on Linux every PR so a platform break is caught early. The self-hosted
+engine setup story per OS remains orthogonal to the UI port.
 
 ## Recommended first concrete slice
 

@@ -87,8 +87,10 @@ notes so expectations are set:
 - [ ] Squash/organize the release commit(s) with a clear summary.
 - [ ] Tag the release (`v*`) and push. This triggers the **Release** workflow
       (`.github/workflows/release.yml`): it re-runs the engine + desktop gates,
-      publishes the self-contained single-file Windows build (`win-x64` profile),
-      and creates the GitHub Release with the zip attached. (Run it via
+      publishes the self-contained single-file Windows build (`win-x64` profile,
+      WPF head), and — via the `avalonia-dist` job — self-contained macOS
+      (`osx-arm64` / `osx-x64`) and Linux (`linux-x64`) builds of the Avalonia
+      head, attaching them all to the GitHub Release. (Run it via
       **workflow_dispatch** first for a dry-run build — it publishes nothing,
-      only uploads the zip as a workflow artifact.)
+      only uploads each platform build as a workflow artifact.)
 - [ ] Attach smoke evidence and screenshots to the release notes.
