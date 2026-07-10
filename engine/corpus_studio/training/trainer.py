@@ -236,15 +236,21 @@ def run_training(config: TrainRunConfig, *, progress_callback: ProgressCallback 
 
     set_seed(config.seed)
 
-    tokenizer = AutoTokenizer.from_pretrained(config.base_model)
+    # SECURITY: never execute a downloaded model repo's custom code. trust_remote_code defaults False,
+    # but we set it explicitly (defence-in-depth; guards against a future default change). A model that
+    # genuinely needs custom code is a deliberate, separate decision — not something a fetched repo can
+    # trigger silently.
+    tokenizer = AutoTokenizer.from_pretrained(config.base_model, trust_remote_code=False)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     if config.cpu_toy:
         # Build from config (random weights) — no weights download, so the smoke test runs offline.
-        model = AutoModelForCausalLM.from_config(AutoConfig.from_pretrained(config.base_model))
+        model = AutoModelForCausalLM.from_config(
+            AutoConfig.from_pretrained(config.base_model, trust_remote_code=False)
+        )
     else:
-        model_kwargs: dict[str, Any] = {}
+        model_kwargs: dict[str, Any] = {"trust_remote_code": False}
         if quantize:
             from transformers import BitsAndBytesConfig  # noqa: PLC0415
 
@@ -256,7 +262,8 @@ def run_training(config: TrainRunConfig, *, progress_callback: ProgressCallback 
             )
             model_kwargs["device_map"] = "auto"
         else:
-            model_kwargs["dtype"] = torch.float32
+            # torch_dtype (not dtype) for compat across transformers 4.44+ and 5.x (the [train] floor).
+            model_kwargs["torch_dtype"] = torch.float32
         model = AutoModelForCausalLM.from_pretrained(config.base_model, **model_kwargs)
     if quantize:
         from peft import prepare_model_for_kbit_training  # noqa: PLC0415

@@ -1678,7 +1678,6 @@ def train_check(
 @app.command("train-run")
 def train_run(
     config_path: Path,
-    project_dir: Optional[Path] = typer.Option(None, "--project-dir", help="Project root (for defaults/records)."),
     dataset_path: Optional[Path] = typer.Option(None, "--dataset-path", help="Override the config's dataset_path (e.g. the train split)."),
     output_dir: Optional[Path] = typer.Option(None, "--output-dir", help="Override where the adapter/checkpoints are written."),
     base_model: Optional[str] = typer.Option(None, "--base-model", help="Override the base model."),
@@ -1761,7 +1760,7 @@ def model_fetch(
     repo_id: str,
     local_dir: Optional[Path] = typer.Option(None, "--local-dir", help="Download here (default: the HF cache, so `train-run --base-model <repo>` finds it offline)."),
     revision: Optional[str] = typer.Option(None, "--revision", help="Branch / tag / commit to fetch."),
-    allow: Optional[list[str]] = typer.Option(None, "--allow", help="Only fetch files matching these glob(s), e.g. --allow '*.safetensors' --allow '*.json'. Repeatable."),
+    allow: Optional[list[str]] = typer.Option(None, "--allow", help="Restrict to these glob(s), e.g. --allow '*.safetensors' (the model card + *.json are always kept so it loads and its license is readable). Repeatable."),
 ):
     """Reliably download a base model from the Hugging Face Hub — RESUMABLE, so it survives dropped
     connections — and report its LICENSE. Prefer MIT/Apache/permissive base models: the base model's

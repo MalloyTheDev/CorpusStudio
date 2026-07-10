@@ -80,9 +80,9 @@ answer, tags, and failure notes.
 ## Scope
 
 Evaluation runs locally through the model-backend abstraction (Ollama /
-OpenAI-compatible); no CUDA or heavyweight ML libraries live inside Corpus Studio.
-Runs are one dataset at a time, for instruction and chat data, with JSON report
-export — no training launcher, no cloud-only requirement.
+OpenAI-compatible); the evaluation path needs no CUDA or heavyweight ML libraries
+(those live only in the opt-in `[train]` extra, not the eval flow). Runs are one
+dataset at a time, for instruction and chat data, with JSON report export.
 
 Already shipped: multi-model comparison (`benchmark`), regression reruns,
 report summaries by tag/failure/score-band, saved failure drilldowns, versioned

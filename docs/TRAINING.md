@@ -110,20 +110,23 @@ frameworks into the core app.
 
 ### Current Boundary
 
-The current app should stay focused on dataset creation, schema templates,
+The engine **core** stays dependency-light: dataset creation, schema templates,
 editors, validation, JSONL export, train/validation/test splitting, evaluation,
-review-first AI assistance, and inspectable training config export. There
-should be no CUDA, PyTorch, Transformers, trainer process launcher, checkpoint
-manager, resume controller, or cloud-only requirement in the core app yet.
+review-first AI assistance, and inspectable training config export need **no**
+CUDA, PyTorch, or Transformers, so the core installs and runs everywhere.
+First-party training is **opt-in**: installing the `[train]` extra adds a real
+QLoRA trainer, adapter merge, and model download (see "First-party training"
+below). Without the extra, none of those heavy deps are pulled.
 
 
 ---
 
 ## Training Prep
 
-Corpus Studio currently does not train models.
-
-It prepares datasets and inspectable config files for training.
+Corpus Studio prepares datasets and inspectable config files for training, **and**
+— with the opt-in `[train]` extra — can run the QLoRA itself first-party
+(`train-run` / `train-merge`, see "First-party training" below). The external
+config-export path stays as an escape hatch for bring-your-own trainers.
 
 ### Later training integrations
 
@@ -146,11 +149,30 @@ Possible future targets:
 - quality report
 - training config draft
 
-The current engine and desktop app export Training Lab config files **and launch
-the user's installed trainer** with them (live logs, checkpoints, run history,
-resume, and a regression gate). They do not install CUDA, PyTorch, Transformers,
-or trainer-specific packages, and they never implement a training loop — they
-orchestrate the trainer the user already has.
+Two training paths exist. **(1) External (default core):** export a config and
+launch the user's own installed trainer (live logs, checkpoints, run history,
+resume, regression gate) — the core never pulls CUDA/PyTorch. **(2) First-party
+(opt-in `[train]` extra):** CorpusStudio runs the QLoRA itself — see below.
+
+## First-party training (opt-in `[train]` extra)
+
+`pip install corpus-studio-engine[train]` adds `torch` / `transformers` / `peft` /
+`trl` / `accelerate` / `datasets` / `bitsandbytes` (bitsandbytes is CUDA-only, so
+it is skipped on macOS). The core stays dependency-light for everyone who does not
+train. All heavy imports are lazy — importing the engine never pulls torch.
+
+| Command | What it does |
+|---|---|
+| `train-check [--json]` | Preflight: which deps are present, the CUDA GPU + VRAM, and whether a real 4-bit QLoRA run — or only the CPU toy path — is possible. |
+| `model-fetch <repo> [--local-dir …]` | Resumably download a base model from the HF Hub and report its **license** (read from the downloaded card). Prefer MIT/Apache/permissive models. |
+| `train-run <config> [--cpu-toy --max-steps N …]` | Run the QLoRA in-process (TRL `SFTTrainer` + peft LoRA, 4-bit on GPU); saves the adapter + tokenizer + checkpoints. `--cpu-toy` is a tiny-model CPU smoke test, not a real train. |
+| `train-merge <adapter> [--strategy auto\|gpu\|cpu\|adapter-only]` | Merge the adapter into the base. A 7B fp16 merge (~14 GB) won't fit 12 GB, so `auto` walks GPU → CPU-offload → adapter-only. |
+
+Security: model loading uses `trust_remote_code=False` (a fetched repo can't execute
+code), and `model-fetch` warns when a model ships only pickle (`.bin`) weights
+instead of safetensors. Honesty: `train-check`'s verdict is a capability check, the
+CPU-toy path proves the *pipeline* (not a trained model), and license classification
+is fail-closed (unknown/custom/non-commercial → restricted-until-verified).
 
 ### Rule
 
@@ -337,11 +359,13 @@ JSON output. The checks are advisory only; they never block export. They flag:
 - **Classification / raw pretraining** — flagged when the chosen target does not
   express that training style with a LoRA causal-LM config.
 
-### Current Non-Goals
+### Non-Goals (for the dependency-light core)
 
-The current app should not add a trainer process launcher, CUDA dependency,
-PyTorch, Transformers, or tool-specific package dependencies. Config export
-should stay lightweight, inspectable, and safe to run without a GPU.
+The **core** must not require CUDA/PyTorch/Transformers or a trainer at import —
+config export stays lightweight, inspectable, and safe to run without a GPU, and
+those heavy deps live only in the opt-in `[train]` extra (loaded lazily, never at
+import). The core is not itself a deep-learning framework: no distributed training,
+no bespoke training loop — the `[train]` runtime delegates to TRL/peft/transformers.
 
 Near-term hardening should improve target-specific config rendering depth,
 clearer dataset/split path selection, and richer dataset-card context. It
