@@ -1654,6 +1654,27 @@ def training_checkpoints(
     )
 
 
+@app.command("train-check")
+def train_check(
+    json_output: bool = typer.Option(False, "--json", help="Emit the machine-readable report instead of the table."),
+):
+    """Preflight the FIRST-PARTY training runtime (the opt-in [train] extra): which deps are present,
+    whether a CUDA GPU is available, and whether a real 4-bit QLoRA run — or only the CPU toy path —
+    is possible. Reads only the Python environment (no project needed); safe with none of the training
+    deps installed. Exit stays 0 (the verdict is in the report)."""
+
+    from corpus_studio.training.environment import (
+        probe_training_runtime,
+        render_training_runtime_text,
+    )
+
+    report = probe_training_runtime()
+    if json_output:
+        typer.echo(report.model_dump_json(indent=2))
+    else:
+        typer.echo(render_training_runtime_text(report))
+
+
 @app.command("training-compat")
 def training_compat(
     schema: str = typer.Option(..., "--schema", help="Dataset schema id."),

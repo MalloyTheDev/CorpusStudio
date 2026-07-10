@@ -79,6 +79,7 @@ The engine generates + inspects configs and records runs; it **never runs the tr
 
 | Command | What it does |
 |---|---|
+| `train-check [--json]` | Preflight the optional first-party training runtime (`[train]` extra): which deps are present, CUDA GPU + VRAM, and whether a real 4-bit QLoRA run — or only the CPU toy path — is possible. Reads only the Python env. |
 | `training-config <input.jsonl> <schema> --output-path … --base-model … [--target … --seed … --sequence-len … …]` | Generate an inspectable training config + token budget + VRAM estimate + **pre-flight** verdict. |
 | `training-compat <schema> <format> <target>` | Report training-config compatibility warnings without generating a config. |
 | `training-checkpoints <output_dir> [--target …]` | List checkpoints in an output dir and build a resume command. |
