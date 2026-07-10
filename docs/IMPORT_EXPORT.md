@@ -208,3 +208,15 @@ remain staged work.
 ### Export rule
 
 Exports must never silently drop fields. If a target format cannot support a field, the exporter must warn the user.
+
+### Provenance enforcement (opt-in)
+
+`export … --check-provenance` runs the per-row provenance gate before writing the
+deliverable and **refuses the export (exit 2)** if any row's declared `meta.teacher`
+is a provider whose terms forbid training on its outputs (e.g. Anthropic/OpenAI) —
+the licensing counterpart to the PII export gate. Rows with unknown provenance
+*warn* by default; `--provenance-strict` blocks them too. A teacher you know is
+trainable-clean is cleared with `--allow-teacher <name>` or a
+`provenance_allowlist.json` sitting next to the input. Honest scope: it trusts each
+row's **declared** teacher — a mislabeled/omitted teacher is not caught by content,
+and unknown provenance is quarantine-until-verified, never assumed safe.
