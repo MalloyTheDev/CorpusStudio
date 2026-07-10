@@ -80,6 +80,7 @@ The engine generates + inspects configs and records runs; it **never runs the tr
 | Command | What it does |
 |---|---|
 | `train-check [--json]` | Preflight the optional first-party training runtime (`[train]` extra): which deps are present, CUDA GPU + VRAM, and whether a real 4-bit QLoRA run — or only the CPU toy path — is possible. Reads only the Python env. |
+| `train-run <config-path> [--project-dir … --dataset-path … --output-dir … --base-model … --cpu-toy --max-steps N]` | RUN the training in-process (first-party trainer): read a CorpusStudio config + dataset, build a TRL SFTTrainer + peft LoRA (4-bit QLoRA on GPU), train, save the adapter + tokenizer + checkpoints. `--cpu-toy` runs a tiny CPU smoke path (no GPU). Progress `[step/total]`→stderr, JSON result→stdout; exit 2 if the runtime can't run it. |
 | `training-config <input.jsonl> <schema> --output-path … --base-model … [--target … --seed … --sequence-len … …]` | Generate an inspectable training config + token budget + VRAM estimate + **pre-flight** verdict. |
 | `training-compat <schema> <format> <target>` | Report training-config compatibility warnings without generating a config. |
 | `training-checkpoints <output_dir> [--target …]` | List checkpoints in an output dir and build a resume command. |
