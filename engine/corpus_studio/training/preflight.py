@@ -76,14 +76,17 @@ def run_training_preflight(
     examples_over_sequence_len: int,
     sequence_len: int,
     vram_min_gb: float | None = None,
+    vram_min_gb_math: float | None = None,
 ) -> TrainingPreflightReport:
     """Run the pre-flight checks and return a structured verdict.
 
     ``launch_argv[0]`` is the trainer executable to resolve on PATH; ``data_paths``
     are the dataset/split files the run reads; the sequence-length inputs come from
     the token budget already computed for the config. ``vram_min_gb`` is the most
-    memory-efficient VRAM estimate (e.g. the 4-bit figure) — when a GPU is detected
-    it drives the OOM check.
+    memory-efficient (4-bit, flash-attention) VRAM estimate — when a GPU is detected
+    it drives the OOM check. ``vram_min_gb_math`` is the higher math-attention-path
+    estimate; on a Blackwell GPU (sm_120, which is forced onto the math path because
+    the fused attention kernels deadlock) it is used instead.
     """
     checks: list[PreflightCheck] = []
 
@@ -196,27 +199,37 @@ def run_training_preflight(
     #    estimate is arithmetic-only and this is skipped rather than guessing).
     gpu = gpu_probe.probe_gpu_memory()
     if gpu is not None and vram_min_gb is not None:
-        if vram_min_gb > gpu.free_gb:
+        # Blackwell (sm_120) is forced onto the math attention path (the fused kernels deadlock), which
+        # uses more VRAM (seq² scores) — use the higher math-path estimate there when we have it.
+        is_blackwell = gpu_probe._capability_major(gpu.compute_capability) >= 12
+        if is_blackwell and vram_min_gb_math is not None:
+            effective_min_gb = vram_min_gb_math
+            path = " (math attention forced on this Blackwell GPU)"
+        else:
+            effective_min_gb = vram_min_gb
+            path = ""
+        if effective_min_gb > gpu.free_gb:
             checks.append(
                 PreflightCheck(
                     name="gpu_memory",
                     status=WARN,
                     message=(
-                        f"Likely OOM: the most memory-efficient (4-bit) estimate is ~{vram_min_gb:.1f} GB but the "
-                        f"GPU has ~{gpu.free_gb:.1f} GB free (of ~{gpu.total_gb:.1f} GB). Use a smaller base model, "
-                        "4-bit quantization, or a lower sequence_len / batch size."
+                        f"Likely OOM/deadlock: the 4-bit estimate is ~{effective_min_gb:.1f} GB{path} but the GPU has "
+                        f"~{gpu.free_gb:.1f} GB free (of ~{gpu.total_gb:.1f} GB). Lower sequence_len / micro-batch, or use "
+                        "a smaller base model — a run over the ceiling can VRAM-pressure DEADLOCK (spin), not just error."
                     ),
                 )
             )
-        elif vram_min_gb > gpu.free_gb - _VRAM_SAFETY_MARGIN_GB:
+        elif effective_min_gb > gpu.free_gb - _VRAM_SAFETY_MARGIN_GB:
             checks.append(
                 PreflightCheck(
                     name="gpu_memory",
                     status=WARN,
                     message=(
-                        f"Tight VRAM: the 4-bit estimate ~{vram_min_gb:.1f} GB leaves under ~{_VRAM_SAFETY_MARGIN_GB:.0f} GB "
-                        f"free of ~{gpu.free_gb:.1f} GB — this close to the edge a run can VRAM-pressure DEADLOCK (not just "
-                        "OOM); the peak is dominated by sequence_len activations. Lower sequence_len or micro-batch for headroom."
+                        f"Tight VRAM: the 4-bit estimate ~{effective_min_gb:.1f} GB{path} leaves under "
+                        f"~{_VRAM_SAFETY_MARGIN_GB:.0f} GB free of ~{gpu.free_gb:.1f} GB — this close to the edge a run can "
+                        "VRAM-pressure DEADLOCK (not just OOM); the peak is dominated by sequence_len activations. Lower "
+                        "sequence_len or micro-batch for headroom."
                     ),
                 )
             )
@@ -227,7 +240,7 @@ def run_training_preflight(
                     status=PASS,
                     message=(
                         f"GPU has ~{gpu.free_gb:.1f} GB free (of ~{gpu.total_gb:.1f} GB); the 4-bit estimate "
-                        f"~{vram_min_gb:.1f} GB fits with headroom."
+                        f"~{effective_min_gb:.1f} GB{path} fits with headroom."
                     ),
                 )
             )

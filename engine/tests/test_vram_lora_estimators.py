@@ -83,6 +83,31 @@ def test_7b_4bit_seq4096_estimate_is_realistic_not_undercounted():
     assert any("bitsandbytes" in a for a in at_4096.assumptions)
 
 
+def test_math_attention_adds_seq_squared_overhead():
+    # Blackwell/sm_120 is forced onto the math attention path, which materializes the seq×seq scores that
+    # flash attention avoids — a seq²-scaling cost. A real 7B/4-bit math run peaked ~11.9 GB @ seq 3072,
+    # which the flash-path estimate (~10.7) under-counts; math_attention=True must add that headroom.
+    flash = build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", sequence_len=3072)
+    math = build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", sequence_len=3072, math_attention=True)
+    assert math.total_gb_int4 > flash.total_gb_int4
+    assert 11.0 <= math.total_gb_int4 <= 13.0  # realistic vs the real ~11.9 GB stall peak
+    assert any("Math attention" in a for a in math.assumptions)
+    assert not any("Math attention" in a for a in flash.assumptions)  # only surfaced when requested
+
+
+def test_math_attention_overhead_scales_with_sequence_squared():
+    # The attention-scores matrix is O(seq²), so halving seq_len cuts the math delta ~4×.
+    long_delta = (
+        build_vram_estimate("7B", sequence_len=4096, math_attention=True).total_gb_int4
+        - build_vram_estimate("7B", sequence_len=4096).total_gb_int4
+    )
+    short_delta = (
+        build_vram_estimate("7B", sequence_len=2048, math_attention=True).total_gb_int4
+        - build_vram_estimate("7B", sequence_len=2048).total_gb_int4
+    )
+    assert long_delta > short_delta * 3  # ~4× (seq²); slack for rounding
+
+
 def test_lora_overhead_scales_with_rank():
     low = build_vram_estimate("7B", lora_r=8)
     high = build_vram_estimate("7B", lora_r=64)
