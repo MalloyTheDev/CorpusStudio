@@ -115,9 +115,10 @@ def test_load_config_reads_attn_implementation(tmp_path):
     assert load_run_config_from_file(_config(tmp_path)).attn_implementation is None
 
 
-def test_resolve_attention_blackwell_forces_math_sdpa():
-    # Blackwell (sm_120 → capability major 12): the fused flash/mem-efficient SDPA deadlocks on the
-    # first backward, so keep default SDPA but signal the caller to disable the fused backends (→ math).
+def test_resolve_attention_blackwell_disables_flash_sdpa():
+    # Blackwell (sm_120 → capability major 12): the fused FLASH SDPA kernel deadlocks on the first
+    # backward (verified on a real 5070; mem-efficient + math are fine), so keep default SDPA but signal
+    # the caller to disable just the flash backend.
     assert resolve_attention_implementation(None, 12) == (None, True)
     assert resolve_attention_implementation(None, 13) == (None, True)
 
@@ -129,7 +130,7 @@ def test_resolve_attention_older_arch_is_unchanged():
 
 
 def test_resolve_attention_explicit_choice_always_wins():
-    # An explicit attn_implementation is honored verbatim and never toggles the fused SDP backends.
+    # An explicit attn_implementation is honored verbatim and never toggles the SDP backends.
     assert resolve_attention_implementation("eager", 12) == ("eager", False)
     assert resolve_attention_implementation("flash_attention_2", 8) == ("flash_attention_2", False)
 
