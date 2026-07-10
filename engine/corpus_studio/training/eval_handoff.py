@@ -124,6 +124,31 @@ def build_eval_handoff(
             steps=[],
         )
 
+    # First-party runs (corpus_studio) produce a LoRA ADAPTER, so the serve step is different from the
+    # generic external-trainer one: merge it (train-merge / the Merge-adapter button) then serve, or
+    # serve base+adapter unmerged. Read the target off the run record — no signature change needed.
+    target_normalized = (getattr(run, "target", "") or "").strip().lower().replace("-", "_")
+    is_first_party = target_normalized in {"corpus_studio", "corpusstudio", "corpus", "first_party", "firstparty"}
+    if is_first_party:
+        serve_detail = (
+            f"This run produced a LoRA adapter in {output_dir or '<output_dir>'}. To serve it, either "
+            "(a) MERGE it into a standalone model first — "
+            f"`corpus-studio train-merge {_quote(output_dir) if output_dir else '<adapter-dir>'}` (or the "
+            "Training tab's 'Merge adapter' button, which falls back to CPU-offload / adapter-only on a "
+            "small GPU) — then serve the merged model, or (b) serve the base + adapter unmerged (vLLM "
+            "`--enable-lora`, or `peft.PeftModel.from_pretrained` at load). CorpusStudio does NOT serve "
+            "models; pick the path your stack supports, then name the served model for the next step."
+        )
+    else:
+        serve_detail = (
+            f"Serve the model this run produced (in {output_dir or '<output_dir>'}) so the "
+            "Eval Lab can reach it. CorpusStudio does NOT serve models — this step is external "
+            "and depends on the checkpoint/adapter format and your stack. Example (Ollama, GGUF): "
+            f"`ollama create {served} -f Modelfile` with a Modelfile FROM the produced weights; or "
+            "serve with vLLM / TGI at an OpenAI-compatible endpoint and use `--backend "
+            "openai-compatible --base-url <url>` in the next step."
+        )
+
     base_url_flag = f" --base-url {_quote(base_url)}" if base_url else ""
 
     eval_command = (
@@ -142,14 +167,7 @@ def build_eval_handoff(
     steps = [
         HandoffStep(
             title="Serve the trained model",
-            detail=(
-                f"Serve the model this run produced (in {output_dir or '<output_dir>'}) so the "
-                "Eval Lab can reach it. CorpusStudio does NOT serve models — this step is external "
-                "and depends on the checkpoint/adapter format and your stack. Example (Ollama, GGUF): "
-                f"`ollama create {served} -f Modelfile` with a Modelfile FROM the produced weights; or "
-                "serve with vLLM / TGI at an OpenAI-compatible endpoint and use `--backend "
-                "openai-compatible --base-url <url>` in the next step."
-            ),
+            detail=serve_detail,
         ),
         HandoffStep(
             title="Evaluate the trained model (writes the after-eval report)",
