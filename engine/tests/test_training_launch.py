@@ -61,6 +61,17 @@ def test_llama_factory_command():
     assert plan.command == 'llamafactory-cli train "out/config.yaml"'
 
 
+def test_corpus_studio_first_party_command():
+    plan = build_launch_plan("corpus_studio", "out/config.json")
+    assert plan.command == 'corpus-studio train-run "out/config.json"'
+    assert plan.argv == ["corpus-studio", "train-run", "out/config.json"]
+    assert plan.dependencies == ["corpus-studio-engine[train]"]
+    # First-party review note (not the "review before running an external trainer" one) + no resume flag.
+    assert plan.resume_supported is False
+    assert any("first-party" in note.lower() for note in plan.notes)
+    assert not any("does not launch training" in note.lower() for note in plan.notes)
+
+
 def test_unknown_target_raises():
     with pytest.raises(ValueError):
         build_launch_plan("nope", "c.yaml")

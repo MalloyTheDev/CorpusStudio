@@ -2125,7 +2125,8 @@
                                 <TextBox AutomationProperties.AutomationId="TrainingTargetTextBox"
                                          Text="{Binding Training.TrainingTarget, UpdateSourceTrigger=PropertyChanged}"
                                          Width="132"
-                                         Margin="0,0,12,0" />
+                                         Margin="0,0,12,0"
+                                         ToolTip="corpus_studio = Corpus Studio's own trainer (runs here, opt-in [train] extra). Others (axolotl_yaml / trl_config / unsloth_script / huggingface_trainer / llama_factory) emit a command for your external trainer." />
                                 <TextBlock Text="Base Model"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
@@ -2226,10 +2227,8 @@
                                      VerticalScrollBarVisibility="Auto"
                                      HorizontalScrollBarVisibility="Auto" />
 
-                            <WrapPanel Grid.Row="3"
-                                       Grid.ColumnSpan="2"
-                                       VerticalAlignment="Center"
-                                       Margin="0,10,0,6">
+                            <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Margin="0,10,0,6">
+                            <WrapPanel VerticalAlignment="Center">
                                 <Button Style="{StaticResource PrimaryButtonStyle}"
                                         AutomationProperties.AutomationId="LaunchTrainingButton"
                                         Content="Launch _Training"
@@ -2266,6 +2265,26 @@
                                         ToolTip="Link the latest trained-model eval and check for regression vs the baseline"
                                         Margin="0,0,12,0"
                                         Command="{Binding GateTrainingRunCommand}" />
+                                <Button AutomationProperties.AutomationId="CheckTrainingRuntimeButton"
+                                        Content="Check runtime"
+                                        ToolTip="Preflight the first-party training runtime (train-check): deps, GPU, and whether a real QLoRA or only the CPU toy path can run here"
+                                        Visibility="{Binding Training.IsFirstPartyTarget, Converter={StaticResource BoolToVis}}"
+                                        Margin="0,0,8,0"
+                                        Command="{Binding CheckTrainingRuntimeCommand}" />
+                                <CheckBox AutomationProperties.AutomationId="TrainingCpuToyCheckBox"
+                                          Content="CPU toy"
+                                          IsChecked="{Binding Training.CpuToyMode, Mode=TwoWay}"
+                                          ToolTip="Run the tiny CPU smoke path (a small model, a few steps) — proves the pipeline runs; does NOT train a usable model"
+                                          Visibility="{Binding Training.IsFirstPartyTarget, Converter={StaticResource BoolToVis}}"
+                                          VerticalAlignment="Center"
+                                          Margin="0,0,8,0" />
+                                <Button AutomationProperties.AutomationId="MergeAdapterButton"
+                                        Content="Merge adapter"
+                                        ToolTip="Merge the trained LoRA adapter into its base (train-merge, auto → GPU / CPU-offload / adapter-only)"
+                                        IsEnabled="{Binding Training.CanMergeAdapter, Mode=OneWay}"
+                                        Visibility="{Binding Training.IsFirstPartyTarget, Converter={StaticResource BoolToVis}}"
+                                        Margin="0,0,12,0"
+                                        Command="{Binding MergeAdapterCommand}" />
                                 <TextBlock Text="Status:"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
@@ -2279,6 +2298,42 @@
                                            Foreground="{DynamicResource Fg475569}"
                                            VerticalAlignment="Center" />
                             </WrapPanel>
+                            <Border Visibility="{Binding Training.IsFirstPartyTarget, Converter={StaticResource BoolToVis}}"
+                                    BorderBrush="{DynamicResource Fg475569}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Padding="8"
+                                    Margin="0,8,0,0">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0"
+                                             AutomationProperties.AutomationId="TrainingRuntimeSummaryTextBox"
+                                             Text="{Binding Training.TrainingRuntimeSummary, Mode=OneWay}"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             FontFamily="Consolas"
+                                             FontSize="11"
+                                             MaxHeight="150"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             Margin="0,0,6,0" />
+                                    <TextBox Grid.Column="1"
+                                             AutomationProperties.AutomationId="TrainingMergeSummaryTextBox"
+                                             Text="{Binding Training.TrainingMergeSummary, Mode=OneWay}"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             FontFamily="Consolas"
+                                             FontSize="11"
+                                             MaxHeight="150"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             Margin="6,0,0,0" />
+                                </Grid>
+                            </Border>
+                            </StackPanel>
 
                             <Grid Grid.Row="4"
                                   Grid.ColumnSpan="2">

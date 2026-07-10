@@ -90,7 +90,13 @@ public sealed class TrainingViewModel : ViewModelBase, ITrainingViewModel
     public string TrainingTarget
     {
         get => _trainingTarget;
-        set => SetField(ref _trainingTarget, value);
+        set
+        {
+            if (SetField(ref _trainingTarget, value))
+            {
+                OnPropertyChanged(nameof(IsFirstPartyTarget));
+            }
+        }
     }
 
     public string TrainingBaseModel
@@ -525,6 +531,7 @@ public sealed class TrainingViewModel : ViewModelBase, ITrainingViewModel
         _trainingResumeCommand = string.Empty;
         TrainingCheckpointsSummary = "Refresh checkpoints after a run writes them.";
         OnPropertyChanged(nameof(CanResumeTraining));
+        OnPropertyChanged(nameof(CanMergeAdapter));
 
         if (result.Launch is { } launch && !string.IsNullOrWhiteSpace(launch.Command))
         {
@@ -635,6 +642,7 @@ public sealed class TrainingViewModel : ViewModelBase, ITrainingViewModel
             {
                 OnPropertyChanged(nameof(CanLaunchTraining));
                 OnPropertyChanged(nameof(CanResumeTraining));
+                OnPropertyChanged(nameof(CanMergeAdapter));
             }
         }
     }
@@ -642,4 +650,147 @@ public sealed class TrainingViewModel : ViewModelBase, ITrainingViewModel
     public bool CanLaunchTraining => !_isTrainingRunning && _trainingLaunchArgv.Count > 0 && _preflightCanLaunch;
 
     public bool CanResumeTraining => !_isTrainingRunning && _trainingResumeArgv.Count > 0;
+
+    // ---- First-party trainer (the opt-in [train] extra; runs in-process) ----
+
+    private bool _cpuToyMode;
+
+    private string _trainingRuntimeSummary =
+        "Check the training runtime (train-check) to see whether a real GPU QLoRA — or only the CPU toy "
+        + "smoke path — can run on this machine.";
+
+    private string _trainingMergeSummary =
+        "After a first-party run, merge the adapter into its base (train-merge). 'auto' falls back to a "
+        + "CPU-offload merge or adapter-only serving when the GPU is too small (a 7B fp16 merge ≈14 GB).";
+
+    /// <summary>True when the selected target is Corpus Studio's own trainer (accepts the aliases the
+    /// engine normalizes: corpus_studio / corpus-studio / corpusstudio / corpus / first_party).</summary>
+    public bool IsFirstPartyTarget
+    {
+        get
+        {
+            var normalized = _trainingTarget.Trim().Replace('-', '_').ToLowerInvariant();
+            return normalized is "corpus_studio" or "corpusstudio" or "corpus" or "first_party" or "firstparty";
+        }
+    }
+
+    public bool CpuToyMode
+    {
+        get => _cpuToyMode;
+        set => SetField(ref _cpuToyMode, value);
+    }
+
+    public string TrainingRuntimeSummary
+    {
+        get => _trainingRuntimeSummary;
+        private set => SetField(ref _trainingRuntimeSummary, value);
+    }
+
+    public string TrainingMergeSummary
+    {
+        get => _trainingMergeSummary;
+        private set => SetField(ref _trainingMergeSummary, value);
+    }
+
+    /// <summary>The merge target is the run's output dir (it holds the adapter). Gate on it existing and
+    /// no run being active; the engine reports a clear "no adapter yet" error if merged too early.</summary>
+    public bool CanMergeAdapter => !_isTrainingRunning && !string.IsNullOrWhiteSpace(_trainingOutputDirectory);
+
+    /// <summary>Render the train-check runtime report (verdict + per-dep presence + GPU + notes). Pure.</summary>
+    public void ApplyTrainingRuntime(TrainingRuntimeReport report)
+    {
+        var verdict = report.Ready
+            ? "READY (GPU QLoRA)"
+            : report.CpuToyReady ? "CPU-TOY ONLY" : "NOT READY";
+        var lines = new List<string> { $"Training runtime: {verdict}" };
+        foreach (var (package, version) in report.Installed)
+        {
+            lines.Add($"  {(version is null ? "--" : "ok")} {package}: {version ?? "not installed"}");
+        }
+        lines.Add(report.Gpu.Available
+            ? $"  GPU: {report.Gpu.Name} ({report.Gpu.TotalMemoryGb:0.#} GB, {report.Gpu.DeviceCount} device(s))"
+            : "  GPU: none detected");
+        lines.AddRange(report.Notes.Select(note => $"  • {note}"));
+        if (!report.Ready && !report.CpuToyReady && !string.IsNullOrWhiteSpace(report.InstallHint))
+        {
+            lines.Add($"  {report.InstallHint}");
+        }
+
+        TrainingRuntimeSummary = string.Join(Environment.NewLine, lines);
+    }
+
+    public void SetTrainingRuntimeError(string message)
+    {
+        TrainingRuntimeSummary = $"The training runtime check could not run.{Environment.NewLine}{message}";
+    }
+
+    public void SetMergeInProgress()
+    {
+        TrainingMergeSummary =
+            "Merging the adapter into its base… (loading the base can take a while; 'auto' falls back on "
+            + "a small GPU).";
+    }
+
+    /// <summary>Render the train-merge result. adapter-only (not merged) is a valid outcome on a small
+    /// GPU — surface the serving note, not an error. Pure.</summary>
+    public void ApplyMergeResult(MergeResult result)
+    {
+        var lines = new List<string>();
+        if (result.Merged)
+        {
+            lines.Add($"Merged ({result.Strategy}) → {result.OutputPath}");
+            if (!string.IsNullOrWhiteSpace(result.BaseModel))
+            {
+                lines.Add($"Base: {result.BaseModel}");
+            }
+        }
+        else
+        {
+            lines.Add($"Not merged (strategy: {result.Strategy}) — serve the base model with the adapter applied:");
+        }
+        lines.AddRange(result.Notes);
+        TrainingMergeSummary = string.Join(Environment.NewLine, lines);
+    }
+
+    public void SetMergeError(string message)
+    {
+        TrainingMergeSummary = $"The adapter merge could not run.{Environment.NewLine}{message}";
+    }
+
+    /// <summary>The launch decision for the first-party trainer, given a fresh train-check report and
+    /// whether CPU-toy was requested. PURE + unit-tested — encodes the honesty rules: a real GPU run
+    /// needs <c>ready</c>; the CPU smoke path needs <c>cpu_toy_ready</c>; otherwise block with the
+    /// install hint (never silently downgrade a real run to a toy run).</summary>
+    public static FirstPartyLaunchDecision DecideFirstPartyLaunch(TrainingRuntimeReport report, bool cpuToyRequested)
+    {
+        if (cpuToyRequested)
+        {
+            return report.CpuToyReady
+                ? new FirstPartyLaunchDecision(true, true,
+                    "CPU toy smoke test: a tiny model + a few steps. It proves the training pipeline runs — "
+                    + "it does NOT train a usable model.")
+                : new FirstPartyLaunchDecision(false, false,
+                    "The CPU toy path needs torch + transformers + trl + peft + datasets + accelerate. "
+                    + report.InstallHint);
+        }
+
+        if (report.Ready)
+        {
+            return new FirstPartyLaunchDecision(true, false, "Ready: a 4-bit QLoRA GPU run is possible.");
+        }
+
+        if (report.CpuToyReady)
+        {
+            return new FirstPartyLaunchDecision(false, false,
+                "No GPU QLoRA runtime detected (only the CPU toy path is available). Tick 'CPU toy' to run "
+                + "the smoke test, or install a CUDA torch build + bitsandbytes for a real run.");
+        }
+
+        return new FirstPartyLaunchDecision(false, false,
+            "The first-party training runtime isn't installed. " + report.InstallHint);
+    }
 }
+
+/// <summary>The outcome of the first-party launch gate: whether to launch, whether it is the CPU-toy
+/// smoke path (so the argv gets <c>--cpu-toy</c>), and the message to show the user.</summary>
+public readonly record struct FirstPartyLaunchDecision(bool CanLaunch, bool CpuToy, string Message);

@@ -204,6 +204,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand LaunchTrainingCommand { get; }
     public System.Windows.Input.ICommand ResumeTrainingCommand { get; }
     public System.Windows.Input.ICommand StopTrainingCommand { get; }
+    public System.Windows.Input.ICommand CheckTrainingRuntimeCommand { get; }
+    public System.Windows.Input.ICommand MergeAdapterCommand { get; }
     public System.Windows.Input.ICommand RunQualityCommand { get; }
     public System.Windows.Input.ICommand SaveGateThresholdsCommand { get; }
     public System.Windows.Input.ICommand RefreshProviderPoliciesCommand { get; }
@@ -341,6 +343,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         LaunchTrainingCommand = new AsyncRelayCommand(LaunchTrainingAsync);
         ResumeTrainingCommand = new AsyncRelayCommand(ResumeTrainingAsync);
         StopTrainingCommand = new RelayCommand(StopTraining);
+        CheckTrainingRuntimeCommand = new AsyncRelayCommand(CheckTrainingRuntimeAsync);
+        MergeAdapterCommand = new AsyncRelayCommand(MergeAdapterAsync);
         RunQualityCommand = new AsyncRelayCommand(() => RefreshQualityAsync());
         SaveGateThresholdsCommand = new AsyncRelayCommand(SaveGateThresholdsAsync);
         RefreshProviderPoliciesCommand = new AsyncRelayCommand(RefreshProviderPoliciesAsync);
@@ -2330,20 +2334,152 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
-    /// <summary>Launch a fresh training run (the generated config's command).</summary>
+    /// <summary>Launch a fresh training run. For the FIRST-PARTY target (corpus_studio) this preflights
+    /// the runtime and runs Corpus Studio's own trainer; otherwise it spawns the generated external
+    /// command.</summary>
     public System.Threading.Tasks.Task LaunchTrainingAsync() =>
-        RunTrainingAsync(Training.TrainingLaunchArgv, Training.TrainingLaunchCommand);
+        Training.IsFirstPartyTarget
+            ? LaunchFirstPartyTrainingAsync()
+            : RunTrainingAsync(Training.TrainingLaunchArgv, Training.TrainingLaunchCommand);
 
     /// <summary>Resume a training run from a checkpoint (the resume command).</summary>
     public System.Threading.Tasks.Task ResumeTrainingAsync() =>
         RunTrainingAsync(Training.TrainingResumeArgv, Training.TrainingResumeCommand);
+
+    /// <summary>Preflight + run Corpus Studio's own first-party trainer. train-check gates the launch
+    /// honestly (a real GPU run needs <c>ready</c>; the CPU smoke path needs <c>cpu_toy_ready</c>), then
+    /// the train-run argv is built with the ENGINE'S interpreter — the same one train-check probed — so
+    /// the run and the preflight can never disagree. It then flows through the exact same streamed run
+    /// lifecycle (records / checkpoints / cancellation) as an external launch.</summary>
+    public async System.Threading.Tasks.Task LaunchFirstPartyTrainingAsync()
+    {
+        if (Training.IsTrainingRunning)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Training.TrainingConfigPath))
+        {
+            await _dialogs.ShowAsync(
+                "Generate a training config first — the first-party trainer runs from it.",
+                "Corpus Studio", DialogSeverity.Information);
+            return;
+        }
+
+        TrainingRuntimeReport report;
+        try
+        {
+            SetBusy("Checking the training runtime...");
+            report = await _engine.CheckTrainingRuntimeAsync();
+            Training.ApplyTrainingRuntime(report);
+        }
+        catch (System.Exception ex)
+        {
+            Training.SetTrainingRuntimeError(ex.Message);
+            await _dialogs.ShowAsync(
+                $"The training runtime check failed.\n\n{ex.Message}", "Corpus Studio", DialogSeverity.Warning);
+            return;
+        }
+        finally
+        {
+            ClearBusy();
+        }
+
+        var decision = TrainingViewModel.DecideFirstPartyLaunch(report, Training.CpuToyMode);
+        if (!decision.CanLaunch)
+        {
+            await _dialogs.ShowAsync(decision.Message, "Training runtime not ready", DialogSeverity.Warning);
+            return;
+        }
+
+        var argv = _engine.BuildFirstPartyTrainArgv(
+            Training.TrainingConfigPath,
+            string.IsNullOrWhiteSpace(Training.TrainingOutputDirectory) ? null : Training.TrainingOutputDirectory,
+            decision.CpuToy,
+            maxSteps: null);
+
+        var baseCommand = string.IsNullOrWhiteSpace(Training.TrainingLaunchCommand)
+            ? "corpus-studio train-run"
+            : Training.TrainingLaunchCommand;
+        var command = decision.CpuToy
+            ? $"{baseCommand}  --cpu-toy\n\n⚠ {decision.Message}"
+            : baseCommand;
+
+        await RunTrainingAsync(argv, command, _engine.EngineWorkingDirectory);
+    }
+
+    /// <summary>Preflight the first-party training runtime (train-check) and surface it, without
+    /// launching — the Training tab's "Check runtime" button.</summary>
+    public async System.Threading.Tasks.Task CheckTrainingRuntimeAsync()
+    {
+        try
+        {
+            SetBusy("Checking the training runtime...");
+            var report = await _engine.CheckTrainingRuntimeAsync();
+            Training.ApplyTrainingRuntime(report);
+        }
+        catch (System.Exception ex)
+        {
+            Training.SetTrainingRuntimeError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Merge the trained LoRA adapter into its base (train-merge, strategy 'auto'). auto falls
+    /// back to a CPU-offload merge or adapter-only serving on a small GPU, so it always resolves.</summary>
+    public async System.Threading.Tasks.Task MergeAdapterAsync()
+    {
+        if (Training.IsTrainingRunning)
+        {
+            return;
+        }
+
+        var adapterDir = Training.TrainingOutputDirectory;
+        if (string.IsNullOrWhiteSpace(adapterDir))
+        {
+            await _dialogs.ShowAsync(
+                "Run the first-party trainer first — merge needs the adapter it writes to the output directory.",
+                "Corpus Studio", DialogSeverity.Information);
+            return;
+        }
+
+        var confirmed = await _dialogs.ConfirmAsync(
+            "Merge the trained LoRA adapter into its base model (train-merge, strategy 'auto'). This loads "
+                + "the base model (large) and can take a while; on a small GPU it falls back to a CPU-offload "
+                + "merge or to adapter-only serving.\n\nMerge now?",
+            "Merge adapter", DialogButtons.OkCancel, DialogSeverity.Information);
+        if (!confirmed)
+        {
+            return;
+        }
+
+        try
+        {
+            SetBusy("Merging the adapter...");
+            Training.SetMergeInProgress();
+            var result = await _engine.MergeAdapterAsync(adapterDir, "auto");
+            Training.ApplyMergeResult(result);
+        }
+        catch (System.Exception ex)
+        {
+            Training.SetMergeError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
 
     /// <summary>Shared launch core for fresh runs and resume-from-checkpoint: the user confirms the
     /// exact command, then the trainer is spawned + streamed. Moved from the desktop code-behind (#246);
     /// the process spawn/stream is behind IProcessRunner and the log-flush / checkpoint-poll timers behind
     /// the IDispatcherTimer seam, so the launch orchestration is head-agnostic + testable. The trainer
     /// runs on the user's machine with their tools — the engine never runs it.</summary>
-    private async System.Threading.Tasks.Task RunTrainingAsync(IReadOnlyList<string> argv, string command)
+    private async System.Threading.Tasks.Task RunTrainingAsync(
+        IReadOnlyList<string> argv, string command, string? workingDirectoryOverride = null)
     {
         if (argv.Count == 0)
         {
@@ -2384,7 +2520,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Training.SetTrainingBaseline(null);
         }
 
-        var workingDirectory = Training.TrainingLaunchWorkingDirectory;
+        var workingDirectory = string.IsNullOrWhiteSpace(workingDirectoryOverride)
+            ? Training.TrainingLaunchWorkingDirectory
+            : workingDirectoryOverride;
         var cts = new System.Threading.CancellationTokenSource();
         _trainingRunCts = cts;
         _trainingCancelRequested = false;

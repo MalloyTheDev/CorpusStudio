@@ -39,6 +39,8 @@ SCHEMA_COMPATIBLE_FORMATS: dict[str, set[str]] = {
 # Training styles each target can express with the LoRA causal-LM template this
 # module renders. Styles outside these sets need a different pipeline.
 TARGET_SUPPORTED_STYLES: dict[TrainingConfigTarget, set[str]] = {
+    # The first-party trainer is a TRL SFTTrainer + peft LoRA under the hood — same SFT surface as trl.
+    "corpus_studio": {"sft"},
     "axolotl_yaml": {"sft", "pretraining", "preference"},
     "trl_config": {"sft", "preference"},
     "unsloth_script": {"sft", "preference"},

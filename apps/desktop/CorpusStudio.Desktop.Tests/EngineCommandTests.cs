@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.Services;
@@ -154,6 +155,27 @@ public sealed class EngineCommandTests
         public System.Collections.Generic.IReadOnlyList<EvaluationReportHistoryItem> LoadEvaluationReportHistory(string projectPath, int maxReports = 20) => new System.Collections.Generic.List<EvaluationReportHistoryItem>();
         public System.Collections.Generic.IReadOnlyList<ReviewedFixRecord> ReconcileReviewedFixes(string projectPath, System.Collections.Generic.IReadOnlyList<EvaluationExampleResult> results) => new System.Collections.Generic.List<ReviewedFixRecord>();
         public Task<TrainingConfigExportResult> GenerateTrainingConfigAsync(string projectPath, string schemaId, string target, string baseModel, string datasetFormat, int sequenceLen, int loraR, int loraAlpha, int microBatchSize, int gradientAccumulationSteps, double learningRate) => Task.FromResult(new TrainingConfigExportResult());
+
+        // First-party trainer (opt-in [train] extra).
+        public TrainingRuntimeReport RuntimeReport { get; set; } = new();
+        public bool CheckRuntimeCalled { get; private set; }
+        public Task<TrainingRuntimeReport> CheckTrainingRuntimeAsync() { CheckRuntimeCalled = true; return Task.FromResult(RuntimeReport); }
+        public IReadOnlyList<string> LastFirstPartyArgv { get; private set; } = Array.Empty<string>();
+        public bool LastFirstPartyCpuToy { get; private set; }
+        public IReadOnlyList<string> BuildFirstPartyTrainArgv(string configPath, string? outputDir, bool cpuToy, int? maxSteps)
+        {
+            var argv = new List<string> { "python", "-m", "corpus_studio.cli", "train-run", configPath };
+            if (!string.IsNullOrEmpty(outputDir)) { argv.Add("--output-dir"); argv.Add(outputDir); }
+            if (cpuToy) { argv.Add("--cpu-toy"); }
+            LastFirstPartyArgv = argv;
+            LastFirstPartyCpuToy = cpuToy;
+            return argv;
+        }
+        public string EngineWorkingDirectory => @"C:\engine";
+        public MergeResult MergeResultToReturn { get; set; } = new();
+        public bool MergeCalled { get; private set; }
+        public string? LastMergeStrategy { get; private set; }
+        public Task<MergeResult> MergeAdapterAsync(string adapterPath, string strategy) { MergeCalled = true; LastMergeStrategy = strategy; return Task.FromResult(MergeResultToReturn); }
         public Task<System.Collections.Generic.IReadOnlyList<DatasetVersionDisplayItem>> LoadDatasetVersionsAsync(string projectPath)
             => Task.FromResult<System.Collections.Generic.IReadOnlyList<DatasetVersionDisplayItem>>(new System.Collections.Generic.List<DatasetVersionDisplayItem>());
         public Task<DatasetVersionRecord> CreateDatasetVersionAsync(string projectPath, string label, string trigger) => Task.FromResult(new DatasetVersionRecord());
@@ -264,6 +286,24 @@ public sealed class EngineCommandTests
             return Task.FromResult(ExitCode);
         }
         public void TryKillCurrent() => KillCalled = true;
+    }
+
+    // A runner that stays pending until the test completes its gate, exposing the live output sink so a
+    // test can emit trainer lines MID-RUN and prove the live-log DispatcherTimer flushes them (#246-2b).
+    private sealed class GatedProcessRunner : IProcessRunner
+    {
+        public TaskCompletionSource<int> Gate { get; } = new();
+        public Action<string>? Sink { get; private set; }
+        public bool RunCalled { get; private set; }
+        public Task<int> RunAsync(IReadOnlyList<string> argv, string? workingDirectory, Action<string> onOutputLine,
+            System.Threading.CancellationToken cancellationToken, Action<int, DateTime?>? onStarted = null)
+        {
+            RunCalled = true;
+            Sink = onOutputLine;
+            onStarted?.Invoke(4321, null);
+            return Gate.Task; // pending — the run stays live until the test sets the result
+        }
+        public void TryKillCurrent() { }
     }
 
     private static MainWindowViewModel VmWith(
@@ -1130,6 +1170,206 @@ public sealed class EngineCommandTests
         vm.StopTrainingForShutdown();
 
         Assert.True(runner.KillCalled); // best-effort kill so the trainer isn't orphaned on exit
+    }
+
+    // ---- First-party trainer (corpus_studio target): preflight + gate + launch + merge ----
+
+    private static TrainingConfigExportResult FirstPartyConfig() => new()
+    {
+        Target = "corpus_studio",
+        OutputPath = "C:/proj/exports/x/config.json",
+        TrainingOutputDirectory = "C:/proj/exports/x/output",
+        Launch = new TrainingLaunchPlan
+        {
+            Target = "corpus_studio",
+            Command = "corpus-studio train-run \"C:/proj/exports/x/config.json\"",
+            Argv = ["corpus-studio", "train-run", "C:/proj/exports/x/config.json"],
+        },
+    };
+
+    private static void SetFirstPartyConfig(MainWindowViewModel vm)
+    {
+        vm.Training.TrainingTarget = "corpus_studio";
+        vm.Training.ApplyTrainingConfigExportResult(FirstPartyConfig());
+    }
+
+    [Theory]
+    // real GPU run needs `ready`; the CPU smoke path needs `cpu_toy_ready`; else blocked.
+    [InlineData(true, true, false, true, false)]   // ready, no toy → launch a GPU run
+    [InlineData(true, true, true, true, true)]     // toy requested + toy-ready → launch a toy run
+    [InlineData(false, true, true, true, true)]    // no GPU but toy-ready + toy requested → toy run
+    [InlineData(false, true, false, false, false)] // no GPU, toy-ready, no toy → BLOCK (tick CPU toy)
+    [InlineData(false, false, false, false, false)]// nothing installed → BLOCK
+    [InlineData(false, false, true, false, false)] // toy requested but not toy-ready → BLOCK
+    public void DecideFirstPartyLaunch_EncodesTheHonestyRules(
+        bool ready, bool cpuToyReady, bool cpuToyRequested, bool expectLaunch, bool expectCpuToy)
+    {
+        var report = new TrainingRuntimeReport { Ready = ready, CpuToyReady = cpuToyReady };
+
+        var decision = TrainingViewModel.DecideFirstPartyLaunch(report, cpuToyRequested);
+
+        Assert.Equal(expectLaunch, decision.CanLaunch);
+        Assert.Equal(expectCpuToy, decision.CpuToy);
+        Assert.False(string.IsNullOrWhiteSpace(decision.Message));
+    }
+
+    [Fact]
+    public void ApplyTrainingRuntime_RendersVerdictAndGpu()
+    {
+        var vm = VmWith(new FakeEngine(new DebtReport { Grade = "A" }));
+
+        vm.Training.ApplyTrainingRuntime(new TrainingRuntimeReport
+        {
+            Ready = true,
+            CpuToyReady = true,
+            Gpu = new TrainingGpuInfo { Available = true, Name = "RTX 5070", TotalMemoryGb = 12.0, DeviceCount = 1 },
+            Installed = new Dictionary<string, string?> { ["torch"] = "2.11.0", ["bitsandbytes"] = null },
+        });
+
+        Assert.Contains("READY (GPU QLoRA)", vm.Training.TrainingRuntimeSummary);
+        Assert.Contains("RTX 5070", vm.Training.TrainingRuntimeSummary);
+        Assert.Contains("torch: 2.11.0", vm.Training.TrainingRuntimeSummary);
+        Assert.Contains("bitsandbytes: not installed", vm.Training.TrainingRuntimeSummary);
+    }
+
+    [Fact]
+    public async Task LaunchFirstParty_Ready_RunsWithTheEngineInterpreterArgv()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { RuntimeReport = new TrainingRuntimeReport { Ready = true } };
+        var runner = new FakeTrainingProcessRunner { ExitCode = 0, Lines = new[] { "[1/2] step" } };
+        var vm = VmWith(engine, new FakeDialogService(confirm: true), trainingRunner: runner);
+        SelectFakeProject(vm);
+        SetFirstPartyConfig(vm);
+
+        await vm.LaunchTrainingAsync(); // routes to the first-party path (IsFirstPartyTarget)
+
+        Assert.True(engine.CheckRuntimeCalled);                       // preflighted
+        Assert.True(runner.RunCalled);                               // launched
+        Assert.False(engine.LastFirstPartyCpuToy);                   // a real GPU run, not the toy path
+        Assert.Equal("python", engine.LastFirstPartyArgv[0]);        // the engine's interpreter, not PATH corpus-studio
+        Assert.Contains("train-run", engine.LastFirstPartyArgv);
+    }
+
+    [Fact]
+    public async Task LaunchFirstParty_CpuToyMode_AddsTheCpuToyFlag()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { RuntimeReport = new TrainingRuntimeReport { CpuToyReady = true } };
+        var runner = new FakeTrainingProcessRunner { ExitCode = 0 };
+        var vm = VmWith(engine, new FakeDialogService(confirm: true), trainingRunner: runner);
+        SelectFakeProject(vm);
+        SetFirstPartyConfig(vm);
+        vm.Training.CpuToyMode = true;
+
+        await vm.LaunchTrainingAsync();
+
+        Assert.True(runner.RunCalled);
+        Assert.True(engine.LastFirstPartyCpuToy);
+        Assert.Contains("--cpu-toy", engine.LastFirstPartyArgv);
+    }
+
+    [Fact]
+    public async Task LaunchFirstParty_RuntimeNotReady_DoesNotRun()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { RuntimeReport = new TrainingRuntimeReport() }; // nothing installed
+        var runner = new FakeTrainingProcessRunner();
+        var vm = VmWith(engine, new FakeDialogService(confirm: true), trainingRunner: runner);
+        SelectFakeProject(vm);
+        SetFirstPartyConfig(vm);
+
+        await vm.LaunchTrainingAsync();
+
+        Assert.True(engine.CheckRuntimeCalled);
+        Assert.False(runner.RunCalled); // gated: no runtime → no launch, even though the user confirmed
+    }
+
+    [Fact]
+    public async Task LaunchFirstParty_WithoutAConfig_DoesNotPreflightOrRun()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { RuntimeReport = new TrainingRuntimeReport { Ready = true } };
+        var runner = new FakeTrainingProcessRunner();
+        var vm = VmWith(engine, new FakeDialogService(confirm: true), trainingRunner: runner);
+        SelectFakeProject(vm);
+        vm.Training.TrainingTarget = "corpus_studio"; // first-party target, but no config generated
+
+        await vm.LaunchTrainingAsync();
+
+        Assert.False(engine.CheckRuntimeCalled);
+        Assert.False(runner.RunCalled);
+    }
+
+    [Fact]
+    public async Task MergeAdapter_ConfirmedWithOutputDir_CallsEngineAndAppliesResult()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" })
+        {
+            MergeResultToReturn = new MergeResult { Strategy = "gpu", Merged = true, OutputPath = "C:/proj/merged", BaseModel = "Qwen/Qwen2.5-7B" },
+        };
+        var vm = VmWith(engine, new FakeDialogService(confirm: true));
+        SelectFakeProject(vm);
+        SetFirstPartyConfig(vm); // gives an output dir
+
+        await vm.MergeAdapterAsync();
+
+        Assert.True(engine.MergeCalled);
+        Assert.Equal("auto", engine.LastMergeStrategy);
+        Assert.Contains("Merged (gpu)", vm.Training.TrainingMergeSummary);
+    }
+
+    [Fact]
+    public async Task MergeAdapter_WithoutOutputDir_DoesNotCallEngine()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine, new FakeDialogService(confirm: true));
+        SelectFakeProject(vm); // no config generated → no output dir
+
+        await vm.MergeAdapterAsync();
+
+        Assert.False(engine.MergeCalled);
+    }
+
+    [Fact]
+    public async Task MergeAdapter_ConfirmDeclined_DoesNotCallEngine()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var vm = VmWith(engine, new FakeDialogService(confirm: false));
+        SelectFakeProject(vm);
+        SetFirstPartyConfig(vm);
+
+        await vm.MergeAdapterAsync();
+
+        Assert.False(engine.MergeCalled); // the user cancelled the merge confirm
+    }
+
+    // #246-2b: the live-log DispatcherTimer streams trainer output MID-RUN (not just at the end).
+    [Fact]
+    public async Task LiveLogTimer_FlushesTrainerOutputWhileTheRunIsStillActive()
+    {
+        var engine = new FakeEngine(new DebtReport { Grade = "A" });
+        var runner = new GatedProcessRunner();
+        var timers = new FakeDispatcherTimerFactory();
+        var vm = VmWith(engine, new FakeDialogService(confirm: true), timerFactory: timers, trainingRunner: runner);
+        SelectFakeProject(vm);
+        vm.Training.ApplyTrainingConfigExportResult(LaunchableConfig()); // external target → no preflight
+
+        var runTask = vm.LaunchTrainingAsync(); // starts; stays pending on the runner's gate
+
+        Assert.True(runner.RunCalled);
+        Assert.True(vm.Training.IsTrainingRunning);
+        runner.Sink!("[1/2] step");            // the trainer emits live lines (enqueued, not yet published)
+        runner.Sink!("[2/2] step");
+        Assert.DoesNotContain("[1/2] step", vm.Training.TrainingRunLog); // not flushed until the timer ticks
+
+        var logTimer = timers.Created.First(t => t.Interval == TimeSpan.FromMilliseconds(150));
+        Assert.True(logTimer.IsRunning);       // the live-log timer is running during the run
+        logTimer.TickNow();                    // the DispatcherTimer fires
+
+        Assert.Contains("[1/2] step", vm.Training.TrainingRunLog); // streamed live, mid-run
+        Assert.Contains("[2/2] step", vm.Training.TrainingRunLog);
+
+        runner.Gate.SetResult(0);              // the trainer exits
+        await runTask;
+        Assert.False(vm.Training.IsTrainingRunning);
+        Assert.False(logTimer.IsRunning);      // the timer is stopped after the run
     }
 
     [Fact]

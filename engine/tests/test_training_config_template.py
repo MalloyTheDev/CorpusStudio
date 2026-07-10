@@ -54,7 +54,7 @@ def test_custom_seed_threads_through_to_the_config():
 
 
 @pytest.mark.parametrize(
-    "target", ["axolotl", "trl", "unsloth", "huggingface", "llama_factory"]
+    "target", ["axolotl", "trl", "unsloth", "huggingface", "llama_factory", "corpus_studio"]
 )
 def test_seed_is_rendered_for_every_target(target: str):
     # The seed only makes runs reproducible if it actually reaches EVERY target's config,
@@ -89,6 +89,36 @@ def test_training_config_renderer_returns_inspectable_yaml():
     assert 'base_model: "Qwen/Qwen2.5-Coder-7B-Instruct"' in rendered
     assert "sequence_len: 2048" in rendered
     assert "lora_r: 8" in rendered
+
+
+@pytest.mark.parametrize(
+    "alias", ["corpus_studio", "corpus-studio", "corpusstudio", "corpus", "first_party", "first-party"]
+)
+def test_first_party_target_aliases_normalize(alias: str):
+    assert normalize_training_config_target(alias) == "corpus_studio"
+
+
+def test_first_party_target_renders_json_train_run_reads():
+    template = build_lora_config_template(
+        base_model="Qwen/Qwen2.5-7B",
+        dataset_path="train.jsonl",
+        eval_dataset_path=None,
+        dataset_format="instruction",
+        target=normalize_training_config_target("corpus_studio"),
+        sequence_len=2048,
+        lora_r=8,
+    )
+    # The first-party config is JSON — the exact shape train-run's load_run_config_from_file reads.
+    assert training_config_file_extension(template.target) == ".json"
+    import json as _json
+
+    payload = _json.loads(render_training_config(template))
+    assert payload["target"] == "corpus_studio"
+    assert payload["base_model"] == "Qwen/Qwen2.5-7B"
+    assert payload["dataset_path"] == "train.jsonl"
+    assert payload["format"] == "instruction"
+    assert payload["sequence_len"] == 2048
+    assert payload["lora_r"] == 8
 
 
 def test_training_estimators_are_lightweight():

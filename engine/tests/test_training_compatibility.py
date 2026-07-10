@@ -48,6 +48,28 @@ def test_matching_schema_format_and_target_has_no_warnings():
     assert warnings == []
 
 
+def test_first_party_target_clean_for_instruction_sft():
+    # The first-party corpus_studio trainer is TRL SFT — an instruction/SFT dataset is compatible.
+    warnings = training_compatibility_warnings(
+        schema_id="instruction",
+        dataset_format="instruction",
+        target="corpus_studio",
+    )
+
+    assert warnings == []
+
+
+def test_first_party_target_warns_on_preference_data():
+    # It has no DPO/preference path (SFT only) — a preference dataset should be flagged.
+    warnings = training_compatibility_warnings(
+        schema_id="preference",
+        dataset_format="preference",
+        target="corpus_studio",
+    )
+
+    assert any("no built-in preference" in warning for warning in warnings)
+
+
 def test_preference_schema_warns_about_dpo_pipeline():
     warnings = training_compatibility_warnings(
         schema_id="preference",

@@ -564,12 +564,25 @@
             <Button Content="Refresh checkpoints" Command="{Binding RefreshTrainingCheckpointsCommand}" Margin="0,0,6,4"/>
             <Button Content="Regression gate" Command="{Binding GateTrainingRunCommand}" Margin="0,0,6,4"/>
           </WrapPanel>
+          <!-- First-party trainer (corpus_studio target): preflight, CPU-toy smoke path, and adapter merge. -->
+          <WrapPanel IsVisible="{Binding Training.IsFirstPartyTarget}">
+            <Button Content="Check runtime" Command="{Binding CheckTrainingRuntimeCommand}" Margin="0,0,6,4"
+                    ToolTip.Tip="Preflight the first-party training runtime (train-check): deps, GPU, QLoRA vs CPU-toy"/>
+            <CheckBox Content="CPU toy" IsChecked="{Binding Training.CpuToyMode}" Margin="0,0,6,4"
+                      ToolTip.Tip="Run the tiny CPU smoke path — proves the pipeline runs; does NOT train a usable model"/>
+            <Button Content="Merge adapter" Command="{Binding MergeAdapterCommand}" IsEnabled="{Binding Training.CanMergeAdapter}" Margin="0,0,6,4"
+                    ToolTip.Tip="Merge the trained LoRA adapter into its base (train-merge, auto → GPU / CPU-offload / adapter-only)"/>
+          </WrapPanel>
           <TextBlock Text="{Binding Training.TrainingLaunchCommand}" TextWrapping="Wrap"
                      FontFamily="Consolas" FontSize="11"/>
           <TextBox Text="{Binding Training.TrainingRunLog}" IsReadOnly="True" AcceptsReturn="True"
                    FontFamily="Consolas" Height="200" TextWrapping="Wrap"/>
           <TextBlock Text="{Binding Training.TrainingCheckpointsSummary}" TextWrapping="Wrap"/>
           <TextBlock Text="{Binding Training.TrainingComparisonSummary}" TextWrapping="Wrap"/>
+          <TextBox Text="{Binding Training.TrainingRuntimeSummary}" IsVisible="{Binding Training.IsFirstPartyTarget}"
+                   IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="11" MaxHeight="140" TextWrapping="Wrap"/>
+          <TextBox Text="{Binding Training.TrainingMergeSummary}" IsVisible="{Binding Training.IsFirstPartyTarget}"
+                   IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="11" MaxHeight="140" TextWrapping="Wrap"/>
         </StackPanel>
       </Grid>
     </TabItem>
