@@ -24,6 +24,15 @@ class GpuMemory(BaseModel):
 
     total_gb: float
     free_gb: float
+    compute_capability: str = ""  # e.g. "12.0" for Blackwell / sm_120 (empty when unreadable)
+
+
+def _capability_major(compute_capability: str) -> int:
+    """Major compute capability from a ``"12.0"``-style string, or 0 when unknown."""
+    try:
+        return int(compute_capability.split(".")[0])
+    except (ValueError, AttributeError, IndexError):
+        return 0
 
 
 def probe_gpu_memory() -> GpuMemory | None:
@@ -36,7 +45,7 @@ def probe_gpu_memory() -> GpuMemory | None:
         completed = subprocess.run(
             [
                 nvidia_smi,
-                "--query-gpu=memory.total,memory.free",
+                "--query-gpu=memory.total,memory.free,compute_cap",
                 "--format=csv,noheader,nounits",
             ],
             capture_output=True,
@@ -60,4 +69,11 @@ def probe_gpu_memory() -> GpuMemory | None:
     except ValueError:
         return None
 
-    return GpuMemory(total_gb=round(total_mb / 1024, 1), free_gb=round(free_mb / 1024, 1))
+    # compute_cap is on older drivers too, but tolerate its absence (older nvidia-smi).
+    capability = parts[2] if len(parts) >= 3 else ""
+
+    return GpuMemory(
+        total_gb=round(total_mb / 1024, 1),
+        free_gb=round(free_mb / 1024, 1),
+        compute_capability=capability,
+    )

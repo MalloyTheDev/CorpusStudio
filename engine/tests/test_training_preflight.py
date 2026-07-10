@@ -150,3 +150,32 @@ def test_tight_vram_warns_even_when_it_technically_fits(tmp_path: Path, monkeypa
     assert gpu_check.status == WARN
     assert "Tight VRAM" in gpu_check.message
     assert report.can_launch is True  # a warning, not a hard block
+
+
+def test_capability_major_parsing():
+    from corpus_studio.training.gpu_probe import _capability_major
+
+    assert _capability_major("12.0") == 12  # Blackwell / sm_120
+    assert _capability_major("8.9") == 8  # Ada
+    assert _capability_major("") == 0  # unknown / older nvidia-smi
+    assert _capability_major("garbage") == 0
+
+
+def test_blackwell_gpu_checks_against_the_higher_math_estimate(tmp_path: Path, monkeypatch):
+    # On Blackwell (sm_120) the trainer is forced onto the math attention path, which uses MORE VRAM
+    # (seq² scores). The pre-flight must check the higher math estimate there — so a config that "fits"
+    # on the flash estimate can still warn on a 12 GB Blackwell card (the 5070 reality that deadlocked).
+    _gpu(monkeypatch, GpuMemory(total_gb=12.0, free_gb=11.6, compute_capability="12.0"))
+    report = _run(tmp_path, vram_min_gb=10.7, vram_min_gb_math=12.1)  # flash ~fits, math over the ceiling
+    gpu_check = next(c for c in report.checks if c.name == "gpu_memory")
+    assert gpu_check.status == WARN
+    assert "math attention" in gpu_check.message.lower()
+
+
+def test_non_blackwell_gpu_uses_the_flash_estimate(tmp_path: Path, monkeypatch):
+    # Where flash attention works, the flash estimate drives the check even if a math estimate is given.
+    _gpu(monkeypatch, GpuMemory(total_gb=24.0, free_gb=22.0, compute_capability="8.9"))
+    report = _run(tmp_path, vram_min_gb=8.0, vram_min_gb_math=20.0)
+    gpu_check = next(c for c in report.checks if c.name == "gpu_memory")
+    assert gpu_check.status == PASS  # 8 GB flash estimate fits 22 free; the math estimate is ignored
+    assert "math attention" not in gpu_check.message.lower()

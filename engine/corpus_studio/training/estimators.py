@@ -182,6 +182,10 @@ _RUNTIME_OVERHEAD_GB = 1.0
 # Extra GB per billion params for a QUANTIZED (4-bit/8-bit) base: bitsandbytes keeps dequant/compute
 # buffers + quant state beyond the raw packed weights, so the real footprint exceeds bytes×params.
 _QUANT_RUNTIME_GB_PER_B = 0.25
+# Math-attention seq²-scores memory for a 7B at seq 4096 (scaled by params ÷7 and (seq/4096)²). The
+# math/eager attention path materializes the seq×seq scores that flash/mem-efficient attention avoids;
+# calibrated so a 7B/4-bit math run lands near its real peak (~11.9 GB @ seq 3072).
+_MATH_ATTENTION_BASE_GB = 2.5
 
 
 def parse_parameter_count(base_model: str) -> float | None:
@@ -220,8 +224,14 @@ def build_vram_estimate(
     sequence_len: int = 4096,
     micro_batch_size: int = 1,
     adapter: str = "lora",
+    math_attention: bool = False,
 ) -> VramEstimate:
-    """Rough VRAM planning estimate from the model name (no hardware access)."""
+    """Rough VRAM planning estimate from the model name (no hardware access).
+
+    ``math_attention=True`` adds the seq²-scaling attention-scores memory that the *math* (eager /
+    math-SDPA) attention path materializes and flash/mem-efficient attention avoids. Blackwell GPUs
+    (sm_120) MUST use the math path (the fused kernels deadlock), so on that arch the estimate is
+    meaningfully higher — pass True there."""
 
     params_b = parse_parameter_count(base_model)
     if params_b is None:
@@ -252,8 +262,16 @@ def build_vram_estimate(
 
     quant_overhead = params_b * _QUANT_RUNTIME_GB_PER_B
 
+    # Math attention materializes the seq×seq attention scores that flash/mem-efficient attention avoids
+    # — a seq²-scaling cost, present only on the math path (which Blackwell/sm_120 is forced onto). Scale
+    # by params (÷7) and (seq/4096)². Calibrated to a real 7B/4-bit run: math @ seq-3072 peaked ~11.9 GB
+    # (vs the ~10.7 GB flash-path estimate) → this adds ~1.4 GB there.
+    math_attention_overhead = (
+        _MATH_ATTENTION_BASE_GB * (params_b / 7) * (sequence_len / 4096) ** 2 if math_attention else 0.0
+    )
+
     def _total(weights: float, quantized: bool) -> float:
-        base = weights + lora_overhead + activation_overhead + _RUNTIME_OVERHEAD_GB
+        base = weights + lora_overhead + activation_overhead + _RUNTIME_OVERHEAD_GB + math_attention_overhead
         return round(base + (quant_overhead if quantized else 0.0), 1)
 
     return VramEstimate(
@@ -276,6 +294,11 @@ def build_vram_estimate(
             f"Activations (~{activation_overhead:.1f} GB): gradient checkpointing, seq_len {sequence_len}, "
             f"micro-batch {micro_batch_size} — they scale with seq_len, so a long sequence dominates.",
             f"Quantized paths add ~{quant_overhead:.1f} GB for bitsandbytes dequant/compute buffers.",
+            *(
+                [f"Math attention (Blackwell/sm_120) adds ~{math_attention_overhead:.1f} GB of seq²-scaling "
+                 "attention scores that flash attention avoids."]
+                if math_attention else []
+            ),
             f"+{_RUNTIME_OVERHEAD_GB:.0f} GB fixed runtime overhead.",
         ],
         note="Rough planning estimate only; real usage varies by architecture and trainer.",

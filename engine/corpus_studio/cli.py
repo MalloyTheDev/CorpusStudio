@@ -1191,6 +1191,15 @@ def training_config(
         sequence_len=sequence_len,
         micro_batch_size=micro_batch_size,
     )
+    # Higher math-attention-path estimate — used by the pre-flight OOM check on a Blackwell GPU, which
+    # is forced onto the math attention path (the fused kernels deadlock there).
+    vram_estimate_math = build_vram_estimate(
+        base_model,
+        lora_r=lora_r,
+        sequence_len=sequence_len,
+        micro_batch_size=micro_batch_size,
+        math_attention=True,
+    )
     lora_recommendation = recommend_lora(
         parse_parameter_count(base_model), lora_r, lora_alpha
     )
@@ -1235,6 +1244,7 @@ def training_config(
         examples_over_sequence_len=token_budget.examples_over_sequence_len,
         sequence_len=sequence_len,
         vram_min_gb=vram_estimate.total_gb_int4,
+        vram_min_gb_math=vram_estimate_math.total_gb_int4,
     )
 
     typer.echo(
