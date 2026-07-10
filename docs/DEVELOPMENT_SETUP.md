@@ -130,8 +130,10 @@ inspectable `project.json`/`examples.jsonl` files.
 ## Local model-backed commands
 
 These commands require Ollama, LM Studio, or another compatible local backend to
-already be running. They do not pull models, install ML packages, or launch
-training jobs.
+already be running. They do not pull models or install ML packages. (First-party
+training is a separate **opt-in** feature — install the `[train]` extra and use
+`train-check` / `train-run` / `train-merge` / `model-fetch`; see `CLI_REFERENCE.md`
+and `TRAINING.md`.)
 
 ```powershell
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli model-list --backend ollama

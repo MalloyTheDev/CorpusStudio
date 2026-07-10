@@ -64,7 +64,9 @@ create dataset
 
 ## Current Non-Goals
 
-- training models directly (the app orchestrates the user's installed trainer)
+- bundling CUDA/PyTorch or a training framework into the dependency-light core
+  (training is **opt-in**: the `[train]` extra's first-party QLoRA trainer, or your
+  own installed external trainer)
 - cloud collaboration
 - automatic scraping
 - bulk synthetic generation
@@ -115,8 +117,9 @@ list and [`WORKFLOWS.md`](WORKFLOWS.md) for the end-to-end walkthrough.
 6. Cleaning should be reversible or auditable.
 7. Export formats must be deterministic.
 8. Evaluation datasets are as important as training datasets.
-9. Training stays downstream of dataset validation and evaluation, and orchestrates the
-   user's installed tools — the app never embeds a training framework.
+9. Training stays downstream of dataset validation and evaluation; it runs via the opt-in
+   `[train]` extra's first-party QLoRA trainer or orchestrates your installed tools — the
+   dependency-light core never bundles a training framework.
 
 ## Current state & roadmap
 

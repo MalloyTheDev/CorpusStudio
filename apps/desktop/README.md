@@ -27,7 +27,7 @@ The desktop workflow supports:
 - Evaluation Lab runs, backend checks, pre-run health gates, report history, two-report comparison, saved regression reruns, report summaries by tag/failure reason/score band, failed-example review filtering, failed-row edit handoff to Writing Studio, failed-example AI Assist triage preparation, manual per-example notes/scores, and **multi-model benchmark comparison**, for configured Ollama or OpenAI-compatible local endpoints (optional LLM-judge scorer)
 - Evaluation **Suites** tab: register, scaffold, and run named evaluation suites with per-metric roll-ups, per-case results, and run history/trend
 - AI Assist backend checks plus schema-aware action presets, persistent review queue, filters, search, sorting, saved queue views, persistent rewrite batches, bulk triage with multi-step undo, accept/reject states, source/suggestion comparison, batch synthetic rewrite preparation, preference-pair judge handoff, preference ranking export, and visible batch judge preparation
-- Training Lab: config export **and launching your installed trainer with live streamed logs, checkpoint listing, run history, a training-run regression gate, and resume-from-checkpoint**
+- Training Lab: config export **and launching the trainer — the opt-in first-party QLoRA trainer (`train-check`/`train-run`/`train-merge`/`model-fetch`/`model-card`) or your installed external trainer — with live streamed logs, checkpoint listing, run history, a training-run regression gate, and resume-from-checkpoint**
 - model **Artifacts** registry (register a run's output, promote-gate to keep, reject) and dataset **Versions** (capture, card, diff, restore-in-place with an undo capture)
 - prompt **Arena** for side-by-side model comparison, and a **Debt** tab (graded A–F dataset-debt ledger with ranked remediation)
 - Hugging Face Hub dataset import (read-only, public) through the normal import-preview/quarantine flow
@@ -154,13 +154,15 @@ It prefers generated train/validation split files when they exist, falls back to
 the project's saved examples for config preview, and writes rendered config
 files under the configured export directory. A "Check Compatibility" button runs
 the engine's `training-compat` pre-check and reports schema/format/target
-mismatches before generating, so problems surface early. It then **launches your
-installed trainer** with the generated command (after a confirm), streaming its
-stdout/stderr live, lists produced checkpoints, records each run, can **resume
-from a checkpoint**, and runs a **regression gate** that links the newest
-post-training eval to the run to check for regression against the baseline.
-It does **not** install ML packages or implement a training framework — it
-orchestrates the trainer you already have (no CUDA/PyTorch internals).
+mismatches before generating, so problems surface early. It then **launches the
+trainer** with the generated command (after a confirm) — either the **opt-in
+first-party QLoRA trainer** (`train-check` preflights the runtime, `train-run`
+runs a 4-bit QLoRA in-process and writes the adapter + a model card, `train-merge`
+merges it, `model-fetch` downloads a permissive base) or your **installed external
+trainer** — streaming its stdout/stderr live, listing checkpoints, recording each
+run, resuming from a checkpoint, and running a **regression gate** against the
+baseline. The dependency-light core installs no ML packages; those come from the
+opt-in `[train]` extra (which delegates to TRL/peft, no bundled framework).
 
 The desktop shell uses shared WPF styles for controls, tabs, side rails, and
 the project header so new lab surfaces should reuse the existing visual frame

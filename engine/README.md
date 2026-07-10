@@ -15,7 +15,10 @@ Responsibilities:
 - run review-first AI Assist Lab MVP passes
 - check configured model backend health
 - list configured backend models
-- generate Training Lab config exports without launching trainers
+- generate Training Lab config exports
+- run the opt-in first-party QLoRA trainer (`[train]` extra): `train-check` (runtime
+  preflight), `train-run` (4-bit QLoRA in-process → adapter + model card), `train-merge`,
+  `model-fetch` (permissive base model + license), `model-card` — or launch your own trainer
 
 ## Development
 

@@ -290,22 +290,13 @@ per-item error isolation, and off-thread document opens.
   progress** (WPF code-behind engine handlers → shared testable commands behind `IEngineService`),
   with the process-streaming/timer/undo-state handlers and Fluent-theme styling + per-OS packaging
   still to do. The Avalonia head is not shipped yet. See `AVALONIA_MIGRATION_PLAN.md`.
-- **Row-store garbage collection** (`dataset-version-gc`): prunes row-store rows no version
-  references, keeping the union of every version manifest. Fail-closed — it aborts on an unreadable
-  manifest and keeps any line it can't identify, so it never removes a referenced row; `--dry-run`
-  previews. (Auto-capture after an import commit ships too.)
 - Dataset-version **reorder detection** and a normalized row identity are still future.
-- **Opt-in PII/secret redaction on export** (`export --redact-pii`): masks the same
-  high-precision patterns the reporter detects (emails, SSNs, keys/tokens, JWTs, Luhn-valid
-  cards) with `[REDACTED:kind]` placeholders, so a dataset the export gate would block on PII
-  can export with the secrets masked; writes a redaction manifest (kinds/counts/rows, never raw
-  values) and never rewrites `examples.jsonl`. Honest boundary: known patterns only — **not** a
-  de-identification guarantee (a desktop toggle is a follow-up).
-- A **per-project gate-threshold editor** in the desktop Settings tab: reads the effective
-  thresholds (`gate-thresholds`) and writes a validated `gate_thresholds.json`
-  (`gate-thresholds-set`, engine-validated so out-of-range values are refused, not written).
-- The validator now checks **lists-of-objects** against a per-element shape (`SchemaField.item_fields`),
-  recursively, with indexed paths.
+
+  _Previously listed here but now **shipped** (see `CLI_REFERENCE.md`): row-store garbage collection
+  (`dataset-version-gc`, fail-closed, `--dry-run`), opt-in export PII/secret redaction
+  (`export --redact-pii`, with a redaction manifest — known patterns only, not de-identification), the
+  desktop per-project gate-threshold editor (`gate-thresholds` read + `gate-thresholds-set` validated
+  write), and the validator's recursive **lists-of-objects** checking (`SchemaField.item_fields`)._
 - Smaller deferrals: an
   app icon. (CI hardening — ruff, mypy, pytest gate, dependabot, and CodeQL — is
   in place.)

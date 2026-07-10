@@ -14,8 +14,9 @@ The guiding rule: **one universal workspace, many schemas, many file viewers** â
 - The **desktop** owns safe, user-facing workspace file editing and never
   silently mutates dataset content.
 
-Corpus Studio orchestrates the user's installed trainer; it never becomes a deep
-learning framework.
+Corpus Studio runs training via its opt-in first-party trainer (the `[train]` extra)
+or orchestrates the user's installed trainer; the dependency-light core never becomes
+a deep-learning framework.
 
 ## Project manifest â€” `.corpus/project.json`
 

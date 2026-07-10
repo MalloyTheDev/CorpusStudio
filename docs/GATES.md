@@ -161,7 +161,9 @@ note if a `gate_thresholds.json` sits next to the input so the ignored config is
 never invisible. Each saved `GateReport` records the effective `thresholds`
 behind its verdict, so a gated report stays reproducible even after the file is
 edited. `gate-thresholds <project-dir>` prints the effective values so you can
-copy them into the file and edit. Example:
+copy them into the file and edit; `gate-thresholds-set <project-dir> --values-json …`
+writes a validated `gate_thresholds.json` directly (out-of-range values are refused,
+not written — this is what the desktop Settings editor calls). Example:
 
 ```json
 { "block_exact_duplicates": false, "max_regression_score_drop": 5.0 }

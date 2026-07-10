@@ -116,7 +116,7 @@ remain the inspectable source of truth.
 
 ## Testing
 
-The Python engine has a pytest suite (64 tests) covering schemas, validation,
+The Python engine has a large pytest suite (800+ tests) covering schemas, validation,
 importers, quality, evaluation reporting, training config, dataset cards, and
 the optional project index. Opt-in local Ollama integration tests
 (`engine/tests/test_ollama_integration.py`) require

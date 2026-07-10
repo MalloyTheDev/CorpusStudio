@@ -222,3 +222,21 @@ Used for model evaluation and regression testing.
 - category
 - difficulty
 - tags
+
+## Classification Schema
+
+Text classification: an input text paired with its class label (sentiment, topic,
+intent, …). The label set is defined by your project — pin it to a fixed enum in a
+project copy of this schema if you want validation to reject unknown labels.
+
+### Example
+
+```jsonl
+{"text": "The delivery was fast and the item works great.", "label": "positive"}
+```
+
+### Fields
+
+- text (required)
+- label (required)
+- optional project-specific metadata (e.g. tags)

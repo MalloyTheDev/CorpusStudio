@@ -29,7 +29,7 @@ concrete, phased, slice-by-slice plan grounded in the current decomposition stat
   Explorer, docked Problems/Output panels, the Studio hero + Quality panel), plus a `StringToBrush`
   converter for the VMs' hex-string status colours. Compiled bindings validate every path at build time,
   so the green build is the proof. Not shipped; WPF stays the product head.
-- **`ICommand` conversion (#184) — in progress.** Converting the WPF code-behind `_Click` engine
+- **`ICommand` conversion (#184) — done.** Converted the WPF code-behind `_Click` engine
   handlers into shared `AsyncRelayCommand`/`RelayCommand`s on the view-models, behind the `IEngineService`
   seam so run-orchestration is head-agnostic and unit-testable with a fake engine. The mechanical,
   dialog (`IDialogService`), file-picker (`IFilePickerService`), and named-control input-binding tiers are
