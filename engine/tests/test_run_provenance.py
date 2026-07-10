@@ -3,6 +3,10 @@
 from pathlib import Path
 
 from corpus_studio import __version__
+from corpus_studio.training.config_templates import (
+    build_lora_config_template,
+    render_training_config,
+)
 from corpus_studio.training.provenance import build_run_provenance
 from corpus_studio.training.run_registry import TrainingRunRecord
 
@@ -53,6 +57,31 @@ def test_missing_dataset_or_config_leaves_fields_null_not_raising(tmp_path: Path
     assert manifest.dataset_row_count == 0
     assert manifest.config_sha256 is None
     assert manifest.engine_version == __version__  # environment is still captured
+
+
+def _write_rendered_config(tmp_path: Path, name: str, seed: int) -> Path:
+    template = build_lora_config_template(
+        base_model="m", dataset_path="d.jsonl", eval_dataset_path=None,
+        dataset_format="instruction", seed=seed,
+    )
+    path = tmp_path / name
+    path.write_text(render_training_config(template), encoding="utf-8")
+    return path
+
+
+def test_config_sha256_pins_the_seed(tmp_path: Path):
+    # The manifest's claim: the config emits a seed and the config SHA-256 hashes it WITH the
+    # config, so the seed is pinned. Changing only the seed must change config_sha256; the same
+    # seed must reproduce it. (Guards the docstring against drifting back to "seed not pinned".)
+    project = _project(tmp_path)
+
+    sha_42 = build_run_provenance(project, _write_rendered_config(tmp_path, "c42.yaml", 42)).config_sha256
+    sha_42_again = build_run_provenance(project, _write_rendered_config(tmp_path, "c42b.yaml", 42)).config_sha256
+    sha_99 = build_run_provenance(project, _write_rendered_config(tmp_path, "c99.yaml", 99)).config_sha256
+
+    assert sha_42 and len(sha_42) == 64
+    assert sha_42 == sha_42_again  # same seed → identical config hash (deterministic)
+    assert sha_42 != sha_99  # a different seed → a different pinned config hash
 
 
 def test_record_roundtrips_with_and_without_provenance(tmp_path: Path):

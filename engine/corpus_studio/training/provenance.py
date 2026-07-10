@@ -15,10 +15,13 @@ Together with the fields the run record already carries (the exact ``argv``, the
 ``base_model``, the dataset-version back-link, and the before/after eval), this is
 the auditable recipe behind a produced model.
 
-Known limitation: the generated training config does not yet emit a random
-**seed**, so this manifest pins the *inputs* (data + config + environment) but not
-the exact weight initialisation — treat it as data/config provenance, not
-bit-exact weight reproduction. (Seed capture is a follow-up.)
+Seed: the generated training config emits a fixed ``seed`` (default 42, see
+``config_templates``), and the config SHA-256 above hashes the rendered config
+byte-for-byte — so the seed is pinned *with* the config. Weight initialisation,
+data shuffling, and dropout are therefore reproducible for trainers that honour the
+config seed. Honest caveat: bit-exactness still depends on the trainer, the
+library/CUDA versions, and the hardware, which this manifest does not capture — but
+the full recipe, seed included, is pinned.
 """
 
 import hashlib
