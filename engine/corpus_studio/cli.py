@@ -1683,6 +1683,7 @@ def train_run(
     base_model: Optional[str] = typer.Option(None, "--base-model", help="Override the base model."),
     cpu_toy: bool = typer.Option(False, "--cpu-toy", help="Run the tiny CPU smoke path (a small model, a few steps, no GPU/bitsandbytes)."),
     max_steps: Optional[int] = typer.Option(None, "--max-steps", help="Cap the number of training steps."),
+    attn_implementation: Optional[str] = typer.Option(None, "--attn-implementation", help="Attention backend (eager | sdpa | flash_attention_2). Default auto: on Blackwell/sm_120 the fused flash/mem-efficient SDPA is disabled (it deadlocks the first backward there) and the math SDPA path is used."),
 ):
     """RUN the training in-process (first-party trainer, opt-in [train] extra): read a CorpusStudio
     training config + dataset, build a TRL SFTTrainer with peft LoRA (4-bit QLoRA on GPU), train, and
@@ -1706,6 +1707,7 @@ def train_run(
             base_model=base_model,
             cpu_toy=cpu_toy,
             max_steps=max_steps,
+            attn_implementation=attn_implementation,
         )
     except (TrainerError, ValueError, json.JSONDecodeError, OSError) as exc:
         typer.echo(str(exc), err=True)

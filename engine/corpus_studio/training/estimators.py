@@ -172,11 +172,16 @@ _PARAM_COUNT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*b(\d+)?(?![a-z])", re.IGNORECAS
 _LORA_FRACTION_AT_R16 = 0.006
 # Bytes per trainable LoRA param: fp16 weight+grad plus fp32 AdamW states.
 _LORA_BYTES_PER_PARAM = 16
-# Rough activation memory for a 7B model at seq 4096, micro-batch 1, with
-# gradient checkpointing enabled.
-_ACTIVATION_BASE_GB = 1.5
+# Activation memory for a 7B model at seq 4096, micro-batch 1, WITH gradient checkpointing — scales with
+# params, sequence_len, and micro-batch. CALIBRATED to a real Qwen2.5-7B 4-bit QLoRA run that peaked
+# ~11.9 GB at seq 4096 and ~10.7 GB at seq 3072: the previous 1.5 badly under-counted activations (they
+# grow with sequence_len), which green-lit a run that then VRAM-deadlocked at the 12 GB edge.
+_ACTIVATION_BASE_GB = 5.0
 # Fixed CUDA context / framework overhead.
 _RUNTIME_OVERHEAD_GB = 1.0
+# Extra GB per billion params for a QUANTIZED (4-bit/8-bit) base: bitsandbytes keeps dequant/compute
+# buffers + quant state beyond the raw packed weights, so the real footprint exceeds bytes×params.
+_QUANT_RUNTIME_GB_PER_B = 0.25
 
 
 def parse_parameter_count(base_model: str) -> float | None:
@@ -245,8 +250,11 @@ def build_vram_estimate(
         * max(1, micro_batch_size)
     )
 
-    def _total(weights: float) -> float:
-        return round(weights + lora_overhead + activation_overhead + _RUNTIME_OVERHEAD_GB, 1)
+    quant_overhead = params_b * _QUANT_RUNTIME_GB_PER_B
+
+    def _total(weights: float, quantized: bool) -> float:
+        base = weights + lora_overhead + activation_overhead + _RUNTIME_OVERHEAD_GB
+        return round(base + (quant_overhead if quantized else 0.0), 1)
 
     return VramEstimate(
         base_model=base_model,
@@ -257,16 +265,17 @@ def build_vram_estimate(
         weights_gb_int4=round(weights_int4, 1),
         lora_overhead_gb=round(lora_overhead, 1),
         activation_overhead_gb=round(activation_overhead, 1),
-        total_gb_fp16=_total(weights_fp16),
-        total_gb_int8=_total(weights_int8),
-        total_gb_int4=_total(weights_int4),
+        total_gb_fp16=_total(weights_fp16, quantized=False),
+        total_gb_int8=_total(weights_int8, quantized=True),
+        total_gb_int4=_total(weights_int4, quantized=True),
         assumptions=[
             f"Parameter count {params_b}B parsed from the model name.",
             "Weights: fp16 2 bytes/param, 8-bit 1, 4-bit 0.5.",
             f"LoRA overhead: ~{_LORA_FRACTION_AT_R16:.1%} of params at r=16, scaled by r={lora_r}, "
             f"{_LORA_BYTES_PER_PARAM} bytes/trainable param (weight+grad+AdamW states).",
-            f"Activations assume gradient checkpointing, seq_len {sequence_len}, "
-            f"micro-batch {micro_batch_size}.",
+            f"Activations (~{activation_overhead:.1f} GB): gradient checkpointing, seq_len {sequence_len}, "
+            f"micro-batch {micro_batch_size} — they scale with seq_len, so a long sequence dominates.",
+            f"Quantized paths add ~{quant_overhead:.1f} GB for bitsandbytes dequant/compute buffers.",
             f"+{_RUNTIME_OVERHEAD_GB:.0f} GB fixed runtime overhead.",
         ],
         note="Rough planning estimate only; real usage varies by architecture and trainer.",

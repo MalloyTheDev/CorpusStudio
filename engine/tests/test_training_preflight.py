@@ -138,3 +138,15 @@ def test_oom_passes_when_it_fits(tmp_path: Path, monkeypatch):
     report = _run(tmp_path, vram_min_gb=8.0)  # 8 GB needed, 22 free
     gpu_check = next(c for c in report.checks if c.name == "gpu_memory")
     assert gpu_check.status == PASS
+
+
+def test_tight_vram_warns_even_when_it_technically_fits(tmp_path: Path, monkeypatch):
+    # A run that only "just fits" can VRAM-pressure DEADLOCK (not cleanly OOM): a real 7B/4-bit/seq-4096
+    # run peaked ~11.9 GB and hung a 12 GB card at 58 MiB free. Estimate 11.5 GB with 12 GB free is
+    # within the safety margin → WARN, not the old green PASS that green-lit the deadlock.
+    _gpu(monkeypatch, GpuMemory(total_gb=12.0, free_gb=12.0))
+    report = _run(tmp_path, vram_min_gb=11.5)
+    gpu_check = next(c for c in report.checks if c.name == "gpu_memory")
+    assert gpu_check.status == WARN
+    assert "Tight VRAM" in gpu_check.message
+    assert report.can_launch is True  # a warning, not a hard block

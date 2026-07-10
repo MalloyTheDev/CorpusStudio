@@ -28,6 +28,11 @@ BLOCK = "block"
 # Below this, a run is almost certainly not worth the compute — warn loudly.
 _MIN_USEFUL_ROWS = 10
 
+# Keep at least this much VRAM free ABOVE the (rough) estimate. A run that only "just fits" can
+# VRAM-pressure DEADLOCK rather than cleanly OOM — a real Qwen2.5-7B / 4-bit / seq-4096 run peaked
+# ~11.9 GB and hung on a 12 GB card at 58 MiB free. Warn in that band instead of green-lighting it.
+_VRAM_SAFETY_MARGIN_GB = 1.5
+
 
 class PreflightCheck(BaseModel):
     """One pre-flight check outcome."""
@@ -203,6 +208,18 @@ def run_training_preflight(
                     ),
                 )
             )
+        elif vram_min_gb > gpu.free_gb - _VRAM_SAFETY_MARGIN_GB:
+            checks.append(
+                PreflightCheck(
+                    name="gpu_memory",
+                    status=WARN,
+                    message=(
+                        f"Tight VRAM: the 4-bit estimate ~{vram_min_gb:.1f} GB leaves under ~{_VRAM_SAFETY_MARGIN_GB:.0f} GB "
+                        f"free of ~{gpu.free_gb:.1f} GB — this close to the edge a run can VRAM-pressure DEADLOCK (not just "
+                        "OOM); the peak is dominated by sequence_len activations. Lower sequence_len or micro-batch for headroom."
+                    ),
+                )
+            )
         else:
             checks.append(
                 PreflightCheck(
@@ -210,7 +227,7 @@ def run_training_preflight(
                     status=PASS,
                     message=(
                         f"GPU has ~{gpu.free_gb:.1f} GB free (of ~{gpu.total_gb:.1f} GB); the 4-bit estimate "
-                        f"~{vram_min_gb:.1f} GB fits."
+                        f"~{vram_min_gb:.1f} GB fits with headroom."
                     ),
                 )
             )

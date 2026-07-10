@@ -19,6 +19,7 @@ from corpus_studio.training.trainer import (
     build_training_kwargs,
     format_example_text,
     load_run_config_from_file,
+    resolve_attention_implementation,
     resolve_run_plan,
     _list_checkpoints,
 )
@@ -103,6 +104,34 @@ def test_load_config_non_mapping_raises_trainer_error(tmp_path):
     config.write_text("just a plain string, not a config mapping\n", encoding="utf-8")
     with pytest.raises(TrainerError):
         load_run_config_from_file(config)
+
+
+def test_load_config_reads_attn_implementation(tmp_path):
+    # From the config file, and an explicit override wins.
+    cfg = load_run_config_from_file(_config(tmp_path, attn_implementation="eager"))
+    assert cfg.attn_implementation == "eager"
+    override = load_run_config_from_file(_config(tmp_path), attn_implementation="sdpa")
+    assert override.attn_implementation == "sdpa"
+    assert load_run_config_from_file(_config(tmp_path)).attn_implementation is None
+
+
+def test_resolve_attention_blackwell_forces_math_sdpa():
+    # Blackwell (sm_120 → capability major 12): the fused flash/mem-efficient SDPA deadlocks on the
+    # first backward, so keep default SDPA but signal the caller to disable the fused backends (→ math).
+    assert resolve_attention_implementation(None, 12) == (None, True)
+    assert resolve_attention_implementation(None, 13) == (None, True)
+
+
+def test_resolve_attention_older_arch_is_unchanged():
+    assert resolve_attention_implementation(None, 9) == (None, False)   # e.g. Ada / Hopper
+    assert resolve_attention_implementation(None, 8) == (None, False)
+    assert resolve_attention_implementation(None, None) == (None, False)  # no GPU info
+
+
+def test_resolve_attention_explicit_choice_always_wins():
+    # An explicit attn_implementation is honored verbatim and never toggles the fused SDP backends.
+    assert resolve_attention_implementation("eager", 12) == ("eager", False)
+    assert resolve_attention_implementation("flash_attention_2", 8) == ("flash_attention_2", False)
 
 
 # ---- formatting --------------------------------------------------------------

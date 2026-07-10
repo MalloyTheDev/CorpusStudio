@@ -46,6 +46,7 @@ class GpuInfo(BaseModel):
     device_count: int = 0
     name: str = ""
     total_memory_gb: float = 0.0
+    compute_capability: str = ""  # e.g. "12.0" for Blackwell / sm_120
 
 
 class TrainingRuntimeReport(BaseModel):
@@ -71,6 +72,14 @@ def _installed_version(package: str) -> str | None:
         return None
 
 
+def _capability_major(compute_capability: str) -> int:
+    """Major compute capability from a ``"12.0"``-style string, or 0 when unknown."""
+    try:
+        return int(compute_capability.split(".")[0])
+    except (ValueError, AttributeError, IndexError):
+        return 0
+
+
 def _probe_gpu(torch_present: bool) -> GpuInfo:
     """Best-effort CUDA probe. Imports torch only when present, fully guarded (a torch/driver
     mismatch must degrade to 'no GPU', never crash)."""
@@ -83,11 +92,17 @@ def _probe_gpu(torch_present: bool) -> GpuInfo:
             return GpuInfo(available=False)
         index = torch.cuda.current_device()
         props = torch.cuda.get_device_properties(index)
+        try:
+            major, minor = torch.cuda.get_device_capability(index)
+            capability = f"{major}.{minor}"
+        except Exception:  # noqa: BLE001 - capability is advisory; never fail the probe on it.
+            capability = ""
         return GpuInfo(
             available=True,
             device_count=torch.cuda.device_count(),
             name=str(props.name),
             total_memory_gb=round(props.total_memory / 1e9, 1),
+            compute_capability=capability,
         )
     except Exception:  # noqa: BLE001 - any probe failure means 'treat as no usable GPU'.
         return GpuInfo()
@@ -122,6 +137,12 @@ def probe_training_runtime() -> TrainingRuntimeReport:
         notes.append(
             f"GPU has {gpu.total_memory_gb} GB VRAM — a 7B fp16 merge (~14 GB) is tight and may OOM; "
             "the fallback is a CPU-offload merge or adapter-only serving."
+        )
+    if gpu.available and _capability_major(gpu.compute_capability) >= 12:
+        notes.append(
+            f"Blackwell GPU (sm_{gpu.compute_capability.replace('.', '')}): the trainer forces the math SDPA "
+            "attention path — the fused flash/mem-efficient kernels deadlock on the first backward on this "
+            "arch. Math attention uses more VRAM than flash, so a long sequence_len is tighter here."
         )
     if ready:
         notes.append("Ready: a 4-bit QLoRA GPU run is possible.")

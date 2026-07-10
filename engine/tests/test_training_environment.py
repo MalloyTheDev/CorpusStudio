@@ -82,6 +82,27 @@ def test_low_vram_gpu_warns_about_merge(monkeypatch):
     assert any("OOM" in n or "tight" in n for n in r.notes)
 
 
+def test_blackwell_gpu_notes_the_math_sdpa_fallback(monkeypatch):
+    # sm_120 → the trainer forces math SDPA (the fused flash/mem-efficient kernels deadlock there).
+    _patch(
+        monkeypatch,
+        {p: "1.0" for p in _FULL},
+        env.GpuInfo(available=True, device_count=1, name="RTX 5070", total_memory_gb=12.0, compute_capability="12.0"),
+    )
+    r = env.probe_training_runtime()
+    assert any("Blackwell" in note and "math SDPA" in note for note in r.notes)
+
+
+def test_non_blackwell_gpu_has_no_sdpa_note(monkeypatch):
+    _patch(
+        monkeypatch,
+        {p: "1.0" for p in _FULL},
+        env.GpuInfo(available=True, device_count=1, name="RTX 4090", total_memory_gb=24.0, compute_capability="8.9"),
+    )
+    r = env.probe_training_runtime()
+    assert not any("Blackwell" in note for note in r.notes)
+
+
 def test_render_text_has_verdict_and_packages(monkeypatch):
     _patch(monkeypatch, {p: "1.0" for p in _FULL}, env.GpuInfo(available=True, total_memory_gb=24.0))
     text = env.render_training_runtime_text(env.probe_training_runtime())

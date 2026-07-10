@@ -185,6 +185,19 @@ the live log (a real GPU run needs `ready`; tick **CPU toy** for the smoke path)
 the trainer with the engine's own interpreter, so the run always matches what
 train-check probed.
 
+### GPU notes: attention backend on Blackwell (RTX 50-series / sm_120)
+
+On brand-new **Blackwell** GPUs (RTX 50-series, compute capability sm_120) the fused
+**flash / memory-efficient SDPA** attention kernels **deadlock on the first backward
+pass** in current PyTorch — the training step hangs at 100% GPU util but ~55 W (a real
+step pulls 150–250 W). bitsandbytes 4-bit and the *math* attention path are both fine;
+only the fused kernels hang. `train-run` **detects sm_120 and automatically disables the
+fused SDPA backends**, falling back to the sm_120-safe math SDPA kernel (`train-check`
+notes this when it sees a Blackwell card). Trade-off: **math attention uses more VRAM
+than flash**, so a long `sequence_len` is tighter on a 12 GB card — lower `sequence_len`
+if you OOM. Override the backend explicitly with `train-run --attn-implementation
+eager|sdpa|flash_attention_2` (or `attn_implementation` in the config).
+
 Security: model loading uses `trust_remote_code=False` (a fetched repo can't execute
 code), and `model-fetch` warns when a model ships only pickle (`.bin`) weights
 instead of safetensors. Honesty: `train-check`'s verdict is a capability check, the
