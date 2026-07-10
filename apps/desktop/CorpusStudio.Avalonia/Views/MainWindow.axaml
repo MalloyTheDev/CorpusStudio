@@ -123,8 +123,19 @@
                 <Button Content="Generate card" Command="{Binding GenerateDatasetCardCommand}" Margin="0,0,6,4"/>
                 <Button Content="Run gates" Command="{Binding RunGatesCommand}" Margin="0,0,6,4"/>
                 <Button Content="Run chat gates" Command="{Binding RunChatGatesCommand}" Margin="0,0,6,4"/>
+                <Button Content="Check provenance" Command="{Binding RunProvenanceGateCommand}" Margin="0,0,6,4"/>
                 <Button Content="Benchmark" Command="{Binding RunBenchmarkCommand}" Margin="0,0,6,4"/>
               </WrapPanel>
+              <!-- Per-row provenance verdict (issue: WBG licensing landmine). Badge + summary,
+                   shown once the gate has run — the shared command feeds both heads. -->
+              <StackPanel IsVisible="{Binding HasProvenanceGateReport}" Spacing="4" Margin="0,2,0,0">
+                <Border CornerRadius="4" Padding="7,1" HorizontalAlignment="Left"
+                        Background="{Binding ProvenanceGateColor, Converter={StaticResource StringToBrush}}">
+                  <TextBlock Text="{Binding ProvenanceGateStatus}" Foreground="White" FontSize="10.5" FontWeight="Bold"/>
+                </Border>
+                <TextBox Text="{Binding ProvenanceGateSummary}" IsReadOnly="True" AcceptsReturn="True"
+                         FontFamily="Consolas" FontSize="11.5" MaxHeight="150" TextWrapping="Wrap"/>
+              </StackPanel>
               <WrapPanel VerticalAlignment="Center">
                 <CheckBox Content="dedupe" IsChecked="{Binding ExportRemoveDuplicates}" Margin="0,0,8,0"/>
                 <CheckBox Content="drop low-info" IsChecked="{Binding ExportRemoveLowInformation}" Margin="0,0,8,0"/>

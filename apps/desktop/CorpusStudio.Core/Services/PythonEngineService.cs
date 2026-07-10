@@ -1171,6 +1171,33 @@ public sealed class PythonEngineService : IEngineService
             ?? throw new InvalidOperationException("The Python engine returned an invalid gate report.");
     }
 
+    /// <summary>Run the per-row provenance gate over the project's dataset — reads each row's declared
+    /// teacher (meta.teacher), applies the project's provenance_allowlist.json, and returns a verdict
+    /// bucketed by teacher. The engine writes the JSON report to stdout (parsed here) and a human table
+    /// to stderr (surfaced as notes); exit stays 0 with the verdict in the report.</summary>
+    public async Task<ProvenanceGateReport> RunProvenanceGateAsync(string projectPath, bool strict = false)
+    {
+        var examplesPath = Path.Combine(projectPath, "examples.jsonl");
+        if (!File.Exists(examplesPath))
+        {
+            throw new FileNotFoundException("Project examples file was not found.", examplesPath);
+        }
+
+        var args = new List<string> { "provenance-gate", examplesPath, "--project-dir", projectPath };
+        if (strict)
+        {
+            args.Add("--strict");
+        }
+
+        var output = await RunEngineCommandAsync(args.ToArray());
+        return ParseProvenanceGateReport(output);
+    }
+
+    /// <summary>Pure parse of the engine's provenance-gate JSON (unit-testable off a string).</summary>
+    public static ProvenanceGateReport ParseProvenanceGateReport(string json) =>
+        JsonSerializer.Deserialize<ProvenanceGateReport>(json, JsonOptions)
+        ?? throw new InvalidOperationException("The Python engine returned an invalid provenance gate report.");
+
     // ---- Evaluation Suites (v1.3 M2) --------------------------------------------------
 
     /// <summary>List the registered evaluation suites under the project's evaluation_suites/.</summary>
