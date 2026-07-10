@@ -757,6 +757,113 @@ public sealed class TrainingViewModel : ViewModelBase, ITrainingViewModel
         TrainingMergeSummary = $"The adapter merge could not run.{Environment.NewLine}{message}";
     }
 
+    // ---- Base-model download (model-fetch) + adapter model card (model-card) ----
+
+    private string _modelFetchRepoId = string.Empty;
+    private bool _isFetchingModel;
+
+    private string _modelFetchSummary =
+        "Download a base model from the Hugging Face Hub to train on. Prefer a permissive (MIT/Apache) "
+        + "license — the base model's license governs what you may do with the trained result.";
+
+    private string _modelCardText =
+        "After a first-party run, view the trained adapter's model card here (base model + license, LoRA "
+        + "config, honesty notes). train-run also writes MODEL_CARD.md next to the adapter.";
+
+    public string ModelFetchRepoId
+    {
+        get => _modelFetchRepoId;
+        set
+        {
+            if (SetField(ref _modelFetchRepoId, value))
+            {
+                OnPropertyChanged(nameof(CanFetchModel));
+            }
+        }
+    }
+
+    public string ModelFetchSummary
+    {
+        get => _modelFetchSummary;
+        private set => SetField(ref _modelFetchSummary, value);
+    }
+
+    public bool IsFetchingModel
+    {
+        get => _isFetchingModel;
+        private set
+        {
+            if (SetField(ref _isFetchingModel, value))
+            {
+                OnPropertyChanged(nameof(CanFetchModel));
+            }
+        }
+    }
+
+    public bool CanFetchModel => !_isFetchingModel && !string.IsNullOrWhiteSpace(_modelFetchRepoId);
+
+    public string ModelCardText
+    {
+        get => _modelCardText;
+        private set => SetField(ref _modelCardText, value);
+    }
+
+    public void SetModelFetchInProgress()
+    {
+        IsFetchingModel = true;
+        ModelFetchSummary = string.IsNullOrWhiteSpace(_modelFetchRepoId)
+            ? "Downloading… (resumable)"
+            : $"Downloading {_modelFetchRepoId} (resumable — survives dropped connections)…";
+    }
+
+    public void AppendModelFetchProgress(string line)
+    {
+        if (!string.IsNullOrWhiteSpace(line))
+        {
+            ModelFetchSummary = line; // show the latest progress line while the download runs
+        }
+    }
+
+    /// <summary>Render a completed model-fetch: repo, LICENSE (permissive or not — the honest, fail-closed
+    /// classification), local path, size, and any warnings (non-permissive license, pickle-only weights).</summary>
+    public void ApplyModelFetch(ModelFetchResult result)
+    {
+        IsFetchingModel = false;
+        var licenseNote = result.LicensePermissive
+            ? "permissive — OK to train on and redistribute the result"
+            : "NOT clearly permissive — verify the repo's terms before training/redistributing";
+        var lines = new List<string>
+        {
+            $"Downloaded {result.RepoId}" + (string.IsNullOrWhiteSpace(result.Revision) ? "" : $"@{result.Revision}"),
+            $"License: {result.License ?? "unknown"} — {licenseNote}",
+            $"Path: {result.LocalPath}",
+            $"{result.WeightFiles.Count} weight file(s), ~{result.TotalSizeMb:N1} MB",
+        };
+        lines.AddRange(result.Warnings.Select(warning => $"⚠ {warning}"));
+        ModelFetchSummary = string.Join(Environment.NewLine, lines);
+    }
+
+    public void SetModelFetchError(string message)
+    {
+        IsFetchingModel = false;
+        ModelFetchSummary = $"The model download failed.{Environment.NewLine}{message}";
+    }
+
+    public void SetModelCardInProgress()
+    {
+        ModelCardText = "Generating the model card…";
+    }
+
+    public void ApplyModelCard(string cardMarkdown)
+    {
+        ModelCardText = string.IsNullOrWhiteSpace(cardMarkdown) ? "(the model card was empty)" : cardMarkdown;
+    }
+
+    public void SetModelCardError(string message)
+    {
+        ModelCardText = $"The model card could not be generated.{Environment.NewLine}{message}";
+    }
+
     /// <summary>The launch decision for the first-party trainer, given a fresh train-check report and
     /// whether CPU-toy was requested. PURE + unit-tested — encodes the honesty rules: a real GPU run
     /// needs <c>ready</c>; the CPU smoke path needs <c>cpu_toy_ready</c>; otherwise block with the

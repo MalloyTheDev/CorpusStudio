@@ -2873,6 +2873,46 @@ public sealed class PythonEngineService : IEngineService
             ?? throw new InvalidOperationException("The Python engine returned an invalid train-merge result.");
     }
 
+    public async Task<ModelFetchResult> FetchModelAsync(
+        string repoId, string? revision, string? localDir, IProgress<string>? progress = null)
+    {
+        var args = new List<string> { "model-fetch", repoId };
+        if (!string.IsNullOrWhiteSpace(revision))
+        {
+            args.Add("--revision");
+            args.Add(revision);
+        }
+        if (!string.IsNullOrWhiteSpace(localDir))
+        {
+            args.Add("--local-dir");
+            args.Add(localDir);
+        }
+
+        // model-fetch streams progress to stderr and the JSON result to stdout; stream when a sink is given.
+        var output = progress is null
+            ? await RunEngineCommandAsync(args.ToArray())
+            : await RunEngineCommandStreamingAsync(progress.Report, args.ToArray());
+        return JsonSerializer.Deserialize<ModelFetchResult>(output, JsonOptions)
+            ?? throw new InvalidOperationException("The Python engine returned an invalid model-fetch result.");
+    }
+
+    public async Task<string> GenerateModelCardAsync(string adapterPath, string? baseModel = null, string? configPath = null)
+    {
+        var args = new List<string> { "model-card", adapterPath };
+        if (!string.IsNullOrWhiteSpace(baseModel))
+        {
+            args.Add("--base-model");
+            args.Add(baseModel);
+        }
+        if (!string.IsNullOrWhiteSpace(configPath))
+        {
+            args.Add("--config");
+            args.Add(configPath);
+        }
+
+        return await RunEngineCommandAsync(args.ToArray());
+    }
+
     public async Task<TrainingCheckpointsResult> GetTrainingCheckpointsAsync(
         string outputDirectory,
         string target,

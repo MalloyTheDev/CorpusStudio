@@ -572,7 +572,18 @@
                       ToolTip.Tip="Run the tiny CPU smoke path — proves the pipeline runs; does NOT train a usable model"/>
             <Button Content="Merge adapter" Command="{Binding MergeAdapterCommand}" IsEnabled="{Binding Training.CanMergeAdapter}" Margin="0,0,6,4"
                     ToolTip.Tip="Merge the trained LoRA adapter into its base (train-merge, auto → GPU / CPU-offload / adapter-only)"/>
+            <Button Content="Model card" Command="{Binding ShowModelCardCommand}" IsEnabled="{Binding Training.CanMergeAdapter}" Margin="0,0,6,4"
+                    ToolTip.Tip="Generate + show the trained adapter's model card (base model + license, LoRA config, honesty notes)"/>
           </WrapPanel>
+          <!-- Download a base model from the HF Hub (resumable + license report). Useful for any target. -->
+          <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,4,0,0">
+            <TextBlock Text="Download base model:" VerticalAlignment="Center"/>
+            <TextBox Text="{Binding Training.ModelFetchRepoId}" Width="280" Watermark="HF repo id (prefer MIT/Apache)"
+                     ToolTip.Tip="e.g. HuggingFaceTB/SmolLM2-135M-Instruct — the base model's license governs the trained result"/>
+            <Button Content="Download" Command="{Binding FetchModelCommand}" IsEnabled="{Binding Training.CanFetchModel}"/>
+          </StackPanel>
+          <TextBox Text="{Binding Training.ModelFetchSummary}" IsReadOnly="True" AcceptsReturn="True"
+                   FontFamily="Consolas" FontSize="11" MaxHeight="120" TextWrapping="Wrap"/>
           <TextBlock Text="{Binding Training.TrainingLaunchCommand}" TextWrapping="Wrap"
                      FontFamily="Consolas" FontSize="11"/>
           <TextBox Text="{Binding Training.TrainingRunLog}" IsReadOnly="True" AcceptsReturn="True"
@@ -583,6 +594,8 @@
                    IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="11" MaxHeight="140" TextWrapping="Wrap"/>
           <TextBox Text="{Binding Training.TrainingMergeSummary}" IsVisible="{Binding Training.IsFirstPartyTarget}"
                    IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="11" MaxHeight="140" TextWrapping="Wrap"/>
+          <TextBox Text="{Binding Training.ModelCardText}" IsVisible="{Binding Training.IsFirstPartyTarget}"
+                   IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="11" MaxHeight="180" TextWrapping="Wrap"/>
         </StackPanel>
       </Grid>
     </TabItem>

@@ -206,6 +206,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand StopTrainingCommand { get; }
     public System.Windows.Input.ICommand CheckTrainingRuntimeCommand { get; }
     public System.Windows.Input.ICommand MergeAdapterCommand { get; }
+    public System.Windows.Input.ICommand FetchModelCommand { get; }
+    public System.Windows.Input.ICommand ShowModelCardCommand { get; }
     public System.Windows.Input.ICommand RunQualityCommand { get; }
     public System.Windows.Input.ICommand SaveGateThresholdsCommand { get; }
     public System.Windows.Input.ICommand RefreshProviderPoliciesCommand { get; }
@@ -345,6 +347,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         StopTrainingCommand = new RelayCommand(StopTraining);
         CheckTrainingRuntimeCommand = new AsyncRelayCommand(CheckTrainingRuntimeAsync);
         MergeAdapterCommand = new AsyncRelayCommand(MergeAdapterAsync);
+        FetchModelCommand = new AsyncRelayCommand(FetchModelAsync);
+        ShowModelCardCommand = new AsyncRelayCommand(ShowModelCardAsync);
         RunQualityCommand = new AsyncRelayCommand(() => RefreshQualityAsync());
         SaveGateThresholdsCommand = new AsyncRelayCommand(SaveGateThresholdsAsync);
         RefreshProviderPoliciesCommand = new AsyncRelayCommand(RefreshProviderPoliciesAsync);
@@ -2466,6 +2470,64 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         catch (System.Exception ex)
         {
             Training.SetMergeError(ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    }
+
+    /// <summary>Download a base model from the Hugging Face Hub (model-fetch) and surface its LICENSE.
+    /// Resumable + streams progress into the model-fetch summary. Needs no project — this grabs a model
+    /// to train ON (prefer a permissive base; the base model's license governs the trained result).</summary>
+    public async System.Threading.Tasks.Task FetchModelAsync()
+    {
+        var repoId = Training.ModelFetchRepoId?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(repoId))
+        {
+            await _dialogs.ShowAsync(
+                "Enter a Hugging Face repo id to download (e.g. HuggingFaceTB/SmolLM2-135M-Instruct).",
+                "Corpus Studio", DialogSeverity.Information);
+            return;
+        }
+
+        try
+        {
+            Training.SetModelFetchInProgress();
+            var progress = new System.Progress<string>(Training.AppendModelFetchProgress);
+            var result = await _engine.FetchModelAsync(repoId, revision: null, localDir: null, progress);
+            Training.ApplyModelFetch(result);
+        }
+        catch (System.Exception ex)
+        {
+            Training.SetModelFetchError(ex.Message);
+        }
+    }
+
+    /// <summary>Generate + show the model card for the current run's output dir (model-card): the base
+    /// model + license reminder, the LoRA config, and honesty notes. train-run also writes it to disk.</summary>
+    public async System.Threading.Tasks.Task ShowModelCardAsync()
+    {
+        var adapterDir = Training.TrainingOutputDirectory;
+        if (string.IsNullOrWhiteSpace(adapterDir))
+        {
+            await _dialogs.ShowAsync(
+                "Run the first-party trainer first — the model card describes the adapter it writes to the output directory.",
+                "Corpus Studio", DialogSeverity.Information);
+            return;
+        }
+
+        try
+        {
+            SetBusy("Generating the model card...");
+            Training.SetModelCardInProgress();
+            var configPath = string.IsNullOrWhiteSpace(Training.TrainingConfigPath) ? null : Training.TrainingConfigPath;
+            var card = await _engine.GenerateModelCardAsync(adapterDir, baseModel: null, configPath: configPath);
+            Training.ApplyModelCard(card);
+        }
+        catch (System.Exception ex)
+        {
+            Training.SetModelCardError(ex.Message);
         }
         finally
         {

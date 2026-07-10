@@ -2283,8 +2283,15 @@
                                         ToolTip="Merge the trained LoRA adapter into its base (train-merge, auto → GPU / CPU-offload / adapter-only)"
                                         IsEnabled="{Binding Training.CanMergeAdapter, Mode=OneWay}"
                                         Visibility="{Binding Training.IsFirstPartyTarget, Converter={StaticResource BoolToVis}}"
-                                        Margin="0,0,12,0"
+                                        Margin="0,0,8,0"
                                         Command="{Binding MergeAdapterCommand}" />
+                                <Button AutomationProperties.AutomationId="ShowModelCardButton"
+                                        Content="Model card"
+                                        ToolTip="Generate + show the trained adapter's model card (base model + license reminder, LoRA config, honesty notes)"
+                                        IsEnabled="{Binding Training.CanMergeAdapter, Mode=OneWay}"
+                                        Visibility="{Binding Training.IsFirstPartyTarget, Converter={StaticResource BoolToVis}}"
+                                        Margin="0,0,12,0"
+                                        Command="{Binding ShowModelCardCommand}" />
                                 <TextBlock Text="Status:"
                                            VerticalAlignment="Center"
                                            Margin="0,0,6,0" />
@@ -2305,33 +2312,84 @@
                                     Padding="8"
                                     Margin="0,8,0,0">
                                 <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox Grid.Column="0"
-                                             AutomationProperties.AutomationId="TrainingRuntimeSummaryTextBox"
-                                             Text="{Binding Training.TrainingRuntimeSummary, Mode=OneWay}"
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid Grid.Row="0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Grid.Column="0"
+                                                 AutomationProperties.AutomationId="TrainingRuntimeSummaryTextBox"
+                                                 Text="{Binding Training.TrainingRuntimeSummary, Mode=OneWay}"
+                                                 IsReadOnly="True"
+                                                 AcceptsReturn="True"
+                                                 FontFamily="Consolas"
+                                                 FontSize="11"
+                                                 MaxHeight="150"
+                                                 TextWrapping="Wrap"
+                                                 VerticalScrollBarVisibility="Auto"
+                                                 Margin="0,0,6,0" />
+                                        <TextBox Grid.Column="1"
+                                                 AutomationProperties.AutomationId="TrainingMergeSummaryTextBox"
+                                                 Text="{Binding Training.TrainingMergeSummary, Mode=OneWay}"
+                                                 IsReadOnly="True"
+                                                 AcceptsReturn="True"
+                                                 FontFamily="Consolas"
+                                                 FontSize="11"
+                                                 MaxHeight="150"
+                                                 TextWrapping="Wrap"
+                                                 VerticalScrollBarVisibility="Auto"
+                                                 Margin="6,0,0,0" />
+                                    </Grid>
+                                    <TextBox Grid.Row="1"
+                                             AutomationProperties.AutomationId="TrainingModelCardTextBox"
+                                             Text="{Binding Training.ModelCardText, Mode=OneWay}"
                                              IsReadOnly="True"
                                              AcceptsReturn="True"
                                              FontFamily="Consolas"
                                              FontSize="11"
-                                             MaxHeight="150"
+                                             MaxHeight="180"
                                              TextWrapping="Wrap"
                                              VerticalScrollBarVisibility="Auto"
-                                             Margin="0,0,6,0" />
-                                    <TextBox Grid.Column="1"
-                                             AutomationProperties.AutomationId="TrainingMergeSummaryTextBox"
-                                             Text="{Binding Training.TrainingMergeSummary, Mode=OneWay}"
-                                             IsReadOnly="True"
-                                             AcceptsReturn="True"
-                                             FontFamily="Consolas"
-                                             FontSize="11"
-                                             MaxHeight="150"
-                                             TextWrapping="Wrap"
-                                             VerticalScrollBarVisibility="Auto"
-                                             Margin="6,0,0,0" />
+                                             Margin="0,6,0,0" />
                                 </Grid>
+                            </Border>
+                            <Border BorderBrush="{DynamicResource Fg475569}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Padding="8"
+                                    Margin="0,8,0,0">
+                                <StackPanel>
+                                    <WrapPanel VerticalAlignment="Center">
+                                        <TextBlock Text="Download base model (HF Hub)"
+                                                   FontWeight="SemiBold"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,8,0" />
+                                        <TextBox AutomationProperties.AutomationId="ModelFetchRepoIdTextBox"
+                                                 Text="{Binding Training.ModelFetchRepoId, UpdateSourceTrigger=PropertyChanged}"
+                                                 Width="300"
+                                                 VerticalAlignment="Center"
+                                                 ToolTip="A Hugging Face repo id, e.g. HuggingFaceTB/SmolLM2-135M-Instruct. Prefer MIT/Apache/permissive models."
+                                                 Margin="0,0,8,0" />
+                                        <Button AutomationProperties.AutomationId="FetchModelButton"
+                                                Content="Download"
+                                                IsEnabled="{Binding Training.CanFetchModel, Mode=OneWay}"
+                                                Command="{Binding FetchModelCommand}" />
+                                    </WrapPanel>
+                                    <TextBox AutomationProperties.AutomationId="ModelFetchSummaryTextBox"
+                                             Text="{Binding Training.ModelFetchSummary, Mode=OneWay}"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             FontFamily="Consolas"
+                                             FontSize="11"
+                                             MaxHeight="120"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             Margin="0,6,0,0" />
+                                </StackPanel>
                             </Border>
                             </StackPanel>
 
