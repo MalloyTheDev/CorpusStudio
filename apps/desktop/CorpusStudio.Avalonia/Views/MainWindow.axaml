@@ -4,6 +4,7 @@
         xmlns:models="clr-namespace:CorpusStudio.Desktop.Models;assembly=CorpusStudio.Core"
         x:Class="CorpusStudio.Avalonia.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
+        Icon="/app.ico"
         Width="1180" Height="800"
         Title="Corpus Studio — Avalonia (full shell over the shared view-models)">
   <Grid ColumnDefinitions="52,*">

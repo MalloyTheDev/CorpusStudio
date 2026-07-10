@@ -27,4 +27,10 @@
     <ProjectReference Include="..\CorpusStudio.Core\CorpusStudio.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- App/window icon (shared "CS" mark). Bundled as an Avalonia resource so MainWindow can
+         reference Icon="/app.ico" across Windows/macOS/Linux. -->
+    <AvaloniaResource Include="app.ico" />
+  </ItemGroup>
+
 </Project>

@@ -4,6 +4,7 @@
         xmlns:vm="clr-namespace:CorpusStudio.Desktop.ViewModels"
         xmlns:local="clr-namespace:CorpusStudio.Desktop"
         Title="Corpus Studio"
+        Icon="app.ico"
         Height="800"
         Width="1180"
         MinHeight="680"

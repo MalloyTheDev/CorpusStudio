@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="Corpus Studio">
+  <!-- Source-of-truth app mark: the same blue gradient rounded square used for the in-app
+       "C" avatar, formalized into a "CS" monogram. Regenerate the .ico/.png from this via
+       tools/generate_icon.py (Pillow). -->
+  <defs>
+    <linearGradient id="cs" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#1D4ED8"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="256" height="256" rx="56" ry="56" fill="url(#cs)"/>
+  <text x="128" y="128" fill="#FFFFFF" font-family="Segoe UI, Arial, sans-serif"
+        font-size="132" font-weight="700" text-anchor="middle" dominant-baseline="central">CS</text>
+</svg>

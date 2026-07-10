@@ -1,5 +1,7 @@
 # Corpus Studio
 
+<img src="assets/branding/corpusstudio-256.png" alt="Corpus Studio" width="104" align="right" />
+
 [![Engine coverage](https://codecov.io/gh/MalloyTheDev/CorpusStudio/branch/main/graph/badge.svg)](https://codecov.io/gh/MalloyTheDev/CorpusStudio)
 
 **Corpus Studio** is a local-first dataset creation studio for AI builders.

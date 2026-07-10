@@ -8,10 +8,17 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>CorpusStudio.Desktop</AssemblyName>
     <RootNamespace>CorpusStudio.Desktop</RootNamespace>
+    <!-- The .exe icon (Explorer, taskbar pin). The window title-bar icon is set in MainWindow.xaml. -->
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Also embedded as a Resource so the Window can bind Icon="app.ico" at runtime. -->
+    <Resource Include="app.ico" />
   </ItemGroup>
 
   <ItemGroup>
