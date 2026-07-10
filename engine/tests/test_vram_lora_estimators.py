@@ -70,42 +70,37 @@ def test_activation_scales_with_sequence_and_batch():
     assert large.activation_overhead_gb > small.activation_overhead_gb
 
 
-def test_7b_4bit_seq4096_estimate_is_realistic_not_undercounted():
-    # Regression guard for the calibration: a real Qwen2.5-7B 4-bit QLoRA at seq 4096 peaked ~11.9 GB
-    # and VRAM-DEADLOCKED a 12 GB card — the OLD estimate said ~6.7 GB and green-lit it. The calibrated
-    # estimate must be realistic (~10-13 GB) so the preflight can warn; a shorter sequence must give
-    # real headroom (the reliable lever).
-    at_4096 = build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", lora_r=16, sequence_len=4096, micro_batch_size=1)
-    assert 10.0 <= at_4096.total_gb_int4 <= 13.0
-    at_3072 = build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", lora_r=16, sequence_len=3072, micro_batch_size=1)
-    assert at_3072.total_gb_int4 < at_4096.total_gb_int4 - 0.5
+def test_vram_estimate_matches_the_7b_memory_sweep():
+    # Calibrated to a real Qwen2.5-7B 4-bit QLoRA memory sweep on an RTX 5070 (the MATH path Blackwell is
+    # forced onto): base ~7.9 GB + ~2.85 GB/1024 tokens → 10.83 GB @ seq1024, 13.76 @ seq2048. The old
+    # estimate said ~6.7 GB and green-lit a run that then spilled to system RAM and crawled.
+    for seq, real in ((1024, 10.83), (2048, 13.76)):
+        est = build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", sequence_len=seq, math_attention=True).total_gb_int4
+        assert abs(est - real) < 0.5, (seq, est, real)
+    # Flash/mem-efficient attention is far lighter (WBG measured ~9 GB @ seq2048) — the biggest Blackwell lever.
+    assert build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", sequence_len=2048).total_gb_int4 < 10.0
     # Quantized paths carry the bitsandbytes runtime overhead that fp16 does not.
-    assert any("bitsandbytes" in a for a in at_4096.assumptions)
+    assert any("bitsandbytes" in a for a in build_vram_estimate("7B").assumptions)
 
 
-def test_math_attention_adds_seq_squared_overhead():
-    # Blackwell/sm_120 is forced onto the math attention path, which materializes the seq×seq scores that
-    # flash attention avoids — a seq²-scaling cost. A real 7B/4-bit math run peaked ~11.9 GB @ seq 3072,
-    # which the flash-path estimate (~10.7) under-counts; math_attention=True must add that headroom.
-    flash = build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", sequence_len=3072)
-    math = build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", sequence_len=3072, math_attention=True)
-    assert math.total_gb_int4 > flash.total_gb_int4
-    assert 11.0 <= math.total_gb_int4 <= 13.0  # realistic vs the real ~11.9 GB stall peak
-    assert any("Math attention" in a for a in math.assumptions)
-    assert not any("Math attention" in a for a in flash.assumptions)  # only surfaced when requested
+def test_math_path_estimate_far_exceeds_flash():
+    # Blackwell/sm_120 is forced onto math/eager attention, which uses ~5× the activation memory of flash.
+    # At seq 2048 that's ~13.8 GB (math, measured) vs ~9 GB (flash) for a 7B.
+    flash = build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", sequence_len=2048)
+    math = build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", sequence_len=2048, math_attention=True)
+    assert math.total_gb_int4 > flash.total_gb_int4 + 3.0  # math is much heavier
+    assert 13.0 <= math.total_gb_int4 <= 14.5  # matches the real sweep (~13.76)
+    assert any("math/eager" in a for a in math.assumptions)
+    assert any("flash" in a for a in flash.assumptions)
 
 
-def test_math_attention_overhead_scales_with_sequence_squared():
-    # The attention-scores matrix is O(seq²), so halving seq_len cuts the math delta ~4×.
-    long_delta = (
-        build_vram_estimate("7B", sequence_len=4096, math_attention=True).total_gb_int4
-        - build_vram_estimate("7B", sequence_len=4096).total_gb_int4
-    )
-    short_delta = (
-        build_vram_estimate("7B", sequence_len=2048, math_attention=True).total_gb_int4
-        - build_vram_estimate("7B", sequence_len=2048).total_gb_int4
-    )
-    assert long_delta > short_delta * 3  # ~4× (seq²); slack for rounding
+def test_activation_scales_linearly_with_sequence_not_squared():
+    # Gradient checkpointing makes the peak LINEAR in seq_len (the memory sweep proved it — not seq²):
+    # equal-width seq steps give ~equal memory steps.
+    a = build_vram_estimate("7B", sequence_len=1024, math_attention=True).total_gb_int4
+    b = build_vram_estimate("7B", sequence_len=2048, math_attention=True).total_gb_int4
+    c = build_vram_estimate("7B", sequence_len=3072, math_attention=True).total_gb_int4
+    assert abs((b - a) - (c - b)) < 0.3  # 1024→2048 step ≈ 2048→3072 step ⇒ linear
 
 
 def test_lora_overhead_scales_with_rank():
