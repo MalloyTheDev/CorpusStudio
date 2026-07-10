@@ -118,7 +118,9 @@ WPF adapters (`MessageBoxDialogService`, `Win32FilePickerService`, `WpfDispatche
 - **Engine** (the CI gate): `cd engine` then
   `./.venv/Scripts/python.exe -m ruff check .` · `… -m mypy corpus_studio` ·
   `… -m pytest -q --basetemp=.pytest_tmp` (with `--cov=corpus_studio` a coverage floor
-  applies). Optional accuracy extras: `[tokenizer]`, `[model-tokenizer]`, `[parquet]`.
+  applies). Optional accuracy extras: `[tokenizer]`, `[model-tokenizer]`, `[parquet]`, and
+  `[train]` (the first-party QLoRA trainer — heavy/GPU: torch/transformers/peft/trl, plus
+  bitsandbytes which is CUDA-only, so skipped on macOS; the gate itself needs none of these).
 - **Desktop**: `dotnet build apps/desktop/CorpusStudio.Desktop.sln` (builds **both** heads)
   and `dotnet test apps/desktop/CorpusStudio.Desktop.sln`.
 - **CI** runs the engine gate, desktop build+tests, and CodeQL (Python + C#) on every PR.

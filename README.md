@@ -105,8 +105,6 @@ a training run — its own opt-in first-party trainer, or your installed trainer
   also selectable per suite case) or manual scoring
 - multi-model benchmark: run one dataset across several models and rank them,
   with per-model deltas and the examples every model failed
-- multi-model benchmark: run one dataset across several models and rank them,
-  with per-model deltas and the examples every model failed
 - Model Arena: run a prompt suite across several models side by side, with an
   optional evaluator-only judge that scores responses and picks a winner, and
   saved comparison reports

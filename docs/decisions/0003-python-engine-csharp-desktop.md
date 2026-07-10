@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted — implemented (the engine/desktop split ships through v1.3+).
 
 ## Context
 

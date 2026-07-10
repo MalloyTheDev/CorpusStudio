@@ -132,6 +132,10 @@ Project folders can also contain:
 - `ai_assist_rewrite_batches.json`
 - `reviewed_fixes.json`
 - `evaluation_failure_filters.json`
+- `gate_thresholds.json` and `gate_reports/` (per-project gate config + saved gate reports)
+- `provenance_allowlist.json` (approved teacher/providers for the per-row provenance gate)
+- `dataset_versions/` and the content-addressed `row_store/` (immutable dataset snapshots)
+- `training_runs/` (the durable run registry) and `model_artifacts/` (tracked adapters/checkpoints)
 
 `ai_assist_rewrite_batches.json` stores prepared synthetic batch rewrite
 handoffs only. Each item keeps the affected row numbers, issue count, source
