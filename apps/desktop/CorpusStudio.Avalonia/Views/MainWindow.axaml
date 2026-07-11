@@ -280,21 +280,202 @@
                for byte — a later slice raises each to full Nocturne fidelity. -->
           <Panel Grid.Row="1" Grid.Column="1" Margin="8,0">
 
-    <!-- OVERVIEW · Dashboard — placeholder overview (a full hero + lifecycle strip is a later slice). -->
+    <!-- OVERVIEW · Dashboard hero (slice 3): readiness card + lifecycle strip + stat cards + quick
+         actions. All read-bindings on existing shared-VM data; per-node lifecycle STATUS wiring +
+         Phosphor icons + a recent-activity feed are later slices (not faked here). -->
     <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Dashboard}">
       <ScrollViewer>
-        <StackPanel Margin="20" Spacing="12">
-          <TextBlock Text="{Binding ActiveProjectTitle}" FontSize="20" FontWeight="Bold"/>
-          <TextBlock Text="{Binding ActiveSchemaDescription}" Foreground="{DynamicResource T3}" TextWrapping="Wrap"/>
-          <TextBlock Text="Pick a workflow phase on the left — Author, Measure, Evaluate, or Train."
-                     Foreground="{DynamicResource T3}"/>
+        <StackPanel Margin="20" Spacing="16" MaxWidth="940" HorizontalAlignment="Left">
+
+          <!-- Readiness hero card -->
+          <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="18"
+                  BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+            <StackPanel Spacing="16">
+              <StackPanel Orientation="Horizontal" Spacing="14">
+                <Border Width="52" Height="52" CornerRadius="10" VerticalAlignment="Top"
+                        Background="{Binding Debt.DebtGradeColor, Converter={StaticResource StringToBrush}}">
+                  <TextBlock Text="{Binding Debt.DebtGrade}" FontSize="26" FontWeight="Bold" Foreground="White"
+                             HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <StackPanel Spacing="5" VerticalAlignment="Center">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <TextBlock Text="{Binding ActiveProjectTitle}" FontSize="20" FontWeight="Bold"
+                               Foreground="{DynamicResource Text}" VerticalAlignment="Center"/>
+                    <Border Background="{DynamicResource AccentSoft}" CornerRadius="5" Padding="8,2" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding ActiveSchemaId}" FontSize="11" Foreground="{DynamicResource AccentInk}"/>
+                    </Border>
+                    <TextBlock Text="stale" Foreground="{DynamicResource Warn}" FontSize="11" VerticalAlignment="Center"
+                               IsVisible="{Binding Debt.DebtStale}"/>
+                  </StackPanel>
+                  <TextBlock Text="{Binding Debt.DebtSummary}" Foreground="{DynamicResource T3}"
+                             TextWrapping="Wrap" MaxWidth="640"/>
+                  <Button Content="Re-check debt" Command="{Binding RunDatasetDebtCommand}"
+                          HorizontalAlignment="Left" Margin="0,4,0,0"/>
+                </StackPanel>
+              </StackPanel>
+
+              <Border Height="1" Background="{DynamicResource Line}"/>
+
+              <!-- Lifecycle strip (structural; neutral nodes — per-phase status is a later slice). -->
+              <Grid Margin="0,2,0,0">
+                <Border Height="2" Background="{DynamicResource Track}" VerticalAlignment="Top" Margin="58,12,58,0"/>
+                <UniformGrid Columns="7">
+                  <StackPanel>
+                    <Border Width="26" Height="26" CornerRadius="13" Background="{DynamicResource Track}"
+                            BorderBrush="{DynamicResource Line2}" BorderThickness="1" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Author" FontSize="10" Foreground="{DynamicResource T4}"
+                               HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                  </StackPanel>
+                  <StackPanel>
+                    <Border Width="26" Height="26" CornerRadius="13" Background="{DynamicResource Track}"
+                            BorderBrush="{DynamicResource Line2}" BorderThickness="1" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Validate" FontSize="10" Foreground="{DynamicResource T4}"
+                               HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                  </StackPanel>
+                  <StackPanel>
+                    <Border Width="26" Height="26" CornerRadius="13" Background="{DynamicResource Track}"
+                            BorderBrush="{DynamicResource Line2}" BorderThickness="1" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Quality" FontSize="10" Foreground="{DynamicResource T4}"
+                               HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                  </StackPanel>
+                  <StackPanel>
+                    <Border Width="26" Height="26" CornerRadius="13" Background="{DynamicResource Track}"
+                            BorderBrush="{DynamicResource Line2}" BorderThickness="1" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Gate" FontSize="10" Foreground="{DynamicResource T4}"
+                               HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                  </StackPanel>
+                  <StackPanel>
+                    <Border Width="26" Height="26" CornerRadius="13" Background="{DynamicResource Track}"
+                            BorderBrush="{DynamicResource Line2}" BorderThickness="1" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Split" FontSize="10" Foreground="{DynamicResource T4}"
+                               HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                  </StackPanel>
+                  <StackPanel>
+                    <Border Width="26" Height="26" CornerRadius="13" Background="{DynamicResource Track}"
+                            BorderBrush="{DynamicResource Line2}" BorderThickness="1" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Evaluate" FontSize="10" Foreground="{DynamicResource T4}"
+                               HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                  </StackPanel>
+                  <StackPanel>
+                    <Border Width="26" Height="26" CornerRadius="13" Background="{DynamicResource Track}"
+                            BorderBrush="{DynamicResource Line2}" BorderThickness="1" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Train" FontSize="10" Foreground="{DynamicResource T4}"
+                               HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                  </StackPanel>
+                </UniformGrid>
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <!-- Stat cards -->
+          <TextBlock Text="AT A GLANCE" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource T4}" Margin="2,2,0,0"/>
           <WrapPanel>
-            <Button Content="Author examples" Command="{Binding GoToWritingStudioCommand}" Margin="0,0,6,4"/>
-            <Button Content="Run quality" Command="{Binding RunQualityCommand}" Margin="0,0,6,4"/>
-            <Button Content="Generate splits" Command="{Binding GenerateSplitsCommand}" Margin="0,0,6,4"/>
-            <Button Content="Run evaluation" Command="{Binding GoToEvaluationCommand}" Margin="0,0,6,4"/>
-            <Button Content="Training" Command="{Binding GoToTrainingCommand}" Margin="0,0,6,4"/>
+            <Border Background="{DynamicResource Panel}" CornerRadius="11" Padding="14" Margin="0,0,10,10"
+                    Width="182" BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <StackPanel Spacing="3">
+                <TextBlock Text="EXAMPLES" FontSize="10" Foreground="{DynamicResource T4}"/>
+                <TextBlock Text="{Binding Examples.Items.Count}" FontSize="26" FontWeight="Bold" Foreground="{DynamicResource Text}"/>
+                <TextBlock Text="rows in the dataset" FontSize="11" Foreground="{DynamicResource T3}"/>
+              </StackPanel>
+            </Border>
+            <Border Background="{DynamicResource Panel}" CornerRadius="11" Padding="14" Margin="0,0,10,10"
+                    Width="182" BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <StackPanel Spacing="3">
+                <TextBlock Text="DATASET DEBT" FontSize="10" Foreground="{DynamicResource T4}"/>
+                <TextBlock Text="{Binding Debt.DebtGrade}" FontSize="26" FontWeight="Bold"
+                           Foreground="{Binding Debt.DebtGradeColor, Converter={StaticResource StringToBrush}}"/>
+                <TextBlock Text="remediation grade" FontSize="11" Foreground="{DynamicResource T3}"/>
+              </StackPanel>
+            </Border>
+            <Border Background="{DynamicResource Panel}" CornerRadius="11" Padding="14" Margin="0,0,10,10"
+                    Width="182" BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <StackPanel Spacing="3">
+                <TextBlock Text="OPEN PROBLEMS" FontSize="10" Foreground="{DynamicResource T4}"/>
+                <TextBlock Text="{Binding Problems.Count}" FontSize="26" FontWeight="Bold" Foreground="{DynamicResource Text}"/>
+                <TextBlock Text="gate findings" FontSize="11" Foreground="{DynamicResource T3}"/>
+              </StackPanel>
+            </Border>
+            <Border Background="{DynamicResource Panel}" CornerRadius="11" Padding="14" Margin="0,0,10,10"
+                    Width="234" BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <StackPanel Spacing="3">
+                <TextBlock Text="LAST EVALUATION" FontSize="10" Foreground="{DynamicResource T4}"/>
+                <TextBlock Text="{Binding Evaluation.EvaluationResultsSummary}" FontSize="13"
+                           Foreground="{DynamicResource Text}" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Border>
           </WrapPanel>
+
+          <!-- Quick actions -->
+          <TextBlock Text="QUICK ACTIONS" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource T4}" Margin="2,4,0,0"/>
+          <WrapPanel>
+            <Button Command="{Binding GoToWritingStudioCommand}" Width="222" Margin="0,0,10,10" Padding="12"
+                    HorizontalContentAlignment="Left" Background="{DynamicResource Panel}"
+                    BorderBrush="{DynamicResource Line2}" BorderThickness="1" CornerRadius="11">
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <Border Width="32" Height="32" CornerRadius="8" Background="{DynamicResource AccentSoft}"/>
+                <StackPanel VerticalAlignment="Center">
+                  <TextBlock Text="Author examples" Foreground="{DynamicResource Text}" FontWeight="SemiBold"/>
+                  <TextBlock Text="write &amp; validate rows" Foreground="{DynamicResource T3}" FontSize="11"/>
+                </StackPanel>
+              </StackPanel>
+            </Button>
+            <Button Command="{Binding RunQualityCommand}" Width="222" Margin="0,0,10,10" Padding="12"
+                    HorizontalContentAlignment="Left" Background="{DynamicResource Panel}"
+                    BorderBrush="{DynamicResource Line2}" BorderThickness="1" CornerRadius="11">
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <Border Width="32" Height="32" CornerRadius="8" Background="{DynamicResource AccentSoft}"/>
+                <StackPanel VerticalAlignment="Center">
+                  <TextBlock Text="Run quality" Foreground="{DynamicResource Text}" FontWeight="SemiBold"/>
+                  <TextBlock Text="scan for issues" Foreground="{DynamicResource T3}" FontSize="11"/>
+                </StackPanel>
+              </StackPanel>
+            </Button>
+            <Button Command="{Binding GenerateSplitsCommand}" Width="222" Margin="0,0,10,10" Padding="12"
+                    HorizontalContentAlignment="Left" Background="{DynamicResource Panel}"
+                    BorderBrush="{DynamicResource Line2}" BorderThickness="1" CornerRadius="11">
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <Border Width="32" Height="32" CornerRadius="8" Background="{DynamicResource AccentSoft}"/>
+                <StackPanel VerticalAlignment="Center">
+                  <TextBlock Text="Generate splits" Foreground="{DynamicResource Text}" FontWeight="SemiBold"/>
+                  <TextBlock Text="train / val / test" Foreground="{DynamicResource T3}" FontSize="11"/>
+                </StackPanel>
+              </StackPanel>
+            </Button>
+            <Button Command="{Binding GoToEvaluationCommand}" Width="222" Margin="0,0,10,10" Padding="12"
+                    HorizontalContentAlignment="Left" Background="{DynamicResource Panel}"
+                    BorderBrush="{DynamicResource Line2}" BorderThickness="1" CornerRadius="11">
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <Border Width="32" Height="32" CornerRadius="8" Background="{DynamicResource AccentSoft}"/>
+                <StackPanel VerticalAlignment="Center">
+                  <TextBlock Text="Run evaluation" Foreground="{DynamicResource Text}" FontWeight="SemiBold"/>
+                  <TextBlock Text="score vs a model" Foreground="{DynamicResource T3}" FontSize="11"/>
+                </StackPanel>
+              </StackPanel>
+            </Button>
+            <Button Command="{Binding GoToTrainingCommand}" Width="222" Margin="0,0,10,10" Padding="12"
+                    HorizontalContentAlignment="Left" Background="{DynamicResource Panel}"
+                    BorderBrush="{DynamicResource Line2}" BorderThickness="1" CornerRadius="11">
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <Border Width="32" Height="32" CornerRadius="8" Background="{DynamicResource AccentSoft}"/>
+                <StackPanel VerticalAlignment="Center">
+                  <TextBlock Text="Training config" Foreground="{DynamicResource Text}" FontWeight="SemiBold"/>
+                  <TextBlock Text="configure a run" Foreground="{DynamicResource T3}" FontSize="11"/>
+                </StackPanel>
+              </StackPanel>
+            </Button>
+            <Button Command="{Binding CaptureDatasetVersionCommand}" Width="222" Margin="0,0,10,10" Padding="12"
+                    HorizontalContentAlignment="Left" Background="{DynamicResource Panel}"
+                    BorderBrush="{DynamicResource Line2}" BorderThickness="1" CornerRadius="11">
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <Border Width="32" Height="32" CornerRadius="8" Background="{DynamicResource AccentSoft}"/>
+                <StackPanel VerticalAlignment="Center">
+                  <TextBlock Text="Capture version" Foreground="{DynamicResource Text}" FontWeight="SemiBold"/>
+                  <TextBlock Text="snapshot the dataset" Foreground="{DynamicResource T3}" FontSize="11"/>
+                </StackPanel>
+              </StackPanel>
+            </Button>
+          </WrapPanel>
+
         </StackPanel>
       </ScrollViewer>
     </Border>
