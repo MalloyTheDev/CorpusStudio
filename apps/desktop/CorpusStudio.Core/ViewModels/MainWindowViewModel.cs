@@ -494,9 +494,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             {
                 OnPropertyChanged(nameof(StudioViewTitle));
                 OnPropertyChanged(nameof(StudioViewSubtitle));
+                OnPropertyChanged(nameof(ShowQualityRail));
             }
         }
     }
+
+    /// <summary>Whether the contextual Quality right rail is shown — only on the design's rail screens
+    /// (Dashboard, Writing Studio, Splits, Dataset Debt); hidden elsewhere so the content area fills.
+    /// Audit fix: the rail previously showed on every Studio screen, off-design.</summary>
+    public bool ShowQualityRail => (StudioTab)_selectedStudioTabIndex is
+        StudioTab.Dashboard or StudioTab.WritingStudio or StudioTab.Splits or StudioTab.Debt;
 
     /// <summary>The current Studio screen's title for the app-shell context bar (slice 4). Derived from
     /// <see cref="SelectedStudioTabIndex"/> — additive (the WPF head may adopt it later).</summary>
