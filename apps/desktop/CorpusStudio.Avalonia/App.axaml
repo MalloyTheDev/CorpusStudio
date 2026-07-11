@@ -4,30 +4,85 @@
              x:Class="CorpusStudio.Avalonia.App">
   <!-- No RequestedThemeVariant → follows the OS light/dark setting by default; the activity-bar
        toggle overrides it. FluentTheme themes the built-in control chrome per variant; the
-       ThemeDictionaries below theme the app's OWN custom colors (backgrounds, borders, muted text,
-       chips, status accents) so nothing light-coloured bleeds through in dark mode. -->
+       ThemeDictionaries below carry the app's OWN design tokens — the "Nocturne" production design
+       system (docs/design/nocturne-tokens.json is the framework-agnostic source of truth; these
+       brushes are its Avalonia consumer). Dark is primary; light is a token-set swap. The legacy
+       App* keys are re-pointed onto Nocturne values so the existing views re-skin unchanged. -->
   <Application.Resources>
     <ResourceDictionary>
       <ResourceDictionary.ThemeDictionaries>
-        <ResourceDictionary x:Key="Light">
-          <SolidColorBrush x:Key="AppBackground" Color="#F8FAFC"/>
-          <SolidColorBrush x:Key="AppBorder" Color="#E2E8F0"/>
-          <SolidColorBrush x:Key="AppTextMuted" Color="#64748B"/>
-          <SolidColorBrush x:Key="AppWarn" Color="#B45309"/>
-          <SolidColorBrush x:Key="AppError" Color="#B91C1C"/>
-          <SolidColorBrush x:Key="AppChipBg" Color="#EEF4FF"/>
-          <SolidColorBrush x:Key="AppChipText" Color="#1D4ED8"/>
-          <SolidColorBrush x:Key="AppAccent" Color="#2563EB"/>
-        </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
-          <SolidColorBrush x:Key="AppBackground" Color="#0B1220"/>
-          <SolidColorBrush x:Key="AppBorder" Color="#26324A"/>
-          <SolidColorBrush x:Key="AppTextMuted" Color="#94A3B8"/>
-          <SolidColorBrush x:Key="AppWarn" Color="#FBBF24"/>
-          <SolidColorBrush x:Key="AppError" Color="#F87171"/>
-          <SolidColorBrush x:Key="AppChipBg" Color="#1E293B"/>
-          <SolidColorBrush x:Key="AppChipText" Color="#93C5FD"/>
-          <SolidColorBrush x:Key="AppAccent" Color="#60A5FA"/>
+          <!-- Nocturne tokens (dark, primary) -->
+          <SolidColorBrush x:Key="Win" Color="#12141f"/>
+          <SolidColorBrush x:Key="Chrome" Color="#0e1019"/>
+          <SolidColorBrush x:Key="Panel" Color="#232532"/>
+          <SolidColorBrush x:Key="Panel2" Color="#1b1d29"/>
+          <SolidColorBrush x:Key="Line" Color="#1FE9E9ED"/>
+          <SolidColorBrush x:Key="Line2" Color="#2c2f3e"/>
+          <SolidColorBrush x:Key="Text" Color="#e9e9ed"/>
+          <SolidColorBrush x:Key="T2" Color="#b2b6ca"/>
+          <SolidColorBrush x:Key="T3" Color="#9397ab"/>
+          <SolidColorBrush x:Key="T4" Color="#75798c"/>
+          <SolidColorBrush x:Key="Accent" Color="#968ae0"/>
+          <SolidColorBrush x:Key="AccentStrong" Color="#b5abfc"/>
+          <SolidColorBrush x:Key="AccentInk" Color="#e7e5fe"/>
+          <SolidColorBrush x:Key="AccentSoft" Color="#29968AE0"/>
+          <SolidColorBrush x:Key="Hover" Color="#12E9E9ED"/>
+          <SolidColorBrush x:Key="Track" Color="#33384a"/>
+          <SolidColorBrush x:Key="Ok" Color="#6bbf9a"/>
+          <SolidColorBrush x:Key="Warn" Color="#d9a35f"/>
+          <SolidColorBrush x:Key="Bad" Color="#d76d6d"/>
+          <SolidColorBrush x:Key="Grade" Color="#d98f52"/>
+          <SolidColorBrush x:Key="OnAccent" Color="#161826"/>
+          <!-- Legacy keys re-pointed onto Nocturne so existing views re-skin without edits. -->
+          <SolidColorBrush x:Key="AppBackground" Color="#12141f"/>
+          <SolidColorBrush x:Key="AppBorder" Color="#2c2f3e"/>
+          <SolidColorBrush x:Key="AppTextMuted" Color="#9397ab"/>
+          <SolidColorBrush x:Key="AppWarn" Color="#d9a35f"/>
+          <SolidColorBrush x:Key="AppError" Color="#d76d6d"/>
+          <SolidColorBrush x:Key="AppChipBg" Color="#29968AE0"/>
+          <SolidColorBrush x:Key="AppChipText" Color="#e7e5fe"/>
+          <SolidColorBrush x:Key="AppAccent" Color="#968ae0"/>
+          <!-- Steer the FluentTheme control accent (buttons/checks/etc.) to the blurple. -->
+          <Color x:Key="SystemAccentColor">#968ae0</Color>
+          <Color x:Key="SystemAccentColorDark1">#796cbf</Color>
+          <Color x:Key="SystemAccentColorLight1">#b5abfc</Color>
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Light">
+          <!-- Nocturne tokens (light) -->
+          <SolidColorBrush x:Key="Win" Color="#eef0f5"/>
+          <SolidColorBrush x:Key="Chrome" Color="#e6e8ef"/>
+          <SolidColorBrush x:Key="Panel" Color="#ffffff"/>
+          <SolidColorBrush x:Key="Panel2" Color="#f4f6fa"/>
+          <SolidColorBrush x:Key="Line" Color="#1A1A1C28"/>
+          <SolidColorBrush x:Key="Line2" Color="#e0e3ec"/>
+          <SolidColorBrush x:Key="Text" Color="#1a1c28"/>
+          <SolidColorBrush x:Key="T2" Color="#3f434f"/>
+          <SolidColorBrush x:Key="T3" Color="#5b6070"/>
+          <SolidColorBrush x:Key="T4" Color="#868b9c"/>
+          <SolidColorBrush x:Key="Accent" Color="#6c5fd0"/>
+          <SolidColorBrush x:Key="AccentStrong" Color="#5d5294"/>
+          <SolidColorBrush x:Key="AccentInk" Color="#463c7d"/>
+          <SolidColorBrush x:Key="AccentSoft" Color="#1F6C5FD0"/>
+          <SolidColorBrush x:Key="Hover" Color="#0D1A1C28"/>
+          <SolidColorBrush x:Key="Track" Color="#dfe3ec"/>
+          <SolidColorBrush x:Key="Ok" Color="#3f9b73"/>
+          <SolidColorBrush x:Key="Warn" Color="#b8792e"/>
+          <SolidColorBrush x:Key="Bad" Color="#c85552"/>
+          <SolidColorBrush x:Key="Grade" Color="#c07636"/>
+          <SolidColorBrush x:Key="OnAccent" Color="#161826"/>
+          <!-- Legacy keys re-pointed onto Nocturne (light). -->
+          <SolidColorBrush x:Key="AppBackground" Color="#eef0f5"/>
+          <SolidColorBrush x:Key="AppBorder" Color="#e0e3ec"/>
+          <SolidColorBrush x:Key="AppTextMuted" Color="#5b6070"/>
+          <SolidColorBrush x:Key="AppWarn" Color="#b8792e"/>
+          <SolidColorBrush x:Key="AppError" Color="#c85552"/>
+          <SolidColorBrush x:Key="AppChipBg" Color="#1F6C5FD0"/>
+          <SolidColorBrush x:Key="AppChipText" Color="#463c7d"/>
+          <SolidColorBrush x:Key="AppAccent" Color="#6c5fd0"/>
+          <Color x:Key="SystemAccentColor">#6c5fd0</Color>
+          <Color x:Key="SystemAccentColorLight1">#8478d8</Color>
+          <Color x:Key="SystemAccentColorDark1">#5d5294</Color>
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
       <conv:StringToBrushConverter x:Key="StringToBrush" />
