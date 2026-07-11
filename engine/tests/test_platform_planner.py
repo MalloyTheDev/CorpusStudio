@@ -1,0 +1,210 @@
+"""Platform slice 6 — the run planner. Pure tests (no torch): synthetic EnvironmentProfile +
+CapabilityReport drive every resolution path and the honesty invariants (Blackwell→math from
+cc_major, proven-only precision/quant, sequence_len flows, cpu_toy never a silent downgrade, a real
+sha256 plan-hash that excludes the volatile stamp). The rendered snapshot is round-tripped through
+the actual TrainRunConfig the runner replays."""
+
+import pytest
+
+import corpus_studio.platform as P
+from corpus_studio.platform.common import Ref
+from corpus_studio.platform.contracts import (
+    CapabilityReport,
+    EffectiveCapabilities,
+    EnvironmentProfile,
+    EnvHost,
+    GpuDevice,
+)
+from corpus_studio.platform.planner import (
+    PlannerConstraints,
+    PlannerError,
+    build_run_plan,
+    compute_plan_hash,
+)
+from corpus_studio.training.trainer import TrainRunConfig
+
+_SIG = "a" * 64
+_NOW = "2026-07-11T00:00:00+00:00"
+
+
+def _profile(*, cc_major=None, os="linux"):
+    gpus = []
+    if cc_major is not None:
+        gpus = [
+            GpuDevice(
+                index=0, kind="cuda", name="GPU", vram_total_bytes=12_000_000_000,
+                compute_capability=f"{cc_major}.0", compute_capability_major=cc_major,
+            )
+        ]
+    return EnvironmentProfile(environment_signature=_SIG, host=EnvHost(os=os), gpus=gpus)
+
+
+def _report(*, readiness="ready", bnb=True, precisions=("bf16",), attn=("sdpa",), missing=()):
+    eff = EffectiveCapabilities(
+        precision_modes=list(precisions),
+        quantization_modes=["nf4"] if bnb else [],
+        attention_impls=list(attn),
+        adapter_methods=["qlora"],
+    )
+    return CapabilityReport(
+        backend_id="corpus_studio", environment_ref=Ref(id=_SIG), readiness=readiness,
+        bitsandbytes_ok=bnb, effective_capabilities=eff, missing_packages=list(missing),
+    )
+
+
+def _plan(profile, report, *, now=_NOW, **kw):
+    kw.setdefault("base_model", "Qwen/Qwen2.5-7B-Instruct")
+    kw.setdefault("dataset_path", "data/examples.jsonl")
+    constraints = PlannerConstraints(**kw)
+    return build_run_plan(
+        profile=profile, capabilities=report, dataset_ref=Ref(id="ds-1"),
+        constraints=constraints, plan_id="p1", now=now,
+    )
+
+
+# ---- resolution paths -------------------------------------------------------
+
+
+def test_blackwell_ready_host_forces_math_bf16_nf4_qlora():
+    plan = _plan(_profile(cc_major=12), _report())
+    assert plan.attention_backend.value == "math"  # Blackwell mandate
+    assert plan.precision.value == "bf16"
+    assert plan.quantization.value == "nf4"
+    assert plan.adapter.method.value == "qlora"
+    # math is not a from_pretrained string → the snapshot leaves the trainer's own path in control.
+    assert "attn_implementation" not in plan.training_config_snapshot
+
+
+def test_non_blackwell_with_proven_sdpa_uses_sdpa():
+    plan = _plan(_profile(cc_major=8), _report(attn=("sdpa",)))
+    assert plan.attention_backend.value == "sdpa"
+
+
+def test_no_proven_attention_falls_back_to_eager():
+    plan = _plan(_profile(cc_major=8), _report(attn=()))
+    assert plan.attention_backend.value == "eager"
+    assert plan.training_config_snapshot["attn_implementation"] == "eager"
+
+
+def test_bf16_not_proven_falls_back_to_fp32():
+    plan = _plan(_profile(cc_major=8), _report(precisions=("fp16",)))
+    assert plan.precision.value == "fp32"
+
+
+def test_no_bitsandbytes_gives_no_quant_and_lora():
+    plan = _plan(_profile(cc_major=8), _report(bnb=False))
+    assert plan.quantization.value == "none"
+    assert plan.adapter.method.value == "lora"
+
+
+def test_explicit_attention_override_wins():
+    plan = _plan(_profile(cc_major=8), _report(), attention_backend="flash_attention_2")
+    assert plan.attention_backend.value == "flash_attention_2"
+    assert plan.training_config_snapshot["attn_implementation"] == "flash_attention_2"
+
+
+# ---- cpu-toy + readiness (honesty) ------------------------------------------
+
+
+def test_cpu_toy_only_with_optin_yields_a_cpu_toy_plan():
+    plan = _plan(_profile(), _report(readiness="cpu_toy_only", bnb=False), allow_cpu_toy=True)
+    assert plan.precision.value == "fp32"
+    assert plan.quantization.value == "none"
+    assert plan.attention_backend.value == "eager"
+    assert plan.training_config_snapshot["cpu_toy"] is True
+
+
+def test_cpu_toy_only_without_optin_raises():
+    with pytest.raises(PlannerError, match="cpu"):
+        _plan(_profile(), _report(readiness="cpu_toy_only"))
+
+
+def test_not_ready_raises_with_missing_packages():
+    with pytest.raises(PlannerError, match="not ready"):
+        _plan(_profile(), _report(readiness="not_ready", missing=["torch", "bitsandbytes"]))
+
+
+def test_unsupported_task_type_raises():
+    with pytest.raises(PlannerError, match="task_type"):
+        _plan(_profile(cc_major=12), _report(), task_type="telepathy")
+
+
+def test_unsupported_attention_override_raises():
+    with pytest.raises(PlannerError, match="attention_backend"):
+        _plan(_profile(cc_major=8), _report(), attention_backend="quantum")
+
+
+# ---- sequence_len flows (no hardcoded calibration value) --------------------
+
+
+def test_sequence_len_flows_verbatim():
+    plan = _plan(_profile(cc_major=12), _report(), sequence_len=1792)
+    assert plan.sequence.max_sequence_len == 1792
+    assert plan.training_config_snapshot["sequence_len"] == 1792
+
+
+# ---- the snapshot round-trips through the real trainer config ---------------
+
+
+def test_snapshot_validates_as_a_trainrunconfig():
+    plan = _plan(_profile(cc_major=12), _report())
+    cfg = TrainRunConfig.model_validate(plan.training_config_snapshot)
+    assert cfg.base_model == "Qwen/Qwen2.5-7B-Instruct"
+    assert cfg.dataset_format == "instruction"  # NOT silently defaulted from a wrong "format" key
+
+
+def test_snapshot_uses_dataset_format_key_not_format():
+    plan = _plan(_profile(cc_major=12), _report(), dataset_format="chat")
+    assert plan.training_config_snapshot["dataset_format"] == "chat"
+    assert "format" not in plan.training_config_snapshot
+
+
+# ---- plan_hash (the immutability seal) --------------------------------------
+
+
+def test_plan_hash_is_a_real_lowercase_sha256():
+    plan = _plan(_profile(cc_major=12), _report())
+    assert P.RunPlan.model_validate_json(plan.model_dump_json()) == plan
+    assert len(plan.plan_hash) == 64
+    assert plan.plan_hash == plan.plan_hash.lower()
+    assert plan.plan_hash != "0" * 64
+
+
+def test_plan_hash_excludes_the_volatile_created_at():
+    a = _plan(_profile(cc_major=12), _report(), now="2026-01-01T00:00:00+00:00")
+    b = _plan(_profile(cc_major=12), _report(), now="2027-12-31T23:59:59+00:00")
+    assert a.created_at != b.created_at
+    assert a.plan_hash == b.plan_hash  # identical plan body → identical seal
+
+
+def test_plan_hash_changes_when_a_planned_field_changes():
+    base = _plan(_profile(cc_major=12), _report())
+    other = _plan(_profile(cc_major=12), _report(), learning_rate=1e-5)
+    assert base.plan_hash != other.plan_hash
+
+
+def test_compute_plan_hash_is_order_independent():
+    assert compute_plan_hash({"a": 1, "b": 2}) == compute_plan_hash({"b": 2, "a": 1})
+
+
+# ---- linkage ----------------------------------------------------------------
+
+
+def test_environment_ref_links_the_profile_signature():
+    plan = _plan(_profile(cc_major=12), _report())
+    assert plan.environment_ref.id == _SIG
+    assert plan.dataset_ref.id == "ds-1"
+    assert plan.backend_ref.id == "corpus_studio"
+
+
+def test_default_clock_stamps_created_at():
+    plan = _plan(_profile(cc_major=12), _report(), now=None)
+    assert plan.created_at is not None
+    assert plan.created_at.endswith("+00:00")
+
+
+def test_an_invalid_resolved_field_becomes_planner_error():
+    # sequence_len=0 fails SequenceSpec.max_sequence_len (ge=1) → a clean PlannerError, not a raw
+    # pydantic ValidationError leaking out.
+    with pytest.raises(PlannerError, match="invalid"):
+        _plan(_profile(cc_major=12), _report(), sequence_len=0)

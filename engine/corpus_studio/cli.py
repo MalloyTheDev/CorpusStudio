@@ -333,6 +333,53 @@ def platform_run(
         raise typer.Exit(1)
 
 
+@app.command("platform-plan")
+def platform_plan(
+    base_model: str = typer.Option(..., "--base-model", help="The base model to fine-tune."),
+    dataset_path: str = typer.Option(..., "--dataset", help="Path to the training JSONL."),
+    dataset_ref: str = typer.Option("dataset", "--dataset-ref", help="Stable id for the dataset the plan references."),
+    task_type: str = typer.Option("sft", "--task-type", help="Training task type (sft / preference / …)."),
+    sequence_len: int = typer.Option(4096, "--sequence-len", help="Max sequence length (flows into the plan verbatim)."),
+    allow_cpu_toy: bool = typer.Option(False, "--allow-cpu-toy", help="Permit a cpu-toy plan when the host is cpu-toy-only."),
+    out_dir: Optional[Path] = typer.Option(None, "--out", help="Write the sealed RunPlan.json to this directory."),
+):
+    """Profile the host, prove its capabilities, and RESOLVE an immutable, hash-sealed RunPlan — the
+    goal+data+hardware → runnable-plan step. Every ambiguous field (precision / quantization /
+    attention / adapter) is resolved against what PROVED to work on THIS host: bf16 only when proven,
+    nf4 only when bitsandbytes passed, and math attention on Blackwell (sm_120). An unready host is a
+    clean PlannerError, never a silent downgrade."""
+    from corpus_studio.platform.common import Ref
+    from corpus_studio.platform.planner import PlannerConstraints, PlannerError, build_run_plan
+    from corpus_studio.platform.probes import run_capability_probes
+    from corpus_studio.platform.profiler import build_environment_profile
+
+    profile = build_environment_profile()
+    report = run_capability_probes(profile)
+    constraints = PlannerConstraints(
+        base_model=base_model,
+        dataset_path=dataset_path,
+        task_type=task_type,
+        sequence_len=sequence_len,
+        allow_cpu_toy=allow_cpu_toy,
+    )
+    try:
+        plan = build_run_plan(
+            profile=profile,
+            capabilities=report,
+            dataset_ref=Ref(id=dataset_ref),
+            constraints=constraints,
+            plan_id=f"plan-{profile.environment_signature[:8]}",
+        )
+    except PlannerError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+
+    if out_dir is not None:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "RunPlan.json").write_text(plan.model_dump_json(indent=2), encoding="utf-8")
+    typer.echo(plan.model_dump_json(indent=2))
+
+
 @app.command()
 def validate(path: Path, schema: str):
     """Validate a JSONL file against a built-in schema."""
