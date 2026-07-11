@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:CorpusStudio.Desktop.ViewModels;assembly=CorpusStudio.Core"
         xmlns:models="clr-namespace:CorpusStudio.Desktop.Models;assembly=CorpusStudio.Core"
+        xmlns:conv="clr-namespace:CorpusStudio.Avalonia.Converters"
         x:Class="CorpusStudio.Avalonia.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Icon="/app.ico"
@@ -662,6 +663,49 @@
               </StackPanel>
             </Button>
           </WrapPanel>
+
+          <!-- Recent activity: the REAL engine command log (shell OutputLog), newest first and capped.
+               Each row's leading glyph is chosen PURELY from the real verb/outcome (quality → broom,
+               import → import, gate/validate → check-circle, capture/version → git-commit, a failure →
+               warning, else a neutral list) via EngineLogEntry.ActivityGlyphKey; the message and time are
+               the entry's own fields. No activity model is invented — an empty log shows a neutral
+               empty-state line (IsNoOutput), never a fabricated feed. The two converters are declared
+               locally so App.axaml/Icons.axaml are untouched. -->
+          <TextBlock Text="RECENT ACTIVITY" FontSize="10" FontWeight="SemiBold"
+                     Foreground="{DynamicResource T4}" Margin="2,4,0,0"/>
+          <Border Background="{DynamicResource Panel}" CornerRadius="11" Padding="6"
+                  BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+            <Border.Resources>
+              <conv:RecentActivityConverter x:Key="RecentActivity"/>
+              <conv:ActivityGlyphConverter x:Key="ActivityGlyph"/>
+            </Border.Resources>
+            <StackPanel>
+              <!-- Empty state (IsNoOutput): honest neutral line, never fabricated rows. -->
+              <StackPanel Orientation="Horizontal" Spacing="10" Margin="8,12" IsVisible="{Binding IsNoOutput}">
+                <Path Classes="ico ico-sm muted" Data="{StaticResource IcoListDashes}" VerticalAlignment="Center"/>
+                <TextBlock Text="No activity yet — run a check or import to see it here"
+                           Foreground="{DynamicResource T3}" FontSize="12.5" VerticalAlignment="Center"/>
+              </StackPanel>
+              <!-- Real log rows, newest first (RecentActivity converter reverses + caps OutputLog). -->
+              <ItemsControl IsVisible="{Binding HasOutput}"
+                            ItemsSource="{Binding OutputLog, Converter={StaticResource RecentActivity}}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="models:EngineLogEntry">
+                    <Grid ColumnDefinitions="Auto,*,Auto" Margin="8,7">
+                      <Path Grid.Column="0" Classes="ico" Width="15" Height="15" VerticalAlignment="Center"
+                            Data="{Binding ActivityGlyphKey, Converter={StaticResource ActivityGlyph}, ConverterParameter=glyph}"
+                            Fill="{Binding ActivityGlyphKey, Converter={StaticResource ActivityGlyph}, ConverterParameter=fill}"/>
+                      <TextBlock Grid.Column="1" Text="{Binding ActivityMessage}" Margin="11,0,10,0"
+                                 Foreground="{DynamicResource T2}" VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis"/>
+                      <TextBlock Grid.Column="2" Text="{Binding ActivityMeta}" Foreground="{DynamicResource T4}"
+                                 FontSize="11" VerticalAlignment="Center"/>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
 
         </StackPanel>
       </ScrollViewer>

@@ -79,6 +79,80 @@ public sealed class OutputLogViewModelTests
         Assert.Equal(string.Empty, e.ArgsSummary);
     }
 
+    // ---- EngineLogEntry Dashboard "Recent Activity" projection -------------------
+
+    [Theory]
+    [InlineData("quality", "ok", "IcoBroom")]
+    [InlineData("import-preview", "ok", "IcoImport")]
+    [InlineData("import-convert", "ok", "IcoImport")]
+    [InlineData("gate-run", "ok", "IcoCheckCircleFill")]
+    [InlineData("validate", "ok", "IcoCheckCircleFill")]
+    [InlineData("capture-version", "ok", "IcoGitCommit")]
+    [InlineData("split", "ok", "IcoListDashes")]
+    [InlineData("export", "ok", "IcoListDashes")]
+    [InlineData("new-project", "ok", "IcoListDashes")]
+    public void ActivityGlyphKey_MapsRealVerbToGlyph(string command, string status, string expected)
+    {
+        var e = new EngineLogEntry { Command = command, Status = status };
+        Assert.Equal(expected, e.ActivityGlyphKey);
+    }
+
+    [Fact]
+    public void ActivityGlyphKey_FailedCommand_SurfacesWarning_RegardlessOfVerb()
+    {
+        // A failed run is flagged with a warning glyph even for a verb that otherwise has its own icon.
+        Assert.Equal("IcoWarningFill", new EngineLogEntry { Command = "quality", Status = "error" }.ActivityGlyphKey);
+        Assert.Equal("IcoWarningFill", new EngineLogEntry { Command = "gate-run", Status = "error" }.ActivityGlyphKey);
+    }
+
+    [Fact]
+    public void ActivityGlyphKey_CancelledKeepsVerbGlyph()
+    {
+        // Cancellation is not a failure, so the verb glyph still applies (only "error" overrides).
+        Assert.Equal("IcoBroom", new EngineLogEntry { Command = "quality", Status = "cancelled" }.ActivityGlyphKey);
+    }
+
+    [Theory]
+    [InlineData("quality", "ok", "Ran quality check")]
+    [InlineData("import-convert", "ok", "Imported rows")]
+    [InlineData("gate-run", "ok", "Ran gates")]
+    [InlineData("validate", "ok", "Validated draft")]
+    [InlineData("capture-version", "ok", "Captured version")]
+    [InlineData("quality", "error", "Ran quality check — failed")]
+    [InlineData("gate-run", "cancelled", "Ran gates — cancelled")]
+    public void ActivityMessage_RendersRealVerbAndOutcome(string command, string status, string expected)
+    {
+        var e = new EngineLogEntry { Command = command, Status = status };
+        Assert.Equal(expected, e.ActivityMessage);
+    }
+
+    [Fact]
+    public void ActivityMessage_UnknownVerb_ShownVerbatim_NeverFabricated()
+    {
+        var e = new EngineLogEntry { Command = "some-new-verb", Status = "ok" };
+        Assert.Equal("some-new-verb", e.ActivityMessage);
+    }
+
+    [Fact]
+    public void ActivityMeta_CombinesRealTimestampAndDuration()
+    {
+        Assert.Equal("12:00:03 · 42 ms", new EngineLogEntry { Timestamp = "12:00:03", DurationMs = 42 }.ActivityMeta);
+        Assert.Equal("12:00:03", new EngineLogEntry { Timestamp = "12:00:03", DurationMs = 0 }.ActivityMeta);
+        Assert.Equal("42 ms", new EngineLogEntry { Timestamp = "", DurationMs = 42 }.ActivityMeta);
+        Assert.Equal(string.Empty, new EngineLogEntry { Timestamp = "", DurationMs = 0 }.ActivityMeta);
+    }
+
+    [Fact]
+    public void FromInvocation_FeedsActivityProjection_FromRealData()
+    {
+        // The projection reads only the entry's own fields — a real invocation flows straight through.
+        var e = EngineLogEntry.FromInvocation(
+            ["quality", "examples.jsonl"], exitCode: 0, durationMs: 8, stderr: null, timestamp: "09:15:00");
+        Assert.Equal("IcoBroom", e.ActivityGlyphKey);
+        Assert.Equal("Ran quality check", e.ActivityMessage);
+        Assert.Equal("09:15:00 · 8 ms", e.ActivityMeta);
+    }
+
     // ---- MainWindowViewModel Output panel ----------------------------------------
 
     [Fact]
