@@ -28,8 +28,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
+from corpus_studio.platform.artifacts import build_artifact_manifest, write_artifact_manifest
 from corpus_studio.platform.common import HashRef, Ref
 from corpus_studio.platform.contracts import (
+    ArtifactManifest,
     EventMetrics,
     FailureRecord,
     RunEvent,
@@ -244,11 +246,13 @@ class EchoRunner:
 # --------------------------------------------------------------------------------------------------
 @dataclass
 class SupervisedRun:
-    """The outcome of one supervised execution: the terminal :class:`RunManifest` plus the full
-    ordered :class:`RunEvent` stream that produced it."""
+    """The outcome of one supervised execution: the terminal :class:`RunManifest`, the full ordered
+    :class:`RunEvent` stream that produced it, and an :class:`ArtifactManifest` (integrity-checked)
+    for each weight artifact the run produced."""
 
     manifest: RunManifest
     events: list[RunEvent]
+    artifacts: list[ArtifactManifest]
 
 
 def execute_run(
@@ -283,6 +287,7 @@ def execute_run(
     state: RunState = "running"
     failure: FailureRecord | None = None
     artifact_ids: list[str] = []
+    produced: Sequence[ProducedArtifact] = []
 
     try:
         produced = runner.run(ctx)
@@ -333,9 +338,22 @@ def execute_run(
         artifact_ids=artifact_ids,
         failure=failure,
     )
+    artifact_manifests = [
+        build_artifact_manifest(
+            artifact_id=artifact.artifact_id,
+            path=artifact.path,
+            kind=artifact.kind,
+            run_id=rid,
+            base_model=plan.base_model,
+            now=finished,
+        )
+        for artifact in produced
+    ]
     if out_dir is not None:
         write_run_manifest(manifest, out_dir)
-    return SupervisedRun(manifest=manifest, events=events)
+        for artifact_manifest in artifact_manifests:
+            write_artifact_manifest(artifact_manifest, out_dir)
+    return SupervisedRun(manifest=manifest, events=events, artifacts=artifact_manifests)
 
 
 def write_run_manifest(manifest: RunManifest, out_dir: str | Path) -> Path:

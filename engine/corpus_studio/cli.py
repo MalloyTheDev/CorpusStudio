@@ -324,6 +324,10 @@ def platform_run(
     result = execute_run(plan, runner, out_dir=out_dir)
     for event in result.events:
         typer.echo(event.model_dump_json(), err=True)
+    if out_dir is not None and result.artifacts:
+        typer.echo(
+            f"wrote {len(result.artifacts)} artifact manifest(s) to {out_dir}/artifacts/", err=True
+        )
     typer.echo(result.manifest.model_dump_json(indent=2))
     if result.manifest.state != "succeeded":
         raise typer.Exit(1)
