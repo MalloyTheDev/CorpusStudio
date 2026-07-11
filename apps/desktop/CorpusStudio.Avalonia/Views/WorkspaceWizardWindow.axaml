@@ -37,7 +37,7 @@
     </Style>
     <Style Selector="ListBox.cards ListBoxItem">
       <Setter Property="Padding" Value="0"/>
-      <Setter Property="Margin" Value="0,0,0,8"/>
+      <Setter Property="Margin" Value="0,0,8,8"/>
     </Style>
     <Style Selector="ListBox.cards ListBoxItem:selected /template/ ContentPresenter">
       <Setter Property="Background" Value="Transparent"/>
@@ -131,17 +131,25 @@
           </Grid>
         </StackPanel>
 
-        <!-- Schema -->
+        <!-- Schema — every built-in dataset schema from the engine, as selectable cards in a
+             2-column grid (the design's card picker; all schemas show, no truncation of the list). -->
         <StackPanel Spacing="0">
           <TextBlock Classes="eyebrow" Text="DATASET SCHEMA"/>
           <ListBox Classes="cards" ItemsSource="{Binding Schemas}" SelectedItem="{Binding SelectedSchema, Mode=TwoWay}">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate>
+                <UniformGrid Columns="2"/>
+              </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
             <ListBox.ItemTemplate>
               <DataTemplate x:DataType="models:DatasetSchema">
                 <Border Classes="optcard">
                   <StackPanel Spacing="2">
-                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="{DynamicResource Text}" FontSize="13.5"/>
-                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource T3}" FontSize="12"
-                               TextWrapping="Wrap" IsVisible="{Binding Description, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="{DynamicResource Text}"
+                               FontSize="13" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource T3}" FontSize="11.5"
+                               TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                               IsVisible="{Binding Description, Converter={x:Static ObjectConverters.IsNotNull}}"/>
                   </StackPanel>
                 </Border>
               </DataTemplate>
