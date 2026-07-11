@@ -45,8 +45,17 @@ run/version records). The live surfaces map onto the platform contracts in
 `RunManifest`/`RunEvent`/`ArtifactManifest`; Evaluation/Suites ← `EvaluationResult`.
 
 ## Migration status
-- **Slice 1 (this):** tokens in the repo + handoff committed + the Nocturne palette applied to the
-  Avalonia head (`App.axaml` ThemeDictionaries + shell chrome).
-- **Next:** the grouped-workflow IA (replace the tab strip with the sectioned sidebar), then
-  per-screen Nocturne fidelity (cards, status chips, hero/lifecycle strips). See
-  [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md).
+The Nocturne re-skin has landed across the cross-platform (Avalonia) shell:
+- **Design system:** tokens + the full handoff (incl. the exact Phosphor SVGs, see
+  [`handoff-v2/`](handoff-v2/)) committed; the `App.axaml` ThemeDictionaries carry the whole token set.
+- **Shell:** the grouped workflow-phase sidebar (Overview · Author · Measure · Evaluate · Train)
+  replaced the flat tab strip; a Phosphor icon system (inlined `StreamGeometry`), the activity bar,
+  context bar, engine-status footer, and the contextual Quality rail.
+- **Screens:** Nocturne card fidelity across Dashboard (hero + honest lifecycle strip), Quality,
+  Dataset Debt, Splits, Writing Studio, Examples, Preference Review, Evaluation, Model Arena,
+  Settings, Versions, Import & Quarantine, Suites, and Artifacts.
+- **Remaining polish:** Writing-Studio structured-form split, Examples search/filter pills, a
+  Dashboard recent-activity feed, the Splits proportion bar, and the docked-console styling.
+
+The interim Avalonia head is being matured to this design so it ports ~1:1 toward the Tauri/React
+endpoint. See [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md).
