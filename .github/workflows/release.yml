@@ -67,7 +67,7 @@ jobs:
 
       # Always available for inspection (this is what makes a workflow_dispatch dry-run verifiable).
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: corpus-studio-win-x64
           path: ${{ env.ASSET }}
@@ -123,7 +123,7 @@ jobs:
           echo "ASSET=$asset" >> "$GITHUB_ENV"
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: corpus-studio-${{ matrix.rid }}
           path: ${{ env.ASSET }}
