@@ -35,6 +35,21 @@ public sealed class DebtReport
             _ => "#64748B",    // gray — N/A, "—", unknown: never green
         };
     }
+
+    /// <summary>An honest one-line train-readiness verdict for a debt grade — the bold hero
+    /// headline above the summary. A/B are train-ready; C/D/F are not (fix the high-severity items
+    /// first, mirroring the design); N/A, the "—" unknown/stale placeholder, and any unknown grade
+    /// get a neutral "run a debt check" prompt so the verdict never claims a train-readiness (or an
+    /// alarm) the engine hasn't actually produced. Pure/testable — no clock, no I/O.</summary>
+    public static string VerdictHeadline(string grade)
+    {
+        return grade switch
+        {
+            "A" or "B" => "Ready to train",
+            "C" or "D" or "F" => "Not train-ready — fix high-severity items first",
+            _ => "Run a debt check to grade this dataset",
+        };
+    }
 }
 
 public sealed class DebtItem

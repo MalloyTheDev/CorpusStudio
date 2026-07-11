@@ -673,33 +673,67 @@
       <ScrollViewer>
         <StackPanel Margin="20" Spacing="14" MaxWidth="880" HorizontalAlignment="Left">
 
-          <!-- Grade hero card -->
+          <!-- Grade hero card: badge · verdict headline + summary · weekly mini bar-chart. -->
           <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="18"
                   BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-            <StackPanel Spacing="12">
-              <Grid ColumnDefinitions="Auto,*">
-                <Border Grid.Column="0" Width="64" Height="64" CornerRadius="12" VerticalAlignment="Top"
-                        Background="{Binding Debt.DebtGradeColor, Converter={StaticResource StringToBrush}}">
-                  <TextBlock Text="{Binding Debt.DebtGrade}" FontSize="34" FontWeight="Bold" Foreground="White"
-                             HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Border>
-                <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center" Margin="14,0,0,0">
-                  <StackPanel Orientation="Horizontal" Spacing="10">
-                    <TextBlock Text="Remediation ledger" FontSize="18" FontWeight="Bold"
-                               Foreground="{DynamicResource Text}" VerticalAlignment="Center"/>
-                    <TextBlock Text="stale" Foreground="{DynamicResource Warn}" FontSize="11"
-                               VerticalAlignment="Center" IsVisible="{Binding Debt.DebtStale}"/>
-                  </StackPanel>
-                  <TextBlock Text="{Binding Debt.DebtSummary}" Foreground="{DynamicResource T3}" TextWrapping="Wrap"/>
-                  <Button Content="Run debt check" Command="{Binding RunDatasetDebtCommand}"
-                          HorizontalAlignment="Left" Margin="0,4,0,0"/>
+            <Grid ColumnDefinitions="Auto,*,Auto">
+              <!-- Grade badge (gray for N/A / "—" / stale — never green). -->
+              <Border Grid.Column="0" Width="64" Height="64" CornerRadius="12" VerticalAlignment="Top"
+                      Background="{Binding Debt.DebtGradeColor, Converter={StaticResource StringToBrush}}">
+                <TextBlock Text="{Binding Debt.DebtGrade}" FontSize="34" FontWeight="Bold" Foreground="White"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              </Border>
+              <!-- Verdict headline (honest, follows the real grade) + descriptive summary. -->
+              <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center" Margin="14,0,0,0">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                  <TextBlock Text="{Binding Debt.DebtVerdict}" FontSize="18" FontWeight="Bold"
+                             Foreground="{DynamicResource Text}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                  <TextBlock Text="stale" Foreground="{DynamicResource Warn}" FontSize="11"
+                             VerticalAlignment="Center" IsVisible="{Binding Debt.DebtStale}"/>
                 </StackPanel>
-              </Grid>
-              <Border Height="1" Background="{DynamicResource Line}"/>
-              <TextBlock Text="{Binding Quality.DebtTrendSummary}" Foreground="{DynamicResource T4}"
-                         FontSize="11" TextWrapping="Wrap"/>
-            </StackPanel>
+                <TextBlock Text="{Binding Debt.DebtSummary}" Foreground="{DynamicResource T3}" TextWrapping="Wrap"/>
+                <Button Content="Run debt check" Command="{Binding RunDatasetDebtCommand}"
+                        HorizontalAlignment="Left" Margin="0,4,0,0"/>
+              </StackPanel>
+              <!-- Weekly mini bar-chart: one accent bar per recorded quality run, height scaled to the
+                   tallest (real Quality.DebtTrend points, latest run at full opacity). Hidden entirely
+                   when no trend has been recorded — no fabricated bars. -->
+              <StackPanel Grid.Column="2" VerticalAlignment="Top" Margin="18,2,0,0" Spacing="5"
+                          IsVisible="{Binding Quality.HasDebtTrendPoints}">
+                <Border Height="56" MinWidth="72" Padding="1,0" VerticalAlignment="Bottom">
+                  <ItemsControl ItemsSource="{Binding Quality.DebtTrend}" VerticalAlignment="Bottom">
+                    <ItemsControl.Styles>
+                      <Style Selector="Border.bar">
+                        <Setter Property="Opacity" Value="0.5"/>
+                      </Style>
+                      <Style Selector="Border.bar.latest">
+                        <Setter Property="Opacity" Value="1"/>
+                      </Style>
+                    </ItemsControl.Styles>
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom"/>
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="models:DebtTrendPoint">
+                        <Border Classes="bar" Classes.latest="{Binding IsLatest}"
+                                Width="9" Height="{Binding BarHeight}" Margin="0,0,4,0"
+                                CornerRadius="2,2,0,0" VerticalAlignment="Bottom"
+                                Background="{DynamicResource Accent}" ToolTip.Tip="{Binding Tooltip}"/>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </Border>
+                <TextBlock Text="issue rate · recent runs" FontSize="9.5" Foreground="{DynamicResource T4}"
+                           HorizontalAlignment="Center"/>
+              </StackPanel>
+            </Grid>
           </Border>
+
+          <!-- Section label above the severity-ranked ledger (T4 eyebrow, matches the design). -->
+          <TextBlock Text="REMEDIATION LEDGER · highest severity first" FontSize="10" FontWeight="SemiBold"
+                     Foreground="{DynamicResource T4}" Margin="2,4,0,0"/>
 
           <!-- Ledger cards (highest severity first) -->
           <ItemsControl ItemsSource="{Binding Debt.DebtItems}">

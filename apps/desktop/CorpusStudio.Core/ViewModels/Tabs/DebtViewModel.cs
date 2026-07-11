@@ -27,6 +27,7 @@ public sealed class DebtViewModel : ViewModelBase, IDebtViewModel
             if (SetField(ref _debtGrade, value))
             {
                 OnPropertyChanged(nameof(HasGrade));
+                OnPropertyChanged(nameof(DebtVerdict));
             }
         }
     }
@@ -34,6 +35,11 @@ public sealed class DebtViewModel : ViewModelBase, IDebtViewModel
     /// <summary>Whether a real letter grade has been computed (not the neutral "—" placeholder).
     /// Drives the sidebar nav-row grade pill so it stays hidden until a debt check has run.</summary>
     public bool HasGrade => _debtGrade != "—";
+
+    /// <summary>The bold hero verdict headline, derived honestly from the real grade (A/B → ready
+    /// to train; C/D/F → not train-ready; neutral "—"/N/A → run a check). Delegates to the pure
+    /// <see cref="DebtReport.VerdictHeadline"/> so it never over- or under-states the grade.</summary>
+    public string DebtVerdict => DebtReport.VerdictHeadline(_debtGrade);
 
     public string DebtGradeColor
     {

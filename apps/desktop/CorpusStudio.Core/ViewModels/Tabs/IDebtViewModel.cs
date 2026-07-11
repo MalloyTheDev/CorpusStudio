@@ -20,6 +20,10 @@ public interface IDebtViewModel : INotifyPropertyChanged
     /// <summary>Whether a real letter grade has been computed (not the neutral "—" placeholder).</summary>
     bool HasGrade { get; }
 
+    /// <summary>The bold hero verdict headline derived honestly from the real grade (A/B ready to
+    /// train, C/D/F not, neutral "—"/N/A prompts a check).</summary>
+    string DebtVerdict { get; }
+
     /// <summary>Show a fresh debt result (grade + ranked ledger + honest summary).</summary>
     void ApplyDebtReport(DebtReport report);
 
