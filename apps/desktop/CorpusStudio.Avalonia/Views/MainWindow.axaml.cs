@@ -19,6 +19,10 @@ public partial class MainWindow : Window
     public IDialogService Dialogs { get; set; } = new AvaloniaDialogService();
     public IFilePickerService FilePicker { get; set; } = new AvaloniaFilePickerService();
 
+    /// <summary>Engine seam (set from DI in App.axaml.cs) — the New Project wizard needs the schema
+    /// list, mirroring the WPF head's <c>_engineService</c>.</summary>
+    public IEngineService? Engine { get; set; }
+
     public MainWindow()
     {
         InitializeComponent();
@@ -117,6 +121,51 @@ public partial class MainWindow : Window
         }
 
         vm.Explorer.CloseDocument(doc);
+    }
+
+    // Start Center "New Dataset Project": mirrors the WPF head's LaunchNewProjectWizardAsync — fetch the
+    // schema list from the engine, run the shared wizard (schema/template/preview/validation → scaffold),
+    // and on success adopt the scaffolded folder as the active project and reveal it in the Explorer.
+    private async void NewProject_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm)
+        {
+            return;
+        }
+
+        if (Engine is null)
+        {
+            await Dialogs.ShowAsync("The engine is unavailable, so schemas can't be loaded.", "New Project",
+                DialogSeverity.Warning);
+            return;
+        }
+
+        System.Collections.Generic.IReadOnlyList<DatasetSchema> schemas;
+        try
+        {
+            schemas = await Engine.GetSchemasAsync();
+        }
+        catch (System.Exception ex)
+        {
+            await Dialogs.ShowAsync(ex.Message, "New Project", DialogSeverity.Error);
+            return;
+        }
+
+        var wizard = new WorkspaceWizardWindow(schemas) { FilePicker = FilePicker };
+        var created = await wizard.ShowDialog<bool>(this);
+        if (!created || wizard.Result is null)
+        {
+            return;
+        }
+
+        var w = wizard.ViewModel;
+        var schema = w.SelectedSchema;
+        vm.AddProject(w.SafeProjectId, w.ProjectName, schema?.Id ?? "instruction",
+            schema?.Name ?? schema?.Id ?? "instruction", wizard.Result.Folder);
+        vm.StartCenter.RecordOpened(
+            wizard.Result.Folder, w.ProjectName, schema?.Id,
+            System.DateTimeOffset.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture));
+        vm.ShowFiles();
     }
 
     // Mark the segment matching the resolved variant as selected (accent-soft pill), the other neutral.
