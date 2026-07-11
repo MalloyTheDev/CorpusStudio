@@ -1518,11 +1518,30 @@
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Grid.Column="0" Text="Quality" FontWeight="SemiBold" FontSize="14"
                                Foreground="{DynamicResource Text}" VerticalAlignment="Center"/>
-                    <Button Grid.Column="1" Content="Run" Command="{Binding RunQualityCommand}"/>
+                    <Button Grid.Column="1" Command="{Binding RunQualityCommand}">
+                      <StackPanel Orientation="Horizontal" Spacing="5">
+                        <Path Classes="ico accent" Data="{StaticResource IcoPlay}" Width="11" Height="11"/>
+                        <TextBlock Text="Run" VerticalAlignment="Center"/>
+                      </StackPanel>
+                    </Button>
                   </Grid>
+                  <!-- PII-aware status banner: the alert callout from the design, driven by the real
+                       Quality.QualityStatusColor/Background (red on PII/secrets, amber on issues, green
+                       clean). Self-contained soft chip — readable in both themes. -->
+                  <Border CornerRadius="8" Padding="9,7" IsVisible="{Binding Quality.HasQualityMetrics}"
+                          Background="{Binding Quality.QualityStatusBackground, Converter={StaticResource StringToBrush}}">
+                    <Grid ColumnDefinitions="Auto,*">
+                      <Path Grid.Column="0" Classes="ico" Width="15" Height="15" VerticalAlignment="Top"
+                            Data="{StaticResource IcoShieldWarningFill}"
+                            Fill="{Binding Quality.QualityStatusColor, Converter={StaticResource StringToBrush}}"/>
+                      <TextBlock Grid.Column="1" Margin="8,0,0,0" TextWrapping="Wrap" FontSize="11.5"
+                                 Text="{Binding Quality.QualityStatusLine}"
+                                 Foreground="{Binding Quality.QualityStatusColor, Converter={StaticResource StringToBrush}}"/>
+                    </Grid>
+                  </Border>
                   <TextBlock Text="{Binding Quality.QualitySummary}" Foreground="{DynamicResource T3}"
-                             FontSize="12" TextWrapping="Wrap"/>
-                  <Border Height="1" Background="{DynamicResource Line}"/>
+                             FontSize="12" TextWrapping="Wrap" IsVisible="{Binding !Quality.HasQualityMetrics}"/>
+                  <Border Height="1" Background="{DynamicResource Line}" IsVisible="{Binding Quality.HasQualityMetrics}"/>
                   <ItemsControl ItemsSource="{Binding Quality.QualityMetrics}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="models:QualityMetric">
@@ -1534,6 +1553,16 @@
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
+                </StackPanel>
+              </Border>
+              <!-- Validation card: bound to the real (honest) shell ValidationSummary — shows the
+                   actual validation state, not a faked "Passed" chip. -->
+              <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="14"
+                      BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+                <StackPanel Spacing="4">
+                  <TextBlock Text="VALIDATION" FontSize="10" Foreground="{DynamicResource T4}"/>
+                  <TextBlock Text="{Binding ValidationSummary}" Foreground="{DynamicResource T3}"
+                             FontSize="11.5" TextWrapping="Wrap"/>
                 </StackPanel>
               </Border>
               <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="14"
