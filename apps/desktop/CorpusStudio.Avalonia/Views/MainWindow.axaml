@@ -113,7 +113,7 @@
         </Grid>
 
         <!-- Studio mode (IsVisible←IsStudio): hero + projects sidebar + the 14-tab TabControl + Quality panel. -->
-        <Grid IsVisible="{Binding IsStudio}" RowDefinitions="Auto,*" ColumnDefinitions="170,*,300">
+        <Grid IsVisible="{Binding IsStudio}" RowDefinitions="Auto,*" ColumnDefinitions="250,*,300">
           <Border Grid.Row="0" Grid.ColumnSpan="3" Background="{DynamicResource AppBackground}" Padding="14,10" Margin="0,0,0,6">
             <StackPanel Spacing="8">
               <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
@@ -168,19 +168,139 @@
               </WrapPanel>
             </StackPanel>
           </Border>
-          <ListBox Grid.Row="1" Grid.Column="0" ItemsSource="{Binding Projects}"
-                   SelectedItem="{Binding SelectedProject}">
-            <ListBox.ItemTemplate>
-              <DataTemplate x:DataType="models:DatasetProjectListItem">
-                <TextBlock Text="{Binding DisplayName}" Margin="0,2"/>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
+          <!-- Grouped workflow-phase sidebar (slice 2): the Nocturne IA — a project switcher over a
+               section→subsection nav that DRIVES the content-switcher via SelectStudioTabCommand.
+               Active row = accent-soft via TabActiveBrush; group headers are T4 uppercase with a
+               per-phase status glyph. Replaces the flat tab strip. (Real gating + Phosphor icons: a
+               later slice.) -->
+          <DockPanel Grid.Row="1" Grid.Column="0" Background="{DynamicResource Panel2}">
+            <!-- Project switcher -->
+            <Border DockPanel.Dock="Top" Padding="10,8" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1">
+              <StackPanel Spacing="4">
+                <TextBlock Text="PROJECT" Foreground="{DynamicResource T4}" FontSize="10" FontWeight="SemiBold"/>
+                <ListBox ItemsSource="{Binding Projects}" SelectedItem="{Binding SelectedProject}"
+                         Background="Transparent" BorderThickness="0" MaxHeight="110" Padding="0">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="models:DatasetProjectListItem">
+                      <TextBlock Text="{Binding DisplayName}" Margin="0,1"/>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </StackPanel>
+            </Border>
+            <!-- Grouped nav -->
+            <ScrollViewer>
+              <StackPanel Margin="8,8" Spacing="1">
 
-          <TabControl Grid.Row="1" Grid.Column="1" Margin="8,0">
+                <TextBlock Text="OVERVIEW" Foreground="{DynamicResource T4}" FontSize="10" FontWeight="SemiBold" Margin="8,4,0,3"/>
+                <Button Content="Dashboard" CommandParameter="Dashboard" Command="{Binding SelectStudioTabCommand}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
+                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Dashboard}"/>
+
+                <StackPanel Orientation="Horizontal" Spacing="6" Margin="8,10,0,3">
+                  <TextBlock Text="AUTHOR" Foreground="{DynamicResource T4}" FontSize="10" FontWeight="SemiBold"/>
+                  <TextBlock Text="✓" Foreground="{DynamicResource Ok}" FontSize="10"/>
+                </StackPanel>
+                <Button Content="Writing Studio" CommandParameter="WritingStudio" Command="{Binding SelectStudioTabCommand}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
+                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=WritingStudio}"/>
+                <Button Content="Examples" CommandParameter="Examples" Command="{Binding SelectStudioTabCommand}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
+                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Examples}"/>
+                <Button Content="Import &amp; Quarantine" CommandParameter="Quarantine" Command="{Binding SelectStudioTabCommand}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
+                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Quarantine}"/>
+                <Button Content="Preference Review" CommandParameter="PreferenceReview" Command="{Binding SelectStudioTabCommand}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
+                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=PreferenceReview}"/>
+                <Button Content="AI Assist" CommandParameter="AiAssist" Command="{Binding SelectStudioTabCommand}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
+                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=AiAssist}"/>
+
+                <StackPanel Orientation="Horizontal" Spacing="6" Margin="8,10,0,3">
+                  <TextBlock Text="MEASURE" Foreground="{DynamicResource T4}" FontSize="10" FontWeight="SemiBold"/>
+                  <TextBlock Text="⚠" Foreground="{DynamicResource Warn}" FontSize="10"/>
+                </StackPanel>
+                <Button Content="Dataset Debt" CommandParameter="Debt" Command="{Binding SelectStudioTabCommand}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
+                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Debt}"/>
+                <Button Content="Splits" CommandParameter="Splits" Command="{Binding SelectStudioTabCommand}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
+                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Splits}"/>
+
+                <TextBlock Text="EVALUATE" Foreground="{DynamicResource T4}" FontSize="10" FontWeight="SemiBold" Margin="8,10,0,3"/>
+                <Button Content="Evaluation" CommandParameter="Evaluation" Command="{Binding SelectStudioTabCommand}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
+                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Evaluation}"/>
+                <Button Content="Model Arena" CommandParameter="Arena" Command="{Binding SelectStudioTabCommand}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
+                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Arena}"/>
+                <Button Content="Suites" CommandParameter="Suites" Command="{Binding SelectStudioTabCommand}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
+                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Suites}"/>
+
+                <TextBlock Text="TRAIN" Foreground="{DynamicResource T4}" FontSize="10" FontWeight="SemiBold" Margin="8,10,0,3"/>
+                <Button Content="Training" CommandParameter="Training" Command="{Binding SelectStudioTabCommand}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
+                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Training}"/>
+                <Button Content="Artifacts" CommandParameter="Artifacts" Command="{Binding SelectStudioTabCommand}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
+                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Artifacts}"/>
+
+                <Border Height="1" Background="{DynamicResource Line}" Margin="8,10,8,6"/>
+                <Button Content="Versions" CommandParameter="Versions" Command="{Binding SelectStudioTabCommand}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
+                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Versions}"/>
+                <Button Content="Settings" CommandParameter="Settings" Command="{Binding SelectStudioTabCommand}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
+                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Settings}"/>
+
+              </StackPanel>
+            </ScrollViewer>
+          </DockPanel>
+
+          <!-- Grouped-IA content-switcher (slice 2): the flat 14-tab strip is replaced by the
+               sectioned nav (left) driving these overlapping view panels; exactly one is IsVisible
+               via SelectedStudioTabIndex. The screen CONTENTS are the former TabItem bodies, byte
+               for byte — a later slice raises each to full Nocturne fidelity. -->
+          <Panel Grid.Row="1" Grid.Column="1" Margin="8,0">
+
+    <!-- OVERVIEW · Dashboard — placeholder overview (a full hero + lifecycle strip is a later slice). -->
+    <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Dashboard}">
+      <ScrollViewer>
+        <StackPanel Margin="20" Spacing="12">
+          <TextBlock Text="{Binding ActiveProjectTitle}" FontSize="20" FontWeight="Bold"/>
+          <TextBlock Text="{Binding ActiveSchemaDescription}" Foreground="{DynamicResource T3}" TextWrapping="Wrap"/>
+          <TextBlock Text="Pick a workflow phase on the left — Author, Measure, Evaluate, or Train."
+                     Foreground="{DynamicResource T3}"/>
+          <WrapPanel>
+            <Button Content="Author examples" Command="{Binding GoToWritingStudioCommand}" Margin="0,0,6,4"/>
+            <Button Content="Run quality" Command="{Binding RunQualityCommand}" Margin="0,0,6,4"/>
+            <Button Content="Generate splits" Command="{Binding GenerateSplitsCommand}" Margin="0,0,6,4"/>
+            <Button Content="Run evaluation" Command="{Binding GoToEvaluationCommand}" Margin="0,0,6,4"/>
+            <Button Content="Training" Command="{Binding GoToTrainingCommand}" Margin="0,0,6,4"/>
+          </WrapPanel>
+        </StackPanel>
+      </ScrollViewer>
+    </Border>
 
     <!-- Debt: read bindings + IsVisible bound to a bool (the Visibility→IsVisible port, proven). -->
-    <TabItem Header="Debt">
+    <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Debt}">
       <ScrollViewer>
         <StackPanel Margin="20" Spacing="10">
           <StackPanel Orientation="Horizontal" Spacing="12">
@@ -203,10 +323,10 @@
           </ItemsControl>
         </StackPanel>
       </ScrollViewer>
-    </TabItem>
+    </Border>
 
     <!-- Arena: TwoWay text bindings on get/set VM inputs (proven) + a read binding. -->
-    <TabItem Header="Arena">
+    <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Arena}">
       <StackPanel Margin="20" Spacing="10">
         <TextBlock Text="Prompts (one per line)"/>
         <TextBox Text="{Binding Arena.ArenaPromptsInput}" AcceptsReturn="True" Height="90"/>
@@ -217,10 +337,10 @@
         <Button Content="Run Arena" Command="{Binding RunArenaCommand}" HorizontalAlignment="Left"/>
         <TextBlock Text="{Binding Arena.ArenaSummary}" TextWrapping="Wrap" Margin="0,8,0,0"/>
       </StackPanel>
-    </TabItem>
+    </Border>
 
     <!-- Settings: two read-only summary panes (SetSettings / ApplyProviderPolicies feed them). -->
-    <TabItem Header="Settings">
+    <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Settings}">
       <ScrollViewer>
         <StackPanel Margin="20" Spacing="8">
           <TextBlock Text="App settings" FontWeight="Bold" FontSize="16"/>
@@ -237,10 +357,10 @@
           </WrapPanel>
         </StackPanel>
       </ScrollViewer>
-    </TabItem>
+    </Border>
 
     <!-- Versions: ItemsSource + TwoWay SelectedItem + a DataTemplate item + TwoWay label input. -->
-    <TabItem Header="Versions">
+    <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Versions}">
       <Grid Margin="16" ColumnDefinitions="300,*">
         <DockPanel Grid.Column="0">
           <TextBlock DockPanel.Dock="Top" Text="{Binding Versions.DatasetVersionSummary}"
@@ -272,10 +392,10 @@
           <TextBlock Text="{Binding Versions.DatasetVersionDetail}" TextWrapping="Wrap" Margin="0,8,0,0"/>
         </StackPanel>
       </Grid>
-    </TabItem>
+    </Border>
 
     <!-- Suites: two collections + TwoWay selection + a read report pane + IsVisible on a bool. -->
-    <TabItem Header="Suites">
+    <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Suites}">
       <Grid Margin="16" ColumnDefinitions="300,*">
         <DockPanel Grid.Column="0">
           <TextBlock DockPanel.Dock="Top" Text="{Binding Suites.SuitesStatus}"
@@ -315,10 +435,10 @@
                      Foreground="{DynamicResource AppTextMuted}" FontSize="11" Margin="0,8,0,0"/>
         </StackPanel>
       </Grid>
-    </TabItem>
+    </Border>
 
     <!-- Splits: three TwoWay percent/seed inputs + a read summary. -->
-    <TabItem Header="Splits">
+    <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Splits}">
       <StackPanel Margin="20" Spacing="8" MaxWidth="360" HorizontalAlignment="Left">
         <TextBlock Text="Train %"/>
         <TextBox Text="{Binding Splits.SplitTrainPercent}"/>
@@ -329,10 +449,10 @@
         <Button Content="Generate splits" Command="{Binding GenerateSplitsCommand}" HorizontalAlignment="Left" Margin="0,4,0,0"/>
         <TextBlock Text="{Binding Splits.SplitSummary}" TextWrapping="Wrap" Margin="0,10,0,0"/>
       </StackPanel>
-    </TabItem>
+    </Border>
 
     <!-- Examples: the dataset spine — ItemsSource + TwoWay selection + a read JSON pane. -->
-    <TabItem Header="Examples">
+    <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Examples}">
       <Grid Margin="16" ColumnDefinitions="300,*">
         <ListBox Grid.Column="0" ItemsSource="{Binding Examples.Items}"
                  SelectedItem="{Binding Examples.SelectedExample}">
@@ -346,10 +466,10 @@
                  IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas"
                  TextWrapping="Wrap" VerticalAlignment="Stretch"/>
       </Grid>
-    </TabItem>
+    </Border>
 
     <!-- Quarantine: failed-import rows list + TwoWay selection + a read detail pane. -->
-    <TabItem Header="Quarantine">
+    <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Quarantine}">
       <Grid Margin="16" ColumnDefinitions="300,*">
         <ListBox Grid.Column="0" ItemsSource="{Binding Quarantine.ImportQuarantineItems}"
                  SelectedItem="{Binding Quarantine.SelectedImportQuarantineItem}">
@@ -366,10 +486,10 @@
                  IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas"
                  TextWrapping="Wrap" VerticalAlignment="Stretch"/>
       </Grid>
-    </TabItem>
+    </Border>
 
     <!-- Preference Review: list + TwoWay selection + read panes + a ComboBox (ItemsSource + SelectedItem). -->
-    <TabItem Header="Preference Review">
+    <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=PreferenceReview}">
       <Grid Margin="16" ColumnDefinitions="300,*">
         <DockPanel Grid.Column="0">
           <ComboBox DockPanel.Dock="Top" Margin="0,0,0,8" HorizontalAlignment="Stretch"
@@ -402,10 +522,10 @@
                      Foreground="{DynamicResource AppTextMuted}" Margin="0,8,0,0"/>
         </StackPanel>
       </Grid>
-    </TabItem>
+    </Border>
 
     <!-- Writing Studio: the shared draft editor — TwoWay text + an IsVisible dirty indicator. -->
-    <TabItem Header="Writing Studio">
+    <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=WritingStudio}">
       <DockPanel Margin="16">
         <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
           <Button Content="Validate draft" Command="{Binding ValidateDraftCommand}" Margin="0,0,6,0"/>
@@ -417,10 +537,10 @@
                  FontFamily="Consolas" TextWrapping="NoWrap"
                  HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
       </DockPanel>
-    </TabItem>
+    </Border>
 
     <!-- AI Assist: the connection child + action ComboBox + review queue + the colored candidate gate. -->
-    <TabItem Header="AI Assist">
+    <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=AiAssist}">
       <Grid Margin="16" ColumnDefinitions="320,*" RowDefinitions="Auto,*">
         <StackPanel Grid.Column="0" Grid.RowSpan="2" Spacing="6">
           <TextBlock Text="Backend / model"/>
@@ -469,10 +589,10 @@
                  Text="{Binding AiAssist.AiAssistSuggestedJsonlText}" IsReadOnly="True"
                  AcceptsReturn="True" FontFamily="Consolas" TextWrapping="Wrap"/>
       </Grid>
-    </TabItem>
+    </Border>
 
     <!-- Evaluation: run inputs + results list/selection + filter ComboBox + report-history comparison. -->
-    <TabItem Header="Evaluation">
+    <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Evaluation}">
       <Grid Margin="16" ColumnDefinitions="320,*">
         <StackPanel Grid.Column="0" Spacing="6">
           <TextBlock Text="Limit / score threshold"/>
@@ -532,10 +652,10 @@
           <TextBlock Text="{Binding Evaluation.EvaluationComparisonSummary}" TextWrapping="Wrap"/>
         </StackPanel>
       </Grid>
-    </TabItem>
+    </Border>
 
     <!-- Training: the config form (TwoWay inputs) + status/IsVisible + the live run log. -->
-    <TabItem Header="Training">
+    <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Training}">
       <Grid Margin="16" ColumnDefinitions="*,*">
         <StackPanel Grid.Column="0" Spacing="6" Margin="0,0,10,0">
           <TextBlock Text="Config" FontWeight="Bold"/>
@@ -599,10 +719,10 @@
                    IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="11" MaxHeight="180" TextWrapping="Wrap"/>
         </StackPanel>
       </Grid>
-    </TabItem>
+    </Border>
 
     <!-- Artifacts: registered adapters/checkpoints list + TwoWay selection + summary/detail panes. -->
-    <TabItem Header="Artifacts">
+    <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Artifacts}">
       <Grid Margin="16" ColumnDefinitions="320,*">
         <DockPanel Grid.Column="0">
           <TextBlock DockPanel.Dock="Top" Text="{Binding Artifacts.ArtifactSummary}"
@@ -630,9 +750,9 @@
                  IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas"
                  TextWrapping="Wrap" VerticalAlignment="Stretch"/>
       </Grid>
-    </TabItem>
+    </Border>
 
-          </TabControl>
+          </Panel>
 
           <!-- Quality right panel: summary + the structured metric grid (colored via the converter). -->
           <ScrollViewer Grid.Row="1" Grid.Column="2">

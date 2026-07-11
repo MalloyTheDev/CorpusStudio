@@ -66,6 +66,26 @@ public sealed class ShellCommandTests
     }
 
     [Fact]
+    public void SelectStudioTabCommand_SwitchesToStudioAndSelectsTheNamedTab()
+    {
+        // The grouped-IA nav rows (slice 2) bind this ONE command with the StudioTab name as the
+        // CommandParameter — the shared target that drives the Avalonia content-switcher.
+        var vm = new MainWindowViewModel();
+        vm.ShowStartCenter();
+
+        vm.SelectStudioTabCommand.Execute("Artifacts");
+        Assert.True(vm.IsStudio);
+        Assert.Equal((int)StudioTab.Artifacts, vm.SelectedStudioTabIndex);
+
+        vm.SelectStudioTabCommand.Execute("Quarantine");
+        Assert.Equal((int)StudioTab.Quarantine, vm.SelectedStudioTabIndex);
+
+        // An unknown/garbage parameter is a safe no-op — the selection stays put, never throws.
+        vm.SelectStudioTabCommand.Execute("NotARealTab");
+        Assert.Equal((int)StudioTab.Quarantine, vm.SelectedStudioTabIndex);
+    }
+
+    [Fact]
     public void AsyncRelayCommandOfT_PassesTypedParameter_AndCoercesMismatchToNull()
     {
         string? seen = "unset";
