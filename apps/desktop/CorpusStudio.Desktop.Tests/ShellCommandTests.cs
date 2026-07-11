@@ -86,6 +86,27 @@ public sealed class ShellCommandTests
     }
 
     [Fact]
+    public void ContextBar_TitleTracksSelectedTab_AndOverflowToggles()
+    {
+        // slice 4: the context bar's title/subtitle are derived from the selected tab, and the
+        // "⋯ More" overflow is a simple toggle (collapsed by default).
+        var vm = new MainWindowViewModel();
+
+        vm.SelectStudioTabCommand.Execute("Debt");
+        Assert.Equal("Dataset Debt", vm.StudioViewTitle);
+        Assert.False(string.IsNullOrWhiteSpace(vm.StudioViewSubtitle));
+
+        vm.SelectStudioTabCommand.Execute("Training");
+        Assert.Equal("Training", vm.StudioViewTitle);
+
+        Assert.False(vm.ProjectActionsExpanded);
+        vm.ToggleProjectActionsCommand.Execute(null);
+        Assert.True(vm.ProjectActionsExpanded);
+        vm.ToggleProjectActionsCommand.Execute(null);
+        Assert.False(vm.ProjectActionsExpanded);
+    }
+
+    [Fact]
     public void AsyncRelayCommandOfT_PassesTypedParameter_AndCoercesMismatchToNull()
     {
         string? seen = "unset";
