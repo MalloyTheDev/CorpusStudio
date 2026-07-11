@@ -852,66 +852,109 @@
       </Grid>
     </Border>
 
-    <!-- Evaluation: run inputs + results list/selection + filter ComboBox + report-history comparison. -->
+    <!-- Evaluation (slice 6 fidelity): config card + results card (status chips) | detail/comparison cards. -->
     <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Evaluation}">
-      <Grid Margin="16" ColumnDefinitions="320,*">
-        <StackPanel Grid.Column="0" Spacing="6">
-          <TextBlock Text="Limit / score threshold"/>
-          <TextBox Text="{Binding Evaluation.EvaluationLimit}"/>
-          <TextBox Text="{Binding Evaluation.EvaluationScoreThreshold}"/>
-          <TextBlock Text="Judge (optional): model / backend / base-url" FontSize="11" Foreground="{DynamicResource AppTextMuted}"/>
-          <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeModel}" Watermark="judge model"/>
-          <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeBackend}" Watermark="judge backend (blank = eval backend)"/>
-          <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeBaseUrl}" Watermark="judge base url (blank = eval base url)"/>
-          <WrapPanel>
-            <Button Content="Check backend" Command="{Binding CheckEvaluationBackendCommand}" Margin="0,0,6,4"/>
-            <Button Content="Refresh models" Command="{Binding RefreshEvaluationModelsCommand}" Margin="0,0,6,4"/>
-            <Button Content="Run Evaluation" Command="{Binding RunEvaluationCommand}" Margin="0,0,6,4"/>
-            <Button Content="Rerun report" Command="{Binding RerunEvaluationReportCommand}" Margin="0,0,6,4"/>
-            <Button Content="Prepare failure review" Command="{Binding PrepareEvaluationFailureReviewCommand}" Margin="0,0,6,4"/>
-          </WrapPanel>
-          <StackPanel IsVisible="{Binding Evaluation.IsEvaluationInProgress}" Spacing="3">
-            <TextBlock Text="{Binding Evaluation.EvaluationProgressText}" FontSize="11"/>
-            <ProgressBar Minimum="0" Maximum="100" Value="{Binding Evaluation.EvaluationProgressPercent}"/>
-          </StackPanel>
-          <TextBlock Text="{Binding Evaluation.EvaluationSummary}" TextWrapping="Wrap" Margin="0,6,0,0"/>
-          <TextBlock Text="{Binding Evaluation.EvaluationResultsSummary}" Margin="0,6,0,0"/>
-          <ComboBox HorizontalAlignment="Stretch"
-                    ItemsSource="{Binding Evaluation.EvaluationResultFilterOptions}"
-                    SelectedItem="{Binding Evaluation.EvaluationResultFilter}"/>
-          <ListBox ItemsSource="{Binding Evaluation.EvaluationResults}"
-                   SelectedItem="{Binding Evaluation.SelectedEvaluationExampleResult}" Height="220">
-            <ListBox.ItemTemplate>
-              <DataTemplate x:DataType="models:EvaluationExampleResult">
-                <StackPanel Margin="0,2">
-                  <TextBlock Text="{Binding ExampleId}" FontWeight="SemiBold"/>
-                  <TextBlock Text="{Binding Score}" Foreground="{DynamicResource AppTextMuted}" FontSize="11"/>
+      <Grid Margin="16" ColumnDefinitions="380,*">
+        <ScrollViewer Grid.Column="0">
+          <StackPanel Spacing="12">
+            <!-- Run configuration card -->
+            <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="16"
+                    BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <StackPanel Spacing="8">
+                <TextBlock Text="Run configuration" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
+                <Grid ColumnDefinitions="*,*">
+                  <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,8,0">
+                    <TextBlock Text="LIMIT" FontSize="10" Foreground="{DynamicResource T4}"/>
+                    <TextBox Text="{Binding Evaluation.EvaluationLimit}"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Spacing="4">
+                    <TextBlock Text="SCORE THRESHOLD" FontSize="10" Foreground="{DynamicResource T4}"/>
+                    <TextBox Text="{Binding Evaluation.EvaluationScoreThreshold}"/>
+                  </StackPanel>
+                </Grid>
+                <TextBlock Text="Judge (optional): model / backend / base-url" FontSize="11" Foreground="{DynamicResource T4}"/>
+                <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeModel}" Watermark="judge model"/>
+                <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeBackend}" Watermark="judge backend (blank = eval backend)"/>
+                <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeBaseUrl}" Watermark="judge base url (blank = eval base url)"/>
+                <WrapPanel>
+                  <Button Content="Check backend" Command="{Binding CheckEvaluationBackendCommand}" Margin="0,0,6,4"/>
+                  <Button Content="Refresh models" Command="{Binding RefreshEvaluationModelsCommand}" Margin="0,0,6,4"/>
+                  <Button Content="Run Evaluation" Command="{Binding RunEvaluationCommand}" Margin="0,0,6,4"
+                          Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}"
+                          BorderBrush="{DynamicResource Accent}" BorderThickness="1"/>
+                  <Button Content="Rerun report" Command="{Binding RerunEvaluationReportCommand}" Margin="0,0,6,4"/>
+                  <Button Content="Prepare failure review" Command="{Binding PrepareEvaluationFailureReviewCommand}" Margin="0,0,6,4"/>
+                </WrapPanel>
+                <StackPanel IsVisible="{Binding Evaluation.IsEvaluationInProgress}" Spacing="3">
+                  <TextBlock Text="{Binding Evaluation.EvaluationProgressText}" FontSize="11" Foreground="{DynamicResource T3}"/>
+                  <ProgressBar Minimum="0" Maximum="100" Value="{Binding Evaluation.EvaluationProgressPercent}"/>
                 </StackPanel>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-        </StackPanel>
-        <StackPanel Grid.Column="1" Margin="16,0,0,0" Spacing="6">
-          <TextBlock Text="{Binding Evaluation.SelectedEvaluationExampleDetail}" TextWrapping="Wrap"/>
-          <TextBlock Text="Manual score / notes" Margin="0,6,0,0"/>
-          <TextBox Text="{Binding Evaluation.EvaluationManualScore}"/>
-          <TextBox Text="{Binding Evaluation.EvaluationManualNotes}" AcceptsReturn="True" Height="50"/>
-          <TextBlock Text="{Binding Evaluation.EvaluationReviewSummary}" Foreground="{DynamicResource AppTextMuted}" TextWrapping="Wrap"/>
-          <TextBlock Text="Report comparison" FontWeight="SemiBold" Margin="0,8,0,0"/>
-          <ComboBox HorizontalAlignment="Stretch"
-                    ItemsSource="{Binding Evaluation.EvaluationReportHistory}"
-                    SelectedItem="{Binding Evaluation.SelectedEvaluationReportHistoryItem}">
-            <ComboBox.ItemTemplate>
-              <DataTemplate x:DataType="models:EvaluationReportHistoryItem">
-                <TextBlock Text="{Binding DisplayName}"/>
-              </DataTemplate>
-            </ComboBox.ItemTemplate>
-          </ComboBox>
-          <!-- Same ICommand the WPF head binds — one shared action, both heads. -->
-          <Button Content="Compare reports" Command="{Binding Evaluation.CompareReportsCommand}"
-                  HorizontalAlignment="Left"/>
-          <TextBlock Text="{Binding Evaluation.EvaluationComparisonSummary}" TextWrapping="Wrap"/>
-        </StackPanel>
+                <TextBlock Text="{Binding Evaluation.EvaluationSummary}" Foreground="{DynamicResource T2}" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Border>
+            <!-- Results card -->
+            <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="16"
+                    BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <StackPanel Spacing="8">
+                <TextBlock Text="Per-example results" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
+                <TextBlock Text="{Binding Evaluation.EvaluationResultsSummary}" Foreground="{DynamicResource T3}" FontSize="12"/>
+                <ComboBox HorizontalAlignment="Stretch"
+                          ItemsSource="{Binding Evaluation.EvaluationResultFilterOptions}"
+                          SelectedItem="{Binding Evaluation.EvaluationResultFilter}"/>
+                <ListBox ItemsSource="{Binding Evaluation.EvaluationResults}"
+                         SelectedItem="{Binding Evaluation.SelectedEvaluationExampleResult}" Height="280"
+                         Background="Transparent">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="models:EvaluationExampleResult">
+                      <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,3">
+                        <TextBlock Grid.Column="0" Text="{Binding ExampleId}" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Text}" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" Text="{Binding Score, StringFormat='{}{0:0.#}'}"
+                                   Foreground="{DynamicResource T3}" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <Border Grid.Column="2" CornerRadius="5" Padding="7,1" VerticalAlignment="Center"
+                                Background="{Binding StatusColor, Converter={StaticResource StringToBrush}}">
+                          <TextBlock Text="{Binding StatusLabel}" Foreground="White" FontSize="9.5" FontWeight="Bold"/>
+                        </Border>
+                      </Grid>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+        <ScrollViewer Grid.Column="1" Margin="16,0,0,0">
+          <StackPanel Spacing="12">
+            <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="16"
+                    BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <StackPanel Spacing="6">
+                <TextBlock Text="Example detail" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
+                <TextBlock Text="{Binding Evaluation.SelectedEvaluationExampleDetail}" Foreground="{DynamicResource T2}" TextWrapping="Wrap"/>
+                <TextBlock Text="Manual score / notes" FontSize="11" Foreground="{DynamicResource T4}" Margin="0,6,0,0"/>
+                <TextBox Text="{Binding Evaluation.EvaluationManualScore}"/>
+                <TextBox Text="{Binding Evaluation.EvaluationManualNotes}" AcceptsReturn="True" Height="50"/>
+                <TextBlock Text="{Binding Evaluation.EvaluationReviewSummary}" Foreground="{DynamicResource T3}" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Border>
+            <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="16"
+                    BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <StackPanel Spacing="6">
+                <TextBlock Text="Report comparison" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
+                <ComboBox HorizontalAlignment="Stretch"
+                          ItemsSource="{Binding Evaluation.EvaluationReportHistory}"
+                          SelectedItem="{Binding Evaluation.SelectedEvaluationReportHistoryItem}">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="models:EvaluationReportHistoryItem">
+                      <TextBlock Text="{Binding DisplayName}"/>
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+                <Button Content="Compare reports" Command="{Binding Evaluation.CompareReportsCommand}" HorizontalAlignment="Left"/>
+                <TextBlock Text="{Binding Evaluation.EvaluationComparisonSummary}" Foreground="{DynamicResource T2}" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
       </Grid>
     </Border>
 
@@ -1015,25 +1058,41 @@
 
           </Panel>
 
-          <!-- Quality right panel: summary + the structured metric grid (colored via the converter). -->
+          <!-- Quality right rail (slice 6 fidelity): a Nocturne signal card + a debt-trend card. -->
           <ScrollViewer Grid.Row="1" Grid.Column="2">
-            <StackPanel Margin="10" Spacing="6">
-              <TextBlock Text="Quality" FontWeight="Bold" FontSize="16"/>
-              <Button Content="Run quality check" Command="{Binding RunQualityCommand}" HorizontalAlignment="Left"/>
-              <TextBlock Text="{Binding Quality.QualitySummary}" TextWrapping="Wrap"/>
-              <ItemsControl ItemsSource="{Binding Quality.QualityMetrics}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="models:QualityMetric">
-                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,1">
-                      <TextBlock Text="{Binding Label}" Width="150"/>
-                      <TextBlock Text="{Binding Value}"
-                                 Foreground="{Binding StatusColor, Converter={StaticResource StringToBrush}}"/>
-                    </StackPanel>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-              <TextBlock Text="Debt trend" FontWeight="SemiBold" Margin="0,10,0,0"/>
-              <TextBlock Text="{Binding Quality.DebtTrendSummary}" TextWrapping="Wrap" FontSize="11"/>
+            <StackPanel Margin="12" Spacing="10">
+              <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="14"
+                      BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+                <StackPanel Spacing="8">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="Quality" FontWeight="SemiBold" FontSize="14"
+                               Foreground="{DynamicResource Text}" VerticalAlignment="Center"/>
+                    <Button Grid.Column="1" Content="Run" Command="{Binding RunQualityCommand}"/>
+                  </Grid>
+                  <TextBlock Text="{Binding Quality.QualitySummary}" Foreground="{DynamicResource T3}"
+                             FontSize="12" TextWrapping="Wrap"/>
+                  <Border Height="1" Background="{DynamicResource Line}"/>
+                  <ItemsControl ItemsSource="{Binding Quality.QualityMetrics}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="models:QualityMetric">
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                          <TextBlock Grid.Column="0" Text="{Binding Label}" Foreground="{DynamicResource T2}" FontSize="12"/>
+                          <TextBlock Grid.Column="1" Text="{Binding Value}" FontWeight="SemiBold" FontSize="12"
+                                     Foreground="{Binding StatusColor, Converter={StaticResource StringToBrush}}"/>
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
+              <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="14"
+                      BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+                <StackPanel Spacing="4">
+                  <TextBlock Text="DEBT TREND" FontSize="10" Foreground="{DynamicResource T4}"/>
+                  <TextBlock Text="{Binding Quality.DebtTrendSummary}" Foreground="{DynamicResource T3}"
+                             FontSize="11" TextWrapping="Wrap"/>
+                </StackPanel>
+              </Border>
             </StackPanel>
           </ScrollViewer>
         </Grid>

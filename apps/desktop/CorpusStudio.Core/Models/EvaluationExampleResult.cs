@@ -68,4 +68,10 @@ public sealed class EvaluationExampleResult
             ModelOutput,
         ]
     );
+
+    /// <summary>Status chip for the results list (slice 6): error &gt; fail &gt; pass.</summary>
+    public string StatusLabel => !string.IsNullOrEmpty(Error) ? "ERROR" : Passed ? "PASS" : "FAIL";
+
+    /// <summary>Nocturne hex for the status chip (error = warn amber, pass = ok green, fail = bad red).</summary>
+    public string StatusColor => !string.IsNullOrEmpty(Error) ? "#d9a35f" : Passed ? "#6bbf9a" : "#d76d6d";
 }
