@@ -141,7 +141,13 @@ public sealed class VersionsViewModel : ViewModelBase, IVersionsViewModel
         DatasetVersions.Clear();
         foreach (var item in items)
         {
+            item.IsCurrent = false;
             DatasetVersions.Add(item);
+        }
+        // The list is newest-first, so the head row is the current dataset version (timeline CURRENT mark).
+        if (DatasetVersions.Count > 0)
+        {
+            DatasetVersions[0].IsCurrent = true;
         }
         SelectedDatasetVersion = DatasetVersions.FirstOrDefault(i => i.Record.VersionId == selectedId);
 

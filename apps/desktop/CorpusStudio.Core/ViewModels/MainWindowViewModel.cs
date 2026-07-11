@@ -223,6 +223,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand ExportPreferenceRankingCommand { get; }
     public System.Windows.Input.ICommand RefreshDatasetVersionsCommand { get; }
     public System.Windows.Input.ICommand RestoreDatasetVersionCommand { get; }
+
+    /// <summary>Restore a SPECIFIC version from the timeline (selects it, then runs the same restore
+    /// flow) — lets each version card carry its own Restore button instead of a selection-coupled one.</summary>
+    public System.Windows.Input.ICommand RestoreDatasetVersionByItemCommand { get; }
     public System.Windows.Input.ICommand RunRowStoreGcCommand { get; }
     public System.Windows.Input.ICommand SaveExampleCommand { get; }
     public System.Windows.Input.ICommand ImportDatasetCommand { get; }
@@ -387,6 +391,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RefreshDatasetVersionsCommand = new AsyncRelayCommand(RefreshDatasetVersionsAsync);
         RunRowStoreGcCommand = new AsyncRelayCommand(RunRowStoreGcAsync);
         RestoreDatasetVersionCommand = new AsyncRelayCommand(RestoreDatasetVersionAsync);
+        RestoreDatasetVersionByItemCommand =
+            new AsyncRelayCommand<DatasetVersionDisplayItem>(RestoreDatasetVersionByItemAsync);
         SaveExampleCommand = new AsyncRelayCommand(SaveExampleAsync);
         ImportDatasetCommand = new AsyncRelayCommand(ImportDatasetAsync);
         ImportFromHuggingFaceCommand = new AsyncRelayCommand(ImportFromHuggingFaceAsync);
@@ -2103,6 +2109,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// <summary>Restore the selected dataset version in place (after a confirm), capturing the current
     /// dataset as an undo version first. The confirm routes through the head-agnostic IDialogService
     /// seam so the VM owns the flow (no View coupling). Moved from the desktop code-behind.</summary>
+    /// <summary>Restore a specific version card (selects it first, then the standard restore).</summary>
+    public async System.Threading.Tasks.Task RestoreDatasetVersionByItemAsync(DatasetVersionDisplayItem? item)
+    {
+        if (item is null)
+        {
+            return;
+        }
+        Versions.SelectedDatasetVersion = item;
+        await RestoreDatasetVersionAsync();
+    }
+
     public async System.Threading.Tasks.Task RestoreDatasetVersionAsync()
     {
         if (Versions.SelectedDatasetVersion is not { } selected)
