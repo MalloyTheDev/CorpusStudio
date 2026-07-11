@@ -818,7 +818,11 @@ public sealed class TrainingViewModel : ViewModelBase, ITrainingViewModel
 
     public void AppendModelFetchProgress(string line)
     {
-        if (!string.IsNullOrWhiteSpace(line))
+        // System.Progress<T> posts callbacks asynchronously, so a late progress line can arrive AFTER
+        // ApplyModelFetch / SetModelFetchError finalized the summary. Guard on IsFetchingModel (which
+        // both set false BEFORE writing the final summary) so a post-completion line can't clobber the
+        // result. De-flakes EngineCommandTests.FetchModel_WithRepoId_CallsEngineAndAppliesResult.
+        if (IsFetchingModel && !string.IsNullOrWhiteSpace(line))
         {
             ModelFetchSummary = line; // show the latest progress line while the download runs
         }

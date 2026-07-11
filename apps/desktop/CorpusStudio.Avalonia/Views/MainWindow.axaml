@@ -1075,70 +1075,123 @@
       </Grid>
     </Border>
 
-    <!-- Training: the config form (TwoWay inputs) + status/IsVisible + the live run log. -->
+    <!-- Training (slice 10 fidelity): configuration card | run + first-party + download + log cards. -->
     <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Training}">
       <Grid Margin="16" ColumnDefinitions="*,*">
-        <StackPanel Grid.Column="0" Spacing="6" Margin="0,0,10,0">
-          <TextBlock Text="Config" FontWeight="Bold"/>
-          <TextBox Text="{Binding Training.TrainingTarget}" Watermark="target"/>
-          <TextBox Text="{Binding Training.TrainingBaseModel}" Watermark="base model"/>
-          <TextBox Text="{Binding Training.TrainingFormat}" Watermark="format"/>
-          <TextBox Text="{Binding Training.TrainingSequenceLen}" Watermark="seq len"/>
-          <TextBox Text="{Binding Training.TrainingLoraR}" Watermark="lora r"/>
-          <TextBox Text="{Binding Training.TrainingLoraAlpha}" Watermark="lora alpha"/>
-          <TextBox Text="{Binding Training.TrainingLearningRate}" Watermark="learning rate"/>
-          <WrapPanel Margin="0,4,0,0">
-            <Button Content="Check compatibility" Command="{Binding CheckTrainingCompatibilityCommand}" Margin="0,0,6,4"/>
-            <Button Content="Generate config" Command="{Binding GenerateTrainingConfigCommand}" Margin="0,0,6,4"/>
-          </WrapPanel>
-          <TextBlock Text="{Binding Training.TrainingSummary}" TextWrapping="Wrap" Margin="0,6,0,0"/>
-        </StackPanel>
-        <StackPanel Grid.Column="1" Spacing="6" Margin="10,0,0,0">
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <TextBlock Text="Status:" FontWeight="Bold"/>
-            <TextBlock Text="{Binding Training.TrainingRunStatus}"/>
-            <TextBlock Text="running" Foreground="{DynamicResource AppWarn}" IsVisible="{Binding Training.IsTrainingRunning}"/>
+        <Border Grid.Column="0" Margin="0,0,10,0" Background="{DynamicResource Panel}" CornerRadius="12" Padding="16"
+                BorderBrush="{DynamicResource Line2}" BorderThickness="1" VerticalAlignment="Top">
+          <StackPanel Spacing="6">
+            <TextBlock Text="Training configuration" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
+            <TextBlock Text="TARGET" FontSize="10" Foreground="{DynamicResource T4}"/>
+            <TextBox Text="{Binding Training.TrainingTarget}" Watermark="target"/>
+            <TextBlock Text="BASE MODEL" FontSize="10" Foreground="{DynamicResource T4}"/>
+            <TextBox Text="{Binding Training.TrainingBaseModel}" Watermark="base model"/>
+            <TextBlock Text="FORMAT" FontSize="10" Foreground="{DynamicResource T4}"/>
+            <TextBox Text="{Binding Training.TrainingFormat}" Watermark="format"/>
+            <Grid ColumnDefinitions="*,*">
+              <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,6,0">
+                <TextBlock Text="SEQ LEN" FontSize="10" Foreground="{DynamicResource T4}"/>
+                <TextBox Text="{Binding Training.TrainingSequenceLen}" Watermark="seq len"/>
+              </StackPanel>
+              <StackPanel Grid.Column="1" Spacing="4">
+                <TextBlock Text="LEARNING RATE" FontSize="10" Foreground="{DynamicResource T4}"/>
+                <TextBox Text="{Binding Training.TrainingLearningRate}" Watermark="learning rate"/>
+              </StackPanel>
+            </Grid>
+            <Grid ColumnDefinitions="*,*">
+              <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,6,0">
+                <TextBlock Text="LORA R" FontSize="10" Foreground="{DynamicResource T4}"/>
+                <TextBox Text="{Binding Training.TrainingLoraR}" Watermark="lora r"/>
+              </StackPanel>
+              <StackPanel Grid.Column="1" Spacing="4">
+                <TextBlock Text="LORA ALPHA" FontSize="10" Foreground="{DynamicResource T4}"/>
+                <TextBox Text="{Binding Training.TrainingLoraAlpha}" Watermark="lora alpha"/>
+              </StackPanel>
+            </Grid>
+            <WrapPanel Margin="0,6,0,0">
+              <Button Content="Check compatibility" Command="{Binding CheckTrainingCompatibilityCommand}" Margin="0,0,6,4"/>
+              <Button Content="Generate config" Command="{Binding GenerateTrainingConfigCommand}" Margin="0,0,6,4"
+                      Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}"
+                      BorderBrush="{DynamicResource Accent}" BorderThickness="1"/>
+            </WrapPanel>
+            <TextBlock Text="{Binding Training.TrainingSummary}" Foreground="{DynamicResource T2}" TextWrapping="Wrap" Margin="0,4,0,0"/>
           </StackPanel>
-          <WrapPanel>
-            <Button Content="Launch" Command="{Binding LaunchTrainingCommand}" IsEnabled="{Binding Training.CanLaunchTraining}" Margin="0,0,6,4"/>
-            <Button Content="Stop" Command="{Binding StopTrainingCommand}" IsEnabled="{Binding Training.IsTrainingRunning}" Margin="0,0,6,4"/>
-            <Button Content="Resume" Command="{Binding ResumeTrainingCommand}" IsEnabled="{Binding Training.CanResumeTraining}" Margin="0,0,6,4"/>
-            <Button Content="Refresh checkpoints" Command="{Binding RefreshTrainingCheckpointsCommand}" Margin="0,0,6,4"/>
-            <Button Content="Regression gate" Command="{Binding GateTrainingRunCommand}" Margin="0,0,6,4"/>
-          </WrapPanel>
-          <!-- First-party trainer (corpus_studio target): preflight, CPU-toy smoke path, and adapter merge. -->
-          <WrapPanel IsVisible="{Binding Training.IsFirstPartyTarget}">
-            <Button Content="Check runtime" Command="{Binding CheckTrainingRuntimeCommand}" Margin="0,0,6,4"
-                    ToolTip.Tip="Preflight the first-party training runtime (train-check): deps, GPU, QLoRA vs CPU-toy"/>
-            <CheckBox Content="CPU toy" IsChecked="{Binding Training.CpuToyMode}" Margin="0,0,6,4"
-                      ToolTip.Tip="Run the tiny CPU smoke path — proves the pipeline runs; does NOT train a usable model"/>
-            <Button Content="Merge adapter" Command="{Binding MergeAdapterCommand}" IsEnabled="{Binding Training.CanMergeAdapter}" Margin="0,0,6,4"
-                    ToolTip.Tip="Merge the trained LoRA adapter into its base (train-merge, auto → GPU / CPU-offload / adapter-only)"/>
-            <Button Content="Model card" Command="{Binding ShowModelCardCommand}" IsEnabled="{Binding Training.CanMergeAdapter}" Margin="0,0,6,4"
-                    ToolTip.Tip="Generate + show the trained adapter's model card (base model + license, LoRA config, honesty notes)"/>
-          </WrapPanel>
-          <!-- Download a base model from the HF Hub (resumable + license report). Useful for any target. -->
-          <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,4,0,0">
-            <TextBlock Text="Download base model:" VerticalAlignment="Center"/>
-            <TextBox Text="{Binding Training.ModelFetchRepoId}" Width="280" Watermark="HF repo id (prefer MIT/Apache)"
-                     ToolTip.Tip="e.g. HuggingFaceTB/SmolLM2-135M-Instruct — the base model's license governs the trained result"/>
-            <Button Content="Download" Command="{Binding FetchModelCommand}" IsEnabled="{Binding Training.CanFetchModel}"/>
+        </Border>
+        <ScrollViewer Grid.Column="1" Margin="10,0,0,0">
+          <StackPanel Spacing="12">
+            <!-- Run card -->
+            <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="14"
+                    BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <StackPanel Spacing="8">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <TextBlock Text="Status:" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
+                  <TextBlock Text="{Binding Training.TrainingRunStatus}" Foreground="{DynamicResource T2}"/>
+                  <TextBlock Text="· running" Foreground="{DynamicResource Warn}" IsVisible="{Binding Training.IsTrainingRunning}"/>
+                </StackPanel>
+                <WrapPanel>
+                  <Button Content="Launch" Command="{Binding LaunchTrainingCommand}" IsEnabled="{Binding Training.CanLaunchTraining}" Margin="0,0,6,4"
+                          Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}"
+                          BorderBrush="{DynamicResource Accent}" BorderThickness="1"/>
+                  <Button Content="Stop" Command="{Binding StopTrainingCommand}" IsEnabled="{Binding Training.IsTrainingRunning}" Margin="0,0,6,4"/>
+                  <Button Content="Resume" Command="{Binding ResumeTrainingCommand}" IsEnabled="{Binding Training.CanResumeTraining}" Margin="0,0,6,4"/>
+                  <Button Content="Refresh checkpoints" Command="{Binding RefreshTrainingCheckpointsCommand}" Margin="0,0,6,4"/>
+                  <Button Content="Regression gate" Command="{Binding GateTrainingRunCommand}" Margin="0,0,6,4"/>
+                </WrapPanel>
+              </StackPanel>
+            </Border>
+            <!-- First-party trainer card (corpus_studio target) -->
+            <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="14"
+                    BorderBrush="{DynamicResource Line2}" BorderThickness="1" IsVisible="{Binding Training.IsFirstPartyTarget}">
+              <StackPanel Spacing="8">
+                <TextBlock Text="First-party trainer" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
+                <WrapPanel>
+                  <Button Content="Check runtime" Command="{Binding CheckTrainingRuntimeCommand}" Margin="0,0,6,4"
+                          ToolTip.Tip="Preflight the first-party training runtime (train-check): deps, GPU, QLoRA vs CPU-toy"/>
+                  <CheckBox Content="CPU toy" IsChecked="{Binding Training.CpuToyMode}" Margin="0,0,6,4"
+                            ToolTip.Tip="Run the tiny CPU smoke path — proves the pipeline runs; does NOT train a usable model"/>
+                  <Button Content="Merge adapter" Command="{Binding MergeAdapterCommand}" IsEnabled="{Binding Training.CanMergeAdapter}" Margin="0,0,6,4"
+                          ToolTip.Tip="Merge the trained LoRA adapter into its base (train-merge, auto → GPU / CPU-offload / adapter-only)"/>
+                  <Button Content="Model card" Command="{Binding ShowModelCardCommand}" IsEnabled="{Binding Training.CanMergeAdapter}" Margin="0,0,6,4"
+                          ToolTip.Tip="Generate + show the trained adapter's model card (base model + license, LoRA config, honesty notes)"/>
+                </WrapPanel>
+              </StackPanel>
+            </Border>
+            <!-- Base-model download card -->
+            <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="14"
+                    BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <StackPanel Spacing="8">
+                <TextBlock Text="Download base model" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <TextBox Text="{Binding Training.ModelFetchRepoId}" Width="280" Watermark="HF repo id (prefer MIT/Apache)"
+                           ToolTip.Tip="e.g. HuggingFaceTB/SmolLM2-135M-Instruct — the base model's license governs the trained result"/>
+                  <Button Content="Download" Command="{Binding FetchModelCommand}" IsEnabled="{Binding Training.CanFetchModel}"/>
+                </StackPanel>
+                <TextBox Text="{Binding Training.ModelFetchSummary}" IsReadOnly="True" AcceptsReturn="True"
+                         FontFamily="Consolas" FontSize="11" MaxHeight="120" TextWrapping="Wrap"
+                         Background="Transparent" BorderThickness="0"/>
+              </StackPanel>
+            </Border>
+            <!-- Run log card -->
+            <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="12"
+                    BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <StackPanel Spacing="6">
+                <TextBlock Text="Run log" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
+                <TextBlock Text="{Binding Training.TrainingLaunchCommand}" Foreground="{DynamicResource T4}"
+                           FontFamily="Consolas" FontSize="11" TextWrapping="Wrap"/>
+                <TextBox Text="{Binding Training.TrainingRunLog}" IsReadOnly="True" AcceptsReturn="True"
+                         FontFamily="Consolas" Height="200" TextWrapping="Wrap" Background="Transparent" BorderThickness="0"/>
+                <TextBlock Text="{Binding Training.TrainingCheckpointsSummary}" Foreground="{DynamicResource T3}" TextWrapping="Wrap"/>
+                <TextBlock Text="{Binding Training.TrainingComparisonSummary}" Foreground="{DynamicResource T3}" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Border>
+            <TextBox Text="{Binding Training.TrainingRuntimeSummary}" IsVisible="{Binding Training.IsFirstPartyTarget}"
+                     IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="11" MaxHeight="140" TextWrapping="Wrap"/>
+            <TextBox Text="{Binding Training.TrainingMergeSummary}" IsVisible="{Binding Training.IsFirstPartyTarget}"
+                     IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="11" MaxHeight="140" TextWrapping="Wrap"/>
+            <TextBox Text="{Binding Training.ModelCardText}" IsVisible="{Binding Training.IsFirstPartyTarget}"
+                     IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="11" MaxHeight="180" TextWrapping="Wrap"/>
           </StackPanel>
-          <TextBox Text="{Binding Training.ModelFetchSummary}" IsReadOnly="True" AcceptsReturn="True"
-                   FontFamily="Consolas" FontSize="11" MaxHeight="120" TextWrapping="Wrap"/>
-          <TextBlock Text="{Binding Training.TrainingLaunchCommand}" TextWrapping="Wrap"
-                     FontFamily="Consolas" FontSize="11"/>
-          <TextBox Text="{Binding Training.TrainingRunLog}" IsReadOnly="True" AcceptsReturn="True"
-                   FontFamily="Consolas" Height="200" TextWrapping="Wrap"/>
-          <TextBlock Text="{Binding Training.TrainingCheckpointsSummary}" TextWrapping="Wrap"/>
-          <TextBlock Text="{Binding Training.TrainingComparisonSummary}" TextWrapping="Wrap"/>
-          <TextBox Text="{Binding Training.TrainingRuntimeSummary}" IsVisible="{Binding Training.IsFirstPartyTarget}"
-                   IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="11" MaxHeight="140" TextWrapping="Wrap"/>
-          <TextBox Text="{Binding Training.TrainingMergeSummary}" IsVisible="{Binding Training.IsFirstPartyTarget}"
-                   IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="11" MaxHeight="140" TextWrapping="Wrap"/>
-          <TextBox Text="{Binding Training.ModelCardText}" IsVisible="{Binding Training.IsFirstPartyTarget}"
-                   IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="11" MaxHeight="180" TextWrapping="Wrap"/>
-        </StackPanel>
+        </ScrollViewer>
       </Grid>
     </Border>
 
