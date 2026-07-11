@@ -272,6 +272,49 @@ def platform_probe(
     typer.echo("\n".join(lines))
 
 
+@app.command("platform-run")
+def platform_run(
+    plan_path: Optional[Path] = typer.Argument(
+        None, help="Path to a RunPlan JSON. Omit and pass --demo to run the built-in echo plan."
+    ),
+    demo: bool = typer.Option(
+        False, "--demo", help="Execute a built-in minimal echo plan (no plan file, GPU, or [train] needed)."
+    ),
+    runner_name: str = typer.Option(
+        "echo", "--runner", help="Runner that executes the plan (this slice ships 'echo' only)."
+    ),
+    out_dir: Optional[Path] = typer.Option(
+        None, "--out", help="Write the terminal RunManifest.json to this directory (atomic)."
+    ),
+):
+    """Execute a RunPlan through the headless run supervisor: stream RunEvents to stderr and produce
+    a RunManifest on stdout. The 'echo' runner is a dependency-light no-op that proves the supervisor
+    end-to-end without a GPU or the [train] extra; real training runners land in a later slice. The
+    RunManifest classifies the terminal state (succeeded / failed / cancelled) with a FailureRecord
+    taxonomy on abnormal termination."""
+    from corpus_studio.platform.contracts import RunPlan
+    from corpus_studio.platform.supervisor import EchoRunner, demo_run_plan, execute_run
+
+    if runner_name != "echo":
+        typer.echo(f"Unknown runner '{runner_name}' (this slice ships 'echo' only).", err=True)
+        raise typer.Exit(2)
+
+    if demo:
+        plan = demo_run_plan()
+    elif plan_path is not None:
+        plan = RunPlan.model_validate_json(plan_path.read_text(encoding="utf-8"))
+    else:
+        typer.echo("Provide a RunPlan path argument, or pass --demo.", err=True)
+        raise typer.Exit(2)
+
+    result = execute_run(plan, EchoRunner(), out_dir=out_dir)
+    for event in result.events:
+        typer.echo(event.model_dump_json(), err=True)
+    typer.echo(result.manifest.model_dump_json(indent=2))
+    if result.manifest.state != "succeeded":
+        raise typer.Exit(1)
+
+
 @app.command()
 def validate(path: Path, schema: str):
     """Validate a JSONL file against a built-in schema."""
