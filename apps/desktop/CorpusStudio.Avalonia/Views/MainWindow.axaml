@@ -496,24 +496,64 @@
       </ScrollViewer>
     </Border>
 
-    <!-- Debt: read bindings + IsVisible bound to a bool (the Visibility→IsVisible port, proven). -->
+    <!-- Dataset Debt (slice 5 fidelity): grade hero card + severity-ranked ledger cards. Same shared
+         Debt VM data (DebtItems already ordered highest-severity-first by the engine). -->
     <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Debt}">
       <ScrollViewer>
-        <StackPanel Margin="20" Spacing="10">
-          <StackPanel Orientation="Horizontal" Spacing="12">
-            <TextBlock Text="{Binding Debt.DebtGrade}" FontSize="44" FontWeight="Bold"
-                       Foreground="{Binding Debt.DebtGradeColor, Converter={StaticResource StringToBrush}}"/>
-            <TextBlock Text="stale" VerticalAlignment="Center" Foreground="{DynamicResource AppWarn}"
-                       IsVisible="{Binding Debt.DebtStale}"/>
-          </StackPanel>
-          <!-- The same shared async engine command the WPF head binds — one run, both heads. -->
-          <Button Content="Run debt check" Command="{Binding RunDatasetDebtCommand}" HorizontalAlignment="Left"/>
-          <TextBlock Text="{Binding Debt.DebtSummary}" TextWrapping="Wrap"/>
+        <StackPanel Margin="20" Spacing="14" MaxWidth="880" HorizontalAlignment="Left">
+
+          <!-- Grade hero card -->
+          <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="18"
+                  BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+            <StackPanel Spacing="12">
+              <StackPanel Orientation="Horizontal" Spacing="14">
+                <Border Width="64" Height="64" CornerRadius="12" VerticalAlignment="Top"
+                        Background="{Binding Debt.DebtGradeColor, Converter={StaticResource StringToBrush}}">
+                  <TextBlock Text="{Binding Debt.DebtGrade}" FontSize="34" FontWeight="Bold" Foreground="White"
+                             HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <StackPanel Spacing="5" VerticalAlignment="Center">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <TextBlock Text="Remediation ledger" FontSize="18" FontWeight="Bold"
+                               Foreground="{DynamicResource Text}" VerticalAlignment="Center"/>
+                    <TextBlock Text="stale" Foreground="{DynamicResource Warn}" FontSize="11"
+                               VerticalAlignment="Center" IsVisible="{Binding Debt.DebtStale}"/>
+                  </StackPanel>
+                  <TextBlock Text="{Binding Debt.DebtSummary}" Foreground="{DynamicResource T3}"
+                             TextWrapping="Wrap" MaxWidth="640"/>
+                  <Button Content="Run debt check" Command="{Binding RunDatasetDebtCommand}"
+                          HorizontalAlignment="Left" Margin="0,4,0,0"/>
+                </StackPanel>
+              </StackPanel>
+              <Border Height="1" Background="{DynamicResource Line}"/>
+              <TextBlock Text="{Binding Quality.DebtTrendSummary}" Foreground="{DynamicResource T4}"
+                         FontSize="11" TextWrapping="Wrap"/>
+            </StackPanel>
+          </Border>
+
+          <!-- Ledger cards (highest severity first) -->
           <ItemsControl ItemsSource="{Binding Debt.DebtItems}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="models:DebtDisplayItem">
-                <Border Padding="8" Margin="0,2" BorderBrush="{DynamicResource AppBorder}" BorderThickness="1" CornerRadius="6">
-                  <TextBlock Text="{Binding DisplayName}" TextWrapping="Wrap"/>
+                <Border Background="{DynamicResource Panel}" CornerRadius="11" Padding="14" Margin="0,0,0,8"
+                        BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+                  <StackPanel Spacing="6">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                      <Border Grid.Column="0" CornerRadius="5" Padding="7,2" VerticalAlignment="Center"
+                              Background="{Binding SeverityColor, Converter={StaticResource StringToBrush}}">
+                        <TextBlock Text="{Binding SeverityBadge}" Foreground="White" FontSize="10.5" FontWeight="Bold"/>
+                      </Border>
+                      <TextBlock Grid.Column="1" Text="{Binding Item.Category}" FontWeight="SemiBold"
+                                 Foreground="{DynamicResource Text}" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                      <TextBlock Grid.Column="2" Text="{Binding Measure}" Foreground="{DynamicResource T3}"
+                                 FontSize="12" VerticalAlignment="Center"/>
+                    </Grid>
+                    <TextBlock Text="{Binding Item.Message}" Foreground="{DynamicResource T2}" TextWrapping="Wrap"/>
+                    <TextBlock TextWrapping="Wrap">
+                      <Run Text="Fix: " Foreground="{DynamicResource T4}"/>
+                      <Run Text="{Binding Item.Remediation}" Foreground="{DynamicResource T3}"/>
+                    </TextBlock>
+                  </StackPanel>
                 </Border>
               </DataTemplate>
             </ItemsControl.ItemTemplate>
@@ -634,18 +674,42 @@
       </Grid>
     </Border>
 
-    <!-- Splits: three TwoWay percent/seed inputs + a read summary. -->
+    <!-- Splits (slice 5 fidelity): config card + result card. Same shared Splits VM inputs/summary. -->
     <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Splits}">
-      <StackPanel Margin="20" Spacing="8" MaxWidth="360" HorizontalAlignment="Left">
-        <TextBlock Text="Train %"/>
-        <TextBox Text="{Binding Splits.SplitTrainPercent}"/>
-        <TextBlock Text="Validation %"/>
-        <TextBox Text="{Binding Splits.SplitValidationPercent}"/>
-        <TextBlock Text="Seed"/>
-        <TextBox Text="{Binding Splits.SplitSeed}"/>
-        <Button Content="Generate splits" Command="{Binding GenerateSplitsCommand}" HorizontalAlignment="Left" Margin="0,4,0,0"/>
-        <TextBlock Text="{Binding Splits.SplitSummary}" TextWrapping="Wrap" Margin="0,10,0,0"/>
-      </StackPanel>
+      <ScrollViewer>
+        <StackPanel Margin="20" Spacing="14" MaxWidth="620" HorizontalAlignment="Left">
+          <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="18"
+                  BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+            <StackPanel Spacing="12">
+              <TextBlock Text="Split configuration" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
+              <Grid ColumnDefinitions="*,*,*">
+                <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,10,0">
+                  <TextBlock Text="TRAIN %" FontSize="10" Foreground="{DynamicResource T4}"/>
+                  <TextBox Text="{Binding Splits.SplitTrainPercent}"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="4" Margin="0,0,10,0">
+                  <TextBlock Text="VALIDATION %" FontSize="10" Foreground="{DynamicResource T4}"/>
+                  <TextBox Text="{Binding Splits.SplitValidationPercent}"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2" Spacing="4">
+                  <TextBlock Text="SEED" FontSize="10" Foreground="{DynamicResource T4}"/>
+                  <TextBox Text="{Binding Splits.SplitSeed}"/>
+                </StackPanel>
+              </Grid>
+              <Button Content="Generate splits" Command="{Binding GenerateSplitsCommand}"
+                      HorizontalAlignment="Left" Background="{DynamicResource AccentSoft}"
+                      Foreground="{DynamicResource AccentInk}" BorderBrush="{DynamicResource Accent}" BorderThickness="1"/>
+            </StackPanel>
+          </Border>
+          <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="18"
+                  BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+            <StackPanel Spacing="8">
+              <TextBlock Text="Result" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
+              <TextBlock Text="{Binding Splits.SplitSummary}" Foreground="{DynamicResource T2}" TextWrapping="Wrap"/>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
     </Border>
 
     <!-- Examples: the dataset spine — ItemsSource + TwoWay selection + a read JSON pane. -->

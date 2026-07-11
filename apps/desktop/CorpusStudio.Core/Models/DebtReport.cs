@@ -85,6 +85,15 @@ public sealed class DebtDisplayItem
         ? string.Format(CultureInfo.InvariantCulture, "{0:0.0}% ({1})", Item.Rate.Value * 100, Item.Count)
         : $"count {Item.Count}";
 
+    /// <summary>A hex color for the severity chip (Nocturne semantics: critical/high = bad red,
+    /// moderate = warn amber, else a muted grey). Rendered via StringToBrush in the desktop heads.</summary>
+    public string SeverityColor => Item.Severity switch
+    {
+        "critical" or "high" => "#d76d6d",
+        "moderate" => "#d9a35f",
+        _ => "#9397ab",
+    };
+
     public string DisplayName =>
         $"{SeverityBadge}  {Item.Category} — {Item.Message} ({Measure})  ·  Fix: {Item.Remediation}";
 }
