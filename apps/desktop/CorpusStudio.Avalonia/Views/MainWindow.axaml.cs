@@ -79,6 +79,46 @@ public partial class MainWindow : Window
         }
     }
 
+    // Universal Explorer: open the selected tree node into a document tab. Mirrors the WPF head's
+    // ExplorerTree_SelectedItemChanged → Explorer.OpenNodeAsync(node) (the shared VM does the read +
+    // dedupe + activation). Directory nodes are ignored by OpenNodeAsync.
+    private async void ExplorerTree_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm
+            && sender is TreeView { SelectedItem: WorkspaceTreeNode node })
+        {
+            await vm.Explorer.OpenNodeAsync(node);
+        }
+    }
+
+    // Close a document tab. Mirrors the WPF head's DocTabClose_Click: confirm-if-dirty through the
+    // head-agnostic dialog seam, then Explorer.CloseDocument(doc). e.Handled stops the click from also
+    // re-selecting the tab being closed.
+    private async void DocTabClose_Click(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (DataContext is not MainWindowViewModel vm
+            || sender is not Button { DataContext: OpenWorkspaceDocument doc })
+        {
+            return;
+        }
+
+        if (doc.IsDirty)
+        {
+            var ok = await Dialogs.ConfirmAsync(
+                $"{doc.DisplayName} has unsaved changes. Close without saving?",
+                "Unsaved changes",
+                DialogButtons.YesNo,
+                DialogSeverity.Warning);
+            if (!ok)
+            {
+                return;
+            }
+        }
+
+        vm.Explorer.CloseDocument(doc);
+    }
+
     // Mark the segment matching the resolved variant as selected (accent-soft pill), the other neutral.
     private void SyncThemeSegments()
     {
