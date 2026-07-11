@@ -41,9 +41,15 @@ from .contracts import (
     WorkerMessage,
     WORKER_BODY_BY_TYPE,
 )
+from .profiler import build_environment_profile
+from .probes import BUILTIN_PROBES, ProbeOutcome, run_capability_probes
 from .schema_export import ROOT_CONTRACTS, contract_schemas, export_json_schemas
 
 __all__ = [
+    "build_environment_profile",
+    "run_capability_probes",
+    "BUILTIN_PROBES",
+    "ProbeOutcome",
     "CONTRACT_VERSION",
     "ContractModel",
     "HashRef",
