@@ -29,6 +29,15 @@
       <Setter Property="Padding" Value="10,8"/>
       <Setter Property="Foreground" Value="{DynamicResource Text}"/>
     </Style>
+    <Style Selector="ComboBox.field">
+      <Setter Property="Background" Value="{DynamicResource Panel}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource Line2}"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="10,7"/>
+      <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+      <Setter Property="HorizontalAlignment" Value="Stretch"/>
+      <Setter Property="MinHeight" Value="38"/>
+    </Style>
     <!-- Selectable schema / template cards -->
     <Style Selector="ListBox.cards">
       <Setter Property="Background" Value="Transparent"/>
@@ -131,22 +140,20 @@
           </Grid>
         </StackPanel>
 
-        <!-- Schema -->
+        <!-- Schema — a dropdown of the built-in dataset "schema templates" (the row shape you author
+             against). The selected schema's description shows below so the collapsed box stays compact. -->
         <StackPanel Spacing="0">
           <TextBlock Classes="eyebrow" Text="DATASET SCHEMA"/>
-          <ListBox Classes="cards" ItemsSource="{Binding Schemas}" SelectedItem="{Binding SelectedSchema, Mode=TwoWay}">
-            <ListBox.ItemTemplate>
+          <ComboBox Classes="field" ItemsSource="{Binding Schemas}" SelectedItem="{Binding SelectedSchema, Mode=TwoWay}">
+            <ComboBox.ItemTemplate>
               <DataTemplate x:DataType="models:DatasetSchema">
-                <Border Classes="optcard">
-                  <StackPanel Spacing="2">
-                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="{DynamicResource Text}" FontSize="13.5"/>
-                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource T3}" FontSize="12"
-                               TextWrapping="Wrap" IsVisible="{Binding Description, Converter={x:Static ObjectConverters.IsNotNull}}"/>
-                  </StackPanel>
-                </Border>
+                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="{DynamicResource Text}" FontSize="13"/>
               </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <TextBlock Text="{Binding SelectedSchema.Description}" Foreground="{DynamicResource T3}" FontSize="12"
+                     TextWrapping="Wrap" Margin="2,7,0,0"
+                     IsVisible="{Binding SelectedSchema.Description, Converter={x:Static ObjectConverters.IsNotNull}}"/>
         </StackPanel>
 
         <!-- Template -->
