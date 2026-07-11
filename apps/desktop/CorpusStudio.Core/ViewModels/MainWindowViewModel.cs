@@ -40,6 +40,12 @@ public enum StudioTab
     Versions = 12,
     Debt = 13,
     Settings = 14,
+
+    /// <summary>Standalone Quality screen (Avalonia production-UI fidelity slice B). Appended at the
+    /// end so every existing index — which the WPF TabControl mirrors by position — is unchanged; the
+    /// WPF head has no Quality tab and never selects this index. The Avalonia content-switcher renders
+    /// a Quality panel here over the existing shared Quality view-model data.</summary>
+    Quality = 15,
 }
 
 public sealed class MainWindowViewModel : INotifyPropertyChanged
@@ -500,10 +506,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
     /// <summary>Whether the contextual Quality right rail is shown — only on the design's rail screens
-    /// (Dashboard, Writing Studio, Splits, Dataset Debt); hidden elsewhere so the content area fills.
-    /// Audit fix: the rail previously showed on every Studio screen, off-design.</summary>
+    /// (Dashboard, Writing Studio, Quality, Splits, Dataset Debt); hidden elsewhere so the content
+    /// area fills. Audit fix: the rail previously showed on every Studio screen, off-design.</summary>
     public bool ShowQualityRail => (StudioTab)_selectedStudioTabIndex is
-        StudioTab.Dashboard or StudioTab.WritingStudio or StudioTab.Splits or StudioTab.Debt;
+        StudioTab.Dashboard or StudioTab.WritingStudio or StudioTab.Quality
+        or StudioTab.Splits or StudioTab.Debt;
 
     /// <summary>The current Studio screen's title for the app-shell context bar (slice 4). Derived from
     /// <see cref="SelectedStudioTabIndex"/> — additive (the WPF head may adopt it later).</summary>
@@ -523,6 +530,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         StudioTab.Suites => "Suites",
         StudioTab.Versions => "Versions",
         StudioTab.Debt => "Dataset Debt",
+        StudioTab.Quality => "Quality",
         StudioTab.Settings => "Settings",
         _ => "Studio",
     };
@@ -544,6 +552,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         StudioTab.Suites => "Saved evaluation suites",
         StudioTab.Versions => "Snapshots & restore",
         StudioTab.Debt => "Graded remediation ledger",
+        StudioTab.Quality => "Duplicates · PII · low-information",
         StudioTab.Settings => "Project & engine config",
         _ => string.Empty,
     };

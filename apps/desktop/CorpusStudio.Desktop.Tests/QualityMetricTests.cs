@@ -170,4 +170,42 @@ public sealed class QualityMetricTests
         Assert.False(vm.Quality.HasQualityMetrics);
         Assert.Empty(vm.Quality.QualityMetrics);
     }
+
+    // ---- fidelity slice B: the standalone Quality screen's card + triage helpers ----
+
+    [Theory]
+    [InlineData("problem", "HIGH")]
+    [InlineData("warn", "WARN")]
+    [InlineData("ok", "OK")]
+    [InlineData("info", "INFO")]
+    public void SeverityBadge_MapsSeverityToCardPill(string severity, string expected)
+    {
+        // The Quality-screen metric card's severity pill text (Nocturne fidelity).
+        var metric = new QualityMetric { Severity = severity };
+        Assert.Equal(expected, metric.SeverityBadge);
+    }
+
+    [Fact]
+    public void HasSyntheticPatternIssues_DrivesTheTriageEmptyState()
+    {
+        // The Quality screen shows a green "no issues" card when false, the issue list when true.
+        var vm = new MainWindowViewModel();
+        Assert.False(vm.Quality.HasSyntheticPatternIssues);          // fresh
+
+        vm.Quality.ApplyQualityReport(new QualityReport
+        {
+            ExampleCount = 10,
+            SyntheticPatternCount = 1,
+            SyntheticPatternIssues = new[]
+            {
+                new SyntheticPatternIssue { Kind = "repeated_opening", Severity = "moderate",
+                    Message = "3 rows share an opening", Suggestion = "vary the opening line" },
+            },
+        });
+        Assert.True(vm.Quality.HasSyntheticPatternIssues);
+        Assert.Single(vm.Quality.SyntheticPatternIssues);
+
+        vm.Quality.ApplyQualityReport(Report());                     // clean re-run
+        Assert.False(vm.Quality.HasSyntheticPatternIssues);
+    }
 }

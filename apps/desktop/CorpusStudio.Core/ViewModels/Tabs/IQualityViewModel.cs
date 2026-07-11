@@ -21,6 +21,9 @@ public interface IQualityViewModel : INotifyPropertyChanged
     event Action<string>? ErrorReported;
 
     ObservableCollection<SyntheticPatternIssue> SyntheticPatternIssues { get; }
+
+    /// <summary>Whether any synthetic-pattern issues were flagged (drives the triage empty/list state).</summary>
+    bool HasSyntheticPatternIssues { get; }
     SyntheticPatternIssue? SelectedSyntheticPatternIssue { get; set; }
     ObservableCollection<QualityMetric> QualityMetrics { get; }
     ObservableCollection<DebtTrendPoint> DebtTrend { get; }

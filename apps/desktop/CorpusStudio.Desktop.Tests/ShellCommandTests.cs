@@ -109,9 +109,10 @@ public sealed class ShellCommandTests
     [Fact]
     public void ShowQualityRail_OnlyOnTheDesignsRailScreens()
     {
-        // audit fix: the contextual Quality rail is only shown on Dashboard/Writing/Splits/Debt.
+        // the contextual Quality rail is only shown on Dashboard/Writing/Quality/Splits/Debt.
         var vm = new MainWindowViewModel();
-        foreach (var tab in new[] { StudioTab.Dashboard, StudioTab.WritingStudio, StudioTab.Splits, StudioTab.Debt })
+        foreach (var tab in new[] { StudioTab.Dashboard, StudioTab.WritingStudio, StudioTab.Quality,
+                                    StudioTab.Splits, StudioTab.Debt })
         {
             vm.GoToStudioTab(tab);
             Assert.True(vm.ShowQualityRail, $"{tab} should show the rail");
@@ -123,6 +124,23 @@ public sealed class ShellCommandTests
             vm.GoToStudioTab(tab);
             Assert.False(vm.ShowQualityRail, $"{tab} should NOT show the rail");
         }
+    }
+
+    [Fact]
+    public void SelectStudioTabCommand_NavigatesToTheStandaloneQualityScreen()
+    {
+        // Fidelity slice B: the design's MEASURE group has a standalone Quality screen. It is appended
+        // as StudioTab.Quality (index 15) so existing indices — mirrored by the WPF TabControl — are
+        // unchanged; the Avalonia content-switcher renders a Quality panel there.
+        var vm = new MainWindowViewModel();
+        vm.ShowStartCenter();
+
+        vm.SelectStudioTabCommand.Execute("Quality");
+        Assert.True(vm.IsStudio);
+        Assert.Equal((int)StudioTab.Quality, vm.SelectedStudioTabIndex);
+        Assert.Equal(15, (int)StudioTab.Quality);          // appended, not inserted (WPF indices intact)
+        Assert.Equal("Quality", vm.StudioViewTitle);
+        Assert.True(vm.ShowQualityRail);
     }
 
     [Fact]

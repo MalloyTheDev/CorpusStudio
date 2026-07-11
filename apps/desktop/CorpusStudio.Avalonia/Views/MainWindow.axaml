@@ -295,6 +295,13 @@
                   <TextBlock Text="MEASURE" Foreground="{DynamicResource T4}" FontSize="10" FontWeight="SemiBold"/>
                   <Path Classes="ico ico-sm warn" Data="{StaticResource IcoWarningFill}"/>
                 </StackPanel>
+                <Button Classes="navrow" CommandParameter="Quality" Command="{Binding SelectStudioTabCommand}"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Quality}">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Path Classes="ico" Data="{StaticResource IcoBroom}"/>
+                    <TextBlock Text="Quality" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
                 <Button Classes="navrow" CommandParameter="Debt" Command="{Binding SelectStudioTabCommand}"
                         Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Debt}">
                   <Grid ColumnDefinitions="Auto,*,Auto">
@@ -647,6 +654,108 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
+        </StackPanel>
+      </ScrollViewer>
+    </Border>
+
+    <!-- Quality (fidelity slice B): the standalone MEASURE screen the design shows but the shell was
+         missing — a status header + a metric-card grid + synthetic-issue triage, all over the shared
+         Quality VM (populated by Run quality). Honesty: before a run the metrics are empty and the
+         header reads the neutral summary; the triage is a green clean-state until real issues exist. -->
+    <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Quality}">
+      <ScrollViewer>
+        <StackPanel Margin="20" Spacing="14" MaxWidth="900" HorizontalAlignment="Left">
+
+          <!-- Status header + run -->
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+              <TextBlock Text="{Binding Quality.QualityStatusLine}" FontSize="14" FontWeight="SemiBold"
+                         Foreground="{DynamicResource Text}" TextWrapping="Wrap"
+                         IsVisible="{Binding Quality.HasQualityMetrics}"/>
+              <TextBlock Text="{Binding Quality.QualitySummary}" Foreground="{DynamicResource T3}"
+                         TextWrapping="Wrap" MaxWidth="560" HorizontalAlignment="Left"
+                         IsVisible="{Binding !Quality.HasQualityMetrics}"/>
+            </StackPanel>
+            <Button Grid.Column="1" Command="{Binding RunQualityCommand}" VerticalAlignment="Center"
+                    Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}"
+                    BorderBrush="{DynamicResource Accent}" BorderThickness="1">
+              <StackPanel Orientation="Horizontal" Spacing="7">
+                <Path Classes="ico accent" Data="{StaticResource IcoBroom}" Width="15" Height="15"/>
+                <TextBlock Text="Run quality" VerticalAlignment="Center"/>
+              </StackPanel>
+            </Button>
+          </Grid>
+
+          <!-- Metric card grid (one card per structured quality metric). -->
+          <ItemsControl ItemsSource="{Binding Quality.QualityMetrics}" IsVisible="{Binding Quality.HasQualityMetrics}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="models:QualityMetric">
+                <Border Background="{DynamicResource Panel}" CornerRadius="11" Padding="14" Margin="0,0,10,10"
+                        Width="220" BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+                  <StackPanel Spacing="8">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Grid.Column="0" Text="{Binding Label}" Foreground="{DynamicResource T2}"
+                                 FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,6,0"/>
+                      <Border Grid.Column="1" CornerRadius="5" Padding="6,1" VerticalAlignment="Center"
+                              Background="{Binding StatusColor, Converter={StaticResource StringToBrush}}">
+                        <TextBlock Text="{Binding SeverityBadge}" Foreground="White" FontSize="9.5" FontWeight="Bold"/>
+                      </Border>
+                    </Grid>
+                    <TextBlock Text="{Binding Value}" FontSize="26" FontWeight="Bold"
+                               Foreground="{Binding StatusColor, Converter={StaticResource StringToBrush}}"/>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <!-- Synthetic issue triage -->
+          <TextBlock Text="SYNTHETIC ISSUE TRIAGE" FontSize="10" FontWeight="SemiBold"
+                     Foreground="{DynamicResource T4}" Margin="2,4,0,0"
+                     IsVisible="{Binding Quality.HasQualityMetrics}"/>
+          <!-- Clean state (no synthetic issues) -->
+          <Border Background="{DynamicResource Panel}" CornerRadius="11" Padding="14"
+                  BorderBrush="{DynamicResource Line2}" BorderThickness="1"
+                  IsVisible="{Binding !Quality.HasSyntheticPatternIssues}">
+            <Grid ColumnDefinitions="Auto,*">
+              <Path Grid.Column="0" Classes="ico ok" Data="{StaticResource IcoCheckCircleFill}" VerticalAlignment="Top"/>
+              <StackPanel Grid.Column="1" Margin="10,0,0,0" Spacing="3">
+                <TextBlock Text="No synthetic-pattern issues detected" Foreground="{DynamicResource Text}"
+                           FontWeight="SemiBold"/>
+                <TextBlock Text="{Binding Quality.QualityTriageSummary}" Foreground="{DynamicResource T3}"
+                           FontSize="11.5" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Grid>
+          </Border>
+          <!-- Flagged synthetic issues -->
+          <ItemsControl ItemsSource="{Binding Quality.SyntheticPatternIssues}"
+                        IsVisible="{Binding Quality.HasSyntheticPatternIssues}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="models:SyntheticPatternIssue">
+                <Border Background="{DynamicResource Panel}" CornerRadius="11" Padding="14" Margin="0,0,0,8"
+                        BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+                  <StackPanel Spacing="4">
+                    <Grid ColumnDefinitions="Auto,*">
+                      <Border Grid.Column="0" CornerRadius="5" Padding="6,1" VerticalAlignment="Center"
+                              Background="{DynamicResource Warn}">
+                        <TextBlock Text="{Binding Severity}" Foreground="White" FontSize="9.5" FontWeight="Bold"/>
+                      </Border>
+                      <TextBlock Grid.Column="1" Text="{Binding Message}" Foreground="{DynamicResource Text}"
+                                 FontWeight="SemiBold" VerticalAlignment="Center" Margin="8,0,0,0" TextWrapping="Wrap"/>
+                    </Grid>
+                    <TextBlock TextWrapping="Wrap">
+                      <Run Text="Fix: " Foreground="{DynamicResource T4}"/>
+                      <Run Text="{Binding Suggestion}" Foreground="{DynamicResource T3}"/>
+                    </TextBlock>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
         </StackPanel>
       </ScrollViewer>
     </Border>
