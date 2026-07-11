@@ -66,6 +66,60 @@ public sealed class QuarantineTests
     }
 
     [Fact]
+    public void CountHelpers_ReflectListAndAreNeutralWhenEmpty()
+    {
+        var vm = new QuarantineViewModel();
+        Assert.False(vm.HasQuarantine);
+        Assert.Equal(0, vm.RejectedCount);
+
+        vm.SetItems([Item(1), Item(2)]);
+        Assert.True(vm.HasQuarantine);
+        Assert.Equal(2, vm.RejectedCount);
+        Assert.Equal("2 rejected", vm.RejectedBadge);
+        Assert.Contains("2 rows", vm.QuarantineSummary);
+
+        vm.SetItems([Item(1)]);
+        Assert.Equal("1 rejected", vm.RejectedBadge);
+        Assert.Equal("1 row held out of the dataset for repair", vm.QuarantineSummary);
+
+        vm.Reset();
+        Assert.False(vm.HasQuarantine);
+        Assert.Equal("0 rejected", vm.RejectedBadge);
+    }
+
+    [Fact]
+    public void CountHelpers_RaisePropertyChangedOnSetAndReset()
+    {
+        var vm = new QuarantineViewModel();
+        var changed = new List<string?>();
+        vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        vm.SetItems([Item(1)]);
+        Assert.Contains(nameof(vm.HasQuarantine), changed);
+        Assert.Contains(nameof(vm.RejectedBadge), changed);
+        Assert.Contains(nameof(vm.QuarantineSummary), changed);
+
+        changed.Clear();
+        vm.Reset();
+        Assert.Contains(nameof(vm.HasQuarantine), changed);
+        Assert.Contains(nameof(vm.RejectedCount), changed);
+    }
+
+    [Fact]
+    public void Headline_UsesRowNumberAndFirstError()
+    {
+        var item = new ImportQuarantineItem
+        {
+            RowNumber = 41,
+            Errors = [new ValidationIssue { Message = "missing required field output" }],
+        };
+        Assert.Equal("Row 41 — missing required field output", item.Headline);
+
+        var noError = new ImportQuarantineItem { RowNumber = 7 };
+        Assert.Equal("Row 7 — rejected row", noError.Headline);
+    }
+
+    [Fact]
     public void SelectProject_ResetsQuarantineState()
     {
         // A project switch must not leave the previous project's quarantined rows on screen.

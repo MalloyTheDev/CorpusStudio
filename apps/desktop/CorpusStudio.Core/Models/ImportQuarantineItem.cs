@@ -33,6 +33,21 @@ public sealed class ImportQuarantineItem
         }
     }
 
+    /// <summary>One-line headline for a reject card: the row number and its first validation message
+    /// (e.g. "Row 41 — missing required field output"). Falls back to a neutral message when the row
+    /// carries no structured error.</summary>
+    [JsonIgnore]
+    public string Headline
+    {
+        get
+        {
+            var message = Errors.FirstOrDefault()?.Message;
+            return string.IsNullOrWhiteSpace(message)
+                ? $"Row {RowNumber} — rejected row"
+                : $"Row {RowNumber} — {message}";
+        }
+    }
+
     [JsonIgnore]
     public string DetailText
     {

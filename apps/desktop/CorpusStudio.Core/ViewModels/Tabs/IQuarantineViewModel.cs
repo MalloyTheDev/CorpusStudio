@@ -18,6 +18,19 @@ public interface IQuarantineViewModel : INotifyPropertyChanged
     ImportQuarantineItem? SelectedImportQuarantineItem { get; set; }
     string SelectedImportQuarantineDetail { get; }
 
+    /// <summary>Number of rejected rows currently held in quarantine.</summary>
+    int RejectedCount { get; }
+
+    /// <summary>True when any rows are quarantined — drives the section header / list vs. empty-state.</summary>
+    bool HasQuarantine { get; }
+
+    /// <summary>Warn-badge label for the section header, e.g. "2 rejected".</summary>
+    string RejectedBadge { get; }
+
+    /// <summary>Right-aligned summary of what's held out of the dataset for repair. Only reflects the
+    /// real quarantine count (the accepted-row count isn't tracked on this tab), so nothing is faked.</summary>
+    string QuarantineSummary { get; }
+
     /// <summary>Replace the quarantine list (newest import result), selecting the first row.</summary>
     void SetItems(IEnumerable<ImportQuarantineItem> items);
 
