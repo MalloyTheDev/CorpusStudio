@@ -15,6 +15,12 @@ public interface ISettingsViewModel : INotifyPropertyChanged
     string SettingsSummary { get; }
     string ProviderPolicySummary { get; }
 
+    /// <summary>The resolved Python interpreter path for the Engine card's Python row, or a neutral
+    /// "not configured" placeholder before settings load. Additive display helper (backlog #4 UI slice):
+    /// the app knows the interpreter PATH but not its version, so the row shows the real path honestly and
+    /// never fabricates a version string.</summary>
+    string PythonExecutableDisplay { get; }
+
     /// <summary>The provider + model for the "approve generation" form (bound two-way).</summary>
     string ProviderApprovalProvider { get; set; }
     string ProviderApprovalModel { get; set; }

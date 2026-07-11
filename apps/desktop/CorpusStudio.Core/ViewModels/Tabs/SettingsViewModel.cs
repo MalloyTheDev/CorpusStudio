@@ -18,11 +18,21 @@ public sealed class SettingsViewModel : ViewModelBase, ISettingsViewModel
         "Gate thresholds load with the project. Edit and save to override how gates block/warn.";
     private string _providerApprovalProvider = "ollama";
     private string _providerApprovalModel = string.Empty;
+    private string _pythonExecutableDisplay = "not configured";
 
     public string SettingsSummary
     {
         get => _settingsSummary;
         private set => SetField(ref _settingsSummary, value);
+    }
+
+    /// <summary>The resolved Python interpreter path for the Engine card's Python row (or a neutral
+    /// "not configured" placeholder until <see cref="SetSettings"/> runs). Honest: the interpreter version
+    /// isn't probed, so the row shows the real path — never a fabricated version.</summary>
+    public string PythonExecutableDisplay
+    {
+        get => _pythonExecutableDisplay;
+        private set => SetField(ref _pythonExecutableDisplay, value);
     }
 
     public string ProviderPolicySummary
@@ -47,6 +57,9 @@ public sealed class SettingsViewModel : ViewModelBase, ISettingsViewModel
 
     public void SetSettings(DesktopSettings settings)
     {
+        PythonExecutableDisplay = string.IsNullOrWhiteSpace(settings.PythonExecutable)
+            ? "not configured"
+            : settings.PythonExecutable;
         SettingsSummary = string.Join(
             Environment.NewLine,
             [
