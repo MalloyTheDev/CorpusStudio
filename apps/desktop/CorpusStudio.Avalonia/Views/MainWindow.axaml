@@ -6,13 +6,14 @@
         x:DataType="vm:MainWindowViewModel"
         Icon="/app.ico"
         Width="1180" Height="800"
+        Background="{DynamicResource Win}"
         Title="Corpus Studio — Avalonia (full shell over the shared view-models)">
   <Grid ColumnDefinitions="52,*">
 
     <!-- Activity bar: mode switches + panel toggles bound to the shell VM's ICommands (RelayCommand).
          The lone code-behind is the theme toggle — switching the app's light/dark variant is an
          Application/View concern (Application.Current.RequestedThemeVariant), not shared VM state. -->
-    <DockPanel Grid.Column="0" Background="#0F172A">
+    <DockPanel Grid.Column="0" Background="{DynamicResource Chrome}">
       <StackPanel DockPanel.Dock="Top" Spacing="2">
         <Button Content="⌂" Command="{Binding ShowStartCenterCommand}" Background="Transparent" Foreground="White"
                 FontSize="18" Width="52" Height="44" HorizontalContentAlignment="Center"/>
@@ -90,7 +91,7 @@
                                  Foreground="{DynamicResource AppChipText}" VerticalAlignment="Center"/>
                     </Border>
                     <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
-                    <Ellipse Width="6" Height="6" Fill="#F59E0B" VerticalAlignment="Center"
+                    <Ellipse Width="6" Height="6" Fill="{DynamicResource Warn}" VerticalAlignment="Center"
                              IsVisible="{Binding IsGeneratedArtifact}"/>
                   </StackPanel>
                 </TreeDataTemplate>
@@ -677,7 +678,7 @@
           </ListBox>
         </DockPanel>
       </Border>
-      <Border Grid.Row="1" Height="180" Background="#0F172A" IsVisible="{Binding OutputPanelVisible}">
+      <Border Grid.Row="1" Height="180" Background="{DynamicResource Chrome}" IsVisible="{Binding OutputPanelVisible}">
         <DockPanel Margin="12,8">
           <TextBlock DockPanel.Dock="Top" Text="{Binding OutputSummary}" FontWeight="Bold"
                      Foreground="White" Margin="0,0,0,6"/>
@@ -687,7 +688,7 @@
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <TextBlock Text="{Binding Timestamp}" Foreground="{DynamicResource AppTextMuted}" FontFamily="Consolas" FontSize="11"/>
                   <TextBlock Text="{Binding Command}" Foreground="White" FontFamily="Consolas" FontSize="11"/>
-                  <TextBlock Text="{Binding ArgsSummary}" Foreground="#94A3B8" FontFamily="Consolas" FontSize="11"/>
+                  <TextBlock Text="{Binding ArgsSummary}" Foreground="{DynamicResource T3}" FontFamily="Consolas" FontSize="11"/>
                 </StackPanel>
               </DataTemplate>
             </ListBox.ItemTemplate>
