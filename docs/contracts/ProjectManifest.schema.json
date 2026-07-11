@@ -1,0 +1,139 @@
+{
+  "$defs": {
+    "ProjectRegistries": {
+      "additionalProperties": false,
+      "description": "Project-relative directories the engine already uses for durable records. Pointers only;\ncontents are resolved live.",
+      "properties": {
+        "dataset_versions_dir": {
+          "default": "dataset_versions",
+          "title": "Dataset Versions Dir",
+          "type": "string"
+        },
+        "gate_reports_dir": {
+          "default": "gate_reports",
+          "title": "Gate Reports Dir",
+          "type": "string"
+        },
+        "gate_thresholds_file": {
+          "default": "gate_thresholds.json",
+          "title": "Gate Thresholds File",
+          "type": "string"
+        },
+        "model_artifacts_dir": {
+          "default": "model_artifacts",
+          "title": "Model Artifacts Dir",
+          "type": "string"
+        },
+        "training_runs_dir": {
+          "default": "training_runs",
+          "title": "Training Runs Dir",
+          "type": "string"
+        }
+      },
+      "title": "ProjectRegistries",
+      "type": "object"
+    },
+    "SplitSettings": {
+      "additionalProperties": false,
+      "description": "Verbatim from storage/project.SplitSettings. Seed pins deterministic splitting.",
+      "properties": {
+        "seed": {
+          "default": 42,
+          "minimum": 0,
+          "title": "Seed",
+          "type": "integer"
+        },
+        "train_ratio": {
+          "default": 0.9,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Train Ratio",
+          "type": "number"
+        },
+        "validation_ratio": {
+          "default": 0.05,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Validation Ratio",
+          "type": "number"
+        }
+      },
+      "title": "SplitSettings",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The top-level descriptor of a project/workspace. Formalizes storage/project.DatasetProject\n(project.json) + SplitSettings, promoting it to the workspace-primary manifest a UI shell opens;\neverything else resolves live from the referenced registries.",
+  "properties": {
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "created_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Created At"
+    },
+    "dataset_path": {
+      "default": "examples.jsonl",
+      "title": "Dataset Path",
+      "type": "string"
+    },
+    "id": {
+      "pattern": "^[a-z0-9][a-z0-9_-]*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "labels": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Labels",
+      "type": "array"
+    },
+    "name": {
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "registries": {
+      "$ref": "#/$defs/ProjectRegistries"
+    },
+    "schema_id": {
+      "pattern": "^[a-z0-9_]+$",
+      "title": "Schema Id",
+      "type": "string"
+    },
+    "split_settings": {
+      "$ref": "#/$defs/SplitSettings"
+    },
+    "updated_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Updated At"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "schema_id"
+  ],
+  "title": "ProjectManifest",
+  "type": "object"
+}

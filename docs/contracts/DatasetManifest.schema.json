@@ -1,0 +1,751 @@
+{
+  "$defs": {
+    "DatasetGeneration": {
+      "additionalProperties": false,
+      "description": "Set when rows were synthesized/distilled from a teacher model \u2014 the reproducible recipe.",
+      "properties": {
+        "decoding": {
+          "additionalProperties": true,
+          "title": "Decoding",
+          "type": "object"
+        },
+        "prompt_hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "prompt_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt Version"
+        },
+        "random_seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Random Seed"
+        },
+        "teacher_model": {
+          "title": "Teacher Model",
+          "type": "string"
+        },
+        "teacher_model_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Teacher Model Version"
+        }
+      },
+      "required": [
+        "teacher_model"
+      ],
+      "title": "DatasetGeneration",
+      "type": "object"
+    },
+    "DatasetLineage": {
+      "additionalProperties": false,
+      "properties": {
+        "generation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DatasetGeneration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "random_seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Random Seed"
+        },
+        "source_artifacts": {
+          "items": {
+            "$ref": "#/$defs/DatasetSourceArtifact"
+          },
+          "title": "Source Artifacts",
+          "type": "array"
+        },
+        "tool_versions": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Tool Versions",
+          "type": "object"
+        },
+        "transformation_pipeline": {
+          "items": {
+            "$ref": "#/$defs/DatasetTransformStep"
+          },
+          "title": "Transformation Pipeline",
+          "type": "array"
+        }
+      },
+      "title": "DatasetLineage",
+      "type": "object"
+    },
+    "DatasetLinks": {
+      "additionalProperties": false,
+      "description": "Live cross-references resolved by the version card. Presence/integrity resolved live.",
+      "properties": {
+        "artifact_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Artifact Ids",
+          "type": "array"
+        },
+        "eval_report_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Eval Report Ref"
+        },
+        "gate_report_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gate Report Ref"
+        },
+        "source_run_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Run Ids",
+          "type": "array"
+        }
+      },
+      "title": "DatasetLinks",
+      "type": "object"
+    },
+    "DatasetRowHashes": {
+      "additionalProperties": false,
+      "description": "Per-row content addressing. Reuses capture_dataset's sha256(exact_row_signature) row ids.",
+      "properties": {
+        "algo": {
+          "default": "sha256-exact-row-signature-v1",
+          "title": "Algo",
+          "type": "string"
+        },
+        "ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ids"
+        },
+        "row_manifest_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Row Manifest Ref"
+        },
+        "rows_stored": {
+          "default": false,
+          "title": "Rows Stored",
+          "type": "boolean"
+        },
+        "stored_row_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Stored Row Count",
+          "type": "integer"
+        }
+      },
+      "title": "DatasetRowHashes",
+      "type": "object"
+    },
+    "DatasetSourceArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "default": "imported_file",
+          "enum": [
+            "dataset_version",
+            "imported_file",
+            "hf_dataset",
+            "generated",
+            "external"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "license": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/License"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ref": {
+          "title": "Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "title": "DatasetSourceArtifact",
+      "type": "object"
+    },
+    "DatasetTransformStep": {
+      "additionalProperties": false,
+      "description": "One ordered transform (import \u2192 clean \u2192 redact \u2192 split \u2192 collate). Grounded in the engine's\ncleaning/redaction sidecar manifests (cli.py).",
+      "properties": {
+        "input_hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "manifest_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Manifest Ref"
+        },
+        "output_hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        },
+        "step": {
+          "title": "Step",
+          "type": "string"
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "tool_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Version"
+        }
+      },
+      "required": [
+        "step",
+        "tool"
+      ],
+      "title": "DatasetTransformStep",
+      "type": "object"
+    },
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "License": {
+      "additionalProperties": false,
+      "description": "License metadata for a dataset, base model, or produced artifact. The engine reminds users\nthe BASE model's license governs a produced adapter (training/model_card).",
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "redistributable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Redistributable"
+        },
+        "source": {
+          "default": "unknown",
+          "enum": [
+            "declared",
+            "model_card",
+            "dataset_card",
+            "user_asserted",
+            "unknown"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "spdx_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Spdx Id"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "title": "License",
+      "type": "object"
+    },
+    "TokenStats": {
+      "additionalProperties": false,
+      "description": "Token accounting for a dataset/run. Extends estimators.TokenBudgetEstimate with the\nsupervised/prompt/completion/padding breakdown the platform requires. 'natural' = tokens in raw\ncontent; 'collated' = after chat-template rendering + packing; 'supervised' = tokens the loss is\ncomputed over (completion tokens under a completion-only mask).",
+      "properties": {
+        "collated_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Collated Tokens"
+        },
+        "completion_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completion Tokens"
+        },
+        "exact": {
+          "default": false,
+          "title": "Exact",
+          "type": "boolean"
+        },
+        "example_count": {
+          "minimum": 0,
+          "title": "Example Count",
+          "type": "integer"
+        },
+        "examples_over_sequence_len": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Examples Over Sequence Len"
+        },
+        "max_tokens_in_example": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Tokens In Example"
+        },
+        "mean_tokens_per_example": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mean Tokens Per Example"
+        },
+        "method": {
+          "default": "heuristic",
+          "title": "Method",
+          "type": "string"
+        },
+        "natural_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Natural Tokens"
+        },
+        "no_truncation": {
+          "default": false,
+          "title": "No Truncation",
+          "type": "boolean"
+        },
+        "padding_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Padding Tokens"
+        },
+        "prompt_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt Tokens"
+        },
+        "sequence_len": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Sequence Len",
+          "type": "integer"
+        },
+        "supervised_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supervised Tokens"
+        },
+        "tokens_per_epoch": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokens Per Epoch"
+        }
+      },
+      "required": [
+        "example_count"
+      ],
+      "title": "TokenStats",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Full identity + LINEAGE of a dataset version. Content identity is verbatim from\nversions/version_registry.DatasetVersionRecord; row hashes reuse the per-row sha256 of\nexact_row_signature; token stats extend estimators; the transformation-pipeline lineage is NEW.",
+  "properties": {
+    "content_fingerprint": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Content Fingerprint"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "created_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Created At"
+    },
+    "fingerprint_algo": {
+      "default": "sha256-ordered-exact-v1",
+      "title": "Fingerprint Algo",
+      "type": "string"
+    },
+    "label": {
+      "default": "",
+      "title": "Label",
+      "type": "string"
+    },
+    "license": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/License"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "lineage": {
+      "$ref": "#/$defs/DatasetLineage"
+    },
+    "links": {
+      "$ref": "#/$defs/DatasetLinks"
+    },
+    "notes": {
+      "default": "",
+      "title": "Notes",
+      "type": "string"
+    },
+    "output_artifact_hash": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HashRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "project_id": {
+      "default": "",
+      "title": "Project Id",
+      "type": "string"
+    },
+    "row_count": {
+      "minimum": 0,
+      "title": "Row Count",
+      "type": "integer"
+    },
+    "row_hashes": {
+      "$ref": "#/$defs/DatasetRowHashes"
+    },
+    "row_signature_kind": {
+      "default": "exact",
+      "title": "Row Signature Kind",
+      "type": "string"
+    },
+    "schema_id": {
+      "default": "",
+      "title": "Schema Id",
+      "type": "string"
+    },
+    "token_stats": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TokenStats"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "trigger": {
+      "default": "",
+      "title": "Trigger",
+      "type": "string"
+    },
+    "updated_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Updated At"
+    },
+    "version_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Version Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "version_id",
+    "row_count",
+    "content_fingerprint"
+  ],
+  "title": "DatasetManifest",
+  "type": "object"
+}

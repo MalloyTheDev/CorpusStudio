@@ -1,0 +1,608 @@
+{
+  "$defs": {
+    "AcceleratorRuntime": {
+      "additionalProperties": false,
+      "properties": {
+        "cuda_driver_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cuda Driver Version"
+        },
+        "cuda_runtime_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cuda Runtime Version"
+        },
+        "driver_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Driver Version"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeviceKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "mps_available": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mps Available"
+        },
+        "nvidia_smi_available": {
+          "default": false,
+          "title": "Nvidia Smi Available",
+          "type": "boolean"
+        },
+        "rocm_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rocm Version"
+        }
+      },
+      "title": "AcceleratorRuntime",
+      "type": "object"
+    },
+    "DeviceKind": {
+      "enum": [
+        "cuda",
+        "rocm",
+        "mps",
+        "xpu",
+        "cpu"
+      ],
+      "title": "DeviceKind",
+      "type": "string"
+    },
+    "EnvCpu": {
+      "additionalProperties": false,
+      "properties": {
+        "instruction_sets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Instruction Sets",
+          "type": "array"
+        },
+        "logical_cores": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Logical Cores"
+        },
+        "model": {
+          "default": "",
+          "title": "Model",
+          "type": "string"
+        },
+        "physical_cores": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Physical Cores"
+        }
+      },
+      "title": "EnvCpu",
+      "type": "object"
+    },
+    "EnvHost": {
+      "additionalProperties": false,
+      "properties": {
+        "hostname_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hostname Hash"
+        },
+        "memory_residency_model": {
+          "$ref": "#/$defs/MemoryResidencyModel",
+          "default": "unknown"
+        },
+        "os": {
+          "$ref": "#/$defs/OperatingSystem"
+        },
+        "os_detail": {
+          "default": "",
+          "title": "Os Detail",
+          "type": "string"
+        },
+        "python_version": {
+          "default": "",
+          "title": "Python Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "os"
+      ],
+      "title": "EnvHost",
+      "type": "object"
+    },
+    "EnvRam": {
+      "additionalProperties": false,
+      "properties": {
+        "available_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Available Bytes"
+        },
+        "total_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Bytes"
+        }
+      },
+      "title": "EnvRam",
+      "type": "object"
+    },
+    "EnvStorage": {
+      "additionalProperties": false,
+      "properties": {
+        "free_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Free Bytes"
+        },
+        "kind": {
+          "default": "unknown",
+          "enum": [
+            "nvme",
+            "ssd",
+            "hdd",
+            "network",
+            "unknown"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "scratch_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scratch Path"
+        }
+      },
+      "title": "EnvStorage",
+      "type": "object"
+    },
+    "GpuDevice": {
+      "additionalProperties": false,
+      "description": "One accelerator. Grounded in environment.GpuInfo + gpu_probe.GpuMemory.",
+      "properties": {
+        "compute_capability": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Compute Capability"
+        },
+        "compute_capability_major": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Compute Capability Major"
+        },
+        "index": {
+          "minimum": 0,
+          "title": "Index",
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "pcie": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GpuPcie"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "supported_dtypes": {
+          "items": {
+            "$ref": "#/$defs/PrecisionMode"
+          },
+          "title": "Supported Dtypes",
+          "type": "array"
+        },
+        "vram_free_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vram Free Bytes"
+        },
+        "vram_total_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vram Total Bytes"
+        }
+      },
+      "required": [
+        "index",
+        "kind",
+        "name"
+      ],
+      "title": "GpuDevice",
+      "type": "object"
+    },
+    "GpuPcie": {
+      "additionalProperties": false,
+      "properties": {
+        "gen": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gen"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width"
+        }
+      },
+      "title": "GpuPcie",
+      "type": "object"
+    },
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "MemoryResidencyModel": {
+      "description": "How the platform maps device memory. ``wddm`` (Windows) silently spills overflow to shared\nsystem RAM and thrashes over PCIe; ``linux_dedicated`` hard-OOMs instead; ``unified_memory`` is\nApple MPS / integrated shared memory. The single most decisive field for spill-vs-OOM.",
+      "enum": [
+        "wddm",
+        "linux_dedicated",
+        "unified_memory",
+        "unknown"
+      ],
+      "title": "MemoryResidencyModel",
+      "type": "string"
+    },
+    "OperatingSystem": {
+      "enum": [
+        "windows",
+        "linux",
+        "macos",
+        "unknown"
+      ],
+      "title": "OperatingSystem",
+      "type": "string"
+    },
+    "PackageLock": {
+      "additionalProperties": false,
+      "description": "A resolved dependency: distribution name \u2192 installed version + optional wheel/artifact hash.\nGrounded in environment.probe_training_runtime (importlib.metadata.version, no import).",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "source": {
+          "default": "unknown",
+          "enum": [
+            "pypi",
+            "wheel",
+            "sdist",
+            "conda",
+            "vcs",
+            "local",
+            "unknown"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "PackageLock",
+      "type": "object"
+    },
+    "PrecisionMode": {
+      "enum": [
+        "fp32",
+        "tf32",
+        "fp16",
+        "bf16",
+        "fp8",
+        "mixed_bf16",
+        "mixed_fp16"
+      ],
+      "title": "PrecisionMode",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The full, hashable SIGNATURE of a host + software environment. Formalizes + greatly extends\nenvironment.probe_training_runtime (package versions + GpuInfo), gpu_probe.probe_gpu_memory, and\nprovenance.RunProvenance. A RunManifest/RunPlan references a profile by ``environment_signature``\nso a result is always tied to the exact environment that produced it.",
+  "properties": {
+    "accelerator_runtime": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AcceleratorRuntime"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "captured_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Captured At"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "cpu": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EnvCpu"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "engine_version": {
+      "default": "",
+      "title": "Engine Version",
+      "type": "string"
+    },
+    "environment_signature": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Environment Signature",
+      "type": "string"
+    },
+    "gpus": {
+      "items": {
+        "$ref": "#/$defs/GpuDevice"
+      },
+      "title": "Gpus",
+      "type": "array"
+    },
+    "host": {
+      "$ref": "#/$defs/EnvHost"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    },
+    "packages": {
+      "items": {
+        "$ref": "#/$defs/PackageLock"
+      },
+      "title": "Packages",
+      "type": "array"
+    },
+    "ram": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EnvRam"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "storage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EnvStorage"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "environment_signature",
+    "host"
+  ],
+  "title": "EnvironmentProfile",
+  "type": "object"
+}

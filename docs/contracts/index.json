@@ -1,0 +1,57 @@
+{
+  "contract_version": "1.0.0",
+  "contracts": [
+    {
+      "contract": "ProjectManifest",
+      "file": "ProjectManifest.schema.json"
+    },
+    {
+      "contract": "DatasetManifest",
+      "file": "DatasetManifest.schema.json"
+    },
+    {
+      "contract": "EnvironmentProfile",
+      "file": "EnvironmentProfile.schema.json"
+    },
+    {
+      "contract": "BackendManifest",
+      "file": "BackendManifest.schema.json"
+    },
+    {
+      "contract": "CapabilityReport",
+      "file": "CapabilityReport.schema.json"
+    },
+    {
+      "contract": "RunPlan",
+      "file": "RunPlan.schema.json"
+    },
+    {
+      "contract": "RunManifest",
+      "file": "RunManifest.schema.json"
+    },
+    {
+      "contract": "RunEvent",
+      "file": "RunEvent.schema.json"
+    },
+    {
+      "contract": "ArtifactManifest",
+      "file": "ArtifactManifest.schema.json"
+    },
+    {
+      "contract": "EvaluationResult",
+      "file": "EvaluationResult.schema.json"
+    },
+    {
+      "contract": "FailureRecord",
+      "file": "FailureRecord.schema.json"
+    },
+    {
+      "contract": "FitClassification",
+      "file": "FitClassification.schema.json"
+    },
+    {
+      "contract": "WorkerMessage",
+      "file": "WorkerMessage.schema.json"
+    }
+  ]
+}

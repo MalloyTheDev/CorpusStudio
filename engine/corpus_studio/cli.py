@@ -186,6 +186,32 @@ def schemas():
     typer.echo(json.dumps(schema_rows, indent=2))
 
 
+@app.command("platform-schemas")
+def platform_schemas(
+    out_dir: Optional[Path] = typer.Option(
+        None, "--out", help="Write each contract's JSON Schema to this directory (+ index.json)."
+    ),
+):
+    """Emit the language-neutral platform contract JSON Schemas (RunPlan, RunEvent, BackendManifest,
+    EnvironmentProfile, FailureRecord, FitClassification, WorkerMessage, …) — the boundary the
+    Rust core / Avalonia / Tauri clients consume. With --out, writes <Name>.schema.json files;
+    otherwise prints the whole schema set to stdout."""
+    from corpus_studio.platform import CONTRACT_VERSION, contract_schemas, export_json_schemas
+
+    if out_dir is not None:
+        written = export_json_schemas(out_dir)
+        typer.echo(
+            json.dumps(
+                {"contract_version": CONTRACT_VERSION, "written": [str(p) for p in written]},
+                indent=2,
+            )
+        )
+        return
+    typer.echo(
+        json.dumps({"contract_version": CONTRACT_VERSION, "contracts": contract_schemas()}, indent=2)
+    )
+
+
 @app.command()
 def validate(path: Path, schema: str):
     """Validate a JSONL file against a built-in schema."""

@@ -1,0 +1,216 @@
+{
+  "$defs": {
+    "ArtifactIntegrity": {
+      "additionalProperties": false,
+      "description": "Two-tier integrity: cheap size+mtime fingerprint powers the fast LIST; content_hash (sha256\nover weight bytes) powers the promote GATE. ``current_integrity`` is computed LIVE at read.",
+      "properties": {
+        "cheap_fingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cheap Fingerprint"
+        },
+        "content_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Hash"
+        },
+        "current_integrity": {
+          "default": "unknown",
+          "enum": [
+            "ok",
+            "missing",
+            "modified",
+            "unknown"
+          ],
+          "title": "Current Integrity",
+          "type": "string"
+        }
+      },
+      "title": "ArtifactIntegrity",
+      "type": "object"
+    },
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Ref",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A first-class record of a weight artifact a run produced. Formalizes\nartifact_registry.ModelArtifactRecord + its two-tier integrity model. The platform NEVER\nmoves/copies/deletes the underlying weights \u2014 the manifest only references + re-checks them.",
+  "properties": {
+    "artifact_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Artifact Id",
+      "type": "string"
+    },
+    "base_model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Base Model"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "created_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Created At"
+    },
+    "integrity": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ArtifactIntegrity"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "kind": {
+      "default": "adapter",
+      "enum": [
+        "adapter",
+        "checkpoint",
+        "merged_model",
+        "gguf",
+        "onnx",
+        "quantized",
+        "other"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "notes": {
+      "default": "",
+      "title": "Notes",
+      "type": "string"
+    },
+    "path": {
+      "title": "Path",
+      "type": "string"
+    },
+    "producer_run_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "reload_verified": {
+      "default": false,
+      "title": "Reload Verified",
+      "type": "boolean"
+    },
+    "status": {
+      "default": "candidate",
+      "enum": [
+        "candidate",
+        "kept",
+        "rejected"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "updated_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Updated At"
+    }
+  },
+  "required": [
+    "artifact_id",
+    "producer_run_ref",
+    "path"
+  ],
+  "title": "ArtifactManifest",
+  "type": "object"
+}

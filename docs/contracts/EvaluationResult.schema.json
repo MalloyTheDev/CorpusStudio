@@ -1,0 +1,470 @@
+{
+  "$defs": {
+    "AsServed": {
+      "additionalProperties": false,
+      "description": "How the model was actually served \u2014 the RAW-vs-AS-SERVED axis. Two evals of the 'same' model\ndiffer if quantization/adapter/template/decoding differ.",
+      "properties": {
+        "adapter_applied": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Adapter Applied"
+        },
+        "backend": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backend"
+        },
+        "chat_template_applied": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chat Template Applied"
+        },
+        "decoding": {
+          "additionalProperties": true,
+          "title": "Decoding",
+          "type": "object"
+        },
+        "precision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PrecisionMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "quantization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuantizationMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "AsServed",
+      "type": "object"
+    },
+    "EvalDataset": {
+      "additionalProperties": false,
+      "properties": {
+        "dataset_fingerprint": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dataset Fingerprint"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "version_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version Ref"
+        }
+      },
+      "title": "EvalDataset",
+      "type": "object"
+    },
+    "EvalGate": {
+      "additionalProperties": false,
+      "description": "Grounded in gates/models.GateReport/GateStatus (pass/warn/block, counts, effective\nthresholds behind the verdict for reproducibility).",
+      "properties": {
+        "block_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Block Count",
+          "type": "integer"
+        },
+        "max_regression_score_drop": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Regression Score Drop"
+        },
+        "min_eval_average_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Eval Average Score"
+        },
+        "min_eval_pass_rate": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Eval Pass Rate"
+        },
+        "overall_status": {
+          "enum": [
+            "pass",
+            "warn",
+            "block"
+          ],
+          "title": "Overall Status",
+          "type": "string"
+        },
+        "pass_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Pass Count",
+          "type": "integer"
+        },
+        "warn_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Warn Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "overall_status"
+      ],
+      "title": "EvalGate",
+      "type": "object"
+    },
+    "EvalMetric": {
+      "additionalProperties": false,
+      "description": "The scorer AND what it measures \u2014 so a number is never treated as quality without\nqualification (reports.EvaluationReport.metric honesty note).",
+      "properties": {
+        "judge_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Judge Model"
+        },
+        "measures": {
+          "default": "",
+          "title": "Measures",
+          "type": "string"
+        },
+        "name": {
+          "default": "keyword_overlap",
+          "enum": [
+            "keyword_overlap",
+            "llm_judge",
+            "exact_match",
+            "pass_rate",
+            "custom"
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "score_threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Score Threshold"
+        }
+      },
+      "title": "EvalMetric",
+      "type": "object"
+    },
+    "EvalSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "average_manual_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Average Manual Score"
+        },
+        "average_score": {
+          "title": "Average Score",
+          "type": "number"
+        },
+        "examples_tested": {
+          "minimum": 0,
+          "title": "Examples Tested",
+          "type": "integer"
+        },
+        "failed_examples": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Failed Examples",
+          "type": "integer"
+        },
+        "pass_rate": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pass Rate"
+        },
+        "weak_tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Weak Tags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "examples_tested",
+        "average_score"
+      ],
+      "title": "EvalSummary",
+      "type": "object"
+    },
+    "EvalTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Ref"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "phase": {
+          "default": "standalone",
+          "enum": [
+            "before",
+            "after",
+            "standalone"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "run_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Ref"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "title": "EvalTarget",
+      "type": "object"
+    },
+    "PrecisionMode": {
+      "enum": [
+        "fp32",
+        "tf32",
+        "fp16",
+        "bf16",
+        "fp8",
+        "mixed_bf16",
+        "mixed_fp16"
+      ],
+      "title": "PrecisionMode",
+      "type": "string"
+    },
+    "QuantizationMode": {
+      "enum": [
+        "none",
+        "int8",
+        "int4",
+        "nf4",
+        "fp4",
+        "gptq",
+        "awq",
+        "hqq"
+      ],
+      "title": "QuantizationMode",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The outcome of evaluating a model/dataset, with an explicit as-served vs raw distinction so a\nnumber is never presented as a quality signal without saying what produced it. Formalizes\nevaluation/reports.EvaluationReport + gates/models.GateReport.",
+  "properties": {
+    "as_served": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AsServed"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "dataset": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EvalDataset"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "eval_id": {
+      "minLength": 1,
+      "title": "Eval Id",
+      "type": "string"
+    },
+    "gate": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EvalGate"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "generated_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Generated At"
+    },
+    "metric": {
+      "$ref": "#/$defs/EvalMetric"
+    },
+    "provenance_caveat": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Provenance Caveat"
+    },
+    "report_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Report Ref"
+    },
+    "summary": {
+      "$ref": "#/$defs/EvalSummary"
+    },
+    "target": {
+      "$ref": "#/$defs/EvalTarget"
+    }
+  },
+  "required": [
+    "eval_id",
+    "target",
+    "metric",
+    "summary"
+  ],
+  "title": "EvaluationResult",
+  "type": "object"
+}

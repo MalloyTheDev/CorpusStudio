@@ -1,0 +1,590 @@
+{
+  "$defs": {
+    "AttentionImpl": {
+      "description": "``math``/``eager`` is forced on Blackwell sm_120 \u2014 the fused flash/mem-efficient kernels\ndeadlock on the first backward (training/environment.py, estimators.py) \u2014 at a large activation\nVRAM cost.",
+      "enum": [
+        "math",
+        "eager",
+        "sdpa",
+        "flash_attention_2",
+        "flash_attention_3",
+        "mem_efficient",
+        "xformers"
+      ],
+      "title": "AttentionImpl",
+      "type": "string"
+    },
+    "EventMetrics": {
+      "additionalProperties": false,
+      "description": "Present on metric/heartbeat events. All optional \u2014 a worker emits what it can sample. The\nmemory block + step_time make the WDDM spill (10-25x slowdown, non-zero shared bytes) visible.",
+      "properties": {
+        "gpu_utilization": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gpu Utilization"
+        },
+        "grad_norm": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Grad Norm"
+        },
+        "learning_rate": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Learning Rate"
+        },
+        "loss": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Loss"
+        },
+        "memory": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "memory_controller_utilization": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Controller Utilization"
+        },
+        "pcie_rx_bytes_per_sec": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pcie Rx Bytes Per Sec"
+        },
+        "pcie_tx_bytes_per_sec": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pcie Tx Bytes Per Sec"
+        },
+        "power_watts": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Power Watts"
+        },
+        "step_time_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step Time Seconds"
+        },
+        "supervised_tokens_per_sec": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supervised Tokens Per Sec"
+        },
+        "temperature_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature C"
+        },
+        "tokens_per_sec": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokens Per Sec"
+        }
+      },
+      "title": "EventMetrics",
+      "type": "object"
+    },
+    "FitClass": {
+      "description": "The fit verdict. ``NATIVE_*`` = fully resident. ``CONTROLLED_*`` = a deliberate, planned\noffload (acceptable, slower). ``ACCIDENTAL_*`` / ``THRASHING`` = an unplanned spill the platform\ndid silently (the failure mode the engine warns about). ``FAIL`` = will not run.",
+      "enum": [
+        "NATIVE_SAFE",
+        "NATIVE_TIGHT",
+        "NATIVE_UNPROVEN",
+        "MARGINAL",
+        "CONTROLLED_ACTIVATION_OFFLOAD",
+        "CONTROLLED_OPTIMIZER_OFFLOAD",
+        "CONTROLLED_PARAMETER_OFFLOAD",
+        "ACCIDENTAL_UNIFIED_MEMORY_PAGING",
+        "ACCIDENTAL_WDDM_SPILL",
+        "THRASHING",
+        "FAIL"
+      ],
+      "title": "FitClass",
+      "type": "string"
+    },
+    "FitClassification": {
+      "additionalProperties": false,
+      "description": "The planner/calibrator verdict on whether a resolved RunPlan fits the target environment, and\nHOW: a native fit, a deliberately-offloaded fit, or an ACCIDENTAL spill (the silent WDDM/unified\npaging that looks frozen but crawls at 10-25x). NEW \u2014 the engine emits only a coarse warn/pass\nVRAM band (preflight.gpu_memory, _VRAM_SAFETY_MARGIN_GB).",
+      "properties": {
+        "attention_path": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttentionImpl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "classification": {
+          "$ref": "#/$defs/FitClass"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "device_capacity_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Capacity Bytes"
+        },
+        "estimated_peak_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimated Peak Bytes"
+        },
+        "headroom_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Headroom Bytes"
+        },
+        "rationale": {
+          "default": "",
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "classification"
+      ],
+      "title": "FitClassification",
+      "type": "object"
+    },
+    "MemoryMetrics": {
+      "additionalProperties": false,
+      "description": "The full memory-signature block sampled during a run. Distinguishes PyTorch's allocator view,\nraw CUDA device memory, and OS-level residency (``dedicated`` vs ``shared`` GPU memory) so a\nWindows/WDDM spill to shared memory is VISIBLE rather than hidden inside 'used VRAM'. Grounded in\ngpu_probe.GpuMemory + the estimators note that torch.max_memory_allocated counts the WDDM spill.",
+      "properties": {
+        "cuda_device_free_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cuda Device Free Bytes"
+        },
+        "cuda_device_used_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cuda Device Used Bytes"
+        },
+        "dedicated_gpu_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dedicated Gpu Bytes"
+        },
+        "process_rss_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Process Rss Bytes"
+        },
+        "shared_gpu_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shared Gpu Bytes"
+        },
+        "system_ram_used_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "System Ram Used Bytes"
+        },
+        "torch_allocated_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Allocated Bytes"
+        },
+        "torch_peak_allocated_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Peak Allocated Bytes"
+        },
+        "torch_peak_reserved_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Peak Reserved Bytes"
+        },
+        "torch_reserved_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Reserved Bytes"
+        }
+      },
+      "title": "MemoryMetrics",
+      "type": "object"
+    },
+    "StageMarker": {
+      "description": "Ordered lifecycle stage of a run, launch \u2192 export. A RunEvent carries the stage it belongs to\nso a consumer can render a precise progress spine and localize a failure to the exact stage.",
+      "enum": [
+        "process_start",
+        "env_loaded",
+        "cuda_init",
+        "model_loaded",
+        "quantized",
+        "adapter_attached",
+        "optimizer_created",
+        "batch_materialized",
+        "forward",
+        "loss",
+        "backward",
+        "optimizer_step",
+        "checkpoint",
+        "reload",
+        "evaluation",
+        "export"
+      ],
+      "title": "StageMarker",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One envelope in the structured telemetry stream a worker emits for a run \u2014 the RunEvent half\nof the immutable-RunPlan-in / RunEvent-stream-out worker protocol. NEW; the engine has no\nstreaming telemetry today (run_registry is a durable per-run record, not an event stream).",
+  "properties": {
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "emitted_at": {
+      "title": "Emitted At",
+      "type": "string"
+    },
+    "epoch": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Epoch"
+    },
+    "event_type": {
+      "enum": [
+        "stage",
+        "metric",
+        "log",
+        "warning",
+        "checkpoint_written",
+        "eval_result",
+        "artifact_produced",
+        "heartbeat",
+        "terminal"
+      ],
+      "title": "Event Type",
+      "type": "string"
+    },
+    "fit": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FitClassification"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Message"
+    },
+    "metrics": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EventMetrics"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "microstep": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Microstep"
+    },
+    "optimizer_step": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Optimizer Step"
+    },
+    "payload": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Payload"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "seq": {
+      "minimum": 0,
+      "title": "Seq",
+      "type": "integer"
+    },
+    "stage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/StageMarker"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "event_type",
+    "run_id",
+    "seq",
+    "emitted_at"
+  ],
+  "title": "RunEvent",
+  "type": "object"
+}

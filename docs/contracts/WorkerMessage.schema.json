@@ -1,0 +1,86 @@
+{
+  "additionalProperties": false,
+  "description": "The versioned envelope for the core\u2194worker channel \u2014 realizes the 'immutable RunPlan IN,\nstructured RunEvent stream OUT' boundary. NEW; no worker/core protocol exists in the engine\ntoday (the desktop owns the trainer process directly). ``protocol_version`` lets the two sides\nnegotiate compatibility independently of any single contract's version. The body shape is\nselected by ``type`` (see :data:`WORKER_BODY_BY_TYPE`).",
+  "properties": {
+    "body": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Body"
+    },
+    "correlation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Correlation Id"
+    },
+    "direction": {
+      "enum": [
+        "core_to_worker",
+        "worker_to_core"
+      ],
+      "title": "Direction",
+      "type": "string"
+    },
+    "message_id": {
+      "minLength": 1,
+      "title": "Message Id",
+      "type": "string"
+    },
+    "protocol_version": {
+      "pattern": "^\\d+\\.\\d+\\.\\d+([-+].+)?$",
+      "title": "Protocol Version",
+      "type": "string"
+    },
+    "sent_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sent At"
+    },
+    "type": {
+      "enum": [
+        "hello",
+        "capability_probe_request",
+        "capability_report",
+        "run_dispatch",
+        "run_accepted",
+        "run_rejected",
+        "run_control",
+        "event",
+        "heartbeat",
+        "terminal_result",
+        "failure"
+      ],
+      "title": "Type",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocol_version",
+    "message_id",
+    "direction",
+    "type"
+  ],
+  "title": "WorkerMessage",
+  "type": "object"
+}
