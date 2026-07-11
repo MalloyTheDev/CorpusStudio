@@ -834,14 +834,119 @@
       </ScrollViewer>
     </Border>
 
-    <!-- Model Arena (slice 8 fidelity): configuration card + standings card. -->
+    <!-- Model Arena (production re-skin): results-first hierarchy — a compact summary line + Run,
+         ranked STANDINGS cards, a HEAD-TO-HEAD strip, with the config form + full transcript demoted
+         into collapsed overflow below. Binds the additive display props on ArenaViewModel. -->
     <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Arena}">
       <ScrollViewer>
-        <StackPanel Margin="20" Spacing="14" MaxWidth="740" HorizontalAlignment="Left">
-          <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="16"
-                  BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-            <StackPanel Spacing="8">
-              <TextBlock Text="Arena configuration" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
+        <StackPanel Margin="20" Spacing="14" MaxWidth="820" HorizontalAlignment="Left">
+
+          <!-- Results-first header: compact summary line + Run arena. -->
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Grid.Column="0" Text="{Binding Arena.ArenaResultsLine}" VerticalAlignment="Center"
+                       Foreground="{DynamicResource T3}" FontSize="13" TextWrapping="Wrap"/>
+            <Button Grid.Column="1" Command="{Binding RunArenaCommand}" VerticalAlignment="Center"
+                    Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}"
+                    BorderBrush="{DynamicResource Accent}" BorderThickness="1">
+              <StackPanel Orientation="Horizontal" Spacing="7">
+                <Path Classes="ico accent" Data="{StaticResource IcoTrophy}" Width="15" Height="15"/>
+                <TextBlock Text="Run arena" VerticalAlignment="Center"/>
+              </StackPanel>
+            </Button>
+          </Grid>
+
+          <!-- Empty / pre-run state. -->
+          <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="18"
+                  BorderBrush="{DynamicResource Line2}" BorderThickness="1"
+                  IsVisible="{Binding !Arena.HasArenaReport}">
+            <StackPanel Orientation="Horizontal" Spacing="12">
+              <Path Classes="ico muted" Data="{StaticResource IcoTrophy}" Width="20" Height="20" VerticalAlignment="Top"/>
+              <StackPanel Spacing="3">
+                <TextBlock Text="No arena results yet" Foreground="{DynamicResource Text}" FontWeight="SemiBold"/>
+                <TextBlock Text="Add prompts and models in Arena configuration below, then run the arena to rank models head-to-head."
+                           Foreground="{DynamicResource T3}" FontSize="12" TextWrapping="Wrap" MaxWidth="520"/>
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
+          <!-- STANDINGS eyebrow + ranked cards. -->
+          <TextBlock Text="STANDINGS" FontSize="10" FontWeight="SemiBold"
+                     Foreground="{DynamicResource T4}" Margin="2,4,0,0"
+                     IsVisible="{Binding Arena.HasArenaReport}"/>
+          <ItemsControl ItemsSource="{Binding Arena.Standings}" IsVisible="{Binding Arena.HasArenaReport}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="models:ArenaStandingItem">
+                <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="16" Margin="0,0,0,10"
+                        BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+                  <Grid ColumnDefinitions="Auto,*,Auto">
+                    <TextBlock Grid.Column="0" Text="{Binding RankDisplay}" FontSize="26" FontWeight="Bold"
+                               Foreground="{DynamicResource T4}" VerticalAlignment="Center"
+                               MinWidth="24" Margin="0,0,16,0"/>
+                    <StackPanel Grid.Column="1" Spacing="9" VerticalAlignment="Center">
+                      <StackPanel Orientation="Horizontal" Spacing="7">
+                        <TextBlock Text="{Binding Model}" FontWeight="SemiBold" FontSize="14"
+                                   Foreground="{DynamicResource Text}" VerticalAlignment="Center"/>
+                        <Path Data="{StaticResource IcoTrophy}" Width="14" Height="14" Stretch="Uniform"
+                              VerticalAlignment="Center" Fill="{DynamicResource Grade}"
+                              IsVisible="{Binding IsFirst}"/>
+                      </StackPanel>
+                      <!-- Two-layer win-rate bar: Accent fill over a Track track. -->
+                      <Grid Height="8">
+                        <Border Background="{DynamicResource Track}" CornerRadius="4"/>
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="{Binding WinRate, Converter={StaticResource FractionToStar}}"/>
+                            <ColumnDefinition Width="{Binding WinRate, Converter={StaticResource FractionToStar}, ConverterParameter=rest}"/>
+                          </Grid.ColumnDefinitions>
+                          <Border Grid.Column="0" Background="{DynamicResource Accent}" CornerRadius="4"/>
+                        </Grid>
+                      </Grid>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="18,0,0,0">
+                      <TextBlock Text="{Binding WinRateDisplay}" FontSize="24" FontWeight="Bold"
+                                 Foreground="{DynamicResource AccentStrong}" HorizontalAlignment="Right"/>
+                      <TextBlock Text="{Binding RecordDisplay}" FontSize="11"
+                                 Foreground="{DynamicResource T4}" HorizontalAlignment="Right"/>
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <!-- HEAD-TO-HEAD eyebrow + per-prompt strip. -->
+          <TextBlock Text="{Binding Arena.HeadToHeadLabel}" FontSize="10" FontWeight="SemiBold"
+                     Foreground="{DynamicResource T4}" Margin="2,6,0,0"
+                     IsVisible="{Binding Arena.HasHeadToHead}"/>
+          <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="6,2"
+                  BorderBrush="{DynamicResource Line2}" BorderThickness="1"
+                  IsVisible="{Binding Arena.HasHeadToHead}">
+            <ItemsControl ItemsSource="{Binding Arena.HeadToHead}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="models:ArenaHeadToHeadItem">
+                  <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="10,11">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Grid.Column="0" Text="{Binding Prompt}" Foreground="{DynamicResource T2}"
+                                 VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,12,0"/>
+                      <Border Grid.Column="1" IsVisible="{Binding IsWin}" VerticalAlignment="Center"
+                              Background="{DynamicResource AccentSoft}" CornerRadius="7" Padding="10,4">
+                        <TextBlock Text="{Binding ResultLabel}" Foreground="{DynamicResource AccentInk}"
+                                   FontSize="12" FontWeight="SemiBold"/>
+                      </Border>
+                      <Border Grid.Column="1" IsVisible="{Binding !IsWin}" VerticalAlignment="Center"
+                              Background="{DynamicResource Line2}" CornerRadius="7" Padding="10,4">
+                        <TextBlock Text="{Binding ResultLabel}" Foreground="{DynamicResource T3}" FontSize="12"/>
+                      </Border>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Border>
+
+          <!-- Demoted overflow: the input form (collapsed) so results lead. -->
+          <Expander Header="Arena configuration" Margin="0,4,0,0">
+            <StackPanel Spacing="8" Margin="0,6,0,0">
               <TextBlock Text="PROMPTS (one per line)" FontSize="10" Foreground="{DynamicResource T4}"/>
               <TextBox Text="{Binding Arena.ArenaPromptsInput}" AcceptsReturn="True" Height="90"/>
               <TextBlock Text="MODELS (comma or newline)" FontSize="10" Foreground="{DynamicResource T4}"/>
@@ -852,14 +957,14 @@
                       Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}"
                       BorderBrush="{DynamicResource Accent}" BorderThickness="1"/>
             </StackPanel>
-          </Border>
-          <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="16"
-                  BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-            <StackPanel Spacing="6">
-              <TextBlock Text="Standings" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
-              <TextBlock Text="{Binding Arena.ArenaSummary}" Foreground="{DynamicResource T2}" TextWrapping="Wrap"/>
-            </StackPanel>
-          </Border>
+          </Expander>
+
+          <!-- Full transcript (collapsed): the honest per-prompt responses + judge rationale. -->
+          <Expander Header="Full transcript" IsVisible="{Binding Arena.HasArenaReport}">
+            <TextBlock Text="{Binding Arena.ArenaSummary}" Foreground="{DynamicResource T2}"
+                       TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" Margin="0,6,0,0"/>
+          </Expander>
+
         </StackPanel>
       </ScrollViewer>
     </Border>

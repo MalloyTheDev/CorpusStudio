@@ -96,6 +96,8 @@
       <conv:StudioTabActiveBrushConverter x:Key="TabActiveBrush" />
       <!-- Dashboard lifecycle strip: a per-node status token → Nocturne circle brush + status glyph. -->
       <conv:LifecycleNodeConverter x:Key="LifecycleNode" />
+      <!-- Model Arena win-rate bar: a 0..1 fraction → star GridLength (fill / remainder columns). -->
+      <conv:FractionToStarConverter x:Key="FractionToStar" />
     </ResourceDictionary>
   </Application.Resources>
   <Application.Styles>
