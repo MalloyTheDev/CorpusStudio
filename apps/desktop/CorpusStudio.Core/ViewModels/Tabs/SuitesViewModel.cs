@@ -30,6 +30,10 @@ public sealed class SuitesViewModel : ViewModelBase, ISuitesViewModel
     /// <summary>Registered evaluation suites (from `suite-list`).</summary>
     public ObservableCollection<SuiteSummary> Suites { get; } = [];
 
+    /// <summary>True when at least one suite is registered — drives the card list vs. the empty state
+    /// in the re-skinned Suites screen. Re-raised from <see cref="ApplySuites"/> and <see cref="Reset"/>.</summary>
+    public bool HasSuites => Suites.Count > 0;
+
     /// <summary>The last run's per-metric roll-up (never a folded cross-metric score).</summary>
     public ObservableCollection<SuiteMetricRollup> SuiteMetricRows { get; } = [];
 
@@ -150,6 +154,7 @@ public sealed class SuitesViewModel : ViewModelBase, ISuitesViewModel
             Suites.Add(summary);
         }
         SelectedSuite = Suites.FirstOrDefault(s => s.Name == selectedName);
+        OnPropertyChanged(nameof(HasSuites));
 
         if (summaries.Count == 0)
         {
@@ -214,6 +219,7 @@ public sealed class SuitesViewModel : ViewModelBase, ISuitesViewModel
     public void Reset()
     {
         Suites.Clear();
+        OnPropertyChanged(nameof(HasSuites));
         SelectedSuite = null;
         SuiteMetricRows.Clear();
         SuiteCaseRows.Clear();

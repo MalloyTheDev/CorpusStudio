@@ -21,6 +21,22 @@ public sealed class SuiteSummary
     /// <summary>List label, e.g. "release-gate — 2 case(s)" or "broken — invalid".</summary>
     public string DisplayLabel =>
         Valid ? $"{Name} — {CaseCount} case(s)" : $"{Name} — invalid";
+
+    /// <summary>True when the registry file failed to parse (<see cref="Valid"/> is false). Drives the
+    /// card's warning glyph + warn-tinted badge so a malformed suite can never read as a healthy one.</summary>
+    [JsonIgnore]
+    public bool IsInvalid => !Valid;
+
+    /// <summary>The small status badge shown beside the suite name. NEUTRAL "valid" for a parseable
+    /// file, warn "invalid" for a malformed one. `suite-list` carries no per-suite run score, so this
+    /// reflects only whether the definition parses — it is never a green "pass" tint (honesty: a score
+    /// that doesn't exist is not invented).</summary>
+    [JsonIgnore]
+    public string StatusBadgeText => Valid ? "valid" : "invalid";
+
+    /// <summary>Meta token under the name: the real case count from the registry ("N case(s)").</summary>
+    [JsonIgnore]
+    public string CaseCountLabel => $"{CaseCount} case(s)";
 }
 
 /// <summary>Per-metric roll-up in a SuiteReport — the suite verdict is never a single
