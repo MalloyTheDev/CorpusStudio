@@ -17,6 +17,10 @@ namespace CorpusStudio.Desktop.ViewModels.Tabs;
 public interface ISuitesViewModel : INotifyPropertyChanged
 {
     ObservableCollection<SuiteSummary> Suites { get; }
+
+    /// <summary>True when at least one suite is registered — drives the card list vs. the empty state.</summary>
+    bool HasSuites { get; }
+
     ObservableCollection<SuiteMetricRollup> SuiteMetricRows { get; }
     ObservableCollection<SuiteCaseResult> SuiteCaseRows { get; }
     ObservableCollection<SuiteHistoryEntry> SuiteHistory { get; }

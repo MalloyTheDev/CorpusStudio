@@ -1245,63 +1245,213 @@
     </Border>
 
     <!-- Suites (slice 8 fidelity): registered-suites list card + a new-suite card + a report card. -->
+    <!-- Suites (production re-skin): one scrolling column of full-width suite cards (was a 300px list |
+         report split). Each card renders the suite's REAL registry fields — name, a valid/invalid status
+         badge, a leading glyph by validity, a case-count meta token — with a right-aligned Run. The
+         selected suite's last-run verdict folds into the "Last run" section below. HONESTY: `suite-list`
+         carries no per-suite score/model/metric/trigger, so none is invented; the badge is NEUTRAL for a
+         parseable file and warn for a malformed one (never a green "pass"); an errored run stays
+         neutral/red through the shared status→colour map. -->
     <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Suites}">
-      <Grid Margin="16" ColumnDefinitions="300,*">
-        <Border Grid.Column="0" Background="{DynamicResource Panel}" CornerRadius="11" Padding="8"
-                BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-          <DockPanel>
-            <TextBlock DockPanel.Dock="Top" Text="{Binding Suites.SuitesStatus}" Foreground="{DynamicResource T3}"
-                       TextWrapping="Wrap" FontSize="12" Margin="0,0,0,8"/>
-            <ListBox ItemsSource="{Binding Suites.Suites}" SelectedItem="{Binding Suites.SelectedSuite}"
-                     Background="Transparent" BorderThickness="0">
-              <ListBox.ItemTemplate>
-                <DataTemplate x:DataType="models:SuiteSummary">
-                  <TextBlock Text="{Binding DisplayLabel}" Foreground="{DynamicResource T2}" Margin="0,2"/>
-                </DataTemplate>
-              </ListBox.ItemTemplate>
-            </ListBox>
-          </DockPanel>
-        </Border>
-        <ScrollViewer Grid.Column="1" Margin="16,0,0,0">
-          <StackPanel Spacing="12">
-            <Border Background="{DynamicResource Panel}" CornerRadius="11" Padding="14"
-                    BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-              <StackPanel Spacing="8">
-                <TextBox Text="{Binding Suites.NewSuiteName}" Watermark="new suite name"/>
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <Button Content="New suite" Command="{Binding NewSuiteCommand}"/>
-                  <Button Content="Run" Command="{Binding RunSuiteCommand}"
-                          Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}"
-                          BorderBrush="{DynamicResource Accent}" BorderThickness="1"/>
-                  <Button Content="Refresh" Command="{Binding RefreshSuitesCommand}"/>
-                </StackPanel>
+      <!-- BadSoft: a Bad-tinted chip fill for the "invalid" badge; OkSoft mirrors the Settings screen. -->
+      <Border.Resources>
+        <ResourceDictionary>
+          <ResourceDictionary.ThemeDictionaries>
+            <ResourceDictionary x:Key="Dark">
+              <SolidColorBrush x:Key="BadSoft" Color="#29d76d6d"/>
+            </ResourceDictionary>
+            <ResourceDictionary x:Key="Light">
+              <SolidColorBrush x:Key="BadSoft" Color="#1fc85552"/>
+            </ResourceDictionary>
+          </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+      </Border.Resources>
+      <Border.Styles>
+        <!-- The ListBox is the single card column; each card owns its selected/hover cue via the inner
+             Border, so the ListBoxItem chrome is stripped and cards are spaced with a bottom margin. -->
+        <Style Selector="ListBox.suitelist">
+          <Setter Property="Background" Value="Transparent"/>
+          <Setter Property="Padding" Value="0"/>
+          <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <Style Selector="ListBox.suitelist ListBoxItem">
+          <Setter Property="Padding" Value="0"/>
+          <Setter Property="Margin" Value="0,0,0,12"/>
+          <Setter Property="Background" Value="Transparent"/>
+        </Style>
+        <Style Selector="ListBox.suitelist ListBoxItem:selected /template/ ContentPresenter">
+          <Setter Property="Background" Value="Transparent"/>
+        </Style>
+        <Style Selector="Border.suitecard">
+          <Setter Property="Background" Value="{DynamicResource Panel}"/>
+          <Setter Property="CornerRadius" Value="11"/>
+          <Setter Property="Padding" Value="15,13"/>
+          <Setter Property="BorderBrush" Value="{DynamicResource Line2}"/>
+          <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+        <Style Selector="ListBox.suitelist ListBoxItem:selected Border.suitecard">
+          <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+        </Style>
+        <Style Selector="ListBox.suitelist ListBoxItem:pointerover Border.suitecard">
+          <Setter Property="Background" Value="{DynamicResource Panel2}"/>
+        </Style>
+        <!-- Status badge beside the name: neutral base, warn variant for an invalid suite. -->
+        <Style Selector="Border.badge">
+          <Setter Property="CornerRadius" Value="6"/>
+          <Setter Property="Padding" Value="8,1"/>
+          <Setter Property="Background" Value="{DynamicResource Panel2}"/>
+          <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Border.badge TextBlock">
+          <Setter Property="Foreground" Value="{DynamicResource T3}"/>
+          <Setter Property="FontSize" Value="11"/>
+        </Style>
+        <Style Selector="Border.badge.warn"><Setter Property="Background" Value="{DynamicResource BadSoft}"/></Style>
+        <Style Selector="Border.badge.warn TextBlock"><Setter Property="Foreground" Value="{DynamicResource Bad}"/></Style>
+        <!-- Muted meta tokens under the name. -->
+        <Style Selector="TextBlock.meta">
+          <Setter Property="Foreground" Value="{DynamicResource T4}"/>
+          <Setter Property="FontSize" Value="11"/>
+        </Style>
+        <!-- Outlined per-card Run. -->
+        <Style Selector="Button.runbtn">
+          <Setter Property="Background" Value="Transparent"/>
+          <Setter Property="Foreground" Value="{DynamicResource T2}"/>
+          <Setter Property="BorderBrush" Value="{DynamicResource Line2}"/>
+          <Setter Property="BorderThickness" Value="1"/>
+          <Setter Property="CornerRadius" Value="7"/>
+          <Setter Property="Padding" Value="18,5"/>
+          <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Button.runbtn:pointerover /template/ ContentPresenter">
+          <Setter Property="Background" Value="{DynamicResource Hover}"/>
+        </Style>
+        <!-- Accent "+ New suite" pill; neutral "Refresh" ghost. -->
+        <Style Selector="Button.pill">
+          <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+          <Setter Property="Foreground" Value="{DynamicResource AccentInk}"/>
+          <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+          <Setter Property="BorderThickness" Value="1"/>
+          <Setter Property="CornerRadius" Value="8"/>
+          <Setter Property="Padding" Value="14,6"/>
+        </Style>
+        <Style Selector="Button.ghost">
+          <Setter Property="Background" Value="Transparent"/>
+          <Setter Property="Foreground" Value="{DynamicResource T2}"/>
+          <Setter Property="BorderBrush" Value="{DynamicResource Line2}"/>
+          <Setter Property="BorderThickness" Value="1"/>
+          <Setter Property="CornerRadius" Value="8"/>
+          <Setter Property="Padding" Value="12,6"/>
+        </Style>
+      </Border.Styles>
+
+      <ScrollViewer>
+        <StackPanel Margin="20" Spacing="14" MaxWidth="940" HorizontalAlignment="Stretch">
+
+          <!-- Header: "N saved suites" (left) + new-suite name box, Refresh, and the accent "+ New suite"
+               pill (right). The count + status are real; the name box feeds the shell's NewSuiteCommand. -->
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+              <TextBlock Text="{Binding Suites.Suites.Count, StringFormat='{}{0} saved suites'}"
+                         Foreground="{DynamicResource T3}" FontSize="13" FontWeight="SemiBold"/>
+              <TextBlock Text="{Binding Suites.SuitesStatus}" Foreground="{DynamicResource T4}"
+                         FontSize="11" TextWrapping="Wrap"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+              <TextBox Text="{Binding Suites.NewSuiteName}" Watermark="new suite name" Width="170"
+                       VerticalAlignment="Center"/>
+              <Button Content="Refresh" Classes="ghost" Command="{Binding RefreshSuitesCommand}"
+                      ToolTip.Tip="Reload the suite registry (suite-list)"/>
+              <Button Classes="pill" Content="+ New suite" Command="{Binding NewSuiteCommand}"
+                      ToolTip.Tip="Scaffold a new suite from the name box"/>
+            </StackPanel>
+          </Grid>
+
+          <!-- Empty state: shown when the registry has no suites (real HasSuites flag). -->
+          <Border IsVisible="{Binding !Suites.HasSuites}" Background="{DynamicResource Panel}"
+                  CornerRadius="11" Padding="24" BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+            <StackPanel Spacing="6" HorizontalAlignment="Center">
+              <Path Classes="ico" Data="{StaticResource IcoChecklist}" Width="22" Height="22"
+                    HorizontalAlignment="Center"/>
+              <TextBlock Text="No suites yet" Foreground="{DynamicResource Text}" FontWeight="SemiBold"
+                         HorizontalAlignment="Center"/>
+              <TextBlock Text="Name one above and choose New suite, then edit its cases in Files."
+                         Foreground="{DynamicResource T4}" FontSize="12" TextWrapping="Wrap"
+                         TextAlignment="Center" MaxWidth="360"/>
+            </StackPanel>
+          </Border>
+
+          <!-- The single card column. Selection (two-way to SelectedSuite) drives the "Last run" section
+               below AND the shell's selection-based RunSuiteCommand; clicking a card selects its suite. -->
+          <ListBox Name="SuitesList" Classes="suitelist" ItemsSource="{Binding Suites.Suites}"
+                   SelectedItem="{Binding Suites.SelectedSuite}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:SuiteSummary">
+                <Border Classes="suitecard">
+                  <Grid ColumnDefinitions="Auto,*,Auto">
+                    <!-- Leading glyph by validity: checklist (parseable) / shield-warning (malformed). -->
+                    <Panel Grid.Column="0" Width="20" VerticalAlignment="Top" Margin="0,1,12,0">
+                      <Path Classes="ico accent" Data="{StaticResource IcoChecklist}" Width="16" Height="16"
+                            IsVisible="{Binding Valid}"/>
+                      <Path Classes="ico warn" Data="{StaticResource IcoShieldWarningFill}" Width="16" Height="16"
+                            IsVisible="{Binding IsInvalid}"/>
+                    </Panel>
+                    <StackPanel Grid.Column="1" Spacing="7">
+                      <StackPanel Orientation="Horizontal" Spacing="9">
+                        <TextBlock Text="{Binding Name}" Foreground="{DynamicResource Text}"
+                                   FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center"/>
+                        <Border Classes="badge" Classes.warn="{Binding IsInvalid}">
+                          <TextBlock Text="{Binding StatusBadgeText}"/>
+                        </Border>
+                      </StackPanel>
+                      <!-- Meta tokens: only REAL registry attributes (case count; the parse error when
+                           invalid). No model/metric/trigger token is shown — `suite-list` doesn't carry them. -->
+                      <WrapPanel Orientation="Horizontal">
+                        <TextBlock Classes="meta" Text="{Binding CaseCountLabel}" Margin="0,0,14,0"/>
+                        <TextBlock Classes="meta" Text="{Binding Error}" Foreground="{DynamicResource Bad}"
+                                   IsVisible="{Binding IsInvalid}" TextTrimming="CharacterEllipsis" MaxWidth="420"/>
+                      </WrapPanel>
+                    </StackPanel>
+                    <Button Grid.Column="2" Classes="runbtn" Content="Run" VerticalAlignment="Top"
+                            Command="{Binding #SuitesList.((vm:MainWindowViewModel)DataContext).RunSuiteCommand}"/>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <!-- Last run: the selected suite's report folds in here — per-metric roll-up (never a folded
+               cross-metric score), the overall verdict, and the honesty note. -->
+          <Border Background="{DynamicResource Panel}" CornerRadius="11" Padding="15,14"
+                  BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+            <StackPanel Spacing="7">
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <TextBlock Text="Last run" FontWeight="SemiBold" Foreground="{DynamicResource Text}"
+                           FontSize="14" VerticalAlignment="Center"/>
+                <Border Classes="badge" IsVisible="{Binding Suites.HasSuiteReport}"
+                        Background="{Binding Suites.SuiteOverallColor, Converter={StaticResource StringToBrush}}">
+                  <TextBlock Text="{Binding Suites.SuiteOverallStatus}" Foreground="{DynamicResource OnAccent}"
+                             FontWeight="SemiBold"/>
+                </Border>
               </StackPanel>
-            </Border>
-            <Border Background="{DynamicResource Panel}" CornerRadius="11" Padding="14"
-                    BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-              <StackPanel Spacing="6">
-                <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding Suites.HasSuiteReport}">
-                  <TextBlock Text="Overall verdict:" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
-                  <TextBlock Text="{Binding Suites.SuiteOverallStatus}" FontWeight="Bold"
-                             Foreground="{Binding Suites.SuiteOverallColor, Converter={StaticResource StringToBrush}}"/>
-                </StackPanel>
-                <TextBlock Text="{Binding Suites.SuiteReportSummary}" Foreground="{DynamicResource T2}" TextWrapping="Wrap"/>
-                <TextBlock Text="PER-METRIC ROLLUP" FontSize="10" Foreground="{DynamicResource T4}" Margin="0,4,0,0"
-                           IsVisible="{Binding Suites.HasSuiteReport}"/>
-                <ItemsControl ItemsSource="{Binding Suites.SuiteMetricRows}">
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="models:SuiteMetricRollup">
-                      <TextBlock Text="{Binding DisplayLabel}" Foreground="{DynamicResource T3}" FontSize="12" Margin="0,1"/>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-                <TextBlock Text="{Binding Suites.SuiteHonestyNote}" Foreground="{DynamicResource T4}"
-                           FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"/>
-              </StackPanel>
-            </Border>
-          </StackPanel>
-        </ScrollViewer>
-      </Grid>
+              <TextBlock Text="{Binding Suites.SuiteReportSummary}" Foreground="{DynamicResource T2}"
+                         TextWrapping="Wrap"/>
+              <TextBlock Text="PER-METRIC ROLLUP" FontSize="10" Foreground="{DynamicResource T4}" Margin="0,4,0,0"
+                         IsVisible="{Binding Suites.HasSuiteReport}"/>
+              <ItemsControl ItemsSource="{Binding Suites.SuiteMetricRows}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="models:SuiteMetricRollup">
+                    <TextBlock Text="{Binding DisplayLabel}" Foreground="{DynamicResource T3}" FontSize="12" Margin="0,1"/>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <TextBlock Text="{Binding Suites.SuiteHonestyNote}" Foreground="{DynamicResource T4}"
+                         FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"/>
+            </StackPanel>
+          </Border>
+
+        </StackPanel>
+      </ScrollViewer>
     </Border>
 
     <!-- Splits (slice 5 fidelity): config card + result card. Same shared Splits VM inputs/summary. -->

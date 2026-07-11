@@ -71,6 +71,42 @@ public sealed class SuitesTests
         Assert.Empty(PythonEngineService.ParseSuiteSummaries("[]"));
     }
 
+    [Fact]
+    public void SuiteSummary_DisplayHelpers_ReflectRealFieldsHonestly()
+    {
+        var summaries = PythonEngineService.ParseSuiteSummaries(ListJson);
+        var valid = summaries.Single(s => s.Valid);
+        var invalid = summaries.Single(s => !s.Valid);
+
+        // Valid suite: neutral "valid" badge (NEVER a green "pass" — suite-list has no run score),
+        // not-invalid, real case-count token.
+        Assert.False(valid.IsInvalid);
+        Assert.Equal("valid", valid.StatusBadgeText);
+        Assert.Equal("2 case(s)", valid.CaseCountLabel);
+
+        // Malformed suite: warn "invalid" badge + IsInvalid true so it can't read as healthy.
+        Assert.True(invalid.IsInvalid);
+        Assert.Equal("invalid", invalid.StatusBadgeText);
+        Assert.Equal("0 case(s)", invalid.CaseCountLabel);
+    }
+
+    [Fact]
+    public void HasSuites_TracksTheRegistry()
+    {
+        var vm = new MainWindowViewModel();
+        Assert.False(vm.Suites.HasSuites);                                  // empty at start
+
+        vm.Suites.ApplySuites(PythonEngineService.ParseSuiteSummaries(ListJson));
+        Assert.True(vm.Suites.HasSuites);                                   // populated -> card list
+
+        vm.Suites.ApplySuites(PythonEngineService.ParseSuiteSummaries("[]"));
+        Assert.False(vm.Suites.HasSuites);                                  // cleared -> empty state
+
+        vm.Suites.ApplySuites(PythonEngineService.ParseSuiteSummaries(ListJson));
+        vm.Suites.Reset();
+        Assert.False(vm.Suites.HasSuites);                                  // reset -> empty state
+    }
+
     [Theory]
     [InlineData("pass", "#16A34A")]
     [InlineData("warn", "#D97706")]
