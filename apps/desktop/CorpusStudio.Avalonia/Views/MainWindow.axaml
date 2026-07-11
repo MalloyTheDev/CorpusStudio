@@ -113,7 +113,8 @@
         </Grid>
 
         <!-- Studio mode (IsVisible←IsStudio): hero + projects sidebar + the 14-tab TabControl + Quality panel. -->
-        <Grid IsVisible="{Binding IsStudio}" RowDefinitions="Auto,*" ColumnDefinitions="250,*,300">
+        <!-- Col2 is Auto so the Quality rail collapses (content fills) when ShowQualityRail is false. -->
+        <Grid IsVisible="{Binding IsStudio}" RowDefinitions="Auto,*" ColumnDefinitions="250,*,Auto">
           <!-- App-shell CONTEXT BAR (slice 4): replaces the always-on action toolbar. Left = the
                current screen's title + subtitle (driven by SelectedStudioTabIndex). Right = the primary
                actions + a "⋯ More" toggle that reveals the secondary project actions + export controls
@@ -307,13 +308,13 @@
           <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="18"
                   BorderBrush="{DynamicResource Line2}" BorderThickness="1">
             <StackPanel Spacing="16">
-              <StackPanel Orientation="Horizontal" Spacing="14">
-                <Border Width="52" Height="52" CornerRadius="10" VerticalAlignment="Top"
+              <Grid ColumnDefinitions="Auto,*">
+                <Border Grid.Column="0" Width="52" Height="52" CornerRadius="10" VerticalAlignment="Top"
                         Background="{Binding Debt.DebtGradeColor, Converter={StaticResource StringToBrush}}">
                   <TextBlock Text="{Binding Debt.DebtGrade}" FontSize="26" FontWeight="Bold" Foreground="White"
                              HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
-                <StackPanel Spacing="5" VerticalAlignment="Center">
+                <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center" Margin="14,0,0,0">
                   <StackPanel Orientation="Horizontal" Spacing="10">
                     <TextBlock Text="{Binding ActiveProjectTitle}" FontSize="20" FontWeight="Bold"
                                Foreground="{DynamicResource Text}" VerticalAlignment="Center"/>
@@ -323,12 +324,11 @@
                     <TextBlock Text="stale" Foreground="{DynamicResource Warn}" FontSize="11" VerticalAlignment="Center"
                                IsVisible="{Binding Debt.DebtStale}"/>
                   </StackPanel>
-                  <TextBlock Text="{Binding Debt.DebtSummary}" Foreground="{DynamicResource T3}"
-                             TextWrapping="Wrap" MaxWidth="640"/>
+                  <TextBlock Text="{Binding Debt.DebtSummary}" Foreground="{DynamicResource T3}" TextWrapping="Wrap"/>
                   <Button Content="Re-check debt" Command="{Binding RunDatasetDebtCommand}"
                           HorizontalAlignment="Left" Margin="0,4,0,0"/>
                 </StackPanel>
-              </StackPanel>
+              </Grid>
 
               <Border Height="1" Background="{DynamicResource Line}"/>
 
@@ -506,25 +506,24 @@
           <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="18"
                   BorderBrush="{DynamicResource Line2}" BorderThickness="1">
             <StackPanel Spacing="12">
-              <StackPanel Orientation="Horizontal" Spacing="14">
-                <Border Width="64" Height="64" CornerRadius="12" VerticalAlignment="Top"
+              <Grid ColumnDefinitions="Auto,*">
+                <Border Grid.Column="0" Width="64" Height="64" CornerRadius="12" VerticalAlignment="Top"
                         Background="{Binding Debt.DebtGradeColor, Converter={StaticResource StringToBrush}}">
                   <TextBlock Text="{Binding Debt.DebtGrade}" FontSize="34" FontWeight="Bold" Foreground="White"
                              HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
-                <StackPanel Spacing="5" VerticalAlignment="Center">
+                <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center" Margin="14,0,0,0">
                   <StackPanel Orientation="Horizontal" Spacing="10">
                     <TextBlock Text="Remediation ledger" FontSize="18" FontWeight="Bold"
                                Foreground="{DynamicResource Text}" VerticalAlignment="Center"/>
                     <TextBlock Text="stale" Foreground="{DynamicResource Warn}" FontSize="11"
                                VerticalAlignment="Center" IsVisible="{Binding Debt.DebtStale}"/>
                   </StackPanel>
-                  <TextBlock Text="{Binding Debt.DebtSummary}" Foreground="{DynamicResource T3}"
-                             TextWrapping="Wrap" MaxWidth="640"/>
+                  <TextBlock Text="{Binding Debt.DebtSummary}" Foreground="{DynamicResource T3}" TextWrapping="Wrap"/>
                   <Button Content="Run debt check" Command="{Binding RunDatasetDebtCommand}"
                           HorizontalAlignment="Left" Margin="0,4,0,0"/>
                 </StackPanel>
-              </StackPanel>
+              </Grid>
               <Border Height="1" Background="{DynamicResource Line}"/>
               <TextBlock Text="{Binding Quality.DebtTrendSummary}" Foreground="{DynamicResource T4}"
                          FontSize="11" TextWrapping="Wrap"/>
@@ -1235,8 +1234,10 @@
 
           </Panel>
 
-          <!-- Quality right rail (slice 6 fidelity): a Nocturne signal card + a debt-trend card. -->
-          <ScrollViewer Grid.Row="1" Grid.Column="2">
+          <!-- Quality right rail (slice 6 fidelity): a Nocturne signal card + a debt-trend card.
+               Audit fix: shown only on the design's rail screens (ShowQualityRail); the Auto column
+               collapses it elsewhere so the content area fills. -->
+          <ScrollViewer Grid.Row="1" Grid.Column="2" Width="300" IsVisible="{Binding ShowQualityRail}">
             <StackPanel Margin="12" Spacing="10">
               <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="14"
                       BorderBrush="{DynamicResource Line2}" BorderThickness="1">

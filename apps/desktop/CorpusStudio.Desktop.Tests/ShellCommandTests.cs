@@ -107,6 +107,25 @@ public sealed class ShellCommandTests
     }
 
     [Fact]
+    public void ShowQualityRail_OnlyOnTheDesignsRailScreens()
+    {
+        // audit fix: the contextual Quality rail is only shown on Dashboard/Writing/Splits/Debt.
+        var vm = new MainWindowViewModel();
+        foreach (var tab in new[] { StudioTab.Dashboard, StudioTab.WritingStudio, StudioTab.Splits, StudioTab.Debt })
+        {
+            vm.GoToStudioTab(tab);
+            Assert.True(vm.ShowQualityRail, $"{tab} should show the rail");
+        }
+        foreach (var tab in new[] { StudioTab.Evaluation, StudioTab.Training, StudioTab.Arena, StudioTab.Suites,
+                                    StudioTab.Artifacts, StudioTab.Versions, StudioTab.Settings, StudioTab.AiAssist,
+                                    StudioTab.Examples, StudioTab.Quarantine, StudioTab.PreferenceReview })
+        {
+            vm.GoToStudioTab(tab);
+            Assert.False(vm.ShowQualityRail, $"{tab} should NOT show the rail");
+        }
+    }
+
+    [Fact]
     public void AsyncRelayCommandOfT_PassesTypedParameter_AndCoercesMismatchToNull()
     {
         string? seen = "unset";

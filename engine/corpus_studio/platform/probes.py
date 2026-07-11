@@ -164,7 +164,8 @@ def _probe_checkpoint_reload(profile: EnvironmentProfile) -> ProbeOutcome:
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "ckpt.pt")
             torch.save({"w": tensor}, path)
-            loaded = torch.load(path, map_location="cpu")["w"]
+            # weights_only=True: defensive default even though this file is the probe's own tensor.
+            loaded = torch.load(path, map_location="cpu", weights_only=True)["w"]
         if bool(torch.equal(tensor, loaded)):
             return ProbeOutcome(_TX.PASS, "checkpoint save/reload round-trip ok")
         return ProbeOutcome(_TX.CHECKPOINT_FAILURE, "reloaded tensor differs from saved")
