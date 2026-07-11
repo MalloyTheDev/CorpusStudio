@@ -278,36 +278,50 @@ def platform_run(
         None, help="Path to a RunPlan JSON. Omit and pass --demo to run the built-in echo plan."
     ),
     demo: bool = typer.Option(
-        False, "--demo", help="Execute a built-in minimal echo plan (no plan file, GPU, or [train] needed)."
+        False, "--demo", help="Execute a built-in minimal plan (echo needs nothing; cpu_toy needs [train])."
     ),
     runner_name: str = typer.Option(
-        "echo", "--runner", help="Runner that executes the plan (this slice ships 'echo' only)."
+        "echo", "--runner", help="Runner that executes the plan: echo | cpu_toy | training."
+    ),
+    max_steps: Optional[int] = typer.Option(
+        None, "--max-steps", help="Cap optimizer steps (cpu_toy / training runners)."
     ),
     out_dir: Optional[Path] = typer.Option(
         None, "--out", help="Write the terminal RunManifest.json to this directory (atomic)."
     ),
 ):
     """Execute a RunPlan through the headless run supervisor: stream RunEvents to stderr and produce
-    a RunManifest on stdout. The 'echo' runner is a dependency-light no-op that proves the supervisor
-    end-to-end without a GPU or the [train] extra; real training runners land in a later slice. The
-    RunManifest classifies the terminal state (succeeded / failed / cancelled) with a FailureRecord
-    taxonomy on abnormal termination."""
+    a RunManifest on stdout. 'echo' is a dependency-light no-op that proves the supervisor without a
+    GPU or the [train] extra; 'cpu_toy' / 'training' run the real trainer (via the TrainingRunner,
+    reading the plan's training_config_snapshot). The RunManifest classifies the terminal state
+    (succeeded / failed / cancelled) with a FailureRecord taxonomy on abnormal termination."""
     from corpus_studio.platform.contracts import RunPlan
-    from corpus_studio.platform.supervisor import EchoRunner, demo_run_plan, execute_run
+    from corpus_studio.platform.supervisor import EchoRunner, Runner, demo_run_plan, execute_run
 
-    if runner_name != "echo":
-        typer.echo(f"Unknown runner '{runner_name}' (this slice ships 'echo' only).", err=True)
+    if runner_name == "echo":
+        runner: Runner = EchoRunner()
+    elif runner_name in ("cpu_toy", "training"):
+        from corpus_studio.platform.runners import TrainingRunner
+
+        runner = TrainingRunner(cpu_toy=(runner_name == "cpu_toy"), max_steps=max_steps)
+    else:
+        typer.echo(f"Unknown runner '{runner_name}' (echo | cpu_toy | training).", err=True)
         raise typer.Exit(2)
 
     if demo:
-        plan = demo_run_plan()
+        if runner_name == "echo":
+            plan = demo_run_plan()
+        else:
+            from corpus_studio.platform.runners import demo_training_plan
+
+            plan = demo_training_plan(plan_id=f"demo-{runner_name}")
     elif plan_path is not None:
         plan = RunPlan.model_validate_json(plan_path.read_text(encoding="utf-8"))
     else:
         typer.echo("Provide a RunPlan path argument, or pass --demo.", err=True)
         raise typer.Exit(2)
 
-    result = execute_run(plan, EchoRunner(), out_dir=out_dir)
+    result = execute_run(plan, runner, out_dir=out_dir)
     for event in result.events:
         typer.echo(event.model_dump_json(), err=True)
     typer.echo(result.manifest.model_dump_json(indent=2))
