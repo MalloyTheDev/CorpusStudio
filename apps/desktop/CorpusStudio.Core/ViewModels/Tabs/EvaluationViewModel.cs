@@ -26,6 +26,9 @@ public sealed class EvaluationViewModel : ViewModelBase, IEvaluationViewModel
         _connection = connection;
         CompareReportsCommand = new RelayCommand(() => CompareSelectedEvaluationReports());
         ApplyFailureFilterCommand = new RelayCommand(ApplySelectedFailureFilter);
+        ShowAllResultsCommand = new RelayCommand(() => EvaluationResultFilter = "All");
+        ShowPassedResultsCommand = new RelayCommand(() => EvaluationResultFilter = "Passed");
+        ShowFailedResultsCommand = new RelayCommand(() => EvaluationResultFilter = "Failed");
     }
 
     /// <summary>Compare the two selected saved reports. Bound as a command so both heads share the action.</summary>
@@ -33,6 +36,15 @@ public sealed class EvaluationViewModel : ViewModelBase, IEvaluationViewModel
 
     /// <summary>Apply the selected saved failure view (guarding on a selection). Command target.</summary>
     public ICommand ApplyFailureFilterCommand { get; }
+
+    /// <summary>Segmented-control commands (Evaluation screen): set the results status filter to All /
+    /// Passed / Failed. Thin wrappers over <see cref="EvaluationResultFilter"/> so the toggle pills bind a
+    /// command (the parameterless <see cref="RelayCommand"/> ignores CommandParameter).</summary>
+    public ICommand ShowAllResultsCommand { get; }
+
+    public ICommand ShowPassedResultsCommand { get; }
+
+    public ICommand ShowFailedResultsCommand { get; }
 
     /// <summary>Apply the selected saved failure view; reports if none is selected. Command target
     /// (the logic moved here from the desktop code-behind so both heads can bind the command).</summary>
@@ -68,6 +80,19 @@ public sealed class EvaluationViewModel : ViewModelBase, IEvaluationViewModel
         "Evaluation example review queue appears after a run or report reload.";
 
     private string _evaluationResultFilter = "All";
+
+    // Discrete KPI display strings (Evaluation screen stat-card row): computed from the report on each
+    // run so the cards bind ready-to-render text and stay hidden (HasEvaluationReport) pre-run.
+    private bool _hasEvaluationReport;
+    private string _averageScoreDisplay = "—";
+    private string _passRateDisplay = "—";
+    private string _passRateDetail = string.Empty;
+    private string _evaluatedDisplay = "—";
+    private string _metricDisplay = "—";
+
+    // Pass/fail totals over the full (unfiltered) result set — the segmented-control pill counts.
+    private int _evaluationPassCount;
+    private int _evaluationFailCount;
 
     private string _evaluationTagFilter = "All";
 
@@ -182,10 +207,79 @@ public sealed class EvaluationViewModel : ViewModelBase, IEvaluationViewModel
         {
             if (SetField(ref _evaluationResultFilter, value))
             {
+                RaiseResultFilterActiveStates();
                 RebuildEvaluationResults();
             }
         }
     }
+
+    /// <summary>True once a run/report has produced examples — gates the KPI stat-card row (hidden pre-run
+    /// so no faked numbers show).</summary>
+    public bool HasEvaluationReport
+    {
+        get => _hasEvaluationReport;
+        private set => SetField(ref _hasEvaluationReport, value);
+    }
+
+    /// <summary>Average automatic score, formatted for the "Average score" KPI card.</summary>
+    public string AverageScoreDisplay
+    {
+        get => _averageScoreDisplay;
+        private set => SetField(ref _averageScoreDisplay, value);
+    }
+
+    /// <summary>Pass rate as a whole-percent string ("74%") for the "Pass rate" KPI card.</summary>
+    public string PassRateDisplay
+    {
+        get => _passRateDisplay;
+        private set => SetField(ref _passRateDisplay, value);
+    }
+
+    /// <summary>Pass-rate sub-line ("14 / 19 ≥ 70") naming the passing count, total, and run threshold.</summary>
+    public string PassRateDetail
+    {
+        get => _passRateDetail;
+        private set => SetField(ref _passRateDetail, value);
+    }
+
+    /// <summary>Examples-tested count for the "Evaluated" KPI card.</summary>
+    public string EvaluatedDisplay
+    {
+        get => _evaluatedDisplay;
+        private set => SetField(ref _evaluatedDisplay, value);
+    }
+
+    /// <summary>Human-readable scorer name ("keyword overlap" / "LLM judge") for the "Metric" KPI card.</summary>
+    public string MetricDisplay
+    {
+        get => _metricDisplay;
+        private set => SetField(ref _metricDisplay, value);
+    }
+
+    /// <summary>Passing-example count over the full result set — the segmented "Pass N" pill.</summary>
+    public int EvaluationPassCount
+    {
+        get => _evaluationPassCount;
+        private set => SetField(ref _evaluationPassCount, value);
+    }
+
+    /// <summary>Failing-example count over the full result set — the segmented "Fail N" pill.</summary>
+    public int EvaluationFailCount
+    {
+        get => _evaluationFailCount;
+        private set => SetField(ref _evaluationFailCount, value);
+    }
+
+    /// <summary>Segmented-control active states — true when the results filter is the matching status,
+    /// so the active pill highlights (Classes.active). Re-raised whenever the filter changes.</summary>
+    public bool IsAllResultsFilterActive =>
+        string.Equals(EvaluationResultFilter, "All", StringComparison.Ordinal);
+
+    public bool IsPassedResultsFilterActive =>
+        string.Equals(EvaluationResultFilter, "Passed", StringComparison.Ordinal);
+
+    public bool IsFailedResultsFilterActive =>
+        string.Equals(EvaluationResultFilter, "Failed", StringComparison.Ordinal);
 
     public string EvaluationTagFilter
     {
@@ -416,6 +510,7 @@ public sealed class EvaluationViewModel : ViewModelBase, IEvaluationViewModel
         );
         EvaluationReportJson = result.ReportJson;
         SetEvaluationResults(result.Report.Results);
+        UpdateEvaluationKpis(result.Report);
     }
 
     public void SetEvaluationReportHistory(IEnumerable<EvaluationReportHistoryItem> history)
@@ -586,9 +681,69 @@ public sealed class EvaluationViewModel : ViewModelBase, IEvaluationViewModel
             EvaluationScoreBandFilterOptions.Contains(filter.ScoreBand) ? filter.ScoreBand : "All",
             nameof(EvaluationScoreBandFilter)
         );
+        RaiseResultFilterActiveStates();
         RebuildEvaluationResults();
         EvaluationFailureFilterSummary = $"Applied failure filter: {filter.Name}.";
     }
+
+    private void RaiseResultFilterActiveStates()
+    {
+        OnPropertyChanged(nameof(IsAllResultsFilterActive));
+        OnPropertyChanged(nameof(IsPassedResultsFilterActive));
+        OnPropertyChanged(nameof(IsFailedResultsFilterActive));
+    }
+
+    /// <summary>Compute the KPI stat-card strings from a finished report. Uses the report's own run
+    /// threshold when saved (else the current threshold field) so the pass-rate sub-line names the
+    /// threshold the numbers were actually produced at. A zero-example report clears the cards.</summary>
+    private void UpdateEvaluationKpis(EvaluationReport report)
+    {
+        var tested = report.ExamplesTested;
+        if (tested <= 0)
+        {
+            ClearEvaluationKpis();
+            return;
+        }
+
+        var passed = Math.Max(0, tested - report.FailedExamples);
+        var threshold = report.RunSettings?.ScoreThreshold ?? ParseThresholdOrDefault();
+        HasEvaluationReport = true;
+        AverageScoreDisplay = report.AverageScore.ToString("0.#", CultureInfo.InvariantCulture);
+        PassRateDisplay = $"{Math.Round(passed * 100.0 / tested).ToString("0", CultureInfo.InvariantCulture)}%";
+        PassRateDetail =
+            $"{passed} / {tested} ≥ {threshold.ToString("0.#", CultureInfo.InvariantCulture)}";
+        EvaluatedDisplay = tested.ToString(CultureInfo.InvariantCulture);
+        MetricDisplay = FormatMetricLabel(report.Metric);
+    }
+
+    private void ClearEvaluationKpis()
+    {
+        HasEvaluationReport = false;
+        AverageScoreDisplay = "—";
+        PassRateDisplay = "—";
+        PassRateDetail = string.Empty;
+        EvaluatedDisplay = "—";
+        MetricDisplay = "—";
+    }
+
+    private double ParseThresholdOrDefault()
+    {
+        return double.TryParse(
+            EvaluationScoreThreshold,
+            NumberStyles.Any,
+            CultureInfo.InvariantCulture,
+            out var threshold)
+            ? threshold
+            : 70.0;
+    }
+
+    /// <summary>Compact scorer label for the Metric KPI card — never a bare metric key.</summary>
+    private static string FormatMetricLabel(string? metric) => (metric ?? "keyword_overlap") switch
+    {
+        "llm_judge" => "LLM judge",
+        "keyword_overlap" => "keyword overlap",
+        _ => metric!.Replace('_', ' '),
+    };
 
     public void ApplyEvaluationFailureFilterSaved(EvaluationFailureFilter filter)
     {
@@ -635,6 +790,8 @@ public sealed class EvaluationViewModel : ViewModelBase, IEvaluationViewModel
     {
         _allEvaluationResults.Clear();
         _allEvaluationResults.AddRange(results);
+        EvaluationPassCount = _allEvaluationResults.Count(result => result.Passed);
+        EvaluationFailCount = _allEvaluationResults.Count(result => !result.Passed);
         RebuildEvaluationFilterOptions();
         RebuildEvaluationResults();
     }
@@ -681,9 +838,12 @@ public sealed class EvaluationViewModel : ViewModelBase, IEvaluationViewModel
     {
         _allEvaluationResults.Clear();
         EvaluationResults.Clear();
+        EvaluationPassCount = 0;
+        EvaluationFailCount = 0;
         SelectedEvaluationExampleResult = null;
         EvaluationResultsSummary = "Evaluation example review queue appears after a run or report reload.";
         ClearEvaluationExampleSelection();
+        ClearEvaluationKpis();
     }
 
     private void ClearEvaluationExampleSelection()

@@ -1242,80 +1242,206 @@
     </Border>
 
     <!-- Evaluation (slice 6 fidelity): config card + results card (status chips) | detail/comparison cards. -->
+    <!-- Evaluation (production-UI re-skin): single full-width column — a top run-config toolbar, a KPI
+         stat-card row, a wide per-example results table, then the example-detail / report-comparison
+         cards below (no always-on right rail). Binds real Evaluation VM data throughout. -->
     <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Evaluation}">
-      <Grid Margin="16" ColumnDefinitions="380,*">
-        <ScrollViewer Grid.Column="0">
-          <StackPanel Spacing="12">
-            <!-- Run configuration card -->
-            <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="16"
-                    BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-              <StackPanel Spacing="8">
-                <TextBlock Text="Run configuration" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
-                <Grid ColumnDefinitions="*,*">
-                  <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,8,0">
-                    <TextBlock Text="LIMIT" FontSize="10" Foreground="{DynamicResource T4}"/>
-                    <TextBox Text="{Binding Evaluation.EvaluationLimit}"/>
-                  </StackPanel>
-                  <StackPanel Grid.Column="1" Spacing="4">
-                    <TextBlock Text="SCORE THRESHOLD" FontSize="10" Foreground="{DynamicResource T4}"/>
-                    <TextBox Text="{Binding Evaluation.EvaluationScoreThreshold}"/>
-                  </StackPanel>
-                </Grid>
-                <TextBlock Text="Judge (optional): model / backend / base-url" FontSize="11" Foreground="{DynamicResource T4}"/>
-                <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeModel}" Watermark="judge model"/>
-                <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeBackend}" Watermark="judge backend (blank = eval backend)"/>
-                <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeBaseUrl}" Watermark="judge base url (blank = eval base url)"/>
-                <WrapPanel>
-                  <Button Content="Check backend" Command="{Binding CheckEvaluationBackendCommand}" Margin="0,0,6,4"/>
-                  <Button Content="Refresh models" Command="{Binding RefreshEvaluationModelsCommand}" Margin="0,0,6,4"/>
-                  <Button Content="Run Evaluation" Command="{Binding RunEvaluationCommand}" Margin="0,0,6,4"
-                          Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}"
-                          BorderBrush="{DynamicResource Accent}" BorderThickness="1"/>
-                  <Button Content="Rerun report" Command="{Binding RerunEvaluationReportCommand}" Margin="0,0,6,4"/>
-                  <Button Content="Prepare failure review" Command="{Binding PrepareEvaluationFailureReviewCommand}" Margin="0,0,6,4"/>
-                </WrapPanel>
-                <StackPanel IsVisible="{Binding Evaluation.IsEvaluationInProgress}" Spacing="3">
-                  <TextBlock Text="{Binding Evaluation.EvaluationProgressText}" FontSize="11" Foreground="{DynamicResource T3}"/>
-                  <ProgressBar Minimum="0" Maximum="100" Value="{Binding Evaluation.EvaluationProgressPercent}"/>
+      <ScrollViewer>
+        <StackPanel Margin="16" Spacing="12">
+
+          <!-- Run configuration: full-width top toolbar (a label above each control). -->
+          <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="16"
+                  BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+            <StackPanel Spacing="10">
+              <Grid ColumnDefinitions="Auto,1.4*,2*,Auto,Auto">
+                <!-- Backend status chip -->
+                <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,14,0">
+                  <TextBlock Text="BACKEND" FontSize="10" Foreground="{DynamicResource T4}"/>
+                  <Border CornerRadius="7" Padding="10,6" Background="{DynamicResource Panel2}"
+                          BorderBrush="{DynamicResource Line2}" BorderThickness="1" VerticalAlignment="Bottom">
+                    <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                      <Ellipse Width="8" Height="8" Fill="{DynamicResource Ok}"/>
+                      <TextBlock Text="{Binding EvaluationConnection.EvaluationBackend}" Foreground="{DynamicResource Text}"
+                                 FontSize="12.5" VerticalAlignment="Center"/>
+                    </StackPanel>
+                  </Border>
                 </StackPanel>
-                <TextBlock Text="{Binding Evaluation.EvaluationSummary}" Foreground="{DynamicResource T2}" TextWrapping="Wrap"/>
+                <!-- Model -->
+                <StackPanel Grid.Column="1" Spacing="4" Margin="0,0,14,0">
+                  <TextBlock Text="MODEL" FontSize="10" Foreground="{DynamicResource T4}"/>
+                  <ComboBox HorizontalAlignment="Stretch" VerticalAlignment="Bottom"
+                            ItemsSource="{Binding EvaluationConnection.EvaluationAvailableModels}"
+                            SelectedItem="{Binding EvaluationConnection.EvaluationModel}"
+                            PlaceholderText="{Binding EvaluationConnection.EvaluationModel}"/>
+                </StackPanel>
+                <!-- Judge (optional) -->
+                <StackPanel Grid.Column="2" Spacing="4" Margin="0,0,14,0">
+                  <TextBlock Text="JUDGE MODEL · OPTIONAL" FontSize="10" Foreground="{DynamicResource T4}"/>
+                  <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeModel}" VerticalAlignment="Bottom"
+                           Watermark="keyword-overlap (none)"/>
+                </StackPanel>
+                <!-- Threshold -->
+                <StackPanel Grid.Column="3" Spacing="4" Margin="0,0,14,0">
+                  <TextBlock Text="THRESHOLD" FontSize="10" Foreground="{DynamicResource T4}"/>
+                  <TextBox Text="{Binding Evaluation.EvaluationScoreThreshold}" Width="72" VerticalAlignment="Bottom"/>
+                </StackPanel>
+                <!-- Run evaluation (accent, leading play glyph) -->
+                <StackPanel Grid.Column="4" Spacing="4">
+                  <TextBlock Text=" " FontSize="10" Foreground="{DynamicResource T4}"/>
+                  <Button Command="{Binding RunEvaluationCommand}" VerticalAlignment="Bottom" Padding="14,7"
+                          Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}"
+                          BorderBrush="{DynamicResource Accent}" BorderThickness="1">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                      <Path Classes="ico accent ico-sm" Data="{StaticResource IcoPlay}"/>
+                      <TextBlock Text="Run evaluation" VerticalAlignment="Center"/>
+                    </StackPanel>
+                  </Button>
+                </StackPanel>
+              </Grid>
+
+              <!-- Live run progress -->
+              <StackPanel IsVisible="{Binding Evaluation.IsEvaluationInProgress}" Spacing="3">
+                <TextBlock Text="{Binding Evaluation.EvaluationProgressText}" FontSize="11" Foreground="{DynamicResource T3}"/>
+                <ProgressBar Minimum="0" Maximum="100" Value="{Binding Evaluation.EvaluationProgressPercent}"/>
+              </StackPanel>
+
+              <!-- Secondary run controls + actions (moved out of the primary row) -->
+              <Border Height="1" Background="{DynamicResource Line}"/>
+              <Grid ColumnDefinitions="Auto,1.4*,2*">
+                <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,14,0">
+                  <TextBlock Text="LIMIT" FontSize="10" Foreground="{DynamicResource T4}"/>
+                  <TextBox Text="{Binding Evaluation.EvaluationLimit}" Width="72"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="4" Margin="0,0,14,0">
+                  <TextBlock Text="JUDGE BACKEND" FontSize="10" Foreground="{DynamicResource T4}"/>
+                  <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeBackend}"
+                           Watermark="blank = eval backend"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2" Spacing="4">
+                  <TextBlock Text="JUDGE BASE URL" FontSize="10" Foreground="{DynamicResource T4}"/>
+                  <TextBox Text="{Binding EvaluationConnection.EvaluationJudgeBaseUrl}"
+                           Watermark="blank = eval base url"/>
+                </StackPanel>
+              </Grid>
+              <WrapPanel>
+                <Button Content="Check backend" Command="{Binding CheckEvaluationBackendCommand}" Margin="0,0,6,4"/>
+                <Button Content="Refresh models" Command="{Binding RefreshEvaluationModelsCommand}" Margin="0,0,6,4"/>
+                <Button Content="Rerun report" Command="{Binding RerunEvaluationReportCommand}" Margin="0,0,6,4"/>
+                <Button Content="Prepare failure review" Command="{Binding PrepareEvaluationFailureReviewCommand}" Margin="0,0,6,4"/>
+              </WrapPanel>
+              <TextBlock Text="{Binding Evaluation.EvaluationSummary}" Foreground="{DynamicResource T2}" TextWrapping="Wrap"/>
+            </StackPanel>
+          </Border>
+
+          <!-- KPI stat-card row (post-run only; hidden pre-run so no faked numbers show). -->
+          <Grid ColumnDefinitions="*,*,*,*" IsVisible="{Binding Evaluation.HasEvaluationReport}">
+            <Border Grid.Column="0" Margin="0,0,6,0" Background="{DynamicResource Panel}" CornerRadius="12"
+                    Padding="16" BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <StackPanel Spacing="6">
+                <TextBlock Text="Average score" FontSize="12" Foreground="{DynamicResource T3}"/>
+                <TextBlock Text="{Binding Evaluation.AverageScoreDisplay}" FontSize="26" FontWeight="Bold"
+                           Foreground="{DynamicResource Text}"/>
               </StackPanel>
             </Border>
-            <!-- Results card -->
-            <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="16"
-                    BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-              <StackPanel Spacing="8">
-                <TextBlock Text="Per-example results" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
-                <TextBlock Text="{Binding Evaluation.EvaluationResultsSummary}" Foreground="{DynamicResource T3}" FontSize="12"/>
-                <ComboBox HorizontalAlignment="Stretch"
-                          ItemsSource="{Binding Evaluation.EvaluationResultFilterOptions}"
-                          SelectedItem="{Binding Evaluation.EvaluationResultFilter}"/>
-                <ListBox ItemsSource="{Binding Evaluation.EvaluationResults}"
-                         SelectedItem="{Binding Evaluation.SelectedEvaluationExampleResult}" Height="280"
-                         Background="Transparent">
-                  <ListBox.ItemTemplate>
-                    <DataTemplate x:DataType="models:EvaluationExampleResult">
-                      <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,3">
-                        <TextBlock Grid.Column="0" Text="{Binding ExampleId}" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource Text}" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Column="1" Text="{Binding Score, StringFormat='{}{0:0.#}'}"
-                                   Foreground="{DynamicResource T3}" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <Border Grid.Column="2" CornerRadius="5" Padding="7,1" VerticalAlignment="Center"
-                                Background="{Binding StatusColor, Converter={StaticResource StringToBrush}}">
-                          <TextBlock Text="{Binding StatusLabel}" Foreground="White" FontSize="9.5" FontWeight="Bold"/>
-                        </Border>
-                      </Grid>
-                    </DataTemplate>
-                  </ListBox.ItemTemplate>
-                </ListBox>
+            <Border Grid.Column="1" Margin="3,0,3,0" Background="{DynamicResource Panel}" CornerRadius="12"
+                    Padding="16" BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <StackPanel Spacing="6">
+                <TextBlock Text="Pass rate" FontSize="12" Foreground="{DynamicResource T3}"/>
+                <TextBlock Text="{Binding Evaluation.PassRateDisplay}" FontSize="26" FontWeight="Bold"
+                           Foreground="{DynamicResource Ok}"/>
+                <TextBlock Text="{Binding Evaluation.PassRateDetail}" FontSize="11" Foreground="{DynamicResource T4}"/>
               </StackPanel>
             </Border>
-          </StackPanel>
-        </ScrollViewer>
-        <ScrollViewer Grid.Column="1" Margin="16,0,0,0">
-          <StackPanel Spacing="12">
-            <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="16"
-                    BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+            <Border Grid.Column="2" Margin="3,0,3,0" Background="{DynamicResource Panel}" CornerRadius="12"
+                    Padding="16" BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <StackPanel Spacing="6">
+                <TextBlock Text="Evaluated" FontSize="12" Foreground="{DynamicResource T3}"/>
+                <TextBlock Text="{Binding Evaluation.EvaluatedDisplay}" FontSize="26" FontWeight="Bold"
+                           Foreground="{DynamicResource Text}"/>
+              </StackPanel>
+            </Border>
+            <Border Grid.Column="3" Margin="6,0,0,0" Background="{DynamicResource Panel}" CornerRadius="12"
+                    Padding="16" BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <StackPanel Spacing="6">
+                <TextBlock Text="Metric" FontSize="12" Foreground="{DynamicResource T3}"/>
+                <TextBlock Text="{Binding Evaluation.MetricDisplay}" FontSize="20" FontWeight="Bold"
+                           Foreground="{DynamicResource Text}" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Border>
+          </Grid>
+
+          <!-- Per-example results (wide), with a segmented All / Pass N / Fail N filter. -->
+          <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="16"
+                  BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+            <Border.Styles>
+              <Style Selector="Button.seg">
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="BorderThickness" Value="0"/>
+                <Setter Property="CornerRadius" Value="7"/>
+                <Setter Property="Padding" Value="13,4"/>
+                <Setter Property="FontSize" Value="12"/>
+                <Setter Property="Foreground" Value="{DynamicResource T3}"/>
+              </Style>
+              <Style Selector="Button.seg.active">
+                <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+                <Setter Property="Foreground" Value="{DynamicResource AccentInk}"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+              </Style>
+            </Border.Styles>
+            <StackPanel Spacing="10">
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+                  <TextBlock Text="Per-example results" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
+                  <TextBlock Text="{Binding Evaluation.EvaluationResultsSummary}" Foreground="{DynamicResource T3}" FontSize="12"/>
+                </StackPanel>
+                <Border Grid.Column="1" CornerRadius="9" Padding="3" Background="{DynamicResource Panel2}"
+                        BorderBrush="{DynamicResource Line2}" BorderThickness="1" VerticalAlignment="Center">
+                  <StackPanel Orientation="Horizontal" Spacing="2">
+                    <Button Classes="seg" Classes.active="{Binding Evaluation.IsAllResultsFilterActive}"
+                            Command="{Binding Evaluation.ShowAllResultsCommand}" Content="All"/>
+                    <Button Classes="seg" Classes.active="{Binding Evaluation.IsPassedResultsFilterActive}"
+                            Command="{Binding Evaluation.ShowPassedResultsCommand}"
+                            Content="{Binding Evaluation.EvaluationPassCount, StringFormat='Pass {0}'}"/>
+                    <Button Classes="seg" Classes.active="{Binding Evaluation.IsFailedResultsFilterActive}"
+                            Command="{Binding Evaluation.ShowFailedResultsCommand}"
+                            Content="{Binding Evaluation.EvaluationFailCount, StringFormat='Fail {0}'}"/>
+                  </StackPanel>
+                </Border>
+              </Grid>
+              <ListBox ItemsSource="{Binding Evaluation.EvaluationResults}"
+                       SelectedItem="{Binding Evaluation.SelectedEvaluationExampleResult}" Height="320"
+                       Background="Transparent">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="models:EvaluationExampleResult">
+                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,4">
+                      <TextBlock Grid.Column="0" Text="{Binding ExampleId}" FontWeight="SemiBold"
+                                 Foreground="{DynamicResource Text}" VerticalAlignment="Center"/>
+                      <!-- Proportional score bar: fixed Track, inner fill width ~ Score/100, Ok when
+                           passed else Warn (before the numeric score). -->
+                      <Border Grid.Column="1" Width="130" Height="6" CornerRadius="3"
+                              Background="{DynamicResource Track}" VerticalAlignment="Center" Margin="0,0,12,0">
+                        <Border HorizontalAlignment="Left" Height="6" CornerRadius="3"
+                                Width="{Binding ScoreBarWidth}"
+                                Background="{Binding ScoreBarColor, Converter={StaticResource StringToBrush}}"/>
+                      </Border>
+                      <TextBlock Grid.Column="2" Text="{Binding Score, StringFormat='{}{0:0.#}'}"
+                                 Foreground="{DynamicResource T2}" FontSize="12.5" MinWidth="30"
+                                 TextAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                      <Border Grid.Column="3" CornerRadius="5" Padding="7,1" VerticalAlignment="Center"
+                              Background="{Binding StatusColor, Converter={StaticResource StringToBrush}}">
+                        <TextBlock Text="{Binding StatusLabel}" Foreground="White" FontSize="9.5" FontWeight="Bold"/>
+                      </Border>
+                    </Grid>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </StackPanel>
+          </Border>
+
+          <!-- Example detail + report comparison (relocated below the table). -->
+          <Grid ColumnDefinitions="*,*">
+            <Border Grid.Column="0" Margin="0,0,6,0" Background="{DynamicResource Panel}" CornerRadius="12"
+                    Padding="16" BorderBrush="{DynamicResource Line2}" BorderThickness="1">
               <StackPanel Spacing="6">
                 <TextBlock Text="Example detail" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
                 <TextBlock Text="{Binding Evaluation.SelectedEvaluationExampleDetail}" Foreground="{DynamicResource T2}" TextWrapping="Wrap"/>
@@ -1325,8 +1451,8 @@
                 <TextBlock Text="{Binding Evaluation.EvaluationReviewSummary}" Foreground="{DynamicResource T3}" TextWrapping="Wrap"/>
               </StackPanel>
             </Border>
-            <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="16"
-                    BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+            <Border Grid.Column="1" Margin="6,0,0,0" Background="{DynamicResource Panel}" CornerRadius="12"
+                    Padding="16" BorderBrush="{DynamicResource Line2}" BorderThickness="1">
               <StackPanel Spacing="6">
                 <TextBlock Text="Report comparison" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
                 <ComboBox HorizontalAlignment="Stretch"
@@ -1342,9 +1468,10 @@
                 <TextBlock Text="{Binding Evaluation.EvaluationComparisonSummary}" Foreground="{DynamicResource T2}" TextWrapping="Wrap"/>
               </StackPanel>
             </Border>
-          </StackPanel>
-        </ScrollViewer>
-      </Grid>
+          </Grid>
+
+        </StackPanel>
+      </ScrollViewer>
     </Border>
 
     <!-- Training (slice 10 fidelity): configuration card | run + first-party + download + log cards. -->
