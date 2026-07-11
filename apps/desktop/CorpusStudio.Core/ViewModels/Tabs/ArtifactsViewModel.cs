@@ -38,8 +38,22 @@ public sealed class ArtifactsViewModel : ViewModelBase, IArtifactsViewModel
     public string ArtifactDetail
     {
         get => _artifactDetail;
-        private set => SetField(ref _artifactDetail, value);
+        private set
+        {
+            if (SetField(ref _artifactDetail, value))
+            {
+                OnPropertyChanged(nameof(HasArtifactDetail));
+            }
+        }
     }
+
+    /// <summary>Whether any artifact rows are loaded — drives the card list vs. the empty state.</summary>
+    public bool HasArtifacts => ModelArtifacts.Count > 0;
+
+    /// <summary>Whether the detail pane holds real content (a rendered weight card or a promote-gate
+    /// verdict) rather than the idle hint — drives the collapsible detail surface on the card screen.</summary>
+    public bool HasArtifactDetail =>
+        !string.IsNullOrWhiteSpace(_artifactDetail) && _artifactDetail != DefaultDetail;
 
     public void SetArtifactError(string message)
     {
@@ -93,6 +107,7 @@ public sealed class ArtifactsViewModel : ViewModelBase, IArtifactsViewModel
             ModelArtifacts.Add(item);
         }
         SelectedModelArtifact = ModelArtifacts.FirstOrDefault(i => i.Record.ArtifactId == selectedId);
+        OnPropertyChanged(nameof(HasArtifacts));
 
         if (items.Count == 0)
         {
@@ -114,5 +129,6 @@ public sealed class ArtifactsViewModel : ViewModelBase, IArtifactsViewModel
         SelectedModelArtifact = null;
         ArtifactSummary = DefaultSummary;
         ArtifactDetail = DefaultDetail;
+        OnPropertyChanged(nameof(HasArtifacts));
     }
 }

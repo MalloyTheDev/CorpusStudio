@@ -77,6 +77,94 @@ public sealed class ArtifactRegistryTests
         Assert.Contains("Qwen/Qwen2.5-Coder-7B", item.DisplayName);
     }
 
+    // --- Nocturne card display helpers (production re-skin) ------------------
+
+    [Fact]
+    public void PrimaryName_UsesResolvedBaseElseExplicitUnknown()
+    {
+        Assert.Equal("llama-3.1-8b", new ArtifactDisplayItem(Record(), "ok", "llama-3.1-8b").PrimaryName);
+        Assert.Equal("(base unknown)", new ArtifactDisplayItem(Record(), "ok", "  ").PrimaryName);
+    }
+
+    [Theory]
+    [InlineData("ok", "integrity: present")]
+    [InlineData("modified", "integrity: modified")]
+    [InlineData("missing", "integrity: missing")]
+    public void IntegrityLabel_PhrasedForTheChip(string integrity, string expected)
+    {
+        Assert.Equal(expected, new ArtifactDisplayItem(Record(), integrity, "base").IntegrityLabel);
+    }
+
+    [Fact]
+    public void IntegrityFlags_AreMutuallyExclusive()
+    {
+        var ok = new ArtifactDisplayItem(Record(), "ok", "base");
+        Assert.True(ok.IsOk);
+        Assert.False(ok.IsFlagged);
+
+        var modified = new ArtifactDisplayItem(Record(), "modified", "base");
+        Assert.True(modified.IsModified);
+        Assert.True(modified.IsFlagged);
+        Assert.False(modified.IsOk);
+
+        var missing = new ArtifactDisplayItem(Record(), "missing", "base");
+        Assert.True(missing.IsMissing);
+        Assert.True(missing.IsFlagged);
+    }
+
+    [Fact]
+    public void IntegrityBlockMessage_OnlyForFlaggedStates()
+    {
+        Assert.Equal(string.Empty, new ArtifactDisplayItem(Record(), "ok", "base").IntegrityBlockMessage);
+        Assert.Contains("weights changed since eval",
+            new ArtifactDisplayItem(Record(), "modified", "base").IntegrityBlockMessage);
+        Assert.Contains("missing",
+            new ArtifactDisplayItem(Record(), "missing", "base").IntegrityBlockMessage);
+    }
+
+    [Fact]
+    public void CreatedDisplay_FormatsIsoAndFallsBackToRaw()
+    {
+        var iso = new ArtifactDisplayItem(
+            new ModelArtifactRecord { CreatedAt = "2026-07-10T14:32:00Z" }, "ok", "base");
+        Assert.Equal("2026-07-10 14:32 UTC", iso.CreatedDisplay);
+
+        // A non-timestamp value (legacy/test data) is shown unchanged — never invented.
+        var raw = new ArtifactDisplayItem(new ModelArtifactRecord { CreatedAt = "t" }, "ok", "base");
+        Assert.Equal("t", raw.CreatedDisplay);
+    }
+
+    [Fact]
+    public void HasArtifacts_TracksTheCollection()
+    {
+        var vm = new MainWindowViewModel();
+        Assert.False(vm.Artifacts.HasArtifacts);
+        vm.Artifacts.ApplyArtifacts([new ArtifactDisplayItem(Record(status: "kept"), "ok", "base")]);
+        Assert.True(vm.Artifacts.HasArtifacts);
+        vm.Artifacts.ApplyArtifacts([]);
+        Assert.False(vm.Artifacts.HasArtifacts);
+    }
+
+    [Fact]
+    public void HasArtifactDetail_TrueOnlyForRealContent()
+    {
+        var vm = new MainWindowViewModel();
+        // Idle hint => no detail surface.
+        Assert.False(vm.Artifacts.HasArtifactDetail);
+
+        vm.Artifacts.SetArtifactDetail("# Weight Card — abc");
+        Assert.True(vm.Artifacts.HasArtifactDetail);
+
+        // A promote-gate verdict is real detail too.
+        vm.Artifacts.ApplyPromoteGate(GateReport("block",
+            new GateResult { GateId = "integrity", Status = "block", Message = "modified" }));
+        Assert.True(vm.Artifacts.HasArtifactDetail);
+
+        // Reset returns to the idle hint => surface collapses again.
+        vm.Artifacts.Reset();
+        Assert.False(vm.Artifacts.HasArtifactDetail);
+    }
+
     [Fact]
     public void ApplyArtifacts_SummarizesKeptAndFlagged()
     {

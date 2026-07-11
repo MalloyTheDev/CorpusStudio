@@ -2204,42 +2204,195 @@
       </Grid>
     </Border>
 
-    <!-- Artifacts (slice 8 fidelity): a summary + actions + list card | a weight-card detail card. -->
+    <!-- Artifacts (production re-skin): a full-width single column of rich weight-artifact cards.
+         Each card renders header/integrity-chip/metadata/actions INLINE (the old 320px list + Consolas
+         detail split is gone). The integrity chip + block message are the REAL provenance verdict
+         (fingerprint match / mismatch / missing path), surfaced truthfully — never a faked "present".
+         Per-card Keep/Weight card bind to the EXISTING selection-based shell commands; showing the
+         action row only on the SELECTED card guarantees those parameterless commands act on this card.
+         The rendered weight card / promote-gate verdict lands in the collapsible detail surface below. -->
     <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Artifacts}">
-      <Grid Margin="16" ColumnDefinitions="320,*">
-        <Border Grid.Column="0" Background="{DynamicResource Panel}" CornerRadius="11" Padding="10"
+      <!-- Ok/Warn/Bad-tinted chip fills, scoped here (theme-aware) so the integrity chips read in both
+           themes without a global token — mirrors the alpha-over-token pattern used on the Settings tab. -->
+      <Border.Resources>
+        <ResourceDictionary>
+          <ResourceDictionary.ThemeDictionaries>
+            <ResourceDictionary x:Key="Dark">
+              <SolidColorBrush x:Key="OkSoft" Color="#296bbf9a"/>
+              <SolidColorBrush x:Key="WarnSoft" Color="#29d9a35f"/>
+              <SolidColorBrush x:Key="BadSoft" Color="#29d76d6d"/>
+            </ResourceDictionary>
+            <ResourceDictionary x:Key="Light">
+              <SolidColorBrush x:Key="OkSoft" Color="#1f3f9b73"/>
+              <SolidColorBrush x:Key="WarnSoft" Color="#1fb8792e"/>
+              <SolidColorBrush x:Key="BadSoft" Color="#1fc85552"/>
+            </ResourceDictionary>
+          </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+      </Border.Resources>
+      <Border.Styles>
+        <!-- Cards render as a plain scrolling column: strip the ListBox/ListBoxItem chrome so the
+             per-artifact Border IS the card; the selected card gets an accent border instead. -->
+        <Style Selector="ListBox.artifactlist">
+          <Setter Property="Background" Value="Transparent"/>
+          <Setter Property="BorderThickness" Value="0"/>
+          <Setter Property="Padding" Value="0"/>
+        </Style>
+        <Style Selector="ListBox.artifactlist > ListBoxItem">
+          <Setter Property="Background" Value="Transparent"/>
+          <Setter Property="Padding" Value="0"/>
+          <Setter Property="Margin" Value="0,0,0,12"/>
+          <Setter Property="CornerRadius" Value="11"/>
+        </Style>
+        <Style Selector="ListBox.artifactlist > ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+          <Setter Property="Background" Value="Transparent"/>
+        </Style>
+        <Style Selector="ListBox.artifactlist > ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+          <Setter Property="Background" Value="Transparent"/>
+        </Style>
+        <Style Selector="ListBox.artifactlist > ListBoxItem:selected Border.artifactcard">
+          <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+        </Style>
+        <Style Selector="TextBlock.metacap">
+          <Setter Property="Foreground" Value="{DynamicResource T4}"/>
+          <Setter Property="FontSize" Value="10"/>
+          <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style Selector="TextBlock.metaval">
+          <Setter Property="Foreground" Value="{DynamicResource T2}"/>
+          <Setter Property="FontSize" Value="13"/>
+          <Setter Property="Margin" Value="0,3,0,0"/>
+        </Style>
+        <Style Selector="Border.intchip">
+          <Setter Property="CornerRadius" Value="7"/>
+          <Setter Property="Padding" Value="9,4"/>
+          <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+      </Border.Styles>
+
+      <DockPanel Margin="16">
+        <!-- Honest state line: kept / integrity-flagged counts (or the empty-state prompt). -->
+        <TextBlock DockPanel.Dock="Top" Text="{Binding Artifacts.ArtifactSummary}" Foreground="{DynamicResource T3}"
+                   FontSize="12.5" TextWrapping="Wrap" Margin="2,0,2,12"/>
+
+        <!-- Collapsible detail surface: the rendered weight card OR the promote-gate verdict from Keep.
+             Shown only when there is real content (not the idle hint) — keeps the clean card column. -->
+        <Border DockPanel.Dock="Bottom" IsVisible="{Binding Artifacts.HasArtifactDetail}"
+                Background="{DynamicResource Panel2}" CornerRadius="11" Padding="14" Margin="0,12,0,0"
                 BorderBrush="{DynamicResource Line2}" BorderThickness="1">
           <DockPanel>
-            <TextBlock DockPanel.Dock="Top" Text="{Binding Artifacts.ArtifactSummary}" Foreground="{DynamicResource T3}"
-                       FontSize="12" TextWrapping="Wrap" Margin="0,0,0,8"/>
-            <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-              <Button Content="View weight card" Command="{Binding ViewArtifactCardCommand}" Margin="0,0,6,4"/>
-              <Button Content="Refresh" Command="{Binding RefreshArtifactsCommand}" Margin="0,0,6,4"/>
-              <Button Content="Register from run" Command="{Binding RegisterArtifactFromRunCommand}" Margin="0,0,6,4"/>
-              <Button Content="Keep" Command="{Binding KeepArtifactCommand}" Margin="0,0,6,4"/>
-              <Button Content="Reject" Command="{Binding RejectArtifactCommand}" Margin="0,0,6,4"/>
-            </WrapPanel>
-            <ListBox ItemsSource="{Binding Artifacts.ModelArtifacts}"
-                     SelectedItem="{Binding Artifacts.SelectedModelArtifact}"
-                     Background="Transparent" BorderThickness="0">
-              <ListBox.ItemTemplate>
-                <DataTemplate x:DataType="models:ArtifactDisplayItem">
-                  <StackPanel Margin="0,2">
-                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
-                    <TextBlock Text="{Binding Integrity}" Foreground="{DynamicResource T4}" FontSize="11"/>
-                  </StackPanel>
-                </DataTemplate>
-              </ListBox.ItemTemplate>
-            </ListBox>
+            <TextBlock DockPanel.Dock="Top" Text="WEIGHT CARD / GATE VERDICT" Classes="metacap" Margin="0,0,0,8"/>
+            <ScrollViewer MaxHeight="220" HorizontalScrollBarVisibility="Disabled">
+              <TextBlock Text="{Binding Artifacts.ArtifactDetail}" Foreground="{DynamicResource T2}"
+                         FontSize="12.5" TextWrapping="Wrap"/>
+            </ScrollViewer>
           </DockPanel>
         </Border>
-        <Border Grid.Column="1" Margin="16,0,0,0" Background="{DynamicResource Panel}" CornerRadius="11" Padding="12"
-                BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-          <TextBox Text="{Binding Artifacts.ArtifactDetail}" IsReadOnly="True" AcceptsReturn="True"
-                   FontFamily="Consolas" TextWrapping="Wrap" VerticalAlignment="Stretch"
-                   Background="Transparent" BorderThickness="0"/>
-        </Border>
-      </Grid>
+
+        <!-- Card column (fills) + empty state, mutually exclusive on the real HasArtifacts signal. -->
+        <Panel>
+          <Border IsVisible="{Binding !Artifacts.HasArtifacts}" Background="{DynamicResource Panel}" CornerRadius="11"
+                  Padding="24" BorderBrush="{DynamicResource Line2}" BorderThickness="1"
+                  HorizontalAlignment="Stretch" VerticalAlignment="Top">
+            <StackPanel HorizontalAlignment="Center" Spacing="8">
+              <Path Classes="ico" Data="{StaticResource IcoCube}" Width="26" Height="26" Fill="{DynamicResource T4}"/>
+              <TextBlock Text="No trained-weight artifacts yet" Foreground="{DynamicResource T2}"
+                         FontWeight="SemiBold" HorizontalAlignment="Center"/>
+              <TextBlock Text="Register one from a completed training run to track its weights and provenance."
+                         Foreground="{DynamicResource T4}" FontSize="12" TextWrapping="Wrap"
+                         TextAlignment="Center" MaxWidth="360"/>
+            </StackPanel>
+          </Border>
+
+          <ListBox Classes="artifactlist" IsVisible="{Binding Artifacts.HasArtifacts}"
+                   ItemsSource="{Binding Artifacts.ModelArtifacts}"
+                   SelectedItem="{Binding Artifacts.SelectedModelArtifact}"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:ArtifactDisplayItem">
+                <Border Classes="artifactcard" Background="{DynamicResource Panel}" CornerRadius="11" Padding="16"
+                        BorderBrush="{DynamicResource Line2}" BorderThickness="1" HorizontalAlignment="Stretch">
+                  <StackPanel Spacing="12">
+                    <!-- Header: cube + base-model headline + source-run + integrity chip. -->
+                    <Grid ColumnDefinitions="*,Auto">
+                      <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                        <Path Classes="ico" Data="{StaticResource IcoCube}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding PrimaryName}" FontWeight="SemiBold" FontSize="14.5"
+                                   Foreground="{DynamicResource Text}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Record.RunId}" Foreground="{DynamicResource T4}" FontSize="12"
+                                   VerticalAlignment="Center" Margin="2,1,0,0"/>
+                      </StackPanel>
+
+                      <!-- integrity: present (ok) -->
+                      <Border Grid.Column="1" Classes="intchip" Background="{DynamicResource OkSoft}"
+                              IsVisible="{Binding IsOk}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Path Classes="ico ico-sm" Data="{StaticResource IcoCheckCircleFill}" Fill="{DynamicResource Ok}"/>
+                          <TextBlock Text="{Binding IntegrityLabel}" Foreground="{DynamicResource Ok}" FontSize="12"
+                                     FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        </StackPanel>
+                      </Border>
+                      <!-- integrity: modified (fingerprint mismatch) -->
+                      <Border Grid.Column="1" Classes="intchip" Background="{DynamicResource WarnSoft}"
+                              IsVisible="{Binding IsModified}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Path Classes="ico ico-sm" Data="{StaticResource IcoWarningFill}" Fill="{DynamicResource Warn}"/>
+                          <TextBlock Text="{Binding IntegrityLabel}" Foreground="{DynamicResource Warn}" FontSize="12"
+                                     FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        </StackPanel>
+                      </Border>
+                      <!-- integrity: missing (recorded path gone) -->
+                      <Border Grid.Column="1" Classes="intchip" Background="{DynamicResource BadSoft}"
+                              IsVisible="{Binding IsMissing}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Path Classes="ico ico-sm" Data="{StaticResource IcoWarningFill}" Fill="{DynamicResource Bad}"/>
+                          <TextBlock Text="{Binding IntegrityLabel}" Foreground="{DynamicResource Bad}" FontSize="12"
+                                     FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        </StackPanel>
+                      </Border>
+                    </Grid>
+
+                    <!-- Metadata: labeled columns from real artifact fields (base is the headline above). -->
+                    <StackPanel Orientation="Horizontal" Spacing="40">
+                      <StackPanel>
+                        <TextBlock Classes="metacap" Text="KIND"/>
+                        <TextBlock Classes="metaval" Text="{Binding Record.Kind}"/>
+                      </StackPanel>
+                      <StackPanel>
+                        <TextBlock Classes="metacap" Text="STATUS"/>
+                        <TextBlock Classes="metaval" Text="{Binding Record.Status}"/>
+                      </StackPanel>
+                      <StackPanel>
+                        <TextBlock Classes="metacap" Text="CREATED"/>
+                        <TextBlock Classes="metaval" Text="{Binding CreatedDisplay}"/>
+                      </StackPanel>
+                    </StackPanel>
+
+                    <!-- Modified/missing: honest promote-block reason from the real integrity signal. -->
+                    <TextBlock Text="{Binding IntegrityBlockMessage}" Foreground="{DynamicResource Bad}"
+                               FontSize="12.5" TextWrapping="Wrap" IsVisible="{Binding IsFlagged}"/>
+
+                    <!-- Actions: only on the SELECTED card, so the parameterless selection-based shell
+                         commands (Keep/Weight card) act on THIS artifact. Compare has no shell command
+                         (see report) so it is present-but-disabled rather than faking an action. -->
+                    <StackPanel Orientation="Horizontal" Spacing="8"
+                                IsVisible="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}">
+                      <Button Content="Keep"
+                              Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}"
+                              BorderBrush="{DynamicResource Accent}" BorderThickness="1"
+                              Command="{Binding ((vm:MainWindowViewModel)DataContext).KeepArtifactCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                      <Button Content="Weight card"
+                              Command="{Binding ((vm:MainWindowViewModel)DataContext).ViewArtifactCardCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                      <Button Content="Compare" IsEnabled="False"
+                              ToolTip.Tip="Artifact comparison is not wired in the shell yet."/>
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Panel>
+      </DockPanel>
     </Border>
 
           </Panel>
