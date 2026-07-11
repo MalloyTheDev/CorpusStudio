@@ -1,0 +1,553 @@
+{
+  "source": "Phosphor Icons",
+  "version": "2.1.1",
+  "cdn": "https://unpkg.com/@phosphor-icons/web@2.1.1",
+  "react_package": "@phosphor-icons/react",
+  "core_svg_package": "@phosphor-icons/core@2.1.1",
+  "count": 59,
+  "icons": [
+    {
+      "name": "arrow-left",
+      "react": "ArrowLeft",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { ArrowLeft } from '@phosphor-icons/react';",
+      "role": "Wizard back"
+    },
+    {
+      "name": "arrow-right",
+      "react": "ArrowRight",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { ArrowRight } from '@phosphor-icons/react';",
+      "role": "Wizard continue / mapping arrows"
+    },
+    {
+      "name": "arrows-clockwise",
+      "react": "ArrowsClockwise",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { ArrowsClockwise } from '@phosphor-icons/react';",
+      "role": "Re-check debt / refresh"
+    },
+    {
+      "name": "broom",
+      "react": "Broom",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { Broom } from '@phosphor-icons/react';",
+      "role": "Quality nav / run quality"
+    },
+    {
+      "name": "caret-down",
+      "react": "CaretDown",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { CaretDown } from '@phosphor-icons/react';",
+      "role": "Dropdowns / console collapse"
+    },
+    {
+      "name": "caret-right",
+      "react": "CaretRight",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { CaretRight } from '@phosphor-icons/react';",
+      "role": "Collapsed tree folder"
+    },
+    {
+      "name": "caret-up-down",
+      "react": "CaretUpDown",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { CaretUpDown } from '@phosphor-icons/react';",
+      "role": "Project switcher"
+    },
+    {
+      "name": "chart-pie-slice",
+      "react": "ChartPieSlice",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { ChartPieSlice } from '@phosphor-icons/react';",
+      "role": "Splits nav / quick action"
+    },
+    {
+      "name": "chat-text",
+      "react": "ChatText",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { ChatText } from '@phosphor-icons/react';",
+      "role": "Instruction schema (wizard)"
+    },
+    {
+      "name": "chats",
+      "react": "Chats",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { Chats } from '@phosphor-icons/react';",
+      "role": "Chat schema (wizard)"
+    },
+    {
+      "name": "check",
+      "react": "Check",
+      "weights": [
+        "bold",
+        "regular"
+      ],
+      "import": "import { Check } from '@phosphor-icons/react';",
+      "role": "Lifecycle/step complete"
+    },
+    {
+      "name": "check-circle",
+      "react": "CheckCircle",
+      "weights": [
+        "regular",
+        "fill",
+        "bold"
+      ],
+      "import": "import { CheckCircle } from '@phosphor-icons/react';",
+      "role": "Clean/valid/pass status"
+    },
+    {
+      "name": "cloud-arrow-down",
+      "react": "CloudArrowDown",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { CloudArrowDown } from '@phosphor-icons/react';",
+      "role": "Import from Hugging Face"
+    },
+    {
+      "name": "code",
+      "react": "Code",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { Code } from '@phosphor-icons/react';",
+      "role": "Code schema (wizard)"
+    },
+    {
+      "name": "copy",
+      "react": "Copy",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { Copy } from '@phosphor-icons/react';",
+      "role": "Exact duplicates (quality)"
+    },
+    {
+      "name": "copy-simple",
+      "react": "CopySimple",
+      "weights": [
+        "fill",
+        "regular"
+      ],
+      "import": "import { CopySimple } from '@phosphor-icons/react';",
+      "role": "Near-duplicate flag"
+    },
+    {
+      "name": "cube",
+      "react": "Cube",
+      "weights": [
+        "fill",
+        "regular"
+      ],
+      "import": "import { Cube } from '@phosphor-icons/react';",
+      "role": "Artifacts nav + artifact cards"
+    },
+    {
+      "name": "export",
+      "react": "Export",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { Export } from '@phosphor-icons/react';",
+      "role": "Export button"
+    },
+    {
+      "name": "file-arrow-up",
+      "react": "FileArrowUp",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { FileArrowUp } from '@phosphor-icons/react';",
+      "role": "Import file drop"
+    },
+    {
+      "name": "flask",
+      "react": "Flask",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { Flask } from '@phosphor-icons/react';",
+      "role": "Evaluation nav / quick action"
+    },
+    {
+      "name": "floppy-disk",
+      "react": "FloppyDisk",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { FloppyDisk } from '@phosphor-icons/react';",
+      "role": "Save example"
+    },
+    {
+      "name": "folder",
+      "react": "Folder",
+      "weights": [
+        "fill",
+        "regular"
+      ],
+      "import": "import { Folder } from '@phosphor-icons/react';",
+      "role": "Explorer folders"
+    },
+    {
+      "name": "folder-open",
+      "react": "FolderOpen",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { FolderOpen } from '@phosphor-icons/react';",
+      "role": "Open Project (Start Center)"
+    },
+    {
+      "name": "gauge",
+      "react": "Gauge",
+      "weights": [
+        "fill",
+        "regular"
+      ],
+      "import": "import { Gauge } from '@phosphor-icons/react';",
+      "role": "Dashboard nav + readiness"
+    },
+    {
+      "name": "gear",
+      "react": "Gear",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { Gear } from '@phosphor-icons/react';",
+      "role": "Settings (activity bar + nav)"
+    },
+    {
+      "name": "git-branch",
+      "react": "GitBranch",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { GitBranch } from '@phosphor-icons/react';",
+      "role": "Versions nav"
+    },
+    {
+      "name": "git-commit",
+      "react": "GitCommit",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { GitCommit } from '@phosphor-icons/react';",
+      "role": "Capture version"
+    },
+    {
+      "name": "git-diff",
+      "react": "GitDiff",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { GitDiff } from '@phosphor-icons/react';",
+      "role": "Regression guard suite"
+    },
+    {
+      "name": "graduation-cap",
+      "react": "GraduationCap",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { GraduationCap } from '@phosphor-icons/react';",
+      "role": "Training nav / quick action"
+    },
+    {
+      "name": "heartbeat",
+      "react": "Heartbeat",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { Heartbeat } from '@phosphor-icons/react';",
+      "role": "Dataset Debt nav"
+    },
+    {
+      "name": "list-checks",
+      "react": "ListChecks",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { ListChecks } from '@phosphor-icons/react';",
+      "role": "Suites nav"
+    },
+    {
+      "name": "list-dashes",
+      "react": "ListDashes",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { ListDashes } from '@phosphor-icons/react';",
+      "role": "Output (activity bar)"
+    },
+    {
+      "name": "lock-simple",
+      "react": "LockSimple",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { LockSimple } from '@phosphor-icons/react';",
+      "role": "Locked pipeline phase (Evaluate/Train)"
+    },
+    {
+      "name": "magnifying-glass",
+      "react": "MagnifyingGlass",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { MagnifyingGlass } from '@phosphor-icons/react';",
+      "role": "Search (activity bar + Examples search)"
+    },
+    {
+      "name": "minus",
+      "react": "Minus",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { Minus } from '@phosphor-icons/react';",
+      "role": "Titlebar minimize"
+    },
+    {
+      "name": "moon-stars",
+      "react": "MoonStars",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { MoonStars } from '@phosphor-icons/react';",
+      "role": "Theme toggle (to dark)"
+    },
+    {
+      "name": "pencil-simple-line",
+      "react": "PencilSimpleLine",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { PencilSimpleLine } from '@phosphor-icons/react';",
+      "role": "Writing Studio nav / author action"
+    },
+    {
+      "name": "play",
+      "react": "Play",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { Play } from '@phosphor-icons/react';",
+      "role": "Run (evaluation / rail)"
+    },
+    {
+      "name": "plugs-connected",
+      "react": "PlugsConnected",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { PlugsConnected } from '@phosphor-icons/react';",
+      "role": "Engine status (status bar)"
+    },
+    {
+      "name": "plus",
+      "react": "Plus",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { Plus } from '@phosphor-icons/react';",
+      "role": "Author example / new"
+    },
+    {
+      "name": "plus-circle",
+      "react": "PlusCircle",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { PlusCircle } from '@phosphor-icons/react';",
+      "role": "New Dataset Project (Start Center)"
+    },
+    {
+      "name": "rows",
+      "react": "Rows",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { Rows } from '@phosphor-icons/react';",
+      "role": "Examples nav"
+    },
+    {
+      "name": "scales",
+      "react": "Scales",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { Scales } from '@phosphor-icons/react';",
+      "role": "Preference Review nav"
+    },
+    {
+      "name": "seal-check",
+      "react": "SealCheck",
+      "weights": [
+        "fill"
+      ],
+      "import": "import { SealCheck } from '@phosphor-icons/react';",
+      "role": "Artifact integrity: present"
+    },
+    {
+      "name": "shield-check",
+      "react": "ShieldCheck",
+      "weights": [
+        "regular",
+        "fill"
+      ],
+      "import": "import { ShieldCheck } from '@phosphor-icons/react';",
+      "role": "Run gates button + safety suite"
+    },
+    {
+      "name": "shield-warning",
+      "react": "ShieldWarning",
+      "weights": [
+        "fill"
+      ],
+      "import": "import { ShieldWarning } from '@phosphor-icons/react';",
+      "role": "PII alert (right rail)"
+    },
+    {
+      "name": "shuffle",
+      "react": "Shuffle",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { Shuffle } from '@phosphor-icons/react';",
+      "role": "Generate splits"
+    },
+    {
+      "name": "square",
+      "react": "Square",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { Square } from '@phosphor-icons/react';",
+      "role": "Titlebar maximize"
+    },
+    {
+      "name": "squares-four",
+      "react": "SquaresFour",
+      "weights": [
+        "fill"
+      ],
+      "import": "import { SquaresFour } from '@phosphor-icons/react';",
+      "role": "Studio (activity bar)"
+    },
+    {
+      "name": "thumbs-down",
+      "react": "ThumbsDown",
+      "weights": [
+        "fill"
+      ],
+      "import": "import { ThumbsDown } from '@phosphor-icons/react';",
+      "role": "Preference: rejected"
+    },
+    {
+      "name": "thumbs-up",
+      "react": "ThumbsUp",
+      "weights": [
+        "fill"
+      ],
+      "import": "import { ThumbsUp } from '@phosphor-icons/react';",
+      "role": "Preference: chosen"
+    },
+    {
+      "name": "tray-arrow-down",
+      "react": "TrayArrowDown",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { TrayArrowDown } from '@phosphor-icons/react';",
+      "role": "Import nav + Import button"
+    },
+    {
+      "name": "tree-view",
+      "react": "TreeView",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { TreeView } from '@phosphor-icons/react';",
+      "role": "Explorer (activity bar)"
+    },
+    {
+      "name": "trophy",
+      "react": "Trophy",
+      "weights": [
+        "regular",
+        "fill"
+      ],
+      "import": "import { Trophy } from '@phosphor-icons/react';",
+      "role": "Model Arena nav + standings"
+    },
+    {
+      "name": "warning",
+      "react": "Warning",
+      "weights": [
+        "fill",
+        "regular"
+      ],
+      "import": "import { Warning } from '@phosphor-icons/react';",
+      "role": "Warn severity (quality/debt/gates)"
+    },
+    {
+      "name": "warning-circle",
+      "react": "WarningCircle",
+      "weights": [
+        "fill"
+      ],
+      "import": "import { WarningCircle } from '@phosphor-icons/react';",
+      "role": "Empty-row / moderate flag"
+    },
+    {
+      "name": "warning-diamond",
+      "react": "WarningDiamond",
+      "weights": [
+        "regular"
+      ],
+      "import": "import { WarningDiamond } from '@phosphor-icons/react';",
+      "role": "Problems (activity bar) + open-problems stat"
+    },
+    {
+      "name": "x",
+      "react": "X",
+      "weights": [
+        "bold",
+        "regular"
+      ],
+      "import": "import { X } from '@phosphor-icons/react';",
+      "role": "Titlebar close, tab close, step blocked"
+    },
+    {
+      "name": "x-circle",
+      "react": "XCircle",
+      "weights": [
+        "fill",
+        "regular"
+      ],
+      "import": "import { XCircle } from '@phosphor-icons/react';",
+      "role": "Error/PII/fail status"
+    }
+  ]
+}

@@ -16,6 +16,10 @@ is being built to match this design so it **ports over to Tauri/React close to 1
     **ignore/do not port that runtime**; reimplement each surface in the shell's own components.
   - `README.md` — the authoritative spec (all tokens, every screen, interactions, state shape).
   - `_ds/.../styles.css` — the Nocturne base tokens (accent ramp, spacing, elevation).
+- **[`handoff-v2/`](handoff-v2/)** — the v2 handoff assets: the actual **Phosphor SVG glyphs**
+  (regular/fill/bold), the icon inventory/manifest (`ICONS.md` / `icons.json`), the Nocturne
+  `styles.css` token source, and the full `SPEC.md`. These are the glyphs the Avalonia
+  `Styles/Icons.axaml` inlines and that the future React shell imports via `@phosphor-icons/react`.
 
 ## Design system: Nocturne
 A quiet, compact UI — near-neutral blue-grey grounds, **Inter** throughout, 8px radii, a single
