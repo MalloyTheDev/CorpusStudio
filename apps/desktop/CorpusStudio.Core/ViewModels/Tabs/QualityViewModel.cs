@@ -52,6 +52,10 @@ public sealed class QualityViewModel : ViewModelBase, IQualityViewModel
 
     public ObservableCollection<SyntheticPatternIssue> SyntheticPatternIssues { get; } = [];
 
+    /// <summary>Whether any synthetic-pattern issues were flagged. Drives the Quality screen's
+    /// synthetic-triage section: a green "no issues" card when false, the issue list when true.</summary>
+    public bool HasSyntheticPatternIssues => SyntheticPatternIssues.Count > 0;
+
     public SyntheticPatternIssue? SelectedSyntheticPatternIssue
     {
         get => _selectedSyntheticPatternIssue;
@@ -361,6 +365,8 @@ public sealed class QualityViewModel : ViewModelBase, IQualityViewModel
         {
             QualityTriageSummary = "No synthetic quality issues found.";
         }
+
+        OnPropertyChanged(nameof(HasSyntheticPatternIssues));
     }
 
     private static string FormatSyntheticPatternIssue(SyntheticPatternIssue issue)
@@ -400,6 +406,7 @@ public sealed class QualityViewModel : ViewModelBase, IQualityViewModel
         QualityTriageSummary = "Synthetic quality issues appear here after quality checks run.";
         SyntheticPatternIssues.Clear();
         SelectedSyntheticPatternIssue = null;
+        OnPropertyChanged(nameof(HasSyntheticPatternIssues));
         QualityHistorySummary = "Quality history appears after quality checks run.";
     }
 

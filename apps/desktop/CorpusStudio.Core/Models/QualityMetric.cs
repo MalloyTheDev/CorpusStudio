@@ -14,6 +14,17 @@ public sealed class QualityMetric
     public string StatusColor { get; init; } = "#64748B";
     public string StatusIcon { get; init; } = "•";
 
+    /// <summary>Short uppercase badge for the Quality-screen metric card (Avalonia fidelity slice B),
+    /// derived from the severity so a nonzero PII/secret reads HIGH, other issues WARN, a clean count
+    /// OK, and an informational count INFO — mirrors the neutral/green/amber/red convention.</summary>
+    public string SeverityBadge => Severity switch
+    {
+        "problem" => "HIGH",
+        "warn" => "WARN",
+        "ok" => "OK",
+        _ => "INFO",
+    };
+
     /// <summary>A neutral informational metric (e.g. the example count) — never an issue.</summary>
     public static QualityMetric Info(string label, int value) => new()
     {
