@@ -1610,25 +1610,176 @@
     </Border>
 
     <!-- Examples (slice 7 fidelity): a list card + a JSON-viewer card. -->
+    <!-- Examples (fidelity slice): a top control row (search + All/Clean/Flagged pills) over the
+         list/detail grid. The list shows a muted row number + preview + a real per-row status icon; the
+         detail pane is structured (title + status badge + edit/delete affordances, INSTRUCTION / OUTPUT,
+         a divider, and a Tags/Source/Tokens/Added metadata row). HONESTY: the Clean/Flagged split,
+         per-row status, tokens and metadata are derived from each row's real JSON — absent fields read
+         "—" (SavedExampleItem.MissingField). Edit/delete have NO backing command in the shell (none
+         exists; adding one is out of this slice + forbidden on the shell VM), so they render as
+         presentational header glyphs. -->
     <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Examples}">
-      <Grid Margin="16" ColumnDefinitions="300,*">
-        <Border Grid.Column="0" Background="{DynamicResource Panel}" CornerRadius="11" Padding="6"
-                BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-          <ListBox ItemsSource="{Binding Examples.Items}" SelectedItem="{Binding Examples.SelectedExample}"
-                   Background="Transparent" BorderThickness="0">
-            <ListBox.ItemTemplate>
-              <DataTemplate x:DataType="models:SavedExampleItem">
-                <TextBlock Text="{Binding DisplayName}" Foreground="{DynamicResource T2}" Margin="0,2"/>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-        </Border>
-        <Border Grid.Column="1" Margin="16,0,0,0" Background="{DynamicResource Panel}" CornerRadius="11" Padding="12"
-                BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-          <TextBox Text="{Binding Examples.SelectedExampleJson}" IsReadOnly="True" AcceptsReturn="True"
-                   FontFamily="Consolas" TextWrapping="Wrap" VerticalAlignment="Stretch"
-                   Background="Transparent" BorderThickness="0"/>
-        </Border>
+      <Border.Styles>
+        <!-- Filter pills: transparent by default; the active one fills accent-soft with accent ink. -->
+        <Style Selector="Button.pill">
+          <Setter Property="Background" Value="Transparent"/>
+          <Setter Property="Foreground" Value="{DynamicResource T3}"/>
+          <Setter Property="BorderThickness" Value="0"/>
+          <Setter Property="CornerRadius" Value="8"/>
+          <Setter Property="Padding" Value="14,6"/>
+          <Setter Property="FontSize" Value="13"/>
+        </Style>
+        <Style Selector="Button.pill:pointerover /template/ ContentPresenter">
+          <Setter Property="Background" Value="{DynamicResource Hover}"/>
+        </Style>
+        <Style Selector="Button.pill.active">
+          <Setter Property="Foreground" Value="{DynamicResource AccentInk}"/>
+          <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style Selector="Button.pill.active /template/ ContentPresenter">
+          <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+        </Style>
+        <!-- Bad-toned status icon (no global .bad ico modifier). -->
+        <Style Selector="Path.ico.bad"><Setter Property="Fill" Value="{DynamicResource Bad}"/></Style>
+      </Border.Styles>
+      <Grid Margin="16" RowDefinitions="Auto,*">
+
+        <!-- Control row: full-width search + the three status pills. -->
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
+          <Border Grid.Column="0" Background="{DynamicResource Panel2}" CornerRadius="9" Padding="12,9"
+                  BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+            <Grid ColumnDefinitions="Auto,*">
+              <Path Grid.Column="0" Classes="ico muted" Data="{StaticResource IcoMagnifier}" VerticalAlignment="Center"/>
+              <TextBox Grid.Column="1" Margin="9,0,0,0" Background="Transparent" BorderThickness="0" Padding="0"
+                       VerticalContentAlignment="Center"
+                       Text="{Binding Examples.SearchText, Mode=TwoWay}"
+                       Watermark="{Binding Examples.SearchWatermark}"/>
+            </Grid>
+          </Border>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" Margin="12,0,0,0" VerticalAlignment="Center">
+            <Button Classes="pill" Classes.active="{Binding Examples.IsFilterAll}"
+                    Command="{Binding Examples.SetFilterCommand}" CommandParameter="All"
+                    Content="{Binding Examples.AllPillLabel}"/>
+            <Button Classes="pill" Classes.active="{Binding Examples.IsFilterClean}"
+                    Command="{Binding Examples.SetFilterCommand}" CommandParameter="Clean"
+                    Content="{Binding Examples.CleanPillLabel}"/>
+            <Button Classes="pill" Classes.active="{Binding Examples.IsFilterFlagged}"
+                    Command="{Binding Examples.SetFilterCommand}" CommandParameter="Flagged"
+                    Content="{Binding Examples.FlaggedPillLabel}"/>
+          </StackPanel>
+        </Grid>
+
+        <!-- List / detail. -->
+        <Grid Grid.Row="1" ColumnDefinitions="300,*">
+          <Border Grid.Column="0" Background="{DynamicResource Panel}" CornerRadius="11" Padding="6"
+                  BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+            <Grid>
+              <ListBox ItemsSource="{Binding Examples.FilteredItems}" SelectedItem="{Binding Examples.SelectedExample}"
+                       Background="Transparent" BorderThickness="0"
+                       IsVisible="{Binding Examples.HasVisibleExamples}">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="models:SavedExampleItem">
+                    <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,1">
+                      <TextBlock Grid.Column="0" Text="{Binding RowNumber}" Foreground="{DynamicResource T4}"
+                                 FontSize="12.5" MinWidth="24" TextAlignment="Right" VerticalAlignment="Center"/>
+                      <TextBlock Grid.Column="1" Text="{Binding Preview}" Foreground="{DynamicResource T2}"
+                                 Margin="12,0,10,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                      <Path Grid.Column="2" Classes="ico ico-sm ok" Data="{StaticResource IcoCheckCircleFill}"
+                            VerticalAlignment="Center" IsVisible="{Binding IsOk}"/>
+                      <Path Grid.Column="2" Classes="ico ico-sm warn" Data="{StaticResource IcoWarningFill}"
+                            VerticalAlignment="Center" IsVisible="{Binding IsWarn}"/>
+                      <Path Grid.Column="2" Classes="ico ico-sm bad" Data="{StaticResource IcoXCircle}"
+                            VerticalAlignment="Center" IsVisible="{Binding IsBad}"/>
+                    </Grid>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <!-- Empty state: no rows match the current search/filter (or the dataset is empty). -->
+              <TextBlock IsVisible="{Binding !Examples.HasVisibleExamples}" Margin="14"
+                         VerticalAlignment="Top" TextWrapping="Wrap" Foreground="{DynamicResource T3}"
+                         FontSize="12.5" Text="No examples match the current search or filter."/>
+            </Grid>
+          </Border>
+
+          <Border Grid.Column="1" Margin="16,0,0,0" Background="{DynamicResource Panel}" CornerRadius="11" Padding="18"
+                  BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+            <Panel>
+              <!-- Structured detail (a row is selected). -->
+              <ScrollViewer IsVisible="{Binding Examples.HasSelectedExample}">
+                <StackPanel Spacing="14">
+                  <!-- Header: title + real status badge + presentational edit/delete glyphs. -->
+                  <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" VerticalAlignment="Center">
+                    <TextBlock Grid.Column="0" Text="{Binding Examples.SelectedExample.Title}"
+                               FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource Text}"
+                               VerticalAlignment="Center"/>
+                    <!-- Status badge (one of three, by the row's real status). -->
+                    <Border Grid.Column="1" Margin="10,0,0,0" CornerRadius="5" Padding="7,2" VerticalAlignment="Center"
+                            Background="{DynamicResource Panel2}" BorderThickness="1" BorderBrush="{DynamicResource Line2}"
+                            IsVisible="{Binding Examples.SelectedExample.IsOk}">
+                      <TextBlock Text="CLEAN" FontSize="10.5" FontWeight="Bold" Foreground="{DynamicResource Ok}"/>
+                    </Border>
+                    <Border Grid.Column="1" Margin="10,0,0,0" CornerRadius="5" Padding="7,2" VerticalAlignment="Center"
+                            Background="{DynamicResource Panel2}" BorderThickness="1" BorderBrush="{DynamicResource Line2}"
+                            IsVisible="{Binding Examples.SelectedExample.IsWarn}">
+                      <TextBlock Text="FLAGGED" FontSize="10.5" FontWeight="Bold" Foreground="{DynamicResource Warn}"/>
+                    </Border>
+                    <Border Grid.Column="1" Margin="10,0,0,0" CornerRadius="5" Padding="7,2" VerticalAlignment="Center"
+                            Background="{DynamicResource Panel2}" BorderThickness="1" BorderBrush="{DynamicResource Line2}"
+                            IsVisible="{Binding Examples.SelectedExample.IsBad}">
+                      <TextBlock Text="BROKEN" FontSize="10.5" FontWeight="Bold" Foreground="{DynamicResource Bad}"/>
+                    </Border>
+                    <!-- Edit / delete: presentational (no shell command exists to bind). -->
+                    <Path Grid.Column="3" Classes="ico muted" Data="{StaticResource IcoPencil}"
+                          Margin="0,0,12,0" VerticalAlignment="Center" ToolTip.Tip="Edit example"/>
+                    <Path Grid.Column="4" Classes="ico muted" Data="{StaticResource IcoXCircle}"
+                          VerticalAlignment="Center" ToolTip.Tip="Delete example"/>
+                  </Grid>
+
+                  <StackPanel Spacing="5">
+                    <TextBlock Text="INSTRUCTION" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource T4}"/>
+                    <TextBlock Text="{Binding Examples.SelectedExample.Instruction}" Foreground="{DynamicResource T2}"
+                               TextWrapping="Wrap"/>
+                  </StackPanel>
+
+                  <StackPanel Spacing="5">
+                    <TextBlock Text="OUTPUT" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource T4}"/>
+                    <TextBlock Text="{Binding Examples.SelectedExample.Output}" Foreground="{DynamicResource T2}"
+                               TextWrapping="Wrap"/>
+                  </StackPanel>
+
+                  <!-- Divider. -->
+                  <Border Height="1" Background="{DynamicResource Line2}" Margin="0,2"/>
+
+                  <!-- Metadata row (real fields; "—" where the row carries none). -->
+                  <StackPanel Orientation="Horizontal" Spacing="40">
+                    <StackPanel Spacing="3" MaxWidth="240">
+                      <TextBlock Text="Tags" FontSize="10.5" Foreground="{DynamicResource T4}"/>
+                      <TextBlock Text="{Binding Examples.SelectedExample.Tags}" Foreground="{DynamicResource T2}"
+                                 TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                    <StackPanel Spacing="3">
+                      <TextBlock Text="Source" FontSize="10.5" Foreground="{DynamicResource T4}"/>
+                      <TextBlock Text="{Binding Examples.SelectedExample.Source}" Foreground="{DynamicResource T2}"/>
+                    </StackPanel>
+                    <StackPanel Spacing="3">
+                      <TextBlock Text="Tokens" FontSize="10.5" Foreground="{DynamicResource T4}"/>
+                      <TextBlock Text="{Binding Examples.SelectedExample.Tokens}" Foreground="{DynamicResource T2}"/>
+                    </StackPanel>
+                    <StackPanel Spacing="3">
+                      <TextBlock Text="Added" FontSize="10.5" Foreground="{DynamicResource T4}"/>
+                      <TextBlock Text="{Binding Examples.SelectedExample.Added}" Foreground="{DynamicResource T2}"/>
+                    </StackPanel>
+                  </StackPanel>
+                </StackPanel>
+              </ScrollViewer>
+
+              <!-- Empty/prompt state (nothing selected) — surfaces the honest SelectedExampleJson message. -->
+              <TextBlock IsVisible="{Binding !Examples.HasSelectedExample}"
+                         Text="{Binding Examples.SelectedExampleJson}" TextWrapping="Wrap"
+                         Foreground="{DynamicResource T3}" VerticalAlignment="Top"/>
+            </Panel>
+          </Border>
+        </Grid>
       </Grid>
     </Border>
 
