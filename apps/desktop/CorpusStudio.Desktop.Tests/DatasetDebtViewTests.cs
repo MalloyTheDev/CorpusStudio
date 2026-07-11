@@ -50,6 +50,41 @@ public sealed class DatasetDebtViewTests
         Assert.NotEqual("#16A34A", DebtReport.GradeColor("N/A"));  // never green
     }
 
+    // --- verdict headline (hero) ------------------------------------------
+
+    [Theory]
+    [InlineData("A", "Ready to train")]
+    [InlineData("B", "Ready to train")]
+    [InlineData("C", "Not train-ready — fix high-severity items first")]
+    [InlineData("D", "Not train-ready — fix high-severity items first")]
+    [InlineData("F", "Not train-ready — fix high-severity items first")]
+    [InlineData("N/A", "Run a debt check to grade this dataset")]
+    [InlineData("—", "Run a debt check to grade this dataset")]
+    [InlineData("", "Run a debt check to grade this dataset")]
+    public void VerdictHeadline_FollowsTheRealGrade(string grade, string expected)
+    {
+        // The hero headline is derived from the grade, never hardcoded: passing grades read ready,
+        // C/D/F read not-ready, and any ungraded/unknown state gets the neutral prompt — so the
+        // verdict can't claim (or alarm) a train-readiness the engine hasn't produced.
+        Assert.Equal(expected, DebtReport.VerdictHeadline(grade));
+    }
+
+    [Fact]
+    public void DebtVerdict_TracksGradeThroughTheViewModelLifecycle()
+    {
+        var vm = new MainWindowViewModel();
+        Assert.Equal("Run a debt check to grade this dataset", vm.Debt.DebtVerdict);  // fresh "—"
+
+        vm.Debt.ApplyDebtReport(Report("D", true, Item()));
+        Assert.Equal("Not train-ready — fix high-severity items first", vm.Debt.DebtVerdict);
+
+        vm.Debt.ApplyDebtReport(Report("A", true));
+        Assert.Equal("Ready to train", vm.Debt.DebtVerdict);
+
+        vm.Debt.SetDebtError("boom");  // failed check collapses to neutral "—"
+        Assert.Equal("Run a debt check to grade this dataset", vm.Debt.DebtVerdict);
+    }
+
     [Fact]
     public void DebtDisplayItem_BadgeAndMeasure()
     {
