@@ -20,6 +20,109 @@ public sealed class EngineLogEntry
     public bool HasDetail => !string.IsNullOrWhiteSpace(Detail);
     public string DurationLabel => $"{DurationMs} ms";
 
+    // ---- Dashboard "Recent Activity" projection ---------------------------------------------------
+    // Pure, testable helpers that let the Dashboard feed render a real engine invocation without a
+    // separate activity model. The glyph key is a Nocturne icon resource name (resolved to a Path
+    // geometry by the view's ActivityGlyphConverter); the message and meta are human renderings of the
+    // entry's own fields — nothing is synthesised.
+
+    /// <summary>Nocturne icon resource key for this entry's leading glyph, chosen from the real verb
+    /// (and status). See <see cref="GlyphKeyFor"/>.</summary>
+    public string ActivityGlyphKey => GlyphKeyFor(Command, Status);
+
+    /// <summary>One-line human summary of the invocation for the activity feed. See <see cref="MessageFor"/>.</summary>
+    public string ActivityMessage => MessageFor(Command, Status);
+
+    /// <summary>Right-aligned "when" for the activity row: the entry's real timestamp and (if measured)
+    /// its duration — never a fabricated relative time.</summary>
+    public string ActivityMeta
+    {
+        get
+        {
+            var hasTime = !string.IsNullOrWhiteSpace(Timestamp);
+            if (hasTime && DurationMs > 0)
+            {
+                return $"{Timestamp} · {DurationLabel}";
+            }
+
+            if (hasTime)
+            {
+                return Timestamp;
+            }
+
+            return DurationMs > 0 ? DurationLabel : string.Empty;
+        }
+    }
+
+    /// <summary>Map a real engine verb + outcome to a Phosphor glyph resource key: a failed command
+    /// surfaces a warning; otherwise the verb picks a distinctive glyph (quality → broom, import →
+    /// import, capture/version → git-commit, gate/validate → check-circle); anything else is the
+    /// neutral list glyph. All keys exist in the Avalonia Icons.axaml resource set.</summary>
+    public static string GlyphKeyFor(string? command, string? status)
+    {
+        if ((status ?? string.Empty).Equals("error", StringComparison.OrdinalIgnoreCase))
+        {
+            return "IcoWarningFill";
+        }
+
+        var verb = (command ?? string.Empty).ToLowerInvariant();
+        if (verb.Contains("quality"))
+        {
+            return "IcoBroom";
+        }
+
+        if (verb.Contains("import"))
+        {
+            return "IcoImport";
+        }
+
+        if (verb.Contains("capture") || verb.Contains("version") || verb.Contains("commit") || verb.Contains("snapshot"))
+        {
+            return "IcoGitCommit";
+        }
+
+        if (verb.Contains("gate") || verb.Contains("validate"))
+        {
+            return "IcoCheckCircleFill";
+        }
+
+        return "IcoListDashes";
+    }
+
+    /// <summary>Human-readable activity line for a real verb, with a failure/cancellation outcome
+    /// appended. An unrecognised verb is shown verbatim (never a fabricated label).</summary>
+    public static string MessageFor(string? command, string? status)
+    {
+        var action = FriendlyAction(command);
+        return (status ?? string.Empty).ToLowerInvariant() switch
+        {
+            "error" => action + " — failed",
+            "cancelled" => action + " — cancelled",
+            _ => action,
+        };
+    }
+
+    private static string FriendlyAction(string? command)
+    {
+        var verb = (command ?? string.Empty).ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(verb))
+        {
+            return "Engine command";
+        }
+
+        if (verb.Contains("quality")) return "Ran quality check";
+        if (verb.Contains("import")) return "Imported rows";
+        if (verb.Contains("gate")) return "Ran gates";
+        if (verb.Contains("validate")) return "Validated draft";
+        if (verb.Contains("split")) return "Generated splits";
+        if (verb.Contains("export")) return "Exported dataset";
+        if (verb.Contains("capture") || verb.Contains("version") || verb.Contains("commit")) return "Captured version";
+        if (verb.Contains("eval")) return "Ran evaluation";
+        if (verb.Contains("assist")) return "Ran AI assist";
+        if (verb.Contains("train")) return "Training run";
+        return command!.Trim();
+    }
+
     public static string StatusIconFor(string status) => (status ?? string.Empty).ToLowerInvariant() switch
     {
         "ok" => "✓",
