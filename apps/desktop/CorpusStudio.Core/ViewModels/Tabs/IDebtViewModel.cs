@@ -17,6 +17,9 @@ public interface IDebtViewModel : INotifyPropertyChanged
     string DebtSummary { get; }
     bool DebtStale { get; }
 
+    /// <summary>Whether a real letter grade has been computed (not the neutral "—" placeholder).</summary>
+    bool HasGrade { get; }
+
     /// <summary>Show a fresh debt result (grade + ranked ledger + honest summary).</summary>
     void ApplyDebtReport(DebtReport report);
 

@@ -22,8 +22,18 @@ public sealed class DebtViewModel : ViewModelBase, IDebtViewModel
     public string DebtGrade
     {
         get => _debtGrade;
-        private set => SetField(ref _debtGrade, value);
+        private set
+        {
+            if (SetField(ref _debtGrade, value))
+            {
+                OnPropertyChanged(nameof(HasGrade));
+            }
+        }
     }
+
+    /// <summary>Whether a real letter grade has been computed (not the neutral "—" placeholder).
+    /// Drives the sidebar nav-row grade pill so it stays hidden until a debt check has run.</summary>
+    public bool HasGrade => _debtGrade != "—";
 
     public string DebtGradeColor
     {

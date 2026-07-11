@@ -105,6 +105,25 @@ public sealed class DatasetDebtViewTests
         Assert.DoesNotContain("no debt", vm.Debt.DebtSummary, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void HasGrade_OnlyTrueOnceGraded_DrivesTheNavPill()
+    {
+        // The sidebar nav-row grade pill binds Debt.HasGrade so it stays hidden until a real letter
+        // grade exists — never a pill around the neutral "—" placeholder, and it collapses back when
+        // the grade is invalidated or a check fails (honesty: no confident badge without a result).
+        var vm = new MainWindowViewModel();
+        Assert.False(vm.Debt.HasGrade);                       // fresh: neutral "—"
+
+        vm.Debt.ApplyDebtReport(Report("D", true, Item()));
+        Assert.True(vm.Debt.HasGrade);                        // graded
+
+        vm.Debt.ApplyDebtReport(Report("N/A", false));        // no rows → neutral N/A is still a grade
+        Assert.True(vm.Debt.HasGrade);
+
+        vm.Debt.SetDebtError("boom");                         // failed check → collapses to "—"
+        Assert.False(vm.Debt.HasGrade);
+    }
+
     // --- the non-negotiable honesty rule: invalidate on dataset change -----
 
     [Fact]
