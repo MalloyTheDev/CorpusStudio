@@ -189,62 +189,252 @@
           </Grid>
         </ScrollViewer>
 
-        <!-- Files / Universal Explorer mode (IsVisible←IsFiles): the hierarchical file TREE +
-             open-document tabs + the active document. Proves the TreeView / TreeDataTemplate shape. -->
-        <Grid IsVisible="{Binding IsFiles}" ColumnDefinitions="300,*" Margin="12">
-          <DockPanel Grid.Column="0">
-            <TextBlock DockPanel.Dock="Top" Text="{Binding Explorer.WorkspaceName}"
-                       FontWeight="Bold" Margin="0,0,0,6"/>
-            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,6">
-              <Button Content="New File" Command="{Binding Explorer.NewFileCommand}"/>
-              <Button Content="New Folder" Command="{Binding Explorer.NewFolderCommand}"/>
-              <Button Content="Refresh" Command="{Binding Explorer.RefreshTreeCommand}"/>
-              <Button Content="Collapse" Command="{Binding Explorer.CollapseAllCommand}"/>
-            </StackPanel>
-            <TextBlock DockPanel.Dock="Bottom" Text="{Binding Explorer.ExplorerStatus}"
-                       Foreground="{DynamicResource AppTextMuted}" FontSize="11" Margin="0,6,0,0"/>
-            <!-- ExplorerTree is named so the per-node context menu (whose DataContext is the node) can
-                 reach the shell VM's file-op commands via an element-name compiled binding (#223). -->
-            <TreeView x:Name="ExplorerTree" ItemsSource="{Binding Explorer.RootNode.Children}">
-              <TreeView.ItemTemplate>
-                <TreeDataTemplate x:DataType="models:WorkspaceTreeNode" ItemsSource="{Binding Children}">
-                  <StackPanel Orientation="Horizontal" Spacing="6" Height="20">
-                    <StackPanel.ContextMenu>
-                      <ContextMenu>
-                        <MenuItem Header="Rename…"
-                                  Command="{Binding #ExplorerTree.((vm:MainWindowViewModel)DataContext).Explorer.RenameNodeCommand}"
-                                  CommandParameter="{Binding}"/>
-                        <Separator/>
-                        <MenuItem Header="Delete"
-                                  Command="{Binding #ExplorerTree.((vm:MainWindowViewModel)DataContext).Explorer.DeleteNodeCommand}"
-                                  CommandParameter="{Binding}"/>
-                      </ContextMenu>
-                    </StackPanel.ContextMenu>
-                    <TextBlock Text="🗀" IsVisible="{Binding IsDirectory}" VerticalAlignment="Center"/>
-                    <Border Background="{DynamicResource AppChipBg}" CornerRadius="3" Padding="3,0" VerticalAlignment="Center"
-                            IsVisible="{Binding !IsDirectory}">
-                      <TextBlock Text="{Binding ChipLabel}" FontSize="8" FontWeight="Bold"
-                                 Foreground="{DynamicResource AppChipText}" VerticalAlignment="Center"/>
+        <!-- Files / Universal Explorer mode (IsVisible←IsFiles): VS-Code-style workspace — a file TREE
+             sidebar + open-document tabs + a read-only code viewer with a line-number gutter. Every
+             element binds real VM state (RootNode / OpenDocuments / ActiveDocument.TextContent); the
+             gutter is computed from the actual text and nothing is synthesized. Selecting a tree node
+             opens it (code-behind → Explorer.OpenNodeAsync); the tab X closes it (Explorer.CloseDocument),
+             both mirroring the WPF head. -->
+        <Grid IsVisible="{Binding IsFiles}" ColumnDefinitions="272,*">
+          <Grid.Resources>
+            <conv:TextToLineNumbersConverter x:Key="LineNos"/>
+            <conv:ProjectInitialsConverter x:Key="Initials"/>
+            <!-- Soft-amber banner fill. These soft tokens are declared per-panel across MainWindow
+                 (not in App.axaml), so scope one here too. Semi-transparent → reads on both themes. -->
+            <SolidColorBrush x:Key="WarnSoft" Color="#29d9a35f"/>
+          </Grid.Resources>
+          <Grid.Styles>
+            <Style Selector="Button.exptool">
+              <Setter Property="Background" Value="Transparent"/>
+              <Setter Property="BorderThickness" Value="0"/>
+              <Setter Property="Width" Value="27"/>
+              <Setter Property="Height" Value="25"/>
+              <Setter Property="Padding" Value="0"/>
+              <Setter Property="CornerRadius" Value="6"/>
+            </Style>
+            <Style Selector="Button.exptool:pointerover /template/ ContentPresenter">
+              <Setter Property="Background" Value="{DynamicResource Panel}"/>
+            </Style>
+            <Style Selector="TreeViewItem">
+              <Setter Property="Padding" Value="2,0"/>
+              <Setter Property="MinHeight" Value="26"/>
+              <!-- Reflect the node's expansion so RefreshTree/CollapseAll (which set node.IsExpanded)
+                   actually drive the visual tree. ReflectionBinding: a Style setter has no x:DataType,
+                   so a compiled binding would resolve against the Window VM instead of the node. -->
+              <Setter Property="IsExpanded" Value="{ReflectionBinding IsExpanded, Mode=TwoWay}"/>
+            </Style>
+            <Style Selector="TreeViewItem:selected /template/ Border#PART_Header">
+              <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+              <Setter Property="CornerRadius" Value="6"/>
+            </Style>
+            <Style Selector="TextBlock.gutter">
+              <Setter Property="FontFamily" Value="Cascadia Code, Consolas, Menlo, monospace"/>
+              <Setter Property="FontSize" Value="12.5"/>
+              <Setter Property="LineHeight" Value="20"/>
+              <Setter Property="TextAlignment" Value="Right"/>
+              <Setter Property="Foreground" Value="{DynamicResource T4}"/>
+              <Setter Property="Margin" Value="16,0,14,0"/>
+              <Setter Property="MinWidth" Value="26"/>
+            </Style>
+            <Style Selector="TextBlock.code">
+              <Setter Property="FontFamily" Value="Cascadia Code, Consolas, Menlo, monospace"/>
+              <Setter Property="FontSize" Value="12.5"/>
+              <Setter Property="LineHeight" Value="20"/>
+              <Setter Property="Foreground" Value="{DynamicResource T2}"/>
+              <Setter Property="TextWrapping" Value="NoWrap"/>
+            </Style>
+          </Grid.Styles>
+
+          <!-- ── Explorer sidebar ───────────────────────────────────────────── -->
+          <Border Grid.Column="0" Background="{DynamicResource Chrome}" BorderBrush="{DynamicResource Line}"
+                  BorderThickness="0,0,1,0">
+            <DockPanel Margin="0">
+              <!-- Header: EXPLORER + toolbar (new file / new folder / refresh / collapse) -->
+              <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="14,12,8,8">
+                <TextBlock Grid.Column="0" Text="EXPLORER" FontSize="11" FontWeight="SemiBold"
+                           Foreground="{DynamicResource T4}" VerticalAlignment="Center"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="1">
+                  <Button Classes="exptool" Command="{Binding Explorer.NewFileCommand}" ToolTip.Tip="New file">
+                    <Path Classes="ico ico-sm" Data="{StaticResource IcoFileArrowUp}"/>
+                  </Button>
+                  <Button Classes="exptool" Command="{Binding Explorer.NewFolderCommand}" ToolTip.Tip="New folder">
+                    <Path Classes="ico ico-sm" Data="{StaticResource IcoFolderOpen}"/>
+                  </Button>
+                  <Button Classes="exptool" Command="{Binding Explorer.RefreshTreeCommand}" ToolTip.Tip="Refresh">
+                    <Path Classes="ico ico-sm" Data="{StaticResource IcoRefresh}"/>
+                  </Button>
+                  <Button Classes="exptool" Command="{Binding Explorer.CollapseAllCommand}" ToolTip.Tip="Collapse all">
+                    <Path Classes="ico ico-sm" Data="{StaticResource IcoListDashes}"/>
+                  </Button>
+                </StackPanel>
+              </Grid>
+
+              <!-- Status line pinned to the bottom of the sidebar -->
+              <TextBlock DockPanel.Dock="Bottom" Text="{Binding Explorer.ExplorerStatus}"
+                         Foreground="{DynamicResource T4}" FontSize="11" Margin="16,8,12,12"
+                         TextTrimming="CharacterEllipsis"/>
+
+              <!-- No-workspace hint -->
+              <TextBlock DockPanel.Dock="Top" IsVisible="{Binding !Explorer.HasWorkspace}"
+                         Text="No workspace open. Open a project from the Start Center."
+                         Foreground="{DynamicResource T3}" FontSize="12" TextWrapping="Wrap" Margin="16,8,12,0"/>
+
+              <!-- Workspace root row + tree -->
+              <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                <StackPanel IsVisible="{Binding Explorer.HasWorkspace}" Margin="6,2,6,0">
+                  <StackPanel Orientation="Horizontal" Spacing="8" Margin="8,2,0,6">
+                    <Border Width="20" Height="20" CornerRadius="5" Background="{DynamicResource Accent}"
+                            VerticalAlignment="Center">
+                      <TextBlock Text="{Binding Explorer.WorkspaceName, Converter={StaticResource Initials}}"
+                                 Foreground="White" FontSize="10" FontWeight="Bold"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
-                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
-                    <Ellipse Width="6" Height="6" Fill="{DynamicResource Warn}" VerticalAlignment="Center"
-                             IsVisible="{Binding IsGeneratedArtifact}"/>
+                    <TextBlock Text="{Binding Explorer.WorkspaceName}" FontWeight="SemiBold"
+                               Foreground="{DynamicResource Text}" VerticalAlignment="Center"/>
                   </StackPanel>
-                </TreeDataTemplate>
-              </TreeView.ItemTemplate>
-            </TreeView>
-          </DockPanel>
-          <DockPanel Grid.Column="1" Margin="12,0,0,0">
-            <ListBox DockPanel.Dock="Top" ItemsSource="{Binding Explorer.OpenDocuments}"
-                     SelectedItem="{Binding Explorer.ActiveDocument}" MaxHeight="90">
-              <ListBox.ItemTemplate>
-                <DataTemplate x:DataType="models:OpenWorkspaceDocument">
-                  <TextBlock Text="{Binding DisplayName}" Margin="0,1"/>
-                </DataTemplate>
-              </ListBox.ItemTemplate>
-            </ListBox>
-            <TextBox IsReadOnly="True" AcceptsReturn="True" Margin="0,8,0,0"
-                     FontFamily="Consolas" TextWrapping="Wrap" Text="{Binding Explorer.ActiveRelPath}"/>
+
+                  <!-- ExplorerTree is named so the per-node context menu (whose DataContext is the node)
+                       can reach the shell VM's file-op commands via an element-name compiled binding (#223). -->
+                  <TreeView x:Name="ExplorerTree" ItemsSource="{Binding Explorer.RootNode.Children}"
+                            SelectionChanged="ExplorerTree_SelectionChanged" Background="Transparent">
+                    <TreeView.ItemTemplate>
+                      <TreeDataTemplate x:DataType="models:WorkspaceTreeNode" ItemsSource="{Binding Children}">
+                        <StackPanel Orientation="Horizontal" Spacing="8" Height="24">
+                          <StackPanel.ContextMenu>
+                            <ContextMenu>
+                              <MenuItem Header="Rename…"
+                                        Command="{Binding #ExplorerTree.((vm:MainWindowViewModel)DataContext).Explorer.RenameNodeCommand}"
+                                        CommandParameter="{Binding}"/>
+                              <Separator/>
+                              <MenuItem Header="Delete"
+                                        Command="{Binding #ExplorerTree.((vm:MainWindowViewModel)DataContext).Explorer.DeleteNodeCommand}"
+                                        CommandParameter="{Binding}"/>
+                            </ContextMenu>
+                          </StackPanel.ContextMenu>
+                          <!-- Folder glyph for directories -->
+                          <Path Classes="ico ico-sm muted" Data="{StaticResource IcoFolder}" VerticalAlignment="Center"
+                                IsVisible="{Binding IsDirectory}"/>
+                          <!-- Colored type chip for files (JSONL / JSON / MD …) -->
+                          <Border Background="{DynamicResource AccentSoft}" CornerRadius="4" Padding="4,1"
+                                  VerticalAlignment="Center" IsVisible="{Binding !IsDirectory}" MinWidth="30">
+                            <TextBlock Text="{Binding ChipLabel}" FontSize="8.5" FontWeight="Bold"
+                                       Foreground="{DynamicResource AccentInk}" HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"/>
+                          </Border>
+                          <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                     Foreground="{DynamicResource T2}"/>
+                          <!-- Generated-artifact marker (honest: derived from the tree node) -->
+                          <Ellipse Width="6" Height="6" Fill="{DynamicResource Warn}" VerticalAlignment="Center"
+                                   IsVisible="{Binding IsGeneratedArtifact}"/>
+                        </StackPanel>
+                      </TreeDataTemplate>
+                    </TreeView.ItemTemplate>
+                  </TreeView>
+                </StackPanel>
+              </ScrollViewer>
+            </DockPanel>
+          </Border>
+
+          <!-- ── Editor pane ────────────────────────────────────────────────── -->
+          <DockPanel Grid.Column="1" Background="{DynamicResource Win}">
+            <!-- Open-document tab strip -->
+            <Border DockPanel.Dock="Top" Background="{DynamicResource Chrome}" BorderBrush="{DynamicResource Line}"
+                    BorderThickness="0,0,0,1" MinHeight="38">
+              <ListBox ItemsSource="{Binding Explorer.OpenDocuments}" SelectedItem="{Binding Explorer.ActiveDocument}"
+                       Background="Transparent" BorderThickness="0" Padding="0">
+                <ListBox.ItemsPanel>
+                  <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+                <ListBox.Styles>
+                  <Style Selector="ListBoxItem">
+                    <Setter Property="Padding" Value="0"/>
+                    <Setter Property="Margin" Value="0"/>
+                  </Style>
+                  <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                    <Setter Property="Background" Value="Transparent"/>
+                  </Style>
+                  <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+                    <Setter Property="Background" Value="Transparent"/>
+                  </Style>
+                  <Style Selector="ListBoxItem:selected Border.doctab">
+                    <Setter Property="Background" Value="{DynamicResource Win}"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                  </Style>
+                </ListBox.Styles>
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="models:OpenWorkspaceDocument">
+                    <Border Classes="doctab" Background="Transparent" BorderBrush="Transparent"
+                            BorderThickness="0,2,0,0" Padding="12,0,8,0" Height="37">
+                      <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                        <Path Classes="ico ico-sm accent" Data="{StaticResource IcoCode}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding DisplayName}" Foreground="{DynamicResource Text}"
+                                   VerticalAlignment="Center" FontSize="12.5"/>
+                        <!-- Dirty marker -->
+                        <Ellipse Width="6" Height="6" Fill="{DynamicResource T3}" VerticalAlignment="Center"
+                                 IsVisible="{Binding IsDirty}"/>
+                        <!-- Close (code-behind: confirm-if-dirty → CloseDocument) -->
+                        <Button Classes="exptool" Width="20" Height="20" Click="DocTabClose_Click"
+                                ToolTip.Tip="Close">
+                          <Path Classes="ico ico-sm muted" Data="{StaticResource IcoX}" Width="11" Height="11"/>
+                        </Button>
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Border>
+
+            <!-- Examples.jsonl caution banner (real: Explorer.IsExamplesFile) -->
+            <Border DockPanel.Dock="Top" Background="{DynamicResource WarnSoft}" BorderBrush="{DynamicResource Warn}"
+                    BorderThickness="3,0,0,0" Padding="14,10" IsVisible="{Binding Explorer.IsExamplesFile}">
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <Path Classes="ico ico-sm warn" Data="{StaticResource IcoWarningFill}" VerticalAlignment="Center"/>
+                <TextBlock Foreground="{DynamicResource Warn}" FontSize="12.5" VerticalAlignment="Center"
+                           TextWrapping="Wrap"
+                           Text="This is the dataset's single source of rows. The desktop is its only writer — use Writing Studio / Import for row-level changes."/>
+              </StackPanel>
+            </Border>
+
+            <!-- Editor body: empty / text / image / binary states -->
+            <Panel>
+              <!-- Empty state -->
+              <StackPanel IsVisible="{Binding Explorer.IsNoDocument}" HorizontalAlignment="Center"
+                          VerticalAlignment="Center" Spacing="10">
+                <Path Classes="ico muted" Data="{StaticResource IcoTree}" Width="30" Height="30"
+                      HorizontalAlignment="Center"/>
+                <TextBlock Text="Select a file in the Explorer to view it."
+                           Foreground="{DynamicResource T3}" FontSize="13" HorizontalAlignment="Center"/>
+              </StackPanel>
+
+              <!-- Text viewer: line-number gutter + real content (read-only) -->
+              <ScrollViewer IsVisible="{Binding Explorer.IsTextDocument}"
+                            VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <Grid ColumnDefinitions="Auto,*" Margin="0,10,0,10">
+                  <TextBlock Grid.Column="0" Classes="gutter"
+                             Text="{Binding Explorer.ActiveDocument.TextContent, Converter={StaticResource LineNos}}"/>
+                  <TextBlock Grid.Column="1" Classes="code" Margin="0,0,16,0"
+                             Text="{Binding Explorer.ActiveDocument.TextContent}"/>
+                </Grid>
+              </ScrollViewer>
+
+              <!-- Image preview -->
+              <StackPanel IsVisible="{Binding Explorer.IsImageDocument}" HorizontalAlignment="Center"
+                          VerticalAlignment="Center" Spacing="6">
+                <TextBlock Text="{Binding Explorer.ActiveRelPath}" Foreground="{DynamicResource T2}"
+                           FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                <TextBlock Text="Image file — open it externally to view." Foreground="{DynamicResource T3}"
+                           FontSize="12.5" HorizontalAlignment="Center"/>
+              </StackPanel>
+
+              <!-- Non-text / non-image note -->
+              <StackPanel IsVisible="{Binding Explorer.IsBinaryDocument}" HorizontalAlignment="Center"
+                          VerticalAlignment="Center" Spacing="6">
+                <TextBlock Text="{Binding Explorer.ActiveRelPath}" Foreground="{DynamicResource T2}"
+                           FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                <TextBlock Text="No text preview for this file type." Foreground="{DynamicResource T3}"
+                           FontSize="12.5" HorizontalAlignment="Center"/>
+              </StackPanel>
+            </Panel>
           </DockPanel>
         </Grid>
 
