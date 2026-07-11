@@ -2006,34 +2006,59 @@
 
     <!-- Preference Review (slice 7 fidelity): list card + prompt card + Chosen/Rejected side-by-side. -->
     <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=PreferenceReview}">
+      <Border.Styles>
+        <!-- Actions lead with an accent "Export ranking"; the rest stay available but de-emphasized. -->
+        <Style Selector="Button.leadaction">
+          <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+          <Setter Property="Foreground" Value="{DynamicResource AccentInk}"/>
+          <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+          <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+        <Style Selector="Button.subtle">
+          <Setter Property="Background" Value="Transparent"/>
+          <Setter Property="Foreground" Value="{DynamicResource T3}"/>
+          <Setter Property="BorderBrush" Value="{DynamicResource Line2}"/>
+          <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+      </Border.Styles>
       <Grid Margin="16" ColumnDefinitions="300,*">
         <Border Grid.Column="0" Background="{DynamicResource Panel}" CornerRadius="11" Padding="8"
                 BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-          <DockPanel>
-            <ComboBox DockPanel.Dock="Top" Margin="0,0,0,8" HorizontalAlignment="Stretch"
-                      ItemsSource="{Binding PreferenceReview.PreferenceContrastFilterOptions}"
-                      SelectedItem="{Binding PreferenceReview.PreferenceContrastFilter}"/>
-            <ListBox ItemsSource="{Binding PreferenceReview.PreferenceReviewItems}"
-                     SelectedItem="{Binding PreferenceReview.SelectedPreferenceReviewItem}"
-                     Background="Transparent" BorderThickness="0">
-              <ListBox.ItemTemplate>
-                <DataTemplate x:DataType="models:PreferenceReviewItem">
+          <ListBox ItemsSource="{Binding PreferenceReview.PreferenceReviewItems}"
+                   SelectedItem="{Binding PreferenceReview.SelectedPreferenceReviewItem}"
+                   Background="Transparent" BorderThickness="0">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:PreferenceReviewItem">
+                <!-- Two-line pair item (mirrors Versions/Quarantine): prompt + real contrast band. -->
+                <StackPanel Spacing="2" Margin="0,2">
                   <TextBlock Text="{Binding Prompt}" TextTrimming="CharacterEllipsis"
-                             Foreground="{DynamicResource T2}" Margin="0,2"/>
-                </DataTemplate>
-              </ListBox.ItemTemplate>
-            </ListBox>
-          </DockPanel>
+                             FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
+                  <TextBlock Text="{Binding ContrastLine}" FontSize="11"
+                             Foreground="{DynamicResource T4}" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
         </Border>
         <ScrollViewer Grid.Column="1" Margin="16,0,0,0">
           <StackPanel Spacing="12">
+            <!-- Header row: ranking summary (left) + a right-aligned Contrast filter. -->
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Grid.Column="0" Text="{Binding PreferenceReview.PreferenceRankingSummary}"
+                         Foreground="{DynamicResource T3}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <TextBlock Text="Contrast" FontSize="12" Foreground="{DynamicResource T4}" VerticalAlignment="Center"/>
+                <ComboBox MinWidth="120"
+                          ItemsSource="{Binding PreferenceReview.PreferenceContrastFilterOptions}"
+                          SelectedItem="{Binding PreferenceReview.PreferenceContrastFilter}"/>
+              </StackPanel>
+            </Grid>
             <WrapPanel>
-              <Button Content="Export for training" Command="{Binding ExportPreferenceForTrainingCommand}" Margin="0,0,6,4"/>
-              <Button Content="Export ranking" Command="{Binding ExportPreferenceRankingCommand}" Margin="0,0,6,4"/>
-              <Button Content="Prepare judge review" Command="{Binding PreparePreferenceJudgeReviewCommand}" Margin="0,0,6,4"/>
-              <Button Content="Batch judge" Command="{Binding PreparePreferenceBatchJudgeReviewCommand}" Margin="0,0,6,4"/>
+              <Button Classes="leadaction" Content="Export ranking" Command="{Binding ExportPreferenceRankingCommand}" Margin="0,0,6,4"/>
+              <Button Classes="subtle" Content="Export for training" Command="{Binding ExportPreferenceForTrainingCommand}" Margin="0,0,6,4"/>
+              <Button Classes="subtle" Content="Prepare judge review" Command="{Binding PreparePreferenceJudgeReviewCommand}" Margin="0,0,6,4"/>
+              <Button Classes="subtle" Content="Batch judge" Command="{Binding PreparePreferenceBatchJudgeReviewCommand}" Margin="0,0,6,4"/>
             </WrapPanel>
-            <TextBlock Text="{Binding PreferenceReview.PreferenceRankingSummary}" Foreground="{DynamicResource T3}" TextWrapping="Wrap"/>
             <Border Background="{DynamicResource Panel}" CornerRadius="11" Padding="14"
                     BorderBrush="{DynamicResource Line2}" BorderThickness="1">
               <StackPanel Spacing="4">
@@ -2045,19 +2070,32 @@
               <Border Grid.Column="0" Margin="0,0,6,0" Background="{DynamicResource Panel}" CornerRadius="11" Padding="14"
                       BorderBrush="{DynamicResource Ok}" BorderThickness="1">
                 <StackPanel Spacing="4">
-                  <TextBlock Text="CHOSEN" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource Ok}"/>
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Path Classes="ico ok" Data="{StaticResource IcoCheckCircleFill}" Width="14" Height="14"/>
+                    <TextBlock Text="CHOSEN" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource Ok}" VerticalAlignment="Center"/>
+                  </StackPanel>
                   <TextBlock Text="{Binding PreferenceReview.PreferenceChosenText}" Foreground="{DynamicResource T2}" TextWrapping="Wrap"/>
                 </StackPanel>
               </Border>
               <Border Grid.Column="1" Margin="6,0,0,0" Background="{DynamicResource Panel}" CornerRadius="11" Padding="14"
                       BorderBrush="{DynamicResource Line2}" BorderThickness="1">
                 <StackPanel Spacing="4">
-                  <TextBlock Text="REJECTED" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource T4}"/>
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Path Classes="ico muted" Data="{StaticResource IcoChats}" Width="14" Height="14"/>
+                    <TextBlock Text="REJECTED" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource T4}" VerticalAlignment="Center"/>
+                  </StackPanel>
                   <TextBlock Text="{Binding PreferenceReview.PreferenceRejectedText}" Foreground="{DynamicResource T3}" TextWrapping="Wrap"/>
                 </StackPanel>
               </Border>
             </Grid>
-            <TextBlock Text="{Binding PreferenceReview.PreferenceReviewSummary}" Foreground="{DynamicResource T4}" TextWrapping="Wrap"/>
+            <!-- REASON card — clones the PROMPT card so the pane's rationale reads as first-class. -->
+            <Border Background="{DynamicResource Panel}" CornerRadius="11" Padding="14"
+                    BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <StackPanel Spacing="4">
+                <TextBlock Text="REASON" FontSize="10" Foreground="{DynamicResource T4}"/>
+                <TextBlock Text="{Binding PreferenceReview.PreferenceReviewSummary}" Foreground="{DynamicResource T2}" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Border>
           </StackPanel>
         </ScrollViewer>
       </Grid>
