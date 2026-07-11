@@ -53,6 +53,26 @@ public interface ITrainingViewModel : INotifyPropertyChanged
     bool CanLaunchTraining { get; }
     bool CanResumeTraining { get; }
 
+    // Read-only display reflections for the production Training screen (Nocturne re-skin). All derived
+    // from real config/run/gate state — never fabricated. See the concrete VM for the honesty notes.
+    /// <summary>Derived method ("lora"/"full") the segmented control reflects read-only (no method setter).</summary>
+    string TrainingMethod { get; }
+    bool IsMethodQlora { get; }
+    bool IsMethodLora { get; }
+    bool IsMethodFull { get; }
+    /// <summary>Session run counter (0 before any launch this session).</summary>
+    int TrainingRunId { get; }
+    /// <summary>True once a run has been launched this session (run header leaves its neutral empty state).</summary>
+    bool HasRunStarted { get; }
+    /// <summary>Monospace run label for the Run card header ("run N", or "—" before any launch).</summary>
+    string TrainingRunLabel { get; }
+    /// <summary>True only for a clean finish (exit 0) — the honest "complete" chip signal.</summary>
+    bool IsTrainingComplete { get; }
+    /// <summary>True for a failed/errored run — the Bad-tinted chip signal.</summary>
+    bool IsTrainingFailed { get; }
+    /// <summary>True when the regression gate produced a real WARN/BLOCK (or could-not-run) verdict.</summary>
+    bool HasGateWarning { get; }
+
     // First-party trainer (the opt-in [train] extra; runs in-process, no external trainer).
     /// <summary>True when the selected target is Corpus Studio's own trainer (corpus_studio).</summary>
     bool IsFirstPartyTarget { get; }
