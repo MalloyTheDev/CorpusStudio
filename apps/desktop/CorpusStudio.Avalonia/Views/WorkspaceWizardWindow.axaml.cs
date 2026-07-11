@@ -38,6 +38,18 @@ public partial class WorkspaceWizardWindow : Window
     /// WPF window so the shell injects the same service.</summary>
     public IFilePickerService FilePicker { get; set; } = new AvaloniaFilePickerService();
 
+    private void ContinueButton_Click(object? sender, RoutedEventArgs e)
+    {
+        SetError(string.Empty);
+        ViewModel.GoNext();
+    }
+
+    private void BackButton_Click(object? sender, RoutedEventArgs e)
+    {
+        SetError(string.Empty);
+        ViewModel.GoBack();
+    }
+
     private async void BrowseButton_Click(object? sender, RoutedEventArgs e)
     {
         var folder = await FilePicker.PickFolderAsync("Choose where to create the project");

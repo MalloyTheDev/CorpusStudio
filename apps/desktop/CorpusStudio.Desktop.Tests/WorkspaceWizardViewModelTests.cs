@@ -136,4 +136,70 @@ public sealed class WorkspaceWizardViewModelTests
         Assert.Equal("standard", manifest.TemplateId);
         Assert.True(manifest.IsRecognized);
     }
+
+    // ---- 4-step stepper (Name · Schema · Source · Review) --------------------------
+
+    [Fact]
+    public void WizardStep_StartsAtStepOne_BackDisabled()
+    {
+        var vm = Vm();
+        Assert.Equal(1, vm.WizardStep);
+        Assert.True(vm.IsStep1);
+        Assert.True(vm.IsFirstStep);
+        Assert.False(vm.IsLastStep);
+    }
+
+    [Fact]
+    public void GoNext_IsBlocked_UntilStepOneIsValid()
+    {
+        var vm = Vm();                         // no name / location yet
+        Assert.False(vm.CanContinue);
+        vm.GoNext();
+        Assert.Equal(1, vm.WizardStep);        // stayed on step 1
+
+        vm.ProjectName = "Support Chatbot";
+        vm.Location = Path.Combine("C:", "ws");
+        Assert.True(vm.CanContinue);
+        vm.GoNext();
+        Assert.Equal(2, vm.WizardStep);        // advanced to Schema
+    }
+
+    [Fact]
+    public void GoBack_StepsBack_AndClampsAtOne()
+    {
+        var vm = Vm();
+        vm.ProjectName = "P";
+        vm.Location = Path.Combine("C:", "ws");
+        vm.GoNext();                           // -> 2
+        vm.GoBack();                           // -> 1
+        Assert.Equal(1, vm.WizardStep);
+        vm.GoBack();                           // clamp (no-op)
+        Assert.Equal(1, vm.WizardStep);
+    }
+
+    [Fact]
+    public void WizardStep_ClampsToOneThroughFour()
+    {
+        var vm = Vm();
+        vm.WizardStep = 99;
+        Assert.Equal(4, vm.WizardStep);
+        Assert.True(vm.IsLastStep);
+        vm.WizardStep = -5;
+        Assert.Equal(1, vm.WizardStep);
+    }
+
+    [Fact]
+    public void CanContinue_ReflectsTheCurrentStep()
+    {
+        var vm = Vm();
+        vm.ProjectName = "P";
+        vm.Location = Path.Combine("C:", "ws");
+        Assert.True(vm.CanContinue);           // step 1 satisfied
+        vm.WizardStep = 2;
+        Assert.True(vm.CanContinue);           // schema pre-selected
+        vm.WizardStep = 3;
+        Assert.True(vm.CanContinue);           // template pre-selected
+        vm.WizardStep = 4;
+        Assert.False(vm.CanContinue);          // last step: creation is gated by CanCreate, not Continue
+    }
 }

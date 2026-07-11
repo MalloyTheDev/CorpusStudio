@@ -85,6 +85,7 @@ public sealed class WorkspaceWizardViewModel : INotifyPropertyChanged
             {
                 OnChanged(nameof(TargetFolder));
                 OnChanged(nameof(CanCreate));
+                OnChanged(nameof(CanContinue));
                 OnChanged(nameof(ValidationMessage));
             }
         }
@@ -100,6 +101,7 @@ public sealed class WorkspaceWizardViewModel : INotifyPropertyChanged
             {
                 RebuildPreview();
                 OnChanged(nameof(CanCreate));
+                OnChanged(nameof(CanContinue));
                 OnChanged(nameof(ValidationMessage));
             }
         }
@@ -115,6 +117,7 @@ public sealed class WorkspaceWizardViewModel : INotifyPropertyChanged
             {
                 RebuildPreview();
                 OnChanged(nameof(CanCreate));
+                OnChanged(nameof(CanContinue));
                 OnChanged(nameof(ValidationMessage));
             }
         }
@@ -183,6 +186,79 @@ public sealed class WorkspaceWizardViewModel : INotifyPropertyChanged
         }
     }
 
+    // ---- Stepper (the Nocturne 4-step wizard: Name · Schema · Source · Review) ----------
+    // View-agnostic step state so the Avalonia head can present the design's stepper while the
+    // WPF head keeps its single-page form (it simply never reads these members). Additive — no
+    // existing member changed, so the WPF wizard is unaffected.
+    private int _wizardStep = 1;
+
+    /// <summary>The active wizard step, 1..4 (Name · Schema · Source · Review).</summary>
+    public int WizardStep
+    {
+        get => _wizardStep;
+        set
+        {
+            var clamped = value < 1 ? 1 : value > 4 ? 4 : value;
+            if (SetField(ref _wizardStep, clamped))
+            {
+                OnChanged(nameof(IsStep1));
+                OnChanged(nameof(IsStep2));
+                OnChanged(nameof(IsStep3));
+                OnChanged(nameof(IsStep4));
+                OnChanged(nameof(IsFirstStep));
+                OnChanged(nameof(IsLastStep));
+                OnChanged(nameof(StepTitle));
+                OnChanged(nameof(CanContinue));
+            }
+        }
+    }
+
+    public bool IsStep1 => _wizardStep == 1;
+    public bool IsStep2 => _wizardStep == 2;
+    public bool IsStep3 => _wizardStep == 3;
+    public bool IsStep4 => _wizardStep == 4;
+    public bool IsFirstStep => _wizardStep == 1;
+    public bool IsLastStep => _wizardStep == 4;
+
+    public string StepTitle => _wizardStep switch
+    {
+        1 => "Name & location",
+        2 => "Dataset schema",
+        3 => "Starting point",
+        4 => "Review & create",
+        _ => string.Empty,
+    };
+
+    /// <summary>Whether the CURRENT step is satisfied enough to advance. The final step has no
+    /// "continue" — creation is gated by <see cref="CanCreate"/>.</summary>
+    public bool CanContinue => _wizardStep switch
+    {
+        1 => !string.IsNullOrWhiteSpace(_projectName)
+             && !string.IsNullOrWhiteSpace(SafeProjectId)
+             && !string.IsNullOrWhiteSpace(_location),
+        2 => _selectedSchema is not null,
+        3 => _selectedTemplate is not null,
+        _ => false,
+    };
+
+    /// <summary>Advance one step when the current step is valid (no-op past the last step).</summary>
+    public void GoNext()
+    {
+        if (_wizardStep < 4 && CanContinue)
+        {
+            WizardStep = _wizardStep + 1;
+        }
+    }
+
+    /// <summary>Step back one (no-op on the first step).</summary>
+    public void GoBack()
+    {
+        if (_wizardStep > 1)
+        {
+            WizardStep = _wizardStep - 1;
+        }
+    }
+
     public WorkspaceProjectManifest BuildManifest() => new()
     {
         ProjectId = SafeProjectId,
@@ -212,6 +288,7 @@ public sealed class WorkspaceWizardViewModel : INotifyPropertyChanged
         OnChanged(nameof(SafeProjectId));
         OnChanged(nameof(TargetFolder));
         OnChanged(nameof(CanCreate));
+        OnChanged(nameof(CanContinue));
         OnChanged(nameof(ValidationMessage));
     }
 
