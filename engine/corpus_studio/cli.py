@@ -212,6 +212,66 @@ def platform_schemas(
     )
 
 
+@app.command("platform-probe")
+def platform_probe(
+    json_out: bool = typer.Option(False, "--json", help="Emit the full EnvironmentProfile + CapabilityReport JSON."),
+    out_dir: Optional[Path] = typer.Option(
+        None, "--out", help="Write EnvironmentProfile.json + CapabilityReport.json to this directory."
+    ),
+):
+    """Profile the current host and run the functional capability probes — 'readiness = a kernel
+    actually ran', not 'the package imports'. Emits an EnvironmentProfile (OS/residency/GPUs/package
+    locks + signature) and a CapabilityReport (per-probe PASS/KERNEL_STALL/… + effective
+    capabilities + ready/cpu_toy_only/not_ready)."""
+    from corpus_studio.platform.profiler import build_environment_profile
+    from corpus_studio.platform.probes import run_capability_probes
+
+    profile = build_environment_profile()
+    report = run_capability_probes(profile)
+
+    if out_dir is not None:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "EnvironmentProfile.json").write_text(
+            profile.model_dump_json(indent=2), encoding="utf-8"
+        )
+        (out_dir / "CapabilityReport.json").write_text(
+            report.model_dump_json(indent=2), encoding="utf-8"
+        )
+
+    if json_out:
+        typer.echo(
+            json.dumps(
+                {
+                    "environment_profile": profile.model_dump(mode="json"),
+                    "capability_report": report.model_dump(mode="json"),
+                },
+                indent=2,
+            )
+        )
+        return
+
+    gpu = profile.gpus[0].name if profile.gpus else "none detected"
+    lines = [
+        "Platform probe",
+        f"  OS: {profile.host.os.value} ({profile.host.memory_residency_model.value})",
+        f"  GPU: {gpu}",
+        f"  env signature: {profile.environment_signature[:12]}…",
+        f"  READINESS: {report.readiness}",
+    ]
+    for result in report.probe_results:
+        lines.append(f"    {result.outcome.value:<12} {result.probe}"
+                     + (f"  — {result.detail}" if result.detail else ""))
+    if report.effective_capabilities is not None:
+        eff = report.effective_capabilities
+        proven = (
+            [m.value for m in eff.precision_modes]
+            + [m.value for m in eff.quantization_modes]
+            + [m.value for m in eff.attention_impls]
+        )
+        lines.append(f"  proven on this host: {', '.join(proven) if proven else '(none)'}")
+    typer.echo("\n".join(lines))
+
+
 @app.command()
 def validate(path: Path, schema: str):
     """Validate a JSONL file against a built-in schema."""

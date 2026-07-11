@@ -1,0 +1,220 @@
+"""Tests for the environment profiler + functional capability probes (corpus_studio.platform).
+
+Pure — these run in CI without torch. They lock the "readiness = a kernel actually ran, not the
+package imports" contract: the profiler builds a deterministic EnvironmentProfile signature and maps
+the existing GPU probes into the contract; the probe framework runs (injectable) probes, never lets
+one crash the runner, derives effective-capabilities only from PASSes, and degrades to a clean
+`not_ready` CapabilityReport when torch is absent (importing nothing heavy).
+"""
+
+from __future__ import annotations
+
+import platform as _pf
+import sys
+
+import corpus_studio.platform as P
+from corpus_studio.platform import profiler
+from corpus_studio.platform.common import PackageLock
+from corpus_studio.platform.contracts import EnvHost, EnvironmentProfile, GpuDevice
+from corpus_studio.platform.enums import (
+    DeviceKind,
+    FailureTaxonomy,
+    MemoryResidencyModel,
+    OperatingSystem,
+    PrecisionMode,
+)
+from corpus_studio.platform.probes import ProbeOutcome, run_capability_probes
+from corpus_studio.training.environment import GpuInfo, TrainingRuntimeReport
+from corpus_studio.training.gpu_probe import GpuMemory
+
+
+# ---- import boundary ---------------------------------------------------------
+
+
+def test_profiler_and_probes_are_torch_free():
+    # importing the environment manager must not pull the heavy stack
+    assert "torch" not in sys.modules
+    assert "bitsandbytes" not in sys.modules
+
+
+# ---- profiler ----------------------------------------------------------------
+
+
+def test_build_environment_profile_shape():
+    prof = P.build_environment_profile()
+    assert isinstance(prof, EnvironmentProfile)
+    assert len(prof.environment_signature) == 64  # sha256 hex
+    assert prof.host.os in set(OperatingSystem)
+    assert len(prof.packages) == len(profiler.PROFILE_PACKAGES)
+
+
+def test_environment_signature_is_deterministic():
+    # volatile fields (free memory, timestamps) are excluded → stable across runs
+    assert (
+        P.build_environment_profile().environment_signature
+        == P.build_environment_profile().environment_signature
+    )
+
+
+def test_os_residency_mapping(monkeypatch):
+    for name, os_enum, residency in [
+        ("Windows", OperatingSystem.windows, MemoryResidencyModel.wddm),
+        ("Linux", OperatingSystem.linux, MemoryResidencyModel.linux_dedicated),
+        ("Darwin", OperatingSystem.macos, MemoryResidencyModel.unified_memory),
+        ("Plan9", OperatingSystem.unknown, MemoryResidencyModel.unknown),
+    ]:
+        monkeypatch.setattr(_pf, "system", lambda name=name: name)
+        assert profiler._operating_system() == (os_enum, residency)
+
+
+def test_supported_dtypes_by_capability():
+    assert profiler._supported_dtypes(None) == []
+    assert PrecisionMode.bf16 not in profiler._supported_dtypes(7)  # Turing: no bf16
+    assert PrecisionMode.bf16 in profiler._supported_dtypes(8)  # Ampere+
+    assert PrecisionMode.fp8 in profiler._supported_dtypes(9)  # Hopper+
+    assert PrecisionMode.fp8 not in profiler._supported_dtypes(8)
+
+
+def test_gpu_mapping_from_existing_probes(monkeypatch):
+    monkeypatch.setattr(
+        profiler,
+        "probe_training_runtime",
+        lambda: TrainingRuntimeReport(
+            gpu=GpuInfo(
+                available=True,
+                device_count=1,
+                name="NVIDIA GeForce RTX 5070",
+                total_memory_gb=12.0,
+                compute_capability="12.0",
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        profiler,
+        "probe_gpu_memory",
+        lambda: GpuMemory(total_gb=12.0, free_gb=11.6, compute_capability="12.0"),
+    )
+    gpus = profiler._gpus()
+    assert len(gpus) == 1
+    g = gpus[0]
+    assert g.kind == DeviceKind.cuda
+    assert g.name == "NVIDIA GeForce RTX 5070"
+    assert g.compute_capability_major == 12
+    assert g.vram_total_bytes == 12_000_000_000
+    assert g.vram_free_bytes == 11_600_000_000
+    assert PrecisionMode.bf16 in g.supported_dtypes
+
+
+def test_gpu_mapping_empty_when_no_accelerator(monkeypatch):
+    monkeypatch.setattr(profiler, "probe_training_runtime", lambda: TrainingRuntimeReport())
+    monkeypatch.setattr(profiler, "probe_gpu_memory", lambda: None)
+    assert profiler._gpus() == []
+
+
+# ---- probe framework (injected fakes) ----------------------------------------
+
+
+def _profile(*, gpus=None, packages=None, os_enum=OperatingSystem.linux) -> EnvironmentProfile:
+    return EnvironmentProfile(
+        environment_signature="a" * 64,
+        host=EnvHost(os=os_enum),
+        gpus=gpus or [],
+        packages=packages or [],
+    )
+
+
+def _blackwell_gpu() -> GpuDevice:
+    return GpuDevice(
+        index=0, kind=DeviceKind.cuda, name="RTX 5070", compute_capability="12.0",
+        compute_capability_major=12,
+    )
+
+
+def test_run_probes_with_injected_fakes():
+    def pass_bf16(_p):
+        return ProbeOutcome(FailureTaxonomy.PASS, "ok", proves={"precision": ["bf16"]})
+
+    def stall(_p):
+        return ProbeOutcome(FailureTaxonomy.KERNEL_STALL, "sm_120 deadlock")
+
+    def boom(_p):
+        raise RuntimeError("kaboom")
+
+    registry = {"bf16": pass_bf16, "flash": stall, "explode": boom}
+    report = run_capability_probes(_profile(), registry=registry)
+
+    outcomes = {r.probe: r.outcome for r in report.probe_results}
+    assert outcomes["bf16"] == FailureTaxonomy.PASS
+    assert outcomes["flash"] == FailureTaxonomy.KERNEL_STALL
+    # a probe that raises must NOT crash the runner → ENVIRONMENT_FAILURE
+    assert outcomes["explode"] == FailureTaxonomy.ENVIRONMENT_FAILURE
+    # effective capabilities come only from the PASS
+    assert report.effective_capabilities is not None
+    assert report.effective_capabilities.precision_modes == [PrecisionMode.bf16]
+
+
+def test_effective_capabilities_ignore_non_pass_proves():
+    def fail_but_claims(_p):
+        return ProbeOutcome(FailureTaxonomy.FAIL, "no", proves={"precision": ["bf16"]})
+
+    report = run_capability_probes(_profile(), registry={"x": fail_but_claims})
+    assert report.effective_capabilities is not None
+    assert report.effective_capabilities.precision_modes == []
+
+
+def test_unknown_probe_name_is_unsupported():
+    report = run_capability_probes(_profile(), probes=["does_not_exist"], registry={})
+    assert report.probe_results[0].outcome == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+
+
+def test_readiness_ready_when_cuda_and_bnb_pass():
+    reg = {
+        "cuda_available": lambda _p: ProbeOutcome(FailureTaxonomy.PASS),
+        "bnb_4bit_load": lambda _p: ProbeOutcome(FailureTaxonomy.PASS),
+    }
+    report = run_capability_probes(
+        _profile(packages=[PackageLock(name="torch", version="2.7.0")]), registry=reg
+    )
+    assert report.readiness == "ready"
+    assert report.bitsandbytes_ok is True
+
+
+def test_readiness_cpu_toy_when_torch_installed_but_no_gpu():
+    reg = {"cuda_available": lambda _p: ProbeOutcome(FailureTaxonomy.FAIL, "cpu build")}
+    report = run_capability_probes(
+        _profile(packages=[PackageLock(name="torch", version="2.7.0+cpu")]), registry=reg
+    )
+    assert report.readiness == "cpu_toy_only"
+    assert "torch" not in report.missing_packages  # installed, just no GPU
+
+
+def test_readiness_not_ready_when_torch_absent():
+    reg = {"cuda_available": lambda _p: ProbeOutcome(FailureTaxonomy.ENVIRONMENT_FAILURE, "no torch")}
+    report = run_capability_probes(_profile(packages=[PackageLock(name="torch", version=None)]),
+                                   registry=reg)
+    assert report.readiness == "not_ready"
+    assert "torch" in report.missing_packages
+
+
+# ---- built-in probes (behavior provable without torch) -----------------------
+
+
+def test_flash_probe_short_circuits_kernel_stall_on_blackwell():
+    from corpus_studio.platform.probes import _probe_flash_attn_backward
+
+    out = _probe_flash_attn_backward(_profile(gpus=[_blackwell_gpu()]))
+    assert out.taxonomy == FailureTaxonomy.KERNEL_STALL
+    assert "sm_120" in (out.detail or "")
+    assert "torch" not in sys.modules  # the hazard is reported without executing/importing torch
+
+
+def test_builtin_probes_degrade_cleanly_without_torch():
+    # the real registry against a real profile in a torch-absent venv → not_ready, no crash
+    profile = P.build_environment_profile()
+    report = run_capability_probes(profile)
+    assert report.readiness == "not_ready"
+    torch_probes = {"cuda_available", "bf16_matmul", "bnb_4bit_load", "checkpoint_reload"}
+    outcomes = {r.probe: r.outcome for r in report.probe_results}
+    for name in torch_probes:
+        assert outcomes[name] == FailureTaxonomy.ENVIRONMENT_FAILURE
+    assert "torch" not in sys.modules
