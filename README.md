@@ -193,8 +193,8 @@ system — a quiet, compact, dark-first look with a grouped workflow-phase sideb
 Phosphor iconography throughout, and a contextual quality rail. The tokens, icon
 set, and screen inventory are the framework-agnostic source of truth in
 [`docs/design/`](docs/design/), so the same design carries toward the eventual
-Tauri/React shell. The shipping WPF walkthrough (Start Center → wizard → Explorer →
-Studio, below) is unchanged; these are the same workflows on the Nocturne shell.
+Tauri/React shell. The full workflow — Start Center → New Project wizard →
+Explorer → Studio — is shown below on that Nocturne shell.
 
 ### Nocturne desktop
 
@@ -265,22 +265,24 @@ scaffolding wizard, and a universal file explorer (see
 
 ![Corpus Studio Start Center](docs/screenshots/workspace-start-center.png)
 
-**Start Center** — a dataset is a workspace, not just rows. Create a new project
-from a template, open an existing folder (Corpus Studio never mutates your files
-without asking), or jump back into a recent workspace. Missing folders are flagged,
-never silently dropped.
+**Start Center** — a dataset is a workspace, not just rows. Start a new project,
+import a dataset, open an existing folder (Corpus Studio never mutates your files
+without asking), or jump back into a recent workspace. Missing folders are flagged
+"missing", never silently dropped, and the engine-status card reads live.
 
 ![Corpus Studio new project wizard](docs/screenshots/workspace-wizard.png)
 
-**New Project wizard** — pick a schema and a template and see a live preview of the
-exact folder structure that will be scaffolded before anything is written.
+**New Project wizard** — a four-step flow (**Name · Schema · Source · Review**):
+name the project, pick a dataset schema from the built-in set, choose a starting
+point (scaffold template), then review a live preview of the exact folder structure
+before anything is written to disk.
 
 ![Corpus Studio workspace explorer](docs/screenshots/workspace-explorer.png)
 
-**Universal Workspace Explorer** — a VS Code-style file tree (generated reports
-flagged and opened read-only) with file-type chips, document tabs, four viewers, and
-a metadata panel. `examples.jsonl` opens with a single-writer caution and is never
-mutated except by an explicit save.
+**Universal Workspace Explorer** — a VS Code-style file tree with file-type chips
+and a marker on generated artifacts, document tabs, and a read-only code viewer with
+a line-number gutter. `examples.jsonl` opens with a single-writer caution banner and
+is never mutated except by an explicit save.
 
 ## Core Local Loop
 
