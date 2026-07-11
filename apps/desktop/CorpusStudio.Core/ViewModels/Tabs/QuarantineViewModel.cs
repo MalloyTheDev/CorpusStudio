@@ -36,6 +36,17 @@ public sealed class QuarantineViewModel : ViewModelBase, IQuarantineViewModel
         private set => SetField(ref _selectedImportQuarantineDetail, value);
     }
 
+    public int RejectedCount => ImportQuarantineItems.Count;
+
+    public bool HasQuarantine => ImportQuarantineItems.Count > 0;
+
+    public string RejectedBadge => $"{RejectedCount} rejected";
+
+    public string QuarantineSummary =>
+        RejectedCount == 1
+            ? "1 row held out of the dataset for repair"
+            : $"{RejectedCount} rows held out of the dataset for repair";
+
     public void SetItems(IEnumerable<ImportQuarantineItem> items)
     {
         ImportQuarantineItems.Clear();
@@ -47,6 +58,7 @@ public sealed class QuarantineViewModel : ViewModelBase, IQuarantineViewModel
         SelectedImportQuarantineItem = ImportQuarantineItems.FirstOrDefault();
         SelectedImportQuarantineDetail = SelectedImportQuarantineItem?.DetailText
             ?? "No rejected import rows are in quarantine for this project.";
+        RaiseQuarantineCountsChanged();
     }
 
     /// <summary>Clear the quarantine list + selection on a project switch so nothing leaks across
@@ -55,5 +67,16 @@ public sealed class QuarantineViewModel : ViewModelBase, IQuarantineViewModel
     {
         ImportQuarantineItems.Clear();
         SelectedImportQuarantineItem = null;
+        RaiseQuarantineCountsChanged();
+    }
+
+    /// <summary>The count-derived display members (badge, summary, has-any) don't observe the
+    /// ObservableCollection directly, so re-raise them whenever the list is replaced or cleared.</summary>
+    private void RaiseQuarantineCountsChanged()
+    {
+        OnPropertyChanged(nameof(RejectedCount));
+        OnPropertyChanged(nameof(HasQuarantine));
+        OnPropertyChanged(nameof(RejectedBadge));
+        OnPropertyChanged(nameof(QuarantineSummary));
     }
 }

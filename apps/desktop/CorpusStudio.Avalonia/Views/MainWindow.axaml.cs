@@ -3,7 +3,9 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Styling;
 using CorpusStudio.Avalonia.Services;
+using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.Services;
+using CorpusStudio.Desktop.ViewModels;
 
 namespace CorpusStudio.Avalonia.Views;
 
@@ -57,6 +59,23 @@ public partial class MainWindow : Window
         if (Application.Current is { } app)
         {
             app.RequestedThemeVariant = ThemeVariant.Light;
+        }
+    }
+
+    // Per-item "Repair" on an Import & Quarantine reject card. The shell exposes the retry as a public
+    // method (RetrySelectedImportQuarantineItem), not an ICommand, and the card list is an ItemsControl
+    // with no selection — so this view handler mirrors the WPF head's RetryQuarantineItemButton_Click:
+    // select the clicked row, load its raw text into the Writing Studio draft (the shell tracks the
+    // pending row so a successful save clears it from quarantine), then reveal Writing Studio for the
+    // edit. MainWindowViewModel is left untouched — no command is added there.
+    private void RepairQuarantineItem_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: ImportQuarantineItem item }
+            && DataContext is MainWindowViewModel vm)
+        {
+            vm.Quarantine.SelectedImportQuarantineItem = item;
+            vm.RetrySelectedImportQuarantineItem();
+            vm.SelectStudioTabCommand.Execute("WritingStudio");
         }
     }
 

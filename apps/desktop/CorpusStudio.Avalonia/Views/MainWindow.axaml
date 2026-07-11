@@ -1366,30 +1366,146 @@
     </Border>
 
     <!-- Import & Quarantine (slice 7 fidelity): rejected-rows list card + a detail card. -->
+    <!-- Import & Quarantine (fidelity slice): a single stacked column — an Import-rows card on top,
+         then the quarantine reject list — over the shared Quarantine VM. Honesty: no file/mapping
+         state is loaded in the shell, so the Import card shows neutral prompts (no fabricated
+         filename / row-count / column mapping); the reject list, the "N rejected" badge and the
+         summary all bind to the real ImportQuarantineItems. "Import & validate" runs the real
+         ImportDatasetCommand; per-item "Repair" mirrors the WPF head's retry (code-behind, since the
+         shell exposes RetrySelectedImportQuarantineItem() as a method, not an ICommand). -->
     <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Quarantine}">
-      <Grid Margin="16" ColumnDefinitions="300,*">
-        <Border Grid.Column="0" Background="{DynamicResource Panel}" CornerRadius="11" Padding="6"
-                BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-          <ListBox ItemsSource="{Binding Quarantine.ImportQuarantineItems}"
-                   SelectedItem="{Binding Quarantine.SelectedImportQuarantineItem}"
-                   Background="Transparent" BorderThickness="0">
-            <ListBox.ItemTemplate>
-              <DataTemplate x:DataType="models:ImportQuarantineItem">
-                <StackPanel Margin="0,2">
-                  <TextBlock Text="{Binding SourcePath}" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
-                  <TextBlock Text="{Binding RowNumber}" Foreground="{DynamicResource T4}" FontSize="11"/>
+      <Border.Styles>
+        <!-- Segmented source selector: transparent segments; the checked one fills accent-soft. -->
+        <Style Selector="ToggleButton.seg">
+          <Setter Property="Background" Value="Transparent"/>
+          <Setter Property="Foreground" Value="{DynamicResource T2}"/>
+          <Setter Property="BorderThickness" Value="0"/>
+          <Setter Property="CornerRadius" Value="7"/>
+          <Setter Property="Padding" Value="16,7"/>
+          <Setter Property="FontSize" Value="13"/>
+        </Style>
+        <Style Selector="ToggleButton.seg:pointerover /template/ ContentPresenter">
+          <Setter Property="Background" Value="{DynamicResource Hover}"/>
+        </Style>
+        <Style Selector="ToggleButton.seg:checked">
+          <Setter Property="Foreground" Value="{DynamicResource AccentInk}"/>
+          <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style Selector="ToggleButton.seg:checked /template/ ContentPresenter">
+          <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+        </Style>
+        <!-- AccentSoft mapping-target pill + Bad-toned reject icon (no global .bad ico modifier). -->
+        <Style Selector="Border.pill">
+          <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+          <Setter Property="CornerRadius" Value="6"/>
+          <Setter Property="Padding" Value="11,3"/>
+          <Setter Property="VerticalAlignment" Value="Center"/>
+          <Setter Property="HorizontalAlignment" Value="Left"/>
+        </Style>
+        <Style Selector="Path.ico.bad"><Setter Property="Fill" Value="{DynamicResource Bad}"/></Style>
+      </Border.Styles>
+      <ScrollViewer>
+        <StackPanel Margin="20" Spacing="14" MaxWidth="920" HorizontalAlignment="Left">
+
+          <!-- Import rows card -->
+          <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="18"
+                  BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+            <StackPanel Spacing="14">
+              <TextBlock Text="Import rows" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
+
+              <!-- Segmented source row. Presentational (the shell has no source-kind state to bind);
+                   JSONL / CSV is the default-checked segment, matching the design. -->
+              <Border Background="{DynamicResource Panel2}" CornerRadius="9" Padding="4" HorizontalAlignment="Left">
+                <StackPanel Orientation="Horizontal" Spacing="2">
+                  <ToggleButton Classes="seg" IsChecked="True" Content="JSONL / CSV"/>
+                  <ToggleButton Classes="seg" Content="Hugging Face"/>
+                  <ToggleButton Classes="seg" Content="Folder"/>
                 </StackPanel>
+              </Border>
+
+              <!-- File row — neutral prompt (no file is selected in the shell; no fake filename/count). -->
+              <Border Background="{DynamicResource Panel2}" CornerRadius="9" Padding="14,12"
+                      BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                  <Path Grid.Column="0" Classes="ico muted" Data="{StaticResource IcoImport}" VerticalAlignment="Center"/>
+                  <TextBlock Grid.Column="1" Margin="12,0,12,0" VerticalAlignment="Center" TextWrapping="Wrap"
+                             Text="No file selected — choose a JSONL or CSV file to import"
+                             Foreground="{DynamicResource T3}"/>
+                  <TextBlock Grid.Column="2" VerticalAlignment="Center" FontSize="12"
+                             Text="0 rows detected" Foreground="{DynamicResource T4}"/>
+                </Grid>
+              </Border>
+
+              <!-- Field mapping — neutral prompt (column→field mapping only exists once a file is parsed). -->
+              <StackPanel Spacing="8">
+                <TextBlock Text="FIELD MAPPING" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource T4}"/>
+                <TextBlock Text="Column-to-field mapping appears here once a source file is selected."
+                           Foreground="{DynamicResource T3}" FontSize="12.5" TextWrapping="Wrap"/>
+              </StackPanel>
+
+              <!-- Import & validate → the real shell import command. -->
+              <Button HorizontalAlignment="Left" Command="{Binding ImportDatasetCommand}"
+                      Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}"
+                      BorderBrush="{DynamicResource Accent}" BorderThickness="1">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                  <Path Classes="ico accent" Data="{StaticResource IcoImport}" Width="15" Height="15"/>
+                  <TextBlock Text="Import &amp; validate" VerticalAlignment="Center"/>
+                </StackPanel>
+              </Button>
+            </StackPanel>
+          </Border>
+
+          <!-- Quarantine section header — bound to the real reject count; hidden when nothing is quarantined. -->
+          <Grid ColumnDefinitions="Auto,Auto,*" IsVisible="{Binding Quarantine.HasQuarantine}">
+            <TextBlock Grid.Column="0" Text="Quarantine" FontWeight="SemiBold" FontSize="15"
+                       Foreground="{DynamicResource Text}" VerticalAlignment="Center"/>
+            <Border Grid.Column="1" Margin="10,0,0,0" Background="{DynamicResource Warn}" CornerRadius="6"
+                    Padding="8,2" VerticalAlignment="Center">
+              <TextBlock Text="{Binding Quarantine.RejectedBadge}" Foreground="White" FontSize="11" FontWeight="Bold"/>
+            </Border>
+            <TextBlock Grid.Column="2" Text="{Binding Quarantine.QuarantineSummary}" HorizontalAlignment="Right"
+                       VerticalAlignment="Center" Foreground="{DynamicResource T3}" FontSize="12.5"/>
+          </Grid>
+
+          <!-- Reject cards: Bad-toned warning icon | message + JSON snippet | Repair. -->
+          <ItemsControl ItemsSource="{Binding Quarantine.ImportQuarantineItems}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="models:ImportQuarantineItem">
+                <Border Background="{DynamicResource Panel}" CornerRadius="11" Padding="14" Margin="0,0,0,8"
+                        BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+                  <Grid ColumnDefinitions="Auto,*,Auto">
+                    <Path Grid.Column="0" Classes="ico bad" Data="{StaticResource IcoWarningFill}"
+                          VerticalAlignment="Top" Margin="0,2,0,0"/>
+                    <StackPanel Grid.Column="1" Margin="12,0,12,0" Spacing="5">
+                      <TextBlock Text="{Binding Headline}" Foreground="{DynamicResource Text}"
+                                 FontWeight="SemiBold" TextWrapping="Wrap"/>
+                      <TextBlock Text="{Binding Raw}" Foreground="{DynamicResource T4}" FontFamily="Consolas"
+                                 FontSize="11.5" TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                    <Button Grid.Column="2" Content="Repair" VerticalAlignment="Center"
+                            Click="RepairQuarantineItem_Click"/>
+                  </Grid>
+                </Border>
               </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-        </Border>
-        <Border Grid.Column="1" Margin="16,0,0,0" Background="{DynamicResource Panel}" CornerRadius="11" Padding="12"
-                BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-          <TextBox Text="{Binding Quarantine.SelectedImportQuarantineDetail}" IsReadOnly="True" AcceptsReturn="True"
-                   FontFamily="Consolas" TextWrapping="Wrap" VerticalAlignment="Stretch"
-                   Background="Transparent" BorderThickness="0"/>
-        </Border>
-      </Grid>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <!-- Empty state — nothing quarantined (also the fresh-project state). -->
+          <Border Background="{DynamicResource Panel}" CornerRadius="11" Padding="14"
+                  BorderBrush="{DynamicResource Line2}" BorderThickness="1"
+                  IsVisible="{Binding !Quarantine.HasQuarantine}">
+            <Grid ColumnDefinitions="Auto,*">
+              <Path Grid.Column="0" Classes="ico ok" Data="{StaticResource IcoCheckCircleFill}" VerticalAlignment="Top"/>
+              <StackPanel Grid.Column="1" Margin="10,0,0,0" Spacing="3">
+                <TextBlock Text="No rows in quarantine" Foreground="{DynamicResource Text}" FontWeight="SemiBold"/>
+                <TextBlock Text="Rejected rows from a mixed import appear here for inspection and repair."
+                           Foreground="{DynamicResource T3}" FontSize="11.5" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Grid>
+          </Border>
+
+        </StackPanel>
+      </ScrollViewer>
     </Border>
 
     <!-- Preference Review (slice 7 fidelity): list card + prompt card + Chosen/Rejected side-by-side. -->
