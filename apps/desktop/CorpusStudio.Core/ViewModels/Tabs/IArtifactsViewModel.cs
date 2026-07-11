@@ -17,6 +17,13 @@ public interface IArtifactsViewModel : INotifyPropertyChanged
     string ArtifactSummary { get; }
     string ArtifactDetail { get; }
 
+    /// <summary>Whether any artifact rows are loaded (card list vs. empty state).</summary>
+    bool HasArtifacts { get; }
+
+    /// <summary>Whether the detail pane holds a rendered weight card / promote-gate verdict
+    /// (rather than the idle hint) — drives the collapsible detail surface.</summary>
+    bool HasArtifactDetail { get; }
+
     void SetArtifactError(string message);
     void SetArtifactDetail(string text);
 
