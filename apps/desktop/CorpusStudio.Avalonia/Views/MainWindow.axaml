@@ -15,21 +15,40 @@
          Application/View concern (Application.Current.RequestedThemeVariant), not shared VM state. -->
     <DockPanel Grid.Column="0" Background="{DynamicResource Chrome}">
       <StackPanel DockPanel.Dock="Top" Spacing="2">
-        <Button Content="⌂" Command="{Binding ShowStartCenterCommand}" Background="Transparent" Foreground="White"
-                FontSize="18" Width="52" Height="44" HorizontalContentAlignment="Center"/>
-        <Button Content="🗀" Command="{Binding ShowFilesCommand}" Background="Transparent" Foreground="White"
-                FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
-        <Button Content="▦" Command="{Binding ShowStudioCommand}" Background="Transparent" Foreground="White"
-                FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
-        <Button Content="⚠" Command="{Binding ToggleProblemsPanelCommand}" Background="Transparent" Foreground="White"
-                FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
-        <Button Content="≡" Command="{Binding ToggleOutputPanelCommand}" Background="Transparent" Foreground="White"
-                FontSize="15" Width="52" Height="44" HorizontalContentAlignment="Center"/>
+        <!-- Brand mark → Start Center. Blurple rounded-square avatar (matches the design). -->
+        <Button Command="{Binding ShowStartCenterCommand}" Classes="activitybtn" Height="56"
+                ToolTip.Tip="Start Center">
+          <Border Width="30" Height="30" CornerRadius="8" Background="{DynamicResource Accent}">
+            <TextBlock Text="C" Foreground="White" FontSize="15" FontWeight="Bold"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+        </Button>
+        <Button Command="{Binding ShowFilesCommand}" Classes="activitybtn" Classes.active="{Binding IsFiles}"
+                ToolTip.Tip="Files / Explorer">
+          <Path Classes="ico onbar" Data="{StaticResource IcoTree}"/>
+        </Button>
+        <Button Command="{Binding ShowStudioCommand}" Classes="activitybtn" Classes.active="{Binding IsStudio}"
+                ToolTip.Tip="Studio">
+          <Path Classes="ico onbar" Data="{StaticResource IcoGridFill}"/>
+        </Button>
+        <Button Command="{Binding ToggleProblemsPanelCommand}" Classes="activitybtn"
+                Classes.active="{Binding ProblemsPanelVisible}" ToolTip.Tip="Problems">
+          <Path Classes="ico onbar" Data="{StaticResource IcoWarnDiamond}"/>
+        </Button>
+        <Button Command="{Binding ToggleOutputPanelCommand}" Classes="activitybtn"
+                Classes.active="{Binding OutputPanelVisible}" ToolTip.Tip="Output">
+          <Path Classes="ico onbar" Data="{StaticResource IcoListDashes}"/>
+        </Button>
       </StackPanel>
-      <!-- Pinned to the bottom of the bar. Cycles System → Light → Dark. -->
-      <Button DockPanel.Dock="Bottom" Content="◐" Click="CycleTheme_Click" Background="Transparent" Foreground="White"
-              FontSize="16" Width="52" Height="44" HorizontalContentAlignment="Center" VerticalAlignment="Bottom"
-              ToolTip.Tip="Theme: System → Light → Dark"/>
+      <!-- Pinned to the bottom: theme cycle (System → Light → Dark) + Settings. -->
+      <Button DockPanel.Dock="Bottom" Command="{Binding SelectStudioTabCommand}" CommandParameter="Settings"
+              Classes="activitybtn" VerticalAlignment="Bottom" ToolTip.Tip="Settings">
+        <Path Classes="ico onbar" Data="{StaticResource IcoGear}"/>
+      </Button>
+      <Button DockPanel.Dock="Bottom" Click="CycleTheme_Click" Classes="activitybtn" VerticalAlignment="Bottom"
+              ToolTip.Tip="Theme: System → Light → Dark">
+        <Path Classes="ico onbar" Data="{StaticResource IcoMoon}"/>
+      </Button>
     </DockPanel>
 
     <Grid Grid.Column="1" RowDefinitions="*,Auto">
@@ -205,87 +224,158 @@
                 </ListBox>
               </StackPanel>
             </Border>
+            <!-- Bottom status (design: green dot + Local-first · engine ready; warn when the engine
+                 probe is unavailable — bound honestly to IsEngineUnavailable). -->
+            <Border DockPanel.Dock="Bottom" Padding="12,8" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0">
+              <StackPanel Orientation="Horizontal" Spacing="7">
+                <Ellipse Width="7" Height="7" VerticalAlignment="Center"
+                         Fill="{DynamicResource Ok}" IsVisible="{Binding !IsEngineUnavailable}"/>
+                <Ellipse Width="7" Height="7" VerticalAlignment="Center"
+                         Fill="{DynamicResource Warn}" IsVisible="{Binding IsEngineUnavailable}"/>
+                <TextBlock Text="Local-first · engine ready" FontSize="11" Foreground="{DynamicResource T3}"
+                           VerticalAlignment="Center" IsVisible="{Binding !IsEngineUnavailable}"/>
+                <TextBlock Text="Local-first · engine unavailable" FontSize="11" Foreground="{DynamicResource Warn}"
+                           VerticalAlignment="Center" IsVisible="{Binding IsEngineUnavailable}"/>
+              </StackPanel>
+            </Border>
             <!-- Grouped nav -->
             <ScrollViewer>
               <StackPanel Margin="8,8" Spacing="1">
 
                 <TextBlock Text="OVERVIEW" Foreground="{DynamicResource T4}" FontSize="10" FontWeight="SemiBold" Margin="8,4,0,3"/>
-                <Button Content="Dashboard" CommandParameter="Dashboard" Command="{Binding SelectStudioTabCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
-                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
-                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Dashboard}"/>
+                <Button Classes="navrow" CommandParameter="Dashboard" Command="{Binding SelectStudioTabCommand}"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Dashboard}">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Path Classes="ico" Data="{StaticResource IcoDashboard}"/>
+                    <TextBlock Text="Dashboard" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
 
                 <StackPanel Orientation="Horizontal" Spacing="6" Margin="8,10,0,3">
                   <TextBlock Text="AUTHOR" Foreground="{DynamicResource T4}" FontSize="10" FontWeight="SemiBold"/>
-                  <TextBlock Text="✓" Foreground="{DynamicResource Ok}" FontSize="10"/>
+                  <Path Classes="ico ico-sm ok" Data="{StaticResource IcoCheckCircleFill}"/>
                 </StackPanel>
-                <Button Content="Writing Studio" CommandParameter="WritingStudio" Command="{Binding SelectStudioTabCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
-                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
-                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=WritingStudio}"/>
-                <Button Content="Examples" CommandParameter="Examples" Command="{Binding SelectStudioTabCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
-                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
-                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Examples}"/>
-                <Button Content="Import &amp; Quarantine" CommandParameter="Quarantine" Command="{Binding SelectStudioTabCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
-                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
-                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Quarantine}"/>
-                <Button Content="Preference Review" CommandParameter="PreferenceReview" Command="{Binding SelectStudioTabCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
-                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
-                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=PreferenceReview}"/>
-                <Button Content="AI Assist" CommandParameter="AiAssist" Command="{Binding SelectStudioTabCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
-                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
-                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=AiAssist}"/>
+                <Button Classes="navrow" CommandParameter="WritingStudio" Command="{Binding SelectStudioTabCommand}"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=WritingStudio}">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Path Classes="ico" Data="{StaticResource IcoPencil}"/>
+                    <TextBlock Text="Writing Studio" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
+                <Button Classes="navrow" CommandParameter="Examples" Command="{Binding SelectStudioTabCommand}"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Examples}">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Path Classes="ico" Data="{StaticResource IcoRows}"/>
+                    <TextBlock Text="Examples" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
+                <Button Classes="navrow" CommandParameter="Quarantine" Command="{Binding SelectStudioTabCommand}"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Quarantine}">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Path Classes="ico" Data="{StaticResource IcoImport}"/>
+                    <TextBlock Text="Import &amp; Quarantine" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
+                <Button Classes="navrow" CommandParameter="PreferenceReview" Command="{Binding SelectStudioTabCommand}"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=PreferenceReview}">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Path Classes="ico" Data="{StaticResource IcoScales}"/>
+                    <TextBlock Text="Preference Review" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
+                <Button Classes="navrow" CommandParameter="AiAssist" Command="{Binding SelectStudioTabCommand}"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=AiAssist}">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Path Classes="ico" Data="{StaticResource IcoChats}"/>
+                    <TextBlock Text="AI Assist" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
 
                 <StackPanel Orientation="Horizontal" Spacing="6" Margin="8,10,0,3">
                   <TextBlock Text="MEASURE" Foreground="{DynamicResource T4}" FontSize="10" FontWeight="SemiBold"/>
-                  <TextBlock Text="⚠" Foreground="{DynamicResource Warn}" FontSize="10"/>
+                  <Path Classes="ico ico-sm warn" Data="{StaticResource IcoWarningFill}"/>
                 </StackPanel>
-                <Button Content="Dataset Debt" CommandParameter="Debt" Command="{Binding SelectStudioTabCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
-                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
-                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Debt}"/>
-                <Button Content="Splits" CommandParameter="Splits" Command="{Binding SelectStudioTabCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
-                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
-                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Splits}"/>
+                <Button Classes="navrow" CommandParameter="Debt" Command="{Binding SelectStudioTabCommand}"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Debt}">
+                  <Grid ColumnDefinitions="Auto,*,Auto">
+                    <Path Grid.Column="0" Classes="ico" Data="{StaticResource IcoHeart}"/>
+                    <TextBlock Grid.Column="1" Text="Dataset Debt" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                    <Border Grid.Column="2" MinWidth="18" Height="18" CornerRadius="4" Padding="4,0" VerticalAlignment="Center"
+                            IsVisible="{Binding Debt.HasGrade}"
+                            Background="{Binding Debt.DebtGradeColor, Converter={StaticResource StringToBrush}}">
+                      <TextBlock Text="{Binding Debt.DebtGrade}" FontSize="10.5" FontWeight="Bold" Foreground="White"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                  </Grid>
+                </Button>
+                <Button Classes="navrow" CommandParameter="Splits" Command="{Binding SelectStudioTabCommand}"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Splits}">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Path Classes="ico" Data="{StaticResource IcoPie}"/>
+                    <TextBlock Text="Splits" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
 
-                <TextBlock Text="EVALUATE" Foreground="{DynamicResource T4}" FontSize="10" FontWeight="SemiBold" Margin="8,10,0,3"/>
-                <Button Content="Evaluation" CommandParameter="Evaluation" Command="{Binding SelectStudioTabCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
-                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
-                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Evaluation}"/>
-                <Button Content="Model Arena" CommandParameter="Arena" Command="{Binding SelectStudioTabCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
-                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
-                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Arena}"/>
-                <Button Content="Suites" CommandParameter="Suites" Command="{Binding SelectStudioTabCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
-                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
-                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Suites}"/>
+                <StackPanel Orientation="Horizontal" Spacing="6" Margin="8,10,0,3">
+                  <TextBlock Text="EVALUATE" Foreground="{DynamicResource T4}" FontSize="10" FontWeight="SemiBold"/>
+                  <Path Classes="ico ico-sm muted" Data="{StaticResource IcoLock}"/>
+                </StackPanel>
+                <Button Classes="navrow" CommandParameter="Evaluation" Command="{Binding SelectStudioTabCommand}"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Evaluation}">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Path Classes="ico" Data="{StaticResource IcoFlask}"/>
+                    <TextBlock Text="Evaluation" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
+                <Button Classes="navrow" CommandParameter="Arena" Command="{Binding SelectStudioTabCommand}"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Arena}">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Path Classes="ico" Data="{StaticResource IcoTrophy}"/>
+                    <TextBlock Text="Model Arena" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
+                <Button Classes="navrow" CommandParameter="Suites" Command="{Binding SelectStudioTabCommand}"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Suites}">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Path Classes="ico" Data="{StaticResource IcoChecklist}"/>
+                    <TextBlock Text="Suites" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
 
-                <TextBlock Text="TRAIN" Foreground="{DynamicResource T4}" FontSize="10" FontWeight="SemiBold" Margin="8,10,0,3"/>
-                <Button Content="Training" CommandParameter="Training" Command="{Binding SelectStudioTabCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
-                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
-                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Training}"/>
-                <Button Content="Artifacts" CommandParameter="Artifacts" Command="{Binding SelectStudioTabCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
-                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
-                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Artifacts}"/>
+                <StackPanel Orientation="Horizontal" Spacing="6" Margin="8,10,0,3">
+                  <TextBlock Text="TRAIN" Foreground="{DynamicResource T4}" FontSize="10" FontWeight="SemiBold"/>
+                  <Path Classes="ico ico-sm muted" Data="{StaticResource IcoLock}"/>
+                </StackPanel>
+                <Button Classes="navrow" CommandParameter="Training" Command="{Binding SelectStudioTabCommand}"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Training}">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Path Classes="ico" Data="{StaticResource IcoCap}"/>
+                    <TextBlock Text="Training" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
+                <Button Classes="navrow" CommandParameter="Artifacts" Command="{Binding SelectStudioTabCommand}"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Artifacts}">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Path Classes="ico" Data="{StaticResource IcoCube}"/>
+                    <TextBlock Text="Artifacts" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
 
                 <Border Height="1" Background="{DynamicResource Line}" Margin="8,10,8,6"/>
-                <Button Content="Versions" CommandParameter="Versions" Command="{Binding SelectStudioTabCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
-                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
-                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Versions}"/>
-                <Button Content="Settings" CommandParameter="Settings" Command="{Binding SelectStudioTabCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Foreground="{DynamicResource T2}"
-                        BorderThickness="0" CornerRadius="7" Padding="10,6" Margin="0,1"
-                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Settings}"/>
+                <Button Classes="navrow" CommandParameter="Versions" Command="{Binding SelectStudioTabCommand}"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Versions}">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Path Classes="ico" Data="{StaticResource IcoBranch}"/>
+                    <TextBlock Text="Versions" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
+                <Button Classes="navrow" CommandParameter="Settings" Command="{Binding SelectStudioTabCommand}"
+                        Background="{Binding SelectedStudioTabIndex, Converter={StaticResource TabActiveBrush}, ConverterParameter=Settings}">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Path Classes="ico" Data="{StaticResource IcoGear}"/>
+                    <TextBlock Text="Settings" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
 
               </StackPanel>
             </ScrollViewer>
