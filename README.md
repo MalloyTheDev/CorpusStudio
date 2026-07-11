@@ -183,9 +183,53 @@ CorpusStudio
 ## Desktop preview
 
 A walk through the workspace, front to back. An IDE-style activity bar toggles
-between the **Start Center**, the file **Explorer**, and the classic **Studio**
-(the 15-tab dashboard), with **Problems** and **Output** panels docked at the
-bottom. See [`docs/WORKSPACE_SYSTEM.md`](docs/WORKSPACE_SYSTEM.md).
+between the **Start Center**, the file **Explorer**, and the **Studio**, with
+**Problems** and **Output** panels docked at the bottom. See
+[`docs/WORKSPACE_SYSTEM.md`](docs/WORKSPACE_SYSTEM.md).
+
+The cross-platform (Avalonia) shell has been re-skinned to the **Nocturne** design
+system — a quiet, compact, dark-first look with a grouped workflow-phase sidebar
+(**Overview · Author · Measure · Evaluate · Train**) in place of a flat tab strip,
+Phosphor iconography throughout, and a contextual quality rail. The tokens, icon
+set, and screen inventory are the framework-agnostic source of truth in
+[`docs/design/`](docs/design/), so the same design carries toward the eventual
+Tauri/React shell. The shipping WPF walkthrough (Start Center → wizard → Explorer →
+Studio, below) is unchanged; these are the same workflows on the Nocturne shell.
+
+### Nocturne design system
+
+![Corpus Studio Nocturne dashboard](docs/screenshots/nocturne-dashboard.png)
+
+**Dashboard** — a readiness hero (the dataset-debt grade badge over a 7-node
+lifecycle strip whose per-node status is derived from real view-model signals and
+stays neutral where a signal doesn't exist), stat cards, quick actions, and the
+contextual Quality rail.
+
+![Corpus Studio Nocturne dataset-debt ledger](docs/screenshots/nocturne-dataset-debt.png)
+
+**Dataset Debt** — the letter-grade hero over a severity-ranked remediation ledger;
+the rail's PII banner and validation card reflect real quality/validation state, not
+a fabricated "all clear".
+
+![Corpus Studio Nocturne quality grid](docs/screenshots/nocturne-quality.png)
+
+**Quality** — a metric-card grid (empty rows, exact/near duplicates, PII/secrets,
+low-information, synthetic patterns) with severity pills, plus synthetic-issue
+triage; severities are advisory and never silently block export.
+
+![Corpus Studio Nocturne version timeline](docs/screenshots/nocturne-versions.png)
+
+**Versions** — a single-writer-safe snapshot timeline: the head is marked
+**CURRENT**, older snapshots restore in place, and each card shows the real row
+count + content fingerprint (no per-version grade is invented).
+
+![Corpus Studio Nocturne settings](docs/screenshots/nocturne-settings.png)
+
+**Settings** — appearance, engine status, gate thresholds, and the **fail-closed
+provider policy** (cloud providers are evaluator-only; only the local backend may
+generate training rows) shown truthfully rather than as an editable free-for-all.
+
+### Workspace flow (shipping shell)
 
 ![Corpus Studio Start Center](docs/screenshots/workspace-start-center.png)
 

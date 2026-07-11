@@ -207,10 +207,13 @@ per-item error isolation, and off-thread document opens.
   a **Universal Explorer** (VS Code-style file tree with file-type chips + an
   active-tab highlight, document tabs, text/JSON/image/binary viewers, a metadata
   panel; generated reports open read-only; `examples.jsonl` carries a single-writer
-  caution), and the classic 15-tab **Studio** (Dashboard, Writing Studio, Examples,
+  caution), and the **Studio** (Dashboard, Writing Studio, Examples,
   Preference Review, Quarantine, Splits, Evaluation, AI Assist, Training, Arena,
-  Artifacts, **Suites**, Versions, Debt, Settings). Both New Project entry points open
-  the one wizard. See [`WORKSPACE_SYSTEM.md`](WORKSPACE_SYSTEM.md).
+  Artifacts, **Suites**, Versions, Debt, Settings) — a flat 15-tab strip in the
+  shipping WPF head, re-skinned to the **Nocturne** grouped workflow-phase sidebar
+  (Overview · Author · Measure · Evaluate · Train) on the cross-platform Avalonia
+  shell (see [`design/`](design/)). Both New Project entry points open the one
+  wizard. See [`WORKSPACE_SYSTEM.md`](WORKSPACE_SYSTEM.md).
 - Two bottom-docked panels (mutually exclusive), toggled from the activity bar: a
   **Problems** panel (the dataset gate findings as a block-first list with fix hints
   and a count badge) and an **Output / Logs** panel (an ephemeral, local-only record of
