@@ -196,20 +196,24 @@ set, and screen inventory are the framework-agnostic source of truth in
 Tauri/React shell. The shipping WPF walkthrough (Start Center → wizard → Explorer →
 Studio, below) is unchanged; these are the same workflows on the Nocturne shell.
 
-### Nocturne design system
+### Nocturne desktop
+
+The Studio, screen by screen, on the cross-platform shell. Every surface renders
+**live engine data** — grades, quality metrics, split ratios, integrity verdicts —
+and where a signal doesn't exist it reads neutral rather than inventing one.
 
 ![Corpus Studio Nocturne dashboard](docs/screenshots/nocturne-dashboard.png)
 
 **Dashboard** — a readiness hero (the dataset-debt grade badge over a 7-node
 lifecycle strip whose per-node status is derived from real view-model signals and
-stays neutral where a signal doesn't exist), stat cards, quick actions, and the
-contextual Quality rail.
+stays neutral where a signal doesn't exist), stat cards, quick actions, a RECENT
+ACTIVITY feed bound to the real engine-operation log, and the contextual Quality rail.
 
-![Corpus Studio Nocturne dataset-debt ledger](docs/screenshots/nocturne-dataset-debt.png)
+![Corpus Studio Nocturne writing studio](docs/screenshots/nocturne-writing-studio.png)
 
-**Dataset Debt** — the letter-grade hero over a severity-ranked remediation ledger;
-the rail's PII banner and validation card reflect real quality/validation state, not
-a fabricated "all clear".
+**Writing Studio** — a structured Instruction / Input / Output authoring form (a
+live projection of the underlying JSON, so validation and save are unchanged), with
+the schema pill, Validate / Save actions, and an honest validation card.
 
 ![Corpus Studio Nocturne quality grid](docs/screenshots/nocturne-quality.png)
 
@@ -217,11 +221,35 @@ a fabricated "all clear".
 low-information, synthetic patterns) with severity pills, plus synthetic-issue
 triage; severities are advisory and never silently block export.
 
+![Corpus Studio Nocturne dataset-debt ledger](docs/screenshots/nocturne-dataset-debt.png)
+
+**Dataset Debt** — a grade hero with a verdict headline (derived honestly from the
+grade) and a mini bar-chart of the real quality-issue trend, over a severity-ranked
+remediation ledger; the rail's PII banner and validation card reflect real state.
+
+![Corpus Studio Nocturne splits](docs/screenshots/nocturne-splits.png)
+
+**Splits** — leakage-checked train / val / test with a proportion bar sized by the
+real ratios, a "No leakage" chip driven by the real shared-row count, and a counts
+footer — no fabricated proportions.
+
 ![Corpus Studio Nocturne version timeline](docs/screenshots/nocturne-versions.png)
 
 **Versions** — a single-writer-safe snapshot timeline: the head is marked
 **CURRENT**, older snapshots restore in place, and each card shows the real row
 count + content fingerprint (no per-version grade is invented).
+
+![Corpus Studio Nocturne suites](docs/screenshots/nocturne-suites.png)
+
+**Suites** — saved evaluation suites as self-contained cards with a per-kind glyph,
+a valid/invalid badge from the real registry state, and a per-card Run — omitting
+the metric/score tokens the engine payload doesn't carry rather than faking them.
+
+![Corpus Studio Nocturne artifacts](docs/screenshots/nocturne-artifacts.png)
+
+**Artifacts** — trained weights as provenance cards with a real integrity chip
+(present / modified) and, when a run's weights changed since eval, the actual
+promote-gate block message — the honesty invariant, surfaced.
 
 ![Corpus Studio Nocturne settings](docs/screenshots/nocturne-settings.png)
 
@@ -229,74 +257,30 @@ count + content fingerprint (no per-version grade is invented).
 provider policy** (cloud providers are evaluator-only; only the local backend may
 generate training rows) shown truthfully rather than as an editable free-for-all.
 
-### Workspace flow (shipping shell)
+### Workspace features
+
+The Studio also lives inside an IDE-style workspace — a Start Center, a
+scaffolding wizard, and a universal file explorer (see
+[`docs/WORKSPACE_SYSTEM.md`](docs/WORKSPACE_SYSTEM.md)).
 
 ![Corpus Studio Start Center](docs/screenshots/workspace-start-center.png)
 
-**1 · Start Center** — a dataset is a workspace, not just rows. Create a new
-project from a template, open an existing folder (Corpus Studio never mutates your
-files without asking), or jump back into a recent workspace. Missing folders are
-flagged, never silently dropped.
+**Start Center** — a dataset is a workspace, not just rows. Create a new project
+from a template, open an existing folder (Corpus Studio never mutates your files
+without asking), or jump back into a recent workspace. Missing folders are flagged,
+never silently dropped.
 
 ![Corpus Studio new project wizard](docs/screenshots/workspace-wizard.png)
 
-**2 · New Project wizard** — pick a schema and a template and see a live preview of
-the exact folder structure that will be scaffolded before anything is written. Both
-the Start Center and the Studio sidebar open this one wizard.
+**New Project wizard** — pick a schema and a template and see a live preview of the
+exact folder structure that will be scaffolded before anything is written.
 
 ![Corpus Studio workspace explorer](docs/screenshots/workspace-explorer.png)
 
-**3 · Universal Workspace Explorer** — a VS Code-style file tree (generated reports
+**Universal Workspace Explorer** — a VS Code-style file tree (generated reports
 flagged and opened read-only) with file-type chips, document tabs, four viewers, and
 a metadata panel. `examples.jsonl` opens with a single-writer caution and is never
 mutated except by an explicit save.
-
-![Corpus Studio Studio dashboard with the dataset-debt grade badge](docs/screenshots/studio-dashboard.png)
-
-**4 · Studio dashboard** — the project overview with quick actions and a glanceable
-**dataset-debt grade badge** in the header (click it for the full ledger). The grade
-reflects the last debt check and marks itself stale when the dataset changes — it
-never auto-runs or shows a stale grade as current.
-
-![Corpus Studio Problems panel](docs/screenshots/problems-panel.png)
-
-**5 · Problems panel** — the dataset's gate findings (schema, quality, PII/secrets,
-leakage) as a scannable, block-first list with fix hints and an activity-bar count
-badge. A clean gate is a pre-export signal, **not approval** — you still review.
-
-![Corpus Studio Output panel](docs/screenshots/output-panel.png)
-
-**6 · Output / Logs panel** — an ephemeral, local-only record of every engine CLI
-invocation (verb, outcome, duration, stderr on failure) for at-a-glance diagnostics.
-
-![Corpus Studio dataset debt ledger](docs/screenshots/dataset-debt.png)
-
-**7 · Dataset Debt** — the engine normalizes the quality signals by dataset size,
-ranks them, and grades the dataset (A–F) so you know what to fix first; secrets/PII
-are graded by presence, not rate. See [the A–F grades side by side](docs/DEBT.md#the-grades-in-the-desktop-debt-tab).
-
-![Corpus Studio debt trend mini-chart](docs/screenshots/debt-trend.png)
-
-**8 · Debt trend** — a mini-chart of the quality **issue rate** (issues ÷ rows) across
-recorded quality runs, with an improving/worsening/stable verdict. Presence-based
-PII/secrets are graded live in the Debt tab, not trended here, so the trend never
-fabricates a grade it can't stand behind.
-
-![Corpus Studio Model Arena surviving a backend outage](docs/screenshots/arena-resilience.png)
-
-**9 · Resilient model runs** — the Model Arena (and Evaluation) keep going when a
-provider fails. Transient errors (429 / 5xx / dropped connections) are retried with
-backoff; a model that stays down is recorded as a per-response **backend error**
-instead of aborting the whole comparison — here `mistral:7b` returned a 503 while
-`llama3.1:8b` was still fully compared and judged.
-
-![Corpus Studio Import from Hugging Face dialog](docs/screenshots/hf-import.png)
-
-**10 · Import from Hugging Face** — pull rows from a **public** Hub dataset (read-only,
-no auth, no upload). Inspect surfaces the **license** with a "not assumed
-training-licensed" caveat; you map the dataset's columns to the project schema, and the
-staged rows run through the normal import preview / quarantine flow — the desktop stays
-the single writer of `examples.jsonl`. Dependency-light: no `datasets` / `huggingface_hub`.
 
 ## Core Local Loop
 
