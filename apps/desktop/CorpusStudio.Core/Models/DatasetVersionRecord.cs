@@ -122,6 +122,38 @@ public sealed class DatasetVersionDisplayItem
 
     public int LinkCount => Record.SourceRunIds.Count + Record.ArtifactIds.Count;
 
+    /// <summary>True for the newest (head) version — the VM sets this on the first row of the
+    /// newest-first list so the timeline can mark it CURRENT and hide its Restore affordance.</summary>
+    public bool IsCurrent { get; set; }
+
+    /// <summary>The version's label for the timeline card title (or a neutral placeholder).</summary>
+    public string Title => string.IsNullOrWhiteSpace(Record.Label) ? "(no label)" : Record.Label;
+
+    /// <summary>"N rows · fp: xxxxxxxx" — real row count + the short content fingerprint (— when none).
+    /// No grade is shown: a per-version grade is not a recorded field, so we never invent one.</summary>
+    public string MetaLine
+    {
+        get
+        {
+            var fp = string.IsNullOrWhiteSpace(Record.ContentFingerprint)
+                ? "—"
+                : Record.ContentFingerprint!.Length > 8 ? Record.ContentFingerprint![..8] : Record.ContentFingerprint!;
+            var rows = $"{Record.RowCount} row{(Record.RowCount == 1 ? "" : "s")}";
+            return $"{rows} · fp: {fp}";
+        }
+    }
+
+    /// <summary>The recorded capture timestamp (engine string; empty when unknown).</summary>
+    public string Timestamp => Record.CreatedAt;
+
+    /// <summary>The integrity chip label + Nocturne colour (matches=Ok / drifted=Warn / unreadable=Bad).</summary>
+    public string IntegrityColor => Integrity switch
+    {
+        "matches" => "#6bbf9a",
+        "drifted" => "#d9a35f",
+        _ => "#d76d6d",
+    };
+
     public string DisplayName
     {
         get

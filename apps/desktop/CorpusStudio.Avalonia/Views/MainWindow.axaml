@@ -1203,45 +1203,86 @@
 
     <!-- Versions (slice 9 fidelity): a version-timeline list card + an actions/detail card. -->
     <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Versions}">
-      <Grid Margin="16" ColumnDefinitions="300,*">
-        <Border Grid.Column="0" Background="{DynamicResource Panel}" CornerRadius="11" Padding="10"
-                BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-          <DockPanel>
-            <TextBlock DockPanel.Dock="Top" Text="{Binding Versions.DatasetVersionSummary}" Foreground="{DynamicResource T3}"
-                       FontSize="12" TextWrapping="Wrap" Margin="0,0,0,8"/>
-            <ListBox ItemsSource="{Binding Versions.DatasetVersions}" SelectedItem="{Binding Versions.SelectedDatasetVersion}"
-                     Background="Transparent" BorderThickness="0">
-              <ListBox.ItemTemplate>
-                <DataTemplate x:DataType="models:DatasetVersionDisplayItem">
-                  <StackPanel Margin="0,2">
-                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
-                    <TextBlock Text="{Binding Integrity}" Foreground="{DynamicResource T4}" FontSize="11"/>
-                  </StackPanel>
-                </DataTemplate>
-              </ListBox.ItemTemplate>
-            </ListBox>
-          </DockPanel>
-        </Border>
-        <Border Grid.Column="1" Margin="16,0,0,0" Background="{DynamicResource Panel}" CornerRadius="12" Padding="16"
-                BorderBrush="{DynamicResource Line2}" BorderThickness="1" VerticalAlignment="Top">
-          <StackPanel Spacing="8">
-            <TextBlock Text="VERSION LABEL" FontSize="10" Foreground="{DynamicResource T4}"/>
-            <TextBox Text="{Binding Versions.DatasetVersionLabel}"/>
-            <WrapPanel>
-              <Button Content="Capture version" Command="{Binding CaptureDatasetVersionCommand}" Margin="0,0,6,4"
-                      Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}"
-                      BorderBrush="{DynamicResource Accent}" BorderThickness="1"/>
-              <Button Content="Refresh" Command="{Binding RefreshDatasetVersionsCommand}" Margin="0,0,6,4"/>
-              <Button Content="View card" Command="{Binding ViewDatasetVersionCardCommand}" Margin="0,0,6,4"/>
-              <Button Content="Diff versions" Command="{Binding DiffVersionsCommand}" Margin="0,0,6,4"/>
-              <Button Content="Restore" Command="{Binding RestoreDatasetVersionCommand}" Margin="0,0,6,4"/>
-              <Button Content="Clean up row store" Command="{Binding RunRowStoreGcCommand}" Margin="0,0,6,4"/>
-            </WrapPanel>
-            <TextBlock Text="{Binding Versions.DatasetDiffBaseLabel}" Foreground="{DynamicResource T4}"/>
-            <TextBlock Text="{Binding Versions.DatasetVersionDetail}" Foreground="{DynamicResource T2}" TextWrapping="Wrap"/>
-          </StackPanel>
-        </Border>
-      </Grid>
+      <ScrollViewer>
+        <StackPanel Margin="20" Spacing="12" MaxWidth="820" HorizontalAlignment="Left">
+          <!-- Header: snapshot summary + a ghost "Capture version" (git-commit) -->
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Grid.Column="0" Text="{Binding Versions.DatasetVersionSummary}" Foreground="{DynamicResource T3}"
+                       FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center"/>
+            <Button Grid.Column="1" Command="{Binding CaptureDatasetVersionCommand}" VerticalAlignment="Center"
+                    Background="{DynamicResource Panel}" BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Path Classes="ico" Data="{StaticResource IcoGitCommit}" Width="14" Height="14"/>
+                <TextBlock Text="Capture version" VerticalAlignment="Center"/>
+              </StackPanel>
+            </Button>
+          </Grid>
+          <!-- Label input + secondary actions (kept, compact) -->
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBox Grid.Column="0" Text="{Binding Versions.DatasetVersionLabel}" Watermark="version label (optional)"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="8,0,0,0" VerticalAlignment="Center">
+              <Button Content="Refresh" Command="{Binding RefreshDatasetVersionsCommand}"/>
+              <Button Content="View card" Command="{Binding ViewDatasetVersionCardCommand}"/>
+              <Button Content="Diff" Command="{Binding DiffVersionsCommand}"/>
+              <Button Content="Clean up" Command="{Binding RunRowStoreGcCommand}"/>
+            </StackPanel>
+          </Grid>
+          <!-- Vertical timeline: a left rail with node dots + a stack of version cards. The head
+               (newest) row is marked CURRENT; older rows carry a per-card Restore. -->
+          <ListBox x:Name="VersionsTimeline" ItemsSource="{Binding Versions.DatasetVersions}"
+                   SelectedItem="{Binding Versions.SelectedDatasetVersion}"
+                   Background="Transparent" BorderThickness="0" Padding="0">
+            <ListBox.Styles>
+              <Style Selector="ListBoxItem"><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0"/></Style>
+              <Style Selector="ListBoxItem:selected /template/ ContentPresenter"><Setter Property="Background" Value="Transparent"/></Style>
+              <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter"><Setter Property="Background" Value="Transparent"/></Style>
+            </ListBox.Styles>
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:DatasetVersionDisplayItem">
+                <Grid ColumnDefinitions="20,*">
+                  <!-- rail + node dot (current = accent, others = muted) -->
+                  <Panel Grid.Column="0">
+                    <Border Width="2" Background="{DynamicResource Line2}" HorizontalAlignment="Center"/>
+                    <Ellipse Width="11" Height="11" VerticalAlignment="Top" Margin="0,18,0,0" HorizontalAlignment="Center"
+                             Fill="{DynamicResource Accent}" IsVisible="{Binding IsCurrent}"/>
+                    <Ellipse Width="10" Height="10" VerticalAlignment="Top" Margin="0,18,0,0" HorizontalAlignment="Center"
+                             Fill="{DynamicResource Track}" Stroke="{DynamicResource Line2}" StrokeThickness="1"
+                             IsVisible="{Binding !IsCurrent}"/>
+                  </Panel>
+                  <Border Grid.Column="1" Margin="6,8,0,8" Background="{DynamicResource Panel}" CornerRadius="11" Padding="14"
+                          BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+                    <StackPanel Spacing="7">
+                      <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+                        <TextBlock Grid.Column="0" Text="{Binding Title}" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Text}" VerticalAlignment="Center"/>
+                        <Border Grid.Column="1" IsVisible="{Binding IsCurrent}" Margin="8,0,0,0" CornerRadius="5" Padding="7,2"
+                                Background="{DynamicResource AccentSoft}" VerticalAlignment="Center">
+                          <TextBlock Text="CURRENT" FontSize="9.5" FontWeight="Bold" Foreground="{DynamicResource AccentInk}"/>
+                        </Border>
+                        <TextBlock Grid.Column="3" Text="{Binding Timestamp}" Foreground="{DynamicResource T4}"
+                                   FontSize="11" VerticalAlignment="Center"/>
+                      </Grid>
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Border CornerRadius="5" Padding="6,1" VerticalAlignment="Center"
+                                Background="{Binding IntegrityColor, Converter={StaticResource StringToBrush}}">
+                          <TextBlock Text="{Binding Integrity}" FontSize="9.5" FontWeight="Bold" Foreground="White"/>
+                        </Border>
+                        <TextBlock Text="{Binding MetaLine}" Foreground="{DynamicResource T3}" FontSize="11.5"
+                                   FontFamily="Consolas" VerticalAlignment="Center"/>
+                      </StackPanel>
+                      <Button Content="Restore" IsVisible="{Binding !IsCurrent}" HorizontalAlignment="Left"
+                              Command="{Binding #VersionsTimeline.((vm:MainWindowViewModel)DataContext).RestoreDatasetVersionByItemCommand}"
+                              CommandParameter="{Binding}"/>
+                    </StackPanel>
+                  </Border>
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <TextBlock Text="{Binding Versions.DatasetVersionDetail}" Foreground="{DynamicResource T4}"
+                     FontSize="11" TextWrapping="Wrap"/>
+        </StackPanel>
+      </ScrollViewer>
     </Border>
 
     <!-- Suites (slice 8 fidelity): registered-suites list card + a new-suite card + a report card. -->

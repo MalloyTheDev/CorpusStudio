@@ -34,6 +34,28 @@ public sealed class DatasetVersionRegistryTests
     }
 
     [Fact]
+    public void DisplayItem_TimelineHelpers_AreHonest()
+    {
+        // Additive timeline display helpers (Versions re-skin): real fields only — NO fabricated grade.
+        var items = PythonEngineService.ParseDatasetVersionList(ListJson);
+        var head = items[0];
+        Assert.Equal("after clean", head.Title);            // the real label
+        Assert.Equal("120 rows · fp: abc", head.MetaLine);  // real row count + short fingerprint
+        Assert.Equal("#6bbf9a", head.IntegrityColor);       // matches -> Ok green
+        Assert.Equal("#d9a35f", items[1].IntegrityColor);   // drifted -> Warn amber
+        Assert.Equal("(no label)", items[1].Title);         // unlabeled -> neutral placeholder, never invented
+    }
+
+    [Fact]
+    public void ApplyDatasetVersions_MarksOnlyTheNewestHeadAsCurrent()
+    {
+        var vm = new MainWindowViewModel();
+        vm.Versions.ApplyDatasetVersions(PythonEngineService.ParseDatasetVersionList(ListJson));
+        Assert.True(vm.Versions.DatasetVersions[0].IsCurrent);   // newest-first head = CURRENT
+        Assert.False(vm.Versions.DatasetVersions[1].IsCurrent);
+    }
+
+    [Fact]
     public void ParseList_EmptyOrMissingVersionsYieldsEmpty()
     {
         Assert.Empty(PythonEngineService.ParseDatasetVersionList("""{"versions": []}"""));
