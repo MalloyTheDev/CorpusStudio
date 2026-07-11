@@ -1,0 +1,692 @@
+{
+  "$defs": {
+    "AdapterMethod": {
+      "enum": [
+        "none",
+        "lora",
+        "qlora",
+        "dora",
+        "ia3",
+        "full_finetune",
+        "prompt_tuning",
+        "prefix_tuning"
+      ],
+      "title": "AdapterMethod",
+      "type": "string"
+    },
+    "AttentionImpl": {
+      "description": "``math``/``eager`` is forced on Blackwell sm_120 \u2014 the fused flash/mem-efficient kernels\ndeadlock on the first backward (training/environment.py, estimators.py) \u2014 at a large activation\nVRAM cost.",
+      "enum": [
+        "math",
+        "eager",
+        "sdpa",
+        "flash_attention_2",
+        "flash_attention_3",
+        "mem_efficient",
+        "xformers"
+      ],
+      "title": "AttentionImpl",
+      "type": "string"
+    },
+    "CheckpointImpl": {
+      "enum": [
+        "full_state",
+        "adapter_only",
+        "sharded",
+        "distcp",
+        "safetensors"
+      ],
+      "title": "CheckpointImpl",
+      "type": "string"
+    },
+    "CheckpointSemantics": {
+      "additionalProperties": false,
+      "properties": {
+        "contains": {
+          "items": {
+            "enum": [
+              "adapter_weights",
+              "base_weights",
+              "optimizer_state",
+              "lr_scheduler",
+              "rng_state",
+              "trainer_state"
+            ],
+            "type": "string"
+          },
+          "title": "Contains",
+          "type": "array"
+        },
+        "reload_verifiable": {
+          "default": false,
+          "title": "Reload Verifiable",
+          "type": "boolean"
+        },
+        "resumable": {
+          "default": false,
+          "title": "Resumable",
+          "type": "boolean"
+        }
+      },
+      "title": "CheckpointSemantics",
+      "type": "object"
+    },
+    "CompileMode": {
+      "enum": [
+        "none",
+        "eager",
+        "reduce_overhead",
+        "max_autotune",
+        "aot_inductor"
+      ],
+      "title": "CompileMode",
+      "type": "string"
+    },
+    "DependencyConflict": {
+      "additionalProperties": false,
+      "properties": {
+        "condition": {
+          "title": "Condition",
+          "type": "string"
+        },
+        "packages": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Packages",
+          "type": "array"
+        },
+        "severity": {
+          "default": "block",
+          "enum": [
+            "block",
+            "warn"
+          ],
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "packages",
+        "condition"
+      ],
+      "title": "DependencyConflict",
+      "type": "object"
+    },
+    "DependencyRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "optional": {
+          "default": false,
+          "title": "Optional",
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "specifier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Specifier"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "DependencyRequirement",
+      "type": "object"
+    },
+    "DeviceKind": {
+      "enum": [
+        "cuda",
+        "rocm",
+        "mps",
+        "xpu",
+        "cpu"
+      ],
+      "title": "DeviceKind",
+      "type": "string"
+    },
+    "ExportCompatibilityEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "$ref": "#/$defs/ExportFormat"
+        },
+        "serves_in": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Serves In",
+          "type": "array"
+        }
+      },
+      "required": [
+        "format"
+      ],
+      "title": "ExportCompatibilityEntry",
+      "type": "object"
+    },
+    "ExportFormat": {
+      "enum": [
+        "adapter_peft",
+        "merged_safetensors",
+        "merged_fp16",
+        "gguf",
+        "onnx",
+        "awq",
+        "gptq",
+        "mlx"
+      ],
+      "title": "ExportFormat",
+      "type": "string"
+    },
+    "FailureTaxonomy": {
+      "description": "Terminal outcome category. ``PASS`` is included so the same enum classifies a completed\nprobe/run, not only failures. Grounded in the exact hazards the engine documents: the sm_120\nfused-attention deadlock (KERNEL_STALL), the WDDM silent spill (ACCIDENTAL_SPILL vs a clean\nOOM), and env/dependency mismatches (ENVIRONMENT_FAILURE).",
+      "enum": [
+        "PASS",
+        "FAIL",
+        "OOM",
+        "TIMEOUT",
+        "KERNEL_STALL",
+        "NUMERICAL_FAILURE",
+        "CHECKPOINT_FAILURE",
+        "ENVIRONMENT_FAILURE",
+        "UNSUPPORTED_CONFIGURATION",
+        "ACCIDENTAL_SPILL",
+        "CONTROLLED_OFFLOAD"
+      ],
+      "title": "FailureTaxonomy",
+      "type": "string"
+    },
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "KnownFailureMode": {
+      "additionalProperties": false,
+      "description": "Pre-declared hazards tagged with a taxonomy so the core can warn/refuse up front. The\ncanonical example: fused attention deadlocks on sm_120.",
+      "properties": {
+        "condition": {
+          "title": "Condition",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "mitigation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mitigation"
+        },
+        "taxonomy": {
+          "$ref": "#/$defs/FailureTaxonomy"
+        }
+      },
+      "required": [
+        "taxonomy",
+        "condition"
+      ],
+      "title": "KnownFailureMode",
+      "type": "object"
+    },
+    "LossImpl": {
+      "enum": [
+        "cross_entropy",
+        "liger_fused_ce",
+        "chunked_ce",
+        "dpo",
+        "orpo",
+        "kto",
+        "ipo",
+        "reward_bt"
+      ],
+      "title": "LossImpl",
+      "type": "string"
+    },
+    "OffloadStrategy": {
+      "description": "The ``controlled_*`` values are the deliberate, planned counterparts of the accidental spills\nin :class:`FitClass`.",
+      "enum": [
+        "none",
+        "controlled_activation_offload",
+        "controlled_optimizer_offload",
+        "controlled_parameter_offload",
+        "cpu_offload",
+        "disk_offload",
+        "deepspeed_zero2",
+        "deepspeed_zero3"
+      ],
+      "title": "OffloadStrategy",
+      "type": "string"
+    },
+    "OperatingSystem": {
+      "enum": [
+        "windows",
+        "linux",
+        "macos",
+        "unknown"
+      ],
+      "title": "OperatingSystem",
+      "type": "string"
+    },
+    "Optimizer": {
+      "enum": [
+        "adamw_torch",
+        "adamw_torch_fused",
+        "adamw_8bit",
+        "adamw_bnb_8bit",
+        "paged_adamw_8bit",
+        "paged_adamw_32bit",
+        "adafactor",
+        "lion",
+        "sgd"
+      ],
+      "title": "Optimizer",
+      "type": "string"
+    },
+    "PrecisionMode": {
+      "enum": [
+        "fp32",
+        "tf32",
+        "fp16",
+        "bf16",
+        "fp8",
+        "mixed_bf16",
+        "mixed_fp16"
+      ],
+      "title": "PrecisionMode",
+      "type": "string"
+    },
+    "QuantizationMode": {
+      "enum": [
+        "none",
+        "int8",
+        "int4",
+        "nf4",
+        "fp4",
+        "gptq",
+        "awq",
+        "hqq"
+      ],
+      "title": "QuantizationMode",
+      "type": "string"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Ref",
+      "type": "object"
+    },
+    "StageMarker": {
+      "description": "Ordered lifecycle stage of a run, launch \u2192 export. A RunEvent carries the stage it belongs to\nso a consumer can render a precise progress spine and localize a failure to the exact stage.",
+      "enum": [
+        "process_start",
+        "env_loaded",
+        "cuda_init",
+        "model_loaded",
+        "quantized",
+        "adapter_attached",
+        "optimizer_created",
+        "batch_materialized",
+        "forward",
+        "loss",
+        "backward",
+        "optimizer_step",
+        "checkpoint",
+        "reload",
+        "evaluation",
+        "export"
+      ],
+      "title": "StageMarker",
+      "type": "string"
+    },
+    "TaskType": {
+      "enum": [
+        "sft",
+        "pretraining",
+        "preference",
+        "reward",
+        "classification",
+        "embedding",
+        "multimodal",
+        "evaluation",
+        "distillation",
+        "grpo"
+      ],
+      "title": "TaskType",
+      "type": "string"
+    },
+    "TelemetryHook": {
+      "additionalProperties": false,
+      "properties": {
+        "metrics": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Metrics",
+          "type": "array"
+        },
+        "stage": {
+          "$ref": "#/$defs/StageMarker"
+        }
+      },
+      "required": [
+        "stage"
+      ],
+      "title": "TelemetryHook",
+      "type": "object"
+    },
+    "TrainerTarget": {
+      "description": "Verbatim from config_templates.TrainingConfigTarget.",
+      "enum": [
+        "corpus_studio",
+        "axolotl_yaml",
+        "trl_config",
+        "unsloth_script",
+        "huggingface_trainer",
+        "llama_factory"
+      ],
+      "title": "TrainerTarget",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A backend worker's STATIC self-declaration of everything it can do \u2014 the core reads this to\ndecide which backend can even attempt a RunPlan, BEFORE dispatch. Mostly NEW; generalizes the\ninference model_backends.base.ModelBackend Protocol + training/compatibility into a declarable\nmanifest for a TRAINING backend.",
+  "properties": {
+    "adapter_methods": {
+      "items": {
+        "$ref": "#/$defs/AdapterMethod"
+      },
+      "title": "Adapter Methods",
+      "type": "array"
+    },
+    "attention_impls": {
+      "items": {
+        "$ref": "#/$defs/AttentionImpl"
+      },
+      "title": "Attention Impls",
+      "type": "array"
+    },
+    "backend_id": {
+      "minLength": 1,
+      "title": "Backend Id",
+      "type": "string"
+    },
+    "backend_version": {
+      "title": "Backend Version",
+      "type": "string"
+    },
+    "capability_probes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Capability Probes",
+      "type": "array"
+    },
+    "checkpoint_impls": {
+      "items": {
+        "$ref": "#/$defs/CheckpointImpl"
+      },
+      "title": "Checkpoint Impls",
+      "type": "array"
+    },
+    "checkpoint_semantics": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CheckpointSemantics"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "compile_modes": {
+      "items": {
+        "$ref": "#/$defs/CompileMode"
+      },
+      "title": "Compile Modes",
+      "type": "array"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "dependency_conflicts": {
+      "items": {
+        "$ref": "#/$defs/DependencyConflict"
+      },
+      "title": "Dependency Conflicts",
+      "type": "array"
+    },
+    "dependency_requirements": {
+      "items": {
+        "$ref": "#/$defs/DependencyRequirement"
+      },
+      "title": "Dependency Requirements",
+      "type": "array"
+    },
+    "display_name": {
+      "default": "",
+      "title": "Display Name",
+      "type": "string"
+    },
+    "environment_lock_ref": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ref"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "export_compatibility": {
+      "items": {
+        "$ref": "#/$defs/ExportCompatibilityEntry"
+      },
+      "title": "Export Compatibility",
+      "type": "array"
+    },
+    "export_formats": {
+      "items": {
+        "$ref": "#/$defs/ExportFormat"
+      },
+      "title": "Export Formats",
+      "type": "array"
+    },
+    "known_failure_modes": {
+      "items": {
+        "$ref": "#/$defs/KnownFailureMode"
+      },
+      "title": "Known Failure Modes",
+      "type": "array"
+    },
+    "loss_impls": {
+      "items": {
+        "$ref": "#/$defs/LossImpl"
+      },
+      "title": "Loss Impls",
+      "type": "array"
+    },
+    "model_families": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Model Families",
+      "type": "array"
+    },
+    "offload_strategies": {
+      "items": {
+        "$ref": "#/$defs/OffloadStrategy"
+      },
+      "title": "Offload Strategies",
+      "type": "array"
+    },
+    "optimizers": {
+      "items": {
+        "$ref": "#/$defs/Optimizer"
+      },
+      "title": "Optimizers",
+      "type": "array"
+    },
+    "precision_modes": {
+      "items": {
+        "$ref": "#/$defs/PrecisionMode"
+      },
+      "title": "Precision Modes",
+      "type": "array"
+    },
+    "quantization_modes": {
+      "items": {
+        "$ref": "#/$defs/QuantizationMode"
+      },
+      "title": "Quantization Modes",
+      "type": "array"
+    },
+    "required_compute_capability": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Required Compute Capability"
+    },
+    "supported_devices": {
+      "items": {
+        "$ref": "#/$defs/DeviceKind"
+      },
+      "minItems": 1,
+      "title": "Supported Devices",
+      "type": "array"
+    },
+    "supported_os": {
+      "items": {
+        "$ref": "#/$defs/OperatingSystem"
+      },
+      "minItems": 1,
+      "title": "Supported Os",
+      "type": "array"
+    },
+    "task_types": {
+      "items": {
+        "$ref": "#/$defs/TaskType"
+      },
+      "minItems": 1,
+      "title": "Task Types",
+      "type": "array"
+    },
+    "telemetry_hooks": {
+      "items": {
+        "$ref": "#/$defs/TelemetryHook"
+      },
+      "title": "Telemetry Hooks",
+      "type": "array"
+    },
+    "trainer_target": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrainerTarget"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "backend_id",
+    "backend_version",
+    "supported_os",
+    "supported_devices",
+    "task_types"
+  ],
+  "title": "BackendManifest",
+  "type": "object"
+}

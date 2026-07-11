@@ -1,0 +1,434 @@
+{
+  "$defs": {
+    "AttentionImpl": {
+      "description": "``math``/``eager`` is forced on Blackwell sm_120 \u2014 the fused flash/mem-efficient kernels\ndeadlock on the first backward (training/environment.py, estimators.py) \u2014 at a large activation\nVRAM cost.",
+      "enum": [
+        "math",
+        "eager",
+        "sdpa",
+        "flash_attention_2",
+        "flash_attention_3",
+        "mem_efficient",
+        "xformers"
+      ],
+      "title": "AttentionImpl",
+      "type": "string"
+    },
+    "FailureTaxonomy": {
+      "description": "Terminal outcome category. ``PASS`` is included so the same enum classifies a completed\nprobe/run, not only failures. Grounded in the exact hazards the engine documents: the sm_120\nfused-attention deadlock (KERNEL_STALL), the WDDM silent spill (ACCIDENTAL_SPILL vs a clean\nOOM), and env/dependency mismatches (ENVIRONMENT_FAILURE).",
+      "enum": [
+        "PASS",
+        "FAIL",
+        "OOM",
+        "TIMEOUT",
+        "KERNEL_STALL",
+        "NUMERICAL_FAILURE",
+        "CHECKPOINT_FAILURE",
+        "ENVIRONMENT_FAILURE",
+        "UNSUPPORTED_CONFIGURATION",
+        "ACCIDENTAL_SPILL",
+        "CONTROLLED_OFFLOAD"
+      ],
+      "title": "FailureTaxonomy",
+      "type": "string"
+    },
+    "FitClass": {
+      "description": "The fit verdict. ``NATIVE_*`` = fully resident. ``CONTROLLED_*`` = a deliberate, planned\noffload (acceptable, slower). ``ACCIDENTAL_*`` / ``THRASHING`` = an unplanned spill the platform\ndid silently (the failure mode the engine warns about). ``FAIL`` = will not run.",
+      "enum": [
+        "NATIVE_SAFE",
+        "NATIVE_TIGHT",
+        "NATIVE_UNPROVEN",
+        "MARGINAL",
+        "CONTROLLED_ACTIVATION_OFFLOAD",
+        "CONTROLLED_OPTIMIZER_OFFLOAD",
+        "CONTROLLED_PARAMETER_OFFLOAD",
+        "ACCIDENTAL_UNIFIED_MEMORY_PAGING",
+        "ACCIDENTAL_WDDM_SPILL",
+        "THRASHING",
+        "FAIL"
+      ],
+      "title": "FitClass",
+      "type": "string"
+    },
+    "FitClassification": {
+      "additionalProperties": false,
+      "description": "The planner/calibrator verdict on whether a resolved RunPlan fits the target environment, and\nHOW: a native fit, a deliberately-offloaded fit, or an ACCIDENTAL spill (the silent WDDM/unified\npaging that looks frozen but crawls at 10-25x). NEW \u2014 the engine emits only a coarse warn/pass\nVRAM band (preflight.gpu_memory, _VRAM_SAFETY_MARGIN_GB).",
+      "properties": {
+        "attention_path": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttentionImpl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "classification": {
+          "$ref": "#/$defs/FitClass"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "device_capacity_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Capacity Bytes"
+        },
+        "estimated_peak_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimated Peak Bytes"
+        },
+        "headroom_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Headroom Bytes"
+        },
+        "rationale": {
+          "default": "",
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "classification"
+      ],
+      "title": "FitClassification",
+      "type": "object"
+    },
+    "MemoryMetrics": {
+      "additionalProperties": false,
+      "description": "The full memory-signature block sampled during a run. Distinguishes PyTorch's allocator view,\nraw CUDA device memory, and OS-level residency (``dedicated`` vs ``shared`` GPU memory) so a\nWindows/WDDM spill to shared memory is VISIBLE rather than hidden inside 'used VRAM'. Grounded in\ngpu_probe.GpuMemory + the estimators note that torch.max_memory_allocated counts the WDDM spill.",
+      "properties": {
+        "cuda_device_free_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cuda Device Free Bytes"
+        },
+        "cuda_device_used_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cuda Device Used Bytes"
+        },
+        "dedicated_gpu_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dedicated Gpu Bytes"
+        },
+        "process_rss_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Process Rss Bytes"
+        },
+        "shared_gpu_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shared Gpu Bytes"
+        },
+        "system_ram_used_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "System Ram Used Bytes"
+        },
+        "torch_allocated_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Allocated Bytes"
+        },
+        "torch_peak_allocated_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Peak Allocated Bytes"
+        },
+        "torch_peak_reserved_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Peak Reserved Bytes"
+        },
+        "torch_reserved_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Reserved Bytes"
+        }
+      },
+      "title": "MemoryMetrics",
+      "type": "object"
+    },
+    "StageMarker": {
+      "description": "Ordered lifecycle stage of a run, launch \u2192 export. A RunEvent carries the stage it belongs to\nso a consumer can render a precise progress spine and localize a failure to the exact stage.",
+      "enum": [
+        "process_start",
+        "env_loaded",
+        "cuda_init",
+        "model_loaded",
+        "quantized",
+        "adapter_attached",
+        "optimizer_created",
+        "batch_materialized",
+        "forward",
+        "loss",
+        "backward",
+        "optimizer_step",
+        "checkpoint",
+        "reload",
+        "evaluation",
+        "export"
+      ],
+      "title": "StageMarker",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A structured, classified terminal outcome for a run, capability probe, or export. The\ntaxonomy turns 'it died' into an actionable category \u2014 a real OOM vs a KERNEL_STALL (the sm_120\nfused-attention deadlock) vs an ACCIDENTAL_SPILL vs a CONTROLLED_OFFLOAD. NEW.",
+  "properties": {
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "detail": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Detail"
+    },
+    "detected_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Detected At"
+    },
+    "exception_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Exception Type"
+    },
+    "exit_code": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Exit Code"
+    },
+    "fit_at_failure": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FitClassification"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "memory_at_failure": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MemoryMetrics"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "message": {
+      "title": "Message",
+      "type": "string"
+    },
+    "reconciled": {
+      "default": false,
+      "title": "Reconciled",
+      "type": "boolean"
+    },
+    "remediation": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Remediation"
+    },
+    "run_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Run Id"
+    },
+    "signal": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Signal"
+    },
+    "stage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/StageMarker"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "taxonomy": {
+      "$ref": "#/$defs/FailureTaxonomy"
+    }
+  },
+  "required": [
+    "taxonomy",
+    "message"
+  ],
+  "title": "FailureRecord",
+  "type": "object"
+}

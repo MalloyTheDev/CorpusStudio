@@ -1,0 +1,108 @@
+{
+  "$defs": {
+    "AttentionImpl": {
+      "description": "``math``/``eager`` is forced on Blackwell sm_120 \u2014 the fused flash/mem-efficient kernels\ndeadlock on the first backward (training/environment.py, estimators.py) \u2014 at a large activation\nVRAM cost.",
+      "enum": [
+        "math",
+        "eager",
+        "sdpa",
+        "flash_attention_2",
+        "flash_attention_3",
+        "mem_efficient",
+        "xformers"
+      ],
+      "title": "AttentionImpl",
+      "type": "string"
+    },
+    "FitClass": {
+      "description": "The fit verdict. ``NATIVE_*`` = fully resident. ``CONTROLLED_*`` = a deliberate, planned\noffload (acceptable, slower). ``ACCIDENTAL_*`` / ``THRASHING`` = an unplanned spill the platform\ndid silently (the failure mode the engine warns about). ``FAIL`` = will not run.",
+      "enum": [
+        "NATIVE_SAFE",
+        "NATIVE_TIGHT",
+        "NATIVE_UNPROVEN",
+        "MARGINAL",
+        "CONTROLLED_ACTIVATION_OFFLOAD",
+        "CONTROLLED_OPTIMIZER_OFFLOAD",
+        "CONTROLLED_PARAMETER_OFFLOAD",
+        "ACCIDENTAL_UNIFIED_MEMORY_PAGING",
+        "ACCIDENTAL_WDDM_SPILL",
+        "THRASHING",
+        "FAIL"
+      ],
+      "title": "FitClass",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The planner/calibrator verdict on whether a resolved RunPlan fits the target environment, and\nHOW: a native fit, a deliberately-offloaded fit, or an ACCIDENTAL spill (the silent WDDM/unified\npaging that looks frozen but crawls at 10-25x). NEW \u2014 the engine emits only a coarse warn/pass\nVRAM band (preflight.gpu_memory, _VRAM_SAFETY_MARGIN_GB).",
+  "properties": {
+    "attention_path": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AttentionImpl"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "classification": {
+      "$ref": "#/$defs/FitClass"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "device_capacity_bytes": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Device Capacity Bytes"
+    },
+    "estimated_peak_bytes": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Estimated Peak Bytes"
+    },
+    "headroom_bytes": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Headroom Bytes"
+    },
+    "rationale": {
+      "default": "",
+      "title": "Rationale",
+      "type": "string"
+    }
+  },
+  "required": [
+    "classification"
+  ],
+  "title": "FitClassification",
+  "type": "object"
+}

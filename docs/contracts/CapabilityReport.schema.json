@@ -1,0 +1,360 @@
+{
+  "$defs": {
+    "AdapterMethod": {
+      "enum": [
+        "none",
+        "lora",
+        "qlora",
+        "dora",
+        "ia3",
+        "full_finetune",
+        "prompt_tuning",
+        "prefix_tuning"
+      ],
+      "title": "AdapterMethod",
+      "type": "string"
+    },
+    "AttentionImpl": {
+      "description": "``math``/``eager`` is forced on Blackwell sm_120 \u2014 the fused flash/mem-efficient kernels\ndeadlock on the first backward (training/environment.py, estimators.py) \u2014 at a large activation\nVRAM cost.",
+      "enum": [
+        "math",
+        "eager",
+        "sdpa",
+        "flash_attention_2",
+        "flash_attention_3",
+        "mem_efficient",
+        "xformers"
+      ],
+      "title": "AttentionImpl",
+      "type": "string"
+    },
+    "EffectiveCapabilities": {
+      "additionalProperties": false,
+      "description": "The intersection of what a backend DECLARES and what PROVED to work on this host. The planner\nresolves a RunPlan against this, not the raw BackendManifest.",
+      "properties": {
+        "adapter_methods": {
+          "items": {
+            "$ref": "#/$defs/AdapterMethod"
+          },
+          "title": "Adapter Methods",
+          "type": "array"
+        },
+        "attention_impls": {
+          "items": {
+            "$ref": "#/$defs/AttentionImpl"
+          },
+          "title": "Attention Impls",
+          "type": "array"
+        },
+        "precision_modes": {
+          "items": {
+            "$ref": "#/$defs/PrecisionMode"
+          },
+          "title": "Precision Modes",
+          "type": "array"
+        },
+        "quantization_modes": {
+          "items": {
+            "$ref": "#/$defs/QuantizationMode"
+          },
+          "title": "Quantization Modes",
+          "type": "array"
+        }
+      },
+      "title": "EffectiveCapabilities",
+      "type": "object"
+    },
+    "FailureTaxonomy": {
+      "description": "Terminal outcome category. ``PASS`` is included so the same enum classifies a completed\nprobe/run, not only failures. Grounded in the exact hazards the engine documents: the sm_120\nfused-attention deadlock (KERNEL_STALL), the WDDM silent spill (ACCIDENTAL_SPILL vs a clean\nOOM), and env/dependency mismatches (ENVIRONMENT_FAILURE).",
+      "enum": [
+        "PASS",
+        "FAIL",
+        "OOM",
+        "TIMEOUT",
+        "KERNEL_STALL",
+        "NUMERICAL_FAILURE",
+        "CHECKPOINT_FAILURE",
+        "ENVIRONMENT_FAILURE",
+        "UNSUPPORTED_CONFIGURATION",
+        "ACCIDENTAL_SPILL",
+        "CONTROLLED_OFFLOAD"
+      ],
+      "title": "FailureTaxonomy",
+      "type": "string"
+    },
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "PackageLock": {
+      "additionalProperties": false,
+      "description": "A resolved dependency: distribution name \u2192 installed version + optional wheel/artifact hash.\nGrounded in environment.probe_training_runtime (importlib.metadata.version, no import).",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "source": {
+          "default": "unknown",
+          "enum": [
+            "pypi",
+            "wheel",
+            "sdist",
+            "conda",
+            "vcs",
+            "local",
+            "unknown"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "PackageLock",
+      "type": "object"
+    },
+    "PrecisionMode": {
+      "enum": [
+        "fp32",
+        "tf32",
+        "fp16",
+        "bf16",
+        "fp8",
+        "mixed_bf16",
+        "mixed_fp16"
+      ],
+      "title": "PrecisionMode",
+      "type": "string"
+    },
+    "ProbeResult": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "measured": {
+          "additionalProperties": true,
+          "title": "Measured",
+          "type": "object"
+        },
+        "outcome": {
+          "$ref": "#/$defs/FailureTaxonomy"
+        },
+        "probe": {
+          "title": "Probe",
+          "type": "string"
+        }
+      },
+      "required": [
+        "probe",
+        "outcome"
+      ],
+      "title": "ProbeResult",
+      "type": "object"
+    },
+    "QuantizationMode": {
+      "enum": [
+        "none",
+        "int8",
+        "int4",
+        "nf4",
+        "fp4",
+        "gptq",
+        "awq",
+        "hqq"
+      ],
+      "title": "QuantizationMode",
+      "type": "string"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Ref",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The DYNAMIC, measured counterpart of a BackendManifest: probe results against a specific\nEnvironmentProfile. Formalizes environment.probe_training_runtime (ready/cpu_toy_ready/\nbitsandbytes_ok/notes) and generalizes it to per-probe outcomes tagged with FailureTaxonomy.",
+  "properties": {
+    "backend_id": {
+      "title": "Backend Id",
+      "type": "string"
+    },
+    "backend_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Backend Version"
+    },
+    "bitsandbytes_ok": {
+      "default": false,
+      "title": "Bitsandbytes Ok",
+      "type": "boolean"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "effective_capabilities": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EffectiveCapabilities"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "environment_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "generated_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Generated At"
+    },
+    "installed_packages": {
+      "items": {
+        "$ref": "#/$defs/PackageLock"
+      },
+      "title": "Installed Packages",
+      "type": "array"
+    },
+    "missing_packages": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Missing Packages",
+      "type": "array"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    },
+    "probe_results": {
+      "items": {
+        "$ref": "#/$defs/ProbeResult"
+      },
+      "title": "Probe Results",
+      "type": "array"
+    },
+    "readiness": {
+      "enum": [
+        "ready",
+        "cpu_toy_only",
+        "not_ready"
+      ],
+      "title": "Readiness",
+      "type": "string"
+    }
+  },
+  "required": [
+    "backend_id",
+    "environment_ref",
+    "readiness"
+  ],
+  "title": "CapabilityReport",
+  "type": "object"
+}

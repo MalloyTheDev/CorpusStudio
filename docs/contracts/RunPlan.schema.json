@@ -1,0 +1,663 @@
+{
+  "$defs": {
+    "AdapterMethod": {
+      "enum": [
+        "none",
+        "lora",
+        "qlora",
+        "dora",
+        "ia3",
+        "full_finetune",
+        "prompt_tuning",
+        "prefix_tuning"
+      ],
+      "title": "AdapterMethod",
+      "type": "string"
+    },
+    "AdapterSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "lora_alpha": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lora Alpha"
+        },
+        "lora_dropout": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lora Dropout"
+        },
+        "lora_r": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lora R"
+        },
+        "method": {
+          "$ref": "#/$defs/AdapterMethod"
+        },
+        "target_modules": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Modules"
+        }
+      },
+      "required": [
+        "method"
+      ],
+      "title": "AdapterSpec",
+      "type": "object"
+    },
+    "AllocatorPolicy": {
+      "enum": [
+        "default",
+        "expandable_segments",
+        "max_split_size",
+        "garbage_collection"
+      ],
+      "title": "AllocatorPolicy",
+      "type": "string"
+    },
+    "AttentionImpl": {
+      "description": "``math``/``eager`` is forced on Blackwell sm_120 \u2014 the fused flash/mem-efficient kernels\ndeadlock on the first backward (training/environment.py, estimators.py) \u2014 at a large activation\nVRAM cost.",
+      "enum": [
+        "math",
+        "eager",
+        "sdpa",
+        "flash_attention_2",
+        "flash_attention_3",
+        "mem_efficient",
+        "xformers"
+      ],
+      "title": "AttentionImpl",
+      "type": "string"
+    },
+    "BatchingSpec": {
+      "additionalProperties": false,
+      "description": "The accumulation TARGET is expressed in SUPERVISED TOKENS, not microbatch count: the trainer\naccumulates until summed supervised tokens >= target and normalizes the loss by supervised\ntokens across the window \u2014 so the effective batch is invariant to sequence length + padding.",
+      "properties": {
+        "fallback_grad_accumulation_steps": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback Grad Accumulation Steps"
+        },
+        "micro_batch_size": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Micro Batch Size",
+          "type": "integer"
+        },
+        "supervised_token_accumulation_target": {
+          "minimum": 1,
+          "title": "Supervised Token Accumulation Target",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "supervised_token_accumulation_target"
+      ],
+      "title": "BatchingSpec",
+      "type": "object"
+    },
+    "CheckpointImpl": {
+      "enum": [
+        "full_state",
+        "adapter_only",
+        "sharded",
+        "distcp",
+        "safetensors"
+      ],
+      "title": "CheckpointImpl",
+      "type": "string"
+    },
+    "CheckpointPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "cadence_optimizer_steps": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cadence Optimizer Steps"
+        },
+        "cadence_seconds": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cadence Seconds"
+        },
+        "impl": {
+          "$ref": "#/$defs/CheckpointImpl"
+        },
+        "keep_last": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keep Last"
+        },
+        "reload_verify": {
+          "default": false,
+          "title": "Reload Verify",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "impl"
+      ],
+      "title": "CheckpointPolicy",
+      "type": "object"
+    },
+    "CompileMode": {
+      "enum": [
+        "none",
+        "eager",
+        "reduce_overhead",
+        "max_autotune",
+        "aot_inductor"
+      ],
+      "title": "CompileMode",
+      "type": "string"
+    },
+    "EvalSchedule": {
+      "additionalProperties": false,
+      "properties": {
+        "after_run": {
+          "default": true,
+          "title": "After Run",
+          "type": "boolean"
+        },
+        "before_run": {
+          "default": true,
+          "title": "Before Run",
+          "type": "boolean"
+        },
+        "every_optimizer_steps": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Every Optimizer Steps"
+        },
+        "suite_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Suite Ref"
+        }
+      },
+      "title": "EvalSchedule",
+      "type": "object"
+    },
+    "ExportFormat": {
+      "enum": [
+        "adapter_peft",
+        "merged_safetensors",
+        "merged_fp16",
+        "gguf",
+        "onnx",
+        "awq",
+        "gptq",
+        "mlx"
+      ],
+      "title": "ExportFormat",
+      "type": "string"
+    },
+    "ExportSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "$ref": "#/$defs/ExportFormat"
+        },
+        "output_dir": {
+          "default": "output",
+          "title": "Output Dir",
+          "type": "string"
+        }
+      },
+      "required": [
+        "format"
+      ],
+      "title": "ExportSpec",
+      "type": "object"
+    },
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "LossImpl": {
+      "enum": [
+        "cross_entropy",
+        "liger_fused_ce",
+        "chunked_ce",
+        "dpo",
+        "orpo",
+        "kto",
+        "ipo",
+        "reward_bt"
+      ],
+      "title": "LossImpl",
+      "type": "string"
+    },
+    "OffloadStrategy": {
+      "description": "The ``controlled_*`` values are the deliberate, planned counterparts of the accidental spills\nin :class:`FitClass`.",
+      "enum": [
+        "none",
+        "controlled_activation_offload",
+        "controlled_optimizer_offload",
+        "controlled_parameter_offload",
+        "cpu_offload",
+        "disk_offload",
+        "deepspeed_zero2",
+        "deepspeed_zero3"
+      ],
+      "title": "OffloadStrategy",
+      "type": "string"
+    },
+    "Optimizer": {
+      "enum": [
+        "adamw_torch",
+        "adamw_torch_fused",
+        "adamw_8bit",
+        "adamw_bnb_8bit",
+        "paged_adamw_8bit",
+        "paged_adamw_32bit",
+        "adafactor",
+        "lion",
+        "sgd"
+      ],
+      "title": "Optimizer",
+      "type": "string"
+    },
+    "OptimizerSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "impl": {
+          "$ref": "#/$defs/Optimizer"
+        },
+        "learning_rate": {
+          "exclusiveMinimum": 0,
+          "title": "Learning Rate",
+          "type": "number"
+        },
+        "lr_scheduler": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lr Scheduler"
+        },
+        "warmup_ratio": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Warmup Ratio"
+        },
+        "weight_decay": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Weight Decay"
+        }
+      },
+      "required": [
+        "impl",
+        "learning_rate"
+      ],
+      "title": "OptimizerSpec",
+      "type": "object"
+    },
+    "PrecisionMode": {
+      "enum": [
+        "fp32",
+        "tf32",
+        "fp16",
+        "bf16",
+        "fp8",
+        "mixed_bf16",
+        "mixed_fp16"
+      ],
+      "title": "PrecisionMode",
+      "type": "string"
+    },
+    "QuantizationMode": {
+      "enum": [
+        "none",
+        "int8",
+        "int4",
+        "nf4",
+        "fp4",
+        "gptq",
+        "awq",
+        "hqq"
+      ],
+      "title": "QuantizationMode",
+      "type": "string"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Ref",
+      "type": "object"
+    },
+    "SequenceSpec": {
+      "additionalProperties": false,
+      "description": "Sequence handling. Buckets let variable-length rows batch efficiently; the max bucket ==\nthe trainer's sequence_len (config_templates.sequence_len, default 4096).",
+      "properties": {
+        "buckets": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Buckets",
+          "type": "array"
+        },
+        "max_sequence_len": {
+          "default": 4096,
+          "minimum": 1,
+          "title": "Max Sequence Len",
+          "type": "integer"
+        },
+        "packing": {
+          "default": false,
+          "title": "Packing",
+          "type": "boolean"
+        },
+        "truncation_allowed": {
+          "default": true,
+          "title": "Truncation Allowed",
+          "type": "boolean"
+        }
+      },
+      "title": "SequenceSpec",
+      "type": "object"
+    },
+    "TaskType": {
+      "enum": [
+        "sft",
+        "pretraining",
+        "preference",
+        "reward",
+        "classification",
+        "embedding",
+        "multimodal",
+        "evaluation",
+        "distillation",
+        "grpo"
+      ],
+      "title": "TaskType",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The IMMUTABLE, fully-resolved execution plan the core dispatches to a worker: no ambiguity is\nleft for the worker to decide. Formalizes + hardens config_templates.TrainingConfigTemplate. Key\nupgrades: attention_backend defaults to math on Blackwell; the accumulation target is in\nSUPERVISED TOKENS; ``plan_hash`` seals immutability (a change means a NEW plan).",
+  "properties": {
+    "adapter": {
+      "$ref": "#/$defs/AdapterSpec"
+    },
+    "allocator_policy": {
+      "$ref": "#/$defs/AllocatorPolicy",
+      "default": "default"
+    },
+    "attention_backend": {
+      "$ref": "#/$defs/AttentionImpl"
+    },
+    "backend_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "base_model": {
+      "minLength": 1,
+      "title": "Base Model",
+      "type": "string"
+    },
+    "batching": {
+      "$ref": "#/$defs/BatchingSpec"
+    },
+    "checkpoint_policy": {
+      "$ref": "#/$defs/CheckpointPolicy"
+    },
+    "compile_mode": {
+      "$ref": "#/$defs/CompileMode",
+      "default": "none"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "created_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Created At"
+    },
+    "dataset_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "environment_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "eval_schedule": {
+      "$ref": "#/$defs/EvalSchedule"
+    },
+    "export": {
+      "$ref": "#/$defs/ExportSpec"
+    },
+    "gradient_checkpointing": {
+      "default": true,
+      "title": "Gradient Checkpointing",
+      "type": "boolean"
+    },
+    "loss_impl": {
+      "$ref": "#/$defs/LossImpl"
+    },
+    "offload_strategy": {
+      "$ref": "#/$defs/OffloadStrategy",
+      "default": "none"
+    },
+    "optimizer": {
+      "$ref": "#/$defs/OptimizerSpec"
+    },
+    "plan_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Plan Hash",
+      "type": "string"
+    },
+    "plan_id": {
+      "minLength": 1,
+      "title": "Plan Id",
+      "type": "string"
+    },
+    "precision": {
+      "$ref": "#/$defs/PrecisionMode"
+    },
+    "quantization": {
+      "$ref": "#/$defs/QuantizationMode"
+    },
+    "seed": {
+      "default": 42,
+      "minimum": 0,
+      "title": "Seed",
+      "type": "integer"
+    },
+    "sequence": {
+      "$ref": "#/$defs/SequenceSpec"
+    },
+    "task_type": {
+      "$ref": "#/$defs/TaskType"
+    },
+    "training_config_snapshot": {
+      "additionalProperties": true,
+      "title": "Training Config Snapshot",
+      "type": "object"
+    }
+  },
+  "required": [
+    "plan_id",
+    "plan_hash",
+    "backend_ref",
+    "environment_ref",
+    "dataset_ref",
+    "task_type",
+    "base_model",
+    "precision",
+    "quantization",
+    "adapter",
+    "optimizer",
+    "loss_impl",
+    "attention_backend",
+    "sequence",
+    "batching",
+    "checkpoint_policy",
+    "export"
+  ],
+  "title": "RunPlan",
+  "type": "object"
+}
