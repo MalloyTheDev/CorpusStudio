@@ -36,6 +36,26 @@ public interface IEvaluationViewModel : INotifyPropertyChanged
     string SelectedEvaluationExampleDetail { get; }
     string EvaluationResultsSummary { get; }
     string EvaluationResultFilter { get; set; }
+
+    // KPI stat-card row (Evaluation screen). Discrete, ready-to-render display strings computed from the
+    // report on each run; HasEvaluationReport gates the row so nothing shows pre-run.
+    bool HasEvaluationReport { get; }
+    string AverageScoreDisplay { get; }
+    string PassRateDisplay { get; }
+    string PassRateDetail { get; }
+    string EvaluatedDisplay { get; }
+    string MetricDisplay { get; }
+
+    // Segmented results filter (All / Pass N / Fail N): pill counts, active states, and the set commands.
+    int EvaluationPassCount { get; }
+    int EvaluationFailCount { get; }
+    bool IsAllResultsFilterActive { get; }
+    bool IsPassedResultsFilterActive { get; }
+    bool IsFailedResultsFilterActive { get; }
+    System.Windows.Input.ICommand ShowAllResultsCommand { get; }
+    System.Windows.Input.ICommand ShowPassedResultsCommand { get; }
+    System.Windows.Input.ICommand ShowFailedResultsCommand { get; }
+
     string EvaluationTagFilter { get; set; }
     string EvaluationFailureReasonFilter { get; set; }
     string EvaluationScoreBandFilter { get; set; }

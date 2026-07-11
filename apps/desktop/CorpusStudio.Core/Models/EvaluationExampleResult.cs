@@ -74,4 +74,16 @@ public sealed class EvaluationExampleResult
 
     /// <summary>Nocturne hex for the status chip (error = warn amber, pass = ok green, fail = bad red).</summary>
     public string StatusColor => !string.IsNullOrEmpty(Error) ? "#d9a35f" : Passed ? "#6bbf9a" : "#d76d6d";
+
+    /// <summary>Fixed pixel width of the per-example score-bar track (Evaluation screen: a compact inline
+    /// bar shown before the numeric score). The filled inner bar is <see cref="ScoreBarWidth"/> of this.</summary>
+    public const double ScoreBarTrackWidth = 130.0;
+
+    /// <summary>Filled width (px) of the score bar — the score as a fraction of 100 across the fixed
+    /// <see cref="ScoreBarTrackWidth"/> track. Clamped to the track so an out-of-range score can't overflow.</summary>
+    public double ScoreBarWidth => Math.Clamp(Score, 0, 100) / 100.0 * ScoreBarTrackWidth;
+
+    /// <summary>Nocturne fill for the score bar: Ok green when the example passed its run threshold, else
+    /// Warn amber (a failing bar reads as caution — the red hex stays reserved for the status chip).</summary>
+    public string ScoreBarColor => Passed ? "#6bbf9a" : "#d9a35f";
 }
