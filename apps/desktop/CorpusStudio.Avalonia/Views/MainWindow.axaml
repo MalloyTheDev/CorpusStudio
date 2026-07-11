@@ -2372,11 +2372,96 @@
 
     <!-- Training (slice 10 fidelity): configuration card | run + first-party + download + log cards. -->
     <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Training}">
+      <!-- Theme-aware soft status tints (alpha over the Ok/Warn/Bad tokens), scoped to the Training panel
+           so the status chip + regression-gate callout read in both themes without a global token —
+           mirrors the Artifacts/Settings pattern. -->
+      <Border.Resources>
+        <ResourceDictionary>
+          <ResourceDictionary.ThemeDictionaries>
+            <ResourceDictionary x:Key="Dark">
+              <SolidColorBrush x:Key="OkSoft" Color="#296bbf9a"/>
+              <SolidColorBrush x:Key="WarnSoft" Color="#29d9a35f"/>
+              <SolidColorBrush x:Key="BadSoft" Color="#29d76d6d"/>
+            </ResourceDictionary>
+            <ResourceDictionary x:Key="Light">
+              <SolidColorBrush x:Key="OkSoft" Color="#1f3f9b73"/>
+              <SolidColorBrush x:Key="WarnSoft" Color="#1fb8792e"/>
+              <SolidColorBrush x:Key="BadSoft" Color="#1fc85552"/>
+            </ResourceDictionary>
+          </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+      </Border.Resources>
+      <Border.Styles>
+        <!-- Method segmented control (READ-ONLY): each segment reflects the derived method; the selected
+             one fills Panel2 + gets an Accent border. Borders (not Buttons) — there is no method setter. -->
+        <Style Selector="Border.methodseg">
+          <Setter Property="Background" Value="Transparent"/>
+          <Setter Property="BorderBrush" Value="Transparent"/>
+          <Setter Property="BorderThickness" Value="1"/>
+          <Setter Property="CornerRadius" Value="7"/>
+          <Setter Property="Padding" Value="12,7"/>
+        </Style>
+        <Style Selector="Border.methodseg.selected">
+          <Setter Property="Background" Value="{DynamicResource Panel2}"/>
+          <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+        </Style>
+        <Style Selector="Border.methodseg > TextBlock">
+          <Setter Property="HorizontalAlignment" Value="Center"/>
+          <Setter Property="FontSize" Value="13"/>
+          <Setter Property="Foreground" Value="{DynamicResource T3}"/>
+        </Style>
+        <Style Selector="Border.methodseg.selected > TextBlock">
+          <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+          <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <!-- Status chip variants (neutral base + Ok/Warn/Bad tints). -->
+        <Style Selector="Border.statuschip">
+          <Setter Property="CornerRadius" Value="7"/>
+          <Setter Property="Padding" Value="9,4"/>
+          <Setter Property="Background" Value="{DynamicResource Panel2}"/>
+          <Setter Property="BorderThickness" Value="1"/>
+          <Setter Property="BorderBrush" Value="{DynamicResource Line2}"/>
+          <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Border.statuschip.ok"><Setter Property="Background" Value="{DynamicResource OkSoft}"/><Setter Property="BorderBrush" Value="{DynamicResource Ok}"/></Style>
+        <Style Selector="Border.statuschip.warn"><Setter Property="Background" Value="{DynamicResource WarnSoft}"/><Setter Property="BorderBrush" Value="{DynamicResource Warn}"/></Style>
+        <Style Selector="Border.statuschip.bad"><Setter Property="Background" Value="{DynamicResource BadSoft}"/><Setter Property="BorderBrush" Value="{DynamicResource Bad}"/></Style>
+        <!-- Stat tiles: small T4 cap over a large value. -->
+        <Style Selector="TextBlock.statcap">
+          <Setter Property="Foreground" Value="{DynamicResource T4}"/>
+          <Setter Property="FontSize" Value="10"/>
+          <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style Selector="TextBlock.statval">
+          <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+          <Setter Property="FontSize" Value="22"/>
+          <Setter Property="Margin" Value="0,2,0,0"/>
+        </Style>
+      </Border.Styles>
       <Grid Margin="16" ColumnDefinitions="*,*">
         <Border Grid.Column="0" Margin="0,0,10,0" Background="{DynamicResource Panel}" CornerRadius="12" Padding="16"
                 BorderBrush="{DynamicResource Line2}" BorderThickness="1" VerticalAlignment="Top">
           <StackPanel Spacing="6">
-            <TextBlock Text="Training configuration" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
+            <TextBlock Text="Configuration" FontWeight="SemiBold" FontSize="14" Foreground="{DynamicResource Text}"/>
+            <!-- Method (read-only): the desktop VM has no training-method state (TokenBudget.Method is the
+                 token estimator name, not the method) and no 4-bit signal, so the method is DERIVED from the
+                 real LoRA rank — LoRA when rank>0, else Full. QLoRA stays inactive because it cannot be
+                 honestly asserted. Reflects config; it is not an input. -->
+            <TextBlock Text="METHOD" FontSize="10" Foreground="{DynamicResource T4}" Margin="0,4,0,0"/>
+            <Border Background="{DynamicResource Track}" CornerRadius="9" Padding="3"
+                    BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+              <Grid ColumnDefinitions="*,*,*">
+                <Border Grid.Column="0" Classes="methodseg" Classes.selected="{Binding Training.IsMethodQlora}">
+                  <TextBlock Text="QLoRA"/>
+                </Border>
+                <Border Grid.Column="1" Classes="methodseg" Classes.selected="{Binding Training.IsMethodLora}">
+                  <TextBlock Text="LoRA"/>
+                </Border>
+                <Border Grid.Column="2" Classes="methodseg" Classes.selected="{Binding Training.IsMethodFull}">
+                  <TextBlock Text="Full"/>
+                </Border>
+              </Grid>
+            </Border>
             <TextBlock Text="TARGET" FontSize="10" Foreground="{DynamicResource T4}"/>
             <TextBox Text="{Binding Training.TrainingTarget}" Watermark="target"/>
             <TextBlock Text="BASE MODEL" FontSize="10" Foreground="{DynamicResource T4}"/>
@@ -2405,11 +2490,20 @@
             </Grid>
             <WrapPanel Margin="0,6,0,0">
               <Button Content="Check compatibility" Command="{Binding CheckTrainingCompatibilityCommand}" Margin="0,0,6,4"/>
-              <Button Content="Generate config" Command="{Binding GenerateTrainingConfigCommand}" Margin="0,0,6,4"
-                      Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}"
-                      BorderBrush="{DynamicResource Accent}" BorderThickness="1"/>
+              <Button Content="Generate config" Command="{Binding GenerateTrainingConfigCommand}" Margin="0,0,6,4"/>
             </WrapPanel>
             <TextBlock Text="{Binding Training.TrainingSummary}" Foreground="{DynamicResource T2}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+            <!-- Hero Launch (item 5): full-width accent, bound to the existing launch command; enabled only
+                 once a generated config yields a launch argv and pre-flight allows it (CanLaunchTraining). -->
+            <Button Command="{Binding LaunchTrainingCommand}" IsEnabled="{Binding Training.CanLaunchTraining}"
+                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,8,0,0" Padding="0,10"
+                    Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}"
+                    BorderBrush="{DynamicResource Accent}" BorderThickness="1">
+              <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                <Path Classes="ico accent" Data="{StaticResource IcoCap}"/>
+                <TextBlock Text="Launch training run" VerticalAlignment="Center" FontWeight="SemiBold"/>
+              </StackPanel>
+            </Button>
           </StackPanel>
         </Border>
         <ScrollViewer Grid.Column="1" Margin="10,0,0,0">
@@ -2417,16 +2511,66 @@
             <!-- Run card -->
             <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="14"
                     BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-              <StackPanel Spacing="8">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <TextBlock Text="Status:" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
-                  <TextBlock Text="{Binding Training.TrainingRunStatus}" Foreground="{DynamicResource T2}"/>
-                  <TextBlock Text="· running" Foreground="{DynamicResource Warn}" IsVisible="{Binding Training.IsTrainingRunning}"/>
-                </StackPanel>
+              <StackPanel Spacing="12">
+                <!-- Header: "Run" + the real session run label (monospace, "—" before any launch) left;
+                     the real run-status chip right (Ok+check when complete, Warn running, Bad failed). -->
+                <Grid ColumnDefinitions="Auto,Auto,*,Auto" VerticalAlignment="Center">
+                  <TextBlock Grid.Column="0" Text="Run" FontWeight="SemiBold" FontSize="14"
+                             Foreground="{DynamicResource Text}" VerticalAlignment="Center"/>
+                  <TextBlock Grid.Column="1" Text="{Binding Training.TrainingRunLabel}" Margin="8,0,0,0"
+                             FontFamily="Consolas" FontSize="13" Foreground="{DynamicResource T3}" VerticalAlignment="Center"/>
+                  <Border Grid.Column="3" Classes="statuschip"
+                          Classes.ok="{Binding Training.IsTrainingComplete}"
+                          Classes.warn="{Binding Training.IsTrainingRunning}"
+                          Classes.bad="{Binding Training.IsTrainingFailed}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <Path Classes="ico ico-sm ok" Data="{StaticResource IcoCheckCircleFill}"
+                            IsVisible="{Binding Training.IsTrainingComplete}"/>
+                      <TextBlock Text="{Binding Training.TrainingRunStatus}" FontSize="12"
+                                 Foreground="{DynamicResource T2}" VerticalAlignment="Center"/>
+                    </StackPanel>
+                  </Border>
+                </Grid>
+
+                <!-- Run stats. HONEST NEUTRAL STATE: the VM/run-record carry no final-loss / steps / wall
+                     fields, so these render permanent "—" placeholders — never fabricated numbers. The
+                     labels mark where those metrics would land once the run pipeline captures them. -->
+                <Grid ColumnDefinitions="*,*,*">
+                  <StackPanel Grid.Column="0" Spacing="1">
+                    <TextBlock Classes="statcap" Text="FINAL LOSS"/>
+                    <TextBlock Classes="statval" Text="—"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Spacing="1">
+                    <TextBlock Classes="statcap" Text="STEPS"/>
+                    <TextBlock Classes="statval" Text="—"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="2" Spacing="1">
+                    <TextBlock Classes="statcap" Text="WALL"/>
+                    <TextBlock Classes="statval" Text="—"/>
+                  </StackPanel>
+                </Grid>
+
+                <!-- Loss curve intentionally OMITTED: no loss-points / history collection exists on the
+                     Training VM to bind a Polyline to, and fabricating points is disallowed. The live text
+                     run log below is the real run-progress surface. -->
+
+                <!-- Regression-gate callout: shown only on a real WARN/BLOCK (or could-not-run) verdict
+                     from the gate; the body is the real gate summary. -->
+                <Border IsVisible="{Binding Training.HasGateWarning}" Background="{DynamicResource WarnSoft}"
+                        BorderBrush="{DynamicResource Warn}" BorderThickness="1" CornerRadius="10" Padding="12">
+                  <Grid ColumnDefinitions="Auto,*">
+                    <Path Grid.Column="0" Classes="ico warn" Data="{StaticResource IcoWarningFill}"
+                          VerticalAlignment="Top" Margin="0,1,10,0"/>
+                    <StackPanel Grid.Column="1" Spacing="3">
+                      <TextBlock Text="Regression gate" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
+                      <TextBlock Text="{Binding Training.TrainingRunGateSummary}" Foreground="{DynamicResource T2}"
+                                 FontSize="12.5" TextWrapping="Wrap"/>
+                    </StackPanel>
+                  </Grid>
+                </Border>
+
+                <!-- Run controls (the gate button feeds the callout above; checkpoints feed resume). -->
                 <WrapPanel>
-                  <Button Content="Launch" Command="{Binding LaunchTrainingCommand}" IsEnabled="{Binding Training.CanLaunchTraining}" Margin="0,0,6,4"
-                          Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}"
-                          BorderBrush="{DynamicResource Accent}" BorderThickness="1"/>
                   <Button Content="Stop" Command="{Binding StopTrainingCommand}" IsEnabled="{Binding Training.IsTrainingRunning}" Margin="0,0,6,4"/>
                   <Button Content="Resume" Command="{Binding ResumeTrainingCommand}" IsEnabled="{Binding Training.CanResumeTraining}" Margin="0,0,6,4"/>
                   <Button Content="Refresh checkpoints" Command="{Binding RefreshTrainingCheckpointsCommand}" Margin="0,0,6,4"/>

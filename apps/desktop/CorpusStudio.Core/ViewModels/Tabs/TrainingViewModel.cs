@@ -120,8 +120,38 @@ public sealed class TrainingViewModel : ViewModelBase, ITrainingViewModel
     public string TrainingLoraR
     {
         get => _trainingLoraR;
-        set => SetField(ref _trainingLoraR, value);
+        set
+        {
+            if (SetField(ref _trainingLoraR, value))
+            {
+                OnPropertyChanged(nameof(TrainingMethod));
+                OnPropertyChanged(nameof(IsMethodQlora));
+                OnPropertyChanged(nameof(IsMethodLora));
+                OnPropertyChanged(nameof(IsMethodFull));
+            }
+        }
     }
+
+    // ---- Read-only method reflection for the design's segmented "Method" control ----
+    // The desktop Training VM configures a LoRA adapter (LoRA r/alpha are the real inputs) and has NO
+    // training-method state: TokenBudget.Method is the token *estimator* name ("heuristic"), not the
+    // training method, and the config carries no 4-bit/quantization signal, so QLoRA cannot be honestly
+    // distinguished from plain LoRA. We therefore DERIVE the method conservatively from the real LoRA
+    // rank — rank > 0 ⇒ LoRA, otherwise Full — and expose it display-only (no setter). The selector
+    // never claims a QLoRA it cannot detect; IsMethodQlora stays false unless a real qlora signal is
+    // one day wired to this property.
+
+    /// <summary>The training method reflected (read-only) by the segmented control, derived from the
+    /// real LoRA-rank config: "lora" when the rank parses &gt; 0, otherwise "full". Never "qlora" — the
+    /// VM has no 4-bit signal to assert it.</summary>
+    public string TrainingMethod =>
+        int.TryParse(_trainingLoraR, out var rank) && rank > 0 ? "lora" : "full";
+
+    public bool IsMethodQlora => TrainingMethod == "qlora";
+
+    public bool IsMethodLora => TrainingMethod == "lora";
+
+    public bool IsMethodFull => TrainingMethod == "full";
 
     public string TrainingLoraAlpha
     {
@@ -174,8 +204,26 @@ public sealed class TrainingViewModel : ViewModelBase, ITrainingViewModel
     public string TrainingRunStatus
     {
         get => _trainingRunStatus;
-        private set => SetField(ref _trainingRunStatus, value);
+        private set
+        {
+            if (SetField(ref _trainingRunStatus, value))
+            {
+                OnPropertyChanged(nameof(IsTrainingComplete));
+                OnPropertyChanged(nameof(IsTrainingFailed));
+            }
+        }
     }
+
+    /// <summary>True only for a clean finish (exit 0) — the honest "complete" signal for the status chip's
+    /// Ok tint + check glyph. Failed / cancelled / error / idle / running are never "complete".</summary>
+    public bool IsTrainingComplete =>
+        _trainingRunStatus.StartsWith("Completed", StringComparison.Ordinal);
+
+    /// <summary>True for a failed or errored run — drives the status chip's Bad tint so a failure never
+    /// reads as neutral.</summary>
+    public bool IsTrainingFailed =>
+        _trainingRunStatus.StartsWith("Failed", StringComparison.Ordinal)
+        || _trainingRunStatus.StartsWith("Error", StringComparison.Ordinal);
 
     public IReadOnlyList<string> TrainingLaunchArgv => _trainingLaunchArgv;
 
@@ -189,8 +237,24 @@ public sealed class TrainingViewModel : ViewModelBase, ITrainingViewModel
         TrainingRunLog = string.Empty;
         TrainingRunStatus = "Running...";
         IsTrainingRunning = true;
-        return ++_trainingRunId;
+        ++_trainingRunId;
+        OnPropertyChanged(nameof(TrainingRunId));
+        OnPropertyChanged(nameof(TrainingRunLabel));
+        OnPropertyChanged(nameof(HasRunStarted));
+        return _trainingRunId;
     }
+
+    /// <summary>The current session run counter (0 before any launch this session). This is the real
+    /// per-session run index the launcher increments — it is NOT the persisted <c>run-XXXX</c> id shown
+    /// in run history, so we render it plainly rather than mimic that format.</summary>
+    public int TrainingRunId => _trainingRunId;
+
+    /// <summary>True once a run has been launched this session (drives the run header out of its neutral
+    /// empty state). False shows the "—" placeholder — never a fabricated run id.</summary>
+    public bool HasRunStarted => _trainingRunId > 0;
+
+    /// <summary>Monospace run label for the Run card header: "run N" once launched, else a neutral dash.</summary>
+    public string TrainingRunLabel => _trainingRunId > 0 ? $"run {_trainingRunId}" : "—";
 
     public void AppendTrainingRunLog(string line)
     {
@@ -249,8 +313,22 @@ public sealed class TrainingViewModel : ViewModelBase, ITrainingViewModel
     public string TrainingRunGateSummary
     {
         get => _trainingRunGateSummary;
-        private set => SetField(ref _trainingRunGateSummary, value);
+        private set
+        {
+            if (SetField(ref _trainingRunGateSummary, value))
+            {
+                OnPropertyChanged(nameof(HasGateWarning));
+            }
+        }
     }
+
+    /// <summary>True when the regression gate has produced a real WARN/BLOCK verdict (or could not run) —
+    /// gates the Warn-tinted callout so it appears only on a genuine gate result, never on the neutral
+    /// "gate a run…" prompt or a clean PASS.</summary>
+    public bool HasGateWarning =>
+        _trainingRunGateSummary.Contains("WARN", StringComparison.OrdinalIgnoreCase)
+        || _trainingRunGateSummary.Contains("BLOCK", StringComparison.OrdinalIgnoreCase)
+        || _trainingRunGateSummary.Contains("could not run", StringComparison.OrdinalIgnoreCase);
 
     public void SetTrainingRunGateError(string message)
     {
