@@ -70,6 +70,97 @@ public sealed class SplitsTests
         Assert.Contains("- tiny validation set", vm.SplitSummary);
     }
 
+    // --- discrete result signals for the re-skinned result card -----------------------
+
+    [Fact]
+    public void ApplySplitReport_ExposesDiscreteCountsRatiosAndNoLeakageChip()
+    {
+        var vm = new SplitsViewModel();
+        vm.ApplySplitReport(Report(rowsShared: 0));
+
+        Assert.True(vm.HasReport);
+        Assert.Equal(90, vm.TrainCount);
+        Assert.Equal(5, vm.ValidationCount);
+        Assert.Equal(5, vm.TestCount);
+        Assert.Equal(0.9, vm.TrainRatio);
+        Assert.Equal(0.05, vm.ValidationRatio);
+        Assert.Equal(0.05, vm.TestRatio);
+        Assert.Equal(0, vm.RowsSharedAcrossSplits);
+        Assert.False(vm.HasLeakage);
+        Assert.True(vm.ShowNoLeakageChip);      // report + no shared rows -> Ok chip
+        Assert.False(vm.ShowLeakageChip);
+        Assert.Equal("checked all pairs across splits — 0 shared rows", vm.SharedRowsDetail);
+        Assert.False(vm.HasWarnings);
+    }
+
+    [Fact]
+    public void ApplySplitReport_WithSharedRows_ShowsLeakageChipAndWarnings()
+    {
+        var vm = new SplitsViewModel();
+        var report = new SplitReport
+        {
+            Train = 8, Validation = 1, Test = 1, Seed = 42,
+            RowsSharedAcrossSplits = 2,
+            Warnings = { "tiny validation set" },
+        };
+        vm.ApplySplitReport(report);
+
+        Assert.True(vm.HasLeakage);
+        Assert.True(vm.ShowLeakageChip);
+        Assert.False(vm.ShowNoLeakageChip);
+        Assert.Equal("checked all pairs across splits — 2 shared rows", vm.SharedRowsDetail);
+        Assert.True(vm.HasWarnings);
+        Assert.Contains("- tiny validation set", vm.SplitWarnings);
+    }
+
+    [Fact]
+    public void SplitTestPercent_DerivesFromTrainAndValidationInputs()
+    {
+        var vm = new SplitsViewModel
+        {
+            SplitTrainPercent = "80",
+            SplitValidationPercent = "10",
+        };
+        Assert.Equal("10", vm.SplitTestPercent);   // 100 - 80 - 10
+
+        vm.SplitTrainPercent = "70";
+        Assert.Equal("20", vm.SplitTestPercent);    // recomputes on input change
+    }
+
+    [Fact]
+    public void SplitTestPercent_ClampsNegativeAndHandlesUnparsableInput()
+    {
+        var vm = new SplitsViewModel
+        {
+            SplitTrainPercent = "90",
+            SplitValidationPercent = "40",   // sums past 100
+        };
+        Assert.Equal("0", vm.SplitTestPercent);     // clamped, never negative
+
+        vm.SplitTrainPercent = "abc";
+        Assert.Equal("—", vm.SplitTestPercent);      // non-numeric -> em dash, not a fake number
+    }
+
+    [Fact]
+    public void HasReport_IsClearedByInProgressResetAndError()
+    {
+        var vm = new SplitsViewModel();
+        vm.ApplySplitReport(Report(rowsShared: 0));
+        Assert.True(vm.HasReport);
+
+        vm.SetSplitInProgress(0.9, 0.05, 42);
+        Assert.False(vm.HasReport);                  // back to the neutral card while generating
+
+        vm.ApplySplitReport(Report(rowsShared: 0));
+        vm.Reset();
+        Assert.False(vm.HasReport);                  // project switch clears the report
+        Assert.False(vm.ShowNoLeakageChip);
+
+        vm.ApplySplitReport(Report(rowsShared: 0));
+        vm.SetSplitError("boom");
+        Assert.False(vm.HasReport);                  // an error hides the stale bar/chip
+    }
+
     [Fact]
     public void SetSplitInProgress_ShowsRatiosAndDerivedTest()
     {

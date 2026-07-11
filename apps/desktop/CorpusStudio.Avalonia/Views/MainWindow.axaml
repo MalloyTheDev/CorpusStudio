@@ -1503,7 +1503,9 @@
                   BorderBrush="{DynamicResource Line2}" BorderThickness="1">
             <StackPanel Spacing="12">
               <TextBlock Text="Split configuration" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
-              <Grid ColumnDefinitions="*,*,*">
+              <!-- Four boxes to match the design; TEST % is read-only (derived 100 − train − val)
+                   so the ratios always sum to a whole and there is no fourth editable field. -->
+              <Grid ColumnDefinitions="*,*,*,*">
                 <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,10,0">
                   <TextBlock Text="TRAIN %" FontSize="10" Foreground="{DynamicResource T4}"/>
                   <TextBox Text="{Binding Splits.SplitTrainPercent}"/>
@@ -1512,21 +1514,95 @@
                   <TextBlock Text="VALIDATION %" FontSize="10" Foreground="{DynamicResource T4}"/>
                   <TextBox Text="{Binding Splits.SplitValidationPercent}"/>
                 </StackPanel>
-                <StackPanel Grid.Column="2" Spacing="4">
+                <StackPanel Grid.Column="2" Spacing="4" Margin="0,0,10,0">
+                  <TextBlock Text="TEST %" FontSize="10" Foreground="{DynamicResource T4}"/>
+                  <TextBox Text="{Binding Splits.SplitTestPercent}" IsReadOnly="True" Foreground="{DynamicResource T2}"/>
+                </StackPanel>
+                <StackPanel Grid.Column="3" Spacing="4">
                   <TextBlock Text="SEED" FontSize="10" Foreground="{DynamicResource T4}"/>
                   <TextBox Text="{Binding Splits.SplitSeed}"/>
                 </StackPanel>
               </Grid>
-              <Button Content="Generate splits" Command="{Binding GenerateSplitsCommand}"
+              <Button Command="{Binding GenerateSplitsCommand}"
                       HorizontalAlignment="Left" Background="{DynamicResource AccentSoft}"
-                      Foreground="{DynamicResource AccentInk}" BorderBrush="{DynamicResource Accent}" BorderThickness="1"/>
+                      Foreground="{DynamicResource AccentInk}" BorderBrush="{DynamicResource Accent}" BorderThickness="1">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                  <Path Classes="ico accent" Data="{StaticResource IcoShuffle}" Width="15" Height="15"/>
+                  <TextBlock Text="Generate splits" VerticalAlignment="Center"/>
+                </StackPanel>
+              </Button>
             </StackPanel>
           </Border>
           <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="18"
                   BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-            <StackPanel Spacing="8">
-              <TextBlock Text="Result" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
-              <TextBlock Text="{Binding Splits.SplitSummary}" Foreground="{DynamicResource T2}" TextWrapping="Wrap"/>
+            <StackPanel Spacing="12">
+              <!-- Title + leakage chip. The chip binds the real RowsSharedAcrossSplits signal:
+                   Ok-tinted "No leakage" at 0, Bad-tinted "Leakage" above 0; hidden pre-run. -->
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <TextBlock Text="Result" FontWeight="SemiBold" Foreground="{DynamicResource Text}" VerticalAlignment="Center"/>
+                <Border IsVisible="{Binding Splits.ShowNoLeakageChip}" Background="{DynamicResource AccentSoft}"
+                        CornerRadius="6" Padding="8,3" VerticalAlignment="Center">
+                  <StackPanel Orientation="Horizontal" Spacing="5">
+                    <Path Classes="ico ok ico-sm" Data="{StaticResource IcoCheckCircleFill}"/>
+                    <TextBlock Text="No leakage" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource Ok}" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Border>
+                <Border IsVisible="{Binding Splits.ShowLeakageChip}" Background="{DynamicResource AccentSoft}"
+                        CornerRadius="6" Padding="8,3" VerticalAlignment="Center">
+                  <StackPanel Orientation="Horizontal" Spacing="5">
+                    <Path Classes="ico ico-sm" Data="{StaticResource IcoWarningFill}" Fill="{DynamicResource Bad}"/>
+                    <TextBlock Text="Leakage" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource Bad}" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+
+              <!-- Pre-run / in-progress / error: neutral text (no fabricated bar or counts). -->
+              <TextBlock IsVisible="{Binding !Splits.HasReport}" Text="{Binding Splits.SplitSummary}"
+                         Foreground="{DynamicResource T2}" TextWrapping="Wrap"/>
+
+              <!-- Populated result: proportion bar (widths = real ratios) + counts footer. -->
+              <StackPanel IsVisible="{Binding Splits.HasReport}" Spacing="12">
+                <Border CornerRadius="8" ClipToBounds="True" Height="34">
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="{Binding Splits.TrainRatio, Converter={StaticResource FractionToStar}}"/>
+                      <ColumnDefinition Width="{Binding Splits.ValidationRatio, Converter={StaticResource FractionToStar}}"/>
+                      <ColumnDefinition Width="{Binding Splits.TestRatio, Converter={StaticResource FractionToStar}}"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Background="{DynamicResource Accent}">
+                      <TextBlock Text="train" FontSize="12" Foreground="{DynamicResource OnAccent}"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <Border Grid.Column="1" Background="{DynamicResource Ok}">
+                      <TextBlock Text="val" FontSize="12" Foreground="{DynamicResource OnAccent}"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <Border Grid.Column="2" Background="{DynamicResource Warn}">
+                      <TextBlock Text="test" FontSize="12" Foreground="{DynamicResource OnAccent}"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                  </Grid>
+                </Border>
+
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Splits.TrainCount}" FontWeight="Bold" Foreground="{DynamicResource Text}"/>
+                    <TextBlock Text="train" Foreground="{DynamicResource T3}"/>
+                    <TextBlock Text="·" Foreground="{DynamicResource T4}"/>
+                    <TextBlock Text="{Binding Splits.ValidationCount}" FontWeight="Bold" Foreground="{DynamicResource Text}"/>
+                    <TextBlock Text="validation" Foreground="{DynamicResource T3}"/>
+                    <TextBlock Text="·" Foreground="{DynamicResource T4}"/>
+                    <TextBlock Text="{Binding Splits.TestCount}" FontWeight="Bold" Foreground="{DynamicResource Text}"/>
+                    <TextBlock Text="test" Foreground="{DynamicResource T3}"/>
+                  </StackPanel>
+                  <TextBlock Grid.Column="1" Text="{Binding Splits.SharedRowsDetail}" FontSize="12.5"
+                             Margin="16,0,0,0" Foreground="{DynamicResource T3}" VerticalAlignment="Center"/>
+                </Grid>
+              </StackPanel>
+
+              <!-- Real engine warnings (kept honest — shown whenever the report carried any). -->
+              <TextBlock IsVisible="{Binding Splits.HasWarnings}" Text="{Binding Splits.SplitWarnings}"
+                         Foreground="{DynamicResource Warn}" FontSize="12.5" TextWrapping="Wrap"/>
             </StackPanel>
           </Border>
         </StackPanel>
