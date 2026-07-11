@@ -433,49 +433,95 @@
 
               <Border Height="1" Background="{DynamicResource Line}"/>
 
-              <!-- Lifecycle strip (structural; neutral nodes — per-phase status is a later slice). -->
+              <!-- Lifecycle strip: HONEST per-node status. Each node's circle colour + status glyph is
+                   driven by a REAL shared-VM signal (*NodeStatus → LifecycleNode converter). Where no
+                   reliable signal exists the node stays NEUTRAL (a bare Track circle, no glyph): Validate
+                   and Split have no persistent "passed / generated" signal, and Train is the terminal
+                   gated phase (a lock, never "done"). A completed step is never faked. -->
               <Grid Margin="0,2,0,0">
                 <Border Height="2" Background="{DynamicResource Track}" VerticalAlignment="Top" Margin="58,12,58,0"/>
                 <UniformGrid Columns="7">
                   <StackPanel>
-                    <Border Width="26" Height="26" CornerRadius="13" Background="{DynamicResource Track}"
-                            BorderBrush="{DynamicResource Line2}" BorderThickness="1" HorizontalAlignment="Center"/>
+                    <Border Width="26" Height="26" CornerRadius="13" BorderThickness="1.5" HorizontalAlignment="Center"
+                            Background="{Binding AuthorNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=bg}"
+                            BorderBrush="{Binding AuthorNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=border}">
+                      <Path Width="14" Height="14" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
+                            IsVisible="{Binding AuthorNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=hasglyph}"
+                            Data="{Binding AuthorNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=glyph}"
+                            Fill="{Binding AuthorNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=glyphfill}"/>
+                    </Border>
                     <TextBlock Text="Author" FontSize="10" Foreground="{DynamicResource T4}"
                                HorizontalAlignment="Center" Margin="0,5,0,0"/>
                   </StackPanel>
                   <StackPanel>
-                    <Border Width="26" Height="26" CornerRadius="13" Background="{DynamicResource Track}"
-                            BorderBrush="{DynamicResource Line2}" BorderThickness="1" HorizontalAlignment="Center"/>
+                    <Border Width="26" Height="26" CornerRadius="13" BorderThickness="1.5" HorizontalAlignment="Center"
+                            Background="{Binding ValidateNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=bg}"
+                            BorderBrush="{Binding ValidateNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=border}">
+                      <Path Width="14" Height="14" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
+                            IsVisible="{Binding ValidateNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=hasglyph}"
+                            Data="{Binding ValidateNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=glyph}"
+                            Fill="{Binding ValidateNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=glyphfill}"/>
+                    </Border>
                     <TextBlock Text="Validate" FontSize="10" Foreground="{DynamicResource T4}"
                                HorizontalAlignment="Center" Margin="0,5,0,0"/>
                   </StackPanel>
                   <StackPanel>
-                    <Border Width="26" Height="26" CornerRadius="13" Background="{DynamicResource Track}"
-                            BorderBrush="{DynamicResource Line2}" BorderThickness="1" HorizontalAlignment="Center"/>
+                    <Border Width="26" Height="26" CornerRadius="13" BorderThickness="1.5" HorizontalAlignment="Center"
+                            Background="{Binding QualityNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=bg}"
+                            BorderBrush="{Binding QualityNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=border}">
+                      <Path Width="14" Height="14" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
+                            IsVisible="{Binding QualityNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=hasglyph}"
+                            Data="{Binding QualityNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=glyph}"
+                            Fill="{Binding QualityNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=glyphfill}"/>
+                    </Border>
                     <TextBlock Text="Quality" FontSize="10" Foreground="{DynamicResource T4}"
                                HorizontalAlignment="Center" Margin="0,5,0,0"/>
                   </StackPanel>
                   <StackPanel>
-                    <Border Width="26" Height="26" CornerRadius="13" Background="{DynamicResource Track}"
-                            BorderBrush="{DynamicResource Line2}" BorderThickness="1" HorizontalAlignment="Center"/>
+                    <Border Width="26" Height="26" CornerRadius="13" BorderThickness="1.5" HorizontalAlignment="Center"
+                            Background="{Binding GateNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=bg}"
+                            BorderBrush="{Binding GateNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=border}">
+                      <Path Width="14" Height="14" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
+                            IsVisible="{Binding GateNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=hasglyph}"
+                            Data="{Binding GateNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=glyph}"
+                            Fill="{Binding GateNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=glyphfill}"/>
+                    </Border>
                     <TextBlock Text="Gate" FontSize="10" Foreground="{DynamicResource T4}"
                                HorizontalAlignment="Center" Margin="0,5,0,0"/>
                   </StackPanel>
                   <StackPanel>
-                    <Border Width="26" Height="26" CornerRadius="13" Background="{DynamicResource Track}"
-                            BorderBrush="{DynamicResource Line2}" BorderThickness="1" HorizontalAlignment="Center"/>
+                    <Border Width="26" Height="26" CornerRadius="13" BorderThickness="1.5" HorizontalAlignment="Center"
+                            Background="{Binding SplitNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=bg}"
+                            BorderBrush="{Binding SplitNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=border}">
+                      <Path Width="14" Height="14" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
+                            IsVisible="{Binding SplitNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=hasglyph}"
+                            Data="{Binding SplitNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=glyph}"
+                            Fill="{Binding SplitNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=glyphfill}"/>
+                    </Border>
                     <TextBlock Text="Split" FontSize="10" Foreground="{DynamicResource T4}"
                                HorizontalAlignment="Center" Margin="0,5,0,0"/>
                   </StackPanel>
                   <StackPanel>
-                    <Border Width="26" Height="26" CornerRadius="13" Background="{DynamicResource Track}"
-                            BorderBrush="{DynamicResource Line2}" BorderThickness="1" HorizontalAlignment="Center"/>
+                    <Border Width="26" Height="26" CornerRadius="13" BorderThickness="1.5" HorizontalAlignment="Center"
+                            Background="{Binding EvaluateNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=bg}"
+                            BorderBrush="{Binding EvaluateNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=border}">
+                      <Path Width="14" Height="14" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
+                            IsVisible="{Binding EvaluateNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=hasglyph}"
+                            Data="{Binding EvaluateNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=glyph}"
+                            Fill="{Binding EvaluateNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=glyphfill}"/>
+                    </Border>
                     <TextBlock Text="Evaluate" FontSize="10" Foreground="{DynamicResource T4}"
                                HorizontalAlignment="Center" Margin="0,5,0,0"/>
                   </StackPanel>
                   <StackPanel>
-                    <Border Width="26" Height="26" CornerRadius="13" Background="{DynamicResource Track}"
-                            BorderBrush="{DynamicResource Line2}" BorderThickness="1" HorizontalAlignment="Center"/>
+                    <Border Width="26" Height="26" CornerRadius="13" BorderThickness="1.5" HorizontalAlignment="Center"
+                            Background="{Binding TrainNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=bg}"
+                            BorderBrush="{Binding TrainNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=border}">
+                      <Path Width="14" Height="14" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
+                            IsVisible="{Binding TrainNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=hasglyph}"
+                            Data="{Binding TrainNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=glyph}"
+                            Fill="{Binding TrainNodeStatus, Converter={StaticResource LifecycleNode}, ConverterParameter=glyphfill}"/>
+                    </Border>
                     <TextBlock Text="Train" FontSize="10" Foreground="{DynamicResource T4}"
                                HorizontalAlignment="Center" Margin="0,5,0,0"/>
                   </StackPanel>

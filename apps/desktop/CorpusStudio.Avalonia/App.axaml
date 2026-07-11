@@ -94,6 +94,8 @@
            the active nav-row accent-soft highlight. Both keyed off the shared SelectedStudioTabIndex. -->
       <conv:StudioTabIsConverter x:Key="TabIs" />
       <conv:StudioTabActiveBrushConverter x:Key="TabActiveBrush" />
+      <!-- Dashboard lifecycle strip: a per-node status token → Nocturne circle brush + status glyph. -->
+      <conv:LifecycleNodeConverter x:Key="LifecycleNode" />
     </ResourceDictionary>
   </Application.Resources>
   <Application.Styles>

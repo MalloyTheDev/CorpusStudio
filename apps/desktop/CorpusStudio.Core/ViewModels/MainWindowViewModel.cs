@@ -330,6 +330,20 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         // Load a suite's run-history trend when it's selected (best-effort; the engine call stays here).
         Suites.SuiteSelected += name => _ = LoadSuiteHistoryAsync(name);
 
+        // Dashboard lifecycle strip (honest per-node status): recompute the affected node when its
+        // underlying REAL signal changes. Additive + notify-only — the WPF head binds none of these, so
+        // these extra notifications change no existing behaviour. See the *NodeStatus properties below.
+        Examples.Items.CollectionChanged += (_, _) => OnPropertyChanged(nameof(AuthorNodeStatus));
+        Evaluation.EvaluationResults.CollectionChanged += (_, _) => OnPropertyChanged(nameof(EvaluateNodeStatus));
+        Quality.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(IQualityViewModel.HasQualityMetrics)
+                or nameof(IQualityViewModel.QualityStatusColor))
+            {
+                OnPropertyChanged(nameof(QualityNodeStatus));
+            }
+        };
+
         ShowStartCenterCommand = new RelayCommand(ShowStartCenter);
         ShowFilesCommand = new RelayCommand(ShowFiles);
         ShowStudioCommand = new RelayCommand(ShowStudio);
@@ -511,6 +525,61 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public bool ShowQualityRail => (StudioTab)_selectedStudioTabIndex is
         StudioTab.Dashboard or StudioTab.WritingStudio or StudioTab.Quality
         or StudioTab.Splits or StudioTab.Debt;
+
+    // ---- Dashboard lifecycle strip: honest per-node status -----------------------------------
+    // The 7-node OVERVIEW strip (Author · Validate · Quality · Gate · Split · Evaluate · Train) shows a
+    // per-node status DERIVED FROM A REAL VIEW-MODEL SIGNAL. The project's honesty invariant governs it:
+    // a node lights up ONLY when a reliable signal exists; where none does the node STAYS NEUTRAL (a
+    // completed step is never faked, and neutral-where-unknown can never read as done/green). Each getter
+    // returns a small token — "done" | "warn" | "bad" | "neutral" | "locked" — that the Avalonia strip
+    // maps to a Nocturne colour + status glyph. Additive + notify-only: the WPF head binds none of these.
+
+    /// <summary>Author — "done" once the dataset has authored rows (Examples.Items); no rows -> "neutral".</summary>
+    public string AuthorNodeStatus => Examples.Items.Count > 0 ? "done" : "neutral";
+
+    /// <summary>Validate — "neutral" by design. No persistent "schema validation passed" signal exists: the
+    /// shell's <see cref="ValidationSummary"/> is a transient text blob (overwritten by import previews) and
+    /// an empty <see cref="ValidationIssues"/> list is ambiguous (not-run vs passed vs cleared). Honesty
+    /// rule: unknown -> neutral — we never fake a validated/green node from an ambiguous state.</summary>
+    public string ValidateNodeStatus => "neutral";
+
+    /// <summary>Quality — colour follows <see cref="IQualityViewModel.QualityStatusColor"/> once a quality
+    /// report exists (<see cref="IQualityViewModel.HasQualityMetrics"/>): green clean -> "done", amber
+    /// issues -> "warn", red PII/secrets -> "bad". Before a run (no metrics) -> "neutral".</summary>
+    public string QualityNodeStatus =>
+        Quality.HasQualityMetrics ? ClassifyStatusColor(Quality.QualityStatusColor) : "neutral";
+
+    /// <summary>Gate — reflects the latest gate run's Problems badge: a block colours the node "bad" (red),
+    /// a warn colours it "warn" (amber). It is NEVER "done": an absent badge is ambiguous (gates not run vs
+    /// ran clean) and a clean gate is not approval, so absence stays "neutral" rather than faking a pass.</summary>
+    public string GateNodeStatus =>
+        HasProblemsBadge ? ClassifyStatusColor(ProblemsBadgeColor) : "neutral";
+
+    /// <summary>Split — "neutral" by design. No "splits generated" signal exists on the Splits VM (only a
+    /// <see cref="ISplitsViewModel.SplitSummary"/> text blob), so per the honesty rule the node stays
+    /// neutral rather than inventing one.</summary>
+    public string SplitNodeStatus => "neutral";
+
+    /// <summary>Evaluate — "done" once an evaluation has produced results
+    /// (<see cref="IEvaluationViewModel.EvaluationResults"/>); no results -> "neutral".</summary>
+    public string EvaluateNodeStatus => Evaluation.EvaluationResults.Count > 0 ? "done" : "neutral";
+
+    /// <summary>Train — the terminal, gated phase: always rendered "locked" (never "done"). Launch is gated
+    /// upstream; the strip shows a lock rather than a completion state.</summary>
+    public string TrainNodeStatus => "locked";
+
+    /// <summary>Classify a VM status-colour hex into a lifecycle-node token, honouring BOTH the Quality
+    /// palette (#15803D / #B45309 / #B91C1C) and the <see cref="GateReport"/> palette (#16A34A / #D97706 /
+    /// #DC2626). Any unrecognised/empty colour maps to "neutral" — an unknown verdict can never read as
+    /// done/green.</summary>
+    private static string ClassifyStatusColor(string? statusColor) =>
+        (statusColor ?? string.Empty).ToUpperInvariant() switch
+        {
+            "#15803D" or "#16A34A" => "done", // green — clean / pass
+            "#B45309" or "#D97706" => "warn", // amber — issues / warn
+            "#B91C1C" or "#DC2626" => "bad",  // red — PII / block
+            _ => "neutral",                    // unknown / empty — never green
+        };
 
     /// <summary>The current Studio screen's title for the app-shell context bar (slice 4). Derived from
     /// <see cref="SelectedStudioTabIndex"/> — additive (the WPF head may adopt it later).</summary>
@@ -3827,6 +3896,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
               + $"({report.BlockCount} block, {report.WarnCount} warn) · {report.PassCount} passed.";
 
         OnPropertyChanged(nameof(IsNoProblems));
+        OnPropertyChanged(nameof(GateNodeStatus)); // dashboard lifecycle strip
     }
 
     /// <summary>Reset the Problems panel to its empty state (e.g. on project switch), so stale
@@ -3838,6 +3908,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ProblemsBadgeColor = GateReport.StatusColor(null);
         ProblemsSummary = "Run gates to check this dataset for problems.";
         OnPropertyChanged(nameof(IsNoProblems));
+        OnPropertyChanged(nameof(GateNodeStatus)); // dashboard lifecycle strip
     }
 
     // ---- Workspace Output / Logs panel (v1.2.7) ----------------------------------
