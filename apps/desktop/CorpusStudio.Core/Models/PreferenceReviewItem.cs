@@ -23,6 +23,11 @@ public sealed class PreferenceReviewItem
     public string DisplayName =>
         $"Example {RowNumber}: {Contrast} | overlap {TokenOverlap:P0} | {Truncate(Prompt)}";
 
+    /// <summary>Second line for the pair-list item template: the pair's contrast band, derived straight
+    /// from the real <see cref="Contrast"/> field (weak = chosen/rejected too similar; strong = clearly
+    /// distinct). Kept honest to the field — a "weak" pair is not relabelled "high contrast".</summary>
+    public string ContrastLine => $"{Contrast} contrast";
+
     public string ContrastSummary
     {
         get

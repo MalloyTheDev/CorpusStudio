@@ -100,6 +100,19 @@ public sealed class PreferenceReviewTests
         Assert.Contains("showing 1 of 3", vm.PreferenceRankingSummary);
     }
 
+    [Fact]
+    public void ContrastLine_DerivesSecondLineFromContrastBand()
+    {
+        var vm = PreferenceVm();
+        vm.SetItems(ThreeContrastExamples());
+
+        // The pair-list item template's second line is bound to ContrastLine — a real, honest
+        // derivation of the Contrast field (weak/moderate/strong), never a relabel to high/med/low.
+        Assert.Equal("weak contrast", vm.PreferenceReviewItems[0].ContrastLine);
+        Assert.Equal("moderate contrast", vm.PreferenceReviewItems[1].ContrastLine);
+        Assert.Equal("strong contrast", vm.PreferenceReviewItems[2].ContrastLine);
+    }
+
     // --- export formatting ------------------------------------------------------------
 
     [Fact]
