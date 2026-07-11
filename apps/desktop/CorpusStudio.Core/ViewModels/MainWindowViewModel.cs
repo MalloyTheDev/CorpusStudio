@@ -243,6 +243,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Windows.Input.ICommand GoToSplitsCommand { get; }
     public System.Windows.Input.ICommand GoToEvaluationCommand { get; }
     public System.Windows.Input.ICommand GoToTrainingCommand { get; }
+
+    /// <summary>Select any Studio tab by its <see cref="StudioTab"/> name — the shared target for the
+    /// Avalonia grouped-IA nav rows (each binds this with a <c>CommandParameter</c> of the tab name).
+    /// Additive: the WPF head keeps its per-command GoTo* bindings; this breaks neither.</summary>
+    public System.Windows.Input.ICommand SelectStudioTabCommand { get; }
     // Prepare-then-navigate: run the AI-Assist handoff bridge; on success it selects the AI Assist tab.
     public System.Windows.Input.ICommand PrepareEvaluationFailureReviewCommand { get; }
     public System.Windows.Input.ICommand PreparePreferenceJudgeReviewCommand { get; }
@@ -382,6 +387,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         GoToSplitsCommand = new RelayCommand(() => GoToStudioTab(StudioTab.Splits));
         GoToEvaluationCommand = new RelayCommand(() => GoToStudioTab(StudioTab.Evaluation));
         GoToTrainingCommand = new RelayCommand(() => GoToStudioTab(StudioTab.Training));
+        SelectStudioTabCommand = new RelayCommand<string>(name =>
+        {
+            if (name is not null && System.Enum.TryParse<StudioTab>(name, out var tab))
+            {
+                GoToStudioTab(tab);
+            }
+        });
         PrepareEvaluationFailureReviewCommand = new RelayCommand(() => PrepareEvaluationFailureReview());
         PreparePreferenceJudgeReviewCommand = new RelayCommand(() => PreparePreferenceJudgeReview());
         PreparePreferenceBatchJudgeReviewCommand = new RelayCommand(() => PreparePreferenceBatchJudgeReview());

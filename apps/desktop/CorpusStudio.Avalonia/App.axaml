@@ -86,6 +86,10 @@
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
       <conv:StringToBrushConverter x:Key="StringToBrush" />
+      <!-- Grouped-IA content-switcher (slice 2): TabIs → IsVisible per Studio screen; TabActiveBrush →
+           the active nav-row accent-soft highlight. Both keyed off the shared SelectedStudioTabIndex. -->
+      <conv:StudioTabIsConverter x:Key="TabIs" />
+      <conv:StudioTabActiveBrushConverter x:Key="TabActiveBrush" />
     </ResourceDictionary>
   </Application.Resources>
   <Application.Styles>
