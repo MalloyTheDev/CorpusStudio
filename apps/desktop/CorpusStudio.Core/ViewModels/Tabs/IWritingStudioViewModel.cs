@@ -19,6 +19,16 @@ public interface IWritingStudioViewModel : INotifyPropertyChanged
     /// loaded/saved draft).</summary>
     bool IsDraftDirty { get; }
 
+    /// <summary>Whether the draft is an instruction-shaped JSON object, so the structured
+    /// Instruction/Input/Output form is safe to edit (else the raw JSON editor is shown).</summary>
+    bool IsInstructionShapedDraft { get; }
+
+    /// <summary>The instruction / optional input / output fields, projected from and written back to
+    /// the <see cref="DraftText"/> JSON buffer (which stays the single source of truth).</summary>
+    string DraftInstruction { get; set; }
+    string DraftInput { get; set; }
+    string DraftOutput { get; set; }
+
     /// <summary>Load a known draft (template, saved example, retried row) as the clean baseline, so it
     /// is not reported as unsaved until the user edits it.</summary>
     void LoadDraft(string text);
