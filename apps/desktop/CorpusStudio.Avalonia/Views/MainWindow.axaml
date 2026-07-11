@@ -2977,42 +2977,192 @@
 
       </Panel>
 
-      <!-- Docked panels (mutually exclusive), toggled from the activity bar. -->
-      <Border Grid.Row="1" Height="180" Background="{DynamicResource AppBackground}" BorderBrush="{DynamicResource AppBorder}"
-              BorderThickness="0,1,0,0" IsVisible="{Binding ProblemsPanelVisible}">
-        <DockPanel Margin="12,8">
-          <TextBlock DockPanel.Dock="Top" Text="{Binding ProblemsSummary}" FontWeight="Bold" Margin="0,0,0,6"/>
-          <ListBox ItemsSource="{Binding Problems}">
-            <ListBox.ItemTemplate>
-              <DataTemplate x:DataType="models:ProblemItem">
-                <StackPanel Margin="0,2">
-                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
-                             Foreground="{Binding SeverityColor, Converter={StaticResource StringToBrush}}"/>
-                  <TextBlock Text="{Binding Message}" FontSize="11"/>
-                  <TextBlock Text="{Binding Fix}" FontSize="11" Foreground="{DynamicResource AppAccent}"/>
+      <!-- Nocturne docked console (bottom dock). Two REAL surfaces — Problems and Output — driven by
+           the mutually-exclusive ProblemsPanelVisible / OutputPanelVisible flags. There is NO terminal
+           feature in this app, so the Terminal tab is rendered visibly disabled (never a fake shell).
+           The wrapper Grid only hosts the shared tab/list styles once; the shared VS-Code-style tab
+           header is repeated inside each border, but because the borders are mutually exclusive exactly
+           one header is ever on screen. Active tab = accent underline via Classes.active bound straight
+           to the panel flag; tabs switch panels through the EXISTING toggle commands. No VM members and
+           no converters are added. -->
+      <Grid Grid.Row="1">
+        <Grid.Styles>
+          <!-- Console tab buttons: transparent, accent underline when active (bound to the flags). -->
+          <Style Selector="Button.constab">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0,0,0,2"/>
+            <Setter Property="CornerRadius" Value="0"/>
+            <Setter Property="Padding" Value="3,9"/>
+            <Setter Property="Margin" Value="0,0,4,0"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Foreground" Value="{DynamicResource T3}"/>
+          </Style>
+          <Style Selector="Button.constab /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent"/>
+          </Style>
+          <Style Selector="Button.constab:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent"/>
+          </Style>
+          <Style Selector="Button.constab:pointerover">
+            <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+          </Style>
+          <Style Selector="Button.constab.active">
+            <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentStrong}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+          </Style>
+          <Style Selector="Button.constab:disabled /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent"/>
+          </Style>
+          <Style Selector="Button.constab:disabled">
+            <Setter Property="Foreground" Value="{DynamicResource T4}"/>
+            <Setter Property="Opacity" Value="0.6"/>
+          </Style>
+          <!-- Collapse chevron -->
+          <Style Selector="Button.conschev">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Width" Value="26"/>
+            <Setter Property="Height" Value="24"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="CornerRadius" Value="6"/>
+          </Style>
+          <Style Selector="Button.conschev:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource Hover}"/>
+          </Style>
+          <!-- Console readouts: flat, no selection chrome (a readout, not a picker). -->
+          <Style Selector="ListBox.consolelist">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+          </Style>
+          <Style Selector="ListBox.consolelist ListBoxItem">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+          </Style>
+          <Style Selector="ListBox.consolelist ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent"/>
+          </Style>
+          <Style Selector="ListBox.consolelist ListBoxItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource Hover}"/>
+          </Style>
+        </Grid.Styles>
+
+        <!-- PROBLEMS surface -->
+        <Border Height="208" Background="{DynamicResource Panel2}"
+                BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0"
+                IsVisible="{Binding ProblemsPanelVisible}">
+          <DockPanel>
+            <Border DockPanel.Dock="Top" Background="{DynamicResource Chrome}"
+                    BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="10,0">
+              <Grid ColumnDefinitions="*,Auto" Height="38">
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                  <Button Classes="constab" Classes.active="{Binding ProblemsPanelVisible}"
+                          Command="{Binding ToggleProblemsPanelCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                      <TextBlock Text="Problems" VerticalAlignment="Center"/>
+                      <Border IsVisible="{Binding HasProblemsBadge}" CornerRadius="9" MinWidth="18" Height="18"
+                              Background="{DynamicResource AccentSoft}" Padding="6,0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding ProblemsBadge}" FontSize="10.5" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AccentInk}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      </Border>
+                    </StackPanel>
+                  </Button>
+                  <Button Classes="constab" Classes.active="{Binding OutputPanelVisible}"
+                          Command="{Binding ToggleOutputPanelCommand}" Content="Output"/>
+                  <Button Classes="constab" IsEnabled="False" Content="Terminal"
+                          ToolTip.Tip="Terminal is not available in this build."/>
                 </StackPanel>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-        </DockPanel>
-      </Border>
-      <Border Grid.Row="1" Height="180" Background="{DynamicResource Chrome}" IsVisible="{Binding OutputPanelVisible}">
-        <DockPanel Margin="12,8">
-          <TextBlock DockPanel.Dock="Top" Text="{Binding OutputSummary}" FontWeight="Bold"
-                     Foreground="White" Margin="0,0,0,6"/>
-          <ListBox ItemsSource="{Binding OutputLog}" Background="Transparent">
-            <ListBox.ItemTemplate>
-              <DataTemplate x:DataType="models:EngineLogEntry">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <TextBlock Text="{Binding Timestamp}" Foreground="{DynamicResource AppTextMuted}" FontFamily="Consolas" FontSize="11"/>
-                  <TextBlock Text="{Binding Command}" Foreground="White" FontFamily="Consolas" FontSize="11"/>
-                  <TextBlock Text="{Binding ArgsSummary}" Foreground="{DynamicResource T3}" FontFamily="Consolas" FontSize="11"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding ProblemsSummary}" Foreground="{DynamicResource T3}" FontSize="11"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="360"/>
+                  <Button Classes="conschev" Command="{Binding ToggleProblemsPanelCommand}"
+                          ToolTip.Tip="Collapse panel">
+                    <Path Data="M2,3 L7,8 L12,3" Stroke="{DynamicResource T3}" StrokeThickness="1.6"
+                          StrokeLineCap="Round" StrokeJoin="Round"
+                          HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  </Button>
                 </StackPanel>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-        </DockPanel>
-      </Border>
+              </Grid>
+            </Border>
+            <Panel Margin="14,10">
+              <TextBlock Text="No problems — run gates to check this dataset." IsVisible="{Binding IsNoProblems}"
+                         Foreground="{DynamicResource T4}" FontSize="12" VerticalAlignment="Top"/>
+              <ListBox Classes="consolelist" ItemsSource="{Binding Problems}" IsVisible="{Binding !IsNoProblems}">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="models:ProblemItem">
+                    <StackPanel Margin="0,3">
+                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12.5"
+                                 Foreground="{Binding SeverityColor, Converter={StaticResource StringToBrush}}"/>
+                      <TextBlock Text="{Binding Message}" FontSize="11.5" Foreground="{DynamicResource T2}" TextWrapping="Wrap"/>
+                      <TextBlock Text="{Binding Fix}" FontSize="11.5" Foreground="{DynamicResource Accent}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Panel>
+          </DockPanel>
+        </Border>
+
+        <!-- OUTPUT surface -->
+        <Border Height="208" Background="{DynamicResource Panel2}"
+                BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0"
+                IsVisible="{Binding OutputPanelVisible}">
+          <DockPanel>
+            <Border DockPanel.Dock="Top" Background="{DynamicResource Chrome}"
+                    BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="10,0">
+              <Grid ColumnDefinitions="*,Auto" Height="38">
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                  <Button Classes="constab" Classes.active="{Binding ProblemsPanelVisible}"
+                          Command="{Binding ToggleProblemsPanelCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                      <TextBlock Text="Problems" VerticalAlignment="Center"/>
+                      <Border IsVisible="{Binding HasProblemsBadge}" CornerRadius="9" MinWidth="18" Height="18"
+                              Background="{DynamicResource AccentSoft}" Padding="6,0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding ProblemsBadge}" FontSize="10.5" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AccentInk}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      </Border>
+                    </StackPanel>
+                  </Button>
+                  <Button Classes="constab" Classes.active="{Binding OutputPanelVisible}"
+                          Command="{Binding ToggleOutputPanelCommand}" Content="Output"/>
+                  <Button Classes="constab" IsEnabled="False" Content="Terminal"
+                          ToolTip.Tip="Terminal is not available in this build."/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding OutputSummary}" Foreground="{DynamicResource T3}" FontSize="11"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="360"/>
+                  <Button Classes="conschev" Command="{Binding ToggleOutputPanelCommand}"
+                          ToolTip.Tip="Collapse panel">
+                    <Path Data="M2,3 L7,8 L12,3" Stroke="{DynamicResource T3}" StrokeThickness="1.6"
+                          StrokeLineCap="Round" StrokeJoin="Round"
+                          HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  </Button>
+                </StackPanel>
+              </Grid>
+            </Border>
+            <Panel Margin="14,10">
+              <TextBlock Text="Engine activity will appear here as you run commands." IsVisible="{Binding IsNoOutput}"
+                         Foreground="{DynamicResource T4}" FontSize="12" VerticalAlignment="Top"/>
+              <ListBox Classes="consolelist" ItemsSource="{Binding OutputLog}" IsVisible="{Binding HasOutput}">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="models:EngineLogEntry">
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,2">
+                      <TextBlock Text="{Binding Timestamp}" Foreground="{DynamicResource T4}" FontFamily="Consolas" FontSize="11.5"/>
+                      <TextBlock Text="{Binding Command}" Foreground="{DynamicResource Text}" FontFamily="Consolas" FontSize="11.5"/>
+                      <TextBlock Text="{Binding ArgsSummary}" Foreground="{DynamicResource T3}" FontFamily="Consolas" FontSize="11.5"/>
+                    </StackPanel>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Panel>
+          </DockPanel>
+        </Border>
+      </Grid>
 
     </Grid>
   </Grid>
