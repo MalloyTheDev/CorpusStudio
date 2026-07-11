@@ -61,6 +61,12 @@ public sealed class DatasetDebtViewTests
         var presence = new DebtDisplayItem(Item("critical", "secrets", 1, null));
         Assert.Contains("CRITICAL", presence.SeverityBadge);
         Assert.Equal("count 1", presence.Measure);
+
+        // slice-5 fidelity: the severity chip color (Nocturne semantics).
+        Assert.Equal("#d76d6d", rated.SeverityColor);      // high  -> bad red
+        Assert.Equal("#d76d6d", presence.SeverityColor);   // critical -> bad red
+        Assert.Equal("#d9a35f", new DebtDisplayItem(Item("moderate", "near_dupes", 2, 0.1)).SeverityColor);
+        Assert.Equal("#9397ab", new DebtDisplayItem(Item("low", "imbalance", 3, null)).SeverityColor);
     }
 
     // --- ApplyDebtReport honest summaries ----------------------------------
