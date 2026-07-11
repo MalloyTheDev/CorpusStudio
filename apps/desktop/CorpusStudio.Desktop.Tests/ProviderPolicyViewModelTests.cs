@@ -85,4 +85,33 @@ public sealed class ProviderPolicyViewModelTests
         Assert.Contains("Python: C:/repo/engine/.venv/Scripts/python.exe", vm.SettingsSummary);
         Assert.Contains("Exports: C:/repo/exports", vm.SettingsSummary);
     }
+
+    [Fact]
+    public void PythonExecutableDisplay_DefaultsToNeutralPlaceholder()
+    {
+        // Before settings load the Engine card must not imply a configured interpreter.
+        var vm = new SettingsViewModel();
+        Assert.Equal("not configured", vm.PythonExecutableDisplay);
+    }
+
+    [Fact]
+    public void PythonExecutableDisplay_ShowsResolvedPath()
+    {
+        var vm = new SettingsViewModel();
+        vm.SetSettings(new DesktopSettings(
+            "C:/repo", "C:/repo/engine", "C:/repo/engine/.venv/Scripts/python.exe",
+            "C:/repo/data/projects", "C:/repo/exports"));
+
+        Assert.Equal("C:/repo/engine/.venv/Scripts/python.exe", vm.PythonExecutableDisplay);
+    }
+
+    [Fact]
+    public void PythonExecutableDisplay_FallsBackWhenPathMissing()
+    {
+        // Honest: a blank interpreter path shows the neutral placeholder, never a faked value.
+        var vm = new SettingsViewModel();
+        vm.SetSettings(new DesktopSettings("C:/repo", "C:/repo/engine", "  ", "C:/p", "C:/e"));
+
+        Assert.Equal("not configured", vm.PythonExecutableDisplay);
+    }
 }

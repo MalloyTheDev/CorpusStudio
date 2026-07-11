@@ -969,25 +969,179 @@
       </ScrollViewer>
     </Border>
 
-    <!-- Settings (slice 9 fidelity): an App-settings card + a Provider-policy card. -->
+    <!-- Settings (production re-skin): four sectioned Nocturne cards — Appearance / Engine / Provider
+         generation policy / Gate thresholds. The old monospace summary blobs are replaced by labelled
+         rows. Honesty: engine "ready" reflects the real IsEngineUnavailable probe; the Python row shows
+         the real interpreter PATH (no version is probed, so none is invented); the Ollama endpoint is the
+         configured host shown with a neutral "configured" (not a faked "detected") status; the provider
+         policy renders the product's fail-closed invariant (cloud = evaluator-only, local = generate). -->
     <Border IsVisible="{Binding SelectedStudioTabIndex, Converter={StaticResource TabIs}, ConverterParameter=Settings}">
+      <!-- OkSoft: an Ok-tinted chip fill, scoped here so the Settings pills stay theme-aware without a
+           global token. Mirrors AccentSoft's alpha over the Ok token for each variant. -->
+      <Border.Resources>
+        <ResourceDictionary>
+          <ResourceDictionary.ThemeDictionaries>
+            <ResourceDictionary x:Key="Dark">
+              <SolidColorBrush x:Key="OkSoft" Color="#296bbf9a"/>
+            </ResourceDictionary>
+            <ResourceDictionary x:Key="Light">
+              <SolidColorBrush x:Key="OkSoft" Color="#1f3f9b73"/>
+            </ResourceDictionary>
+          </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+      </Border.Resources>
+      <Border.Styles>
+        <Style Selector="Border.card">
+          <Setter Property="Background" Value="{DynamicResource Panel}"/>
+          <Setter Property="CornerRadius" Value="12"/>
+          <Setter Property="Padding" Value="18"/>
+          <Setter Property="BorderBrush" Value="{DynamicResource Line2}"/>
+          <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+        <Style Selector="TextBlock.cardtitle">
+          <Setter Property="FontWeight" Value="SemiBold"/>
+          <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+          <Setter Property="FontSize" Value="14"/>
+        </Style>
+        <!-- Appearance segmented toggle: transparent segments; the selected one fills accent-soft. -->
+        <Style Selector="Button.segbtn">
+          <Setter Property="Background" Value="Transparent"/>
+          <Setter Property="Foreground" Value="{DynamicResource T2}"/>
+          <Setter Property="BorderThickness" Value="0"/>
+          <Setter Property="CornerRadius" Value="6"/>
+          <Setter Property="Padding" Value="22,6"/>
+          <Setter Property="FontSize" Value="13"/>
+          <Setter Property="MinWidth" Value="82"/>
+          <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Button.segbtn:pointerover /template/ ContentPresenter">
+          <Setter Property="Background" Value="{DynamicResource Hover}"/>
+        </Style>
+        <Style Selector="Button.segbtn.selected">
+          <Setter Property="Foreground" Value="{DynamicResource AccentInk}"/>
+          <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style Selector="Button.segbtn.selected /template/ ContentPresenter">
+          <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+        </Style>
+        <!-- Ok-tinted "on" / role chips + neutral base. -->
+        <Style Selector="Border.chip">
+          <Setter Property="CornerRadius" Value="6"/>
+          <Setter Property="Padding" Value="11,2"/>
+          <Setter Property="Background" Value="{DynamicResource Track}"/>
+          <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Border.chip.on"><Setter Property="Background" Value="{DynamicResource OkSoft}"/></Style>
+        <Style Selector="Ellipse.statusdot">
+          <Setter Property="Width" Value="7"/>
+          <Setter Property="Height" Value="7"/>
+          <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="TextBlock.rowlabel">
+          <Setter Property="Foreground" Value="{DynamicResource T2}"/>
+          <Setter Property="VerticalAlignment" Value="Center"/>
+          <Setter Property="FontSize" Value="13"/>
+        </Style>
+        <Style Selector="TextBlock.rowvalue">
+          <Setter Property="Foreground" Value="{DynamicResource T3}"/>
+          <Setter Property="FontFamily" Value="Consolas"/>
+          <Setter Property="FontSize" Value="12.5"/>
+          <Setter Property="VerticalAlignment" Value="Center"/>
+          <Setter Property="TextAlignment" Value="Right"/>
+          <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+        </Style>
+        <Style Selector="TextBlock.statusword">
+          <Setter Property="FontSize" Value="12.5"/>
+          <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+      </Border.Styles>
       <ScrollViewer>
-        <StackPanel Margin="20" Spacing="14" MaxWidth="720" HorizontalAlignment="Left">
-          <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="16"
-                  BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-            <StackPanel Spacing="8">
-              <TextBlock Text="App settings" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
-              <TextBlock Text="{Binding Settings.SettingsSummary}" Foreground="{DynamicResource T2}"
-                         TextWrapping="Wrap" FontFamily="Consolas" FontSize="12"/>
-              <Button Content="Save gate thresholds" Command="{Binding SaveGateThresholdsCommand}" HorizontalAlignment="Left"/>
+        <StackPanel Margin="20" Spacing="14" MaxWidth="780" HorizontalAlignment="Left">
+
+          <!-- 1. Appearance -->
+          <Border Classes="card">
+            <StackPanel Spacing="14">
+              <TextBlock Classes="cardtitle" Text="Appearance"/>
+              <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+                <TextBlock Grid.Column="0" Classes="rowlabel" Text="Theme"/>
+                <Border Grid.Column="1" Background="{DynamicResource Panel2}" CornerRadius="8" Padding="3"
+                        BorderBrush="{DynamicResource Line2}" BorderThickness="1">
+                  <StackPanel Orientation="Horizontal" Spacing="2">
+                    <Button x:Name="ThemeDarkButton" Classes="segbtn" Content="Dark" Click="SelectDarkTheme_Click"/>
+                    <Button x:Name="ThemeLightButton" Classes="segbtn" Content="Light" Click="SelectLightTheme_Click"/>
+                  </StackPanel>
+                </Border>
+              </Grid>
             </StackPanel>
           </Border>
-          <Border Background="{DynamicResource Panel}" CornerRadius="12" Padding="16"
-                  BorderBrush="{DynamicResource Line2}" BorderThickness="1">
-            <StackPanel Spacing="8">
-              <TextBlock Text="Provider generation policy" FontWeight="SemiBold" Foreground="{DynamicResource Text}"/>
-              <TextBlock Text="{Binding Settings.ProviderPolicySummary}" Foreground="{DynamicResource T2}"
-                         TextWrapping="Wrap" FontFamily="Consolas" FontSize="12"/>
+
+          <!-- 2. Engine -->
+          <Border Classes="card">
+            <StackPanel Spacing="12">
+              <TextBlock Classes="cardtitle" Text="Engine"/>
+              <!-- Python: value = real interpreter path; status = the real engine-availability probe. -->
+              <Grid ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Center">
+                <TextBlock Grid.Column="0" Classes="rowlabel" Text="Python"/>
+                <TextBlock Grid.Column="1" Classes="rowvalue" Margin="14,0,12,0"
+                           Text="{Binding Settings.PythonExecutableDisplay}"
+                           ToolTip.Tip="{Binding Settings.PythonExecutableDisplay}"/>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+                  <Ellipse Classes="statusdot" Fill="{DynamicResource Ok}" IsVisible="{Binding !IsEngineUnavailable}"/>
+                  <Ellipse Classes="statusdot" Fill="{DynamicResource Warn}" IsVisible="{Binding IsEngineUnavailable}"/>
+                  <TextBlock Classes="statusword" Text="ready" Foreground="{DynamicResource Ok}"
+                             IsVisible="{Binding !IsEngineUnavailable}"/>
+                  <TextBlock Classes="statusword" Text="unavailable" Foreground="{DynamicResource Warn}"
+                             IsVisible="{Binding IsEngineUnavailable}"/>
+                </StackPanel>
+              </Grid>
+              <!-- Ollama: value = configured local endpoint; status is neutral (configured, not probed). -->
+              <Grid ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Center">
+                <TextBlock Grid.Column="0" Classes="rowlabel" Text="Ollama"/>
+                <TextBlock Grid.Column="1" Classes="rowvalue" Margin="14,0,12,0"
+                           Text="{Binding AiAssistConnection.AiAssistBaseUrl}"
+                           ToolTip.Tip="{Binding AiAssistConnection.AiAssistBaseUrl}"/>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+                  <Ellipse Classes="statusdot" Fill="{DynamicResource T4}"/>
+                  <TextBlock Classes="statusword" Text="configured" Foreground="{DynamicResource T3}"/>
+                </StackPanel>
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <!-- 3. Provider generation policy (fail-closed invariant: cloud = evaluator-only forever). -->
+          <Border Classes="card">
+            <StackPanel Spacing="12">
+              <StackPanel Spacing="3">
+                <TextBlock Classes="cardtitle" Text="Provider generation policy"/>
+                <TextBlock Foreground="{DynamicResource T4}" FontSize="12" TextWrapping="Wrap"
+                           Text="Local-first. Cloud providers are evaluator-only — they can never generate training rows."/>
+              </StackPanel>
+              <!-- OpenAI -->
+              <Grid ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Center">
+                <Ellipse Grid.Column="0" Classes="statusdot" Fill="{DynamicResource T4}"/>
+                <TextBlock Grid.Column="1" Classes="rowlabel" Text="OpenAI" Margin="10,0,0,0"/>
+                <Border Grid.Column="2" Classes="chip">
+                  <TextBlock Text="evaluator-only" Foreground="{DynamicResource T3}" FontSize="12"/>
+                </Border>
+              </Grid>
+              <!-- Anthropic -->
+              <Grid ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Center">
+                <Ellipse Grid.Column="0" Classes="statusdot" Fill="{DynamicResource T4}"/>
+                <TextBlock Grid.Column="1" Classes="rowlabel" Text="Anthropic" Margin="10,0,0,0"/>
+                <Border Grid.Column="2" Classes="chip">
+                  <TextBlock Text="evaluator-only" Foreground="{DynamicResource T3}" FontSize="12"/>
+                </Border>
+              </Grid>
+              <!-- Ollama (local) — the only provider that may generate trainable rows. -->
+              <Grid ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Center">
+                <Ellipse Grid.Column="0" Classes="statusdot" Fill="{DynamicResource Ok}"/>
+                <TextBlock Grid.Column="1" Classes="rowlabel" Text="Ollama" Margin="10,0,0,0"/>
+                <Border Grid.Column="2" Classes="chip on">
+                  <TextBlock Text="generate ✓" Foreground="{DynamicResource Ok}" FontSize="12" FontWeight="SemiBold"/>
+                </Border>
+              </Grid>
+              <!-- Approve/Revoke a local model for generation (kept from the wired commands). -->
+              <Border Background="{DynamicResource Line2}" Height="1" Margin="0,2"/>
               <Grid ColumnDefinitions="*,*">
                 <TextBox Grid.Column="0" Text="{Binding Settings.ProviderApprovalProvider}" Watermark="provider" Margin="0,0,6,0"/>
                 <TextBox Grid.Column="1" Text="{Binding Settings.ProviderApprovalModel}" Watermark="model"/>
@@ -997,8 +1151,52 @@
                 <Button Content="Approve" Command="{Binding ApproveProviderGenerationCommand}" Margin="0,0,6,4"/>
                 <Button Content="Revoke" Command="{Binding RevokeProviderGenerationCommand}" Margin="0,0,6,4"/>
               </WrapPanel>
+              <TextBlock Text="{Binding Settings.ProviderPolicySummary}" Foreground="{DynamicResource T4}"
+                         FontSize="11" TextWrapping="Wrap"/>
             </StackPanel>
           </Border>
+
+          <!-- 4. Gate thresholds (bound to the effective per-project GateThresholds). -->
+          <Border Classes="card">
+            <StackPanel Spacing="12">
+              <TextBlock Classes="cardtitle" Text="Gate thresholds"/>
+              <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+                <TextBlock Grid.Column="0" Classes="rowlabel" Text="Block on exact duplicates"/>
+                <Border Grid.Column="1" Classes="chip" Classes.on="{Binding Settings.GateThresholds.BlockExactDuplicates}">
+                  <Panel>
+                    <TextBlock Text="on" Foreground="{DynamicResource Ok}" FontSize="12" FontWeight="SemiBold"
+                               IsVisible="{Binding Settings.GateThresholds.BlockExactDuplicates}"/>
+                    <TextBlock Text="off" Foreground="{DynamicResource T4}" FontSize="12"
+                               IsVisible="{Binding !Settings.GateThresholds.BlockExactDuplicates}"/>
+                  </Panel>
+                </Border>
+              </Grid>
+              <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+                <TextBlock Grid.Column="0" Classes="rowlabel" Text="Block on PII / secrets"/>
+                <Border Grid.Column="1" Classes="chip" Classes.on="{Binding Settings.GateThresholds.BlockOnHighSeverityPii}">
+                  <Panel>
+                    <TextBlock Text="on" Foreground="{DynamicResource Ok}" FontSize="12" FontWeight="SemiBold"
+                               IsVisible="{Binding Settings.GateThresholds.BlockOnHighSeverityPii}"/>
+                    <TextBlock Text="off" Foreground="{DynamicResource T4}" FontSize="12"
+                               IsVisible="{Binding !Settings.GateThresholds.BlockOnHighSeverityPii}"/>
+                  </Panel>
+                </Border>
+              </Grid>
+              <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+                <TextBlock Grid.Column="0" Classes="rowlabel" Text="Max regression score drop"/>
+                <TextBlock Grid.Column="1" Classes="rowvalue"
+                           Text="{Binding Settings.GateThresholds.MaxRegressionScoreDrop, StringFormat='{}{0:0.0}'}"/>
+              </Grid>
+              <Border Background="{DynamicResource Line2}" Height="1" Margin="0,2"/>
+              <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+                <TextBlock Grid.Column="0" Text="{Binding Settings.GateThresholdsSummary}" Foreground="{DynamicResource T4}"
+                           FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                <Button Grid.Column="1" Content="Save" Command="{Binding SaveGateThresholdsCommand}"
+                        VerticalAlignment="Center"/>
+              </Grid>
+            </StackPanel>
+          </Border>
+
         </StackPanel>
       </ScrollViewer>
     </Border>
