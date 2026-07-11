@@ -84,8 +84,8 @@
 
               <TextBlock Text="START" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource T4}" Margin="2,30,0,10"/>
 
-              <!-- Primary: enter the Studio -->
-              <Button Command="{Binding ShowStudioCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+              <!-- Primary: launch the New Project wizard (scaffolds a real workspace, then opens it) -->
+              <Button Click="NewProject_Click" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
                       Background="{DynamicResource Accent}" BorderThickness="0" CornerRadius="12" Padding="16" Margin="0,0,0,10">
                 <Grid ColumnDefinitions="Auto,*,Auto">
                   <Path Grid.Column="0" Classes="ico" Fill="White" Data="{StaticResource IcoPlusCircle}" Width="22" Height="22"/>

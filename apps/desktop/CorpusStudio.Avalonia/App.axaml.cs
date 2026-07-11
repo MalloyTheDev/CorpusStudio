@@ -52,6 +52,7 @@ public partial class App : Application
                 DataContext = provider.GetRequiredService<MainWindowViewModel>(),
                 Dialogs = provider.GetRequiredService<CorpusStudio.Desktop.Services.IDialogService>(),
                 FilePicker = provider.GetRequiredService<CorpusStudio.Desktop.Services.IFilePickerService>(),
+                Engine = provider.GetRequiredService<CorpusStudio.Desktop.Services.IEngineService>(),
             };
         }
 

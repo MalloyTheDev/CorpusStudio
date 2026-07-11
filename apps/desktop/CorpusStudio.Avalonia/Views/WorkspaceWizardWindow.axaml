@@ -1,0 +1,211 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:CorpusStudio.Desktop.ViewModels;assembly=CorpusStudio.Core"
+        xmlns:models="clr-namespace:CorpusStudio.Desktop.Models;assembly=CorpusStudio.Core"
+        xmlns:conv="clr-namespace:CorpusStudio.Avalonia.Converters"
+        x:Class="CorpusStudio.Avalonia.Views.WorkspaceWizardWindow"
+        x:DataType="vm:WorkspaceWizardViewModel"
+        Width="620" Height="720"
+        MinWidth="520" MinHeight="560"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource Win}"
+        Title="New Dataset Project">
+  <Window.Styles>
+    <Style Selector="TextBlock.eyebrow">
+      <Setter Property="Foreground" Value="{DynamicResource T4}"/>
+      <Setter Property="FontSize" Value="10.5"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Margin" Value="2,0,0,8"/>
+    </Style>
+    <Style Selector="TextBlock.fieldlabel">
+      <Setter Property="Foreground" Value="{DynamicResource T3}"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Margin" Value="2,0,0,4"/>
+    </Style>
+    <Style Selector="TextBox.field">
+      <Setter Property="Background" Value="{DynamicResource Panel}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource Line2}"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="10,8"/>
+      <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+    </Style>
+    <!-- Selectable schema / template cards -->
+    <Style Selector="ListBox.cards">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Padding" Value="0"/>
+    </Style>
+    <Style Selector="ListBox.cards ListBoxItem">
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="Margin" Value="0,0,0,8"/>
+    </Style>
+    <Style Selector="ListBox.cards ListBoxItem:selected /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent"/>
+    </Style>
+    <Style Selector="ListBox.cards ListBoxItem:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent"/>
+    </Style>
+    <Style Selector="Border.optcard">
+      <Setter Property="Background" Value="{DynamicResource Panel}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource Line2}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="10"/>
+      <Setter Property="Padding" Value="12,10"/>
+    </Style>
+    <Style Selector="ListBox.cards ListBoxItem:selected Border.optcard">
+      <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+      <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+    </Style>
+    <Style Selector="Button.primary">
+      <Setter Property="Background" Value="{DynamicResource Accent}"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="18,9"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style Selector="Button.primary:disabled /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Line2}"/>
+      <Setter Property="Foreground" Value="{DynamicResource T4}"/>
+    </Style>
+    <Style Selector="Button.ghost">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource T2}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource Line2}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="16,9"/>
+    </Style>
+  </Window.Styles>
+
+  <DockPanel>
+    <!-- Header -->
+    <Border DockPanel.Dock="Top" Background="{DynamicResource Chrome}" BorderBrush="{DynamicResource Line}"
+            BorderThickness="0,0,0,1" Padding="24,18">
+      <StackPanel Orientation="Horizontal" Spacing="14">
+        <Border Width="42" Height="42" CornerRadius="11" Background="{DynamicResource Accent}" VerticalAlignment="Center">
+          <Path Classes="ico" Fill="White" Data="{StaticResource IcoPlusCircle}" Width="22" Height="22"/>
+        </Border>
+        <StackPanel VerticalAlignment="Center" Spacing="1">
+          <TextBlock Text="New Dataset Project" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource Text}"/>
+          <TextBlock Text="Pick a schema and a starting template — the folder is scaffolded on your machine."
+                     Foreground="{DynamicResource T3}" FontSize="12.5"/>
+        </StackPanel>
+      </StackPanel>
+    </Border>
+
+    <!-- Footer (validation + actions) -->
+    <Border DockPanel.Dock="Bottom" Background="{DynamicResource Chrome}" BorderBrush="{DynamicResource Line}"
+            BorderThickness="0,1,0,0" Padding="24,14">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+          <TextBlock Text="{Binding ValidationMessage}" Foreground="{DynamicResource T3}" FontSize="12"
+                     TextTrimming="CharacterEllipsis"/>
+          <TextBlock x:Name="ErrorText" Foreground="{DynamicResource Bad}" FontSize="12" IsVisible="False"
+                     TextWrapping="Wrap"/>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+          <Button Classes="ghost" Content="Cancel" Click="CancelButton_Click"/>
+          <Button Classes="primary" Content="Create project" Click="CreateButton_Click"
+                  IsEnabled="{Binding CanCreate}"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Body -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+      <StackPanel Margin="24,20" Spacing="22">
+
+        <!-- Project name + id -->
+        <StackPanel Spacing="0">
+          <TextBlock Classes="eyebrow" Text="PROJECT"/>
+          <Grid ColumnDefinitions="*,12,*">
+            <StackPanel Grid.Column="0">
+              <TextBlock Classes="fieldlabel" Text="Name"/>
+              <TextBox Classes="field" Text="{Binding ProjectName, Mode=TwoWay}" Watermark="Support Chatbot"/>
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+              <TextBlock Classes="fieldlabel" Text="Folder id"/>
+              <TextBox Classes="field" Text="{Binding ProjectId, Mode=TwoWay}" Watermark="support-chatbot"/>
+            </StackPanel>
+          </Grid>
+        </StackPanel>
+
+        <!-- Schema -->
+        <StackPanel Spacing="0">
+          <TextBlock Classes="eyebrow" Text="DATASET SCHEMA"/>
+          <ListBox Classes="cards" ItemsSource="{Binding Schemas}" SelectedItem="{Binding SelectedSchema, Mode=TwoWay}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:DatasetSchema">
+                <Border Classes="optcard">
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="{DynamicResource Text}" FontSize="13.5"/>
+                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource T3}" FontSize="12"
+                               TextWrapping="Wrap" IsVisible="{Binding Description, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </StackPanel>
+
+        <!-- Template -->
+        <StackPanel Spacing="0">
+          <TextBlock Classes="eyebrow" Text="STARTING TEMPLATE"/>
+          <ListBox Classes="cards" ItemsSource="{Binding Templates}" SelectedItem="{Binding SelectedTemplate, Mode=TwoWay}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:WorkspaceTemplateDefinition">
+                <Border Classes="optcard">
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="{DynamicResource Text}" FontSize="13.5"/>
+                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource T3}" FontSize="12" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </StackPanel>
+
+        <!-- Location -->
+        <StackPanel Spacing="0">
+          <TextBlock Classes="eyebrow" Text="LOCATION"/>
+          <Grid ColumnDefinitions="*,10,Auto">
+            <TextBox Grid.Column="0" Classes="field" Text="{Binding Location, Mode=TwoWay}"
+                     Watermark="Choose where to create the project folder…"/>
+            <Button Grid.Column="2" Classes="ghost" Content="Browse…" Click="BrowseButton_Click" VerticalAlignment="Stretch"/>
+          </Grid>
+          <TextBlock Text="{Binding TargetFolder}" Foreground="{DynamicResource T4}" FontSize="11.5" Margin="2,6,0,0"
+                     FontFamily="Cascadia Code, Consolas, monospace" TextTrimming="CharacterEllipsis"
+                     IsVisible="{Binding TargetFolder, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+        </StackPanel>
+
+        <!-- Preview -->
+        <StackPanel Spacing="0">
+          <TextBlock Classes="eyebrow" Text="FOLDER PREVIEW"/>
+          <Border Background="{DynamicResource Panel}" BorderBrush="{DynamicResource Line2}" BorderThickness="1"
+                  CornerRadius="10" Padding="14,12">
+            <StackPanel Spacing="8">
+              <ItemsControl ItemsSource="{Binding PreviewLines}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:WorkspacePreviewLine">
+                    <StackPanel Orientation="Horizontal" Spacing="7" Margin="{Binding Indent, Converter={x:Static conv:PreviewIndentConverter.Instance}}" Height="20">
+                      <Path Classes="ico ico-sm muted" Data="{StaticResource IcoFolder}" VerticalAlignment="Center"
+                            IsVisible="{Binding IsFolder}"/>
+                      <Path Classes="ico ico-sm muted" Data="{StaticResource IcoCode}" VerticalAlignment="Center"
+                            IsVisible="{Binding !IsFolder}"/>
+                      <TextBlock Text="{Binding Text}" Foreground="{DynamicResource T2}" VerticalAlignment="Center"
+                                 FontFamily="Cascadia Code, Consolas, monospace" FontSize="12"/>
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <TextBlock Text="{Binding PreviewNote}" Foreground="{DynamicResource T3}" FontSize="12" TextWrapping="Wrap"
+                         IsVisible="{Binding HasPreviewNote}"/>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
+</Window>
