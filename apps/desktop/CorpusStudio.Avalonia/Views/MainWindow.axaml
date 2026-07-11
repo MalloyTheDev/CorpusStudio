@@ -114,60 +114,76 @@
 
         <!-- Studio mode (IsVisible←IsStudio): hero + projects sidebar + the 14-tab TabControl + Quality panel. -->
         <Grid IsVisible="{Binding IsStudio}" RowDefinitions="Auto,*" ColumnDefinitions="250,*,300">
-          <Border Grid.Row="0" Grid.ColumnSpan="3" Background="{DynamicResource AppBackground}" Padding="14,10" Margin="0,0,0,6">
-            <StackPanel Spacing="8">
-              <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
-                <TextBlock Text="{Binding ActiveProjectTitle}" FontSize="18" FontWeight="Bold" VerticalAlignment="Center"/>
-                <TextBlock Text="{Binding ActiveSchemaDescription}" Foreground="{DynamicResource AppTextMuted}" VerticalAlignment="Center"/>
-                <Border CornerRadius="6" Padding="10,4" VerticalAlignment="Center"
-                        Background="{Binding Debt.DebtGradeColor, Converter={StaticResource StringToBrush}}">
-                  <TextBlock Text="{Binding Debt.DebtGrade}" Foreground="White" FontWeight="Bold"/>
-                </Border>
+          <!-- App-shell CONTEXT BAR (slice 4): replaces the always-on action toolbar. Left = the
+               current screen's title + subtitle (driven by SelectedStudioTabIndex). Right = the primary
+               actions + a "⋯ More" toggle that reveals the secondary project actions + export controls
+               (nothing lost). The redundant Debt/Eval/Splits/Train/Studio nav buttons are dropped — the
+               grouped sidebar navigates now. -->
+          <StackPanel Grid.Row="0" Grid.ColumnSpan="3" Margin="0,0,0,6">
+
+            <Border Height="54" Background="{DynamicResource Win}" Padding="16,0"
+                    BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1">
+              <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding StudioViewTitle}" FontSize="15" FontWeight="SemiBold"
+                             Foreground="{DynamicResource Text}"/>
+                  <TextBlock Text="{Binding StudioViewSubtitle}" FontSize="11.5" Foreground="{DynamicResource T4}"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                  <Button Content="Import" Command="{Binding ImportDatasetCommand}"/>
+                  <Button Content="Run gates" Command="{Binding RunGatesCommand}"/>
+                  <Button Content="Author example" Command="{Binding GoToWritingStudioCommand}"
+                          Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}"
+                          BorderBrush="{DynamicResource Accent}" BorderThickness="1"/>
+                  <Button Content="⋯" Width="34" Command="{Binding ToggleProjectActionsCommand}"
+                          ToolTip.Tip="More project actions"/>
+                </StackPanel>
+              </Grid>
+            </Border>
+
+            <!-- Overflow: the secondary project actions + export controls (hidden by default). -->
+            <Border IsVisible="{Binding ProjectActionsExpanded}" Background="{DynamicResource Panel2}"
+                    BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="16,10">
+              <StackPanel Spacing="8">
+                <WrapPanel>
+                  <Button Content="Import from HF" Command="{Binding ImportFromHuggingFaceCommand}" Margin="0,0,6,4"/>
+                  <Button Content="Rebuild index" Command="{Binding RebuildProjectIndexCommand}" Margin="0,0,6,4"/>
+                  <Button Content="Generate card" Command="{Binding GenerateDatasetCardCommand}" Margin="0,0,6,4"/>
+                  <Button Content="Run chat gates" Command="{Binding RunChatGatesCommand}" Margin="0,0,6,4"/>
+                  <Button Content="Check provenance" Command="{Binding RunProvenanceGateCommand}" Margin="0,0,6,4"/>
+                  <Button Content="Benchmark" Command="{Binding RunBenchmarkCommand}" Margin="0,0,6,4"/>
+                </WrapPanel>
+                <WrapPanel VerticalAlignment="Center">
+                  <CheckBox Content="dedupe" IsChecked="{Binding ExportRemoveDuplicates}" Margin="0,0,8,0"/>
+                  <CheckBox Content="drop low-info" IsChecked="{Binding ExportRemoveLowInformation}" Margin="0,0,8,0"/>
+                  <TextBox Text="{Binding ExportFormat}" Watermark="jsonl/csv/tsv/parquet" Width="150" Margin="0,0,6,0"/>
+                  <Button Content="Export dataset" Command="{Binding ExportJsonlCommand}" Margin="0,0,10,0"/>
+                </WrapPanel>
               </StackPanel>
-              <!-- Project-level actions bound to the shared shell commands (issue #245 — sync with WPF). -->
-              <WrapPanel>
-                <Button Content="Import dataset" Command="{Binding ImportDatasetCommand}" Margin="0,0,6,4"/>
-                <Button Content="Import from HF" Command="{Binding ImportFromHuggingFaceCommand}" Margin="0,0,6,4"/>
-                <Button Content="Rebuild index" Command="{Binding RebuildProjectIndexCommand}" Margin="0,0,6,4"/>
-                <Button Content="Generate card" Command="{Binding GenerateDatasetCardCommand}" Margin="0,0,6,4"/>
-                <Button Content="Run gates" Command="{Binding RunGatesCommand}" Margin="0,0,6,4"/>
-                <Button Content="Run chat gates" Command="{Binding RunChatGatesCommand}" Margin="0,0,6,4"/>
-                <Button Content="Check provenance" Command="{Binding RunProvenanceGateCommand}" Margin="0,0,6,4"/>
-                <Button Content="Benchmark" Command="{Binding RunBenchmarkCommand}" Margin="0,0,6,4"/>
-              </WrapPanel>
-              <!-- Per-row provenance verdict (issue: WBG licensing landmine). Badge + summary,
-                   shown once the gate has run — the shared command feeds both heads. -->
-              <StackPanel IsVisible="{Binding HasProvenanceGateReport}" Spacing="4" Margin="0,2,0,0">
-                <Border CornerRadius="4" Padding="7,1" HorizontalAlignment="Left"
-                        Background="{Binding ProvenanceGateColor, Converter={StaticResource StringToBrush}}">
-                  <TextBlock Text="{Binding ProvenanceGateStatus}" Foreground="White" FontSize="10.5" FontWeight="Bold"/>
-                </Border>
-                <TextBox Text="{Binding ProvenanceGateSummary}" IsReadOnly="True" AcceptsReturn="True"
-                         FontFamily="Consolas" FontSize="11.5" MaxHeight="150" TextWrapping="Wrap"/>
-              </StackPanel>
-              <WrapPanel VerticalAlignment="Center">
-                <CheckBox Content="dedupe" IsChecked="{Binding ExportRemoveDuplicates}" Margin="0,0,8,0"/>
-                <CheckBox Content="drop low-info" IsChecked="{Binding ExportRemoveLowInformation}" Margin="0,0,8,0"/>
-                <TextBox Text="{Binding ExportFormat}" Watermark="jsonl/csv/tsv/parquet" Width="150" Margin="0,0,6,0"/>
-                <Button Content="Export dataset" Command="{Binding ExportJsonlCommand}" Margin="0,0,10,0"/>
-                <Button Content="Debt" Command="{Binding GoToDebtCommand}" Margin="0,0,4,0"/>
-                <Button Content="Eval" Command="{Binding GoToEvaluationCommand}" Margin="0,0,4,0"/>
-                <Button Content="Splits" Command="{Binding GoToSplitsCommand}" Margin="0,0,4,0"/>
-                <Button Content="Train" Command="{Binding GoToTrainingCommand}" Margin="0,0,4,0"/>
-                <Button Content="Studio" Command="{Binding GoToWritingStudioCommand}" Margin="0,0,4,0"/>
-              </WrapPanel>
-              <!-- Engine setup (shown when the engine is not located) + the error-banner dismiss. -->
-              <WrapPanel IsVisible="{Binding IsEngineUnavailable}">
-                <TextBlock Text="{Binding EngineUnavailableMessage}" Foreground="{DynamicResource AppWarn}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <Button Content="Locate engine…" Command="{Binding LocateEngineCommand}" Margin="0,0,6,0"/>
-                <Button Content="Retry" Command="{Binding RetryEngineCommand}" Margin="0,0,6,0"/>
-              </WrapPanel>
-              <WrapPanel IsVisible="{Binding HasError}">
-                <TextBlock Text="{Binding ErrorMessage}" Foreground="{DynamicResource AppError}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <Button Content="Dismiss" Command="{Binding DismissErrorCommand}"/>
-              </WrapPanel>
+            </Border>
+
+            <!-- Per-row provenance verdict (conditional; the WBG licensing landmine). -->
+            <StackPanel IsVisible="{Binding HasProvenanceGateReport}" Spacing="4" Margin="16,6,16,0">
+              <Border CornerRadius="4" Padding="7,1" HorizontalAlignment="Left"
+                      Background="{Binding ProvenanceGateColor, Converter={StaticResource StringToBrush}}">
+                <TextBlock Text="{Binding ProvenanceGateStatus}" Foreground="White" FontSize="10.5" FontWeight="Bold"/>
+              </Border>
+              <TextBox Text="{Binding ProvenanceGateSummary}" IsReadOnly="True" AcceptsReturn="True"
+                       FontFamily="Consolas" FontSize="11.5" MaxHeight="150" TextWrapping="Wrap"/>
             </StackPanel>
-          </Border>
+
+            <!-- Engine setup + error banners (conditional). -->
+            <WrapPanel IsVisible="{Binding IsEngineUnavailable}" Margin="16,6,16,0">
+              <TextBlock Text="{Binding EngineUnavailableMessage}" Foreground="{DynamicResource AppWarn}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+              <Button Content="Locate engine…" Command="{Binding LocateEngineCommand}" Margin="0,0,6,0"/>
+              <Button Content="Retry" Command="{Binding RetryEngineCommand}" Margin="0,0,6,0"/>
+            </WrapPanel>
+            <WrapPanel IsVisible="{Binding HasError}" Margin="16,6,16,0">
+              <TextBlock Text="{Binding ErrorMessage}" Foreground="{DynamicResource AppError}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+              <Button Content="Dismiss" Command="{Binding DismissErrorCommand}"/>
+            </WrapPanel>
+
+          </StackPanel>
           <!-- Grouped workflow-phase sidebar (slice 2): the Nocturne IA — a project switcher over a
                section→subsection nav that DRIVES the content-switcher via SelectStudioTabCommand.
                Active row = accent-soft via TabActiveBrush; group headers are T4 uppercase with a

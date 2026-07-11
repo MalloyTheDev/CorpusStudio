@@ -248,6 +248,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// Avalonia grouped-IA nav rows (each binds this with a <c>CommandParameter</c> of the tab name).
     /// Additive: the WPF head keeps its per-command GoTo* bindings; this breaks neither.</summary>
     public System.Windows.Input.ICommand SelectStudioTabCommand { get; }
+
+    /// <summary>Toggle the context bar's "⋯ More" overflow panel (slice 4).</summary>
+    public System.Windows.Input.ICommand ToggleProjectActionsCommand { get; }
     // Prepare-then-navigate: run the AI-Assist handoff bridge; on success it selects the AI Assist tab.
     public System.Windows.Input.ICommand PrepareEvaluationFailureReviewCommand { get; }
     public System.Windows.Input.ICommand PreparePreferenceJudgeReviewCommand { get; }
@@ -394,6 +397,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 GoToStudioTab(tab);
             }
         });
+        ToggleProjectActionsCommand = new RelayCommand(() => ProjectActionsExpanded = !ProjectActionsExpanded);
         PrepareEvaluationFailureReviewCommand = new RelayCommand(() => PrepareEvaluationFailureReview());
         PreparePreferenceJudgeReviewCommand = new RelayCommand(() => PreparePreferenceJudgeReview());
         PreparePreferenceBatchJudgeReviewCommand = new RelayCommand(() => PreparePreferenceBatchJudgeReview());
@@ -484,7 +488,67 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public int SelectedStudioTabIndex
     {
         get => _selectedStudioTabIndex;
-        set => SetField(ref _selectedStudioTabIndex, value);
+        set
+        {
+            if (SetField(ref _selectedStudioTabIndex, value))
+            {
+                OnPropertyChanged(nameof(StudioViewTitle));
+                OnPropertyChanged(nameof(StudioViewSubtitle));
+            }
+        }
+    }
+
+    /// <summary>The current Studio screen's title for the app-shell context bar (slice 4). Derived from
+    /// <see cref="SelectedStudioTabIndex"/> — additive (the WPF head may adopt it later).</summary>
+    public string StudioViewTitle => (StudioTab)_selectedStudioTabIndex switch
+    {
+        StudioTab.Dashboard => "Dashboard",
+        StudioTab.WritingStudio => "Writing Studio",
+        StudioTab.Examples => "Examples",
+        StudioTab.PreferenceReview => "Preference Review",
+        StudioTab.Quarantine => "Import & Quarantine",
+        StudioTab.Splits => "Splits",
+        StudioTab.Evaluation => "Evaluation",
+        StudioTab.AiAssist => "AI Assist",
+        StudioTab.Training => "Training",
+        StudioTab.Arena => "Model Arena",
+        StudioTab.Artifacts => "Artifacts",
+        StudioTab.Suites => "Suites",
+        StudioTab.Versions => "Versions",
+        StudioTab.Debt => "Dataset Debt",
+        StudioTab.Settings => "Settings",
+        _ => "Studio",
+    };
+
+    /// <summary>The current Studio screen's one-line subtitle for the context bar (slice 4).</summary>
+    public string StudioViewSubtitle => (StudioTab)_selectedStudioTabIndex switch
+    {
+        StudioTab.Dashboard => "Project overview & train-readiness",
+        StudioTab.WritingStudio => "Author & validate one example",
+        StudioTab.Examples => "Browse & inspect rows",
+        StudioTab.PreferenceReview => "Rank chosen vs rejected",
+        StudioTab.Quarantine => "Bring rows in & repair rejects",
+        StudioTab.Splits => "Leakage-checked train / val / test",
+        StudioTab.Evaluation => "Score the dataset against a model",
+        StudioTab.AiAssist => "Review-first AI rewrites",
+        StudioTab.Training => "Configure, launch & track runs",
+        StudioTab.Arena => "Head-to-head model comparison",
+        StudioTab.Artifacts => "Trained weights & provenance",
+        StudioTab.Suites => "Saved evaluation suites",
+        StudioTab.Versions => "Snapshots & restore",
+        StudioTab.Debt => "Graded remediation ledger",
+        StudioTab.Settings => "Project & engine config",
+        _ => string.Empty,
+    };
+
+    private bool _projectActionsExpanded;
+
+    /// <summary>Whether the context bar's "⋯ More" overflow (the secondary project actions + export
+    /// controls) is expanded. Keeps the bar slim by default while nothing is lost (slice 4).</summary>
+    public bool ProjectActionsExpanded
+    {
+        get => _projectActionsExpanded;
+        set => SetField(ref _projectActionsExpanded, value);
     }
 
     /// <summary>Switch to the Studio view and select <paramref name="tab"/>. The shared target for the
