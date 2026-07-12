@@ -36,6 +36,9 @@ from corpus_studio.training.environment import INSTALL_HINT, probe_training_runt
 TINY_TOY_MODEL = "hf-internal-testing/tiny-random-LlamaForCausalLM"
 
 ProgressCallback = Callable[[int, int, float | None], None]
+# (stage_name, message) — platform-agnostic strings so the trainer stays decoupled from the platform
+# enums. Fires at setup milestones so a supervisor sees progress during the long silent model-load.
+StageCallback = Callable[[str, str], None]
 
 
 class TrainerError(Exception):
@@ -274,11 +277,23 @@ def _list_checkpoints(output_dir: Path) -> list[str]:
     return sorted(str(p) for p in output_dir.glob("checkpoint-*") if p.is_dir())
 
 
-def run_training(config: TrainRunConfig, *, progress_callback: ProgressCallback | None = None) -> TrainResult:
+def run_training(
+    config: TrainRunConfig,
+    *,
+    progress_callback: ProgressCallback | None = None,
+    stage_callback: StageCallback | None = None,
+) -> TrainResult:
     """Run the training. Lazy-imports the heavy stack; verified via the CPU toy path (a real GPU QLoRA
-    can only be user-smoke-tested). Raises :class:`TrainerError` if the runtime can't run the request."""
+    can only be user-smoke-tested). Raises :class:`TrainerError` if the runtime can't run the request.
+    ``stage_callback(name, message)`` fires at setup milestones (model_loaded / quantized /
+    adapter_attached / optimizer_created) so the long SILENT model-load window emits real progress a
+    supervisor can see — the honest alternative to a liveness heartbeat."""
     plan = resolve_run_plan(config, probe_training_runtime())
     quantize: bool = plan["quantize"]
+
+    def _stage(name: str, message: str) -> None:
+        if stage_callback is not None:
+            stage_callback(name, message)
 
     import torch  # noqa: PLC0415 - intentionally lazy heavy imports.
     from datasets import Dataset  # noqa: PLC0415
@@ -354,11 +369,14 @@ def run_training(config: TrainRunConfig, *, progress_callback: ProgressCallback 
             model_kwargs["attn_implementation"] = attn_impl
 
         model = AutoModelForCausalLM.from_pretrained(config.base_model, **model_kwargs)
+    _stage("model_loaded", f"loaded {config.base_model}")  # the end of the long silent load window
     if quantize:
         from peft import prepare_model_for_kbit_training  # noqa: PLC0415
 
         model = prepare_model_for_kbit_training(model)
+        _stage("quantized", "prepared for 4-bit k-bit training")
     model = get_peft_model(model, LoraConfig(**build_lora_kwargs(config)))
+    _stage("adapter_attached", "LoRA adapter attached")
 
     rows = list(read_jsonl(Path(config.dataset_path)))
     texts = [format_example_text(row, config.dataset_format, tokenizer) for row in rows]
@@ -402,6 +420,7 @@ def run_training(config: TrainRunConfig, *, progress_callback: ProgressCallback 
     elif "tokenizer" in trainer_params:
         trainer_kwargs["tokenizer"] = tokenizer
     trainer = SFTTrainer(**trainer_kwargs)
+    _stage("optimizer_created", "SFT trainer + optimizer ready — starting training")
     # Training frameworks print metrics/tqdm to STDOUT — and transformers can log to stdout during
     # SAVE too — so redirect the whole train+save block to stderr. Only the CLI's final JSON echo then
     # writes to stdout, keeping it the pure JSON result the desktop/WBG parses. Progress reaches stderr.

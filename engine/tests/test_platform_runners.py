@@ -20,7 +20,7 @@ def _fake_run_training(steps, *, loss_by_step=None, capture=None):
     """Build a stand-in for run_training that drives the progress callback `steps` times then returns
     a TrainResult — no torch, no model, no dataset."""
 
-    def _run(config, *, progress_callback=None):
+    def _run(config, *, progress_callback=None, **_kw):
         if capture is not None:
             capture["config"] = config
         for step in range(1, steps + 1):
@@ -157,6 +157,29 @@ def _sample(*, peak_reserved, dedicated=12 * GB, shared=0):
     )
 
 
+def test_runner_streams_setup_stage_events_from_the_trainer(monkeypatch):
+    # A trainer that reports setup milestones → the runner emits them as `stage` RunEvents. Over the
+    # worker pipe these reset the subprocess supervisor's silence timer during the silent model-load —
+    # real progress, the honest alternative to a liveness heartbeat.
+    def _trainer_with_stages(config, *, progress_callback=None, stage_callback=None, **_kw):
+        if stage_callback is not None:
+            stage_callback("model_loaded", "loaded the base model")
+            stage_callback("adapter_attached", "LoRA attached")
+            stage_callback("optimizer_created", "trainer ready")
+        if progress_callback is not None:
+            progress_callback(1, 1, 0.5)
+        return TrainResult(
+            output_dir="o", adapter_path="o", base_model=config.base_model, cpu_toy=True, steps=1
+        )
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _trainer_with_stages)
+    result = execute_run(demo_training_plan(), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    stages = [e.stage.value for e in result.events if e.event_type == "stage" and e.stage is not None]
+    assert "model_loaded" in stages
+    assert "adapter_attached" in stages
+    assert "optimizer_created" in stages
+
+
 def test_runner_records_the_measured_fit_from_the_watchdog(monkeypatch):
     # The per-step progress callback samples memory; the observed peak reconciles to a MEASURED fit on
     # the manifest — a run that stayed on-device earns NATIVE_SAFE (an estimate never does).
@@ -191,7 +214,7 @@ def test_runner_does_not_abort_on_a_stall_and_warns_instead(monkeypatch):
     # returns WITHOUT another beat, so watchdog.stalled is still set at the end.
     import time
 
-    def _stalling_trainer(config, *, progress_callback=None):
+    def _stalling_trainer(config, *, progress_callback=None, **_kw):
         if progress_callback is not None:
             progress_callback(1, 3, 0.9)  # one beat, then go silent
         time.sleep(0.4)  # > heartbeat_timeout_s; the watchdog thread trips (heads-up only, no cancel)
@@ -214,7 +237,7 @@ def test_runner_does_not_abort_on_a_stall_and_warns_instead(monkeypatch):
 def test_runner_records_the_measured_fit_even_on_failure(monkeypatch):
     # The watchdog samples per step; a run that trains then FAILS must still record the measured peak
     # (the richest diagnostic) — captured in a finally, on every terminal path, not only on success.
-    def _sample_then_boom(config, *, progress_callback=None):
+    def _sample_then_boom(config, *, progress_callback=None, **_kw):
         if progress_callback is not None:
             progress_callback(1, 2, 0.9)  # a step happens → the watchdog samples a real peak
         raise RuntimeError("kaboom mid-training")
@@ -233,7 +256,7 @@ def test_runner_records_the_measured_fit_even_on_failure(monkeypatch):
 def test_runner_records_a_spill_even_on_failure(monkeypatch):
     # The richest diagnostic: a run that SPILLED then failed. The finally must record the spill fit +
     # emit the spill warning even though the run raised (this is what the finally exists for).
-    def _spill_then_boom(config, *, progress_callback=None):
+    def _spill_then_boom(config, *, progress_callback=None, **_kw):
         if progress_callback is not None:
             progress_callback(1, 2, 0.9)  # samples a spilling peak
         raise RuntimeError("OOM after the spill")
@@ -259,7 +282,7 @@ def test_runner_records_the_fit_on_cancel_after_a_step(monkeypatch):
 
     token = CancelToken()
 
-    def _cancel_after_step1(config, *, progress_callback=None):
+    def _cancel_after_step1(config, *, progress_callback=None, **_kw):
         progress_callback(1, 2, 0.9)  # a step completes → the watchdog samples a 6 GB peak
         token.cancel()  # user cancels between steps
         progress_callback(2, 2, 0.8)  # observes the cancel → _CancelTraining
@@ -295,7 +318,7 @@ def test_runner_survives_a_raising_memory_sampler(monkeypatch):
 
 
 def test_missing_runtime_is_environment_failure(monkeypatch):
-    def _raise(config, *, progress_callback=None):
+    def _raise(config, *, progress_callback=None, **_kw):
         raise TrainerError("CPU toy training needs torch + transformers + …")
 
     monkeypatch.setattr("corpus_studio.training.trainer.run_training", _raise)
@@ -371,7 +394,7 @@ def test_grad_information_message_is_not_numerical():
 
 
 def test_runner_oom_is_classified_as_oom(monkeypatch):
-    def _oom(config, *, progress_callback=None):
+    def _oom(config, *, progress_callback=None, **_kw):
         raise RuntimeError("CUDA out of memory. Tried to allocate 20.00 GiB")
 
     monkeypatch.setattr("corpus_studio.training.trainer.run_training", _oom)
@@ -383,7 +406,7 @@ def test_runner_oom_is_classified_as_oom(monkeypatch):
 
 
 def test_runner_unrecognized_error_stays_fail(monkeypatch):
-    def _boom(config, *, progress_callback=None):
+    def _boom(config, *, progress_callback=None, **_kw):
         raise RuntimeError("an unexpected internal error")
 
     monkeypatch.setattr("corpus_studio.training.trainer.run_training", _boom)
