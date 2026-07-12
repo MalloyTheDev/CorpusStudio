@@ -25,6 +25,7 @@ class GpuMemory(BaseModel):
     total_gb: float
     free_gb: float
     compute_capability: str = ""  # e.g. "12.0" for Blackwell / sm_120 (empty when unreadable)
+    name: str = ""  # e.g. "NVIDIA GeForce RTX 5070" — so the profile names the GPU without torch
 
 
 def _capability_major(compute_capability: str) -> int:
@@ -45,7 +46,7 @@ def probe_gpu_memory() -> GpuMemory | None:
         completed = subprocess.run(
             [
                 nvidia_smi,
-                "--query-gpu=memory.total,memory.free,compute_cap",
+                "--query-gpu=memory.total,memory.free,compute_cap,name",
                 "--format=csv,noheader,nounits",
             ],
             capture_output=True,
@@ -69,11 +70,14 @@ def probe_gpu_memory() -> GpuMemory | None:
     except ValueError:
         return None
 
-    # compute_cap is on older drivers too, but tolerate its absence (older nvidia-smi).
+    # compute_cap + name are trailing fields — tolerate their absence on older nvidia-smi (the name
+    # is never comma-bearing, so CSV splitting stays safe).
     capability = parts[2] if len(parts) >= 3 else ""
+    name = parts[3] if len(parts) >= 4 else ""
 
     return GpuMemory(
         total_gb=round(total_mb / 1024, 1),
         free_gb=round(free_mb / 1024, 1),
         compute_capability=capability,
+        name=name,
     )

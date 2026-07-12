@@ -149,11 +149,14 @@ def _gpus(gb_to_bytes: float = 1e9) -> list[GpuDevice]:
     cc_major = _capability_major(cc)
     total_gb = info.total_memory_gb or (mem.total_gb if mem else 0.0)
     free_bytes = int(mem.free_gb * gb_to_bytes) if mem is not None else None
+    # Name from torch's GpuInfo when present, else nvidia-smi's name (so a torch-free Blackwell host
+    # still reports "RTX 5070", not "unknown" — the whole point of a pre-install hardware profile).
+    name = info.name or (mem.name if mem else "") or "unknown"
     return [
         GpuDevice(
             index=0,
             kind=DeviceKind.cuda,  # nvidia-smi / torch.cuda implies a CUDA device
-            name=info.name or "unknown",
+            name=name,
             vram_total_bytes=int(total_gb * gb_to_bytes) if total_gb else None,
             vram_free_bytes=free_bytes,
             compute_capability=cc or None,
