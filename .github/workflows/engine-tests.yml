@@ -39,7 +39,7 @@ jobs:
       # Upload coverage to Codecov. Soft-fail: this is best-effort reporting and must never
       # break the gate — it no-ops until a CODECOV_TOKEN secret is configured for the repo.
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           files: ./engine/coverage.xml
           flags: engine
