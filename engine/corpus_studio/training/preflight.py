@@ -15,6 +15,7 @@ succeed". Blocking checks are only for things that make a launch certainly fail
 """
 
 import shutil
+import sys
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -85,8 +86,9 @@ def run_training_preflight(
     the token budget already computed for the config. ``vram_min_gb`` is the most
     memory-efficient (4-bit, flash-attention) VRAM estimate — when a GPU is detected
     it drives the OOM check. ``vram_min_gb_math`` is the higher math-attention-path
-    estimate; on a Blackwell GPU (sm_120, which is forced onto the math path because
-    the fused attention kernels deadlock) it is used instead.
+    estimate; on a **native-Windows** Blackwell GPU (sm_120, forced onto the math path
+    because the fused flash kernel deadlocks under WDDM) it is used instead. On WSL/Linux
+    flash works, so the flash estimate holds even on Blackwell.
     """
     checks: list[PreflightCheck] = []
 
@@ -199,12 +201,15 @@ def run_training_preflight(
     #    estimate is arithmetic-only and this is skipped rather than guessing).
     gpu = gpu_probe.probe_gpu_memory()
     if gpu is not None and vram_min_gb is not None:
-        # Blackwell (sm_120) is forced onto the math attention path (the fused kernels hang), which uses
-        # far more VRAM than flash — use the higher math-path estimate there when we have it.
+        # The fused flash SDPA kernel deadlocks on Blackwell (sm_120) ONLY under native Windows (WDDM),
+        # forcing the higher-VRAM math path THERE. On WSL/Linux flash works, so the flash estimate holds
+        # — using the math estimate there would over-warn. (WSL still SPILLS via the host WDDM driver;
+        # bare Linux hard-OOMs.)
         is_blackwell = gpu_probe._capability_major(gpu.compute_capability) >= 12
-        if is_blackwell and vram_min_gb_math is not None:
+        native_windows = sys.platform == "win32"
+        if is_blackwell and native_windows and vram_min_gb_math is not None:
             effective_min_gb = vram_min_gb_math
-            path = " (math attention forced on this Blackwell GPU)"
+            path = " (math attention forced on this native-Windows Blackwell GPU)"
         else:
             effective_min_gb = vram_min_gb
             path = ""
@@ -215,9 +220,9 @@ def run_training_preflight(
                     status=WARN,
                     message=(
                         f"Won't fit fast: the 4-bit training peak is ~{effective_min_gb:.1f} GB{path} but the GPU has "
-                        f"~{gpu.free_gb:.1f} GB free (of ~{gpu.total_gb:.1f} GB). On Windows the driver silently SPILLS the "
-                        "overflow to system RAM and thrashes over PCIe — steps run 10-25x slower (looks frozen but is "
-                        "crawling); on Linux it OOMs. Lower sequence_len / micro-batch, or use a smaller base model."
+                        f"~{gpu.free_gb:.1f} GB free (of ~{gpu.total_gb:.1f} GB). On Windows/WSL the driver silently SPILLS "
+                        "the overflow to system RAM and thrashes over PCIe — steps run 10-25x slower (looks frozen but is "
+                        "crawling); on bare Linux it OOMs. Lower sequence_len / micro-batch, or use a smaller base model."
                     ),
                 )
             )

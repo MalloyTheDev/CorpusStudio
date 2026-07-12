@@ -98,7 +98,8 @@ Shipped first-party run backends (selectable via `platform-plan --backend`, "pic
 - **`corpus_studio`** — the first-party HF + TRL + PEFT QLoRA trainer (LoRA/QLoRA; math/eager/sdpa/
   flash attention). The Blackwell-safe default.
 - **`unsloth`** — the accelerated 4-bit QLoRA path (flash/sdpa kernels; **honestly refused on
-  Blackwell/sm_120**, which needs the math path Unsloth doesn't provide).
+  native-Windows Blackwell/sm_120**, which is forced onto the math path Unsloth doesn't provide.
+  On **WSL/Linux** flash works, so Unsloth's sdpa is accepted on Blackwell there).
 
 Planned additional config targets (external-launcher / config-generation): Axolotl, Hugging Face
 Trainer, LLaMA-Factory, llama.cpp fine-tuning where applicable. Corpus Studio generates tool-specific
@@ -193,12 +194,19 @@ train-check probed.
 ### GPU notes: attention backend on Blackwell (RTX 50-series / sm_120)
 
 On brand-new **Blackwell** GPUs (RTX 50-series, compute capability sm_120) the fused
-**flash** SDPA attention kernel **deadlocks on the first backward pass** in current
-PyTorch — the training step hangs at 100% GPU util but ~55 W (a real step pulls 150–250 W).
-Verified on a real RTX 5070: bitsandbytes 4-bit, the *mem-efficient* SDPA kernel, and the
-*math* path all work — **only the fused flash kernel hangs**. `train-run` **detects sm_120
-and disables just the flash backend** (`train-check` notes this when it sees a Blackwell
-card).
+**flash** SDPA attention kernel **deadlocks on the first backward pass — but only under the
+native-Windows WDDM driver** — the training step hangs at 100% GPU util but ~55 W (a real step
+pulls 150–250 W). Verified on a real RTX 5070: bitsandbytes 4-bit, the *mem-efficient* SDPA
+kernel, and the *math* path all work — **only the fused flash kernel hangs, and only on native
+Windows**. It is a WDDM property, **not** an sm_120 kernel bug: on **WSL / bare Linux** the same
+flash kernel runs fine (verified on the 5070 under WSL2 — ~1000× faster than the math fallback).
+
+CorpusStudio treats **WSL as its own platform** (`OperatingSystem.wsl`): flash-safe like Linux,
+but `wddm` memory-residency like Windows (it still spills — see below). So `train-run` disables
+the flash backend **only on native Windows + Blackwell**; on WSL/Linux it keeps flash, the
+capability probe actually runs the flash backward and proves it, and `platform-plan` **seals
+`sdpa` instead of `math`**. `train-check` notes which path applies to your host. Running a
+long-sequence 7B QLoRA on Blackwell? Prefer **WSL** to get the memory-efficient flash path.
 
 The real ceiling (measured, and it is **not** an attention-kernel problem): on a **12 GB** card
 the 7B 4-bit QLoRA training peak is ~10.8 GB @ `sequence_len` 1024 → 13.8 GB @ 2048, so above

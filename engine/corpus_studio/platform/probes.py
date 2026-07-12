@@ -9,10 +9,12 @@ Dependency-light: this module imports NO torch at load time. Every torch/bitsand
 inside a probe body, so a core-only install still runs the framework and reports each hardware probe as
 ``ENVIRONMENT_FAILURE`` (→ ``readiness = not_ready``) instead of crashing.
 
-The one probe that must not actually execute on Blackwell sm_120 is ``flash_attn_backward``: the fused
-flash/mem-efficient attention kernels deadlock on the first backward there (documented in
-``training/environment.py``), so on ``compute_capability_major >= 12`` it short-circuits to
-``KERNEL_STALL`` from the known hazard rather than hanging the probe process.
+The one probe that must not actually execute on **native-Windows** Blackwell sm_120 is
+``flash_attn_backward``: the fused flash SDPA backward deadlocks on the first backward under the
+Windows WDDM driver (documented in ``training/environment.py``), so there it short-circuits to
+``KERNEL_STALL`` rather than hanging the probe process. On **WSL / bare Linux** the same sm_120 kernel
+runs fine (verified on a real 5070 under WSL2), so the probe executes and proves flash/sdpa — see
+``host_platform.flash_sdpa_deadlocks`` for the exact native-Windows-only condition.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from .enums import (
     PrecisionMode,
     QuantizationMode,
 )
+from .host_platform import flash_sdpa_deadlocks
 
 _TX = FailureTaxonomy
 
@@ -118,13 +121,16 @@ def _probe_bnb_4bit_load(profile: EnvironmentProfile) -> ProbeOutcome:
 
 
 def _probe_flash_attn_backward(profile: EnvironmentProfile) -> ProbeOutcome:
-    # Known-hazard short-circuit: the fused flash/mem-efficient attention kernels deadlock on the
-    # first backward on Blackwell sm_120. Report it WITHOUT executing so the probe never hangs.
-    if _max_cc_major(profile) >= 12:
+    # Known-hazard short-circuit: the fused flash SDPA backward deadlocks on Blackwell sm_120 ONLY
+    # under the native-Windows WDDM driver. Report it WITHOUT executing THERE so the probe never hangs.
+    # On WSL / bare Linux the same sm_120 kernel runs fine (verified on a real 5070 under WSL2), so the
+    # probe DOES execute and proves flash/sdpa — the whole reason WSL unlocks the memory-efficient path.
+    if flash_sdpa_deadlocks(profile.host.os, _max_cc_major(profile)):
         return ProbeOutcome(
             _TX.KERNEL_STALL,
-            "sm_120 (Blackwell): fused flash/mem-efficient attention deadlocks on the first "
-            "backward — not executed to avoid hanging the probe; use math/eager SDPA.",
+            "native Windows + sm_120 (Blackwell): the fused flash SDPA backward deadlocks under the "
+            "Windows WDDM driver — not executed to avoid hanging the probe; use math/eager SDPA, or "
+            "run under WSL where flash is safe.",
         )
     try:
         import torch  # noqa: PLC0415

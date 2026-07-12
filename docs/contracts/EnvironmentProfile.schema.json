@@ -425,6 +425,7 @@
     "OperatingSystem": {
       "enum": [
         "windows",
+        "wsl",
         "linux",
         "macos",
         "unknown"

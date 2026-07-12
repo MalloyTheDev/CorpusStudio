@@ -196,15 +196,28 @@ def test_capability_major_parsing():
     assert _capability_major("garbage") == 0
 
 
-def test_blackwell_gpu_checks_against_the_higher_math_estimate(tmp_path: Path, monkeypatch):
-    # On Blackwell (sm_120) the trainer is forced onto the math attention path, which uses MORE VRAM
-    # (seq² scores). The pre-flight must check the higher math estimate there — so a config that "fits"
-    # on the flash estimate can still warn on a 12 GB Blackwell card (the 5070 reality that deadlocked).
+def test_native_windows_blackwell_gpu_checks_against_the_higher_math_estimate(tmp_path: Path, monkeypatch):
+    # On NATIVE WINDOWS + Blackwell (sm_120) the trainer is forced onto the math attention path (WDDM
+    # flash deadlock), which uses MORE VRAM (seq² scores). The pre-flight must check the higher math
+    # estimate there — so a config that "fits" on the flash estimate can still warn on a 12 GB card.
+    monkeypatch.setattr("corpus_studio.training.preflight.sys.platform", "win32")
     _gpu(monkeypatch, GpuMemory(total_gb=12.0, free_gb=11.6, compute_capability="12.0"))
     report = _run(tmp_path, vram_min_gb=10.7, vram_min_gb_math=12.1)  # flash ~fits, math over the ceiling
     gpu_check = next(c for c in report.checks if c.name == "gpu_memory")
     assert gpu_check.status == WARN
     assert "math attention" in gpu_check.message.lower()
+
+
+def test_wsl_blackwell_gpu_uses_the_flash_estimate(tmp_path: Path, monkeypatch):
+    # On WSL/Linux + Blackwell flash works, so the pre-flight must use the FLASH estimate even on
+    # sm_120 — NOT the higher math estimate native Windows would. A config that comfortably fits on
+    # flash must PASS here (no over-warning), and the message must not claim math attention is forced.
+    monkeypatch.setattr("corpus_studio.training.preflight.sys.platform", "linux")
+    _gpu(monkeypatch, GpuMemory(total_gb=12.0, free_gb=11.6, compute_capability="12.0"))
+    report = _run(tmp_path, vram_min_gb=8.0, vram_min_gb_math=12.1)  # flash fits with headroom; math would warn
+    gpu_check = next(c for c in report.checks if c.name == "gpu_memory")
+    assert gpu_check.status == PASS
+    assert "math attention" not in gpu_check.message.lower()  # the WSL host is NOT on the math path
 
 
 def test_non_blackwell_gpu_uses_the_flash_estimate(tmp_path: Path, monkeypatch):
