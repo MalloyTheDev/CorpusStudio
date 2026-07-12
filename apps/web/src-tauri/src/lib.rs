@@ -26,11 +26,23 @@ fn platform_probe() -> Result<Value, String> {
     run_engine(&["platform-probe", "--json", "--cache"])
 }
 
-/// Resolve a hash-sealed RunPlan for a base model + dataset (RunPlan JSON).
+/// The registered training backends and their declared capabilities (BackendManifest[] JSON) — the
+/// "pick your framework" registry. The engine owns it; the shell only lists it.
 #[tauri::command]
-fn platform_plan(base_model: String, dataset: String, sequence_len: u32) -> Result<Value, String> {
+fn platform_backends() -> Result<Value, String> {
+    run_engine(&["platform-backends", "--json"])
+}
+
+/// Resolve a hash-sealed RunPlan for a base model + dataset on the chosen backend (RunPlan JSON).
+#[tauri::command]
+fn platform_plan(
+    base_model: String,
+    dataset: String,
+    sequence_len: u32,
+    backend: Option<String>,
+) -> Result<Value, String> {
     let seq = sequence_len.to_string();
-    run_engine(&[
+    let mut args = vec![
         "platform-plan",
         "--base-model",
         &base_model,
@@ -38,13 +50,23 @@ fn platform_plan(base_model: String, dataset: String, sequence_len: u32) -> Resu
         &dataset,
         "--sequence-len",
         &seq,
-    ])
+    ];
+    let backend_id = backend.unwrap_or_default();
+    if !backend_id.is_empty() {
+        args.push("--backend");
+        args.push(&backend_id);
+    }
+    run_engine(&args)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![platform_probe, platform_plan])
+        .invoke_handler(tauri::generate_handler![
+            platform_probe,
+            platform_plan,
+            platform_backends
+        ])
         .run(tauri::generate_context!())
         .expect("error while running the Corpus Studio shell");
 }

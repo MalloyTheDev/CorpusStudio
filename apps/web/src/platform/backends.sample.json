@@ -1,0 +1,242 @@
+[
+  {
+    "contract_version": "1.0.0",
+    "backend_id": "corpus_studio",
+    "display_name": "Corpus Studio (first-party \u00b7 HF + TRL + PEFT)",
+    "backend_version": "1.0.0",
+    "trainer_target": "corpus_studio",
+    "supported_os": [
+      "windows",
+      "linux",
+      "macos"
+    ],
+    "supported_devices": [
+      "cuda",
+      "cpu"
+    ],
+    "required_compute_capability": null,
+    "model_families": [],
+    "task_types": [
+      "sft"
+    ],
+    "precision_modes": [
+      "bf16",
+      "fp16",
+      "fp32"
+    ],
+    "quantization_modes": [
+      "none",
+      "nf4",
+      "int8"
+    ],
+    "adapter_methods": [
+      "lora",
+      "qlora"
+    ],
+    "attention_impls": [
+      "math",
+      "eager",
+      "sdpa",
+      "flash_attention_2"
+    ],
+    "loss_impls": [
+      "cross_entropy",
+      "liger_fused_ce"
+    ],
+    "checkpoint_impls": [
+      "adapter_only",
+      "safetensors"
+    ],
+    "optimizers": [
+      "adamw_torch",
+      "adamw_8bit",
+      "paged_adamw_8bit",
+      "adamw_bnb_8bit"
+    ],
+    "offload_strategies": [],
+    "compile_modes": [],
+    "export_formats": [
+      "adapter_peft"
+    ],
+    "dependency_requirements": [
+      {
+        "name": "torch",
+        "specifier": null,
+        "optional": false,
+        "reason": null
+      },
+      {
+        "name": "transformers",
+        "specifier": null,
+        "optional": false,
+        "reason": null
+      },
+      {
+        "name": "peft",
+        "specifier": null,
+        "optional": false,
+        "reason": null
+      },
+      {
+        "name": "trl",
+        "specifier": null,
+        "optional": false,
+        "reason": null
+      },
+      {
+        "name": "datasets",
+        "specifier": null,
+        "optional": false,
+        "reason": null
+      },
+      {
+        "name": "accelerate",
+        "specifier": null,
+        "optional": false,
+        "reason": null
+      },
+      {
+        "name": "bitsandbytes",
+        "specifier": null,
+        "optional": true,
+        "reason": "only for 4-bit/8-bit quantization"
+      }
+    ],
+    "dependency_conflicts": [],
+    "environment_lock_ref": null,
+    "checkpoint_semantics": null,
+    "export_compatibility": [],
+    "known_failure_modes": [
+      {
+        "taxonomy": "KERNEL_STALL",
+        "condition": "compute_capability_major>=12 with fused flash attention",
+        "description": "The fused flash/mem-efficient SDPA kernels deadlock on Blackwell (sm_120).",
+        "mitigation": "Use the math attention path (the planner forces it on sm_120)."
+      }
+    ],
+    "capability_probes": [
+      "cuda_available",
+      "bf16_matmul",
+      "bnb_4bit_load",
+      "flash_attn_backward"
+    ],
+    "telemetry_hooks": []
+  },
+  {
+    "contract_version": "1.0.0",
+    "backend_id": "unsloth",
+    "display_name": "Unsloth (accelerated QLoRA \u00b7 ~2\u00d7 faster, less VRAM)",
+    "backend_version": "1.0.0",
+    "trainer_target": "unsloth_script",
+    "supported_os": [
+      "linux",
+      "windows"
+    ],
+    "supported_devices": [
+      "cuda"
+    ],
+    "required_compute_capability": ">=7.5",
+    "model_families": [],
+    "task_types": [
+      "sft"
+    ],
+    "precision_modes": [
+      "bf16",
+      "fp16"
+    ],
+    "quantization_modes": [
+      "nf4",
+      "int4",
+      "none"
+    ],
+    "adapter_methods": [
+      "lora",
+      "qlora"
+    ],
+    "attention_impls": [
+      "flash_attention_2",
+      "sdpa"
+    ],
+    "loss_impls": [
+      "cross_entropy"
+    ],
+    "checkpoint_impls": [
+      "adapter_only",
+      "safetensors"
+    ],
+    "optimizers": [
+      "adamw_8bit",
+      "paged_adamw_8bit"
+    ],
+    "offload_strategies": [],
+    "compile_modes": [],
+    "export_formats": [
+      "adapter_peft",
+      "merged_safetensors",
+      "merged_fp16",
+      "gguf"
+    ],
+    "dependency_requirements": [
+      {
+        "name": "unsloth",
+        "specifier": null,
+        "optional": false,
+        "reason": null
+      },
+      {
+        "name": "torch",
+        "specifier": null,
+        "optional": false,
+        "reason": null
+      },
+      {
+        "name": "transformers",
+        "specifier": null,
+        "optional": false,
+        "reason": null
+      },
+      {
+        "name": "trl",
+        "specifier": null,
+        "optional": false,
+        "reason": null
+      },
+      {
+        "name": "peft",
+        "specifier": null,
+        "optional": false,
+        "reason": null
+      },
+      {
+        "name": "datasets",
+        "specifier": null,
+        "optional": false,
+        "reason": null
+      },
+      {
+        "name": "bitsandbytes",
+        "specifier": null,
+        "optional": false,
+        "reason": null
+      }
+    ],
+    "dependency_conflicts": [],
+    "environment_lock_ref": null,
+    "checkpoint_semantics": null,
+    "export_compatibility": [],
+    "known_failure_modes": [
+      {
+        "taxonomy": "UNSUPPORTED_CONFIGURATION",
+        "condition": "compute_capability_major>=12 (Blackwell / sm_120)",
+        "description": "Unsloth's fused kernels are flash/sdpa; Blackwell needs the math path.",
+        "mitigation": "Use the corpus_studio backend on Blackwell."
+      }
+    ],
+    "capability_probes": [
+      "cuda_available",
+      "bf16_matmul",
+      "bnb_4bit_load"
+    ],
+    "telemetry_hooks": []
+  }
+]

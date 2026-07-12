@@ -1,5 +1,6 @@
 import type { PlatformSnapshot } from "../platform/api";
 import type { FitClass } from "../contracts/FitClassification";
+import { BackendPicker } from "./BackendPicker";
 import { Card, Chip, Chips, Eyebrow, Hash, Row, type Tone } from "./ui";
 
 const gb = (bytes: number | null | undefined): string =>
@@ -134,6 +135,8 @@ export function PlatformView({ snap }: { snap: PlatformSnapshot }) {
           </div>
         </Card>
       </div>
+
+      <BackendPicker snap={snap} />
 
       <p className="cs-note">
         Rendered from the engine's language-neutral JSON-Schema contracts (docs/contracts) — the same
