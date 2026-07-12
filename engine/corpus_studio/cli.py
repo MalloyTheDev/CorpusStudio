@@ -374,9 +374,14 @@ def platform_plan(
         typer.echo(str(exc), err=True)
         raise typer.Exit(2) from exc
 
+    from corpus_studio.platform.calibrator import classify_fit
+
+    fit = classify_fit(plan, profile)
     if out_dir is not None:
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / "RunPlan.json").write_text(plan.model_dump_json(indent=2), encoding="utf-8")
+        (out_dir / "FitClassification.json").write_text(fit.model_dump_json(indent=2), encoding="utf-8")
+    typer.echo(f"predicted fit: {fit.classification.value} — {fit.rationale}", err=True)
     typer.echo(plan.model_dump_json(indent=2))
 
 
