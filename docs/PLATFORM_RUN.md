@@ -56,6 +56,13 @@ against what PROVED to work on this host:
   refused rather than silently downgraded).
 - `sequence_len` flows from your flag — never a hardcoded calibration value.
 
+**Pick your framework.** `corpus-studio platform-backends` lists the registered training backends
+(`corpus_studio`, `unsloth`, …); pass `--backend <id>` to `platform-plan` to resolve the plan on that
+framework. The planner validates the chosen backend against the *resolved* plan — so on Blackwell,
+where `math` attention is mandatory, `--backend unsloth` is **honestly refused** (Unsloth's fused
+kernels declare no `math` path) with the backends that *do* fit named. A backend is never "supported"
+for a config it doesn't declare.
+
 It also prints the **predicted fit** to stderr and writes `FitClassification.json`, e.g.:
 
 ```
@@ -97,6 +104,38 @@ On a machine without the `[train]` extra, `--runner cpu_toy` reports `failed / E
 cleanly (not a crash) — the honest "this host can't run it" signal.
 
 ---
+
+## Verified on a real RTX 5070 (Blackwell / sm_120), 2026-07-12
+
+The full lifecycle was executed on an actual RTX 5070 (12 GB, driver 610.74, `cc 12.0`, Windows/WDDM)
+with `torch 2.11.0+cu128` + the `[train]` extra — the exact hardware this runbook targets.
+
+**Profile + probe** (`platform-probe`) — `READINESS: ready`, kernels actually ran:
+
+```
+GPU: NVIDIA GeForce RTX 5070
+PASS         cuda_available   — 1 CUDA device(s)
+PASS         bf16_matmul      — bf16 matmul on cuda
+PASS         bnb_4bit_load    — Linear4bit forward ok
+KERNEL_STALL flash_attn_backward — sm_120 (Blackwell): not executed to avoid the deadlock
+PASS         checkpoint_reload — save/reload round-trip ok
+proven on this host: bf16, int4, nf4
+```
+
+**Plan** (`platform-plan`) resolved `bf16 / nf4 / math / qlora`, backend `corpus_studio`. For the
+WBG-7B target (Qwen2.5-7B, seq 4096) the fit was honestly **`ACCIDENTAL_WDDM_SPILL`** (est. peak
+~19.3 GB > 12.8 GB — *predicted, not measured*). `--backend unsloth` was refused:
+`attention 'math' not supported. Backends that fit: corpus_studio.`
+
+**Run** (`platform-run --runner training`) — a real GPU QLoRA (Qwen2.5-0.5B, nf4, math attention,
+3 steps) reached `state: succeeded`; the RunEvent stream showed the loss **decreasing** across steps
+(`3.70 → 2.49`), and it did **not** deadlock (the sm_120 flash kernel was correctly disabled). The
+saved LoRA adapter (17.6 MB) got an integrity-checked ArtifactManifest — a real 64-char sha256
+`content_hash`, and a live re-hash of the on-disk weights re-verified as `ok`.
+
+So every row of the table below is not just designed but **exercised on the real target hardware**;
+the only thing still unmeasured is a full-length 7B run's *actual* peak memory (the fit above stays
+`predicted` until then).
 
 ## What's proven vs. what still needs a measured run
 
