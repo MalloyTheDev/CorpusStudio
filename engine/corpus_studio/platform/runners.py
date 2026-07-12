@@ -39,6 +39,38 @@ class _CancelTraining(Exception):
     only cooperative hook into an otherwise-blocking ``trainer.train()`` call."""
 
 
+# Substrings that reliably identify a CUDA out-of-memory in a torch/transformers error message. The
+# exception TYPE ``OutOfMemoryError`` (torch.cuda.OutOfMemoryError) is matched by name so torch need
+# not be imported to classify.
+_OOM_MARKERS = ("out of memory", "cuda oom", "cublas_status_alloc_failed", "cuda_error_out_of_memory")
+
+
+def classify_training_error(exc: BaseException) -> tuple[FailureTaxonomy, str | None]:
+    """Map a training runtime exception to a :class:`FailureTaxonomy` + a remediation hint. Only the
+    signatures we can identify with confidence are promoted from the generic ``FAIL``:
+
+    * a CUDA out-of-memory (``OutOfMemoryError`` / "out of memory") → ``OOM``;
+    * a NaN/Inf loss or gradient → ``NUMERICAL_FAILURE``.
+
+    A genuine ``KERNEL_STALL`` (the sm_120 fused-attention deadlock) is a HANG and an
+    ``ACCIDENTAL_SPILL`` is a slowdown — neither raises, so both belong to a watchdog + a
+    memory-signature classifier, not to error-string matching. Anything unrecognized stays ``FAIL``
+    rather than being mislabeled."""
+    message = str(exc).lower()
+    if type(exc).__name__ == "OutOfMemoryError" or any(marker in message for marker in _OOM_MARKERS):
+        return (
+            FailureTaxonomy.OOM,
+            "reduce sequence_len or micro_batch_size, enable gradient checkpointing / offload, "
+            "or use a smaller base model.",
+        )
+    if ("nan" in message or "inf" in message) and ("loss" in message or "grad" in message):
+        return (
+            FailureTaxonomy.NUMERICAL_FAILURE,
+            "lower the learning rate, add warmup, or check the dataset for malformed rows.",
+        )
+    return FailureTaxonomy.FAIL, None
+
+
 class TrainingRunner:
     """Executes a real training run through ``training.trainer.run_training`` under the supervisor.
 
@@ -87,6 +119,13 @@ class TrainingRunner:
                 taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
                 stage=StageMarker.env_loaded,
                 remediation="run 'corpus-studio train-check' to see what's missing",
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 — classify the runtime failure, don't leak it as FAIL
+            taxonomy, remediation = classify_training_error(exc)
+            raise RunnerFailure(
+                str(exc) or type(exc).__name__,
+                taxonomy=taxonomy,
+                remediation=remediation,
             ) from exc
 
         for checkpoint in result.checkpoints:
