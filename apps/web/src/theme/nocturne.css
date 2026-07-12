@@ -1,0 +1,80 @@
+/* Nocturne design tokens as CSS custom properties — the web half of docs/design/nocturne-tokens.json
+   (the same token set the Avalonia head consumes as ResourceDictionary brushes). Theme = a token-set
+   swap on :root[data-theme]. Keep in sync with the tokens JSON. */
+
+:root,
+:root[data-theme="dark"] {
+  --cs-win: #12141f;
+  --cs-chrome: #0e1019;
+  --cs-panel: #232532;
+  --cs-panel-2: #1b1d29;
+  --cs-line: rgba(233, 233, 237, 0.12);
+  --cs-line-2: #2c2f3e;
+  --cs-text: #e9e9ed;
+  --cs-t2: #b2b6ca;
+  --cs-t3: #9397ab;
+  --cs-t4: #75798c;
+  --cs-accent: #968ae0;
+  --cs-accent-strong: #b5abfc;
+  --cs-accent-ink: #e7e5fe;
+  --cs-accent-soft: rgba(150, 138, 224, 0.16);
+  --cs-hover: rgba(233, 233, 237, 0.07);
+  --cs-track: #33384a;
+  --cs-ok: #6bbf9a;
+  --cs-warn: #d9a35f;
+  --cs-bad: #d76d6d;
+  --cs-grade: #d98f52;
+  --cs-on-accent: #161826;
+}
+
+:root[data-theme="light"] {
+  --cs-win: #eef0f5;
+  --cs-chrome: #e6e8ef;
+  --cs-panel: #ffffff;
+  --cs-panel-2: #f4f6fa;
+  --cs-line: rgba(26, 28, 40, 0.1);
+  --cs-line-2: #e0e3ec;
+  --cs-text: #1a1c28;
+  --cs-t2: #3f434f;
+  --cs-t3: #5b6070;
+  --cs-t4: #868b9c;
+  --cs-accent: #6c5fd0;
+  --cs-accent-strong: #5d5294;
+  --cs-accent-ink: #463c7d;
+  --cs-accent-soft: rgba(108, 95, 208, 0.12);
+  --cs-hover: rgba(26, 28, 40, 0.05);
+  --cs-track: #dfe3ec;
+  --cs-ok: #3f9b73;
+  --cs-warn: #b8792e;
+  --cs-bad: #c85552;
+  --cs-grade: #c07636;
+  --cs-on-accent: #161826;
+}
+
+:root {
+  --cs-font: Inter, system-ui, sans-serif;
+  --cs-mono: ui-monospace, Menlo, Consolas, monospace;
+  --cs-radius-card: 12px;
+  --cs-radius-button: 8px;
+  --cs-radius-chip: 6px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--cs-win);
+  color: var(--cs-text);
+  font-family: var(--cs-font);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}

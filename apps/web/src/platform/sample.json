@@ -1,0 +1,395 @@
+{
+  "profile": {
+    "contract_version": "1.0.0",
+    "environment_signature": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "captured_at": null,
+    "engine_version": "1.3.0",
+    "host": {
+      "os": "windows",
+      "os_detail": "",
+      "memory_residency_model": "wddm",
+      "python_version": "3.12",
+      "hostname_hash": null
+    },
+    "cpu": {
+      "model": "AMD Ryzen 9",
+      "physical_cores": 8,
+      "logical_cores": 16,
+      "instruction_sets": []
+    },
+    "ram": {
+      "total_bytes": 64000000000,
+      "available_bytes": 40000000000
+    },
+    "gpus": [
+      {
+        "index": 0,
+        "kind": "cuda",
+        "name": "NVIDIA GeForce RTX 5070",
+        "vram_total_bytes": 12000000000,
+        "vram_free_bytes": 11000000000,
+        "compute_capability": "12.0",
+        "compute_capability_major": 12,
+        "supported_dtypes": [],
+        "pcie": null
+      }
+    ],
+    "accelerator_runtime": null,
+    "storage": null,
+    "packages": [],
+    "notes": []
+  },
+  "capabilities": {
+    "contract_version": "1.0.0",
+    "backend_id": "corpus_studio",
+    "backend_version": null,
+    "environment_ref": {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "hash": null
+    },
+    "generated_at": null,
+    "readiness": "ready",
+    "bitsandbytes_ok": true,
+    "installed_packages": [],
+    "missing_packages": [],
+    "probe_results": [
+      {
+        "probe": "cuda_available",
+        "outcome": "PASS",
+        "detail": null,
+        "measured": {}
+      },
+      {
+        "probe": "bf16_matmul",
+        "outcome": "PASS",
+        "detail": null,
+        "measured": {}
+      },
+      {
+        "probe": "bnb_4bit_load",
+        "outcome": "PASS",
+        "detail": null,
+        "measured": {}
+      },
+      {
+        "probe": "flash_attn_backward",
+        "outcome": "KERNEL_STALL",
+        "detail": "sm_120 fused-flash deadlock (short-circuited)",
+        "measured": {}
+      }
+    ],
+    "effective_capabilities": {
+      "precision_modes": [
+        "bf16",
+        "fp16"
+      ],
+      "quantization_modes": [
+        "nf4",
+        "int8"
+      ],
+      "attention_impls": [
+        "math",
+        "sdpa",
+        "eager"
+      ],
+      "adapter_methods": [
+        "lora",
+        "qlora"
+      ]
+    },
+    "notes": []
+  },
+  "plan": {
+    "contract_version": "1.0.0",
+    "plan_id": "wbg-7b-plan",
+    "plan_hash": "25701b6d0235a0035246b72ae46c0265d4563e7b1dc6114b4a7803646b072d29",
+    "created_at": "2026-07-12T02:30:32.538865+00:00",
+    "backend_ref": {
+      "id": "corpus_studio",
+      "hash": null
+    },
+    "environment_ref": {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "hash": null
+    },
+    "dataset_ref": {
+      "id": "20260711-wbg",
+      "hash": null
+    },
+    "task_type": "sft",
+    "base_model": "Qwen/Qwen2.5-7B-Instruct",
+    "precision": "bf16",
+    "quantization": "nf4",
+    "adapter": {
+      "method": "qlora",
+      "lora_r": 16,
+      "lora_alpha": 32,
+      "lora_dropout": null,
+      "target_modules": null
+    },
+    "optimizer": {
+      "impl": "adamw_torch",
+      "learning_rate": 0.0002,
+      "weight_decay": null,
+      "lr_scheduler": null,
+      "warmup_ratio": null
+    },
+    "loss_impl": "cross_entropy",
+    "attention_backend": "math",
+    "sequence": {
+      "max_sequence_len": 4096,
+      "buckets": [],
+      "packing": false,
+      "truncation_allowed": true
+    },
+    "batching": {
+      "micro_batch_size": 1,
+      "supervised_token_accumulation_target": 32768,
+      "fallback_grad_accumulation_steps": 8
+    },
+    "checkpoint_policy": {
+      "impl": "adapter_only",
+      "cadence_optimizer_steps": null,
+      "cadence_seconds": null,
+      "keep_last": null,
+      "reload_verify": false
+    },
+    "offload_strategy": "none",
+    "allocator_policy": "default",
+    "compile_mode": "none",
+    "gradient_checkpointing": true,
+    "eval_schedule": {
+      "before_run": true,
+      "after_run": true,
+      "every_optimizer_steps": null,
+      "suite_ref": null
+    },
+    "export": {
+      "format": "adapter_peft",
+      "output_dir": "output"
+    },
+    "seed": 42,
+    "training_config_snapshot": {
+      "base_model": "Qwen/Qwen2.5-7B-Instruct",
+      "dataset_path": "data/examples.jsonl",
+      "output_dir": "output",
+      "dataset_format": "instruction",
+      "sequence_len": 4096,
+      "lora_r": 16,
+      "lora_alpha": 32,
+      "micro_batch_size": 1,
+      "gradient_accumulation_steps": 8,
+      "learning_rate": 0.0002,
+      "seed": 42
+    }
+  },
+  "fit": {
+    "contract_version": "1.0.0",
+    "classification": "ACCIDENTAL_WDDM_SPILL",
+    "estimated_peak_bytes": 19300000000,
+    "device_capacity_bytes": 12000000000,
+    "headroom_bytes": -7300000000,
+    "attention_path": "math",
+    "rationale": "estimated peak ~19.3 GB exceeds 12.0 GB by ~7.3 GB \u2014 on Windows/WDDM this silently spills to shared memory (10-25\u00d7 slowdown), not a clean OOM. Reduce sequence_len / micro_batch_size, or offload."
+  },
+  "manifest": {
+    "contract_version": "1.0.0",
+    "run_id": "wbg-run-1",
+    "plan_ref": {
+      "id": "wbg-7b-plan",
+      "hash": {
+        "algo": "sha256",
+        "value": "25701b6d0235a0035246b72ae46c0265d4563e7b1dc6114b4a7803646b072d29"
+      }
+    },
+    "environment_ref": {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "hash": null
+    },
+    "dataset_ref": {
+      "id": "20260711-wbg",
+      "hash": null
+    },
+    "created_at": "2026-07-12T02:30:32.548865+00:00",
+    "updated_at": "2026-07-12T02:30:32.548865+00:00",
+    "started_at": "2026-07-12T02:30:32.548865+00:00",
+    "finished_at": "2026-07-12T02:30:32.548865+00:00",
+    "state": "succeeded",
+    "base_model": "Qwen/Qwen2.5-7B-Instruct",
+    "target": "echo",
+    "process": null,
+    "output_dir": "output",
+    "checkpoints": [],
+    "artifact_ids": [],
+    "evaluation": null,
+    "reproducibility": null,
+    "failure": null,
+    "final_fit": null,
+    "notes": ""
+  },
+  "events": [
+    {
+      "contract_version": "1.0.0",
+      "event_type": "stage",
+      "run_id": "wbg-run-1",
+      "seq": 0,
+      "emitted_at": "2026-07-12T02:30:32.548865+00:00",
+      "stage": "process_start",
+      "microstep": null,
+      "optimizer_step": null,
+      "epoch": null,
+      "message": "echo run started",
+      "metrics": null,
+      "fit": null,
+      "payload": null
+    },
+    {
+      "contract_version": "1.0.0",
+      "event_type": "metric",
+      "run_id": "wbg-run-1",
+      "seq": 1,
+      "emitted_at": "2026-07-12T02:30:32.548865+00:00",
+      "stage": null,
+      "microstep": null,
+      "optimizer_step": 1,
+      "epoch": null,
+      "message": "[1/4] step",
+      "metrics": {
+        "memory": null,
+        "gpu_utilization": null,
+        "memory_controller_utilization": null,
+        "power_watts": null,
+        "temperature_c": null,
+        "pcie_tx_bytes_per_sec": null,
+        "pcie_rx_bytes_per_sec": null,
+        "step_time_seconds": null,
+        "tokens_per_sec": null,
+        "supervised_tokens_per_sec": null,
+        "loss": 1.0,
+        "grad_norm": null,
+        "learning_rate": null
+      },
+      "fit": null,
+      "payload": null
+    },
+    {
+      "contract_version": "1.0.0",
+      "event_type": "metric",
+      "run_id": "wbg-run-1",
+      "seq": 2,
+      "emitted_at": "2026-07-12T02:30:32.548865+00:00",
+      "stage": null,
+      "microstep": null,
+      "optimizer_step": 2,
+      "epoch": null,
+      "message": "[2/4] step",
+      "metrics": {
+        "memory": null,
+        "gpu_utilization": null,
+        "memory_controller_utilization": null,
+        "power_watts": null,
+        "temperature_c": null,
+        "pcie_tx_bytes_per_sec": null,
+        "pcie_rx_bytes_per_sec": null,
+        "step_time_seconds": null,
+        "tokens_per_sec": null,
+        "supervised_tokens_per_sec": null,
+        "loss": 0.5,
+        "grad_norm": null,
+        "learning_rate": null
+      },
+      "fit": null,
+      "payload": null
+    },
+    {
+      "contract_version": "1.0.0",
+      "event_type": "metric",
+      "run_id": "wbg-run-1",
+      "seq": 3,
+      "emitted_at": "2026-07-12T02:30:32.548865+00:00",
+      "stage": null,
+      "microstep": null,
+      "optimizer_step": 3,
+      "epoch": null,
+      "message": "[3/4] step",
+      "metrics": {
+        "memory": null,
+        "gpu_utilization": null,
+        "memory_controller_utilization": null,
+        "power_watts": null,
+        "temperature_c": null,
+        "pcie_tx_bytes_per_sec": null,
+        "pcie_rx_bytes_per_sec": null,
+        "step_time_seconds": null,
+        "tokens_per_sec": null,
+        "supervised_tokens_per_sec": null,
+        "loss": 0.3333,
+        "grad_norm": null,
+        "learning_rate": null
+      },
+      "fit": null,
+      "payload": null
+    },
+    {
+      "contract_version": "1.0.0",
+      "event_type": "metric",
+      "run_id": "wbg-run-1",
+      "seq": 4,
+      "emitted_at": "2026-07-12T02:30:32.548865+00:00",
+      "stage": null,
+      "microstep": null,
+      "optimizer_step": 4,
+      "epoch": null,
+      "message": "[4/4] step",
+      "metrics": {
+        "memory": null,
+        "gpu_utilization": null,
+        "memory_controller_utilization": null,
+        "power_watts": null,
+        "temperature_c": null,
+        "pcie_tx_bytes_per_sec": null,
+        "pcie_rx_bytes_per_sec": null,
+        "step_time_seconds": null,
+        "tokens_per_sec": null,
+        "supervised_tokens_per_sec": null,
+        "loss": 0.25,
+        "grad_norm": null,
+        "learning_rate": null
+      },
+      "fit": null,
+      "payload": null
+    },
+    {
+      "contract_version": "1.0.0",
+      "event_type": "stage",
+      "run_id": "wbg-run-1",
+      "seq": 5,
+      "emitted_at": "2026-07-12T02:30:32.548865+00:00",
+      "stage": "export",
+      "microstep": null,
+      "optimizer_step": null,
+      "epoch": null,
+      "message": "echo run complete",
+      "metrics": null,
+      "fit": null,
+      "payload": null
+    },
+    {
+      "contract_version": "1.0.0",
+      "event_type": "terminal",
+      "run_id": "wbg-run-1",
+      "seq": 6,
+      "emitted_at": "2026-07-12T02:30:32.548865+00:00",
+      "stage": null,
+      "microstep": null,
+      "optimizer_step": null,
+      "epoch": null,
+      "message": "succeeded",
+      "metrics": null,
+      "fit": null,
+      "payload": {
+        "state": "succeeded"
+      }
+    }
+  ]
+}
