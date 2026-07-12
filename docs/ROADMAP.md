@@ -17,6 +17,15 @@ checkpoints, resume, before/after eval), a training run registry + regression
 gate, a model artifact registry + weight card + promote gate, and dataset version
 history (capture/card/diff/restore) — all local-first and file-backed.
 
+The most recent re-scope adds a **headless platform run lifecycle**: a language-neutral contracts
+substrate (RunPlan / RunEvent / BackendManifest) that turns goal + data + hardware into a validated,
+reproducible run — profile → plan → predict-fit → run → measure-fit → artifacts — with a **multi-backend
+"pick your framework" registry** (`corpus_studio`, `unsloth`; Unsloth honestly refused on Blackwell),
+a **calibrator + watchdog** (predicted-vs-measured fit, spill/stall detection), and a **supervised
+subprocess worker** that can KILL a hung run. It's exercised by a new **Tauri 2 + React** contract-first
+client (`apps/web`) alongside the WPF (shipping) and Avalonia (interim) heads. The whole lifecycle was
+verified end-to-end on a real RTX 5070 (Blackwell/sm_120), including a real GPU QLoRA run.
+
 On top of that loop, v1.2.1–v1.2.15 added an **IDE-like workspace shell** (Start
 Center, Universal Explorer, Problems + Output panels, one New Project wizard) and
 desktop polish; a deep-review pass shipped an **opt-in LLM-judge evaluation

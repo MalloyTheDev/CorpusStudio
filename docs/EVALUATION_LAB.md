@@ -2,7 +2,8 @@
 
 Evaluation Lab tests datasets by running prompts through selected models and
 comparing the responses with expected outputs, rubrics, or human scores — building
-on the dataset-creation loop without turning Corpus Studio into a trainer.
+on the dataset-creation loop. (Training is now a shipped, opt-in capability via the `[train]` extra;
+the eval path itself still needs no CUDA/ML deps — it only calls a serving endpoint.)
 
 The engine `eval-run` command runs instruction or chat JSONL through Ollama or an
 OpenAI-compatible local endpoint and exports a JSON report. The desktop Evaluation
@@ -87,8 +88,7 @@ dataset at a time, for instruction and chat data, with JSON report export.
 Already shipped: multi-model comparison (`benchmark`), regression reruns,
 report summaries by tag/failure/score-band, saved failure drilldowns, versioned
 reviewed-fix tracking, and an opt-in judge-model scorer. Genuinely future:
-rubric-based grading, checkpoint comparison, prompt-template versioning, and the
-v1.3 Evaluation Suites.
+rubric-based grading, checkpoint comparison, and prompt-template versioning.
 - cost and token accounting
 - failed-example review queues
 

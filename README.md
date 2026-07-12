@@ -170,8 +170,9 @@ Every dataset example should be:
 ```text
 CorpusStudio
 ├── apps/
-│   └── desktop/             # C# WPF desktop app
-├── engine/                  # Python dataset engine
+│   ├── desktop/             # C# desktop heads (WPF shipping + Avalonia interim) over a shared Core
+│   └── web/                 # Tauri 2 + React contract-first client (early-stage)
+├── engine/                  # Python dataset engine + platform run-lifecycle substrate
 ├── schemas/                 # Built-in schema definitions
 ├── docs/                    # Product, architecture, roadmap, workflows
 ├── examples/                # Example dataset rows

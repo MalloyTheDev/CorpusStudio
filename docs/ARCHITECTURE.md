@@ -1,9 +1,15 @@
 # Architecture
 
-Corpus Studio is split into two major layers:
+Corpus Studio has grown from a two-layer app into a **platform**:
 
-1. Desktop application
-2. Dataset engine
+1. **Dataset engine** — the dependency-light Python core (torch-free at import).
+2. **Platform run lifecycle** — a language-neutral contracts substrate
+   (`engine/corpus_studio/platform/`: RunPlan / RunEvent / BackendManifest / …) + a headless run
+   supervisor + supervised in-process **and subprocess** Python training workers + a multi-backend
+   trainer registry ("pick your framework": `corpus_studio`, `unsloth`).
+3. **UI heads over a shared Core** — WPF (shipping), Avalonia (cross-platform interim), and a new
+   Tauri 2 + React contract-first client (`apps/web`). Each head is a *client* of the engine/platform;
+   none contains platform logic.
 
 The desktop app owns user interaction.
 The Python engine owns dataset logic.
@@ -190,8 +196,10 @@ goes through the existing validator and explicit user action.
 
 ## Lab boundaries
 
-Evaluation Lab, AI Assist Lab, and Training Lab should build on the engine
-without turning the core app into a trainer.
+Evaluation Lab, AI Assist Lab, and Training all build on the engine. Training is now **shipped and
+opt-in**: the first-party QLoRA trainer (the `[train]` extra) runs in-process, driven by the platform
+run lifecycle — the core stays dependency-light (torch is lazy-imported only when a training command
+runs). The engine can also generate a config to launch an external trainer.
 
 ```text
 Desktop Future Labs
@@ -201,8 +209,9 @@ Desktop Future Labs
   +-- Training Lab   -> split/export outputs + training config templates + rendered config files
 ```
 
-Model calls stay behind backend adapters. Real training launch should stay out
-until the Evaluation workflow and config export path are stable.
+Model calls stay behind backend adapters. Real training launch has shipped (the first-party trainer +
+the `platform-run` supervisor); the UI heads drive it as clients — they never contain the training
+logic.
 
 The Training Lab MVP uses the same desktop-to-engine boundary:
 

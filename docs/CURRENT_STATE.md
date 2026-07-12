@@ -3,7 +3,9 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-07-08 (through **v1.3** — Evaluation Suites & Chat Gates —
+Last reconciled: 2026-07-12 (through **v1.3** — Evaluation Suites & Chat Gates — plus the **platform
+run lifecycle** re-scope: profile → plan → predict-fit → run → measure-fit → artifacts, a multi-backend
+registry, and subprocess reliability, verified on a real RTX 5070 —
 plus the deep bug/security audit, 19 fixes across data integrity, gate/policy
 hardening, and quality/split correctness, PRs #104–118; a residual-audit pass
 hardening the v1.3 surface, PRs #133–142; the CI dependency refresh, PRs
@@ -143,9 +145,26 @@ per-item error isolation, and off-thread document opens.
   (tokens-per-epoch after truncation, over-length counts), a rough arithmetic
   VRAM planning estimate (never inspects hardware), a LoRA rank/alpha suggestion,
   and the exact launch command.
-- In-app launch of the user's installed trainer with explicit confirmation of
-  the exact argv (no shell), live log streaming, and a Stop that kills the
-  process tree.
+- In-app launch of **the first-party `corpus_studio` QLoRA trainer** (the opt-in `[train]` extra, run
+  via the engine's own interpreter) **or** the user's installed external trainer — with explicit
+  confirmation of the exact argv (no shell), live log streaming, and a Stop that kills the process
+  tree. The first-party CLI: `train-check` / `train-run` / `train-merge` / `model-fetch`.
+
+**Platform run lifecycle** (headless, contract-first)
+- A language-neutral contracts substrate (`engine/corpus_studio/platform/`) turns goal + data +
+  hardware into a validated run: **profile** the host + functional capability probes → **plan** a
+  hash-sealed RunPlan → predict the **fit** (never `NATIVE_SAFE` from an estimate) → **run** it (via
+  the supervisor, in-process or a kill-able **subprocess** worker) → **measure** the fit (watchdog) →
+  account for the **artifact** (integrity-checked). CLI: `platform-probe / -plan / -run / -backends /
+  -profiles / -schemas`.
+- **Multi-backend "pick your framework"**: a BackendManifest registry (`corpus_studio`, `unsloth`);
+  the planner validates the chosen backend and **honestly refuses Unsloth on Blackwell/sm_120** (which
+  needs the math attention path Unsloth doesn't provide).
+- **Reliability**: an in-process watchdog detects a stall/spill + captures a measured fit; the
+  subprocess worker can **KILL a hung run** (→ `KERNEL_STALL`) and isolates a crash. Verified
+  end-to-end on a real RTX 5070 (Blackwell): a GPU QLoRA ran in-process and in a subprocess.
+- Consumed by a new **Tauri 2 + React** contract-first client (`apps/web`) alongside the WPF + Avalonia
+  heads.
 - Checkpoint tracking during and after runs, resume-from-latest for targets
   with a CLI resume flag, and before/after evaluation comparison against the
   baseline captured at launch.

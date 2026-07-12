@@ -6,11 +6,17 @@ fake it all. For the high-level picture see [ARCHITECTURE.md](ARCHITECTURE.md); 
 setup see [DEVELOPMENT_SETUP.md](DEVELOPMENT_SETUP.md); for every engine command see
 [CLI_REFERENCE.md](CLI_REFERENCE.md).
 
-## The two halves
+## The pieces
 
 - **`engine/`** — a dependency-light Python CLI (`corpus_studio`), the source of truth
   for all dataset logic: schemas, validation, quality/debt, gates, splits, evaluation,
-  training-config, artifacts, versions, import/export. No UI, no desktop knowledge.
+  training-config, artifacts, versions, import/export. No UI, no desktop knowledge. It also holds the
+  **platform run-lifecycle substrate** (`corpus_studio/platform/`: language-neutral contracts +
+  planner + calibrator + run supervisor + subprocess worker + the first-party/Unsloth trainers) — the
+  engine now runs training in-process via the opt-in `[train]` extra (still torch-free at import).
+- **`apps/web/`** — a Tauri 2 + React contract-first client (early-stage): TypeScript types generated
+  from the engine's JSON-Schema contracts; the Rust shell shells out to the `corpus-studio platform-*`
+  CLI. A *client* of the engine, like the desktop.
 - **`apps/desktop/`** — the .NET desktop, split into four projects:
   - **`CorpusStudio.Core`** (`net8.0`, WPF-free) — the view-models, models, and service
     **seams**. This is where nearly all logic lives.

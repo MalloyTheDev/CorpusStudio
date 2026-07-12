@@ -6,6 +6,12 @@ TRAINING_PREP, and TRAINING_LAUNCHER_DESIGN docs. The dependency-light core neve
 bundles CUDA/PyTorch; training is opt-in — either Corpus Studio's own first-party
 QLoRA trainer (the `[train]` extra) or the user's installed external trainer.
 
+A first-party run is now driven by the **platform run lifecycle** (profile → plan → predict-fit → run
+→ measure-fit → artifacts) with a multi-backend "pick your framework" registry (`corpus_studio`,
+`unsloth`) and a supervised subprocess worker that can kill a hung run — see
+[PLATFORM_RUN.md](PLATFORM_RUN.md) and the `platform-*` commands in
+[CLI_REFERENCE.md](CLI_REFERENCE.md).
+
 
 ---
 
@@ -85,19 +91,18 @@ Launcher scope should include:
 Full orchestration can include job queues, hardware profiles, multiple
 experiments, dataset versions, artifact tracking, and richer comparison views.
 
-### Supported Future Training Tools
+### Training backends
 
-Planned config targets:
+Shipped first-party run backends (selectable via `platform-plan --backend`, "pick your framework"):
 
-- Axolotl
-- TRL
-- Unsloth
-- Hugging Face Trainer
-- LLaMA-Factory
-- llama.cpp fine-tuning where applicable
+- **`corpus_studio`** — the first-party HF + TRL + PEFT QLoRA trainer (LoRA/QLoRA; math/eager/sdpa/
+  flash attention). The Blackwell-safe default.
+- **`unsloth`** — the accelerated 4-bit QLoRA path (flash/sdpa kernels; **honestly refused on
+  Blackwell/sm_120**, which needs the math path Unsloth doesn't provide).
 
-Corpus Studio should generate tool-specific configs without embedding heavy ML
-frameworks into the core app.
+Planned additional config targets (external-launcher / config-generation): Axolotl, Hugging Face
+Trainer, LLaMA-Factory, llama.cpp fine-tuning where applicable. Corpus Studio generates tool-specific
+configs without embedding heavy ML frameworks into the core.
 
 ### Planned Features
 
@@ -431,10 +436,12 @@ hardening that is now done.
 
 - **Local-first.** No cloud orchestration by default.
 - **Never hide the trainer command.** The user always sees exactly what runs.
-- **No forced ML dependencies in the engine.** Corpus Studio orchestrates the
-  user's *installed* trainer (axolotl / TRL / Unsloth / Hugging Face /
-  LLaMA-Factory). It never imports torch/CUDA. If the trainer is not installed,
-  the app shows the command to run rather than failing silently.
+- **No forced ML dependencies in the engine core.** The core is torch-free at import. The
+  external-launcher path orchestrates the user's *installed* trainer (axolotl / TRL / Unsloth / HF /
+  LLaMA-Factory) and never imports torch/CUDA. The **first-party `[train]` trainer** (`train-run`)
+  *does* import torch/transformers/peft/trl — but only when the opt-in extra is installed and a
+  training command is invoked (a lazy import inside the function, never at module load). If neither is
+  available, the app shows the command / install hint rather than failing silently.
 - **Launching is a big, machine-consuming action.** It requires explicit
   confirmation showing the exact command before every launch.
 

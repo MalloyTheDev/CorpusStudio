@@ -74,8 +74,11 @@ All make **live backend calls**. The automatic score is keyword-overlap recall u
 
 ## Training
 
-The engine generates + inspects configs and records runs; it **never runs the trainer**
-(the desktop launches your installed trainer). See [TRAINING.md](TRAINING.md).
+The engine **runs the first-party QLoRA trainer in-process** (opt-in `[train]` extra) via `train-run`
+— or generates an inspectable config to launch your own installed trainer (axolotl / TRL / Unsloth /
+HF / LLaMA-Factory). The desktop can drive either path. The core stays dependency-light: torch is
+never imported unless the `[train]` extra is installed and a training command is invoked. See
+[TRAINING.md](TRAINING.md) and, for the supervised run lifecycle, [PLATFORM_RUN.md](PLATFORM_RUN.md).
 
 | Command | What it does |
 |---|---|
@@ -140,7 +143,23 @@ The engine generates + inspects configs and records runs; it **never runs the tr
 |---|---|
 | `arena-run <prompts> --model … (repeatable) [--judge-model …]` | Run a prompt suite across several models and capture responses side by side. |
 
+## Platform (headless run lifecycle)
+
+The platform turns **goal + data + hardware** into a validated, reproducible run through
+language-neutral contracts: profile the host → plan the run → predict the fit → run it → measure the
+fit → account for the artifact. Dependency-light (torch is lazy-imported only by the runner). See
+[PLATFORM_RUN.md](PLATFORM_RUN.md).
+
+| Command | What it does |
+|---|---|
+| `platform-probe [--cache] [--json] [--out DIR]` | Profile the host + run the **functional capability probes** (readiness = a kernel actually ran, not "the package imports"): emits an EnvironmentProfile + a CapabilityReport (per-probe `PASS / KERNEL_STALL / …`, `ready / cpu_toy_only / not_ready`). On Blackwell (sm_120) the flash-attention probe short-circuits to `KERNEL_STALL` without executing. `--cache` reuses an unchanged host's report. |
+| `platform-backends [--json]` | List the registered training backends — "pick your framework" (`corpus_studio`, `unsloth`, …) — and their declared capabilities. |
+| `platform-plan --base-model … --dataset … [--sequence-len N --backend corpus_studio\|unsloth --allow-cpu-toy --json --out DIR]` | Resolve an immutable, **hash-sealed RunPlan** — every ambiguous field decided against what PROVED to work on this host (bf16 only if proven, nf4 only if bitsandbytes passed, **math attention on Blackwell**). The chosen backend is validated (on sm_120 Unsloth is honestly refused). Prints the predicted **fit** (never `NATIVE_SAFE` from an estimate); `--json` emits `{run_plan, fit_classification}`. |
+| `platform-run [PLAN.json \| --demo] [--runner echo\|cpu_toy\|training] [--subprocess --timeout S] [--max-steps N --out DIR]` | Execute a RunPlan through the headless supervisor: stream RunEvents to stderr, a RunManifest to stdout. `training` dispatches to the plan's backend. **`--subprocess`** runs it in a child process the parent can time out + KILL (a hung run → a real `KERNEL_STALL`; a crash is isolated). |
+| `platform-profiles [--store DIR] [--json]` | List the cached host profiles (from `platform-probe --cache`). |
+| `platform-schemas [--out DIR]` | Export the platform contracts as language-neutral JSON Schema (consumed by the Tauri/React client + the Rust core). |
+
 ---
 
-*Generated from the engine CLI (`corpus-studio --help`, 56 commands). Run any command with
+*Generated from the engine CLI (`corpus-studio --help`, 62 commands). Run any command with
 `--help` for its complete, authoritative option list — that is always the source of truth.*
