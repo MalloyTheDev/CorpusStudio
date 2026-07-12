@@ -218,16 +218,42 @@ def platform_probe(
     out_dir: Optional[Path] = typer.Option(
         None, "--out", help="Write EnvironmentProfile.json + CapabilityReport.json to this directory."
     ),
+    cache: bool = typer.Option(
+        False, "--cache", help="Reuse a cached CapabilityReport when the host signature is unchanged (skips the probes)."
+    ),
+    store: Optional[Path] = typer.Option(
+        None, "--store", help="Profile cache directory (default: ~/.corpus_studio/profiles)."
+    ),
+    refresh: bool = typer.Option(
+        False, "--refresh", help="Re-run the probes and update the cache even on a signature hit."
+    ),
 ):
     """Profile the current host and run the functional capability probes — 'readiness = a kernel
     actually ran', not 'the package imports'. Emits an EnvironmentProfile (OS/residency/GPUs/package
     locks + signature) and a CapabilityReport (per-probe PASS/KERNEL_STALL/… + effective
-    capabilities + ready/cpu_toy_only/not_ready)."""
+    capabilities + ready/cpu_toy_only/not_ready). With --cache, an unchanged host reuses the stored
+    report instead of re-running the (torch-loading) probes."""
     from corpus_studio.platform.profiler import build_environment_profile
     from corpus_studio.platform.probes import run_capability_probes
 
-    profile = build_environment_profile()
-    report = run_capability_probes(profile)
+    if cache:
+        from corpus_studio.platform.profile_store import default_store_dir, resolve_capabilities
+
+        resolved = resolve_capabilities(
+            store or default_store_dir(),
+            build_profile=build_environment_profile,
+            run_probes=run_capability_probes,
+            refresh=refresh,
+        )
+        profile, report = resolved.profile, resolved.report
+        typer.echo(
+            f"capabilities: {'cached' if resolved.cached else 'freshly probed'} "
+            f"(signature {profile.environment_signature[:12]}…)",
+            err=True,
+        )
+    else:
+        profile = build_environment_profile()
+        report = run_capability_probes(profile)
 
     if out_dir is not None:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -270,6 +296,39 @@ def platform_probe(
         )
         lines.append(f"  proven on this host: {', '.join(proven) if proven else '(none)'}")
     typer.echo("\n".join(lines))
+
+
+@app.command("platform-profiles")
+def platform_profiles(
+    store: Optional[Path] = typer.Option(
+        None, "--store", help="Profile cache directory (default: ~/.corpus_studio/profiles)."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit the cached signatures as JSON."),
+):
+    """List the cached host profiles (from `platform-probe --cache`): one line per environment
+    signature with its GPU + readiness verdict, so a re-probe is only needed when the host changed."""
+    from corpus_studio.platform.profile_store import (
+        default_store_dir,
+        list_signatures,
+        load_profile,
+        load_report,
+    )
+
+    store_dir = store or default_store_dir()
+    signatures = list_signatures(store_dir)
+    if json_out:
+        typer.echo(json.dumps({"store": str(store_dir), "signatures": signatures}, indent=2))
+        return
+    if not signatures:
+        typer.echo(f"No cached profiles in {store_dir}.")
+        return
+    typer.echo(f"Cached profiles in {store_dir}:")
+    for signature in signatures:
+        profile = load_profile(signature, store_dir)
+        report = load_report(signature, store_dir)
+        gpu = profile.gpus[0].name if profile and profile.gpus else "no GPU"
+        readiness = report.readiness if report else "?"
+        typer.echo(f"  {signature[:12]}…  {gpu:<24}  {readiness}")
 
 
 @app.command("platform-run")
