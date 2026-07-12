@@ -115,24 +115,39 @@ def test_load_config_reads_attn_implementation(tmp_path):
     assert load_run_config_from_file(_config(tmp_path)).attn_implementation is None
 
 
-def test_resolve_attention_blackwell_disables_flash_sdpa():
-    # Blackwell (sm_120 → capability major 12): the fused FLASH SDPA kernel deadlocks on the first
-    # backward (verified on a real 5070; mem-efficient + math are fine), so keep default SDPA but signal
-    # the caller to disable just the flash backend.
-    assert resolve_attention_implementation(None, 12) == (None, True)
-    assert resolve_attention_implementation(None, 13) == (None, True)
+def test_resolve_attention_native_windows_blackwell_disables_flash_sdpa():
+    # NATIVE WINDOWS + Blackwell (sm_120 → capability major 12): the fused FLASH SDPA kernel deadlocks
+    # on the first backward under the Windows WDDM driver (verified on a real 5070; mem-efficient + math
+    # are fine), so keep default SDPA but signal the caller to disable just the flash backend.
+    assert resolve_attention_implementation(None, 12, native_windows=True) == (None, True)
+    assert resolve_attention_implementation(None, 13, native_windows=True) == (None, True)
+
+
+def test_resolve_attention_wsl_or_linux_blackwell_keeps_flash_enabled():
+    # The deadlock is a Windows WDDM property, NOT an sm_120 kernel bug: on WSL / bare Linux the SAME
+    # flash kernel runs fine (verified on a real 5070 under WSL2), so flash must stay ENABLED there —
+    # the whole reason to run training under WSL. native_windows=False (WSL Python reports sys.platform
+    # 'linux') → no SDP toggling on Blackwell.
+    assert resolve_attention_implementation(None, 12, native_windows=False) == (None, False)
+    assert resolve_attention_implementation(None, 13, native_windows=False) == (None, False)
+    assert resolve_attention_implementation(None, 12) == (None, False)  # default (unknown host) = safe
 
 
 def test_resolve_attention_older_arch_is_unchanged():
-    assert resolve_attention_implementation(None, 9) == (None, False)   # e.g. Ada / Hopper
-    assert resolve_attention_implementation(None, 8) == (None, False)
-    assert resolve_attention_implementation(None, None) == (None, False)  # no GPU info
+    # Pre-Blackwell arch: no toggling regardless of OS (the deadlock is sm_120-specific).
+    assert resolve_attention_implementation(None, 9, native_windows=True) == (None, False)   # Ada/Hopper
+    assert resolve_attention_implementation(None, 8, native_windows=True) == (None, False)
+    assert resolve_attention_implementation(None, None, native_windows=True) == (None, False)  # no GPU
 
 
 def test_resolve_attention_explicit_choice_always_wins():
-    # An explicit attn_implementation is honored verbatim and never toggles the SDP backends.
-    assert resolve_attention_implementation("eager", 12) == ("eager", False)
-    assert resolve_attention_implementation("flash_attention_2", 8) == ("flash_attention_2", False)
+    # An explicit attn_implementation is honored verbatim and never toggles the SDP backends, even on
+    # native-Windows Blackwell.
+    assert resolve_attention_implementation("eager", 12, native_windows=True) == ("eager", False)
+    assert resolve_attention_implementation("flash_attention_2", 8, native_windows=True) == (
+        "flash_attention_2",
+        False,
+    )
 
 
 # ---- formatting --------------------------------------------------------------

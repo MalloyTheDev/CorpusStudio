@@ -29,6 +29,7 @@ from .contracts import (
     GpuDevice,
 )
 from .enums import DeviceKind, MemoryResidencyModel, OperatingSystem, PrecisionMode
+from .host_platform import detect_operating_system
 
 # The dependency stack the planner + backends care about. Distribution (PyPI) names — read from
 # installed-package metadata, never imported. Extends training.environment._TRAIN_PACKAGES with the
@@ -73,15 +74,10 @@ def _capability_major(compute_capability: str) -> int | None:
 
 
 def _operating_system() -> tuple[OperatingSystem, MemoryResidencyModel]:
-    """Map the host OS to the contract enum + the memory-residency model that decides spill-vs-OOM."""
-    system = platform.system()
-    if system == "Windows":
-        return OperatingSystem.windows, MemoryResidencyModel.wddm
-    if system == "Linux":
-        return OperatingSystem.linux, MemoryResidencyModel.linux_dedicated
-    if system == "Darwin":
-        return OperatingSystem.macos, MemoryResidencyModel.unified_memory
-    return OperatingSystem.unknown, MemoryResidencyModel.unknown
+    """Map the host OS to the contract enum + the memory-residency model that decides spill-vs-OOM.
+    Delegates to the shared detector so WSL is recognised as its own platform (flash-safe like Linux,
+    ``wddm`` spill like Windows) consistently with the trainer + planner."""
+    return detect_operating_system()
 
 
 def _system_ram_bytes() -> tuple[int | None, int | None]:

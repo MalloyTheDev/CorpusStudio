@@ -26,9 +26,12 @@ _SIG = "a" * 64
 
 
 def _blackwell_profile():
+    # Native Windows + Blackwell — the host whose WDDM flash deadlock forces the math mandate this
+    # e2e chain asserts. (A WSL/Linux Blackwell host would instead seal sdpa; covered in the planner
+    # + CLI tests.)
     return EnvironmentProfile(
         environment_signature=_SIG,
-        host=EnvHost(os="linux"),
+        host=EnvHost(os="windows"),
         gpus=[GpuDevice(index=0, kind="cuda", name="RTX 5070", vram_total_bytes=12_000_000_000,
                         compute_capability_major=12)],
     )

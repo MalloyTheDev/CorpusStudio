@@ -21,10 +21,10 @@ runner = CliRunner()
 _SIG = "b" * 64
 
 
-def _ready_profile(cc_major: int = 8) -> EnvironmentProfile:
+def _ready_profile(cc_major: int = 8, os_name: str = "linux") -> EnvironmentProfile:
     return EnvironmentProfile(
         environment_signature=_SIG,
-        host=EnvHost(os="linux"),
+        host=EnvHost(os=os_name),
         gpus=[
             GpuDevice(
                 index=0, kind="cuda", name="Synthetic", vram_total_bytes=12_000_000_000,
@@ -45,11 +45,12 @@ def _ready_report(attn: str = "sdpa") -> CapabilityReport:
     )
 
 
-def _ready_host(monkeypatch, *, cc_major: int = 8, attn: str = "sdpa") -> None:
-    """Inject a synthetic ready host so the planner produces a plan without torch/a GPU present."""
+def _ready_host(monkeypatch, *, cc_major: int = 8, attn: str = "sdpa", os_name: str = "linux") -> None:
+    """Inject a synthetic ready host so the planner produces a plan without torch/a GPU present.
+    ``os_name`` matters on Blackwell: only native Windows forces the math mandate (WSL/Linux keep sdpa)."""
     monkeypatch.setattr(
         "corpus_studio.platform.profiler.build_environment_profile",
-        lambda: _ready_profile(cc_major),
+        lambda: _ready_profile(cc_major, os_name),
     )
     monkeypatch.setattr(
         "corpus_studio.platform.probes.run_capability_probes", lambda _profile: _ready_report(attn)
@@ -135,15 +136,31 @@ def test_platform_plan_backend_flows_through_the_cli(monkeypatch):
     assert json.loads(result.stdout)["run_plan"]["backend_ref"]["id"] == "unsloth"
 
 
-def test_platform_plan_rejects_unsloth_on_a_blackwell_math_plan(monkeypatch):
-    # Blackwell forces math; Unsloth declares no math → the planner refuses through the CLI (exit 2).
-    _ready_host(monkeypatch, cc_major=12, attn="sdpa")
+def test_platform_plan_rejects_unsloth_on_a_native_windows_blackwell_math_plan(monkeypatch):
+    # NATIVE WINDOWS + Blackwell forces math (WDDM flash deadlock); Unsloth declares no math → the
+    # planner refuses through the CLI (exit 2).
+    _ready_host(monkeypatch, cc_major=12, attn="sdpa", os_name="windows")
     result = runner.invoke(
         app,
         ["platform-plan", "--base-model", "m", "--dataset", "d.jsonl", "--backend", "unsloth"],
     )
     assert result.exit_code == 2
     assert "can't run this plan" in result.stderr or "can't run this plan" in result.output
+
+
+def test_platform_plan_allows_unsloth_on_wsl_blackwell(monkeypatch):
+    # WSL is its own platform: the flash deadlock is Windows-WDDM-only, so a WSL Blackwell host does
+    # NOT force math — it seals sdpa, which Unsloth declares, so the plan is accepted (exit 0). This is
+    # the whole reason to train under WSL (verified on a real 5070: flash SDPA runs on WSL2 Blackwell).
+    _ready_host(monkeypatch, cc_major=12, attn="sdpa", os_name="wsl")
+    result = runner.invoke(
+        app,
+        ["platform-plan", "--base-model", "m", "--dataset", "d.jsonl", "--backend", "unsloth", "--json"],
+    )
+    assert result.exit_code == 0
+    bundle = json.loads(result.stdout)
+    assert bundle["run_plan"]["backend_ref"]["id"] == "unsloth"
+    assert bundle["run_plan"]["attention_backend"] == "sdpa"  # sdpa sealed, NOT math (Windows-only)
 
 
 def test_platform_plan_json_survives_stdout_noise_from_a_probe(monkeypatch):

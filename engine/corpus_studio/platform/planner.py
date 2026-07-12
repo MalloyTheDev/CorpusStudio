@@ -53,8 +53,10 @@ from corpus_studio.platform.enums import (
     AdapterMethod,
     AttentionImpl,
     ExportFormat,
+    OperatingSystem,
     TaskType,
 )
+from corpus_studio.platform.host_platform import flash_sdpa_deadlocks
 
 # attn_implementation strings the trainer passes to from_pretrained. math / sdpa / mem_efficient /
 # xformers are NOT from_pretrained values (they are SDPA backends toggled inside the trainer), so we
@@ -119,22 +121,27 @@ def _max_cc_major(profile: EnvironmentProfile) -> int | None:
     return max(majors) if majors else None
 
 
-def _resolve_attention(explicit: str | None, cc_major: int | None, proven_attn: set[str]) -> str:
-    blackwell = cc_major is not None and cc_major >= _BLACKWELL_MAJOR
+def _resolve_attention(
+    explicit: str | None, cc_major: int | None, proven_attn: set[str], *, os_value: OperatingSystem
+) -> str:
+    # The fused flash / mem-efficient kernels deadlock on Blackwell ONLY under the native-Windows WDDM
+    # driver model — NOT on WSL or bare Linux, where the same sm_120 kernels run fine (verified on a
+    # real 5070 under WSL2). So the "force math" mandate is native-Windows-only; on WSL/Linux Blackwell
+    # a plan may seal sdpa (→ flash), which is the whole reason to run training under WSL.
+    wddm_blackwell = flash_sdpa_deadlocks(os_value, cc_major)
     if explicit is not None:
         _require_enum(explicit, AttentionImpl, "attention_backend")
-        # The Blackwell mandate outranks an explicit override: the fused flash / mem-efficient
-        # kernels deadlock on sm_120, so refuse to seal a plan that would hang rather than honor a
-        # request the safety layer exists to prevent.
-        if blackwell and explicit in _FUSED_ATTN_UNSAFE_ON_BLACKWELL:
+        # The WDDM-Blackwell mandate outranks an explicit override: refuse to seal a plan that would
+        # hang rather than honor a request the safety layer exists to prevent.
+        if wddm_blackwell and explicit in _FUSED_ATTN_UNSAFE_ON_BLACKWELL:
             raise PlannerError(
-                f"attention_backend '{explicit}' is not guaranteed safe on Blackwell (sm_120, "
-                f"cc_major>={_BLACKWELL_MAJOR}) — it can hit the deadlocking flash kernel; use math or "
-                "eager."
+                f"attention_backend '{explicit}' is not guaranteed safe on native Windows + Blackwell "
+                f"(sm_120, cc_major>={_BLACKWELL_MAJOR}) — it can hit the deadlocking flash kernel under "
+                "the Windows WDDM driver; use math or eager, or run under WSL where flash is safe."
             )
         return explicit
-    if blackwell:
-        return AttentionImpl.math.value  # Blackwell mandate — asserted, not probe-derived
+    if wddm_blackwell:
+        return AttentionImpl.math.value  # native-Windows Blackwell mandate — asserted, not probe-derived
     if AttentionImpl.sdpa.value in proven_attn:
         return AttentionImpl.sdpa.value
     return AttentionImpl.eager.value  # universal safe fallback
@@ -194,7 +201,9 @@ def build_run_plan(
     else:
         precision = "bf16" if "bf16" in proven_precisions else "fp32"
         quantization = "nf4" if capabilities.bitsandbytes_ok else "none"
-        attention_backend = _resolve_attention(constraints.attention_backend, cc_major, proven_attn)
+        attention_backend = _resolve_attention(
+            constraints.attention_backend, cc_major, proven_attn, os_value=profile.host.os
+        )
 
     adapter_method = constraints.adapter_method or ("qlora" if quantization == "nf4" else "lora")
     _require_enum(adapter_method, AdapterMethod, "adapter_method")

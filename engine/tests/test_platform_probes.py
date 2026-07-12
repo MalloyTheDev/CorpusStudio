@@ -199,13 +199,26 @@ def test_readiness_not_ready_when_torch_absent():
 # ---- built-in probes (behavior provable without torch) -----------------------
 
 
-def test_flash_probe_short_circuits_kernel_stall_on_blackwell():
+def test_flash_probe_short_circuits_kernel_stall_on_native_windows_blackwell():
     from corpus_studio.platform.probes import _probe_flash_attn_backward
 
-    out = _probe_flash_attn_backward(_profile(gpus=[_blackwell_gpu()]))
+    # NATIVE WINDOWS + Blackwell (WDDM): the flash backward would deadlock, so the probe reports the
+    # hazard WITHOUT executing/importing torch.
+    out = _probe_flash_attn_backward(_profile(gpus=[_blackwell_gpu()], os_enum=OperatingSystem.windows))
     assert out.taxonomy == FailureTaxonomy.KERNEL_STALL
     assert "sm_120" in (out.detail or "")
     assert "torch" not in sys.modules  # the hazard is reported without executing/importing torch
+
+
+def test_flash_probe_executes_on_wsl_blackwell_not_short_circuited():
+    from corpus_studio.platform.probes import _probe_flash_attn_backward
+
+    # WSL Blackwell: the deadlock does NOT apply, so the probe must NOT short-circuit — it actually
+    # attempts the flash backward (on a real WSL GPU it PASSes and proves flash/sdpa; here in the
+    # torch-free gate it degrades to ENVIRONMENT_FAILURE). The key invariant: it is NOT a KERNEL_STALL,
+    # so a WSL host can prove flash and the planner can seal sdpa.
+    out = _probe_flash_attn_backward(_profile(gpus=[_blackwell_gpu()], os_enum=OperatingSystem.wsl))
+    assert out.taxonomy != FailureTaxonomy.KERNEL_STALL
 
 
 def test_builtin_probes_degrade_cleanly_without_torch():

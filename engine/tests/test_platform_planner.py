@@ -65,14 +65,22 @@ def _plan(profile, report, *, now=_NOW, **kw):
 # ---- resolution paths -------------------------------------------------------
 
 
-def test_blackwell_ready_host_forces_math_bf16_nf4_qlora():
-    plan = _plan(_profile(cc_major=12), _report())
-    assert plan.attention_backend.value == "math"  # Blackwell mandate
+def test_native_windows_blackwell_host_forces_math_bf16_nf4_qlora():
+    plan = _plan(_profile(cc_major=12, os="windows"), _report())
+    assert plan.attention_backend.value == "math"  # native-Windows Blackwell (WDDM) mandate
     assert plan.precision.value == "bf16"
     assert plan.quantization.value == "nf4"
     assert plan.adapter.method.value == "qlora"
     # math is not a from_pretrained string → the snapshot leaves the trainer's own path in control.
     assert "attn_implementation" not in plan.training_config_snapshot
+
+
+def test_wsl_blackwell_host_keeps_sdpa_not_math():
+    # WSL is its own platform: the flash deadlock is Windows-WDDM-only, so a WSL Blackwell host does
+    # NOT force math — it seals the proven sdpa (→ flash on Linux CUDA). The whole reason to run under
+    # WSL (verified on a real 5070 under WSL2).
+    plan = _plan(_profile(cc_major=12, os="wsl"), _report(attn=("sdpa",)))
+    assert plan.attention_backend.value == "sdpa"
 
 
 def test_non_blackwell_with_proven_sdpa_uses_sdpa():
@@ -103,25 +111,32 @@ def test_explicit_attention_override_wins():
     assert plan.training_config_snapshot["attn_implementation"] == "flash_attention_2"
 
 
-def test_blackwell_rejects_an_explicit_unsafe_attention_override():
-    # The Blackwell math mandate outranks the request. The fused/flash family deadlocks outright, and
-    # plain sdpa can DISPATCH to the flash kernel — only math/eager are guaranteed safe on sm_120.
+def test_native_windows_blackwell_rejects_an_explicit_unsafe_attention_override():
+    # The native-Windows Blackwell (WDDM) math mandate outranks the request. The fused/flash family
+    # deadlocks outright there, and plain sdpa can DISPATCH to the flash kernel — only math/eager are
+    # guaranteed safe under WDDM+sm_120.
     for unsafe in ("flash_attention_2", "mem_efficient", "sdpa"):
         with pytest.raises(PlannerError, match="deadlock"):
-            _plan(_profile(cc_major=12), _report(), attention_backend=unsafe)
+            _plan(_profile(cc_major=12, os="windows"), _report(), attention_backend=unsafe)
 
 
-def test_blackwell_allows_only_math_and_eager_explicit_attention():
+def test_wsl_blackwell_allows_an_explicit_sdpa_override():
+    # On WSL the deadlock does not apply, so an explicit sdpa override is honored (not refused).
+    plan = _plan(_profile(cc_major=12, os="wsl"), _report(), attention_backend="sdpa")
+    assert plan.attention_backend.value == "sdpa"
+
+
+def test_native_windows_blackwell_allows_only_math_and_eager_explicit_attention():
     for safe in ("eager", "math"):
-        plan = _plan(_profile(cc_major=12), _report(), attention_backend=safe)
+        plan = _plan(_profile(cc_major=12, os="windows"), _report(), attention_backend=safe)
         assert plan.attention_backend.value == safe
 
 
-def test_unsloth_refused_on_blackwell_even_with_an_explicit_sdpa_override():
-    # The "Unsloth refused on sm_120" invariant must NOT be bypassable: an explicit sdpa (which Unsloth
-    # declares) is itself refused on Blackwell, so Unsloth can't be sealed there by any attention path.
+def test_unsloth_refused_on_native_windows_blackwell_even_with_an_explicit_sdpa_override():
+    # The "Unsloth refused on native-Windows sm_120" invariant must NOT be bypassable: an explicit sdpa
+    # (which Unsloth declares) is itself refused there, so Unsloth can't be sealed by any attention path.
     with pytest.raises(PlannerError, match="deadlock"):
-        _plan(_profile(cc_major=12), _report(), backend="unsloth", attention_backend="sdpa")
+        _plan(_profile(cc_major=12, os="windows"), _report(), backend="unsloth", attention_backend="sdpa")
 
 
 def test_unsupported_adapter_method_is_rejected():
@@ -147,9 +162,10 @@ def test_unknown_backend_is_rejected():
 
 
 def test_backend_that_cannot_run_the_resolved_plan_is_rejected_with_alternatives():
-    # Unsloth can't do the math attention a Blackwell plan requires → refused, corpus_studio named.
+    # Unsloth can't do the math attention a NATIVE-WINDOWS Blackwell plan requires → refused,
+    # corpus_studio named. (On WSL the plan seals sdpa, which Unsloth CAN run — see the CLI test.)
     with pytest.raises(PlannerError, match="can't run this plan"):
-        _plan(_profile(cc_major=12), _report(), backend="unsloth")
+        _plan(_profile(cc_major=12, os="windows"), _report(), backend="unsloth")
 
 
 def test_default_backend_is_corpus_studio():

@@ -15,6 +15,12 @@ from enum import Enum
 
 class OperatingSystem(str, Enum):
     windows = "windows"
+    # WSL is its OWN platform, not Windows and not bare Linux: it runs a Linux CUDA userspace, so the
+    # fused FLASH SDPA kernel that DEADLOCKS on native Windows (WDDM) runs fine here — yet its GPU
+    # memory still spills to shared system RAM via the host WDDM driver (wddm residency), so it
+    # degrades to slow-but-training instead of hard-OOMing like bare Linux. Flash-safe like Linux,
+    # spill-prone like Windows. Verified on a real RTX 5070 under WSL2.
+    wsl = "wsl"
     linux = "linux"
     macos = "macos"
     unknown = "unknown"

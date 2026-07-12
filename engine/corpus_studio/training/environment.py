@@ -17,6 +17,7 @@ Two readiness levels are distinguished:
 
 from __future__ import annotations
 
+import sys
 from importlib.metadata import PackageNotFoundError, version
 
 from pydantic import BaseModel, Field
@@ -139,11 +140,20 @@ def probe_training_runtime() -> TrainingRuntimeReport:
             "the fallback is a CPU-offload merge or adapter-only serving."
         )
     if gpu.available and _capability_major(gpu.compute_capability) >= 12:
-        notes.append(
-            f"Blackwell GPU (sm_{gpu.compute_capability.replace('.', '')}): the trainer forces the math SDPA "
-            "attention path — the fused flash/mem-efficient kernels deadlock on the first backward on this "
-            "arch. Math attention uses more VRAM than flash, so a long sequence_len is tighter here."
-        )
+        sm = gpu.compute_capability.replace(".", "")
+        if sys.platform == "win32":
+            notes.append(
+                f"Blackwell GPU (sm_{sm}) on native Windows: the trainer forces the math SDPA attention "
+                "path — the fused flash SDPA backward deadlocks under the Windows WDDM driver. Math "
+                "attention uses more VRAM than flash, so a long sequence_len is tighter; run under WSL to "
+                "keep flash (O(seq) memory)."
+            )
+        else:
+            notes.append(
+                f"Blackwell GPU (sm_{sm}) on WSL/Linux: flash SDPA attention is available — the Windows "
+                "WDDM flash deadlock does not apply here, so a long sequence_len is far cheaper (O(seq) "
+                "memory) than on native Windows."
+            )
     if ready:
         notes.append("Ready: a 4-bit QLoRA GPU run is possible.")
     elif cpu_toy_ready:

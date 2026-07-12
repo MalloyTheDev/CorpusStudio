@@ -27,7 +27,7 @@ _CORPUS_STUDIO = {
     "display_name": "Corpus Studio (first-party · HF + TRL + PEFT)",
     "backend_version": "1.0.0",
     "trainer_target": "corpus_studio",
-    "supported_os": ["windows", "linux", "macos"],
+    "supported_os": ["windows", "wsl", "linux", "macos"],
     "supported_devices": ["cuda", "cpu"],
     "task_types": ["sft"],
     "precision_modes": ["bf16", "fp16", "fp32"],
@@ -51,9 +51,11 @@ _CORPUS_STUDIO = {
     "known_failure_modes": [
         {
             "taxonomy": "KERNEL_STALL",
-            "condition": "compute_capability_major>=12 with fused flash attention",
-            "description": "The fused flash/mem-efficient SDPA kernels deadlock on Blackwell (sm_120).",
-            "mitigation": "Use the math attention path (the planner forces it on sm_120).",
+            "condition": "native Windows (WDDM) + compute_capability_major>=12 with fused flash attention",
+            "description": "The fused flash SDPA backward deadlocks on Blackwell (sm_120) under the "
+            "Windows WDDM driver. WSL/Linux run the same kernel fine.",
+            "mitigation": "On native Windows the planner forces the math attention path on sm_120; run "
+            "under WSL to keep flash (O(seq) memory).",
         }
     ],
     "capability_probes": ["cuda_available", "bf16_matmul", "bnb_4bit_load", "flash_attn_backward"],
@@ -65,7 +67,7 @@ _UNSLOTH = {
     "backend_version": "1.0.0",
     "trainer_target": "unsloth_script",
     # Unsloth is CUDA/triton-focused — no CPU training path.
-    "supported_os": ["linux", "windows"],
+    "supported_os": ["linux", "wsl", "windows"],
     "supported_devices": ["cuda"],
     "required_compute_capability": ">=7.5",
     "task_types": ["sft"],
@@ -91,9 +93,10 @@ _UNSLOTH = {
     "known_failure_modes": [
         {
             "taxonomy": "UNSUPPORTED_CONFIGURATION",
-            "condition": "compute_capability_major>=12 (Blackwell / sm_120)",
-            "description": "Unsloth's fused kernels are flash/sdpa; Blackwell needs the math path.",
-            "mitigation": "Use the corpus_studio backend on Blackwell.",
+            "condition": "native Windows (WDDM) + compute_capability_major>=12 (Blackwell / sm_120)",
+            "description": "Unsloth's fused kernels are flash/sdpa; native-Windows Blackwell needs the "
+            "math path (WDDM flash deadlock), which Unsloth lacks. On WSL/Linux Unsloth's sdpa runs.",
+            "mitigation": "Use the corpus_studio backend on native-Windows Blackwell, or run under WSL.",
         }
     ],
     "capability_probes": ["cuda_available", "bf16_matmul", "bnb_4bit_load"],
