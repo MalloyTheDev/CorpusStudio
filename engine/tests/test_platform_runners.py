@@ -144,6 +144,153 @@ def test_cpu_toy_always_uses_the_first_party_path_regardless_of_backend(monkeypa
     assert result.manifest.target == "cpu_toy"
 
 
+# ---- the run watchdog (measured fit / spill / stall) -------------------------
+
+GB = 1_000_000_000
+
+
+def _sample(*, peak_reserved, dedicated=12 * GB, shared=0):
+    from corpus_studio.platform.contracts import MemoryMetrics
+
+    return MemoryMetrics(
+        torch_peak_reserved_bytes=peak_reserved, dedicated_gpu_bytes=dedicated, shared_gpu_bytes=shared
+    )
+
+
+def test_runner_records_the_measured_fit_from_the_watchdog(monkeypatch):
+    # The per-step progress callback samples memory; the observed peak reconciles to a MEASURED fit on
+    # the manifest — a run that stayed on-device earns NATIVE_SAFE (an estimate never does).
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _fake_run_training(3))
+    runner = TrainingRunner(cpu_toy=True, memory_sampler=lambda: _sample(peak_reserved=6 * GB))
+    result = execute_run(demo_training_plan(), runner, clock=_CLOCK)
+    assert result.manifest.state == "succeeded"
+    assert result.manifest.final_fit is not None
+    assert result.manifest.final_fit.classification.value == "NATIVE_SAFE"
+    assert result.manifest.final_fit.estimated_peak_bytes == 6 * GB
+
+
+def test_runner_warns_on_a_measured_spill(monkeypatch):
+    # A sample showing memory spilled to shared RAM → a warning event + an ACCIDENTAL_WDDM_SPILL fit.
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _fake_run_training(2))
+    runner = TrainingRunner(
+        cpu_toy=True, memory_sampler=lambda: _sample(peak_reserved=19 * GB, shared=7 * GB)
+    )
+    result = execute_run(demo_training_plan(), runner, clock=_CLOCK)
+    assert result.manifest.final_fit is not None
+    assert result.manifest.final_fit.classification.value == "ACCIDENTAL_WDDM_SPILL"
+    assert any(
+        e.event_type == "warning" and "spill" in (e.message or "").lower() for e in result.events
+    )
+
+
+def test_runner_does_not_abort_on_a_stall_and_warns_instead(monkeypatch):
+    # A detected stall is an OBSERVABILITY SIGNAL, never an abort (an in-process CUDA hang can't be
+    # force-killed or classified — that's the subprocess-worker slice). A run that goes silent past the
+    # timeout must still SUCCEED (no false KERNEL_STALL abort) and only carry a warning. Uses a real
+    # (short) thread: the mocked trainer beats once, then goes silent past the tiny timeout, then
+    # returns WITHOUT another beat, so watchdog.stalled is still set at the end.
+    import time
+
+    def _stalling_trainer(config, *, progress_callback=None):
+        if progress_callback is not None:
+            progress_callback(1, 3, 0.9)  # one beat, then go silent
+        time.sleep(0.4)  # > heartbeat_timeout_s; the watchdog thread trips (heads-up only, no cancel)
+        return TrainResult(
+            output_dir="o", adapter_path="o", base_model=config.base_model, cpu_toy=True, steps=3
+        )
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _stalling_trainer)
+    runner = TrainingRunner(
+        cpu_toy=True, memory_sampler=lambda: None, heartbeat_timeout_s=0.1, poll_interval_s=0.02
+    )
+    result = execute_run(demo_training_plan(), runner, clock=_CLOCK)
+    assert result.manifest.state == "succeeded"  # NOT aborted / KERNEL_STALL
+    assert result.manifest.failure is None
+    assert any(
+        e.event_type == "warning" and "without progress" in (e.message or "") for e in result.events
+    )
+
+
+def test_runner_records_the_measured_fit_even_on_failure(monkeypatch):
+    # The watchdog samples per step; a run that trains then FAILS must still record the measured peak
+    # (the richest diagnostic) — captured in a finally, on every terminal path, not only on success.
+    def _sample_then_boom(config, *, progress_callback=None):
+        if progress_callback is not None:
+            progress_callback(1, 2, 0.9)  # a step happens → the watchdog samples a real peak
+        raise RuntimeError("kaboom mid-training")
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _sample_then_boom)
+    runner = TrainingRunner(cpu_toy=True, memory_sampler=lambda: _sample(peak_reserved=6 * GB))
+    result = execute_run(demo_training_plan(), runner, clock=_CLOCK)
+    assert result.manifest.state == "failed"
+    assert result.manifest.final_fit is not None  # the measured peak survived the failure
+    assert result.manifest.final_fit.estimated_peak_bytes == 6 * GB
+    # HONESTY: a FAILED run must NOT be stamped NATIVE_SAFE "fit proven" from its partial peak — the
+    # run didn't complete, so the fit is UNPROVEN (a spill would still classify; this one didn't spill).
+    assert result.manifest.final_fit.classification.value == "NATIVE_UNPROVEN"
+
+
+def test_runner_records_a_spill_even_on_failure(monkeypatch):
+    # The richest diagnostic: a run that SPILLED then failed. The finally must record the spill fit +
+    # emit the spill warning even though the run raised (this is what the finally exists for).
+    def _spill_then_boom(config, *, progress_callback=None):
+        if progress_callback is not None:
+            progress_callback(1, 2, 0.9)  # samples a spilling peak
+        raise RuntimeError("OOM after the spill")
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _spill_then_boom)
+    runner = TrainingRunner(
+        cpu_toy=True, memory_sampler=lambda: _sample(peak_reserved=19 * GB, shared=7 * GB)
+    )
+    result = execute_run(demo_training_plan(), runner, clock=_CLOCK)
+    assert result.manifest.state == "failed"
+    assert result.manifest.final_fit is not None
+    assert result.manifest.final_fit.classification.value == "ACCIDENTAL_WDDM_SPILL"
+    assert result.manifest.final_fit.estimated_peak_bytes == 19 * GB
+    assert any(
+        e.event_type == "warning" and "spill" in (e.message or "").lower() for e in result.events
+    )
+
+
+def test_runner_records_the_fit_on_cancel_after_a_step(monkeypatch):
+    # A run that completes a step (real peak sampled) and is THEN cancelled must still record the
+    # measured fit — the finally captures it on the cancel path, not just success.
+    from corpus_studio.platform.supervisor import CancelToken
+
+    token = CancelToken()
+
+    def _cancel_after_step1(config, *, progress_callback=None):
+        progress_callback(1, 2, 0.9)  # a step completes → the watchdog samples a 6 GB peak
+        token.cancel()  # user cancels between steps
+        progress_callback(2, 2, 0.8)  # observes the cancel → _CancelTraining
+        return TrainResult(
+            output_dir="o", adapter_path="o", base_model=config.base_model, cpu_toy=True, steps=2
+        )
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _cancel_after_step1)
+    runner = TrainingRunner(cpu_toy=True, memory_sampler=lambda: _sample(peak_reserved=6 * GB))
+    result = execute_run(demo_training_plan(), runner, cancel=token, clock=_CLOCK)
+    assert result.manifest.state == "cancelled"
+    assert result.manifest.failure is None
+    assert result.manifest.final_fit is not None  # measured peak survived the cancel
+    assert result.manifest.final_fit.estimated_peak_bytes == 6 * GB
+    assert result.manifest.final_fit.classification.value == "NATIVE_UNPROVEN"  # not "proven"
+
+
+def test_runner_survives_a_raising_memory_sampler(monkeypatch):
+    # The memory probe is best-effort observability — a sampler that RAISES (e.g. a torch memory query
+    # on a faulting GPU) must NEVER abort an otherwise-successful run.
+    def _boom_sampler():
+        raise RuntimeError("CUDA error: an illegal memory access was encountered")
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _fake_run_training(2))
+    result = execute_run(
+        demo_training_plan(), TrainingRunner(cpu_toy=True, memory_sampler=_boom_sampler), clock=_CLOCK
+    )
+    assert result.manifest.state == "succeeded"  # the probe fault didn't fail the run
+    assert result.manifest.final_fit is None  # nothing usable was sampled
+
+
 # ---- failure + cancel classification -----------------------------------------
 
 
