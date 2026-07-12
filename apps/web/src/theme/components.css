@@ -1,0 +1,213 @@
+/* Nocturne component styles for the platform shell — cards, chips, eyebrows, the lifecycle strip. */
+
+.cs-app {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.cs-topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 24px;
+  background: var(--cs-chrome);
+  border-bottom: 1px solid var(--cs-line);
+}
+.cs-brand {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--cs-radius-avatar, 8px);
+  background: var(--cs-accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cs-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.cs-subtitle {
+  font-size: 12px;
+  color: var(--cs-t3);
+}
+.cs-spacer {
+  flex: 1;
+}
+.cs-btn {
+  background: var(--cs-panel);
+  color: var(--cs-t2);
+  border: 1px solid var(--cs-line-2);
+  border-radius: var(--cs-radius-button);
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cs-btn:hover {
+  background: var(--cs-hover);
+}
+
+.cs-body {
+  padding: 22px 24px 40px;
+  max-width: 1120px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.cs-eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--cs-t4);
+  margin: 0 0 8px 2px;
+}
+
+.cs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.cs-card {
+  background: var(--cs-panel);
+  border: 1px solid var(--cs-line-2);
+  border-radius: var(--cs-radius-card);
+  padding: 16px;
+}
+.cs-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+
+.cs-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  font-size: 12.5px;
+}
+.cs-row + .cs-row {
+  border-top: 1px solid var(--cs-line);
+}
+.cs-key {
+  color: var(--cs-t3);
+}
+.cs-val {
+  color: var(--cs-text);
+  font-weight: 500;
+  text-align: right;
+}
+.cs-mono {
+  font-family: var(--cs-mono);
+  font-size: 12px;
+}
+
+.cs-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: var(--cs-radius-chip);
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--cs-accent-soft);
+  color: var(--cs-accent-ink);
+}
+.cs-chip.ok {
+  background: color-mix(in srgb, var(--cs-ok) 16%, transparent);
+  color: var(--cs-ok);
+}
+.cs-chip.warn {
+  background: color-mix(in srgb, var(--cs-warn) 16%, transparent);
+  color: var(--cs-warn);
+}
+.cs-chip.bad {
+  background: color-mix(in srgb, var(--cs-bad) 16%, transparent);
+  color: var(--cs-bad);
+}
+.cs-chip.neutral {
+  background: var(--cs-panel-2);
+  color: var(--cs-t3);
+}
+.cs-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cs-lifecycle {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 22px;
+}
+.cs-stage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cs-t3);
+}
+.cs-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--cs-accent);
+}
+.cs-connector {
+  flex: 1;
+  height: 2px;
+  background: var(--cs-accent);
+  margin: 0 10px;
+}
+
+.cs-note {
+  font-size: 11.5px;
+  color: var(--cs-t3);
+  margin-top: 10px;
+  line-height: 1.5;
+}
+.cs-rationale {
+  font-size: 12px;
+  color: var(--cs-t2);
+  margin-top: 10px;
+  line-height: 1.55;
+}
+
+.cs-events {
+  font-family: var(--cs-mono);
+  font-size: 11.5px;
+  max-height: 240px;
+  overflow: auto;
+}
+.cs-event {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+  color: var(--cs-t2);
+}
+.cs-event .seq {
+  color: var(--cs-t4);
+  min-width: 22px;
+  text-align: right;
+}
+.cs-event .kind {
+  color: var(--cs-accent-strong);
+  min-width: 74px;
+}
+
+.cs-honest {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--cs-t4);
+  border: 1px dashed var(--cs-line-2);
+  border-radius: 4px;
+  padding: 1px 6px;
+}

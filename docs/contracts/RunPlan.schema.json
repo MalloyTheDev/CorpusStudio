@@ -108,7 +108,7 @@
     },
     "BatchingSpec": {
       "additionalProperties": false,
-      "description": "The accumulation TARGET is expressed in SUPERVISED TOKENS, not microbatch count: the trainer\naccumulates until summed supervised tokens >= target and normalizes the loss by supervised\ntokens across the window \u2014 so the effective batch is invariant to sequence length + padding.",
+      "description": "The accumulation TARGET is expressed in SUPERVISED TOKENS, not microbatch count. A\ntoken-target-CAPABLE backend accumulates until summed supervised tokens >= target and normalizes\nthe loss by supervised tokens across the window, so the effective batch is invariant to sequence\nlength + padding. The first-party ``corpus_studio`` reference trainer is NOT token-target-capable\ntoday \u2014 it honors ``fallback_grad_accumulation_steps`` (a fixed microbatch count); the token\ntarget is the contract a future token-aware backend would satisfy.",
       "properties": {
         "fallback_grad_accumulation_steps": {
           "anyOf": [

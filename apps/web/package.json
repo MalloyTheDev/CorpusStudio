@@ -1,0 +1,30 @@
+{
+  "name": "corpus-studio-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Corpus Studio's Tauri 2 + React shell — a client over the platform's language-neutral contracts. Renders the run lifecycle (profile → plan → fit → run) from the same JSON-Schema contracts the engine emits, skinned with the shared Nocturne design tokens. The eventual cross-platform head (see docs/design/); the Avalonia head is the interim.",
+  "scripts": {
+    "gen:contracts": "node scripts/gen-contracts.mjs",
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@phosphor-icons/react": "^2.1.7",
+    "@tauri-apps/api": "^2.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "json-schema-to-typescript": "^15.0.3",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}

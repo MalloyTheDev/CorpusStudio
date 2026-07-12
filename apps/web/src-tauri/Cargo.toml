@@ -1,0 +1,19 @@
+[package]
+name = "corpus-studio-web"
+version = "0.1.0"
+description = "Corpus Studio — Tauri 2 desktop shell over the platform contracts"
+authors = ["Corpus Studio"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "corpus_studio_web_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
