@@ -5,7 +5,11 @@ a core-only install. The real training path is user-smoke-tested (a GPU + the [t
 
 import corpus_studio.platform as P
 from corpus_studio.platform.enums import FailureTaxonomy, StageMarker
-from corpus_studio.platform.runners import TrainingRunner, demo_training_plan
+from corpus_studio.platform.runners import (
+    TrainingRunner,
+    classify_training_error,
+    demo_training_plan,
+)
 from corpus_studio.platform.supervisor import execute_run
 from corpus_studio.training.trainer import TrainerError, TrainResult
 
@@ -125,6 +129,63 @@ def test_cancellation_during_training_yields_cancelled(monkeypatch):
 
     assert result.manifest.state == "cancelled"
     assert result.manifest.failure is None
+
+
+# ---- fine-grained failure classification ------------------------------------
+
+
+class OutOfMemoryError(Exception):
+    """Stands in for torch.cuda.OutOfMemoryError — the classifier matches by type NAME, so no torch
+    is needed and the message can be empty (torch's OOM often carries the signal only in the type)."""
+
+
+def test_classify_oom_from_message():
+    taxonomy, remediation = classify_training_error(
+        RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+    )
+    assert taxonomy == FailureTaxonomy.OOM
+    assert remediation and "sequence_len" in remediation
+
+
+def test_classify_oom_from_exception_type_name():
+    assert classify_training_error(OutOfMemoryError(""))[0] == FailureTaxonomy.OOM
+
+
+def test_classify_numerical_failure():
+    assert classify_training_error(ValueError("Loss is nan"))[0] == FailureTaxonomy.NUMERICAL_FAILURE
+    assert classify_training_error(RuntimeError("gradients contain inf"))[0] == (
+        FailureTaxonomy.NUMERICAL_FAILURE
+    )
+
+
+def test_classify_unrecognized_stays_fail():
+    taxonomy, remediation = classify_training_error(ValueError("something unexpected"))
+    assert taxonomy == FailureTaxonomy.FAIL
+    assert remediation is None
+    # 'information' contains 'inf' but must not be mislabeled numerical (no loss/grad co-signal).
+    assert classify_training_error(RuntimeError("missing information"))[0] == FailureTaxonomy.FAIL
+
+
+def test_runner_oom_is_classified_as_oom(monkeypatch):
+    def _oom(config, *, progress_callback=None):
+        raise RuntimeError("CUDA out of memory. Tried to allocate 20.00 GiB")
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _oom)
+    result = execute_run(demo_training_plan(), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.OOM
+    assert "micro_batch_size" in (result.manifest.failure.remediation or "")
+
+
+def test_runner_unrecognized_error_stays_fail(monkeypatch):
+    def _boom(config, *, progress_callback=None):
+        raise RuntimeError("an unexpected internal error")
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _boom)
+    result = execute_run(demo_training_plan(), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.FAIL
 
 
 def test_empty_snapshot_is_unsupported_configuration():
