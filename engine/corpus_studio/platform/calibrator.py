@@ -24,7 +24,12 @@ _SAFETY_MARGIN_BYTES = 1_500_000_000
 _GB = 1_000_000_000
 # Attention paths that materialize the seq-scaling attention-scores memory (Blackwell is forced here).
 _MATH_ATTENTION = frozenset({"math", "eager"})
-_INT4_QUANT = frozenset({"nf4", "int4", "fp4"})
+# Sub-16-bit quantization schemes costed at the int4 weight tier. gptq/awq/hqq aren't strictly 4-bit,
+# so this is an approximation — but far closer than the fp16 tier and it errs toward under-not-over.
+_INT4_QUANT = frozenset({"nf4", "int4", "fp4", "gptq", "awq", "hqq"})
+# Full-width precisions whose weights are 4 bytes/param (2× fp16) — an un-quantized fp32 plan must not
+# be costed at the fp16 tier or it would be under-estimated and wrongly predicted to fit.
+_FP32_PRECISION = frozenset({"fp32", "tf32"})
 
 
 def classify_fit(plan: RunPlan, profile: EnvironmentProfile) -> FitClassification:
@@ -60,7 +65,7 @@ def classify_fit(plan: RunPlan, profile: EnvironmentProfile) -> FitClassificatio
         adapter=plan.adapter.method.value,
         math_attention=math_attention,
     )
-    total_gb = _select_total_gb(estimate, plan.quantization.value)
+    total_gb = _select_total_gb(estimate, plan.quantization.value, plan.precision.value)
     if total_gb is None:
         return FitClassification(
             classification=FitClass.NATIVE_UNPROVEN,
@@ -82,12 +87,17 @@ def classify_fit(plan: RunPlan, profile: EnvironmentProfile) -> FitClassificatio
     )
 
 
-def _select_total_gb(estimate: object, quantization: str) -> float | None:
+def _select_total_gb(estimate: object, quantization: str, precision: str) -> float | None:
     if quantization in _INT4_QUANT:
         return getattr(estimate, "total_gb_int4", None)
     if quantization == "int8":
         return getattr(estimate, "total_gb_int8", None)
-    return getattr(estimate, "total_gb_fp16", None)
+    total = getattr(estimate, "total_gb_fp16", None)
+    weights_fp16 = getattr(estimate, "weights_gb_fp16", None)
+    if total is not None and weights_fp16 is not None and precision in _FP32_PRECISION:
+        # fp32 weights are 2× fp16 → add the extra weight bytes (coarse; over- not under-estimates).
+        total = round(total + weights_fp16, 1)
+    return total
 
 
 def _band(
