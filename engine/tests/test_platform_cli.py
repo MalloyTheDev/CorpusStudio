@@ -95,6 +95,21 @@ def test_platform_plan_json_bundles_plan_and_fit(monkeypatch):
     assert bundle["fit_classification"]["classification"] != "NATIVE_SAFE"
 
 
+def test_platform_plan_dataset_format_flows_through_the_cli(monkeypatch):
+    # A chat dataset (messages) must not be planned as instruction (Alpaca) — the snapshot's
+    # dataset_format is what the trainer uses to format rows.
+    _ready_host(monkeypatch)
+    result = runner.invoke(
+        app,
+        ["platform-plan", "--base-model", "m", "--dataset", "d.jsonl", "--dataset-format", "chat",
+         "--json"],
+    )
+    assert result.exit_code == 0
+    snap = json.loads(result.stdout)["run_plan"]["training_config_snapshot"]
+    assert snap["dataset_format"] == "chat"
+    assert "format" not in snap  # the trainer key is dataset_format, never a silently-dropped "format"
+
+
 def test_platform_plan_backend_flows_through_the_cli(monkeypatch):
     # A proven-sdpa host: Unsloth declares sdpa, so it can run this plan → backend_ref reflects it.
     _ready_host(monkeypatch, cc_major=8, attn="sdpa")
