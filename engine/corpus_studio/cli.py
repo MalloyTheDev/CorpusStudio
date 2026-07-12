@@ -340,7 +340,10 @@ def platform_run(
         False, "--demo", help="Execute a built-in minimal plan (echo needs nothing; cpu_toy needs [train])."
     ),
     runner_name: str = typer.Option(
-        "echo", "--runner", help="Runner that executes the plan: echo | cpu_toy | training."
+        "echo",
+        "--runner",
+        help="Runner: echo | cpu_toy | training. 'training' dispatches by the plan's backend "
+        "(corpus_studio / unsloth — see 'platform-backends').",
     ),
     max_steps: Optional[int] = typer.Option(
         None, "--max-steps", help="Cap optimizer steps (cpu_toy / training runners)."
@@ -352,8 +355,10 @@ def platform_run(
     """Execute a RunPlan through the headless run supervisor: stream RunEvents to stderr and produce
     a RunManifest on stdout. 'echo' is a dependency-light no-op that proves the supervisor without a
     GPU or the [train] extra; 'cpu_toy' / 'training' run the real trainer (via the TrainingRunner,
-    reading the plan's training_config_snapshot). The RunManifest classifies the terminal state
-    (succeeded / failed / cancelled) with a FailureRecord taxonomy on abnormal termination."""
+    reading the plan's training_config_snapshot). 'training' dispatches to the framework the plan
+    picked (backend_ref: corpus_studio → the first-party trainer, unsloth → the Unsloth backend). The
+    RunManifest classifies the terminal state (succeeded / failed / cancelled) with a FailureRecord
+    taxonomy on abnormal termination."""
     from corpus_studio.platform.contracts import RunPlan
     from corpus_studio.platform.supervisor import EchoRunner, Runner, demo_run_plan, execute_run
 

@@ -98,6 +98,52 @@ def test_training_runner_name_reflects_cpu_toy_flag():
     assert TrainingRunner().name == "training"
 
 
+# ---- multi-backend dispatch --------------------------------------------------
+
+
+def _plan_with_backend(backend_id: str):
+    body = demo_training_plan().model_dump(mode="json")
+    body["backend_ref"] = {"id": backend_id}
+    return P.RunPlan.model_validate(body)
+
+
+def test_training_runner_dispatches_to_the_plan_backend_corpus_studio(monkeypatch):
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _fake_run_training(1))
+    result = execute_run(_plan_with_backend("corpus_studio"), TrainingRunner(), clock=_CLOCK)
+    assert result.manifest.state == "succeeded"
+    assert result.manifest.target == "corpus_studio"  # the manifest names the framework that ran
+
+
+def test_training_runner_dispatches_to_unsloth(monkeypatch):
+    # The 'training' runner reads the plan's backend_ref and drives the Unsloth trainer for it. The
+    # Unsloth function is mocked (the real one needs a GPU + unsloth); dispatch + labeling is what we
+    # prove here.
+    monkeypatch.setattr(
+        "corpus_studio.training.unsloth_trainer.run_unsloth_training", _fake_run_training(2)
+    )
+    result = execute_run(_plan_with_backend("unsloth"), TrainingRunner(), clock=_CLOCK)
+    assert result.manifest.state == "succeeded"
+    assert result.manifest.target == "unsloth"
+    assert [m.optimizer_step for m in result.events if m.event_type == "metric"] == [1, 2]
+
+
+def test_unknown_backend_is_unsupported_configuration():
+    result = execute_run(_plan_with_backend("megatron"), TrainingRunner(), clock=_CLOCK)
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert "megatron" in (result.manifest.failure.message or "")
+
+
+def test_cpu_toy_always_uses_the_first_party_path_regardless_of_backend(monkeypatch):
+    # A plan can carry any backend_ref, but --runner cpu_toy is the first-party CPU smoke path — it must
+    # NOT silently route to Unsloth (which has no CPU path). It runs run_training and labels 'cpu_toy'.
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _fake_run_training(1))
+    result = execute_run(_plan_with_backend("unsloth"), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    assert result.manifest.state == "succeeded"
+    assert result.manifest.target == "cpu_toy"
+
+
 # ---- failure + cancel classification -----------------------------------------
 
 

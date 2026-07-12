@@ -1,11 +1,14 @@
 """Real runners that plug into the platform run supervisor — platform slice 4.
 
 The :class:`~corpus_studio.platform.supervisor.EchoRunner` proves the harness with zero heavy deps;
-this module adds the runner that executes an ACTUAL training run. :class:`TrainingRunner` wraps
-``training.trainer.run_training``: it reads the trainer config from the RunPlan's
-``training_config_snapshot``, adapts the ``(step, total, loss)`` progress into ``RunEvent`` metrics,
-cooperatively aborts on cancel, classifies a missing runtime as an ``ENVIRONMENT_FAILURE`` (never a
-crash), and returns the produced adapter artifact.
+this module adds the runner that executes an ACTUAL training run. :class:`TrainingRunner` dispatches
+by the RunPlan's chosen backend (``backend_ref`` — ``corpus_studio`` → ``trainer.run_training``,
+``unsloth`` → ``unsloth_trainer.run_unsloth_training``; ``cpu_toy`` always uses the first-party CPU
+smoke path): it reads the trainer config from the RunPlan's ``training_config_snapshot``, adapts the
+``(step, total, loss)`` progress into ``RunEvent`` metrics, cooperatively aborts on cancel, classifies
+a missing runtime as an ``ENVIRONMENT_FAILURE`` (never a crash), and returns the produced adapter
+artifact. Both backends share the ``(config, *, progress_callback) -> TrainResult`` shape, so the
+progress/cancel/error-classification harness is identical — "pick your framework", one runner.
 
 The heavy stack (torch/transformers/…) is lazy-imported **inside** ``run()`` — importing this module
 pulls only the platform contracts + the (import-light) trainer module, so the dependency-light
@@ -16,7 +19,7 @@ GPU); the real GPU QLoRA path can only be user-smoke-tested.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
@@ -32,7 +35,9 @@ from corpus_studio.platform.supervisor import (
 )
 
 if TYPE_CHECKING:
-    from corpus_studio.training.trainer import TrainRunConfig
+    from corpus_studio.training.trainer import TrainResult, TrainRunConfig
+
+    TrainerFn = Callable[..., TrainResult]
 
 
 class _CancelTraining(Exception):
@@ -89,24 +94,15 @@ class TrainingRunner:
         self.name = "cpu_toy" if cpu_toy else "training"
 
     def run(self, ctx: RunContext) -> Sequence[ProducedArtifact]:
-        try:
-            # Lazy: keeps importing this module dependency-light. The trainer module itself is
-            # import-light (torch is lazy-imported inside run_training), so this rarely fails —
-            # a truly-missing runtime instead surfaces as the TrainerError below.
-            from corpus_studio.training.trainer import (  # noqa: PLC0415
-                TrainerError,
-                run_training,
-            )
-        except ImportError as exc:  # pragma: no cover - defensive; the trainer module imports cleanly
-            raise RunnerFailure(
-                f"the training runtime module could not be imported: {exc}",
-                taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
-                stage=StageMarker.env_loaded,
-                remediation="install the training extra: pip install '.[train]'",
-            ) from exc
+        trainer_fn, backend_label = self._resolve_trainer(ctx.plan)
+        # The manifest target reflects the backend that actually ran ("cpu_toy" for the smoke path).
+        self.name = backend_label
+        from corpus_studio.training.trainer import TrainerError  # noqa: PLC0415
 
         config = self._resolve_config(ctx.plan)
-        ctx.emit_stage(StageMarker.process_start, f"training run: {config.base_model}")
+        ctx.emit_stage(
+            StageMarker.process_start, f"training run [{backend_label}]: {config.base_model}"
+        )
 
         def _progress(step: int, total: int, loss: float | None) -> None:
             if ctx.cancelled:
@@ -114,7 +110,7 @@ class TrainingRunner:
             ctx.emit_metric(optimizer_step=step, loss=loss, message=f"[{step}/{total}] step")
 
         try:
-            result = run_training(config, progress_callback=_progress)
+            result = trainer_fn(config, progress_callback=_progress)
         except _CancelTraining:
             raise RunCancelled from None
         except TrainerError as exc:
@@ -143,6 +139,39 @@ class TrainingRunner:
         )
         ctx.emit_artifact(artifact)
         return [artifact]
+
+    def _resolve_trainer(self, plan: RunPlan) -> tuple[TrainerFn, str]:
+        """The ``(trainer fn, manifest label)`` for this plan. ``cpu_toy`` always uses the first-party
+        CPU smoke path; otherwise dispatch by the plan's ``backend_ref`` so the plan the planner sealed
+        (which the backend registry already validated) executes on the framework the user picked. An
+        unregistered backend is a clean ``UNSUPPORTED_CONFIGURATION``, not a crash."""
+        try:
+            from corpus_studio.training.trainer import run_training  # noqa: PLC0415
+
+            if self.cpu_toy:
+                return run_training, "cpu_toy"
+            backend_id = plan.backend_ref.id
+            if backend_id == "corpus_studio":
+                return run_training, "corpus_studio"
+            if backend_id == "unsloth":
+                from corpus_studio.training.unsloth_trainer import (  # noqa: PLC0415
+                    run_unsloth_training,
+                )
+
+                return run_unsloth_training, "unsloth"
+        except ImportError as exc:  # pragma: no cover - defensive; the trainer modules import cleanly
+            raise RunnerFailure(
+                f"the training runtime module could not be imported: {exc}",
+                taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
+                stage=StageMarker.env_loaded,
+                remediation="install the training extra: pip install '.[train]'",
+            ) from exc
+        raise RunnerFailure(
+            f"no training runner is registered for backend '{plan.backend_ref.id}'",
+            taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+            stage=StageMarker.env_loaded,
+            remediation="choose a registered backend (corpus_studio, unsloth) — see 'platform-backends'",
+        )
 
     def _resolve_config(self, plan: RunPlan) -> TrainRunConfig:
         """Build the trainer config from the plan's rendered snapshot, applying the runner's
@@ -179,6 +208,7 @@ def demo_training_plan(plan_id: str = "demo-cpu-toy") -> RunPlan:
     body = demo_run_plan(plan_id).model_dump(mode="json")
     body["task_type"] = "sft"
     body["base_model"] = "hf-internal-testing/tiny-random-gpt2"
+    body["backend_ref"] = {"id": "corpus_studio"}  # coherent for both the cpu_toy + corpus_studio paths
     body["training_config_snapshot"] = {
         "base_model": "hf-internal-testing/tiny-random-gpt2",
         "dataset_path": "examples/datasets/instruction/train.jsonl",
