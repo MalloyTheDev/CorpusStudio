@@ -355,24 +355,28 @@ def platform_run(
     out_dir: Optional[Path] = typer.Option(
         None, "--out", help="Write the terminal RunManifest.json to this directory (atomic)."
     ),
+    subprocess_mode: bool = typer.Option(
+        False,
+        "--subprocess",
+        help="Run in a supervised CHILD process — the parent can KILL a hung run (a stall becomes a "
+        "real KERNEL_STALL) and a backend crash is isolated from the core.",
+    ),
+    silence_timeout: float = typer.Option(
+        600.0, "--timeout", help="[--subprocess] Kill the worker after this many seconds of silence."
+    ),
 ):
     """Execute a RunPlan through the headless run supervisor: stream RunEvents to stderr and produce
     a RunManifest on stdout. 'echo' is a dependency-light no-op that proves the supervisor without a
     GPU or the [train] extra; 'cpu_toy' / 'training' run the real trainer (via the TrainingRunner,
     reading the plan's training_config_snapshot). 'training' dispatches to the framework the plan
-    picked (backend_ref: corpus_studio → the first-party trainer, unsloth → the Unsloth backend). The
-    RunManifest classifies the terminal state (succeeded / failed / cancelled) with a FailureRecord
-    taxonomy on abnormal termination."""
+    picked (backend_ref: corpus_studio → the first-party trainer, unsloth → the Unsloth backend).
+    --subprocess runs it in a supervised child process the parent can time out + KILL (a hung run
+    becomes a real KERNEL_STALL; a crash is isolated). The RunManifest classifies the terminal state
+    (succeeded / failed / cancelled) with a FailureRecord taxonomy on abnormal termination."""
     from corpus_studio.platform.contracts import RunPlan
     from corpus_studio.platform.supervisor import EchoRunner, Runner, demo_run_plan, execute_run
 
-    if runner_name == "echo":
-        runner: Runner = EchoRunner()
-    elif runner_name in ("cpu_toy", "training"):
-        from corpus_studio.platform.runners import TrainingRunner
-
-        runner = TrainingRunner(cpu_toy=(runner_name == "cpu_toy"), max_steps=max_steps)
-    else:
+    if runner_name not in ("echo", "cpu_toy", "training"):
         typer.echo(f"Unknown runner '{runner_name}' (echo | cpu_toy | training).", err=True)
         raise typer.Exit(2)
 
@@ -389,7 +393,24 @@ def platform_run(
         typer.echo("Provide a RunPlan path argument, or pass --demo.", err=True)
         raise typer.Exit(2)
 
-    result = execute_run(plan, runner, out_dir=out_dir)
+    if subprocess_mode:
+        from corpus_studio.platform.subprocess_supervisor import execute_run_subprocess
+
+        result = execute_run_subprocess(
+            plan,
+            runner_name=runner_name,
+            max_steps=max_steps,
+            silence_timeout_s=silence_timeout,
+            out_dir=out_dir,
+        )
+    else:
+        if runner_name == "echo":
+            runner: Runner = EchoRunner()
+        else:
+            from corpus_studio.platform.runners import TrainingRunner
+
+            runner = TrainingRunner(cpu_toy=(runner_name == "cpu_toy"), max_steps=max_steps)
+        result = execute_run(plan, runner, out_dir=out_dir)
     for event in result.events:
         typer.echo(event.model_dump_json(), err=True)
     if out_dir is not None and result.artifacts:
