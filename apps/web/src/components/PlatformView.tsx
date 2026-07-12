@@ -27,10 +27,20 @@ const Stage = ({ label }: { label: string }) => (
   </div>
 );
 
-export function PlatformView({ snap }: { snap: PlatformSnapshot }) {
+export function PlatformView({
+  snap,
+  onPickBackend,
+  busy = false,
+}: {
+  snap: PlatformSnapshot;
+  onPickBackend?: (backendId: string) => void;
+  /** A probe or re-plan is in flight — disables the backend picker so it can't race the request. */
+  busy?: boolean;
+}) {
   const gpu = snap.profile.gpus?.[0];
   const eff = snap.capabilities.effective_capabilities;
   const fit = snap.fit;
+  const manifest = snap.manifest;
 
   return (
     <div className="cs-body">
@@ -108,41 +118,59 @@ export function PlatformView({ snap }: { snap: PlatformSnapshot }) {
         </Card>
 
         <Card title="Run">
-          <Row k="State">
-            <Chip tone={snap.manifest.state === "succeeded" ? "ok" : "bad"}>
-              {snap.manifest.state}
-            </Chip>
-          </Row>
-          <Row k="Run id">{snap.manifest.run_id}</Row>
-          <Row k="Runner">{snap.manifest.target}</Row>
-          <Row k="Artifacts">{(snap.manifest.artifact_ids ?? []).join(", ") || "—"}</Row>
+          {manifest ? (
+            <>
+              <Row k="State">
+                <Chip tone={manifest.state === "succeeded" ? "ok" : "bad"}>{manifest.state}</Chip>
+              </Row>
+              <Row k="Run id">{manifest.run_id}</Row>
+              <Row k="Runner">{manifest.target}</Row>
+              <Row k="Artifacts">{(manifest.artifact_ids ?? []).join(", ") || "—"}</Row>
+            </>
+          ) : (
+            <>
+              <Row k="State">
+                <Chip tone="neutral">not launched</Chip>
+              </Row>
+              <p className="cs-note">
+                Plan resolved — nothing has executed yet. Launch it from the desktop shell
+                (<span className="cs-mono">platform-run --runner training</span>); the live RunEvent
+                stream lands here.
+              </p>
+            </>
+          )}
         </Card>
 
         <Card title="Event stream">
-          <div className="cs-events">
-            {snap.events.map((e) => (
-              <div className="cs-event" key={e.seq}>
-                <span className="seq">{e.seq}</span>
-                <span className="kind">{e.event_type}</span>
-                <span>
-                  {e.stage ?? ""}
-                  {e.optimizer_step != null ? ` step ${e.optimizer_step}` : ""}
-                  {e.metrics?.loss != null ? ` loss=${e.metrics.loss.toFixed(4)}` : ""}
-                  {e.message ? ` ${e.message}` : ""}
-                </span>
-              </div>
-            ))}
-          </div>
+          {snap.events?.length ? (
+            <div className="cs-events">
+              {snap.events.map((e) => (
+                <div className="cs-event" key={e.seq}>
+                  <span className="seq">{e.seq}</span>
+                  <span className="kind">{e.event_type}</span>
+                  <span>
+                    {e.stage ?? ""}
+                    {e.optimizer_step != null ? ` step ${e.optimizer_step}` : ""}
+                    {e.metrics?.loss != null ? ` loss=${e.metrics.loss.toFixed(4)}` : ""}
+                    {e.message ? ` ${e.message}` : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="cs-note">No run yet — events appear once a run is launched.</p>
+          )}
         </Card>
       </div>
 
-      <BackendPicker snap={snap} />
+      <BackendPicker snap={snap} onPick={onPickBackend} busy={busy} />
 
       <p className="cs-note">
         Rendered from the engine's language-neutral JSON-Schema contracts (docs/contracts) — the same
-        boundary the Rust core and the Avalonia head consume. This is a real engine-generated snapshot;
-        wiring the live host flow (probe → plan → run against your machine, via the Tauri commands) is
-        the next slice.
+        boundary the Rust core and the Avalonia head consume.{" "}
+        {onPickBackend
+          ? "This is a live probe → plan against your host; launch a run from the desktop shell to populate the run stream."
+          : "This is a real engine-generated snapshot; switch to “Live host” inside the desktop shell to probe your own machine."}
       </p>
     </div>
   );

@@ -33,7 +33,8 @@ fn platform_backends() -> Result<Value, String> {
     run_engine(&["platform-backends", "--json"])
 }
 
-/// Resolve a hash-sealed RunPlan for a base model + dataset on the chosen backend (RunPlan JSON).
+/// Resolve a hash-sealed RunPlan for a base model + dataset on the chosen backend, plus its predicted
+/// fit — the `{run_plan, fit_classification}` bundle the live flow renders (`--json`).
 #[tauri::command]
 fn platform_plan(
     base_model: String,
@@ -50,6 +51,7 @@ fn platform_plan(
         &dataset,
         "--sequence-len",
         &seq,
+        "--json",
     ];
     let backend_id = backend.unwrap_or_default();
     if !backend_id.is_empty() {
