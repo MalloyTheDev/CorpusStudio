@@ -8,17 +8,36 @@ import { Card, Chips, Eyebrow } from "./ui";
  *  DECLARE support for the plan the engine already resolved — a Blackwell math plan filters Unsloth
  *  out (its fused kernels can't do math), it isn't silently downgraded. Picking a fitting backend
  *  reveals its export formats, optimizers, and pre-declared hazards. */
-export function BackendPicker({ snap }: { snap: PlatformSnapshot }) {
+export function BackendPicker({
+  snap,
+  onPick,
+  busy = false,
+}: {
+  snap: PlatformSnapshot;
+  /** When provided (live host flow), picking a fitting backend re-resolves the plan through the
+   *  engine. Absent (sample) → picking only highlights + previews. */
+  onPick?: (backendId: string) => void;
+  /** A probe or re-plan is in flight — disables picking so it can't race the request. */
+  busy?: boolean;
+}) {
   const [backends, setBackends] = useState<BackendManifest[] | null>(null);
   const reqs = useMemo(() => planRequirements(snap), [snap]);
-  const [picked, setPicked] = useState<string>(snap.plan.backend_ref.id);
+  // The picked backend follows the resolved plan, so a live re-plan keeps the selection in sync.
+  const picked = snap.plan.backend_ref.id;
+  const [previewed, setPreviewed] = useState<string>(picked);
+  const selected = onPick ? picked : previewed;
 
   useEffect(() => {
     loadBackends().then(setBackends);
   }, []);
 
+  const choose = (backendId: string): void => {
+    if (onPick) onPick(backendId);
+    else setPreviewed(backendId);
+  };
+
   if (!backends) return null;
-  const pickedBackend = backends.find((b) => b.backend_id === picked) ?? null;
+  const pickedBackend = backends.find((b) => b.backend_id === selected) ?? null;
 
   return (
     <section className="cs-backends-section">
@@ -27,14 +46,14 @@ export function BackendPicker({ snap }: { snap: PlatformSnapshot }) {
         {backends.map((b) => {
           const unmet = unmetRequirements(b, reqs);
           const fits = unmet.length === 0;
-          const isPicked = picked === b.backend_id;
+          const isPicked = selected === b.backend_id;
           return (
             <button
               key={b.backend_id}
               type="button"
               className={`cs-backend${isPicked ? " picked" : ""}${fits ? "" : " unfit"}`}
-              onClick={() => fits && setPicked(b.backend_id)}
-              disabled={!fits}
+              onClick={() => fits && !busy && choose(b.backend_id)}
+              disabled={!fits || busy}
               aria-pressed={isPicked}
             >
               <div className="cs-backend-head">
@@ -101,10 +120,12 @@ export function BackendPicker({ snap }: { snap: PlatformSnapshot }) {
         The planner is authoritative — it already validated{" "}
         <strong>{snap.plan.backend_ref.id}</strong> for this plan and resolved{" "}
         <code>{reqs.attention}</code> attention
-        {reqs.attention === "math" ? " (Blackwell sm_120 → math)" : ""}. This preview shows which
-        registered backends <em>declare</em> support for the resolved plan; one that doesn’t (Unsloth’s
-        fused kernels can’t do the math path) is filtered out, not silently downgraded. In the live
-        flow, picking a fitting backend re-plans through the engine.
+        {reqs.attention === "math" ? " (Blackwell sm_120 → math)" : ""}. This shows which registered
+        backends <em>declare</em> support for the resolved plan; one that doesn’t (Unsloth’s fused
+        kernels can’t do the math path) is filtered out, not silently downgraded.{" "}
+        {onPick
+          ? "Picking a fitting backend re-plans through the engine."
+          : "This is the committed demo snapshot; picking previews a backend (live re-planning runs in the desktop shell)."}
       </p>
     </section>
   );

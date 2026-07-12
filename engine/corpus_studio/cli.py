@@ -1,4 +1,5 @@
 from pathlib import Path
+import contextlib
 import json
 import os
 import sqlite3
@@ -236,24 +237,27 @@ def platform_probe(
     from corpus_studio.platform.profiler import build_environment_profile
     from corpus_studio.platform.probes import run_capability_probes
 
-    if cache:
-        from corpus_studio.platform.profile_store import default_store_dir, resolve_capabilities
+    # Redirect probe-time stdout to stderr so a library banner printed at import (historically older
+    # bitsandbytes) can't corrupt the JSON a client parses off stdout; the human/JSON output is below.
+    with contextlib.redirect_stdout(sys.stderr):
+        if cache:
+            from corpus_studio.platform.profile_store import default_store_dir, resolve_capabilities
 
-        resolved = resolve_capabilities(
-            store or default_store_dir(),
-            build_profile=build_environment_profile,
-            run_probes=run_capability_probes,
-            refresh=refresh,
-        )
-        profile, report = resolved.profile, resolved.report
-        typer.echo(
-            f"capabilities: {'cached' if resolved.cached else 'freshly probed'} "
-            f"(signature {profile.environment_signature[:12]}…)",
-            err=True,
-        )
-    else:
-        profile = build_environment_profile()
-        report = run_capability_probes(profile)
+            resolved = resolve_capabilities(
+                store or default_store_dir(),
+                build_profile=build_environment_profile,
+                run_probes=run_capability_probes,
+                refresh=refresh,
+            )
+            profile, report = resolved.profile, resolved.report
+            typer.echo(
+                f"capabilities: {'cached' if resolved.cached else 'freshly probed'} "
+                f"(signature {profile.environment_signature[:12]}…)",
+                err=True,
+            )
+        else:
+            profile = build_environment_profile()
+            report = run_capability_probes(profile)
 
     if out_dir is not None:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -407,6 +411,9 @@ def platform_plan(
     backend: str = typer.Option("corpus_studio", "--backend", help="Training framework to run on (see platform-backends)."),
     allow_cpu_toy: bool = typer.Option(False, "--allow-cpu-toy", help="Permit a cpu-toy plan when the host is cpu-toy-only."),
     out_dir: Optional[Path] = typer.Option(None, "--out", help="Write the sealed RunPlan.json to this directory."),
+    json_out: bool = typer.Option(
+        False, "--json", help="Emit {run_plan, fit_classification} as one JSON bundle to stdout."
+    ),
 ):
     """Profile the host, prove its capabilities, and RESOLVE an immutable, hash-sealed RunPlan — the
     goal+data+hardware → runnable-plan step. Every ambiguous field (precision / quantization /
@@ -418,8 +425,12 @@ def platform_plan(
     from corpus_studio.platform.probes import run_capability_probes
     from corpus_studio.platform.profiler import build_environment_profile
 
-    profile = build_environment_profile()
-    report = run_capability_probes(profile)
+    # Harden the JSON contract: a probe that lazily imports a library which prints a banner to stdout
+    # (historically older bitsandbytes) would prepend non-JSON bytes and break the client's parse.
+    # Redirect probe-time stdout to stderr; the bundle is emitted to the real stdout below.
+    with contextlib.redirect_stdout(sys.stderr):
+        profile = build_environment_profile()
+        report = run_capability_probes(profile)
     constraints = PlannerConstraints(
         base_model=base_model,
         dataset_path=dataset_path,
@@ -447,6 +458,19 @@ def platform_plan(
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / "RunPlan.json").write_text(plan.model_dump_json(indent=2), encoding="utf-8")
         (out_dir / "FitClassification.json").write_text(fit.model_dump_json(indent=2), encoding="utf-8")
+    if json_out:
+        # One bundle for a client (the Tauri shell / apps/web live flow): the sealed plan + the
+        # predicted, not-measured fit. stdout stays pure JSON; the human line is stderr-only above.
+        typer.echo(
+            json.dumps(
+                {
+                    "run_plan": plan.model_dump(mode="json"),
+                    "fit_classification": fit.model_dump(mode="json"),
+                },
+                indent=2,
+            )
+        )
+        return
     typer.echo(f"predicted fit: {fit.classification.value} — {fit.rationale}", err=True)
     typer.echo(plan.model_dump_json(indent=2))
 

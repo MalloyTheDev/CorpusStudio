@@ -58,6 +58,91 @@
   margin: 0 auto;
 }
 
+/* Sample / Live host segmented control */
+.cs-segment {
+  display: inline-flex;
+  border: 1px solid var(--cs-line-2);
+  border-radius: var(--cs-radius-button);
+  overflow: hidden;
+}
+.cs-seg {
+  background: var(--cs-panel);
+  color: var(--cs-t3);
+  border: none;
+  padding: 7px 13px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cs-seg + .cs-seg {
+  border-left: 1px solid var(--cs-line-2);
+}
+.cs-seg.on {
+  background: var(--cs-accent-soft);
+  color: var(--cs-accent-ink);
+  font-weight: 600;
+}
+.cs-seg:disabled {
+  color: var(--cs-t4);
+  cursor: not-allowed;
+}
+
+/* Live plan form bar */
+.cs-planbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 24px;
+  max-width: 1120px;
+  width: 100%;
+  margin: 0 auto;
+  border-bottom: 1px solid var(--cs-line);
+}
+.cs-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--cs-t3);
+}
+.cs-field-grow {
+  flex: 1;
+  min-width: 180px;
+}
+.cs-field input {
+  background: var(--cs-panel);
+  color: var(--cs-text);
+  border: 1px solid var(--cs-line-2);
+  border-radius: var(--cs-radius-button);
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12.5px;
+}
+.cs-field input:focus {
+  outline: none;
+  border-color: var(--cs-accent);
+}
+.cs-btn-primary {
+  background: var(--cs-accent);
+  color: #fff;
+  border-color: var(--cs-accent);
+  font-weight: 600;
+}
+.cs-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.cs-error {
+  background: color-mix(in srgb, var(--cs-bad) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--cs-bad) 40%, transparent);
+  color: var(--cs-bad);
+  border-radius: var(--cs-radius-card);
+  padding: 12px 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
 .cs-eyebrow {
   font-size: 10px;
   font-weight: 600;
