@@ -55,6 +55,15 @@ from corpus_studio.platform.enums import (
 # leave attn_implementation unset for those and let the trainer's own proven Blackwell path fire.
 _EXPLICIT_ATTN = frozenset({"eager", "flash_attention_2", "flash_attention_3"})
 _LORA_FAMILY = frozenset({"lora", "qlora", "dora"})
+# The fused / flash-family attention backends that deadlock on Blackwell (sm_120) — never sealable
+# into a plan targeting a cc_major>=12 GPU, even on an explicit request.
+_FUSED_ATTN_UNSAFE_ON_BLACKWELL = frozenset(
+    {"flash_attention_2", "flash_attention_3", "mem_efficient", "xformers"}
+)
+# Adapter methods the first-party corpus_studio trainer can actually execute today (build_lora_kwargs
+# is LoRA-only; dora/ia3/full_finetune/… are unsupported, so the planner refuses them rather than
+# emit a plan the runner would silently train as plain LoRA).
+_TRAINER_SUPPORTED_ADAPTERS = frozenset({"lora", "qlora"})
 _BLACKWELL_MAJOR = 12
 _DEFAULT_BACKEND = "corpus_studio"
 
@@ -107,10 +116,19 @@ def _max_cc_major(profile: EnvironmentProfile) -> int | None:
 
 
 def _resolve_attention(explicit: str | None, cc_major: int | None, proven_attn: set[str]) -> str:
+    blackwell = cc_major is not None and cc_major >= _BLACKWELL_MAJOR
     if explicit is not None:
         _require_enum(explicit, AttentionImpl, "attention_backend")
+        # The Blackwell mandate outranks an explicit override: the fused flash / mem-efficient
+        # kernels deadlock on sm_120, so refuse to seal a plan that would hang rather than honor a
+        # request the safety layer exists to prevent.
+        if blackwell and explicit in _FUSED_ATTN_UNSAFE_ON_BLACKWELL:
+            raise PlannerError(
+                f"attention_backend '{explicit}' deadlocks on Blackwell (sm_120, cc_major>="
+                f"{_BLACKWELL_MAJOR}); use math, eager, or sdpa."
+            )
         return explicit
-    if cc_major is not None and cc_major >= _BLACKWELL_MAJOR:
+    if blackwell:
         return AttentionImpl.math.value  # Blackwell mandate — asserted, not probe-derived
     if AttentionImpl.sdpa.value in proven_attn:
         return AttentionImpl.sdpa.value
@@ -175,6 +193,11 @@ def build_run_plan(
 
     adapter_method = constraints.adapter_method or ("qlora" if quantization == "nf4" else "lora")
     _require_enum(adapter_method, AdapterMethod, "adapter_method")
+    if adapter_method not in _TRAINER_SUPPORTED_ADAPTERS:
+        raise PlannerError(
+            f"adapter method '{adapter_method}' isn't executable by the corpus_studio trainer yet "
+            "(it is LoRA-only) — use lora or qlora so the plan can't be silently trained as plain LoRA."
+        )
 
     token_target = constraints.supervised_token_accumulation_target or max(
         1, constraints.sequence_len * constraints.micro_batch_size * constraints.gradient_accumulation_steps

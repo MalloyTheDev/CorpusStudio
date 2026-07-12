@@ -103,6 +103,33 @@ def test_explicit_attention_override_wins():
     assert plan.training_config_snapshot["attn_implementation"] == "flash_attention_2"
 
 
+def test_blackwell_rejects_an_explicit_fused_attention_override():
+    # The Blackwell math mandate outranks the request — a fused/flash backend deadlocks on sm_120.
+    with pytest.raises(PlannerError, match="deadlock"):
+        _plan(_profile(cc_major=12), _report(), attention_backend="flash_attention_2")
+    with pytest.raises(PlannerError, match="deadlock"):
+        _plan(_profile(cc_major=12), _report(), attention_backend="mem_efficient")
+
+
+def test_blackwell_allows_explicit_safe_attention():
+    for safe in ("sdpa", "eager", "math"):
+        plan = _plan(_profile(cc_major=12), _report(), attention_backend=safe)
+        assert plan.attention_backend.value == safe
+
+
+def test_unsupported_adapter_method_is_rejected():
+    # dora / ia3 / full_finetune are in the enum but the LoRA-only trainer can't execute them, so the
+    # planner refuses rather than emit a plan that would be silently trained as plain LoRA.
+    for method in ("dora", "ia3", "full_finetune"):
+        with pytest.raises(PlannerError, match="adapter method"):
+            _plan(_profile(cc_major=12), _report(), adapter_method=method)
+
+
+def test_lora_and_qlora_adapters_are_allowed():
+    assert _plan(_profile(cc_major=8), _report(bnb=False), adapter_method="lora").adapter.method.value == "lora"
+    assert _plan(_profile(cc_major=12), _report(), adapter_method="qlora").adapter.method.value == "qlora"
+
+
 # ---- cpu-toy + readiness (honesty) ------------------------------------------
 
 

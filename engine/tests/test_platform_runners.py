@@ -166,6 +166,17 @@ def test_classify_unrecognized_stays_fail():
     assert classify_training_error(RuntimeError("missing information"))[0] == FailureTaxonomy.FAIL
 
 
+def test_grad_information_message_is_not_numerical():
+    # "gradient" (grad co-signal) + "information" (contains 'inf') co-occur, but there is no whole-word
+    # NaN/Inf numeric signal → must stay FAIL, not be promoted to NUMERICAL_FAILURE.
+    assert classify_training_error(
+        RuntimeError("failed to gather gradient information from rank 0")
+    )[0] == FailureTaxonomy.FAIL
+    assert classify_training_error(
+        RuntimeError("reinforcement gradient step failed")
+    )[0] == FailureTaxonomy.FAIL
+
+
 def test_runner_oom_is_classified_as_oom(monkeypatch):
     def _oom(config, *, progress_callback=None):
         raise RuntimeError("CUDA out of memory. Tried to allocate 20.00 GiB")

@@ -12,12 +12,13 @@ _GB = 1_000_000_000
 
 
 def _plan(*, base_model="Qwen/Qwen2.5-7B-Instruct", quantization="nf4", attention="math",
-          sequence_len=4096, micro_batch=1, lora_r=16, cpu_toy=False):
+          sequence_len=4096, micro_batch=1, lora_r=16, cpu_toy=False, precision="bf16"):
     from corpus_studio.platform.supervisor import demo_run_plan
 
     body = demo_run_plan().model_dump(mode="json")
     body["base_model"] = base_model
     body["quantization"] = quantization
+    body["precision"] = precision
     body["attention_backend"] = attention
     body["sequence"]["max_sequence_len"] = sequence_len
     body["batching"]["micro_batch_size"] = micro_batch
@@ -136,6 +137,23 @@ def test_int8_quant_uses_the_int8_estimate():
     fit = classify_fit(_plan(quantization="int8"), _profile(capacity_gb=80.0))
     expected = int(_peak_gb("int8") * _GB)
     assert fit.estimated_peak_bytes == expected
+
+
+def test_fp32_precision_is_costed_heavier_than_bf16():
+    cap = _profile(capacity_gb=200.0)
+    bf16 = classify_fit(_plan(quantization="none", precision="bf16"), cap)
+    fp32 = classify_fit(_plan(quantization="none", precision="fp32"), cap)
+    # fp32 weights are 2x fp16 → the un-quantized fp32 plan must estimate strictly heavier, so it
+    # isn't silently under-costed and wrongly predicted to fit.
+    assert fp32.estimated_peak_bytes > bf16.estimated_peak_bytes
+
+
+def test_gptq_quant_uses_the_int4_tier_not_fp16():
+    cap = _profile(capacity_gb=200.0)
+    gptq = classify_fit(_plan(quantization="gptq"), cap)
+    fp16 = classify_fit(_plan(quantization="none", precision="bf16"), cap)
+    # A sub-16-bit scheme must not be sized at the fp16 (2 bytes/param) weight tier.
+    assert gptq.estimated_peak_bytes < fp16.estimated_peak_bytes
 
 
 def test_fit_classification_roundtrips():

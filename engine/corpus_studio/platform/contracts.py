@@ -456,9 +456,12 @@ class SequenceSpec(ContractModel):
 
 
 class BatchingSpec(ContractModel):
-    """The accumulation TARGET is expressed in SUPERVISED TOKENS, not microbatch count: the trainer
-    accumulates until summed supervised tokens >= target and normalizes the loss by supervised
-    tokens across the window — so the effective batch is invariant to sequence length + padding."""
+    """The accumulation TARGET is expressed in SUPERVISED TOKENS, not microbatch count. A
+    token-target-CAPABLE backend accumulates until summed supervised tokens >= target and normalizes
+    the loss by supervised tokens across the window, so the effective batch is invariant to sequence
+    length + padding. The first-party ``corpus_studio`` reference trainer is NOT token-target-capable
+    today — it honors ``fallback_grad_accumulation_steps`` (a fixed microbatch count); the token
+    target is the contract a future token-aware backend would satisfy."""
 
     micro_batch_size: int = Field(default=1, ge=1)
     supervised_token_accumulation_target: int = Field(ge=1)

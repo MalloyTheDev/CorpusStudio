@@ -15,6 +15,7 @@ GPU); the real GPU QLoRA path can only be user-smoke-tested.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
@@ -43,6 +44,10 @@ class _CancelTraining(Exception):
 # exception TYPE ``OutOfMemoryError`` (torch.cuda.OutOfMemoryError) is matched by name so torch need
 # not be imported to classify.
 _OOM_MARKERS = ("out of memory", "cuda oom", "cublas_status_alloc_failed", "cuda_error_out_of_memory")
+# A NaN/Inf numeric signal — matched as a WHOLE WORD so "information" / "reinforcement" / "infinite"
+# don't count as "inf" — co-occurring with a loss/gradient signal.
+_NUMERIC_SIGNAL = re.compile(r"\b(nan|inf|infinity)\b")
+_LOSS_GRAD_SIGNAL = re.compile(r"\b(loss|grad\w*)\b")
 
 
 def classify_training_error(exc: BaseException) -> tuple[FailureTaxonomy, str | None]:
@@ -63,7 +68,7 @@ def classify_training_error(exc: BaseException) -> tuple[FailureTaxonomy, str | 
             "reduce sequence_len or micro_batch_size, enable gradient checkpointing / offload, "
             "or use a smaller base model.",
         )
-    if ("nan" in message or "inf" in message) and ("loss" in message or "grad" in message):
+    if _NUMERIC_SIGNAL.search(message) and _LOSS_GRAD_SIGNAL.search(message):
         return (
             FailureTaxonomy.NUMERICAL_FAILURE,
             "lower the learning rate, add warmup, or check the dataset for malformed rows.",
