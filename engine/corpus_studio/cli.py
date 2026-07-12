@@ -399,6 +399,7 @@ def platform_plan(
     dataset_ref: str = typer.Option("dataset", "--dataset-ref", help="Stable id for the dataset the plan references."),
     task_type: str = typer.Option("sft", "--task-type", help="Training task type (sft / preference / …)."),
     sequence_len: int = typer.Option(4096, "--sequence-len", help="Max sequence length (flows into the plan verbatim)."),
+    backend: str = typer.Option("corpus_studio", "--backend", help="Training framework to run on (see platform-backends)."),
     allow_cpu_toy: bool = typer.Option(False, "--allow-cpu-toy", help="Permit a cpu-toy plan when the host is cpu-toy-only."),
     out_dir: Optional[Path] = typer.Option(None, "--out", help="Write the sealed RunPlan.json to this directory."),
 ):
@@ -419,6 +420,7 @@ def platform_plan(
         dataset_path=dataset_path,
         task_type=task_type,
         sequence_len=sequence_len,
+        backend=backend,
         allow_cpu_toy=allow_cpu_toy,
     )
     try:
@@ -442,6 +444,32 @@ def platform_plan(
         (out_dir / "FitClassification.json").write_text(fit.model_dump_json(indent=2), encoding="utf-8")
     typer.echo(f"predicted fit: {fit.classification.value} — {fit.rationale}", err=True)
     typer.echo(plan.model_dump_json(indent=2))
+
+
+@app.command("platform-backends")
+def platform_backends(
+    json_out: bool = typer.Option(False, "--json", help="Emit the full BackendManifests as JSON."),
+):
+    """List the registered training backends — the frameworks you can pick to train on (corpus_studio,
+    unsloth, …). Each declares what it can run; the planner resolves a plan against the chosen
+    backend's declared support intersected with what actually proved to work on the host."""
+    from corpus_studio.platform.backends import builtin_backends
+
+    backends = builtin_backends()
+    if json_out:
+        typer.echo(json.dumps([b.model_dump(mode="json") for b in backends], indent=2))
+        return
+    for backend in backends:
+        typer.echo(f"{backend.backend_id}  —  {backend.display_name}")
+        typer.echo(
+            f"    devices: {', '.join(d.value for d in backend.supported_devices)}"
+            f"  |  precision: {', '.join(p.value for p in backend.precision_modes)}"
+            f"  |  quant: {', '.join(q.value for q in backend.quantization_modes)}"
+        )
+        typer.echo(
+            f"    adapters: {', '.join(a.value for a in backend.adapter_methods)}"
+            f"  |  attention: {', '.join(a.value for a in backend.attention_impls)}"
+        )
 
 
 @app.command()

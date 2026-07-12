@@ -118,11 +118,36 @@ def test_blackwell_allows_explicit_safe_attention():
 
 
 def test_unsupported_adapter_method_is_rejected():
-    # dora / ia3 / full_finetune are in the enum but the LoRA-only trainer can't execute them, so the
-    # planner refuses rather than emit a plan that would be silently trained as plain LoRA.
+    # dora / ia3 / full_finetune are in the enum but the corpus_studio backend declares only lora/qlora,
+    # so the planner refuses rather than emit a plan that would be silently trained as plain LoRA.
     for method in ("dora", "ia3", "full_finetune"):
-        with pytest.raises(PlannerError, match="adapter method"):
+        with pytest.raises(PlannerError, match="adapter"):
             _plan(_profile(cc_major=12), _report(), adapter_method=method)
+
+
+# ---- multi-backend selection ------------------------------------------------
+
+
+def test_backend_ref_reflects_the_chosen_backend():
+    # Unsloth on a non-Blackwell host with a proven sdpa plan.
+    plan = _plan(_profile(cc_major=8), _report(attn=("sdpa",)), backend="unsloth")
+    assert plan.backend_ref.id == "unsloth"
+
+
+def test_unknown_backend_is_rejected():
+    with pytest.raises(PlannerError, match="unknown backend"):
+        _plan(_profile(cc_major=8), _report(), backend="megatron")
+
+
+def test_backend_that_cannot_run_the_resolved_plan_is_rejected_with_alternatives():
+    # Unsloth can't do the math attention a Blackwell plan requires → refused, corpus_studio named.
+    with pytest.raises(PlannerError, match="can't run this plan"):
+        _plan(_profile(cc_major=12), _report(), backend="unsloth")
+
+
+def test_default_backend_is_corpus_studio():
+    plan = _plan(_profile(cc_major=12), _report())
+    assert plan.backend_ref.id == "corpus_studio"
 
 
 def test_lora_and_qlora_adapters_are_allowed():
