@@ -19,6 +19,7 @@ GPU); the real GPU QLoRA path can only be user-smoke-tested.
 from __future__ import annotations
 
 import re
+import sys
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
@@ -33,6 +34,7 @@ from corpus_studio.platform.supervisor import (
     RunnerFailure,
     demo_run_plan,
 )
+from corpus_studio.platform.watchdog import MemorySampler, RunWatchdog, sample_gpu_memory
 
 if TYPE_CHECKING:
     from corpus_studio.training.trainer import TrainResult, TrainRunConfig
@@ -88,9 +90,26 @@ class TrainingRunner:
     training runtime surfaces as an ``ENVIRONMENT_FAILURE`` FailureRecord; a plan with no / an invalid
     ``training_config_snapshot`` surfaces as ``UNSUPPORTED_CONFIGURATION``."""
 
-    def __init__(self, *, cpu_toy: bool = False, max_steps: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        cpu_toy: bool = False,
+        max_steps: int | None = None,
+        memory_sampler: MemorySampler = sample_gpu_memory,
+        heartbeat_timeout_s: float = 600.0,
+        poll_interval_s: float = 5.0,
+    ) -> None:
         self.cpu_toy = cpu_toy
         self.max_steps = max_steps
+        # The watchdog samples GPU memory (peak → the MEASURED fit; a spill → a warning) and flags a
+        # heartbeat stall as an OBSERVABILITY SIGNAL only — a stderr heads-up + a warning, never an
+        # abort and never a KERNEL_STALL manifest verdict (an in-process CUDA hang can't be killed or
+        # classified; that's the subprocess-worker slice). `heartbeat_timeout_s` defaults high (a
+        # spilling step is legitimately slow — minutes — so only a long silence trips the heads-up).
+        # The sampler is injectable so the integration is testable without a GPU.
+        self.memory_sampler = memory_sampler
+        self.heartbeat_timeout_s = heartbeat_timeout_s
+        self.poll_interval_s = poll_interval_s
         self.name = "cpu_toy" if cpu_toy else "training"
 
     def run(self, ctx: RunContext) -> Sequence[ProducedArtifact]:
@@ -104,13 +123,40 @@ class TrainingRunner:
             StageMarker.process_start, f"training run [{backend_label}]: {config.base_model}"
         )
 
+        def _on_stall() -> None:
+            # A true CUDA hang can't be force-killed in-process (the training thread is stuck in the
+            # kernel) NOR classified onto the manifest (the run never returns) — killing a hang is the
+            # subprocess-worker slice. So this is a heads-up ONLY, never an abort: print a signal so a
+            # stuck run says so instead of dying silently. Runs on the watchdog thread → a bare stderr
+            # write (not ctx.emit_*, whose seq is not thread-safe).
+            print(
+                f"[watchdog] no training progress for >{self.heartbeat_timeout_s:.0f}s. Normal during a "
+                "long model download/load; if training is underway this may be a WDDM spill (10-25x "
+                "slowdown) or a hung kernel (e.g. fused attention on sm_120). Kill the process if it "
+                "never recovers.",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        watchdog = RunWatchdog(
+            sampler=self.memory_sampler,
+            heartbeat_timeout_s=self.heartbeat_timeout_s,
+            poll_interval_s=self.poll_interval_s,
+            on_stall=_on_stall,
+        )
+
         def _progress(step: int, total: int, loss: float | None) -> None:
             if ctx.cancelled:
                 raise _CancelTraining
+            watchdog.beat()
+            watchdog.sample()  # per-step peak capture (the thread also samples between steps)
             ctx.emit_metric(optimizer_step=step, loss=loss, message=f"[{step}/{total}] step")
 
+        succeeded = False
         try:
-            result = trainer_fn(config, progress_callback=_progress)
+            with watchdog:
+                result = trainer_fn(config, progress_callback=_progress)
+            succeeded = True
         except _CancelTraining:
             raise RunCancelled from None
         except TrainerError as exc:
@@ -128,6 +174,24 @@ class TrainingRunner:
                 taxonomy=taxonomy,
                 remediation=remediation,
             ) from exc
+        finally:
+            # Record whatever the watchdog measured — on EVERY terminal path. A failed/cancelled run
+            # that spilled is the richest diagnostic; capturing it only on success would discard that.
+            # But proven=succeeded so a FAILED run never gets a NATIVE_SAFE "fit proven" verdict from
+            # its partial peak (a spill still classifies honestly). The supervisor writes ctx.final_fit
+            # onto the manifest for any terminal state.
+            ctx.final_fit = watchdog.measured_fit(proven=succeeded)
+            if watchdog.spilled:
+                ctx.emit_warning(
+                    "MEASURED a GPU-memory spill to shared system RAM during training (10-25x "
+                    "slowdown, not a clean OOM) — reduce sequence_len / micro_batch_size, or offload."
+                )
+            if watchdog.ever_stalled:
+                ctx.emit_warning(
+                    "the run went >"
+                    f"{self.heartbeat_timeout_s:.0f}s without progress at least once (a very slow "
+                    "step or a stall, likely a WDDM spill) — see the stderr watchdog note."
+                )
 
         for checkpoint in result.checkpoints:
             ctx.emit_log(f"checkpoint: {checkpoint}")

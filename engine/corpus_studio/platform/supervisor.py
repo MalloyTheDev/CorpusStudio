@@ -34,6 +34,7 @@ from corpus_studio.platform.contracts import (
     ArtifactManifest,
     EventMetrics,
     FailureRecord,
+    FitClassification,
     RunEvent,
     RunManifest,
     RunPlan,
@@ -147,6 +148,9 @@ class RunContext:
         self._cancel = cancel
         self._clock = clock
         self._seq = 0
+        # A runner may set the MEASURED fit (from the watchdog's observed peak) — the post-run
+        # reconciliation of the calibrator's *predicted* fit. The supervisor records it on the manifest.
+        self.final_fit: FitClassification | None = None
 
     @property
     def cancelled(self) -> bool:
@@ -337,6 +341,7 @@ def execute_run(
         output_dir=str(out_dir) if out_dir is not None else plan.export.output_dir,
         artifact_ids=artifact_ids,
         failure=failure,
+        final_fit=ctx.final_fit,  # the MEASURED fit, when a runner captured one (via the watchdog)
     )
     artifact_manifests = [
         build_artifact_manifest(
