@@ -110,6 +110,20 @@ def test_platform_plan_dataset_format_flows_through_the_cli(monkeypatch):
     assert "format" not in snap  # the trainer key is dataset_format, never a silently-dropped "format"
 
 
+def test_platform_plan_output_dir_flows_into_the_snapshot(monkeypatch):
+    # --output-dir controls where the trainer saves the adapter (so a run can target a project dir,
+    # not the CWD). It must reach the training snapshot verbatim.
+    _ready_host(monkeypatch)
+    result = runner.invoke(
+        app,
+        ["platform-plan", "--base-model", "m", "--dataset", "d.jsonl", "--output-dir",
+         "/some/project/adapters/wbg", "--json"],
+    )
+    assert result.exit_code == 0
+    snap = json.loads(result.stdout)["run_plan"]["training_config_snapshot"]
+    assert snap["output_dir"] == "/some/project/adapters/wbg"
+
+
 def test_platform_plan_backend_flows_through_the_cli(monkeypatch):
     # A proven-sdpa host: Unsloth declares sdpa, so it can run this plan → backend_ref reflects it.
     _ready_host(monkeypatch, cc_major=8, attn="sdpa")
