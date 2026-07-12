@@ -34,6 +34,7 @@ from corpus_studio.platform.contracts import (
     RunPlan,
 )
 from corpus_studio.platform.enums import FailureTaxonomy
+from corpus_studio.platform.artifacts import write_artifact_manifest
 from corpus_studio.platform.supervisor import (
     RunEventSink,
     SupervisedRun,
@@ -218,6 +219,10 @@ def execute_run_subprocess(
     )
     if out_dir_str is not None:
         write_run_manifest(manifest, out_dir_str)
+        # Persist the child's integrity-checked ArtifactManifests too (the child ran execute_run
+        # WITHOUT out_dir, so it built them but didn't write them). Same machine → the paths are valid.
+        for artifact_manifest in artifacts:
+            write_artifact_manifest(artifact_manifest, out_dir_str)
     return SupervisedRun(manifest=manifest, events=events, artifacts=artifacts)
 
 

@@ -103,18 +103,25 @@ def test_explicit_attention_override_wins():
     assert plan.training_config_snapshot["attn_implementation"] == "flash_attention_2"
 
 
-def test_blackwell_rejects_an_explicit_fused_attention_override():
-    # The Blackwell math mandate outranks the request — a fused/flash backend deadlocks on sm_120.
-    with pytest.raises(PlannerError, match="deadlock"):
-        _plan(_profile(cc_major=12), _report(), attention_backend="flash_attention_2")
-    with pytest.raises(PlannerError, match="deadlock"):
-        _plan(_profile(cc_major=12), _report(), attention_backend="mem_efficient")
+def test_blackwell_rejects_an_explicit_unsafe_attention_override():
+    # The Blackwell math mandate outranks the request. The fused/flash family deadlocks outright, and
+    # plain sdpa can DISPATCH to the flash kernel — only math/eager are guaranteed safe on sm_120.
+    for unsafe in ("flash_attention_2", "mem_efficient", "sdpa"):
+        with pytest.raises(PlannerError, match="deadlock"):
+            _plan(_profile(cc_major=12), _report(), attention_backend=unsafe)
 
 
-def test_blackwell_allows_explicit_safe_attention():
-    for safe in ("sdpa", "eager", "math"):
+def test_blackwell_allows_only_math_and_eager_explicit_attention():
+    for safe in ("eager", "math"):
         plan = _plan(_profile(cc_major=12), _report(), attention_backend=safe)
         assert plan.attention_backend.value == safe
+
+
+def test_unsloth_refused_on_blackwell_even_with_an_explicit_sdpa_override():
+    # The "Unsloth refused on sm_120" invariant must NOT be bypassable: an explicit sdpa (which Unsloth
+    # declares) is itself refused on Blackwell, so Unsloth can't be sealed there by any attention path.
+    with pytest.raises(PlannerError, match="deadlock"):
+        _plan(_profile(cc_major=12), _report(), backend="unsloth", attention_backend="sdpa")
 
 
 def test_unsupported_adapter_method_is_rejected():

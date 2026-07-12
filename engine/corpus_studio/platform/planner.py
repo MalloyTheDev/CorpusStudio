@@ -61,10 +61,12 @@ from corpus_studio.platform.enums import (
 # leave attn_implementation unset for those and let the trainer's own proven Blackwell path fire.
 _EXPLICIT_ATTN = frozenset({"eager", "flash_attention_2", "flash_attention_3"})
 _LORA_FAMILY = frozenset({"lora", "qlora", "dora"})
-# The fused / flash-family attention backends that deadlock on Blackwell (sm_120) — never sealable
-# into a plan targeting a cc_major>=12 GPU, even on an explicit request.
+# The attention backends NOT guaranteed safe on Blackwell (sm_120): the fused/flash family deadlocks
+# outright, and plain `sdpa` can DISPATCH to the deadlocking flash kernel (its safety would depend on
+# the trainer disabling flash at runtime — a detail the plan must not assume; it also lets Unsloth,
+# which declares sdpa but no math, slip past the sm_120 refusal). Only math + eager are sealable here.
 _FUSED_ATTN_UNSAFE_ON_BLACKWELL = frozenset(
-    {"flash_attention_2", "flash_attention_3", "mem_efficient", "xformers"}
+    {"flash_attention_2", "flash_attention_3", "mem_efficient", "xformers", "sdpa"}
 )
 _BLACKWELL_MAJOR = 12
 
@@ -126,8 +128,9 @@ def _resolve_attention(explicit: str | None, cc_major: int | None, proven_attn: 
         # request the safety layer exists to prevent.
         if blackwell and explicit in _FUSED_ATTN_UNSAFE_ON_BLACKWELL:
             raise PlannerError(
-                f"attention_backend '{explicit}' deadlocks on Blackwell (sm_120, cc_major>="
-                f"{_BLACKWELL_MAJOR}); use math, eager, or sdpa."
+                f"attention_backend '{explicit}' is not guaranteed safe on Blackwell (sm_120, "
+                f"cc_major>={_BLACKWELL_MAJOR}) — it can hit the deadlocking flash kernel; use math or "
+                "eager."
             )
         return explicit
     if blackwell:

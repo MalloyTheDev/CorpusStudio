@@ -69,6 +69,13 @@ def run_worker(
     a *result*, not a worker crash; non-zero only when the worker itself couldn't run the dispatch)."""
     from corpus_studio.platform.supervisor import execute_run  # noqa: PLC0415
 
+    # CAPTURE the real stdout NOW, before running the trainer. The protocol channel is stdout, but the
+    # trainer wraps trainer.train() in redirect_stdout(sys.stderr) (to keep tqdm/transformers off the
+    # CLI's stdout) — so a live `sys.stdout` lookup inside the per-step sink would land on stderr, and
+    # the parent (reading the stdout pipe) would see silence during training and false-kill a healthy
+    # run as KERNEL_STALL. Binding the stream here makes every message reach the pipe regardless.
+    stream = out if out is not None else sys.stdout
+
     try:
         envelope = json.loads(dispatch_line)
         body = envelope["body"]
@@ -76,10 +83,10 @@ def run_worker(
         run_id = body["run_id"]
     except (ValueError, KeyError, TypeError) as exc:
         _send("run_rejected", {"run_id": "unknown", "taxonomy": "ENVIRONMENT_FAILURE",
-                               "message": f"malformed run_dispatch: {exc}"}, out=out)
+                               "message": f"malformed run_dispatch: {exc}"}, out=stream)
         return 2
 
-    _send("run_accepted", {"run_id": run_id, "pid": os.getpid()}, out=out)
+    _send("run_accepted", {"run_id": run_id, "pid": os.getpid()}, out=stream)
 
     runner = _build_runner(runner_name, max_steps)
     # Stream each RunEvent to the parent as it is produced (the sink runs synchronously inside
@@ -90,7 +97,7 @@ def run_worker(
         plan,
         runner,
         run_id=run_id,
-        sink=lambda event: _send("event", event.model_dump(mode="json"), out=out),
+        sink=lambda event: _send("event", event.model_dump(mode="json"), out=stream),
     )
     manifest = result.manifest
     outcome = (
@@ -107,7 +114,7 @@ def run_worker(
             "artifacts": [a.model_dump(mode="json") for a in result.artifacts],
             "failure": manifest.failure.model_dump(mode="json") if manifest.failure else None,
         },
-        out=out,
+        out=stream,
     )
     return 0
 
