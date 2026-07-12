@@ -37,6 +37,12 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from corpus_studio.platform.backends import (
+    builtin_backends,
+    compatible_backends,
+    get_backend,
+    unmet_requirements,
+)
 from corpus_studio.platform.contracts import (
     CapabilityReport,
     EnvironmentProfile,
@@ -60,12 +66,7 @@ _LORA_FAMILY = frozenset({"lora", "qlora", "dora"})
 _FUSED_ATTN_UNSAFE_ON_BLACKWELL = frozenset(
     {"flash_attention_2", "flash_attention_3", "mem_efficient", "xformers"}
 )
-# Adapter methods the first-party corpus_studio trainer can actually execute today (build_lora_kwargs
-# is LoRA-only; dora/ia3/full_finetune/… are unsupported, so the planner refuses them rather than
-# emit a plan the runner would silently train as plain LoRA).
-_TRAINER_SUPPORTED_ADAPTERS = frozenset({"lora", "qlora"})
 _BLACKWELL_MAJOR = 12
-_DEFAULT_BACKEND = "corpus_studio"
 
 
 class PlannerError(Exception):
@@ -99,6 +100,7 @@ class PlannerConstraints:
     supervised_token_accumulation_target: int | None = None
     attention_backend: str | None = None  # explicit override; else resolved from the host
     export_format: str = "adapter_peft"
+    backend: str = "corpus_studio"  # the training framework to run on (see platform.backends)
     allow_cpu_toy: bool = False
 
 
@@ -193,11 +195,46 @@ def build_run_plan(
 
     adapter_method = constraints.adapter_method or ("qlora" if quantization == "nf4" else "lora")
     _require_enum(adapter_method, AdapterMethod, "adapter_method")
-    if adapter_method not in _TRAINER_SUPPORTED_ADAPTERS:
-        raise PlannerError(
-            f"adapter method '{adapter_method}' isn't executable by the corpus_studio trainer yet "
-            "(it is LoRA-only) — use lora or qlora so the plan can't be silently trained as plain LoRA."
+
+    # Validate the chosen training backend can actually run the RESOLVED plan (declared support), so a
+    # plan is never sealed for a framework that would silently downgrade or refuse it. This is where
+    # "pick your framework" is enforced honestly — e.g. Unsloth (flash/sdpa only) is rejected for a
+    # Blackwell math plan, and the fitting alternatives are named.
+    backend = get_backend(constraints.backend)
+    if backend is None:
+        known = ", ".join(b.backend_id for b in builtin_backends())
+        raise PlannerError(f"unknown backend '{constraints.backend}'; available: {known}.")
+    device = "cpu" if cpu_toy else ("cuda" if profile.gpus else "cpu")
+    host_os = profile.host.os.value
+    unmet = unmet_requirements(
+        backend,
+        os=host_os,
+        device=device,
+        task_type=constraints.task_type,
+        precision=precision,
+        quantization=quantization,
+        adapter_method=adapter_method,
+        attention=attention_backend,
+    )
+    if unmet:
+        alternatives = [
+            b.backend_id
+            for b in compatible_backends(
+                os=host_os,
+                device=device,
+                task_type=constraints.task_type,
+                precision=precision,
+                quantization=quantization,
+                adapter_method=adapter_method,
+                attention=attention_backend,
+            )
+        ]
+        hint = (
+            f" Backends that fit: {', '.join(alternatives)}."
+            if alternatives
+            else " No registered backend fits this configuration."
         )
+        raise PlannerError(f"backend '{backend.backend_id}' can't run this plan: {'; '.join(unmet)}.{hint}")
 
     token_target = constraints.supervised_token_accumulation_target or max(
         1, constraints.sequence_len * constraints.micro_batch_size * constraints.gradient_accumulation_steps
@@ -231,7 +268,7 @@ def build_run_plan(
     body: dict[str, Any] = {
         "plan_id": plan_id,
         "plan_hash": "0" * 64,  # placeholder — replaced by the real seal below
-        "backend_ref": {"id": _DEFAULT_BACKEND},
+        "backend_ref": {"id": backend.backend_id},
         "environment_ref": {"id": profile.environment_signature},
         "dataset_ref": dataset_ref.model_dump(mode="json"),
         "task_type": constraints.task_type,
