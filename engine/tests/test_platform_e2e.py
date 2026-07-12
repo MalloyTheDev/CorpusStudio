@@ -49,7 +49,7 @@ def _fake_trainer(adapter_dir, *, steps=2):
     """A stand-in run_training that writes a real adapter dir (so integrity is checkable) and drives
     the progress callback — no torch, no model, no dataset."""
 
-    def _run(config, *, progress_callback=None):
+    def _run(config, *, progress_callback=None, **_kw):
         adapter_dir.mkdir(parents=True, exist_ok=True)
         (adapter_dir / "adapter_config.json").write_text('{"r": 16}', encoding="utf-8")
         (adapter_dir / "adapter_model.safetensors").write_bytes(b"trained-weights")

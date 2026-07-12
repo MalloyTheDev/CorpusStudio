@@ -15,6 +15,7 @@ from typing import Any
 
 from corpus_studio.training.trainer import (
     ProgressCallback,
+    StageCallback,
     TrainerError,
     TrainResult,
     TrainRunConfig,
@@ -55,11 +56,15 @@ def build_unsloth_kwargs(config: TrainRunConfig) -> dict[str, Any]:
 
 
 def run_unsloth_training(
-    config: TrainRunConfig, *, progress_callback: ProgressCallback | None = None
+    config: TrainRunConfig,
+    *,
+    progress_callback: ProgressCallback | None = None,
+    stage_callback: StageCallback | None = None,
 ) -> TrainResult:
     """Train via Unsloth (accelerated 4-bit QLoRA). Lazy-imports Unsloth; raises
     :class:`TrainerError` when it (or a CUDA GPU) is unavailable — the clean "can't run this here"
-    signal the platform classifies as ENVIRONMENT_FAILURE. The training itself is user-smoke-tested."""
+    signal the platform classifies as ENVIRONMENT_FAILURE. The training itself is user-smoke-tested.
+    ``stage_callback`` fires setup milestones during the silent load (see ``trainer.run_training``)."""
     try:
         from unsloth import FastLanguageModel  # noqa: PLC0415 - lazy; the whole point of the backend
     except ImportError as exc:
@@ -67,13 +72,16 @@ def run_unsloth_training(
             "Unsloth isn't installed (it needs a CUDA GPU): pip install unsloth. On Blackwell "
             "(sm_120) use the corpus_studio backend — Unsloth's fused kernels don't support it yet."
         ) from exc
-    return _train_with_unsloth(config, FastLanguageModel, progress_callback)  # pragma: no cover
+    return _train_with_unsloth(  # pragma: no cover
+        config, FastLanguageModel, progress_callback, stage_callback
+    )
 
 
 def _train_with_unsloth(  # pragma: no cover - needs a CUDA GPU + unsloth; user-smoke-tested only
     config: TrainRunConfig,
     fast_language_model: Any,
     progress_callback: ProgressCallback | None,
+    stage_callback: StageCallback | None = None,
 ) -> TrainResult:
     import contextlib
     import dataclasses
@@ -91,10 +99,16 @@ def _train_with_unsloth(  # pragma: no cover - needs a CUDA GPU + unsloth; user-
         format_example_text,
     )
 
+    def _stage(name: str, message: str) -> None:
+        if stage_callback is not None:
+            stage_callback(name, message)
+
     # Unsloth builds + 4-bit-quantizes + LoRA-wraps the model in two calls.
     kwargs = build_unsloth_kwargs(config)
     model, tokenizer = fast_language_model.from_pretrained(**kwargs["from_pretrained"])
+    _stage("model_loaded", f"loaded {config.base_model} (Unsloth 4-bit)")
     model = fast_language_model.get_peft_model(model, **kwargs["get_peft_model"])
+    _stage("adapter_attached", "LoRA adapter attached")
 
     rows = list(read_jsonl(Path(config.dataset_path)))
     texts = [format_example_text(row, config.dataset_format, tokenizer) for row in rows]
@@ -134,6 +148,7 @@ def _train_with_unsloth(  # pragma: no cover - needs a CUDA GPU + unsloth; user-
     output_dir = config.output_dir
     with contextlib.redirect_stdout(sys.stderr):
         trainer = SFTTrainer(**trainer_kwargs)
+        _stage("optimizer_created", "Unsloth SFT trainer ready — starting training")
         result = trainer.train()
         model.save_pretrained(output_dir)
         tokenizer.save_pretrained(output_dir)

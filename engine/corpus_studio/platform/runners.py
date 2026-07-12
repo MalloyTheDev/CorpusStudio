@@ -152,10 +152,22 @@ class TrainingRunner:
             watchdog.sample()  # per-step peak capture (the thread also samples between steps)
             ctx.emit_metric(optimizer_step=step, loss=loss, message=f"[{step}/{total}] step")
 
+        def _stage(name: str, message: str) -> None:
+            # A setup milestone (model_loaded / quantized / …). Beat the watchdog so a long silent LOAD
+            # doesn't look like a stall, and emit a stage RunEvent — which, over the worker pipe, resets
+            # the subprocess supervisor's silence timer. Real progress, not a liveness heartbeat.
+            watchdog.beat()
+            try:
+                marker = StageMarker(name)
+            except ValueError:
+                ctx.emit_log(f"{name}: {message}")
+                return
+            ctx.emit_stage(marker, message)
+
         succeeded = False
         try:
             with watchdog:
-                result = trainer_fn(config, progress_callback=_progress)
+                result = trainer_fn(config, progress_callback=_progress, stage_callback=_stage)
             succeeded = True
         except _CancelTraining:
             raise RunCancelled from None
