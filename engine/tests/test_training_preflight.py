@@ -111,6 +111,40 @@ def test_missing_config_blocks(tmp_path: Path):
     assert report.can_launch is False
 
 
+# --- nvidia-smi CSV parsing (incl. the GPU name, so a torch-free host names the device) ------------
+
+
+def test_probe_gpu_memory_parses_the_gpu_name(monkeypatch):
+    import subprocess as sp
+
+    monkeypatch.setattr("shutil.which", lambda _name: "nvidia-smi")
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *a, **k: sp.CompletedProcess(
+            a, 0, stdout="11900, 11100, 12.0, NVIDIA GeForce RTX 5070\n", stderr=""
+        ),
+    )
+    mem = gpu_probe.probe_gpu_memory()
+    assert mem is not None
+    assert mem.name == "NVIDIA GeForce RTX 5070"
+    assert mem.compute_capability == "12.0"
+    assert mem.total_gb == round(11900 / 1024, 1)
+
+
+def test_probe_gpu_memory_tolerates_older_driver_without_name(monkeypatch):
+    # An older nvidia-smi emits only memory columns; name/compute_cap default to empty, never crash.
+    import subprocess as sp
+
+    monkeypatch.setattr("shutil.which", lambda _name: "nvidia-smi")
+    monkeypatch.setattr(
+        "subprocess.run", lambda *a, **k: sp.CompletedProcess(a, 0, stdout="11900, 11100\n", stderr="")
+    )
+    mem = gpu_probe.probe_gpu_memory()
+    assert mem is not None
+    assert mem.name == ""
+    assert mem.compute_capability == ""
+
+
 # --- OOM / GPU-memory realism (nvidia-smi probe) -----------------------------
 
 
