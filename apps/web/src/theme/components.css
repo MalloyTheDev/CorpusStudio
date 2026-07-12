@@ -211,3 +211,84 @@
   border-radius: 4px;
   padding: 1px 6px;
 }
+
+/* Backend picker — "pick your framework" */
+.cs-backends-section {
+  margin-top: 26px;
+}
+.cs-backends {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.cs-backend {
+  text-align: left;
+  font: inherit;
+  color: var(--cs-text);
+  background: var(--cs-panel);
+  border: 1px solid var(--cs-line-2);
+  border-radius: var(--cs-radius-card);
+  padding: 16px;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease;
+}
+.cs-backend:hover:not(:disabled) {
+  background: var(--cs-hover);
+}
+.cs-backend.picked {
+  border-color: var(--cs-accent);
+  box-shadow: 0 0 0 1px var(--cs-accent);
+  background: var(--cs-accent-soft);
+}
+.cs-backend.unfit {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+.cs-backend-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.cs-backend-name {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.cs-backend-caps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cs-backend-reasons {
+  margin: 12px 0 0;
+  padding-left: 16px;
+  font-size: 11.5px;
+  color: var(--cs-bad);
+  line-height: 1.55;
+}
+.cs-backend-detail {
+  font-size: 12.5px;
+}
+.cs-hazard {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 7px 0;
+}
+.cs-hazard + .cs-hazard {
+  border-top: 1px solid var(--cs-line);
+}
+.cs-hazard-cond {
+  color: var(--cs-t2);
+  font-family: var(--cs-mono);
+  font-size: 11.5px;
+}
+.cs-hazard-mit {
+  color: var(--cs-t3);
+  font-size: 11.5px;
+  margin-top: 2px;
+}
