@@ -11,6 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Reject unresolved merge markers
+        run: |
+          if git grep -n -E '^(<<<<<<< |=======|>>>>>>> )'; then
+            echo "Unresolved merge markers found in tracked files."
+            exit 1
+          fi
+
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"

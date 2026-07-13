@@ -14,6 +14,145 @@
       "title": "AttentionImpl",
       "type": "string"
     },
+    "EnvironmentCommandRecord": {
+      "additionalProperties": false,
+      "description": "Durable evidence for one bounded, argv-only creation/install/probe command.",
+      "properties": {
+        "argv": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Argv",
+          "type": "array"
+        },
+        "cancelled": {
+          "default": false,
+          "title": "Cancelled",
+          "type": "boolean"
+        },
+        "command_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Command Id",
+          "type": "string"
+        },
+        "environment": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Environment",
+          "type": "object"
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exit Code"
+        },
+        "expected_outputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Expected Outputs",
+          "type": "array"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "finished_at": {
+          "title": "Finished At",
+          "type": "string"
+        },
+        "native_build_occurred": {
+          "default": false,
+          "title": "Native Build Occurred",
+          "type": "boolean"
+        },
+        "phase": {
+          "enum": [
+            "create_venv",
+            "upgrade_pip",
+            "install",
+            "lock",
+            "import_probe",
+            "verify",
+            "dependency_probe",
+            "functional_probe",
+            "hardware_probe",
+            "health_probe"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "started_at": {
+          "title": "Started At",
+          "type": "string"
+        },
+        "stderr_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stderr Path"
+        },
+        "stdout_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stdout Path"
+        },
+        "timed_out": {
+          "default": false,
+          "title": "Timed Out",
+          "type": "boolean"
+        },
+        "timeout_seconds": {
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        },
+        "working_directory": {
+          "title": "Working Directory",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id",
+        "phase",
+        "argv",
+        "working_directory",
+        "timeout_seconds",
+        "started_at",
+        "finished_at"
+      ],
+      "title": "EnvironmentCommandRecord",
+      "type": "object"
+    },
     "EnvironmentState": {
       "description": "The lifecycle state of a managed environment. The escalation is deliberate \u2014 \"installed\" is\nNEVER \"supported\": a package importing (IMPORTABLE) is not proof a kernel runs\n(FUNCTIONAL_PROBE_PASSED), which is not proof the hardware supports it (HARDWARE_VERIFIED). Only\nHARDWARE_VERIFIED earns \"supported\". The terminal-degraded states record WHY an env is unusable.",
       "enum": [
@@ -458,149 +597,6 @@
       "title": "MemoryMetrics",
       "type": "object"
     },
-    "PackageLock": {
-      "additionalProperties": false,
-      "description": "A resolved dependency and its install provenance.\n\n``hash`` seals the installed distribution's RECORD metadata when that evidence is available; it\nis not mislabelled as the original wheel hash. ``direct_url`` and ``artifact`` preserve the\nstronger source identity pip exposes for direct/VCS/local installs. ``dependencies`` is the\ninstalled metadata dependency graph, not a second resolver.",
-      "properties": {
-        "artifact": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Artifact"
-        },
-        "dependencies": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Dependencies",
-          "type": "array"
-        },
-        "direct_url": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Direct Url"
-        },
-        "hash": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/HashRef"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "installer": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Installer"
-        },
-        "name": {
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
-        },
-        "requested": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Requested"
-        },
-        "source": {
-          "default": "unknown",
-          "enum": [
-            "pypi",
-            "wheel",
-            "sdist",
-            "conda",
-            "vcs",
-            "local",
-            "unknown"
-          ],
-          "title": "Source",
-          "type": "string"
-        },
-        "version": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Version"
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "title": "PackageLock",
-      "type": "object"
-    },
-    "ProbeResult": {
-      "additionalProperties": false,
-      "properties": {
-        "detail": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Detail"
-        },
-        "measured": {
-          "additionalProperties": true,
-          "title": "Measured",
-          "type": "object"
-        },
-        "outcome": {
-          "$ref": "#/$defs/FailureTaxonomy"
-        },
-        "probe": {
-          "title": "Probe",
-          "type": "string"
-        }
-      },
-      "required": [
-        "probe",
-        "outcome"
-      ],
-      "title": "ProbeResult",
-      "type": "object"
-    },
     "Ref": {
       "additionalProperties": false,
       "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
@@ -653,54 +649,20 @@
     }
   },
   "additionalProperties": false,
-  "description": "The live health of a managed environment: its state, drift vs the recorded lock, and probe\noutcomes. ``drift_detected`` means the installed set no longer matches the lock (a package changed\nunder the env). NEW.",
+  "description": "Recoverable journal for one environment creation attempt.",
   "properties": {
-    "changed_package_sources": {
+    "commands": {
       "items": {
-        "type": "string"
+        "$ref": "#/$defs/EnvironmentCommandRecord"
       },
-      "title": "Changed Package Sources",
+      "title": "Commands",
       "type": "array"
-    },
-    "checked_at": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Checked At"
     },
     "contract_version": {
       "const": "1.0.0",
       "default": "1.0.0",
       "title": "Contract Version",
       "type": "string"
-    },
-    "cuda_mismatch": {
-      "default": false,
-      "title": "Cuda Mismatch",
-      "type": "boolean"
-    },
-    "drift_detected": {
-      "default": false,
-      "title": "Drift Detected",
-      "type": "boolean"
-    },
-    "drifted_packages": {
-      "items": {
-        "type": "string"
-      },
-      "title": "Drifted Packages",
-      "type": "array"
-    },
-    "environment_missing": {
-      "default": false,
-      "title": "Environment Missing",
-      "type": "boolean"
     },
     "environment_ref": {
       "$ref": "#/$defs/Ref"
@@ -716,75 +678,7 @@
       ],
       "default": null
     },
-    "hardware_mismatch": {
-      "default": false,
-      "title": "Hardware Mismatch",
-      "type": "boolean"
-    },
-    "installed_packages": {
-      "items": {
-        "$ref": "#/$defs/PackageLock"
-      },
-      "title": "Installed Packages",
-      "type": "array"
-    },
-    "interpreter_missing": {
-      "default": false,
-      "title": "Interpreter Missing",
-      "type": "boolean"
-    },
-    "lock_mismatch": {
-      "default": false,
-      "title": "Lock Mismatch",
-      "type": "boolean"
-    },
-    "lock_ref": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/Ref"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
-    },
-    "missing_requirements": {
-      "items": {
-        "type": "string"
-      },
-      "title": "Missing Requirements",
-      "type": "array"
-    },
-    "probe_results": {
-      "items": {
-        "$ref": "#/$defs/ProbeResult"
-      },
-      "title": "Probe Results",
-      "type": "array"
-    },
-    "python_version": {
-      "default": "",
-      "title": "Python Version",
-      "type": "string"
-    },
-    "recipe_drift_detected": {
-      "default": false,
-      "title": "Recipe Drift Detected",
-      "type": "boolean"
-    },
-    "recipe_ref": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/Ref"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
-    },
-    "remediation": {
+    "finished_at": {
       "anyOf": [
         {
           "type": "string"
@@ -794,16 +688,40 @@
         }
       ],
       "default": null,
-      "title": "Remediation"
+      "title": "Finished At"
+    },
+    "installation_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Installation Id",
+      "type": "string"
+    },
+    "recipe_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "resolution_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "retry_requires_recreate": {
+      "default": false,
+      "title": "Retry Requires Recreate",
+      "type": "boolean"
+    },
+    "started_at": {
+      "title": "Started At",
+      "type": "string"
     },
     "state": {
-      "$ref": "#/$defs/EnvironmentState"
+      "$ref": "#/$defs/EnvironmentState",
+      "default": "INSTALLING"
     }
   },
   "required": [
+    "installation_id",
     "environment_ref",
-    "state"
+    "recipe_ref",
+    "resolution_ref",
+    "started_at"
   ],
-  "title": "EnvironmentHealthReport",
+  "title": "EnvironmentInstallation",
   "type": "object"
 }

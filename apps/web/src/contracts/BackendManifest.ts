@@ -109,7 +109,7 @@ export type DeviceKind = "cuda" | "rocm" | "mps" | "xpu" | "cpu";
  * @minItems 1
  */
 export type SupportedOs = [OperatingSystem, ...OperatingSystem[]];
-export type OperatingSystem = "windows" | "linux" | "macos" | "unknown";
+export type OperatingSystem = "windows" | "wsl" | "linux" | "macos" | "unknown";
 /**
  * @minItems 1
  */

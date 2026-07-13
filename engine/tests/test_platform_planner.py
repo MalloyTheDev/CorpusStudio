@@ -75,6 +75,23 @@ def test_native_windows_blackwell_host_forces_math_bf16_nf4_qlora():
     assert "attn_implementation" not in plan.training_config_snapshot
 
 
+def test_managed_environment_lock_reference_is_sealed_into_plan():
+    environment_ref = Ref(id="managed-env", hash=P.HashRef(value="b" * 64))
+    plan = build_run_plan(
+        profile=_profile(cc_major=8),
+        capabilities=_report(),
+        dataset_ref=Ref(id="ds-1"),
+        constraints=PlannerConstraints(
+            base_model="Qwen/Qwen2.5-7B-Instruct",
+            dataset_path="data/examples.jsonl",
+        ),
+        plan_id="p-managed",
+        environment_ref=environment_ref,
+        now=_NOW,
+    )
+    assert plan.environment_ref == environment_ref
+
+
 def test_wsl_blackwell_host_keeps_sdpa_not_math():
     # WSL is its own platform: the flash deadlock is Windows-WDDM-only, so a WSL Blackwell host does
     # NOT force math — it seals the proven sdpa (→ flash on Linux CUDA). The whole reason to run under

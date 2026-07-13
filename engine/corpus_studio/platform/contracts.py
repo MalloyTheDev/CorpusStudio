@@ -492,6 +492,28 @@ class CapabilityReport(ContractModel):
 # The 3-layer dependency model: a lightweight always-installable control plane, opt-in capability
 # profiles, and ISOLATED per-backend worker environments (heavy frameworks pin conflicting builds).
 # --------------------------------------------------------------------------------------------------
+class PythonRuntime(ContractModel):
+    """A discovered Python executable that can potentially create an isolated worker environment.
+
+    Discovery never assumes the control-plane interpreter is the only installation. Compatibility is
+    an explicit verdict against the selected recipe, while ``venv_available`` proves the stdlib venv
+    module can be located without creating anything.
+    """
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    runtime_id: str = Field(pattern=_ID)
+    executable: str = Field(min_length=1)
+    version: str = ""
+    implementation: str = ""
+    architecture: str = ""
+    platform: str = ""
+    os: OperatingSystem = OperatingSystem.unknown
+    is_virtual_environment: bool = False
+    venv_available: bool = False
+    compatible: bool = False
+    incompatibility_reasons: list[str] = Field(default_factory=list)
+
+
 class EnvironmentRecipe(ContractModel):
     """A declarative, platform/CUDA-aware recipe for building one isolated environment — the WHAT to
     install, not the act of installing. A recipe is only a declaration: ``verification`` says whether
@@ -532,6 +554,12 @@ class InstallStep(ContractModel):
     phase: Literal["create_venv", "upgrade_pip", "install", "verify"]
     description: str = ""
     argv: list[str] = Field(min_length=1)
+    working_directory: str | None = None
+    environment: dict[str, str] = Field(default_factory=dict)
+    timeout_seconds: int = Field(default=1800, ge=1)
+    expected_outputs: list[str] = Field(default_factory=list)
+    network_required: bool = False
+    native_build_expected: bool = False
 
 
 class DependencyResolution(ContractModel):
@@ -541,6 +569,10 @@ class DependencyResolution(ContractModel):
 
     contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
     recipe_ref: Ref
+    environment_ref: Ref | None = None
+    runtime: PythonRuntime | None = None
+    environment_root: str | None = None
+    manager_version: str = ""
     python_version: str = ""
     os: OperatingSystem = OperatingSystem.unknown
     # The accelerator tag the resolver selected (e.g. "cu128", "cpu") + the index it maps to.
@@ -555,6 +587,49 @@ class DependencyResolution(ContractModel):
     resolvable: bool = True
     blocking_reasons: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    # Hash over the canonical resolution body, including concrete argv/runtime/root. Creation requires
+    # the caller to echo this exact hash, proving the executed plan is the reviewed plan.
+    resolution_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
+
+
+class EnvironmentCommandRecord(ContractModel):
+    """Durable evidence for one bounded, argv-only creation/install/probe command."""
+
+    command_id: str = Field(pattern=_ID)
+    phase: Literal[
+        "create_venv", "upgrade_pip", "install", "lock", "import_probe",
+        "verify", "dependency_probe", "functional_probe", "hardware_probe", "health_probe",
+    ]
+    argv: list[str] = Field(min_length=1)
+    working_directory: str
+    environment: dict[str, str] = Field(default_factory=dict)
+    timeout_seconds: int = Field(ge=1)
+    expected_outputs: list[str] = Field(default_factory=list)
+    started_at: str
+    finished_at: str
+    exit_code: int | None = None
+    timed_out: bool = False
+    cancelled: bool = False
+    stdout_path: str | None = None
+    stderr_path: str | None = None
+    native_build_occurred: bool = False
+    failure: FailureRecord | None = None
+
+
+class EnvironmentInstallation(ContractModel):
+    """Recoverable journal for one environment creation attempt."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    installation_id: str = Field(pattern=_ID)
+    environment_ref: Ref
+    recipe_ref: Ref
+    resolution_ref: Ref
+    state: EnvironmentState = EnvironmentState.installing
+    started_at: str
+    finished_at: str | None = None
+    commands: list[EnvironmentCommandRecord] = Field(default_factory=list)
+    failure: FailureRecord | None = None
+    retry_requires_recreate: bool = False
 
 
 class EnvironmentLock(ContractModel):
@@ -566,11 +641,19 @@ class EnvironmentLock(ContractModel):
     lock_id: str = Field(pattern=_ID)
     recipe_ref: Ref
     created_at: str | None = None
+    manager_version: str = ""
+    runtime: PythonRuntime | None = None
     python_version: str = ""
     platform_tag: str = ""
+    architecture: str = ""
+    implementation: str = ""
+    torch_version: str | None = None
+    torch_build: str | None = None
+    cuda_runtime_version: str | None = None
+    compute_capability: str | None = None
     index_urls: list[str] = Field(default_factory=list)
     packages: list[PackageLock] = Field(default_factory=list)
-    # sha256 over the canonicalized (name, version) set — the immutability seal for drift checks.
+    # sha256 over the canonical lock body (runtime, recipe, sources, metadata hashes, and packages).
     lock_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
 
 
@@ -587,6 +670,10 @@ class EnvironmentDescriptor(ContractModel):
     python_executable: str = ""
     state: EnvironmentState = EnvironmentState.not_installed
     lock_ref: Ref | None = None
+    resolution_ref: Ref | None = None
+    installation_ref: Ref | None = None
+    managed_by: str = "CorpusStudio"
+    manager_version: str = ""
     created_at: str | None = None
     updated_at: str | None = None
     notes: list[str] = Field(default_factory=list)
@@ -600,14 +687,23 @@ class EnvironmentHealthReport(ContractModel):
     contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
     environment_ref: Ref
     recipe_ref: Ref | None = None
+    lock_ref: Ref | None = None
     state: EnvironmentState
     python_version: str = ""
     checked_at: str | None = None
     installed_packages: list[PackageLock] = Field(default_factory=list)
     missing_requirements: list[str] = Field(default_factory=list)
     drifted_packages: list[str] = Field(default_factory=list)
+    changed_package_sources: list[str] = Field(default_factory=list)
     drift_detected: bool = False
+    recipe_drift_detected: bool = False
+    lock_mismatch: bool = False
+    interpreter_missing: bool = False
+    environment_missing: bool = False
+    hardware_mismatch: bool = False
+    cuda_mismatch: bool = False
     probe_results: list[ProbeResult] = Field(default_factory=list)
+    failure: FailureRecord | None = None
     remediation: str | None = None
 
 

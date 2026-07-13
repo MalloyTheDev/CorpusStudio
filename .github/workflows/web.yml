@@ -4,10 +4,14 @@ on:
   push:
     paths:
       - "apps/web/**"
+      - "docs/contracts/**"
+      - "engine/corpus_studio/platform/**"
       - ".github/workflows/web.yml"
   pull_request:
     paths:
       - "apps/web/**"
+      - "docs/contracts/**"
+      - "engine/corpus_studio/platform/**"
       - ".github/workflows/web.yml"
 
 jobs:
@@ -21,8 +25,31 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install schema generator dependencies
+        # JSON Schema details can change across pydantic releases. Pin the generator runtime so the
+        # committed schema/client diff gate is reproducible; bump intentionally with regenerated files.
+        run: python -m pip install "pydantic==2.13.4"
       - name: Install (locked)
         run: npm ci
+      - name: Regenerate language-neutral schemas
+        working-directory: engine
+        run: >-
+          python -c "from corpus_studio.platform.schema_export import export_json_schemas;
+          export_json_schemas('../docs/contracts')"
+      - name: Regenerate TypeScript contracts
+        run: npm run gen:contracts
+      - name: Verify committed contract clients are current
+        run: |
+          changes="$(git -C ../.. status --porcelain --untracked-files=all -- docs/contracts apps/web/src/contracts)"
+          if [[ -n "$changes" ]]; then
+            echo "$changes"
+            git -C ../.. diff -- docs/contracts apps/web/src/contracts
+            echo "Regenerate and commit the JSON Schema and TypeScript contract clients."
+            exit 1
+          fi
       - name: Typecheck
         run: npm run typecheck
       - name: Build

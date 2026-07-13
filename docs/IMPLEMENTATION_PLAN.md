@@ -11,7 +11,8 @@ the source of truth. Nothing here is claimed as implemented unless it links to a
 The **run lifecycle is largely built and hardware-verified.** The `engine/corpus_studio/platform/`
 package is a real, torch-free contract substrate + lifecycle, not a plan on paper:
 
-- **14 versioned contracts** (`platform/contracts.py`) → language-neutral JSON Schema (`docs/contracts/`).
+- **21 root versioned contracts** (`platform/contracts.py`) → deterministic language-neutral JSON
+  Schema (`docs/contracts/`) → generated TypeScript client types.
 - **profile → plan (hash-sealed) → predict-fit → run → measure-fit → account-for-artifacts**, with a
   multi-backend registry (`corpus_studio`, `unsloth`), a watchdog (measured fit + spill/stall), and a
   supervised subprocess worker that can **kill a hung run**. Verified end-to-end on a real RTX 5070.
@@ -21,14 +22,14 @@ Against the full-platform vision, the frontier is the **input side**. Ranked gap
 | Gap | Status | Notes |
 |---|---|---|
 | **Storage & offload profiling** | ✅ **done** (this slice) | `StorageProfile` + role suitability — see [`HARDWARE_STORAGE_PROFILE.md`](HARDWARE_STORAGE_PROFILE.md) |
-| **Environment Manager + dependency profiles** | ⏭️ **next foundational phase** | §2 below — the prerequisite for isolated multi-backend execution |
+| **Environment Manager + dependency profiles** | ✅ **reference lifecycle shipped** | §2 below — sealed creation/lock/probe/drift/recreate for `backend-corpus-studio`; other backends remain separate future slices |
 | Model & Tokenizer Lab (`ModelDescriptor`/`TokenizerDescriptor`) | planned | no contracts yet |
 | `TrainingObjective` as a distinct registry | partial | today only `TaskType` enum + `RunPlan` |
 | Full versioned `TraceRecord` | partial | lightweight `training/traces.py` exists |
 | Dataset mixtures + transformation graph | partial | `DatasetManifest.lineage` is the seed |
 | Offload planning (DeepSpeed/FSDP/NVMe) | planned | **depends on** StorageProfile ✅ **and** the Environment Manager |
 
-## 2. Dependency & runtime architecture (correction — the next foundational phase)
+## 2. Dependency & runtime architecture (reference foundation shipped)
 
 **"Dependency-light" describes the CONTROL PLANE, not the whole product.** A full AI platform needs
 complete data, model, training, evaluation, multimodal, conversion, serving, storage, and
@@ -71,15 +72,15 @@ backend environments** — never one uncontrolled `[everything]` env as the prim
 
 ### 2.1 Environment Manager (the deliverable of this phase)
 
-A first-class Environment Manager with versioned contracts:
+A first-class Environment Manager now ships with versioned contracts:
 
-- `EnvironmentDescriptor` · `DependencyRequirement` · `DependencyResolution` · `InstalledPackage` ·
-  `EnvironmentLock` · `CapabilityProbeResult` · `EnvironmentHealthReport` · `EnvironmentRecipe`
+- `PythonRuntime` · `EnvironmentRecipe` · `DependencyResolution` · `EnvironmentInstallation` ·
+  `EnvironmentLock` · `EnvironmentDescriptor` · `EnvironmentHealthReport`
 
 Responsibilities:
 
 - discover compatible Python runtimes;
-- create isolated environments (`~/.corpusstudio/environments/<backend>/`);
+- create isolated environments under a deterministic per-user manager root;
 - select a platform/CUDA-aware **recipe** (wheel source, native-build needs, GPU-arch compat);
 - **preview** install commands + disk/network requirements → **explicit user confirmation**;
 - run installs as **bounded argv installers** (no shell interpolation) — mirrors the existing
@@ -87,9 +88,15 @@ Responsibilities:
 - record exact package / source / hash (`EnvironmentLock`);
 - apply **backend-specific dependency constraints**;
 - run import → dependency → functional → hardware probes (reusing `platform/probes.py`);
-- detect **drift**; **repair/recreate**; export a reproducibility lock;
+- detect **drift**; safely remove/recreate; export a reproducibility lock;
 - **associate an environment hash with each `RunPlan`** (extends `RunPlan.environment_ref`);
 - **prevent one backend from modifying another backend's runtime.**
+
+The side-effectful implementation is intentionally scoped to the `backend-corpus-studio` reference
+worker. Other declared recipes are not installable merely because they can be previewed. Default CI
+uses fake installers and CPU-only functional probes; a new real CUDA environment requires explicit
+network confirmation and separate hardware verification. See
+[`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md).
 
 ### 2.2 Environment states — "installed" ≠ "supported"
 
@@ -125,7 +132,7 @@ contracts as they are built** (see §5 and [`MOE_ARCHITECTURE.md`](MOE_ARCHITECT
 |---|---|---|
 | **0** | ✅ Platform contracts + lifecycle (profile→plan→fit→run→artifact→watchdog→subprocess) | shipped |
 | **1** | ✅ **StorageProfile** — `StorageDevice` / volume / path-role assessment | shipped (this slice) |
-| **2** | 🔨 **Environment Manager + isolated backend runtimes** (3-layer deps, §2) — **substrate shipped** (recipe registry + install-preview resolver, [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md)); env creation/health/drift/lock is the next slice | gate before DeepSpeed/FSDP/multimodal |
+| **2** | ✅ **Environment Manager + isolated backend runtimes** (3-layer deps, §2) — reference `backend-corpus-studio` creation, command journal, lock, probes, drift, safe remove/recreate, and RunPlan pinning shipped ([`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md)) | new frameworks still require one isolated, verified backend slice each |
 | 3 | General **`ModelDescriptor` + `TokenizerDescriptor`** | **must be MoE-safe from the start** (§1 of MoE doc) |
 | 4 | **`TrainingObjective` registry** (objective distinct from backend) | must express router-vs-expert training |
 | 5 | **Dense-safe + MoE-safe parameter accounting** (`N_logical`/`N_active`/`N_resident`/`N_touched`/`N_updated`/`N_exposed`) | no runtime needed — contracts only |

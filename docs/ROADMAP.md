@@ -107,14 +107,15 @@ input side. Ordered:
 - ✅ **StorageProfile** — dependency-light storage topology + per-role safe-spill suitability (offload
   onto USB / cloud-sync / near-full / in-repo / rotational is refused). See
   [`HARDWARE_STORAGE_PROFILE.md`](HARDWARE_STORAGE_PROFILE.md).
-- ⏭️ **Environment Manager + 3-layer dependency profiles** — the next foundational phase, and the gate
-  before DeepSpeed/FSDP/multimodal/new objectives. "Dependency-light" describes the **control plane**,
-  not the whole product: a lightweight, always-installable core (layer 1) + installable capability
-  profiles (layer 2) + **isolated per-backend worker environments** (layer 3), each capability-probed
-  so "installed" never means "supported". The current `[train]` extra becomes the reference
-  `backend-corpus-studio` env; other frameworks get isolated envs, never one `[everything]`.
-- Then: Model/Tokenizer Lab, `TrainingObjective` registry, offload planning (uses StorageProfile +
-  Env Manager), additional backend workers, full `TraceRecord`, dataset mixtures.
+- ✅ **Environment Manager + 3-layer dependency profiles** — the reference `backend-corpus-studio`
+  lifecycle now covers runtime discovery, sealed preview/confirmation, isolated creation, durable
+  command journals, package/source/hash locks, separate functional and hardware proof, drift, safe
+  remove/recreate, and immutable RunPlan association. Other frameworks still get independent,
+  verified worker environments — never one `[everything]`. See
+  [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md).
+- ⏭️ **Model/Tokenizer Lab** — `ModelDescriptor` + `TokenizerDescriptor`, MoE-safe from their first
+  version. Then: `TrainingObjective` registry, parameter accounting, offload/placement RunPlan
+  expansion, additional backend workers, full `TraceRecord`, and dataset mixtures.
 
 - **Surface the LLM judge in the Evaluation tab** — the `--judge-model` scorer ships in
   the engine and in suites, but the desktop Evaluation tab still has no judge-model field.

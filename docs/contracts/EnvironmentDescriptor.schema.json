@@ -113,6 +113,17 @@
       "title": "Env Id",
       "type": "string"
     },
+    "installation_ref": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ref"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "layer": {
       "$ref": "#/$defs/DependencyLayer"
     },
@@ -126,6 +137,16 @@
         }
       ],
       "default": null
+    },
+    "managed_by": {
+      "default": "CorpusStudio",
+      "title": "Managed By",
+      "type": "string"
+    },
+    "manager_version": {
+      "default": "",
+      "title": "Manager Version",
+      "type": "string"
     },
     "notes": {
       "items": {
@@ -141,6 +162,17 @@
     },
     "recipe_ref": {
       "$ref": "#/$defs/Ref"
+    },
+    "resolution_ref": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ref"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "root_path": {
       "default": "",

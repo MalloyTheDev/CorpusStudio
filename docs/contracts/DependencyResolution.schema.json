@@ -48,6 +48,30 @@
           "title": "Description",
           "type": "string"
         },
+        "environment": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Environment",
+          "type": "object"
+        },
+        "expected_outputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Expected Outputs",
+          "type": "array"
+        },
+        "native_build_expected": {
+          "default": false,
+          "title": "Native Build Expected",
+          "type": "boolean"
+        },
+        "network_required": {
+          "default": false,
+          "title": "Network Required",
+          "type": "boolean"
+        },
         "phase": {
           "enum": [
             "create_venv",
@@ -57,6 +81,24 @@
           ],
           "title": "Phase",
           "type": "string"
+        },
+        "timeout_seconds": {
+          "default": 1800,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        },
+        "working_directory": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Working Directory"
         }
       },
       "required": [
@@ -76,6 +118,80 @@
       ],
       "title": "OperatingSystem",
       "type": "string"
+    },
+    "PythonRuntime": {
+      "additionalProperties": false,
+      "description": "A discovered Python executable that can potentially create an isolated worker environment.\n\nDiscovery never assumes the control-plane interpreter is the only installation. Compatibility is\nan explicit verdict against the selected recipe, while ``venv_available`` proves the stdlib venv\nmodule can be located without creating anything.",
+      "properties": {
+        "architecture": {
+          "default": "",
+          "title": "Architecture",
+          "type": "string"
+        },
+        "compatible": {
+          "default": false,
+          "title": "Compatible",
+          "type": "boolean"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "executable": {
+          "minLength": 1,
+          "title": "Executable",
+          "type": "string"
+        },
+        "implementation": {
+          "default": "",
+          "title": "Implementation",
+          "type": "string"
+        },
+        "incompatibility_reasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Incompatibility Reasons",
+          "type": "array"
+        },
+        "is_virtual_environment": {
+          "default": false,
+          "title": "Is Virtual Environment",
+          "type": "boolean"
+        },
+        "os": {
+          "$ref": "#/$defs/OperatingSystem",
+          "default": "unknown"
+        },
+        "platform": {
+          "default": "",
+          "title": "Platform",
+          "type": "string"
+        },
+        "runtime_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Runtime Id",
+          "type": "string"
+        },
+        "venv_available": {
+          "default": false,
+          "title": "Venv Available",
+          "type": "boolean"
+        },
+        "version": {
+          "default": "",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtime_id",
+        "executable"
+      ],
+      "title": "PythonRuntime",
+      "type": "object"
     },
     "Ref": {
       "additionalProperties": false,
@@ -126,6 +242,29 @@
       "title": "Contract Version",
       "type": "string"
     },
+    "environment_ref": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ref"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "environment_root": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Environment Root"
+    },
     "estimated_disk_bytes": {
       "anyOf": [
         {
@@ -159,6 +298,11 @@
       "title": "Install Steps",
       "type": "array"
     },
+    "manager_version": {
+      "default": "",
+      "title": "Manager Version",
+      "type": "string"
+    },
     "os": {
       "$ref": "#/$defs/OperatingSystem",
       "default": "unknown"
@@ -171,6 +315,19 @@
     "recipe_ref": {
       "$ref": "#/$defs/Ref"
     },
+    "resolution_hash": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Resolution Hash"
+    },
     "resolvable": {
       "default": true,
       "title": "Resolvable",
@@ -182,6 +339,17 @@
       },
       "title": "Resolved Index Urls",
       "type": "array"
+    },
+    "runtime": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PythonRuntime"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "warnings": {
       "items": {

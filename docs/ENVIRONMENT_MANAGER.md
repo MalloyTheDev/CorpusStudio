@@ -1,109 +1,196 @@
 # Environment Manager
 
-The Environment Manager realizes the **three-layer dependency architecture**
-([`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §2): a lightweight, always-installable control
-plane; opt-in capability profiles; and **isolated per-backend worker environments**. It is the gate
-before heavy backends (DeepSpeed / FSDP / Unsloth / multimodal) can be added honestly — those pin
-conflicting `torch` / CUDA / `xformers` builds and cannot coexist in one Python environment.
+The Environment Manager implements the three-layer dependency architecture described in
+[`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md): a lightweight control plane, opt-in capability
+packs, and isolated backend-worker environments. Heavy frameworks do not share the control-plane
+interpreter or each other's dependency graph.
 
-> **Status:** this slice ships the **substrate** — the recipe registry + the install *preview*
-> resolver. It creates nothing and mutates nothing. Actually building a venv and running the
-> installers (the side-effectful half — `env-create` / health / drift / lock) is the next slice, which
-> needs real-machine verification.
+> **Implemented status:** the complete create-to-remove lifecycle is implemented for the
+> `backend-corpus-studio` reference backend. Other recipes can still be inspected, but their presence
+> does not make their creation or hardware path supported. The lifecycle is covered in default CI by
+> fake installers and CPU-only probes. Building the new managed CUDA environment on a real GPU remains
+> an explicit, network-using verification operation; it is not run automatically.
 
-## The three layers
+## Dependency layers
 
-| Layer | What it is | Where it installs |
+| Layer | Purpose | Installation boundary |
 |---|---|---|
-| **control plane** | the dependency-light CorpusStudio core — no CUDA, no ML framework | the base interpreter |
-| **capability** | opt-in feature stacks (tokenization, columnar data, …) with graceful fallback | **into the control-plane interpreter** (augments the core process) |
-| **backend_worker** | isolated per-framework training runtimes | its **own** venv (`root_path` is the isolation boundary) |
+| `control_plane` | contracts, projects, policy, planning, registries, CLI/UI communication | base CorpusStudio interpreter |
+| `capability` | optional stable in-process features such as exact tokenization or Parquet | control-plane interpreter |
+| `backend_worker` | torch/CUDA/framework stacks that can conflict | one owned venv per backend environment |
 
-Opening CorpusStudio requires only the control plane. A capability profile adds capability to the core
-process. A backend worker never shares an environment with another backend — so one backend can't
-corrupt another's runtime.
+Only `backend-corpus-studio` has a side-effectful creation implementation in this slice. DeepSpeed,
+FSDP, Axolotl, LLaMA-Factory, and MoE runtimes are not added here.
 
-## Recipes
+## Evidence levels
 
-An `EnvironmentRecipe` is a **declaration** of what to install — not the act of installing. The
-built-in recipes are grounded in the engine's real optional extras:
+Environment state is deliberately monotonic until a probe fails or drift is found:
 
-| Recipe | Layer | Deps | Verification |
-|---|---|---|---|
-| `control-plane` | control_plane | pydantic, typer | hardware_verified |
-| `capability-tokenization` | capability | tiktoken | hardware_verified |
-| `capability-model-tokenizer` | capability | tokenizers | hardware_verified |
-| `capability-data` | capability | pyarrow | hardware_verified |
-| `backend-corpus-studio` | backend_worker | torch, transformers, peft, trl, accelerate, datasets, bitsandbytes | hardware_verified (ran on a real RTX 5070) |
-| `backend-unsloth` | backend_worker | unsloth | **declared** (happy path not verified on our Blackwell host) |
-
-`verification` is the recipe-level honesty tier — **`declared` means we can render the install plan but
-have not built + probed it.** Heavier backends (DeepSpeed / FSDP / Axolotl / LLaMA-Factory / MoE)
-arrive with their own backend slices, so a recipe is never claimed before it can be built and probed.
-
-## Environment states — "installed" ≠ "supported"
-
-```
-NOT_INSTALLED → INSTALLING → INSTALLED_UNCHECKED → IMPORTABLE →
-DEPENDENCY_PROBE_PASSED → FUNCTIONAL_PROBE_PASSED → HARDWARE_VERIFIED
-                                                    ↘ DEGRADED / INCOMPATIBLE / DRIFTED / BROKEN
+```text
+NOT_INSTALLED -> INSTALLING -> INSTALLED_UNCHECKED -> IMPORTABLE ->
+DEPENDENCY_PROBE_PASSED -> FUNCTIONAL_PROBE_PASSED -> HARDWARE_VERIFIED
+                                                   \-> DEGRADED / INCOMPATIBLE / DRIFTED / BROKEN
 ```
 
-A package importing (`IMPORTABLE`) is not proof a kernel runs (`FUNCTIONAL_PROBE_PASSED`), which is not
-proof the hardware supports it (`HARDWARE_VERIFIED`). Only `HARDWARE_VERIFIED` earns "supported".
+`INSTALLED_UNCHECKED` is not a support claim. CPU forward/backward and checkpoint reload earn
+`FUNCTIONAL_PROBE_PASSED`; they do not earn GPU support. `HARDWARE_VERIFIED` requires the managed
+interpreter to prove CUDA allocation, 4-bit layer construction, a minimal GPU forward/backward, and
+the safe math-attention path. On native-Windows Blackwell, the probe never executes the known
+deadlocking fused SDPA path.
 
-## Install preview (the resolver)
+## Runtime discovery and plan review
 
-`resolve_dependencies(recipe, os, accelerator_tag, python_version)` renders the exact install plan
-**without installing anything** — for explicit confirmation first. It is:
+`env-runtimes` probes more than the current interpreter. Each `PythonRuntime` records its executable,
+Python version, implementation, architecture, platform, whether it is already a venv, whether the
+stdlib `venv` module is available, and compatibility reasons.
 
-- **CUDA-aware** — picks the PyTorch wheel index by the host's accelerator (a Blackwell 5070 → the
-  `cu128` index); installs torch from its own index so the rest still resolve from PyPI.
-- **argv-structured, never a shell string** — each `InstallStep.argv` is a list, executed without a
-  shell, so an untrusted package/index name can't inject a command (mirrors the no-shell
-  trainer-launch invariant). Environment markers like `; platform_system != 'Darwin'` stay safely
-  inside a single argv token.
-- **layer-aware** — a backend recipe creates its own venv; a capability recipe installs into the
-  control-plane interpreter.
-- **honest about feasibility** — `resolvable = False` (with reasons) when the host can't satisfy the
-  recipe: Python floor unmet, unsupported OS, or a CUDA-required recipe on a CUDA-less host. Warnings
-  are non-blocking caveats (CPU torch, macOS bitsandbytes skip, native-build compiler need).
+`env-plan` is non-mutating. For an actionable backend plan it resolves:
 
-## CLI
+- the selected base interpreter and deterministic environment root;
+- exact argv arrays, working directories, a small explicit non-secret environment, timeouts, expected
+  outputs, and whether each step uses the network;
+- explicit PyPI and accelerator-specific PyTorch indexes (`cu128` for the Blackwell reference host);
+- a non-editable install of the reviewed local CorpusStudio worker source into the isolated venv;
+- estimated download and installed sizes;
+- a recipe digest and `resolution_hash` over the concrete plan.
 
-```
-corpus-studio env-recipes [--layer control_plane|capability|backend_worker] [--json]
-corpus-studio env-plan <recipe-id> [--accelerator cu128|cpu|…] [--python 3.12] [--json]
-```
+Pip runs with `--isolated`, `--no-input`, an explicit `PIP_CONFIG_FILE` null device, and explicit
+indexes. Host pip configuration cannot add a source, and the manager never silently retries from a
+different source.
 
-Example on a real RTX 5070 (Blackwell) host — the accelerator is detected, not assumed:
+Example review flow (PowerShell):
 
-```
-Install plan: backend-corpus-studio  [backend_worker]
-  host: windows  |  accelerator: cu128  |  python 3.12.10
-  resolvable: True
-  estimated download: 2.85 GB  |  on disk: 6.55 GB
-  steps:
-    [create_venv] <BASE_PYTHON> -m venv <ENV_ROOT>
-    [upgrade_pip] <ENV_ROOT>\Scripts\python.exe -m pip install --upgrade pip
-    [install] <ENV_ROOT>\Scripts\python.exe -m pip install --index-url https://download.pytorch.org/whl/cu128 torch>=2.1
-    [install] <ENV_ROOT>\Scripts\python.exe -m pip install transformers>=4.44 peft>=0.11 …
+```powershell
+corpus-studio env-runtimes --recipe backend-corpus-studio
+corpus-studio env-plan backend-corpus-studio `
+  --env-id backend-corpus-studio `
+  --runtime C:\CorpusStudio\engine\.venv\Scripts\python.exe `
+  --accelerator cu128
 ```
 
-The `<BASE_PYTHON>` / `<ENV_ROOT>` placeholders are substituted with real paths when a future
-`env-create` acts on the plan.
+The plan prints its exact `resolution hash`. Creation requires that same value and the same planning
+options:
 
-## Contracts
+```powershell
+corpus-studio env-create backend-corpus-studio `
+  --env-id backend-corpus-studio `
+  --runtime C:\CorpusStudio\engine\.venv\Scripts\python.exe `
+  --accelerator cu128 `
+  --confirm <resolution-hash>
+```
 
-`EnvironmentRecipe`, `DependencyResolution` (+ `InstallStep`), `EnvironmentLock`,
-`EnvironmentDescriptor`, `EnvironmentHealthReport` — all versioned, exported as language-neutral JSON
-Schema under [`contracts/`](contracts/). `RunPlan` will reference an environment by hash in a later
-slice so a result is always tied to the exact environment that produced it.
+This second command performs network package installation. Do not run it until the displayed indexes,
+size, target path, environment, and argv have been reviewed. A changed recipe, runtime, root, command,
+environment variable, or manager version changes the hash and invalidates confirmation.
 
-## Deferred to the next slice
+## Durable state and logs
 
-Environment **creation** and management — discover compatible Python runtimes; create the isolated
-venv; run the bounded argv installers with explicit confirmation; record the exact `EnvironmentLock`
-(package + source + hash); import / functional / hardware probes → `EnvironmentHealthReport`; drift
-detection; repair/recreate; associate the environment hash with each `RunPlan`. Those are
-side-effectful and need real-machine verification, so they land as their own vertical slice.
+The default user-owned root is `%LOCALAPPDATA%\CorpusStudio\environment-manager` on Windows and the
+XDG data directory on Linux/macOS. It has two separate areas:
+
+```text
+environment-manager/
+  environments/<env-id>/          # the venv; contains .corpusstudio-owner.json
+  registry/<env-id>/
+    EnvironmentDescriptor.json
+    EnvironmentHealthReport.json
+    installations/<attempt-id>.json
+    locks/<lock-id>.json
+    logs/<attempt-id>/*.stdout.log|*.stderr.log
+```
+
+Registry writes use temp-file plus atomic replacement. A failed, timed-out, or cancelled attempt keeps
+its descriptor, command journal, logs, structured `FailureRecord`, and partial owned environment. It
+is `BROKEN` and explicitly requires recreation; the manager does not hide the failure with a different
+source or an automatic destructive retry.
+
+Each installation command record includes argv, cwd, explicit environment, timeout, expected outputs,
+timestamps, exit code, stdout/stderr paths, native-build evidence, and failure details.
+
+## Lock, probes, and drift
+
+After installation, the managed interpreter emits an `EnvironmentLock` containing:
+
+- Python executable/version/implementation/platform/architecture;
+- exact installed distribution versions;
+- pip installer, direct URL and wheel/source identity where available;
+- installed `RECORD` metadata hashes and dependency metadata;
+- torch build, CUDA runtime, and compute capability;
+- recipe digest, selected indexes, manager version, timestamp, and a canonical lock digest.
+
+Probe categories remain separate:
+
+- **import:** CorpusStudio worker, torch, transformers, PEFT, TRL, Accelerate, Datasets, bitsandbytes;
+- **dependency:** `python -m pip check`;
+- **functional:** tiny CPU forward/backward plus checkpoint save/reload;
+- **hardware:** CUDA availability/allocation, compute capability, BF16 signal, bitsandbytes 4-bit
+  construction, minimal GPU forward/backward, optional-kernel flags, and math SDPA execution.
+
+`env-probe` re-snapshots the live environment and detects missing roots/interpreters/locks, package
+addition/removal/version/hash changes, source changes, recipe drift, lock tampering, broken imports,
+functional failures, and CUDA/compute-capability changes.
+
+```powershell
+corpus-studio env-status [<env-id>] [--refresh] [--json]
+corpus-studio env-probe <env-id> [--json]
+corpus-studio env-lock <env-id>
+```
+
+## Safe removal and recreation
+
+Removal requires both path containment under the manager's `environments` directory and a matching
+ownership marker. It also requires the exact environment ID as confirmation. Registry evidence is
+retained.
+
+```powershell
+corpus-studio env-remove backend-corpus-studio --confirm backend-corpus-studio
+```
+
+Recreation is intentionally two confirmations: the new plan hash and the exact old environment ID.
+
+```powershell
+corpus-studio env-recreate backend-corpus-studio `
+  --confirm <new-resolution-hash> `
+  --confirm-remove backend-corpus-studio
+```
+
+An arbitrary directory, an unmarked directory, a marker owned by another manager root, or a path that
+escapes containment is refused.
+
+## RunPlan association
+
+`RunPlan.environment_ref` can now carry the environment ID plus the immutable lock hash. It never
+depends on the mutable venv path. When `--environment` is selected, `platform-plan` builds its
+EnvironmentProfile and CapabilityReport inside that managed interpreter, so a lightweight control
+plane does not need the training stack installed merely to plan for its isolated worker.
+
+```powershell
+corpus-studio platform-plan ... --environment backend-corpus-studio
+corpus-studio platform-run RunPlan.json --runner training --subprocess
+```
+
+Before dispatch or resume, `platform-run` performs live health/drift checks and verifies the plan's
+environment ID, lock hash, and functional state. A managed plan must use `--subprocess`; the worker is
+launched with the managed interpreter so training cannot silently fall back into the control plane.
+
+## Contracts and clients
+
+The lifecycle uses the root contracts `PythonRuntime`, `EnvironmentRecipe`, `DependencyResolution`,
+`EnvironmentInstallation`, `EnvironmentLock`, `EnvironmentDescriptor`, and
+`EnvironmentHealthReport`. Pydantic remains the source of truth; deterministic JSON Schemas under
+[`contracts/`](contracts/) and committed TypeScript types under `apps/web/src/contracts/` are generated
+from it. CI regenerates and diffs both layers.
+
+## Verification boundary and deferred work
+
+Default CI proves command construction, confirmation seals, path containment, ownership, atomic
+records, timeout/cancellation, failure recovery, lock generation, CPU probes, drift, safe
+remove/recreate, RunPlan pinning, and managed-interpreter dispatch using fakes and temp directories.
+
+Not claimed by this slice:
+
+- a newly downloaded real CUDA environment or real-GPU result from this branch (network confirmation
+  was not supplied);
+- in-place package repair (recreate is the safe supported recovery path);
+- side-effectful creation for capability packs or any backend other than `backend-corpus-studio`;
+- container, conda, `uv`, or remote environment providers.
