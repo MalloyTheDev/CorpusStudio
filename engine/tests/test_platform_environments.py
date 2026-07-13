@@ -7,6 +7,7 @@ installing anything, so the whole 3-layer dependency model is provable in CI wit
 from __future__ import annotations
 
 import json
+import sys
 
 from typer.testing import CliRunner
 
@@ -269,7 +270,16 @@ def test_env_recipes_cli_lists_and_filters():
 
 def test_env_plan_cli_previews_a_backend_install():
     result = runner.invoke(
-        app, ["env-plan", "backend-corpus-studio", "--accelerator", "cu128", "--python", "3.12", "--json"]
+        app,
+        [
+            "env-plan",
+            "backend-corpus-studio",
+            "--accelerator",
+            "cu128",
+            "--runtime",
+            sys.executable,
+            "--json",
+        ],
     )
     assert result.exit_code == 0
     resolution = json.loads(result.stdout)
