@@ -166,9 +166,12 @@ a training run — its own opt-in first-party trainer, or your installed trainer
   additional frameworks remain separate backend slices rather than being piled into one environment
   (see [`docs/ENVIRONMENT_MANAGER.md`](docs/ENVIRONMENT_MANAGER.md))
 - static, offline `ModelDescriptor` / `TokenizerDescriptor` inspection records source pins, portable
-  inventory/hashes, trust findings, component-scoped representations, and tokenizer compatibility
-  without importing model code or claiming loadability/fit (see
-  [`docs/MODEL_TOKENIZER_CONTRACTS.md`](docs/MODEL_TOKENIZER_CONTRACTS.md))
+  inventory/hashes, trust findings, component-scoped representations, and tokenizer compatibility.
+  A hash-pinned allowlist adds structural Mixtral/Qwen2-MoE/DeepSeek V2/V3 expert-instance evidence
+  while keeping runtime capability unverified; no model code is imported and no loadability/backend/
+  fit/residency claim is made (see
+  [`docs/MODEL_TOKENIZER_CONTRACTS.md`](docs/MODEL_TOKENIZER_CONTRACTS.md) and
+  [`docs/MOE_MODEL_INSPECTION.md`](docs/MOE_MODEL_INSPECTION.md))
 - a 29-entry, hash-sealed `TrainingObjective` registry describes datasets, labels, masks, losses,
   model/update/backend requirements, artifacts, resume/evaluation, and MoE-safe router/expert intent
   independently from backend implementation; its checker keeps declarations separate from measured

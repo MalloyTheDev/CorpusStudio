@@ -124,14 +124,35 @@ export type ModelTaskClass =
   | "custom"
   | "unknown";
 export type ModelExecutionKind1 = "dense" | "sparse" | "mixture_of_experts" | "conditional" | "hybrid" | "unknown";
+export type ActiveExpertInstancesPerToken = number;
+export type ActiveRoutedExpertInstancesPerToken = number;
+export type ActiveSharedExpertInstancesPerToken = number;
+export type LogicalExpertInstances = number;
+export type MoeLayerCount = number;
+export type RoutedExpertInstances = number;
+export type SharedExpertInstances = number;
+export type Unit1 = "expert_instances";
+export type ComponentPath = string | null;
 export type ExpertCount = number;
 export type ExpertIdentityScheme = string | null;
 export type ExpertsPerToken = number | null;
 export type GroupId = string;
 export type Heterogeneous = boolean;
 export type LayerIndices = number[];
+export type LayerNamespace = string;
+export type MetadataSources = string[];
+export type RoutedExpertCount = number | null;
 export type SharedExpertCount = number | null;
 export type ExpertGroups = ExpertGroup[];
+export type ConfigFile = string | null;
+export type ConfigSha256 = string | null;
+export type EvidenceLevel = "not_checked" | "static_metadata_only";
+export type EvidencePaths = string[];
+export type Family = string | null;
+export type Method = "not_checked" | "static_config_v1";
+export type RuntimeCapability = "unverified";
+export type Status1 = "not_checked" | "no_recognized_moe_evidence" | "detected" | "incomplete" | "unsupported_family";
+export type Warnings = string[];
 export type PhysicalSchedulerOwner = "run_plan";
 export type CapacityFactor = number | null;
 export type MetadataSource = string;
@@ -169,7 +190,7 @@ export type VerificationOutcome2 = "not_checked" | "passed" | "failed" | "partia
  * and hardware support must never be collapsed into a misleading linear level.
  */
 export type VerificationOutcome3 = "not_checked" | "passed" | "failed" | "partial" | "not_applicable";
-export type Warnings = string[];
+export type Warnings1 = string[];
 export type TiedEmbeddings = boolean | null;
 
 /**
@@ -324,11 +345,37 @@ export interface DescriptorSource {
 }
 export interface ModelTopology {
   execution_kind?: ModelExecutionKind1;
+  expert_counts?: ExpertTopologyCounts | null;
   expert_groups?: ExpertGroups;
+  inspection?: TopologyInspection;
   physical_scheduler_owner?: PhysicalSchedulerOwner;
   semantic_routing?: SemanticRouting | null;
 }
+/**
+ * Derived structural counts across one full model pass for one token.
+ *
+ * The unit is expert instances, not parameter coordinates. These values therefore never substitute
+ * for N_logical/N_active in ParameterAccountingReport.
+ */
+export interface ExpertTopologyCounts {
+  active_expert_instances_per_token: ActiveExpertInstancesPerToken;
+  active_routed_expert_instances_per_token: ActiveRoutedExpertInstancesPerToken;
+  active_shared_expert_instances_per_token: ActiveSharedExpertInstancesPerToken;
+  logical_expert_instances: LogicalExpertInstances;
+  moe_layer_count: MoeLayerCount;
+  routed_expert_instances: RoutedExpertInstances;
+  shared_expert_instances: SharedExpertInstances;
+  unit?: Unit1;
+}
+/**
+ * One routed-expert layout repeated at each listed layer.
+ *
+ * expert_count is the total logical expert identities per listed layer. routed_expert_count and
+ * always-active shared_expert_count partition that total. experts_per_token counts only routed
+ * experts selected per token; neither it nor any other field here is a parameter count.
+ */
 export interface ExpertGroup {
+  component_path?: ComponentPath;
   expert_count: ExpertCount;
   expert_identity_scheme?: ExpertIdentityScheme;
   expert_registry_ref?: Ref | null;
@@ -336,19 +383,43 @@ export interface ExpertGroup {
   group_id: GroupId;
   heterogeneous?: Heterogeneous;
   layer_indices?: LayerIndices;
+  layer_namespace?: LayerNamespace;
+  metadata_sources?: MetadataSources;
+  routed_expert_count?: RoutedExpertCount;
   shared_expert_count?: SharedExpertCount;
+}
+/**
+ * Evidence for a bounded static topology classification.
+ *
+ * This is config metadata evidence only. It cannot authorize model code, prove that a backend can
+ * load the snapshot, or claim inference/training/hardware support.
+ */
+export interface TopologyInspection {
+  config_file?: ConfigFile;
+  config_sha256?: ConfigSha256;
+  evidence_level?: EvidenceLevel;
+  evidence_paths?: EvidencePaths;
+  family?: Family;
+  method?: Method;
+  runtime_capability?: RuntimeCapability;
+  status?: Status1;
+  warnings?: Warnings;
 }
 /**
  * The learned semantic selection policy. Physical placement is not represented here.
  */
 export interface SemanticRouting {
   capacity_factor?: CapacityFactor;
+  details?: Details;
   metadata_source: MetadataSource;
   router_type: RouterType;
   routing_noise?: RoutingNoise;
   routing_unit?: RoutingUnit;
   selection_policy: SelectionPolicy;
   top_k?: TopK;
+}
+export interface Details {
+  [k: string]: unknown;
 }
 /**
  * Static trust findings only. This descriptor can never authorize custom-code execution.
@@ -376,7 +447,7 @@ export interface DescriptorVerification {
   integrity?: VerificationOutcome1;
   license?: VerificationOutcome2;
   metadata?: VerificationOutcome3;
-  warnings?: Warnings;
+  warnings?: Warnings1;
 }
 export interface EmbeddingVocabulary {
   declared_vocab_size?: DimensionEvidence | null;

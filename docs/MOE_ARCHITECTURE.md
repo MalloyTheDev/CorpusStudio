@@ -1,8 +1,10 @@
 # Mixture-of-Experts, Sparse Models & Conditional Computation
 
-**Status: architectural requirement, not yet implemented.** No MoE runtime exists today; the platform
-is dense/QLoRA-oriented. This document is the binding design constraint so that when MoE arrives it is
-*not* a disruptive redesign. Its single most important rule:
+**Status: architectural requirement with the static-inspection foundation implemented.** No MoE
+runtime exists today; the platform remains dense/QLoRA-oriented for execution. Phase B can now parse a
+narrow allowlist of hash-pinned config topology, but that is not loadability, backend, fit, or hardware
+proof. This document remains the binding design constraint so later MoE execution is *not* a disruptive
+redesign. Its single most important rule:
 
 > **No new foundational contract may assume dense execution.** MoE support must be designed into the
 > `ModelDescriptor`, `TrainingObjective`, `RunPlan`, checkpoint, telemetry, artifact, and evaluation
@@ -190,7 +192,7 @@ coverage, staleness, throughput, energy, wall-clock, held-out improvement, and r
 
 | Existing contract | Change to stay dense-safe |
 |---|---|
-| `ModelDescriptor` ✅ foundation | component-scoped representation + scoped multi-count records + optional semantic routing/expert groups; physical scheduling remains owned by `RunPlan`. The static inspector leaves execution kind unknown rather than guessing dense/MoE; actual MoE parsing is Phase B. |
+| `ModelDescriptor` ✅ foundation | component-scoped representation + scoped multi-count records + semantic routing/expert groups; physical scheduling remains owned by `RunPlan`. Phase B now recognizes only complete Mixtral/Qwen2-MoE/DeepSeek V2/V3 static config mappings, binds the config hash/evidence paths, and otherwise leaves execution kind unknown. Structural expert-instance totals are not parameter-coordinate or runtime evidence. |
 | `RunPlan` ✅ foundation | explicit resources, state placements, expert/component/parameter selectors, offload rules, rank bindings, and parallel groups are hash-sealed; semantic routing remains separate and non-trivial built-in execution is refused rather than inferred |
 | `CheckpointPolicy` / checkpoint | must allow multi-component sharded checkpoints + a completion manifest (§10) |
 | `RunEvent` / `EventMetrics` | routing/expert telemetry channels; locality metrics separate from quality |
@@ -205,9 +207,11 @@ coverage, staleness, throughput, energy, wall-clock, held-out improvement, and r
 - **A — Dense-safe foundational contracts** (in progress; `ModelDescriptor`, `TrainingObjective`,
   parameter-accounting, and physical `RunPlan` foundations shipped, no MoE runtime): ensure
   `ArtifactManifest`, checkpoint, and telemetry also avoid dense-only assumptions.
-- **B — MoE model inspection**: detect existing MoE architectures; parse expert/router structure;
-  report logical/active/shared/routed/expert counts; tokenizer compat. Inference-only is acceptable if
-  **labeled**.
+- **B — Static MoE model inspection** ✅ foundation shipped: parse a narrow allowlist of existing-MoE
+  config metadata; report routed/shared/logical and active-per-token expert-instance structure;
+  preserve tokenizer compatibility; fail closed on incomplete or unsupported families. Evidence is
+  labeled `static_metadata_only`, and runtime capability remains `unverified` (see
+  [`MOE_MODEL_INSPECTION.md`](MOE_MODEL_INSPECTION.md)).
 - **C — Existing-model MoE fine-tuning**: load a supported MoE model; train router and/or selected
   experts through a verified backend; MoE-aware checkpoints + telemetry. One backend, one family first.
 - **D — Full expert training**: full expert + router optimization; exposure accounting; sparse

@@ -24,11 +24,12 @@ Against the full-platform vision, the frontier is the **input side**. Ranked gap
 |---|---|---|
 | **Storage & offload profiling** | ✅ **done** (this slice) | `StorageProfile` + role suitability — see [`HARDWARE_STORAGE_PROFILE.md`](HARDWARE_STORAGE_PROFILE.md) |
 | **Environment Manager + dependency profiles** | ✅ **reference lifecycle shipped** | §2 below — sealed creation/lock/probe/drift/recreate for `backend-corpus-studio`; other backends remain separate future slices |
-| Model & Tokenizer Lab (`ModelDescriptor`/`TokenizerDescriptor`) | ✅ **contract + static-inspection foundation shipped** | offline identity/inventory/trust/tokenizer compatibility; loading, editing/training, MoE detection, and runtime support proof remain future work — see [`MODEL_TOKENIZER_CONTRACTS.md`](MODEL_TOKENIZER_CONTRACTS.md) |
+| Model & Tokenizer Lab (`ModelDescriptor`/`TokenizerDescriptor`) | ✅ **contract + static-inspection foundation shipped** | offline identity/inventory/trust/tokenizer compatibility plus allowlisted static MoE topology evidence; loading, editing/training, and runtime support proof remain future work — see [`MODEL_TOKENIZER_CONTRACTS.md`](MODEL_TOKENIZER_CONTRACTS.md) |
 | `TrainingObjective` as a distinct registry | ✅ **contract + registry foundation shipped** | 29 sealed objective definitions + conservative dataset/model/backend evidence checker; RunPlan integration and trainer implementation remain future work — see [`TRAINING_OBJECTIVES.md`](TRAINING_OBJECTIVES.md) |
 | MoE-safe parameter accounting | ✅ **contract + static/reconciliation foundation shipped** | Sealed reports, bounded descriptor/safetensors evidence, typed worker-observation seam, explicit gaps/conflicts, and lifecycle refs; backend runtime instrumentation remains future work — see [`PARAMETER_ACCOUNTING.md`](PARAMETER_ACCOUNTING.md) |
 | Physical `RunPlan` planning | ✅ **contract + planner foundation shipped** | Concrete resources/placements/offload/ranks/groups, sealed evidence refs, static + probed capability gates, and legacy-hash compatibility; built-in workers still refuse non-trivial physical execution — see [`RUN_PLAN_PHYSICAL_EXECUTION.md`](RUN_PLAN_PHYSICAL_EXECUTION.md) |
 | Full versioned `TraceRecord` | ✅ **contract + workflow foundation shipped** | sealed source/context/segments/producer/validation/review, migration/generation/review/training gates, built-in trace draft schema; graphical Trace Studio, tool execution, and tool/process trainers remain future work — see [`TRACE_RECORDS.md`](TRACE_RECORDS.md) |
+| Static MoE model inspection | ✅ **allowlisted config foundation shipped** | hash-pinned Mixtral/Qwen2-MoE/DeepSeek V2/V3 structure and expert-instance counts; runtime, backend, parameter-residency, and fit proof remain future work — see [`MOE_MODEL_INSPECTION.md`](MOE_MODEL_INSPECTION.md) |
 | Dataset mixtures + transformation graph | partial | `DatasetManifest.lineage` is the seed |
 | Offload execution (DeepSpeed/FSDP/NVMe) | planned | the physical contract is shipped; each mechanism still needs an isolated backend plus functional and hardware proof |
 
@@ -136,12 +137,12 @@ contracts as they are built** (see §5 and [`MOE_ARCHITECTURE.md`](MOE_ARCHITECT
 | **0** | ✅ Platform contracts + lifecycle (profile→plan→fit→run→artifact→watchdog→subprocess) | shipped |
 | **1** | ✅ **StorageProfile** — `StorageDevice` / volume / path-role assessment | shipped (this slice) |
 | **2** | ✅ **Environment Manager + isolated backend runtimes** (3-layer deps, §2) — reference `backend-corpus-studio` creation, command journal, lock, probes, drift, safe remove/recreate, and RunPlan pinning shipped ([`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md)) | new frameworks still require one isolated, verified backend slice each |
-| **3** | ✅ General **`ModelDescriptor` + `TokenizerDescriptor`** foundation + static local inspection | component-scoped representation, scoped count records, semantic routing separate from physical scheduling; actual MoE detection/runtime remains Phase 8 |
+| **3** | ✅ General **`ModelDescriptor` + `TokenizerDescriptor`** foundation + static local inspection | component-scoped representation, scoped count records, semantic routing separate from physical scheduling; the Phase 8 allowlisted topology parser now fills this substrate without runtime claims |
 | **4** | ✅ **`TrainingObjective` registry** (objective distinct from backend) | 29 sealed definitions; explicit labels/masks/loss components, router/expert update policy, artifacts/resume/eval/hardware implications, and independent compatibility evidence ([`TRAINING_OBJECTIVES.md`](TRAINING_OBJECTIVES.md)) |
 | **5** | ✅ **Dense-safe + MoE-safe parameter-accounting evidence foundation** (`N_logical`/`N_active`/`N_resident`/`N_touched`/`N_updated`/`N_exposed`) | hash-sealed report + strict scopes/windows/sources, bounded static producer, typed runtime reconciliation, gaps/conflicts, and planning/telemetry/checkpoint/evaluation refs shipped; actual workers must still emit measured coordinates ([`PARAMETER_ACCOUNTING.md`](PARAMETER_ACCOUNTING.md)) |
 | **6** | ✅ **Immutable `RunPlan` expansion** (offload/placement/parallelism representable) | explicit physical specification, evidence pinning, capability gates, tamper checks, and honest singleton-only runner support shipped ([`RUN_PLAN_PHYSICAL_EXECUTION.md`](RUN_PLAN_PHYSICAL_EXECUTION.md)) |
 | **7** | ✅ Generalized **`TraceRecord`** + Trace Studio engine/authoring foundation | versioned contract, generated clients, legacy adapter, fail-closed generation, explicit review, trainer gate, and desktop-selectable trace draft schema shipped; dedicated graphical surface remains future work ([`TRACE_RECORDS.md`](TRACE_RECORDS.md)) |
-| 8 | **MoE model inspection** (detect/parse existing MoE; report logical/active/expert counts) | inference-only OK if labeled |
+| **8** | ✅ **Static MoE model inspection** (parse allowlisted existing-MoE configs; report structural expert-instance counts) | static metadata only; runtime capability remains unverified ([`MOE_MODEL_INSPECTION.md`](MOE_MODEL_INSPECTION.md)) |
 | 9 | Additional **dense** training backends (one isolated env at a time: TRL → DeepSpeed → FSDP → Unsloth → Axolotl) | |
 | 10 | **Existing-model MoE fine-tuning** (router and/or selected experts, verified backend) | one backend + family first |
 | 11 | **Full MoE training + expert parallelism** (exposure clocks, starvation/collapse gates, all-to-all, distributed ckpt) | |
@@ -152,7 +153,8 @@ those need isolated, capability-probed environments to be added honestly; (b) `M
 `TrainingObjective` / parameter-accounting / `RunPlan` (Phases 3–6) are the foundational contracts that
 **must be MoE-safe when written**, because retrofitting sparse semantics into dense-assuming contracts
 later would force a disruptive redesign of the model, optimizer, checkpoint, telemetry, and artifact
-systems all at once. MoE execution (8, 10–12) comes later; the contracts do not.
+systems all at once. Static topology inspection is now shipped; MoE execution (10–12) still comes
+later, and the inspection result is never promoted into runtime proof.
 
 ## 4. Invariants preserved throughout
 

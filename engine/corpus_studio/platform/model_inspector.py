@@ -28,7 +28,6 @@ from .contracts import (
     EmbeddingVocabulary,
     ModelDescriptor,
     ModelTokenizerCompatibility,
-    ModelTopology,
     ParameterAccountingReport,
     ParameterComponent,
     ParameterCount,
@@ -54,6 +53,7 @@ from .enums import (
     TokenizerFormat,
     VerificationOutcome,
 )
+from .moe_inspector import inspect_moe_topology
 
 MAX_JSON_BYTES = 16 * 1024 * 1024
 MAX_INVENTORY_FILES = 100_000
@@ -486,7 +486,7 @@ def _verification(
             else VerificationOutcome.passed
         ),
         inspected_at=captured_at,
-        inspector="corpus_studio.platform.model_inspector/v1",
+        inspector="corpus_studio.platform.model_inspector/v2",
         warnings=sorted(set(warnings)),
     )
 
@@ -636,10 +636,11 @@ def inspect_model(
     files, warnings, complete, inventory_sha256 = _inventory(
         root, hash_weights=hash_weights
     )
+    config_sha256 = _inventory_hash(files, "config.json")
     config = _load_json(
         root,
         "config.json",
-        expected_sha256=_inventory_hash(files, "config.json"),
+        expected_sha256=config_sha256,
     ) or {}
     if not config and not any(item.role == DescriptorFileRole.weights for item in files):
         raise ModelInspectionError("snapshot has neither config.json nor recognized weight files")
@@ -676,7 +677,11 @@ def inspect_model(
     context = _dimension(
         config, "max_position_embeddings", "n_positions", "seq_length", "max_sequence_length"
     )
-    representation = _parameter_representation(config, files)
+    topology = inspect_moe_topology(config, config_sha256=config_sha256)
+    warnings.extend(topology.inspection.warnings)
+    representation = _parameter_representation(config, files).model_copy(
+        update={"kind": topology.execution_kind}
+    )
     timestamp = _timestamp(now)
     snapshot_hash = (
         inventory_sha256
@@ -702,7 +707,7 @@ def inspect_model(
         task_classes=_task_classes(config),
         formats=formats or [ModelFormat.unknown],
         parameters=representation,
-        topology=ModelTopology(execution_kind=ModelExecutionKind.unknown),
+        topology=topology,
         vocabulary=vocabulary,
         context_window=context,
         tokenizer_ref=Ref(id=tokenizer_id) if tokenizer_id else None,

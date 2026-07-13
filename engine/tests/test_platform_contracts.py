@@ -485,6 +485,19 @@ def test_export_json_schemas_writes_language_neutral_files(tmp_path):
     representation = model_schema["$defs"]["ParameterRepresentation"]["properties"]
     assert "counts" in representation
     assert "parameter_count" not in representation
+    topology = model_schema["$defs"]["ModelTopology"]["properties"]
+    assert "inspection" in topology and "expert_counts" in topology
+    inspection = model_schema["$defs"]["TopologyInspection"]["properties"]
+    assert inspection["runtime_capability"]["const"] == "unverified"
+    assert inspection["evidence_level"]["default"] == "not_checked"
+    expert_group = model_schema["$defs"]["ExpertGroup"]
+    assert "routed_expert_count" in expert_group["properties"]
+    assert "routed_expert_count" not in expert_group.get("required", [])
+    assert "shared_expert_count" not in expert_group.get("required", [])
+    assert "component_path" in expert_group["properties"]
+    expert_counts = model_schema["$defs"]["ExpertTopologyCounts"]["properties"]
+    assert expert_counts["unit"]["const"] == "expert_instances"
+    assert "active_expert_instances_per_token" in expert_counts
     # Objective schemas preserve independent loss components/masks and the no-fit-claim boundary.
     objective_schema = P.contract_schemas()["TrainingObjective"]
     objective_properties = objective_schema["properties"]

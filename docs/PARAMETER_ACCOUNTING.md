@@ -6,8 +6,9 @@ truth is the `ParameterAccountingReport` contract in
 dependency-light producers and reconciler live in
 [`engine/corpus_studio/platform/parameter_accounting.py`](../engine/corpus_studio/platform/parameter_accounting.py).
 
-This foundation is dense-safe and MoE-safe. It does not claim that a current backend measures every
-axis, detects an MoE topology, or makes the resource-elastic research target practical.
+This foundation is dense-safe and MoE-safe. Static MoE topology inspection now supplies structural
+expert identities for an allowlisted family set, but it does not claim that a current backend measures
+every parameter axis or makes the resource-elastic research target practical.
 
 ## Distinct quantities
 
@@ -67,6 +68,13 @@ Supplying a different or changed snapshot cannot silently attach evidence to the
 revision. Malformed, oversized, linked, overlapping, incomplete, or changing inputs produce bounded
 gaps rather than a guessed count.
 
+Static [`ExpertTopologyCounts`](MOE_MODEL_INSPECTION.md) are deliberately outside this parameter
+coordinate algebra. They count expert **instances** across layers and expert identities selected per
+token; they do not reveal how many independent coordinates each expert contains, which coordinates
+are tied/shared, or where any coordinate resides. A router top-k therefore never manufactures
+`N_active_token` or `N_resident`. Unless exact coordinate evidence exists, the corresponding
+`ParameterAccountingReport` axes remain explicit gaps.
+
 ## Runtime reconciliation
 
 Workers can emit typed observations through `RunEvent.metrics.parameter_observations`. The
@@ -102,8 +110,8 @@ the lifecycle without manufacturing backend measurements.
 
 Current limitation: the control-plane contract, static producer, event loader, and reconciler ship;
 the existing dense training workers do not yet emit the full runtime observation set. Until a backend
-adds pinned coordinate instrumentation, runtime reports correctly retain gaps. MoE family detection
-also remains a later phase.
+adds pinned coordinate instrumentation, runtime reports correctly retain gaps. Static family
+detection does not change that requirement.
 
 ## CLI
 

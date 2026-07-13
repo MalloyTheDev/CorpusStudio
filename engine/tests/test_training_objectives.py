@@ -517,6 +517,7 @@ def test_routed_expert_update_requires_semantic_routing_evidence():
                     "group_id": "experts",
                     "layer_indices": [0],
                     "expert_count": 2,
+                    "routed_expert_count": 2,
                     "expert_identity_scheme": "layer-index",
                 }
             ],

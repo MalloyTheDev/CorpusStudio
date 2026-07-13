@@ -117,8 +117,11 @@ input side. Ordered:
 - ✅ **Model/Tokenizer contract + static-inspection foundation** — `ModelDescriptor` +
   `TokenizerDescriptor` are MoE-safe from their first version, with offline inventory, fail-closed
   custom-code findings, tokenizer vocabulary/compatibility evidence, JSON Schema, and generated TS
-  types. This does not yet load/train/edit models or tokenizers, detect MoE topology, or prove backend
-  support. See [`MODEL_TOKENIZER_CONTRACTS.md`](MODEL_TOKENIZER_CONTRACTS.md).
+  types. An allowlisted Phase 8 parser now adds hash-pinned Mixtral/Qwen2-MoE/DeepSeek V2/V3
+  structural expert-instance evidence. This does not load/train/edit models or tokenizers, prove
+  backend support, populate active/resident parameter coordinates, or establish MoE runtime
+  capability. See [`MODEL_TOKENIZER_CONTRACTS.md`](MODEL_TOKENIZER_CONTRACTS.md) and
+  [`MOE_MODEL_INSPECTION.md`](MOE_MODEL_INSPECTION.md).
 - ✅ **TrainingObjective contract + registry foundation** — 29 hash-sealed, backend-independent
   definitions with dataset/label/mask/loss semantics, MoE-safe update scope/exposure rules, artifacts,
   resume/eval/hardware implications, and conservative dataset/model/backend compatibility axes. This
@@ -137,7 +140,8 @@ input side. Ordered:
   immutable review, legacy migration, atomic generation reports, trainer approval gating, generated
   JSON Schema/TypeScript, and a desktop-selectable trace draft schema. A dedicated graphical Trace
   Studio and tool/process trainers remain future work. See [`TRACE_RECORDS.md`](TRACE_RECORDS.md).
-- ⏭️ **MoE model inspection**, then additional backend workers and dataset mixtures.
+- ✅ **Static MoE model inspection**; next are additional isolated backend contracts/fake-worker tests,
+  Environment Manager lock/drift hardening, desktop/web contract integration, and dataset mixtures.
 
 - **Surface the LLM judge in the Evaluation tab** — the `--judge-model` scorer ships in
   the engine and in suites, but the desktop Evaluation tab still has no judge-model field.

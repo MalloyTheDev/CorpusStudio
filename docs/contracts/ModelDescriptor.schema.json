@@ -420,7 +420,21 @@
     },
     "ExpertGroup": {
       "additionalProperties": false,
+      "description": "One routed-expert layout repeated at each listed layer.\n\nexpert_count is the total logical expert identities per listed layer. routed_expert_count and\nalways-active shared_expert_count partition that total. experts_per_token counts only routed\nexperts selected per token; neither it nor any other field here is a parameter count.",
       "properties": {
+        "component_path": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Component Path"
+        },
         "expert_count": {
           "minimum": 1,
           "title": "Expert Count",
@@ -479,6 +493,32 @@
           "title": "Layer Indices",
           "type": "array"
         },
+        "layer_namespace": {
+          "default": "decoder",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Layer Namespace",
+          "type": "string"
+        },
+        "metadata_sources": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Metadata Sources",
+          "type": "array"
+        },
+        "routed_expert_count": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Routed Expert Count"
+        },
         "shared_expert_count": {
           "anyOf": [
             {
@@ -498,6 +538,64 @@
         "expert_count"
       ],
       "title": "ExpertGroup",
+      "type": "object"
+    },
+    "ExpertTopologyCounts": {
+      "additionalProperties": false,
+      "description": "Derived structural counts across one full model pass for one token.\n\nThe unit is expert instances, not parameter coordinates. These values therefore never substitute\nfor N_logical/N_active in ParameterAccountingReport.",
+      "properties": {
+        "active_expert_instances_per_token": {
+          "minimum": 1,
+          "title": "Active Expert Instances Per Token",
+          "type": "integer"
+        },
+        "active_routed_expert_instances_per_token": {
+          "minimum": 1,
+          "title": "Active Routed Expert Instances Per Token",
+          "type": "integer"
+        },
+        "active_shared_expert_instances_per_token": {
+          "minimum": 0,
+          "title": "Active Shared Expert Instances Per Token",
+          "type": "integer"
+        },
+        "logical_expert_instances": {
+          "minimum": 1,
+          "title": "Logical Expert Instances",
+          "type": "integer"
+        },
+        "moe_layer_count": {
+          "minimum": 1,
+          "title": "Moe Layer Count",
+          "type": "integer"
+        },
+        "routed_expert_instances": {
+          "minimum": 1,
+          "title": "Routed Expert Instances",
+          "type": "integer"
+        },
+        "shared_expert_instances": {
+          "minimum": 0,
+          "title": "Shared Expert Instances",
+          "type": "integer"
+        },
+        "unit": {
+          "const": "expert_instances",
+          "default": "expert_instances",
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "moe_layer_count",
+        "routed_expert_instances",
+        "shared_expert_instances",
+        "logical_expert_instances",
+        "active_routed_expert_instances_per_token",
+        "active_shared_expert_instances_per_token",
+        "active_expert_instances_per_token"
+      ],
+      "title": "ExpertTopologyCounts",
       "type": "object"
     },
     "HashRef": {
@@ -678,12 +776,26 @@
           "$ref": "#/$defs/ModelExecutionKind",
           "default": "unknown"
         },
+        "expert_counts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExpertTopologyCounts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "expert_groups": {
           "items": {
             "$ref": "#/$defs/ExpertGroup"
           },
           "title": "Expert Groups",
           "type": "array"
+        },
+        "inspection": {
+          "$ref": "#/$defs/TopologyInspection"
         },
         "physical_scheduler_owner": {
           "const": "run_plan",
@@ -982,6 +1094,11 @@
           "default": null,
           "title": "Capacity Factor"
         },
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
+        },
         "metadata_source": {
           "minLength": 1,
           "title": "Metadata Source",
@@ -1041,6 +1158,101 @@
         "metadata_source"
       ],
       "title": "SemanticRouting",
+      "type": "object"
+    },
+    "TopologyInspection": {
+      "additionalProperties": false,
+      "description": "Evidence for a bounded static topology classification.\n\nThis is config metadata evidence only. It cannot authorize model code, prove that a backend can\nload the snapshot, or claim inference/training/hardware support.",
+      "properties": {
+        "config_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Config File"
+        },
+        "config_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Config Sha256"
+        },
+        "evidence_level": {
+          "default": "not_checked",
+          "enum": [
+            "not_checked",
+            "static_metadata_only"
+          ],
+          "title": "Evidence Level",
+          "type": "string"
+        },
+        "evidence_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Paths",
+          "type": "array"
+        },
+        "family": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Family"
+        },
+        "method": {
+          "default": "not_checked",
+          "enum": [
+            "not_checked",
+            "static_config_v1"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "runtime_capability": {
+          "const": "unverified",
+          "default": "unverified",
+          "title": "Runtime Capability",
+          "type": "string"
+        },
+        "status": {
+          "default": "not_checked",
+          "enum": [
+            "not_checked",
+            "no_recognized_moe_evidence",
+            "detected",
+            "incomplete",
+            "unsupported_family"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "title": "TopologyInspection",
       "type": "object"
     },
     "TrustRequirement": {
