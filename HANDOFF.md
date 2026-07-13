@@ -68,14 +68,16 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   6 skipped / 88.47% Windows coverage, deterministic 27-root schema/TypeScript generation, web
   production build, 815 desktop tests, and zero-warning WPF/Avalonia Release builds. See
   `docs/MOE_MODEL_INSPECTION.md`.
-- **Current branch `feat/backend-worker-contracts` is Phase 9A**: protocol 2.0 worker-first
+- **#418 is the Phase 9A backend-worker protocol/isolation PR** (`feat/backend-worker-contracts`):
+  protocol 2.0 worker-first
   backend/environment identity, typed envelope/state-machine validation, managed recipe/lock/backend
   binding, pre-run seal checks at both public execution entry points, and shared bounded process-tree
   termination with a real descendant fake-worker test. It adds no new training backend or hardware
   capability. The final local gate is Ruff clean, MyPy clean (124 files), 1,450 Python tests passed /
   6 skipped / 88.38% Windows coverage, deterministic 27-root schema/TypeScript generation, web
   production build, 815 desktop tests, and zero-warning WPF/Avalonia Release builds. See
-  `docs/BACKEND_WORKER_PROTOCOL.md`.
+  `docs/BACKEND_WORKER_PROTOCOL.md`. Verify its live CI/merge state rather than inferring it from this
+  snapshot.
 
 ## 3. The architecture North Star + binding directives
 
@@ -169,7 +171,7 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 7. Immediate next actions (ranked)
 
-1. **Finish Phase 9A as one CI-green PR.** Publish/merge `feat/backend-worker-contracts`; do not call
+1. **Finish Phase 9A as one CI-green PR.** Verify and merge #418; do not call
    protocol conformance, process isolation, or static topology evidence runtime capability.
 2. **Phase 9B — effective execution truth (highest priority).** The 2026-07-13 audit was reconciled
    against live post-#417 code and confirmed plan/runtime drift around attention enforcement, precision,
