@@ -2,3 +2,6 @@
 # scripts/setup_linux_training.sh (and any future shell script) runnable on the native-Linux target
 # regardless of a contributor's core.autocrlf setting on Windows.
 *.sh text eol=lf
+
+# Model weights are binary — never eol/diff them.
+*.safetensors binary
