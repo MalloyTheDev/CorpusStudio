@@ -18,6 +18,20 @@ At true seq-4096 a 7B QLoRA needs ~15–20 GB — over the 12 GB card. On WSL2 t
 when it spills that hard; **native Linux gives direct GPU access + clean OOM**, so you can add
 *explicit* offload (CPU/NVMe) to fit the overflow instead of relying on a fragile silent spill.
 
+**Measured on a real RTX 5070 under WSL2** (true full-length sequences — QLoRA r16, grad checkpointing):
+
+| seq | GPU peak | step time | verdict |
+|----:|---------:|----------:|---------|
+| 2048 | 14.1 GB | ~670 s | spills to RAM (impractically slow) |
+| 2560 | 18.8 GB | ~310 s | spills |
+| 3072 | 24.4 GB | ~460 s | spills — the **usable WSL ceiling**, barely |
+| 3584 | — | — | **fails** (`device not ready`) |
+
+So WSL "works" only up to seq-3072 and only by spilling at **5–11 minutes per step** — unusable for
+real training. (Short *effective* sequences — the WBG corpus is ~1.2 k tokens — stay under 12 GB and
+train fast at NATIVE_SAFE regardless of the `sequence_len` config.) True long-context needs the
+native-Linux + offload path below, or more VRAM.
+
 ## 1. Dedicate an NVMe + install Ubuntu
 
 You have 3 NVMes — dedicate one to Linux (better than an external drive: full PCIe speed, native
