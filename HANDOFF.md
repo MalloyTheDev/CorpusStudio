@@ -18,13 +18,10 @@ forward plan see [`docs/ROADMAP.md`](docs/ROADMAP.md) + [`docs/IMPLEMENTATION_PL
 - WorldBibleGenerator (the "WBG" reference project): **`C:\WorldBibleGenerator`** holds the *important*
   stuff (source + datasets + trained adapters, ~2.4 GB). The large merged/GGUF models + pretrain data
   (~260 GB) were intentionally left on `F:\WorldBibleGenerator` (reproducible from adapters).
-<<<<<<< HEAD
 - **WBG WSL training now points to C:** — the launch scripts / configs / README under
   `C:\WorldBibleGenerator\training` were repointed off `/mnt/f` → `/mnt/c` (the venv stays on the Linux
   FS `~/wbg-venv`, which is correct). The base model loads from the HF cache, so the data→adapter path
   is self-contained on C:. (Those edits are uncommitted in the WBG git repo.)
-=======
->>>>>>> 34e325e345a3e23158aae133813272a52554dc07
 
 ## 1. What CorpusStudio is
 
@@ -40,20 +37,16 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
 
 ## 2. Current git / PR state
 
-<<<<<<< HEAD
-`main` is the source of truth; everything through **#409 is merged**:
+`main` is the source of truth; everything through **#410 is merged**:
 - **#404** configurable checkpoint retention · **#405** StorageProfile + the dependency-architecture
   correction · **#406** Environment Manager substrate (Phase 2 slice 1) · **#407** storage USB/WSL
   runtime-role risks + storage-vs-not failure diagnostic · **#408** HANDOFF/AGENTS · **#409**
-  CURRENT_STATE/CLI_REFERENCE reconciliation.
-
-**Open:** **#410** — a docs follow-up (folds Environment Manager + storage runtime-risks into
-CURRENT_STATE/CLI_REFERENCE, plus this HANDOFF/AGENTS refresh). Merge it and the docs are fully in sync.
-
-**Admin-merge note:** the auto-mode classifier blocks a self-authored admin-merge unless the user names
-the PR that turn ("merge 410"). After merging any `platform/` contract change, regenerate the committed
-schemas (see §4) and bump the count in `tests/test_platform_contracts.py` (currently **19 root
-contracts**).
+  CURRENT_STATE/CLI_REFERENCE reconciliation · **#410** the follow-up docs refresh. At the start of
+  the Environment Manager creation slice there were no open pull requests; verify GitHub live rather
+  than trusting this snapshot. The current `feat/environment-manager-creation` branch implements Phase
+  2 slice 2 but is not merged merely because this handoff describes it. After any `platform/` contract
+  change, regenerate the committed schemas (see §4), update the count in
+  `tests/test_platform_contracts.py`, and regenerate the TypeScript types.
 
 ## 3. The architecture North Star + binding directives
 
@@ -73,24 +66,6 @@ requirements — not the product scope. The eventual shell strangles WPF → Ava
 React, over the stable language-neutral contracts, with a progressively Rust-ified core.
 
 The big epic (memory `platform-architecture-epic`). Non-negotiables the user has set:
-=======
-Merged to `main`: **#404** (configurable checkpoint retention), **#405** (StorageProfile).
-
-**Open, CI-green, awaiting the user's admin-merge** (the user says "merge NNN" to authorize each):
-- **#406** — Environment Manager substrate (Phase 2 slice 1). Branch `feat/environment-manager-substrate`.
-- **#407** — Storage USB/WSL runtime-role risks + storage-vs-not failure diagnostic. Branch
-  `feat/storage-runtime-risks` (the branch the C: copy is currently on).
-
-**Merge-order note:** #406 and #407 both touch `platform/enums.py` + `platform/contracts.py` but in
-different sections (env contracts vs storage) — they should auto-merge. After merging, if the *set* of
-root contracts changed, regenerate the committed schemas (see §4) and bump the count in
-`tests/test_platform_contracts.py`.
-
-## 3. The architecture North Star + binding directives
-
-The big epic (memory `platform-architecture-epic`): evolve CorpusStudio into a **universal local-first
-AI-lifecycle platform**. Non-negotiables the user has set:
->>>>>>> 34e325e345a3e23158aae133813272a52554dc07
 
 - **3-layer dependency model** ([`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) §2):
   "dependency-light" describes the **CONTROL PLANE only**, not the whole product. Layers = control
@@ -103,8 +78,8 @@ AI-lifecycle platform**. Non-negotiables the user has set:
   (`N_logical`/`N_active`/`N_resident`/`N_touched`/`N_updated`/`N_exposed`), the
   semantic-router-vs-physical-scheduler split, stable expert identity, and sharded transactional
   checkpoints **from day one** — retrofitting sparse later is a disruptive redesign.
-- **Revised foundational order** (do these in order): 1 StorageProfile ✅ → 2 Env Manager (substrate ✅,
-  **creation is next**) → 3 `ModelDescriptor` + `TokenizerDescriptor` (MoE-safe) → 4 `TrainingObjective`
+- **Revised foundational order** (do these in order): 1 StorageProfile ✅ → 2 Env Manager reference
+  lifecycle ✅ → 3 `ModelDescriptor` + `TokenizerDescriptor` (MoE-safe) → 4 `TrainingObjective`
   registry → 5 parameter accounting → 6 `RunPlan` expansion → 7 `TraceRecord` → 8 MoE inspection →
   9 dense backends → 10 existing-model MoE FT → 11 full MoE → 12 resource-elastic expert runtime.
 
@@ -117,7 +92,8 @@ From `C:\CorpusStudio\engine` (PowerShell):
 .\.venv\Scripts\python.exe -m pytest -q --no-header --basetemp=.pytest_tmp
 ```
 CI (GitHub Actions, **Linux + Python 3.11**) runs `pytest --cov=corpus_studio --cov-report=term-missing`
-with **`--cov-fail-under=88`**, plus `avalonia-linux-build`, `desktop-tests`, C# + Python CodeQL.
+with **`--cov-fail-under=88`**, plus `avalonia-linux-build`, `desktop-tests`, web typecheck/build,
+schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 - **★ COVERAGE GOTCHA:** running the suite on **Windows under-measures** `storage_profiler`'s
   Linux-only detection by ~0.3% (those lines only execute on the Linux CI runner). **Target ≥ 88.2%
@@ -128,7 +104,7 @@ with **`--cov-fail-under=88`**, plus `avalonia-linux-build`, `desktop-tests`, C#
   .\.venv\Scripts\python.exe -c "from corpus_studio.platform.schema_export import export_json_schemas; export_json_schemas('../docs/contracts')"
   ```
   then fix the two counts in `tests/test_platform_contracts.py` (`len(ROOT_CONTRACTS)` + the export
-  test). There are **19 root contracts** as of #406 (will be 19 or more after merges).
+  test). This branch exports **21 root contracts**.
 
 ## 5. Workflow / process conventions (the user cares about these)
 
@@ -161,29 +137,15 @@ with **`--cov-fail-under=88`**, plus `avalonia-linux-build`, `desktop-tests`, C#
 
 ## 7. Immediate next actions (ranked)
 
-<<<<<<< HEAD
-1. **Phase 2 slice 2 — Environment Manager CREATION.** The substrate (recipes + install-preview) is
-   merged; next is the side-effectful half: create the isolated venv, run the bounded argv installers
-   (with explicit confirmation), record the exact `EnvironmentLock` (package + source + hash), run
-   import/functional/hardware probes → `EnvironmentHealthReport`, drift detection, repair/recreate, and
-   associate the environment hash with each `RunPlan`. Verify on the real 5070 (build + probe a real
-   `backend-corpus-studio` env).
-2. **Phase 3 — `ModelDescriptor` + `TokenizerDescriptor`**, built **MoE-safe from day one** (§3): the
+1. **Phase 3 — `ModelDescriptor` + `TokenizerDescriptor`**, built **MoE-safe from day one** (§3): the
    multi-count parameter accounting + the semantic-router-vs-physical-scheduler split baked in.
+2. **Environment Manager hardware verification (explicit/networked).** After reviewing `env-plan`,
+   build and probe a real `backend-corpus-studio` CUDA environment on the RTX 5070. The code and CI
+   harness do not claim this newly downloaded environment exists or is hardware-verified.
 3. **Phase 4+** down the revised order (§3): `TrainingObjective` registry → parameter accounting →
    `RunPlan` expansion → `TraceRecord` → MoE inspection → dense backends → MoE FT → resource-elastic.
 4. When a native-Linux NVMe box is ready: the **untruncated seq-4096 WBG-7B re-train** for paper numbers
    (the WBG WSL training now points at C:, not the F: USB drive — see §0).
-=======
-1. **Merge #406 + #407** (ask the user; they authorize per-PR).
-2. **Phase 2 slice 2 — Environment Manager CREATION**: actually create the venv, run the bounded argv
-   installers (with explicit confirmation), record the exact `EnvironmentLock` (package + source +
-   hash), run import/functional/hardware probes → `EnvironmentHealthReport`, drift detection,
-   repair/recreate, and associate the environment hash with each `RunPlan`. Side-effectful → verify on
-   the real 5070 (create a real `backend-corpus-studio` env + probe it).
-3. **Phase 3 — `ModelDescriptor` + `TokenizerDescriptor`**, built **MoE-safe from day one** (§3).
-4. When a native-Linux NVMe box is ready: the **untruncated seq-4096 WBG-7B re-train** for paper numbers.
->>>>>>> 34e325e345a3e23158aae133813272a52554dc07
 
 ## 8. Hardware + environments
 
@@ -198,16 +160,18 @@ with **`--cov-fail-under=88`**, plus `avalonia-linux-build`, `desktop-tests`, C#
 
 ## 9. Repository map
 
-- **Platform contracts**: `engine/corpus_studio/platform/contracts.py` (19 root contracts) + `enums.py`
+- **Platform contracts**: `engine/corpus_studio/platform/contracts.py` (21 root contracts) + `enums.py`
   + `common.py`; `schema_export.py` → `docs/contracts/*.schema.json` (language-neutral, consumed by
   `apps/web`).
 - **Lifecycle**: `platform/{profiler, probes, planner, calibrator, supervisor, runners, watchdog,
   subprocess_supervisor, worker, backends}.py`.
-- **Environment Manager** (Phase 2): `platform/environments.py` (recipes + install-preview resolver).
+- **Environment Manager** (Phase 2): `platform/environments.py` (recipes + concrete resolver) and
+  `platform/environment_manager.py` (runtime discovery, creation, journals, lock/probe/drift, owned
+  removal/recreation, and RunPlan compatibility).
 - **Storage**: `platform/storage_profiler.py` (topology + per-role safe-spill guardrail + failure
   diagnostic).
 - **Trainer**: `training/trainer.py` (+ `unsloth_trainer.py`). CLI: `engine/corpus_studio/cli.py`
-  (~65 commands incl. `platform-*`, `env-recipes`/`env-plan`, `train-*`).
+  (including `platform-*`, the full `env-*` lifecycle, and `train-*`).
 - **Docs**: source of truth `docs/CURRENT_STATE.md`; plan `docs/IMPLEMENTATION_PLAN.md`; MoE
   `docs/MOE_ARCHITECTURE.md`; storage `docs/HARDWARE_STORAGE_PROFILE.md`; env
   `docs/ENVIRONMENT_MANAGER.md`; platform run `docs/PLATFORM_RUN.md`.

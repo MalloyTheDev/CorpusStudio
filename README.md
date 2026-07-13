@@ -4,7 +4,8 @@
 
 [![Engine coverage](https://codecov.io/gh/MalloyTheDev/CorpusStudio/branch/main/graph/badge.svg)](https://codecov.io/gh/MalloyTheDev/CorpusStudio)
 
-**Corpus Studio** is a local-first dataset creation studio for AI builders.
+**Corpus Studio** is a local-first, hardware-aware AI engineering platform with a mature dataset
+studio at its center.
 
 It is designed to be a one-stop shop for authoring, importing, cleaning, validating, splitting, versioning, and exporting model-ready datasets across multiple schemas:
 
@@ -18,14 +19,15 @@ It is designed to be a one-stop shop for authoring, importing, cleaning, validat
 - retrieval/embedding datasets
 - evaluation datasets
 
-Corpus Studio is not just a JSONL editor. It is a writing-first dataset IDE
-covering the full dataset-to-model workflow: create datasets, validate them,
+Corpus Studio is not just a JSONL editor. It is a writing-first dataset IDE plus a contract-first
+run control plane covering the dataset-to-model workflow: create datasets, validate them,
 clean and measure them, grade their outstanding debt, run pass/warn/block gates,
 generate or rewrite candidates only with policy-approved providers under human
 review, test and compare models, export them, version/diff/restore the dataset,
 generate training configs, run the QLoRA yourself (the opt-in first-party trainer)
-or launch your own installed trainer with live logs and checkpoints, track every
-run and the model artifacts it produces, and measure the before/after improvement.
+or launch your own installed trainer with live logs and checkpoints, plan against measured hardware,
+isolate the reference training backend in a lock-pinned managed environment, track every run and the
+model artifacts it produces, and measure the before/after improvement.
 
 The single source of truth for what is implemented today is
 [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md).
@@ -145,11 +147,23 @@ a training run — its own opt-in first-party trainer, or your installed trainer
   and a promote gate that refuses to keep a modified/missing or regressed
   artifact
 
-Corpus Studio's dependency-light core never bundles CUDA, PyTorch, or trainer
-packages — training deps are opt-in via the `[train]` extra, which adds the
-first-party trainer; you can also launch your own installed trainer. It never
-hides the command it runs, enforces who may generate trainable data, and does not
-publish datasets or auto-accept generated rows.
+**Plan & isolate**
+- a dependency-light, torch-free platform control plane that profiles hardware and storage, seals
+  immutable run plans, predicts fit without claiming measured safety, supervises kill-able worker
+  subprocesses, records measured fit, and preserves artifact lineage
+- a 3-layer dependency architecture: lightweight control plane, opt-in capability packs, and isolated
+  heavy backend workers. The `backend-corpus-studio` reference lifecycle discovers Python runtimes,
+  previews exact no-shell install commands and sources, requires a matching plan hash, creates an owned
+  venv, records an exact package/source/hash lock, separates CPU functional proof from GPU hardware
+  proof, detects drift, and safely recreates only owned environments
+- managed run plans pin the environment's immutable lock hash and dispatch through that interpreter;
+  additional frameworks remain separate backend slices rather than being piled into one environment
+  (see [`docs/ENVIRONMENT_MANAGER.md`](docs/ENVIRONMENT_MANAGER.md))
+
+Corpus Studio's dependency-light core never bundles CUDA, PyTorch, or trainer packages. Training deps
+are opt-in via the `[train]` extra or installed into an explicitly reviewed managed reference-backend
+environment; you can also launch your own installed trainer. It never hides the command it runs,
+enforces who may generate trainable data, and does not publish datasets or auto-accept generated rows.
 
 ## License
 
@@ -172,7 +186,7 @@ CorpusStudio
 ├── apps/
 │   ├── desktop/             # C# desktop heads (WPF shipping + Avalonia interim) over a shared Core
 │   └── web/                 # Tauri 2 + React contract-first client (early-stage)
-├── engine/                  # Python dataset engine + platform run-lifecycle substrate
+├── engine/                  # Python dataset engine + platform run lifecycle and environment manager
 ├── schemas/                 # Built-in schema definitions
 ├── docs/                    # Product, architecture, roadmap, workflows
 ├── examples/                # Example dataset rows

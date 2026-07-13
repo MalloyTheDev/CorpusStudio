@@ -18,12 +18,20 @@
       "file": "StorageProfile.schema.json"
     },
     {
+      "contract": "PythonRuntime",
+      "file": "PythonRuntime.schema.json"
+    },
+    {
       "contract": "EnvironmentRecipe",
       "file": "EnvironmentRecipe.schema.json"
     },
     {
       "contract": "DependencyResolution",
       "file": "DependencyResolution.schema.json"
+    },
+    {
+      "contract": "EnvironmentInstallation",
+      "file": "EnvironmentInstallation.schema.json"
     },
     {
       "contract": "EnvironmentLock",

@@ -7,6 +7,7 @@ installing anything, so the whole 3-layer dependency model is provable in CI wit
 from __future__ import annotations
 
 import json
+import sys
 
 from typer.testing import CliRunner
 
@@ -27,6 +28,7 @@ from corpus_studio.platform.enums import (
     RecipeVerification,
 )
 from corpus_studio.platform.environments import (
+    PYPI_INDEX_URL,
     PYTORCH_INDEX_URLS,
     _parse_min_python,
     _python_tuple,
@@ -97,6 +99,14 @@ def _corpus_studio():
     return recipe
 
 
+def _torch_install_step(resolution):
+    return next(
+        step
+        for step in resolution.install_steps
+        if any(token.startswith("torch") for token in step.argv)
+    )
+
+
 def test_backend_resolution_creates_a_venv_and_uses_the_cuda_index():
     res = resolve_dependencies(
         _corpus_studio(), os_value=OperatingSystem.linux, accelerator_tag="cu128", python_version="3.12"
@@ -105,11 +115,13 @@ def test_backend_resolution_creates_a_venv_and_uses_the_cuda_index():
     phases = [s.phase for s in res.install_steps]
     assert phases[0] == "create_venv"  # a backend gets its OWN isolated env
     # torch installs from the cu128 wheel index, as separate argv tokens (never a shell string).
-    torch_step = next(s for s in res.install_steps if "--index-url" in s.argv)
+    torch_step = _torch_install_step(res)
     idx = torch_step.argv.index("--index-url")
     assert torch_step.argv[idx + 1] == PYTORCH_INDEX_URLS["cu128"]
     assert any(tok.startswith("torch") for tok in torch_step.argv)
     assert PYTORCH_INDEX_URLS["cu128"] in res.resolved_index_urls
+    assert PYPI_INDEX_URL in res.resolved_index_urls
+    assert all("--isolated" in step.argv for step in res.install_steps if step.phase != "create_venv")
 
 
 def test_every_install_step_is_argv_structured_not_a_shell_string():
@@ -134,7 +146,7 @@ def test_cpu_accelerator_warns_and_uses_cpu_torch_index():
         _corpus_studio(), os_value=OperatingSystem.linux, accelerator_tag="cpu", python_version="3.12"
     )
     assert any("CPU" in w for w in res.warnings)
-    torch_step = next(s for s in res.install_steps if "--index-url" in s.argv)
+    torch_step = _torch_install_step(res)
     idx = torch_step.argv.index("--index-url")
     assert torch_step.argv[idx + 1] == PYTORCH_INDEX_URLS["cpu"]
 
@@ -215,7 +227,7 @@ def test_unknown_accelerator_tag_falls_back_to_cpu_index():
     res = resolve_dependencies(
         _corpus_studio(), os_value=OperatingSystem.linux, accelerator_tag="cu999", python_version="3.12"
     )
-    torch_step = next(s for s in res.install_steps if "--index-url" in s.argv)
+    torch_step = _torch_install_step(res)
     idx = torch_step.argv.index("--index-url")
     assert torch_step.argv[idx + 1] == PYTORCH_INDEX_URLS["cpu"]
 
@@ -258,7 +270,16 @@ def test_env_recipes_cli_lists_and_filters():
 
 def test_env_plan_cli_previews_a_backend_install():
     result = runner.invoke(
-        app, ["env-plan", "backend-corpus-studio", "--accelerator", "cu128", "--python", "3.12", "--json"]
+        app,
+        [
+            "env-plan",
+            "backend-corpus-studio",
+            "--accelerator",
+            "cu128",
+            "--runtime",
+            sys.executable,
+            "--json",
+        ],
     )
     assert result.exit_code == 0
     resolution = json.loads(result.stdout)

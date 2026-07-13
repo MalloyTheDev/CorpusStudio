@@ -1,0 +1,87 @@
+{
+  "$defs": {
+    "OperatingSystem": {
+      "enum": [
+        "windows",
+        "wsl",
+        "linux",
+        "macos",
+        "unknown"
+      ],
+      "title": "OperatingSystem",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A discovered Python executable that can potentially create an isolated worker environment.\n\nDiscovery never assumes the control-plane interpreter is the only installation. Compatibility is\nan explicit verdict against the selected recipe, while ``venv_available`` proves the stdlib venv\nmodule can be located without creating anything.",
+  "properties": {
+    "architecture": {
+      "default": "",
+      "title": "Architecture",
+      "type": "string"
+    },
+    "compatible": {
+      "default": false,
+      "title": "Compatible",
+      "type": "boolean"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "executable": {
+      "minLength": 1,
+      "title": "Executable",
+      "type": "string"
+    },
+    "implementation": {
+      "default": "",
+      "title": "Implementation",
+      "type": "string"
+    },
+    "incompatibility_reasons": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Incompatibility Reasons",
+      "type": "array"
+    },
+    "is_virtual_environment": {
+      "default": false,
+      "title": "Is Virtual Environment",
+      "type": "boolean"
+    },
+    "os": {
+      "$ref": "#/$defs/OperatingSystem",
+      "default": "unknown"
+    },
+    "platform": {
+      "default": "",
+      "title": "Platform",
+      "type": "string"
+    },
+    "runtime_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Runtime Id",
+      "type": "string"
+    },
+    "venv_available": {
+      "default": false,
+      "title": "Venv Available",
+      "type": "boolean"
+    },
+    "version": {
+      "default": "",
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "runtime_id",
+    "executable"
+  ],
+  "title": "PythonRuntime",
+  "type": "object"
+}

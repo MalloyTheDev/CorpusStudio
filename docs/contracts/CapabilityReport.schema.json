@@ -115,8 +115,39 @@
     },
     "PackageLock": {
       "additionalProperties": false,
-      "description": "A resolved dependency: distribution name \u2192 installed version + optional wheel/artifact hash.\nGrounded in environment.probe_training_runtime (importlib.metadata.version, no import).",
+      "description": "A resolved dependency and its install provenance.\n\n``hash`` seals the installed distribution's RECORD metadata when that evidence is available; it\nis not mislabelled as the original wheel hash. ``direct_url`` and ``artifact`` preserve the\nstronger source identity pip exposes for direct/VCS/local installs. ``dependencies`` is the\ninstalled metadata dependency graph, not a second resolver.",
       "properties": {
+        "artifact": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact"
+        },
+        "dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "direct_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direct Url"
+        },
         "hash": {
           "anyOf": [
             {
@@ -128,10 +159,34 @@
           ],
           "default": null
         },
+        "installer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installer"
+        },
         "name": {
           "minLength": 1,
           "title": "Name",
           "type": "string"
+        },
+        "requested": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested"
         },
         "source": {
           "default": "unknown",

@@ -33,13 +33,18 @@ export type HostnameHash = string | null;
  * Apple MPS / integrated shared memory. The single most decisive field for spill-vs-OOM.
  */
 export type MemoryResidencyModel = "wddm" | "linux_dedicated" | "unified_memory" | "unknown";
-export type OperatingSystem = "windows" | "linux" | "macos" | "unknown";
+export type OperatingSystem = "windows" | "wsl" | "linux" | "macos" | "unknown";
 export type OsDetail = string;
 export type PythonVersion = string;
 export type Notes = string[];
+export type Artifact = string | null;
+export type Dependencies = string[];
+export type DirectUrl = string | null;
 export type Algo = "sha256" | "sha256-ordered-exact-v1" | "blake3" | "none";
 export type Value = string | null;
+export type Installer = string | null;
 export type Name1 = string;
+export type Requested = boolean | null;
 export type Source = "pypi" | "wheel" | "sdist" | "conda" | "vcs" | "local" | "unknown";
 export type Version = string | null;
 export type Packages = PackageLock[];
@@ -110,12 +115,21 @@ export interface EnvHost {
   python_version?: PythonVersion;
 }
 /**
- * A resolved dependency: distribution name → installed version + optional wheel/artifact hash.
- * Grounded in environment.probe_training_runtime (importlib.metadata.version, no import).
+ * A resolved dependency and its install provenance.
+ *
+ * ``hash`` seals the installed distribution's RECORD metadata when that evidence is available; it
+ * is not mislabelled as the original wheel hash. ``direct_url`` and ``artifact`` preserve the
+ * stronger source identity pip exposes for direct/VCS/local installs. ``dependencies`` is the
+ * installed metadata dependency graph, not a second resolver.
  */
 export interface PackageLock {
+  artifact?: Artifact;
+  dependencies?: Dependencies;
+  direct_url?: DirectUrl;
   hash?: HashRef | null;
+  installer?: Installer;
   name: Name1;
+  requested?: Requested;
   source?: Source;
   version?: Version;
 }

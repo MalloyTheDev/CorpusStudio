@@ -36,10 +36,17 @@ def test_contract_version_is_pinned():
 
 
 def test_all_root_contracts_registered():
-    assert len(P.ROOT_CONTRACTS) == 19
+    assert len(P.ROOT_CONTRACTS) == 21
     assert "StorageProfile" in P.ROOT_CONTRACTS
-    for expected in ("EnvironmentRecipe", "DependencyResolution", "EnvironmentLock",
-                     "EnvironmentDescriptor", "EnvironmentHealthReport"):
+    for expected in (
+        "PythonRuntime",
+        "EnvironmentRecipe",
+        "DependencyResolution",
+        "EnvironmentInstallation",
+        "EnvironmentLock",
+        "EnvironmentDescriptor",
+        "EnvironmentHealthReport",
+    ):
         assert expected in P.ROOT_CONTRACTS
     for name, model in P.ROOT_CONTRACTS.items():
         if name == "WorkerMessage":
@@ -251,11 +258,11 @@ def test_worker_protocol_version_pattern():
 
 def test_export_json_schemas_writes_language_neutral_files(tmp_path):
     written = P.export_json_schemas(tmp_path)
-    # 19 contract schemas + index.json
-    assert len(written) == 20
+    # 21 contract schemas + index.json
+    assert len(written) == 22
     index = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
     assert index["contract_version"] == "1.0.0"
-    assert len(index["contracts"]) == 19
+    assert len(index["contracts"]) == 21
     # every emitted schema is valid JSON with a proper object shape
     for name in P.ROOT_CONTRACTS:
         schema = json.loads((tmp_path / f"{name}.schema.json").read_text(encoding="utf-8"))
@@ -268,3 +275,16 @@ def test_export_json_schemas_writes_language_neutral_files(tmp_path):
         "supervised_token_accumulation_target"
         in run_plan_schema["$defs"]["BatchingSpec"]["properties"]
     )
+
+
+def test_export_json_schemas_is_byte_deterministic(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    P.export_json_schemas(first)
+    P.export_json_schemas(second)
+
+    first_files = sorted(path.name for path in first.iterdir())
+    second_files = sorted(path.name for path in second.iterdir())
+    assert first_files == second_files
+    for name in first_files:
+        assert (first / name).read_bytes() == (second / name).read_bytes()

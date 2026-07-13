@@ -183,16 +183,19 @@ per-item error isolation, and off-thread document opens.
   triages a training failure as storage-implicated (I/O error, dropped drive, full disk) vs a
   VRAM/kernel failure the disk can't explain; `--recommend` prints the per-role storage tier. The
   prerequisite for honest offload planning. See [`HARDWARE_STORAGE_PROFILE.md`](HARDWARE_STORAGE_PROFILE.md).
-- **Environment Manager substrate** (`env-recipes` / `env-plan`): the 3-layer dependency model in
-  code — a lightweight always-installable **control plane**, opt-in **capability profiles**, and
-  **isolated per-backend worker environments** (heavy frameworks pin conflicting torch/CUDA/xformers
-  and can't coexist). A registry of declarative `EnvironmentRecipe`s (grounded in the real extras —
-  `backend-corpus-studio` = the `[train]` extra, `backend-unsloth`, the capability profiles) and a
-  **pure install-preview** resolver: `env-plan` renders the exact argv install steps (never a shell
-  string), picks the CUDA-aware wheel index (a Blackwell host → `cu128`), and reports disk/network
-  cost — for confirmation *before* anything is installed. `EnvironmentState` encodes "installed ≠
-  supported". Env *creation* is the next slice. See [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md);
-  the full 3-layer + MoE-safe forward plan is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) +
+- **Environment Manager reference lifecycle** (`env-runtimes` / `env-plan` / `env-create` /
+  `env-status` / `env-probe` / `env-lock` / `env-remove` / `env-recreate`): the 3-layer dependency
+  model in code — a lightweight always-installable **control plane**, opt-in **capability profiles**,
+  and **isolated per-backend worker environments**. The side-effectful path is deliberately limited
+  to the `backend-corpus-studio` reference backend: it discovers Python runtimes, renders concrete
+  no-shell argv + explicit indexes, requires the exact plan hash before mutation, creates one owned
+  venv, journals bounded commands, seals installed package/source/metadata hashes, runs separate
+  import/dependency/CPU-functional/GPU-hardware probes, detects drift, and safely removes or recreates
+  only contained paths with matching ownership markers. `RunPlan.environment_ref` pins the immutable
+  lock hash and `platform-run --subprocess` dispatches with that managed interpreter after a live
+  health check. Tests use fake installers and CPU probes; a newly downloaded CUDA environment is not
+  claimed as verified by this slice. See [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md); the full
+  3-layer + MoE-safe forward plan is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) +
   [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md).
 - **Multi-backend "pick your framework"**: a BackendManifest registry (`corpus_studio`, `unsloth`);
   the planner validates the chosen backend and **honestly refuses Unsloth on Blackwell/sm_120** (which

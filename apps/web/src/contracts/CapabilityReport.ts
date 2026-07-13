@@ -23,7 +23,12 @@ export type Algo = "sha256" | "sha256-ordered-exact-v1" | "blake3" | "none";
 export type Value = string | null;
 export type Id = string;
 export type GeneratedAt = string | null;
+export type Artifact = string | null;
+export type Dependencies = string[];
+export type DirectUrl = string | null;
+export type Installer = string | null;
 export type Name = string;
+export type Requested = boolean | null;
 export type Source = "pypi" | "wheel" | "sdist" | "conda" | "vcs" | "local" | "unknown";
 export type Version = string | null;
 export type InstalledPackages = PackageLock[];
@@ -98,12 +103,21 @@ export interface HashRef {
   value?: Value;
 }
 /**
- * A resolved dependency: distribution name → installed version + optional wheel/artifact hash.
- * Grounded in environment.probe_training_runtime (importlib.metadata.version, no import).
+ * A resolved dependency and its install provenance.
+ *
+ * ``hash`` seals the installed distribution's RECORD metadata when that evidence is available; it
+ * is not mislabelled as the original wheel hash. ``direct_url`` and ``artifact`` preserve the
+ * stronger source identity pip exposes for direct/VCS/local installs. ``dependencies`` is the
+ * installed metadata dependency graph, not a second resolver.
  */
 export interface PackageLock {
+  artifact?: Artifact;
+  dependencies?: Dependencies;
+  direct_url?: DirectUrl;
   hash?: HashRef | null;
+  installer?: Installer;
   name: Name;
+  requested?: Requested;
   source?: Source;
   version?: Version;
 }

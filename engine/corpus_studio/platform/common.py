@@ -50,14 +50,24 @@ class Ref(ContractModel):
 
 
 class PackageLock(ContractModel):
-    """A resolved dependency: distribution name → installed version + optional wheel/artifact hash.
-    Grounded in environment.probe_training_runtime (importlib.metadata.version, no import)."""
+    """A resolved dependency and its install provenance.
+
+    ``hash`` seals the installed distribution's RECORD metadata when that evidence is available; it
+    is not mislabelled as the original wheel hash. ``direct_url`` and ``artifact`` preserve the
+    stronger source identity pip exposes for direct/VCS/local installs. ``dependencies`` is the
+    installed metadata dependency graph, not a second resolver.
+    """
 
     name: str = Field(min_length=1)
     # Installed version string, or null when the distribution is absent (environment stores None).
     version: str | None = None
     hash: HashRef | None = None
     source: PackageSource = "unknown"
+    direct_url: str | None = None
+    artifact: str | None = None
+    installer: str | None = None
+    requested: bool | None = None
+    dependencies: list[str] = Field(default_factory=list)
 
 
 class License(ContractModel):

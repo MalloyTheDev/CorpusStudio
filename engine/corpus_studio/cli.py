@@ -472,6 +472,11 @@ def platform_run(
     silence_timeout: float = typer.Option(
         600.0, "--timeout", help="[--subprocess] Kill the worker after this many seconds of silence."
     ),
+    manager_root: Optional[Path] = typer.Option(
+        None,
+        "--manager-root",
+        help="Environment Manager state root for a plan pinned to a managed lock.",
+    ),
 ):
     """Execute a RunPlan through the headless run supervisor: stream RunEvents to stderr and produce
     a RunManifest on stdout. 'echo' is a dependency-light no-op that proves the supervisor without a
@@ -501,6 +506,53 @@ def platform_run(
         typer.echo("Provide a RunPlan path argument, or pass --demo.", err=True)
         raise typer.Exit(2)
 
+    managed_worker_argv = None
+    if plan.environment_ref.hash is not None:
+        from corpus_studio.platform.environment_manager import (
+            EnvironmentManager,
+            EnvironmentManagerError,
+            verify_run_plan_environment,
+        )
+        from corpus_studio.platform.enums import EnvironmentState
+
+        try:
+            manager = EnvironmentManager(manager_root)
+            # A live health check catches package/source/CUDA drift before dispatch or resume.
+            health = manager.health(plan.environment_ref.id)
+            descriptor = manager.load_descriptor(plan.environment_ref.id)
+            lock = manager.load_lock(plan.environment_ref.id)
+            blockers = verify_run_plan_environment(plan, descriptor, lock)
+            if health.state not in {
+                EnvironmentState.functional_probe_passed,
+                EnvironmentState.hardware_verified,
+            }:
+                blockers.append(
+                    f"live environment state {health.state.value} is not functionally verified"
+                )
+            if health.drift_detected:
+                blockers.append("live environment health reports drift")
+            if blockers:
+                raise EnvironmentManagerError(
+                    "managed environment is incompatible with this plan: " + "; ".join(blockers)
+                )
+            if not subprocess_mode:
+                raise EnvironmentManagerError(
+                    "a managed environment plan must run with --subprocess so the isolated "
+                    "interpreter, not the control plane, owns training"
+                )
+            managed_worker_argv = [
+                descriptor.python_executable,
+                "-m",
+                "corpus_studio.platform.worker",
+                "--runner",
+                runner_name,
+            ]
+            if max_steps is not None:
+                managed_worker_argv += ["--max-steps", str(max_steps)]
+        except EnvironmentManagerError as exc:
+            typer.echo(exc.failure.model_dump_json(indent=2), err=True)
+            raise typer.Exit(2) from exc
+
     if subprocess_mode:
         from corpus_studio.platform.subprocess_supervisor import execute_run_subprocess
 
@@ -510,6 +562,7 @@ def platform_run(
             max_steps=max_steps,
             silence_timeout_s=silence_timeout,
             out_dir=out_dir,
+            worker_argv=managed_worker_argv,
         )
     else:
         if runner_name == "echo":
@@ -544,6 +597,14 @@ def platform_plan(
     use_liger: bool = typer.Option(False, "--use-liger", help="Fuse the cross-entropy loss (Liger) to drop the long-seq logits memory spike. Needs liger-kernel; Blackwell support unverified."),
     memory_efficient: bool = typer.Option(False, "--memory-efficient", help="Shortcut for a tight GPU: enable the memory-saving levers (paged optimizer + fused Liger loss). Explicit --optim / --use-liger override it."),
     allow_cpu_toy: bool = typer.Option(False, "--allow-cpu-toy", help="Permit a cpu-toy plan when the host is cpu-toy-only."),
+    environment_id: Optional[str] = typer.Option(
+        None,
+        "--environment",
+        help="Pin the plan to this managed environment's immutable lock hash.",
+    ),
+    manager_root: Optional[Path] = typer.Option(
+        None, "--manager-root", help="Environment Manager state root for --environment."
+    ),
     out_dir: Optional[Path] = typer.Option(None, "--out", help="Write the sealed RunPlan.json to this directory."),
     json_out: bool = typer.Option(
         False, "--json", help="Emit {run_plan, fit_classification} as one JSON bundle to stdout."
@@ -556,15 +617,6 @@ def platform_plan(
     clean PlannerError, never a silent downgrade."""
     from corpus_studio.platform.common import Ref
     from corpus_studio.platform.planner import PlannerConstraints, PlannerError, build_run_plan
-    from corpus_studio.platform.probes import run_capability_probes
-    from corpus_studio.platform.profiler import build_environment_profile
-
-    # Harden the JSON contract: a probe that lazily imports a library which prints a banner to stdout
-    # (historically older bitsandbytes) would prepend non-JSON bytes and break the client's parse.
-    # Redirect probe-time stdout to stderr; the bundle is emitted to the real stdout below.
-    with contextlib.redirect_stdout(sys.stderr):
-        profile = build_environment_profile()
-        report = run_capability_probes(profile)
     # --memory-efficient is a shortcut; explicit --optim / --use-liger win.
     resolved_optim = optim or ("paged_adamw_8bit" if memory_efficient else "adamw_torch")
     constraints = PlannerConstraints(
@@ -579,6 +631,36 @@ def platform_plan(
         use_liger=use_liger or memory_efficient,
         allow_cpu_toy=allow_cpu_toy,
     )
+    managed_environment_ref = None
+    if environment_id is not None:
+        from corpus_studio.platform.environment_manager import (
+            EnvironmentManager,
+            EnvironmentManagerError,
+            locked_environment_ref,
+        )
+
+        try:
+            manager = EnvironmentManager(manager_root)
+            profile, report = manager.capability_snapshot(environment_id)
+            descriptor = manager.load_descriptor(environment_id)
+            lock = manager.load_lock(environment_id)
+            if backend != "corpus_studio" or descriptor.recipe_ref.id != "backend-corpus-studio":
+                raise EnvironmentManagerError(
+                    "the selected managed environment belongs to the corpus_studio backend"
+                )
+            managed_environment_ref = locked_environment_ref(descriptor, lock)
+        except EnvironmentManagerError as exc:
+            typer.echo(exc.failure.model_dump_json(indent=2), err=True)
+            raise typer.Exit(2) from exc
+    else:
+        from corpus_studio.platform.probes import run_capability_probes
+        from corpus_studio.platform.profiler import build_environment_profile
+
+        # Harden the JSON contract: a probe that lazily imports a library which prints a banner to
+        # stdout (historically older bitsandbytes) would prepend non-JSON bytes and break the client.
+        with contextlib.redirect_stdout(sys.stderr):
+            profile = build_environment_profile()
+            report = run_capability_probes(profile)
     try:
         plan = build_run_plan(
             profile=profile,
@@ -586,6 +668,7 @@ def platform_plan(
             dataset_ref=Ref(id=dataset_ref),
             constraints=constraints,
             plan_id=f"plan-{profile.environment_signature[:8]}",
+            environment_ref=managed_environment_ref,
         )
     except PlannerError as exc:
         typer.echo(str(exc), err=True)
@@ -648,7 +731,7 @@ def env_recipes(
     ),
     json_out: bool = typer.Option(False, "--json", help="Emit the full EnvironmentRecipes as JSON."),
 ):
-    """List the built-in environment recipes across the three dependency layers — the always-installable
+    """List the built-in environment recipes across the three dependency layers - the always-installable
     control plane, opt-in capability profiles, and isolated per-backend worker environments. A recipe is
     a DECLARATION of what to install; 'verification' says whether it has ever produced a working env."""
     from corpus_studio.platform.enums import DependencyLayer
@@ -677,46 +760,33 @@ def env_plan(
         "Default: detected from the host GPU/CUDA."
     ),
     python_version: Optional[str] = typer.Option(
-        None, "--python", help="Target Python version (e.g. 3.12). Default: this interpreter."
+        None, "--python", help="Required runtime version prefix (e.g. 3.12). Default: selected runtime."
+    ),
+    env_id: Optional[str] = typer.Option(
+        None, "--env-id", help="Managed environment id. Default: the recipe id."
+    ),
+    runtime: Optional[Path] = typer.Option(
+        None, "--runtime", help="Python executable used to create the venv. Default: this interpreter."
+    ),
+    manager_root: Optional[Path] = typer.Option(
+        None, "--manager-root", help="Environment Manager state root. Default: per-user local data."
     ),
     json_out: bool = typer.Option(False, "--json", help="Emit the full DependencyResolution JSON."),
 ):
-    """PREVIEW provisioning a recipe on this host — the exact argv install steps, the CUDA-aware wheel
-    index, and rough disk/network cost — WITHOUT installing anything. This is the explicit-confirmation
+    """PREVIEW provisioning a recipe on this host - the exact argv install steps, the CUDA-aware wheel
+    index, and rough disk/network cost - WITHOUT installing anything. This is the explicit-confirmation
     surface: nothing is created until a later 'env-create' acts on this plan."""
-    import platform as _platform  # noqa: PLC0415
-
-    from corpus_studio.platform.environments import (
-        get_recipe,
-        resolve_dependencies,
-        select_accelerator_tag,
-    )
-
-    recipe = get_recipe(recipe_id)
-    if recipe is None:
-        typer.echo(f"Unknown recipe '{recipe_id}' (see 'env-recipes').", err=True)
-        raise typer.Exit(2)
-
-    # Detect the host OS + accelerator tag from the environment profile (redirect probe stdout so a
-    # library banner can't corrupt JSON on stdout).
-    with contextlib.redirect_stdout(sys.stderr):
-        from corpus_studio.platform.profiler import build_environment_profile
-
-        profile = build_environment_profile()
-    gpu = profile.gpus[0] if profile.gpus else None
-    tag = accelerator or select_accelerator_tag(
-        cuda_runtime_version=profile.accelerator_runtime.cuda_runtime_version
-        if profile.accelerator_runtime
-        else None,
-        compute_capability_major=gpu.compute_capability_major if gpu else None,
-        has_gpu=gpu is not None,
-    )
-    resolution = resolve_dependencies(
-        recipe,
-        os_value=profile.host.os,
-        accelerator_tag=tag,
-        python_version=python_version or _platform.python_version(),
-    )
+    try:
+        _, resolution = _build_environment_resolution(
+            recipe_id,
+            env_id=env_id or recipe_id,
+            runtime=runtime,
+            accelerator=accelerator,
+            manager_root=manager_root,
+            python_version=python_version,
+        )
+    except Exception as exc:  # EnvironmentManagerError plus bounded runtime-probe failures
+        _environment_cli_error(exc)
 
     if json_out:
         typer.echo(json.dumps(resolution.model_dump(mode="json"), indent=2))
@@ -726,12 +796,17 @@ def env_plan(
         return f"{value / 1_000_000_000:.2f} GB" if value is not None else "?"
 
     lines = [
-        f"Install plan: {recipe.recipe_id}  [{recipe.layer.value}]",
+        f"Install plan: {resolution.recipe_ref.id}",
         f"  host: {resolution.os.value}  |  accelerator: {resolution.accelerator_tag}  |  "
         f"python {resolution.python_version}",
+        f"  environment: {resolution.environment_ref.id if resolution.environment_ref else '?'}",
+        f"  root: {resolution.environment_root or '?'}",
+        f"  runtime: {resolution.runtime.executable if resolution.runtime else '?'}",
+        f"  resolution hash: {resolution.resolution_hash or '?'}",
         f"  resolvable: {resolution.resolvable}",
         f"  estimated download: {_gb(resolution.estimated_download_bytes)}  |  "
         f"on disk: {_gb(resolution.estimated_disk_bytes)}",
+        f"  network indexes: {', '.join(resolution.resolved_index_urls) or '(none)'}",
     ]
     for reason in resolution.blocking_reasons:
         lines.append(f"  BLOCKED: {reason}")
@@ -739,10 +814,302 @@ def env_plan(
         lines.append(f"  warning: {warning}")
     lines.append("  steps:")
     for step in resolution.install_steps:
-        lines.append(f"    [{step.phase}] {' '.join(step.argv)}")
+        lines.append(
+            f"    [{step.phase}] timeout={step.timeout_seconds}s network={step.network_required}"
+        )
+        lines.append(f"      cwd: {step.working_directory or '?'}")
+        lines.append(f"      env: {json.dumps(step.environment, sort_keys=True)}")
+        lines.append(f"      argv: {json.dumps(step.argv)}")
     typer.echo("\n".join(lines))
     if not resolution.resolvable:
         raise typer.Exit(1)
+
+
+def _build_environment_resolution(
+    recipe_id: str,
+    *,
+    env_id: str,
+    runtime: Optional[Path],
+    accelerator: Optional[str],
+    manager_root: Optional[Path],
+    python_version: Optional[str] = None,
+):
+    """Build the same concrete, sealed plan for env-plan/create/recreate."""
+    from corpus_studio.platform.environment_manager import EnvironmentManager
+    from corpus_studio.platform.environments import get_recipe, resolution_digest, select_accelerator_tag
+
+    recipe = get_recipe(recipe_id)
+    if recipe is None:
+        raise ValueError(f"Unknown recipe '{recipe_id}' (see 'env-recipes').")
+    tag = accelerator
+    if tag is None:
+        with contextlib.redirect_stdout(sys.stderr):
+            from corpus_studio.platform.profiler import build_environment_profile
+
+            profile = build_environment_profile()
+        gpu = profile.gpus[0] if profile.gpus else None
+        tag = select_accelerator_tag(
+            cuda_runtime_version=profile.accelerator_runtime.cuda_runtime_version
+            if profile.accelerator_runtime
+            else None,
+            compute_capability_major=gpu.compute_capability_major if gpu else None,
+            has_gpu=gpu is not None,
+        )
+    manager = EnvironmentManager(manager_root)
+    resolution = manager.preview(
+        recipe_id,
+        env_id=env_id,
+        runtime_executable=runtime or Path(sys.executable),
+        accelerator_tag=tag,
+    )
+    if python_version and not resolution.python_version.startswith(python_version):
+        blocked = resolution.model_copy(
+            update={
+                "resolvable": False,
+                "blocking_reasons": resolution.blocking_reasons
+                + [
+                    f"selected runtime Python {resolution.python_version} does not match "
+                    f"--python {python_version}"
+                ],
+                "resolution_hash": None,
+            }
+        )
+        resolution = blocked.model_copy(
+            update={"resolution_hash": resolution_digest(blocked)}
+        )
+    return manager, resolution
+
+
+def _environment_cli_error(exc: Exception) -> None:
+    from corpus_studio.platform.environment_manager import EnvironmentManagerError
+
+    if isinstance(exc, EnvironmentManagerError):
+        typer.echo(exc.failure.model_dump_json(indent=2), err=True)
+    else:
+        typer.echo(str(exc), err=True)
+    raise typer.Exit(2)
+
+
+@app.command("env-runtimes")
+def env_runtimes(
+    recipe_id: str = typer.Option(
+        "backend-corpus-studio", "--recipe", help="Recipe used for compatibility checks."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit PythonRuntime records as JSON."),
+):
+    """List compatible and incompatible Python runtimes without creating anything."""
+    from corpus_studio.platform.environment_manager import discover_python_runtimes
+    from corpus_studio.platform.environments import get_recipe
+
+    recipe = get_recipe(recipe_id)
+    if recipe is None:
+        typer.echo(f"Unknown recipe '{recipe_id}' (see 'env-recipes').", err=True)
+        raise typer.Exit(2)
+    runtimes = discover_python_runtimes(python_requires=recipe.python_requires)
+    if json_out:
+        typer.echo(json.dumps([item.model_dump(mode="json") for item in runtimes], indent=2))
+        return
+    if not runtimes:
+        typer.echo("No working Python runtimes were discovered.")
+        raise typer.Exit(1)
+    for runtime_record in runtimes:
+        verdict = "compatible" if runtime_record.compatible else "incompatible"
+        venv = "venv=yes" if runtime_record.venv_available else "venv=no"
+        typer.echo(
+            f"{runtime_record.runtime_id}  {verdict}  Python {runtime_record.version}  "
+            f"{runtime_record.architecture}  {venv}"
+        )
+        typer.echo(f"    {runtime_record.executable}")
+        for reason in runtime_record.incompatibility_reasons:
+            typer.echo(f"    BLOCKED: {reason}")
+
+
+def _creation_payload(result: Any) -> dict[str, Any]:
+    return {
+        "descriptor": result.descriptor.model_dump(mode="json"),
+        "lock": result.lock.model_dump(mode="json"),
+        "health": result.health.model_dump(mode="json"),
+        "installation": result.installation.model_dump(mode="json"),
+    }
+
+
+@app.command("env-create")
+def env_create(
+    recipe_id: str = typer.Argument("backend-corpus-studio", help="Reference backend recipe id."),
+    env_id: Optional[str] = typer.Option(None, "--env-id", help="Environment id. Default: recipe id."),
+    runtime: Optional[Path] = typer.Option(None, "--runtime", help="Base Python executable."),
+    accelerator: Optional[str] = typer.Option(None, "--accelerator", help="Wheel tag override."),
+    manager_root: Optional[Path] = typer.Option(None, "--manager-root", help="Manager state root."),
+    confirmed_hash: str = typer.Option(
+        ..., "--confirm", help="Exact resolution hash printed by env-plan."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit lifecycle records as JSON."),
+):
+    """Create the sealed reference-backend environment after exact plan-hash confirmation."""
+    try:
+        manager, resolution = _build_environment_resolution(
+            recipe_id,
+            env_id=env_id or recipe_id,
+            runtime=runtime,
+            accelerator=accelerator,
+            manager_root=manager_root,
+        )
+        result = manager.create(
+            resolution, confirmed_resolution_hash=confirmed_hash
+        )
+    except Exception as exc:
+        _environment_cli_error(exc)
+    if json_out:
+        typer.echo(json.dumps(_creation_payload(result), indent=2))
+        return
+    typer.echo(f"Environment: {result.descriptor.env_id}")
+    typer.echo(f"State: {result.descriptor.state.value}")
+    typer.echo(f"Lock: {result.lock.lock_id} ({result.lock.lock_hash})")
+    typer.echo(f"Installation journal: {result.installation.installation_id}")
+
+
+@app.command("env-status")
+def env_status(
+    env_id: Optional[str] = typer.Argument(None, help="Environment id; omit to list all."),
+    manager_root: Optional[Path] = typer.Option(None, "--manager-root", help="Manager state root."),
+    refresh: bool = typer.Option(False, "--refresh", help="Run live lock/import/functional probes."),
+    json_out: bool = typer.Option(False, "--json", help="Emit records as JSON."),
+):
+    """Show durable environment status; --refresh performs live health and drift checks."""
+    from corpus_studio.platform.environment_manager import EnvironmentManager
+
+    manager = EnvironmentManager(manager_root)
+    try:
+        if env_id is None:
+            descriptors = manager.list_descriptors()
+            if json_out:
+                typer.echo(json.dumps([item.model_dump(mode="json") for item in descriptors], indent=2))
+                return
+            if not descriptors:
+                typer.echo("No CorpusStudio-managed environments.")
+                return
+            for descriptor in descriptors:
+                typer.echo(
+                    f"{descriptor.env_id}  {descriptor.state.value}  {descriptor.root_path}"
+                )
+            return
+        descriptor = manager.load_descriptor(env_id)
+        health = manager.health(env_id) if refresh else None
+        if health is None:
+            try:
+                health = manager.load_health(env_id)
+            except Exception:
+                health = None
+    except Exception as exc:
+        _environment_cli_error(exc)
+    payload = {
+        "descriptor": descriptor.model_dump(mode="json"),
+        "health": health.model_dump(mode="json") if health is not None else None,
+    }
+    if json_out:
+        typer.echo(json.dumps(payload, indent=2))
+        return
+    typer.echo(f"Environment: {descriptor.env_id}")
+    typer.echo(f"State: {(health.state if health is not None else descriptor.state).value}")
+    typer.echo(f"Root: {descriptor.root_path}")
+    typer.echo(f"Lock: {descriptor.lock_ref.id if descriptor.lock_ref else '(none)'}")
+    if health is not None:
+        typer.echo(f"Drift detected: {health.drift_detected}")
+
+
+@app.command("env-probe")
+def env_probe(
+    env_id: str = typer.Argument(..., help="Managed environment id."),
+    manager_root: Optional[Path] = typer.Option(None, "--manager-root", help="Manager state root."),
+    json_out: bool = typer.Option(False, "--json", help="Emit EnvironmentHealthReport JSON."),
+):
+    """Run live import, dependency, functional, hardware, and drift checks."""
+    from corpus_studio.platform.environment_manager import EnvironmentManager
+
+    try:
+        report = EnvironmentManager(manager_root).health(env_id)
+    except Exception as exc:
+        _environment_cli_error(exc)
+    if json_out:
+        typer.echo(report.model_dump_json(indent=2))
+        return
+    typer.echo(f"Environment: {env_id}")
+    typer.echo(f"State: {report.state.value}")
+    typer.echo(f"Drift detected: {report.drift_detected}")
+    for result in report.probe_results:
+        typer.echo(f"  {result.probe}: {result.outcome.value}")
+
+
+@app.command("env-lock")
+def env_lock(
+    env_id: str = typer.Argument(..., help="Managed environment id."),
+    manager_root: Optional[Path] = typer.Option(None, "--manager-root", help="Manager state root."),
+):
+    """Print the exact sealed EnvironmentLock for a managed environment."""
+    from corpus_studio.platform.environment_manager import EnvironmentManager
+
+    try:
+        lock = EnvironmentManager(manager_root).load_lock(env_id)
+    except Exception as exc:
+        _environment_cli_error(exc)
+    typer.echo(lock.model_dump_json(indent=2))
+
+
+@app.command("env-remove")
+def env_remove(
+    env_id: str = typer.Argument(..., help="Managed environment id."),
+    confirmed_env_id: str = typer.Option(
+        ..., "--confirm", help="Repeat the exact environment id to authorize deletion."
+    ),
+    manager_root: Optional[Path] = typer.Option(None, "--manager-root", help="Manager state root."),
+):
+    """Remove only a path carrying this manager's ownership marker; retain audit records."""
+    from corpus_studio.platform.environment_manager import EnvironmentManager
+
+    try:
+        descriptor = EnvironmentManager(manager_root).remove(
+            env_id, confirmed_env_id=confirmed_env_id
+        )
+    except Exception as exc:
+        _environment_cli_error(exc)
+    typer.echo(f"Environment {descriptor.env_id}: {descriptor.state.value}")
+
+
+@app.command("env-recreate")
+def env_recreate(
+    recipe_id: str = typer.Argument("backend-corpus-studio", help="Reference backend recipe id."),
+    env_id: Optional[str] = typer.Option(None, "--env-id", help="Environment id. Default: recipe id."),
+    runtime: Optional[Path] = typer.Option(None, "--runtime", help="Base Python executable."),
+    accelerator: Optional[str] = typer.Option(None, "--accelerator", help="Wheel tag override."),
+    manager_root: Optional[Path] = typer.Option(None, "--manager-root", help="Manager state root."),
+    confirmed_hash: str = typer.Option(..., "--confirm", help="Exact new env-plan resolution hash."),
+    confirmed_remove_env_id: str = typer.Option(
+        ..., "--confirm-remove", help="Exact existing environment id to remove first."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit lifecycle records as JSON."),
+):
+    """Explicitly remove an owned environment and recreate it from a newly reviewed plan."""
+    target_env_id = env_id or recipe_id
+    try:
+        manager, resolution = _build_environment_resolution(
+            recipe_id,
+            env_id=target_env_id,
+            runtime=runtime,
+            accelerator=accelerator,
+            manager_root=manager_root,
+        )
+        result = manager.recreate(
+            resolution,
+            confirmed_resolution_hash=confirmed_hash,
+            confirmed_remove_env_id=confirmed_remove_env_id,
+        )
+    except Exception as exc:
+        _environment_cli_error(exc)
+    if json_out:
+        typer.echo(json.dumps(_creation_payload(result), indent=2))
+        return
+    typer.echo(f"Environment {result.descriptor.env_id}: {result.descriptor.state.value}")
+    typer.echo(f"Lock: {result.lock.lock_id} ({result.lock.lock_hash})")
 
 
 @app.command()

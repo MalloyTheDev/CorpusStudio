@@ -167,6 +167,7 @@ def build_run_plan(
     dataset_ref: Ref,
     constraints: PlannerConstraints,
     plan_id: str,
+    environment_ref: Ref | None = None,
     now: str | None = None,
 ) -> RunPlan:
     """Resolve one immutable, hash-sealed :class:`RunPlan` from the host profile + proven
@@ -288,7 +289,9 @@ def build_run_plan(
         "plan_id": plan_id,
         "plan_hash": "0" * 64,  # placeholder — replaced by the real seal below
         "backend_ref": {"id": backend.backend_id},
-        "environment_ref": {"id": profile.environment_signature},
+        "environment_ref": (environment_ref or Ref(id=profile.environment_signature)).model_dump(
+            mode="json"
+        ),
         "dataset_ref": dataset_ref.model_dump(mode="json"),
         "task_type": constraints.task_type,
         "base_model": constraints.base_model,
