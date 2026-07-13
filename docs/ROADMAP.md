@@ -113,15 +113,20 @@ input side. Ordered:
   remove/recreate, and immutable RunPlan association. Other frameworks still get independent,
   verified worker environments — never one `[everything]`. See
   [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md).
-- ⏭️ **Model/Tokenizer Lab** — `ModelDescriptor` + `TokenizerDescriptor`, MoE-safe from their first
-  version. Then: `TrainingObjective` registry, parameter accounting, offload/placement RunPlan
-  expansion, additional backend workers, full `TraceRecord`, and dataset mixtures.
+- ✅ **Model/Tokenizer contract + static-inspection foundation** — `ModelDescriptor` +
+  `TokenizerDescriptor` are MoE-safe from their first version, with offline inventory, fail-closed
+  custom-code findings, tokenizer vocabulary/compatibility evidence, JSON Schema, and generated TS
+  types. This does not yet load/train/edit models or tokenizers, detect MoE topology, or prove backend
+  support. See [`MODEL_TOKENIZER_CONTRACTS.md`](MODEL_TOKENIZER_CONTRACTS.md).
+- ⏭️ **TrainingObjective registry**, then parameter-accounting evidence producers,
+  offload/placement RunPlan expansion, full `TraceRecord`, MoE inspection, additional backend workers,
+  and dataset mixtures.
 
 - **Surface the LLM judge in the Evaluation tab** — the `--judge-model` scorer ships in
   the engine and in suites, but the desktop Evaluation tab still has no judge-model field.
-- **A real tokenizer** (transformers/tokenizers) so token-budget / VRAM numbers are
-  exact rather than heuristic — deferred on purpose (it would break the dependency-light
-  engine; the estimate is documented as a heuristic).
+- **Tokenizer training/editing + isolated functional probes.** Optional target-model `tokenizers`
+  and tiktoken counting already exist; the dependency-light core retains a documented heuristic
+  fallback, while static descriptors deliberately make no encode/decode claim.
 - **Hugging Face Hub export/push** (upload/publishing) — stays a deliberate
   non-goal for now; read-only Hub *import* already ships.
 - **Finish the Avalonia cross-platform port.** Phases 0–3 are **done** — a shared

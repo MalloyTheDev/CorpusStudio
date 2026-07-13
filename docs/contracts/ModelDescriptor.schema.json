@@ -1,0 +1,1294 @@
+{
+  "$defs": {
+    "BackendCompatibilityEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "backend_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "capability_report_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "environment_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "status": {
+          "default": "unverified",
+          "enum": [
+            "compatible",
+            "incompatible",
+            "unverified"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "backend_ref"
+      ],
+      "title": "BackendCompatibilityEntry",
+      "type": "object"
+    },
+    "CountHandling": {
+      "enum": [
+        "included",
+        "excluded",
+        "deduplicated",
+        "represented_separately",
+        "not_applicable",
+        "unknown"
+      ],
+      "title": "CountHandling",
+      "type": "string"
+    },
+    "DescriptorFile": {
+      "additionalProperties": false,
+      "description": "One safe, portable inventory entry. sha256 is separate from hash_status so skipped hashing\nand unreadable content are never confused with a verified empty digest.",
+      "properties": {
+        "format": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelFormat"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "hash_status": {
+          "default": "not_requested",
+          "enum": [
+            "verified",
+            "not_requested",
+            "unreadable",
+            "skipped_unsafe"
+          ],
+          "title": "Hash Status",
+          "type": "string"
+        },
+        "is_link": {
+          "default": false,
+          "title": "Is Link",
+          "type": "boolean"
+        },
+        "path": {
+          "minLength": 1,
+          "pattern": "^(?:[^/\\\\:.][^/\\\\:]*|\\.[^./\\\\:][^/\\\\:]*)(?:/(?:[^/\\\\:.][^/\\\\:]*|\\.[^./\\\\:][^/\\\\:]*))*$",
+          "title": "Path",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/DescriptorFileRole",
+          "default": "other"
+        },
+        "serialization_risk": {
+          "default": "unknown",
+          "enum": [
+            "safe",
+            "pickle",
+            "executable_code",
+            "archive",
+            "unknown"
+          ],
+          "title": "Serialization Risk",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "size_bytes"
+      ],
+      "title": "DescriptorFile",
+      "type": "object"
+    },
+    "DescriptorFileRole": {
+      "enum": [
+        "config",
+        "weights",
+        "weight_index",
+        "tokenizer",
+        "tokenizer_config",
+        "special_tokens",
+        "generation_config",
+        "model_card",
+        "license",
+        "custom_code",
+        "other"
+      ],
+      "title": "DescriptorFileRole",
+      "type": "string"
+    },
+    "DescriptorSource": {
+      "additionalProperties": false,
+      "description": "Identity of the requested source and the immutable revision actually inspected.\n\nrequested_revision is user intent. resolved_revision/resolved_commit are evidence. They are\nintentionally separate so a mutable branch name is never misreported as a pinned snapshot.",
+      "properties": {
+        "artifact_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evidence_source": {
+          "default": "user_input",
+          "title": "Evidence Source",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ModelSourceKind"
+        },
+        "local_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Local Path"
+        },
+        "repository": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repository"
+        },
+        "requested_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested Revision"
+        },
+        "resolved_commit": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{7,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Commit"
+        },
+        "resolved_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Revision"
+        },
+        "revision_pinned": {
+          "default": false,
+          "title": "Revision Pinned",
+          "type": "boolean"
+        },
+        "snapshot_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snapshot Sha256"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "DescriptorSource",
+      "type": "object"
+    },
+    "DescriptorVerification": {
+      "additionalProperties": false,
+      "description": "Independent evidence axes. Integrity never implies compatibility or hardware support.",
+      "properties": {
+        "custom_code_policy": {
+          "$ref": "#/$defs/VerificationOutcome",
+          "default": "not_checked"
+        },
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/Ref"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "inspected_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inspected At"
+        },
+        "inspector": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inspector"
+        },
+        "integrity": {
+          "$ref": "#/$defs/VerificationOutcome",
+          "default": "not_checked"
+        },
+        "license": {
+          "$ref": "#/$defs/VerificationOutcome",
+          "default": "not_checked"
+        },
+        "metadata": {
+          "$ref": "#/$defs/VerificationOutcome",
+          "default": "not_checked"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "title": "DescriptorVerification",
+      "type": "object"
+    },
+    "DimensionEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "$ref": "#/$defs/EvidenceKind"
+        },
+        "source": {
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "value": {
+          "minimum": 0,
+          "title": "Value",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "value",
+        "source",
+        "evidence"
+      ],
+      "title": "DimensionEvidence",
+      "type": "object"
+    },
+    "EmbeddingVocabulary": {
+      "additionalProperties": false,
+      "properties": {
+        "declared_vocab_size": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DimensionEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "input_embedding_rows": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DimensionEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "output_head_rows": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DimensionEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tied_embeddings": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tied Embeddings"
+        }
+      },
+      "title": "EmbeddingVocabulary",
+      "type": "object"
+    },
+    "EvidenceKind": {
+      "enum": [
+        "measured",
+        "estimated",
+        "declared",
+        "unknown"
+      ],
+      "title": "EvidenceKind",
+      "type": "string"
+    },
+    "ExpertGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "expert_count": {
+          "minimum": 1,
+          "title": "Expert Count",
+          "type": "integer"
+        },
+        "expert_identity_scheme": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expert Identity Scheme"
+        },
+        "expert_registry_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "experts_per_token": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Experts Per Token"
+        },
+        "group_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Group Id",
+          "type": "string"
+        },
+        "heterogeneous": {
+          "default": false,
+          "title": "Heterogeneous",
+          "type": "boolean"
+        },
+        "layer_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Layer Indices",
+          "type": "array"
+        },
+        "shared_expert_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shared Expert Count"
+        }
+      },
+      "required": [
+        "group_id",
+        "expert_count"
+      ],
+      "title": "ExpertGroup",
+      "type": "object"
+    },
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "License": {
+      "additionalProperties": false,
+      "description": "License metadata for a dataset, base model, or produced artifact. The engine reminds users\nthe BASE model's license governs a produced adapter (training/model_card).",
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "redistributable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Redistributable"
+        },
+        "source": {
+          "default": "unknown",
+          "enum": [
+            "declared",
+            "model_card",
+            "dataset_card",
+            "user_asserted",
+            "unknown"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "spdx_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Spdx Id"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "title": "License",
+      "type": "object"
+    },
+    "ModelAttentionType": {
+      "enum": [
+        "full",
+        "sliding_window",
+        "block_sparse",
+        "linear",
+        "state_space",
+        "hybrid",
+        "custom",
+        "unknown"
+      ],
+      "title": "ModelAttentionType",
+      "type": "string"
+    },
+    "ModelExecutionKind": {
+      "enum": [
+        "dense",
+        "sparse",
+        "mixture_of_experts",
+        "conditional",
+        "hybrid",
+        "unknown"
+      ],
+      "title": "ModelExecutionKind",
+      "type": "string"
+    },
+    "ModelFormat": {
+      "enum": [
+        "safetensors",
+        "pytorch_pickle",
+        "gguf",
+        "onnx",
+        "torchscript",
+        "numpy",
+        "other",
+        "unknown"
+      ],
+      "title": "ModelFormat",
+      "type": "string"
+    },
+    "ModelSourceKind": {
+      "description": "Where a model/tokenizer identity originated. A local snapshot may still carry a repository\nand revision, but network retrieval is never implied by this value.",
+      "enum": [
+        "local",
+        "huggingface",
+        "ollama",
+        "artifact",
+        "generated",
+        "external",
+        "unknown"
+      ],
+      "title": "ModelSourceKind",
+      "type": "string"
+    },
+    "ModelTaskClass": {
+      "enum": [
+        "causal_lm",
+        "masked_lm",
+        "seq2seq_lm",
+        "classification",
+        "embedding",
+        "reranker",
+        "reward_model",
+        "vision",
+        "speech",
+        "multimodal",
+        "custom",
+        "unknown"
+      ],
+      "title": "ModelTaskClass",
+      "type": "string"
+    },
+    "ModelTopology": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_kind": {
+          "$ref": "#/$defs/ModelExecutionKind",
+          "default": "unknown"
+        },
+        "expert_groups": {
+          "items": {
+            "$ref": "#/$defs/ExpertGroup"
+          },
+          "title": "Expert Groups",
+          "type": "array"
+        },
+        "physical_scheduler_owner": {
+          "const": "run_plan",
+          "default": "run_plan",
+          "title": "Physical Scheduler Owner",
+          "type": "string"
+        },
+        "semantic_routing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SemanticRouting"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ModelTopology",
+      "type": "object"
+    },
+    "ParameterComponent": {
+      "additionalProperties": false,
+      "description": "A representation component such as shared weights, router, experts, or an adapter.\n\nStored dtype is a raw representation string, not PrecisionMode (which describes run compute and\nincludes values such as tf32/mixed_bf16 that are not on-disk dtypes).",
+      "properties": {
+        "component_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Component Id",
+          "type": "string"
+        },
+        "file_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "File Refs",
+          "type": "array"
+        },
+        "format": {
+          "$ref": "#/$defs/ModelFormat"
+        },
+        "quantization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuantizationMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "quantization_details": {
+          "additionalProperties": true,
+          "title": "Quantization Details",
+          "type": "object"
+        },
+        "scope": {
+          "default": "all",
+          "enum": [
+            "all",
+            "embedding",
+            "shared",
+            "router",
+            "expert_group",
+            "output_head",
+            "adapter",
+            "other"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "storage_dtype": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Storage Dtype"
+        }
+      },
+      "required": [
+        "component_id",
+        "format"
+      ],
+      "title": "ParameterComponent",
+      "type": "object"
+    },
+    "ParameterCount": {
+      "additionalProperties": false,
+      "description": "One explicitly scoped count. There is deliberately no scalar parameter_count field.",
+      "properties": {
+        "evidence": {
+          "$ref": "#/$defs/EvidenceKind"
+        },
+        "handling": {
+          "$ref": "#/$defs/ParameterCountHandling"
+        },
+        "kind": {
+          "$ref": "#/$defs/ParameterCountKind"
+        },
+        "measurement_window": {
+          "minLength": 1,
+          "title": "Measurement Window",
+          "type": "string"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        },
+        "scope": {
+          "minLength": 1,
+          "title": "Scope",
+          "type": "string"
+        },
+        "source": {
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "unit": {
+          "default": "coordinates",
+          "enum": [
+            "coordinates",
+            "elements",
+            "parameters"
+          ],
+          "title": "Unit",
+          "type": "string"
+        },
+        "value": {
+          "minimum": 0,
+          "title": "Value",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "value",
+        "scope",
+        "measurement_window",
+        "source",
+        "evidence"
+      ],
+      "title": "ParameterCount",
+      "type": "object"
+    },
+    "ParameterCountHandling": {
+      "additionalProperties": false,
+      "properties": {
+        "decompressed_caches": {
+          "$ref": "#/$defs/CountHandling",
+          "default": "not_applicable"
+        },
+        "generated": {
+          "$ref": "#/$defs/CountHandling",
+          "default": "unknown"
+        },
+        "optimizer_shadows": {
+          "$ref": "#/$defs/CountHandling",
+          "default": "not_applicable"
+        },
+        "quantized": {
+          "$ref": "#/$defs/CountHandling",
+          "default": "unknown"
+        },
+        "replicated": {
+          "$ref": "#/$defs/CountHandling",
+          "default": "unknown"
+        },
+        "shared": {
+          "$ref": "#/$defs/CountHandling",
+          "default": "unknown"
+        },
+        "tied": {
+          "$ref": "#/$defs/CountHandling",
+          "default": "unknown"
+        }
+      },
+      "title": "ParameterCountHandling",
+      "type": "object"
+    },
+    "ParameterCountKind": {
+      "description": "Distinct parameter quantities required for dense-safe and MoE-safe accounting.",
+      "enum": [
+        "logical",
+        "active_token",
+        "active_sequence",
+        "touched_window",
+        "resident",
+        "updated_window",
+        "exposed_window",
+        "effective"
+      ],
+      "title": "ParameterCountKind",
+      "type": "string"
+    },
+    "ParameterRepresentation": {
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "items": {
+            "$ref": "#/$defs/ParameterComponent"
+          },
+          "title": "Components",
+          "type": "array"
+        },
+        "counts": {
+          "items": {
+            "$ref": "#/$defs/ParameterCount"
+          },
+          "title": "Counts",
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/ModelExecutionKind",
+          "default": "unknown"
+        }
+      },
+      "title": "ParameterRepresentation",
+      "type": "object"
+    },
+    "PositionalEncoding": {
+      "enum": [
+        "rope",
+        "alibi",
+        "absolute",
+        "relative",
+        "none",
+        "custom",
+        "unknown"
+      ],
+      "title": "PositionalEncoding",
+      "type": "string"
+    },
+    "QuantizationMode": {
+      "enum": [
+        "none",
+        "int8",
+        "int4",
+        "nf4",
+        "fp4",
+        "gptq",
+        "awq",
+        "hqq"
+      ],
+      "title": "QuantizationMode",
+      "type": "string"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Ref",
+      "type": "object"
+    },
+    "SemanticRouting": {
+      "additionalProperties": false,
+      "description": "The learned semantic selection policy. Physical placement is not represented here.",
+      "properties": {
+        "capacity_factor": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capacity Factor"
+        },
+        "metadata_source": {
+          "minLength": 1,
+          "title": "Metadata Source",
+          "type": "string"
+        },
+        "router_type": {
+          "minLength": 1,
+          "title": "Router Type",
+          "type": "string"
+        },
+        "routing_noise": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Routing Noise"
+        },
+        "routing_unit": {
+          "default": "token",
+          "enum": [
+            "token",
+            "sequence",
+            "layer",
+            "request",
+            "custom"
+          ],
+          "title": "Routing Unit",
+          "type": "string"
+        },
+        "selection_policy": {
+          "minLength": 1,
+          "title": "Selection Policy",
+          "type": "string"
+        },
+        "top_k": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Top K"
+        }
+      },
+      "required": [
+        "router_type",
+        "selection_policy",
+        "metadata_source"
+      ],
+      "title": "SemanticRouting",
+      "type": "object"
+    },
+    "TrustRequirement": {
+      "additionalProperties": false,
+      "description": "Static trust findings only. This descriptor can never authorize custom-code execution.",
+      "properties": {
+        "approval_required": {
+          "default": false,
+          "title": "Approval Required",
+          "type": "boolean"
+        },
+        "custom_code_files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Custom Code Files",
+          "type": "array"
+        },
+        "custom_code_required": {
+          "default": false,
+          "title": "Custom Code Required",
+          "type": "boolean"
+        },
+        "detected_auto_map": {
+          "additionalProperties": true,
+          "title": "Detected Auto Map",
+          "type": "object"
+        },
+        "isolated_execution_required": {
+          "default": false,
+          "title": "Isolated Execution Required",
+          "type": "boolean"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "trust_remote_code": {
+          "const": false,
+          "default": false,
+          "title": "Trust Remote Code",
+          "type": "boolean"
+        }
+      },
+      "title": "TrustRequirement",
+      "type": "object"
+    },
+    "VerificationOutcome": {
+      "description": "One independent descriptor evidence axis. Integrity, compatibility, functional behavior,\nand hardware support must never be collapsed into a misleading linear level.",
+      "enum": [
+        "not_checked",
+        "passed",
+        "failed",
+        "partial",
+        "not_applicable"
+      ],
+      "title": "VerificationOutcome",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Static identity, representation, integrity, and compatibility surface for one model snapshot.\n\nThe descriptor is safe to build in the torch-free control plane. It does not claim that the model\ncan load, train, fit a device, or execute custom code.",
+  "properties": {
+    "architectures": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Architectures",
+      "type": "array"
+    },
+    "artifact_role": {
+      "default": "unknown",
+      "enum": [
+        "base",
+        "adapter",
+        "merged",
+        "checkpoint",
+        "quantized",
+        "converted",
+        "other",
+        "unknown"
+      ],
+      "title": "Artifact Role",
+      "type": "string"
+    },
+    "attention_type": {
+      "$ref": "#/$defs/ModelAttentionType",
+      "default": "unknown"
+    },
+    "backend_compatibility": {
+      "items": {
+        "$ref": "#/$defs/BackendCompatibilityEntry"
+      },
+      "title": "Backend Compatibility",
+      "type": "array"
+    },
+    "captured_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Captured At"
+    },
+    "context_window": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DimensionEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "files": {
+      "items": {
+        "$ref": "#/$defs/DescriptorFile"
+      },
+      "title": "Files",
+      "type": "array"
+    },
+    "formats": {
+      "items": {
+        "$ref": "#/$defs/ModelFormat"
+      },
+      "minItems": 1,
+      "title": "Formats",
+      "type": "array"
+    },
+    "inventory_complete": {
+      "default": false,
+      "title": "Inventory Complete",
+      "type": "boolean"
+    },
+    "inventory_sha256": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Inventory Sha256"
+    },
+    "license": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/License"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "model_family": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model Family"
+    },
+    "model_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Model Id",
+      "type": "string"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    },
+    "parameters": {
+      "$ref": "#/$defs/ParameterRepresentation"
+    },
+    "positional_encoding": {
+      "$ref": "#/$defs/PositionalEncoding",
+      "default": "unknown"
+    },
+    "source": {
+      "$ref": "#/$defs/DescriptorSource"
+    },
+    "storage_size_bytes": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Storage Size Bytes",
+      "type": "integer"
+    },
+    "task_classes": {
+      "items": {
+        "$ref": "#/$defs/ModelTaskClass"
+      },
+      "minItems": 1,
+      "title": "Task Classes",
+      "type": "array"
+    },
+    "tokenizer_ref": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ref"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "topology": {
+      "$ref": "#/$defs/ModelTopology"
+    },
+    "trust": {
+      "$ref": "#/$defs/TrustRequirement"
+    },
+    "verification": {
+      "$ref": "#/$defs/DescriptorVerification"
+    },
+    "vocabulary": {
+      "$ref": "#/$defs/EmbeddingVocabulary"
+    }
+  },
+  "required": [
+    "model_id",
+    "source"
+  ],
+  "title": "ModelDescriptor",
+  "type": "object"
+}

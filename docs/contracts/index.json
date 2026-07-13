@@ -10,6 +10,14 @@
       "file": "DatasetManifest.schema.json"
     },
     {
+      "contract": "ModelDescriptor",
+      "file": "ModelDescriptor.schema.json"
+    },
+    {
+      "contract": "TokenizerDescriptor",
+      "file": "TokenizerDescriptor.schema.json"
+    },
+    {
       "contract": "EnvironmentProfile",
       "file": "EnvironmentProfile.schema.json"
     },

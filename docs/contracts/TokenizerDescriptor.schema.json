@@ -1,0 +1,848 @@
+{
+  "$defs": {
+    "CompatibilityCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "check": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Check",
+          "type": "string"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/VerificationOutcome"
+        },
+        "remediation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Remediation"
+        }
+      },
+      "required": [
+        "check",
+        "outcome"
+      ],
+      "title": "CompatibilityCheck",
+      "type": "object"
+    },
+    "CompatibilityStatus": {
+      "enum": [
+        "compatible",
+        "resize_required",
+        "incompatible",
+        "unverified"
+      ],
+      "title": "CompatibilityStatus",
+      "type": "string"
+    },
+    "DescriptorFile": {
+      "additionalProperties": false,
+      "description": "One safe, portable inventory entry. sha256 is separate from hash_status so skipped hashing\nand unreadable content are never confused with a verified empty digest.",
+      "properties": {
+        "format": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelFormat"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "hash_status": {
+          "default": "not_requested",
+          "enum": [
+            "verified",
+            "not_requested",
+            "unreadable",
+            "skipped_unsafe"
+          ],
+          "title": "Hash Status",
+          "type": "string"
+        },
+        "is_link": {
+          "default": false,
+          "title": "Is Link",
+          "type": "boolean"
+        },
+        "path": {
+          "minLength": 1,
+          "pattern": "^(?:[^/\\\\:.][^/\\\\:]*|\\.[^./\\\\:][^/\\\\:]*)(?:/(?:[^/\\\\:.][^/\\\\:]*|\\.[^./\\\\:][^/\\\\:]*))*$",
+          "title": "Path",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/DescriptorFileRole",
+          "default": "other"
+        },
+        "serialization_risk": {
+          "default": "unknown",
+          "enum": [
+            "safe",
+            "pickle",
+            "executable_code",
+            "archive",
+            "unknown"
+          ],
+          "title": "Serialization Risk",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "size_bytes"
+      ],
+      "title": "DescriptorFile",
+      "type": "object"
+    },
+    "DescriptorFileRole": {
+      "enum": [
+        "config",
+        "weights",
+        "weight_index",
+        "tokenizer",
+        "tokenizer_config",
+        "special_tokens",
+        "generation_config",
+        "model_card",
+        "license",
+        "custom_code",
+        "other"
+      ],
+      "title": "DescriptorFileRole",
+      "type": "string"
+    },
+    "DescriptorSource": {
+      "additionalProperties": false,
+      "description": "Identity of the requested source and the immutable revision actually inspected.\n\nrequested_revision is user intent. resolved_revision/resolved_commit are evidence. They are\nintentionally separate so a mutable branch name is never misreported as a pinned snapshot.",
+      "properties": {
+        "artifact_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evidence_source": {
+          "default": "user_input",
+          "title": "Evidence Source",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ModelSourceKind"
+        },
+        "local_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Local Path"
+        },
+        "repository": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repository"
+        },
+        "requested_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested Revision"
+        },
+        "resolved_commit": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{7,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Commit"
+        },
+        "resolved_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Revision"
+        },
+        "revision_pinned": {
+          "default": false,
+          "title": "Revision Pinned",
+          "type": "boolean"
+        },
+        "snapshot_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snapshot Sha256"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "DescriptorSource",
+      "type": "object"
+    },
+    "DescriptorVerification": {
+      "additionalProperties": false,
+      "description": "Independent evidence axes. Integrity never implies compatibility or hardware support.",
+      "properties": {
+        "custom_code_policy": {
+          "$ref": "#/$defs/VerificationOutcome",
+          "default": "not_checked"
+        },
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/Ref"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "inspected_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inspected At"
+        },
+        "inspector": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inspector"
+        },
+        "integrity": {
+          "$ref": "#/$defs/VerificationOutcome",
+          "default": "not_checked"
+        },
+        "license": {
+          "$ref": "#/$defs/VerificationOutcome",
+          "default": "not_checked"
+        },
+        "metadata": {
+          "$ref": "#/$defs/VerificationOutcome",
+          "default": "not_checked"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "title": "DescriptorVerification",
+      "type": "object"
+    },
+    "DimensionEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "$ref": "#/$defs/EvidenceKind"
+        },
+        "source": {
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "value": {
+          "minimum": 0,
+          "title": "Value",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "value",
+        "source",
+        "evidence"
+      ],
+      "title": "DimensionEvidence",
+      "type": "object"
+    },
+    "EvidenceKind": {
+      "enum": [
+        "measured",
+        "estimated",
+        "declared",
+        "unknown"
+      ],
+      "title": "EvidenceKind",
+      "type": "string"
+    },
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "ModelFormat": {
+      "enum": [
+        "safetensors",
+        "pytorch_pickle",
+        "gguf",
+        "onnx",
+        "torchscript",
+        "numpy",
+        "other",
+        "unknown"
+      ],
+      "title": "ModelFormat",
+      "type": "string"
+    },
+    "ModelSourceKind": {
+      "description": "Where a model/tokenizer identity originated. A local snapshot may still carry a repository\nand revision, but network retrieval is never implied by this value.",
+      "enum": [
+        "local",
+        "huggingface",
+        "ollama",
+        "artifact",
+        "generated",
+        "external",
+        "unknown"
+      ],
+      "title": "ModelSourceKind",
+      "type": "string"
+    },
+    "ModelTokenizerCompatibility": {
+      "additionalProperties": false,
+      "properties": {
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/CompatibilityCheck"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
+        "model_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "required_embedding_rows": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Required Embedding Rows"
+        },
+        "resize_input_embeddings": {
+          "default": false,
+          "title": "Resize Input Embeddings",
+          "type": "boolean"
+        },
+        "resize_output_head": {
+          "default": false,
+          "title": "Resize Output Head",
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/CompatibilityStatus"
+        },
+        "tokenizer_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "model_ref",
+        "tokenizer_ref",
+        "status"
+      ],
+      "title": "ModelTokenizerCompatibility",
+      "type": "object"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Ref",
+      "type": "object"
+    },
+    "SpecialToken": {
+      "additionalProperties": false,
+      "properties": {
+        "added": {
+          "default": false,
+          "title": "Added",
+          "type": "boolean"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "role": {
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "token_id": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Token Id"
+        }
+      },
+      "required": [
+        "role",
+        "content"
+      ],
+      "title": "SpecialToken",
+      "type": "object"
+    },
+    "TokenizerFormat": {
+      "enum": [
+        "tokenizers_json",
+        "sentencepiece",
+        "tiktoken",
+        "custom",
+        "unknown"
+      ],
+      "title": "TokenizerFormat",
+      "type": "string"
+    },
+    "TrustRequirement": {
+      "additionalProperties": false,
+      "description": "Static trust findings only. This descriptor can never authorize custom-code execution.",
+      "properties": {
+        "approval_required": {
+          "default": false,
+          "title": "Approval Required",
+          "type": "boolean"
+        },
+        "custom_code_files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Custom Code Files",
+          "type": "array"
+        },
+        "custom_code_required": {
+          "default": false,
+          "title": "Custom Code Required",
+          "type": "boolean"
+        },
+        "detected_auto_map": {
+          "additionalProperties": true,
+          "title": "Detected Auto Map",
+          "type": "object"
+        },
+        "isolated_execution_required": {
+          "default": false,
+          "title": "Isolated Execution Required",
+          "type": "boolean"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "trust_remote_code": {
+          "const": false,
+          "default": false,
+          "title": "Trust Remote Code",
+          "type": "boolean"
+        }
+      },
+      "title": "TrustRequirement",
+      "type": "object"
+    },
+    "VerificationOutcome": {
+      "description": "One independent descriptor evidence axis. Integrity, compatibility, functional behavior,\nand hardware support must never be collapsed into a misleading linear level.",
+      "enum": [
+        "not_checked",
+        "passed",
+        "failed",
+        "partial",
+        "not_applicable"
+      ],
+      "title": "VerificationOutcome",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Static tokenizer identity and structure. Exact encode/decode behavior needs a later functional\nprobe in an isolated capability environment; inspection alone does not claim it.",
+  "properties": {
+    "added_token_count": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Added Token Count"
+    },
+    "base_vocabulary_size": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Base Vocabulary Size"
+    },
+    "captured_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Captured At"
+    },
+    "chat_template": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Chat Template"
+    },
+    "chat_template_sha256": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Chat Template Sha256"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "effective_vocabulary_size": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Effective Vocabulary Size"
+    },
+    "files": {
+      "items": {
+        "$ref": "#/$defs/DescriptorFile"
+      },
+      "title": "Files",
+      "type": "array"
+    },
+    "format": {
+      "$ref": "#/$defs/TokenizerFormat",
+      "default": "unknown"
+    },
+    "implementation_class": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Implementation Class"
+    },
+    "inventory_complete": {
+      "default": false,
+      "title": "Inventory Complete",
+      "type": "boolean"
+    },
+    "inventory_sha256": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Inventory Sha256"
+    },
+    "max_token_id": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Token Id"
+    },
+    "model_compatibility": {
+      "items": {
+        "$ref": "#/$defs/ModelTokenizerCompatibility"
+      },
+      "title": "Model Compatibility",
+      "type": "array"
+    },
+    "model_max_length": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DimensionEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "normalization": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Normalization"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    },
+    "pre_tokenization": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Pre Tokenization"
+    },
+    "source": {
+      "$ref": "#/$defs/DescriptorSource"
+    },
+    "special_tokens": {
+      "items": {
+        "$ref": "#/$defs/SpecialToken"
+      },
+      "title": "Special Tokens",
+      "type": "array"
+    },
+    "storage_size_bytes": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Storage Size Bytes",
+      "type": "integer"
+    },
+    "tokenizer_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Tokenizer Id",
+      "type": "string"
+    },
+    "trust": {
+      "$ref": "#/$defs/TrustRequirement"
+    },
+    "verification": {
+      "$ref": "#/$defs/DescriptorVerification"
+    }
+  },
+  "required": [
+    "tokenizer_id",
+    "source"
+  ],
+  "title": "TokenizerDescriptor",
+  "type": "object"
+}
