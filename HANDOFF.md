@@ -46,9 +46,10 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   adds the Phase 3 model/tokenizer descriptor and static inspection foundation; **#413** adds the
   Phase 4 TrainingObjective registry and compatibility checker; **#414** adds the Phase 5
   parameter-accounting foundation. GitHub was checked live at Phase 6 publication: no competing PRs;
-  only unrelated UI-theme issues #187 and #201 were open. The `feat/run-plan-placement` branch
-  delivers the Phase 6 physical `RunPlan` foundation; verify its live PR/merge state rather than
-  inferring it from this snapshot. Its local gate was 1,374 Python tests passed / 6 skipped / 88.32%
+  only unrelated UI-theme issues #187 and #201 were open. **#415**
+  (`feat/run-plan-placement`) delivers the Phase 6 physical `RunPlan` foundation; verify its live
+  merge state rather than inferring it from this snapshot. Its local gate was 1,374 Python tests
+  passed / 6 skipped / 88.32%
   Windows coverage, full Ruff/MyPy, deterministic 26-root schema/TypeScript generation, web
   production build, 815 desktop tests, and clean WPF/Avalonia Release builds. After any
   `platform/` contract change,
