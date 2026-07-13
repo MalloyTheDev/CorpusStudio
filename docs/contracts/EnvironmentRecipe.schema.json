@@ -1,0 +1,242 @@
+{
+  "$defs": {
+    "DependencyConflict": {
+      "additionalProperties": false,
+      "properties": {
+        "condition": {
+          "title": "Condition",
+          "type": "string"
+        },
+        "packages": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Packages",
+          "type": "array"
+        },
+        "severity": {
+          "default": "block",
+          "enum": [
+            "block",
+            "warn"
+          ],
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "packages",
+        "condition"
+      ],
+      "title": "DependencyConflict",
+      "type": "object"
+    },
+    "DependencyLayer": {
+      "description": "The three dependency layers. The CONTROL PLANE stays lightweight + always installable (opening\nCorpusStudio must never require CUDA/DeepSpeed/an ML framework); CAPABILITY profiles are opt-in\nfeature stacks added to the core process with graceful fallback; BACKEND_WORKER environments are\nisolated per-framework runtimes (heavy frameworks pin conflicting torch/CUDA/xformers builds and\ncannot coexist \u2014 they talk to the core via the WorkerMessage protocol, never by import).",
+      "enum": [
+        "control_plane",
+        "capability",
+        "backend_worker"
+      ],
+      "title": "DependencyLayer",
+      "type": "string"
+    },
+    "DependencyRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "optional": {
+          "default": false,
+          "title": "Optional",
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "specifier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Specifier"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "DependencyRequirement",
+      "type": "object"
+    },
+    "OperatingSystem": {
+      "enum": [
+        "windows",
+        "wsl",
+        "linux",
+        "macos",
+        "unknown"
+      ],
+      "title": "OperatingSystem",
+      "type": "string"
+    },
+    "RecipeVerification": {
+      "description": "How far a recipe has been proven \u2014 the recipe-level twin of EnvironmentState. A recipe is a\nDECLARATION of what to install; this says whether that declaration has ever produced a working\nenvironment, and at what level. ``declared`` = we can render the install plan but have not built +\nverified it; higher tiers require actual evidence (a real install / probe / hardware run).",
+      "enum": [
+        "declared",
+        "build_verified",
+        "functional_verified",
+        "hardware_verified"
+      ],
+      "title": "RecipeVerification",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A declarative, platform/CUDA-aware recipe for building one isolated environment \u2014 the WHAT to\ninstall, not the act of installing. A recipe is only a declaration: ``verification`` says whether\nit has ever produced a working environment (declared \u2192 hardware_verified). Grounded in the engine's\nreal optional extras (pyproject ``[train]`` / ``[parquet]`` / ``[tokenizer]``).",
+  "properties": {
+    "capability_probes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Capability Probes",
+      "type": "array"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "cuda_index_urls": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Cuda Index Urls",
+      "type": "object"
+    },
+    "default_index_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Default Index Url"
+    },
+    "dependency_requirements": {
+      "items": {
+        "$ref": "#/$defs/DependencyRequirement"
+      },
+      "title": "Dependency Requirements",
+      "type": "array"
+    },
+    "description": {
+      "default": "",
+      "title": "Description",
+      "type": "string"
+    },
+    "display_name": {
+      "default": "",
+      "title": "Display Name",
+      "type": "string"
+    },
+    "extra_index_urls": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Extra Index Urls",
+      "type": "array"
+    },
+    "known_conflicts": {
+      "items": {
+        "$ref": "#/$defs/DependencyConflict"
+      },
+      "title": "Known Conflicts",
+      "type": "array"
+    },
+    "layer": {
+      "$ref": "#/$defs/DependencyLayer"
+    },
+    "min_compute_capability": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Min Compute Capability"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    },
+    "python_requires": {
+      "default": ">=3.10",
+      "title": "Python Requires",
+      "type": "string"
+    },
+    "recipe_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Recipe Id",
+      "type": "string"
+    },
+    "requires_cuda": {
+      "default": false,
+      "title": "Requires Cuda",
+      "type": "boolean"
+    },
+    "requires_native_build": {
+      "default": false,
+      "title": "Requires Native Build",
+      "type": "boolean"
+    },
+    "supported_os": {
+      "items": {
+        "$ref": "#/$defs/OperatingSystem"
+      },
+      "title": "Supported Os",
+      "type": "array"
+    },
+    "target": {
+      "default": "",
+      "title": "Target",
+      "type": "string"
+    },
+    "verification": {
+      "$ref": "#/$defs/RecipeVerification",
+      "default": "declared"
+    }
+  },
+  "required": [
+    "recipe_id",
+    "layer"
+  ],
+  "title": "EnvironmentRecipe",
+  "type": "object"
+}
