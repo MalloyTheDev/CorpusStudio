@@ -31,13 +31,14 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
    first-party TRL/PEFT QLoRA trainer.
 2. **Platform** (`engine/corpus_studio/platform/`) — a **contract-first, torch-free** run lifecycle:
    profile → plan (hash-sealed RunPlan) → predict-fit → run (supervised, in-proc or kill-able
-   subprocess) → measure-fit (watchdog) → artifacts. Verified end-to-end on a real RTX 5070.
+   subprocess) → measure-fit (watchdog) → artifacts. The existing real RTX 5070 evidence is from
+   native Windows/WDDM (plus separately labeled WSL probes), not bare-Linux or real-offload proof.
 3. **UI heads** — WPF (shipping), Avalonia (cross-platform interim), Tauri 2 + React (`apps/web`,
    contract-first future head). The UI is a **client** over the engine CLI; it never owns training.
 
 ## 2. Current git / PR state
 
-`main` is the source of truth; everything through **#414 was merged when the Phase 6 branch began**:
+`main` is the source of truth; everything through **#415 is merged**:
 - **#404** configurable checkpoint retention · **#405** StorageProfile + the dependency-architecture
   correction · **#406** Environment Manager substrate (Phase 2 slice 1) · **#407** storage USB/WSL
   runtime-role risks + storage-vs-not failure diagnostic · **#408** HANDOFF/AGENTS · **#409**
@@ -45,16 +46,21 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   managed `backend-corpus-studio` environment creation/lock/probe/drift/recreate lifecycle; **#412**
   adds the Phase 3 model/tokenizer descriptor and static inspection foundation; **#413** adds the
   Phase 4 TrainingObjective registry and compatibility checker; **#414** adds the Phase 5
-  parameter-accounting foundation. GitHub was checked live at Phase 6 publication: no competing PRs;
-  only unrelated UI-theme issues #187 and #201 were open. **#415**
-  (`feat/run-plan-placement`) delivers the Phase 6 physical `RunPlan` foundation; verify its live
-  merge state rather than inferring it from this snapshot. Its local gate was 1,374 Python tests
-  passed / 6 skipped / 88.32%
-  Windows coverage, full Ruff/MyPy, deterministic 26-root schema/TypeScript generation, web
+  parameter-accounting foundation; **#415** adds the Phase 6 physical `RunPlan` foundation and was
+  squash-merged as `f142b6b7517b0755fbc8ba04fdc1605366e30979`. Its local gate was 1,374 Python
+  tests passed / 6 skipped / 88.32% Windows coverage, full Ruff/MyPy, deterministic 26-root
+  schema/TypeScript generation, web
   production build, 815 desktop tests, and clean WPF/Avalonia Release builds. After any
   `platform/` contract change,
   regenerate the committed schemas (see §4), update the count in
   `tests/test_platform_contracts.py`, and regenerate the TypeScript types.
+- **Phase 7 is implemented locally on `feat/trace-record-foundation` and awaiting publish/CI**: one
+  `TraceRecord` root, hash/policy/source/review evidence, legacy migration, explicit reviewed
+  successors, external provider-authority and trainer gates, generated clients, and a
+  desktop-selectable trace draft schema. Local gate: Ruff clean, MyPy clean (121 files), 1,412 Python
+  tests passed / 6 skipped / 88.50% Windows coverage, deterministic 27-root schema/TypeScript
+  generation, web production build, 815 desktop tests, and clean WPF/Avalonia Release builds (the
+  existing Avalonia Watermark deprecation warnings remain). See `docs/TRACE_RECORDS.md`.
 
 ## 3. The architecture North Star + binding directives
 
@@ -88,7 +94,7 @@ The big epic (memory `platform-architecture-epic`). Non-negotiables the user has
   checkpoints **from day one** — retrofitting sparse later is a disruptive redesign.
 - **Revised foundational order** (do these in order): 1 StorageProfile ✅ → 2 Env Manager reference
   lifecycle ✅ → 3 `ModelDescriptor` + `TokenizerDescriptor` foundation ✅ → 4 `TrainingObjective`
-  registry ✅ → 5 parameter accounting ✅ → 6 `RunPlan` expansion ✅ → 7 `TraceRecord` → 8 MoE
+  registry ✅ → 5 parameter accounting ✅ → 6 `RunPlan` expansion ✅ → 7 `TraceRecord` ✅ → 8 MoE
   inspection → 9 dense backends → 10 existing-model MoE FT → 11 full MoE → 12 resource-elastic
   expert runtime.
 
@@ -113,7 +119,7 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   .\.venv\Scripts\python.exe -c "from corpus_studio.platform.schema_export import export_json_schemas; export_json_schemas('../docs/contracts')"
   ```
   then fix the two counts in `tests/test_platform_contracts.py` (`len(ROOT_CONTRACTS)` + the export
-  test). This branch exports **26 root contracts**.
+  test). This branch exports **27 root contracts**.
 
 ## 5. Workflow / process conventions (the user cares about these)
 
@@ -137,7 +143,8 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   the engine refuses to write it); provider policy enforced **in the engine**, not just the UI.
 - **Predicted fit is never `NATIVE_SAFE`** — only a *measured* run earns it (the calibrator/watchdog).
 - **Blackwell / sm_120**: force the **math** attention path — the fused flash-SDPA kernel **deadlocks
-  on the first backward under native-Windows WDDM** (high GPU util, low power). WSL/Linux flash is safe.
+  on the first backward under native-Windows WDDM** (high GPU util, low power). WSL flash was measured
+  separately; bare-Linux FlashAttention remains unverified until the final machine is available.
   Unsloth is honestly **refused on Blackwell** (it declares no math path) and routed to
   `backend-corpus-studio`.
 - **Dependency-light boundary**: `import corpus_studio.platform` pulls **no torch**; all heavy imports
@@ -147,23 +154,29 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 7. Immediate next actions (ranked)
 
-1. **Phase 7 — generalized `TraceRecord` + Trace Studio foundation.** Reconcile the existing
-   lightweight `training/traces.py` shape with a versioned language-neutral contract; preserve
-   provenance, tool/reasoning boundaries, answer-leak protections, and dataset lineage without
-   treating generated reasoning as ground truth.
-2. **Environment Manager hardware verification (explicit/networked).** After reviewing `env-plan`,
-   build and probe a real `backend-corpus-studio` CUDA environment on the RTX 5070. The code and CI
-   harness do not claim this newly downloaded environment exists or is hardware-verified.
-3. **Phase 8+** down the revised order (§3): MoE inspection → dense backends → existing-model MoE FT
+1. **Finish/publish Phase 7** and verify its full local/CI gate; the implementation branch is named
+   above. Do not call the built-in draft schema a dedicated graphical Trace Studio.
+2. **Phase 8 — MoE model inspection.** Detect and report existing MoE topology/count evidence without
+   claiming execution support; keep semantic routing separate from physical placement.
+3. **Continue hardware-independent foundations while the PCIe/NVMe adapter is pending:** MoE-safe
+   inspection, backend contracts/fake-worker tests, Environment Manager lock/drift tests, and
+   desktop/web contract integration. Keep non-trivial placement/offload execution unimplemented until
+   an isolated backend proves it.
+4. **Phase 9+** down the revised order (§3): dense backends → existing-model MoE FT
    → full MoE → resource-elastic expert runtime.
-4. When a native-Linux NVMe box is ready: the **untruncated seq-4096 WBG-7B re-train** for paper numbers
-   (the WBG WSL training now points at C:, not the F: USB drive — see §0).
+5. **Only after the Linux NVMe is installed in the RTX 5070 desktop:** install the NVIDIA/CUDA stack,
+   build/probe `backend-corpus-studio`, run a tiny GPU smoke, benchmark the NVMe non-destructively,
+   then step the 7B workload from sequence 1024 upward before CPU and finally NVMe offload.
 
 ## 8. Hardware + environments
 
 - **GPU**: RTX 5070, 12 GB, Blackwell (sm_120, cc 12.0), Windows/WDDM. Measured VRAM ceiling for 7B
   4-bit QLoRA: **~10.8 GB @ seq 1024, ~13.8 GB @ 2048**; above ~1280 the WDDM path spills to system RAM
-  and crawls (native Linux OOMs instead). This is why long-seq training wants native Linux + offload.
+  and crawls. Expected native-Linux behavior and every real offload fit remain unverified.
+- **Hard verification boundary until the final machine is assembled:** do not claim native-Linux RTX
+  5070 training, DeepSpeed NVMe offload, Linux FSDP, bare-Linux FlashAttention, PCIe 4.0 NVMe
+  throughput, sustained NVMe writes, real offload fit, full-sequence 7B success, or MoE runtime
+  capability. Contract representation, fake workers, and CI are not hardware proof.
 - **Engine venv**: `C:\CorpusStudio\engine\.venv` (3.12.10). Recreate with
   `py -3.12 -m venv .venv; .\.venv\Scripts\python -m pip install -e .[dev]`.
 - **GPU train venv**: rebuild `C:\cs-train-venv` when training (was torch 2.11.0+cu128 + `[train]`).
@@ -172,7 +185,7 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 9. Repository map
 
-- **Platform contracts**: `engine/corpus_studio/platform/contracts.py` (26 root contracts) + `enums.py`
+- **Platform contracts**: `engine/corpus_studio/platform/contracts.py` (27 root contracts) + `enums.py`
   + `common.py`; `schema_export.py` → `docs/contracts/*.schema.json` (language-neutral, consumed by
   `apps/web`).
 - **Lifecycle**: `platform/{profiler, probes, planner, calibrator, supervisor, runners, watchdog,
@@ -197,6 +210,12 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   explicit. `platform-run` and the worker reject hash tampering; current built-in runners support only
   the singleton CPU/GPU path and refuse non-trivial execution; see
   `docs/RUN_PLAN_PHYSICAL_EXECUTION.md`.
+- **TraceRecord foundation** (Phase 7): `platform/trace_records.py` + `training/{traces,
+  trace_generation,trainer}.py`; the contract preserves source/context/segments/producer/validation/
+  review, while `trace-migrate`, `trace-generate`, `trace-review`, and `trace-validate` implement the
+  pending → reviewed workflow. Stored provider-policy snapshots are evidence only: review/training
+  re-resolve the external project override and block unknown/frontier/drifted authority. See
+  `docs/TRACE_RECORDS.md`.
 - **Storage**: `platform/storage_profiler.py` (topology + per-role safe-spill guardrail + failure
   diagnostic).
 - **Trainer**: `training/trainer.py` (+ `unsloth_trainer.py`). CLI: `engine/corpus_studio/cli.py`

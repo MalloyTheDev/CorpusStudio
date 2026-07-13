@@ -175,7 +175,8 @@ Trustworthy scoring comes from two places:
   (the reasoning is not the reference and would corrupt the score) while the full output is kept in
   the record for inspection; a "reasoning" model that emitted no reasoning is flagged
   (`no_reasoning`). Works with either scorer above. See the trace loop in
-  [CLI_REFERENCE.md](CLI_REFERENCE.md) (`trace-generate` / `trace-validate`).
+  [TRACE_RECORDS.md](TRACE_RECORDS.md) and the trace commands in
+  [CLI_REFERENCE.md](CLI_REFERENCE.md).
 
 ## Current Desktop MVP
 

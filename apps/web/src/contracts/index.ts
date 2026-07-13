@@ -23,5 +23,6 @@ export type { RunManifest } from "./RunManifest";
 export type { RunPlan } from "./RunPlan";
 export type { StorageProfile } from "./StorageProfile";
 export type { TokenizerDescriptor } from "./TokenizerDescriptor";
+export type { TraceRecord } from "./TraceRecord";
 export type { TrainingObjective } from "./TrainingObjective";
 export type { WorkerMessage } from "./WorkerMessage";

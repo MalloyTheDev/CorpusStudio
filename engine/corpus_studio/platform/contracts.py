@@ -313,6 +313,340 @@ class DatasetManifest(ContractModel):
 
 
 # --------------------------------------------------------------------------------------------------
+# TraceRecord - versioned reasoning/tool/process evidence. Structured records never use <think>
+# markup internally; that syntax is confined to legacy import and training rendering boundaries.
+# --------------------------------------------------------------------------------------------------
+class TraceSource(ContractModel):
+    """Pinned identity of the exact source row used to create a trace.
+
+    A source is either a hash-pinned DatasetManifest reference or a hash-pinned imported artifact.
+    ``source_row_id`` reuses the engine's sha256(exact_row_signature) row identity so trace lineage
+    and dataset-version lineage agree rather than inventing a second row fingerprint.
+    """
+
+    dataset_ref: Ref | None = None
+    artifact_ref: str | None = Field(default=None, min_length=1)
+    artifact_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    source_row_id: str = Field(pattern=SHA256_PATTERN)
+    source_row_index: int | None = Field(default=None, ge=1)
+    row_id_algo: Literal["sha256-exact-row-signature-v1"] = "sha256-exact-row-signature-v1"
+
+    @model_validator(mode="after")
+    def _validate_source(self) -> TraceSource:
+        has_dataset = self.dataset_ref is not None
+        has_artifact = self.artifact_ref is not None or self.artifact_sha256 is not None
+        if has_dataset == has_artifact:
+            raise ValueError("trace source requires exactly one pinned dataset or imported artifact")
+        if self.dataset_ref is not None and not _is_pinned_ref(self.dataset_ref):
+            raise ValueError("trace dataset_ref must be hash-pinned")
+        if (self.artifact_ref is None) != (self.artifact_sha256 is None):
+            raise ValueError("trace artifact_ref and artifact_sha256 must be set together")
+        return self
+
+
+class TraceMessage(ContractModel):
+    message_id: str = Field(pattern=_ID)
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str = Field(min_length=1)
+    name: str | None = Field(default=None, min_length=1)
+    tool_call_id: str | None = Field(default=None, pattern=_ID)
+
+    @model_validator(mode="after")
+    def _validate_message(self) -> TraceMessage:
+        if not self.content.strip():
+            raise ValueError("trace context content cannot be blank")
+        if self.role == "tool" and self.tool_call_id is None:
+            raise ValueError("tool context messages require tool_call_id")
+        if self.role != "tool" and self.tool_call_id is not None:
+            raise ValueError("tool_call_id is only valid on tool context messages")
+        return self
+
+
+class TraceToolCall(ContractModel):
+    call_id: str = Field(pattern=_ID)
+    tool_name: str = Field(min_length=1)
+    tool_version: str | None = None
+    arguments: JsonObject = Field(default_factory=dict)
+    argument_schema_ref: Ref | None = None
+
+
+class TraceToolResult(ContractModel):
+    call_id: str = Field(pattern=_ID)
+    status: Literal["success", "error", "denied"]
+    content: str | None = None
+    content_ref: Ref | None = None
+    content_sha256: str = Field(pattern=SHA256_PATTERN)
+    truncated: bool = False
+    error: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_result(self) -> TraceToolResult:
+        if self.content is None and self.content_ref is None:
+            raise ValueError("tool results require inline content or a content_ref")
+        if self.status in {"error", "denied"} and not self.error:
+            raise ValueError("error/denied tool results require an error explanation")
+        if self.status == "success" and self.error is not None:
+            raise ValueError("successful tool results cannot carry an error")
+        return self
+
+
+class TraceTrainingSignal(ContractModel):
+    """Optional per-segment supervision without implying the content is factual ground truth."""
+
+    target: bool = False
+    label: str | float | bool | None = None
+    reward: float | None = None
+    weight: float = Field(default=1.0, ge=0)
+    verifier_ref: Ref | None = None
+
+
+class TraceSegment(ContractModel):
+    segment_id: str = Field(pattern=_ID)
+    sequence: int = Field(ge=0)
+    kind: Literal[
+        "reasoning",
+        "action",
+        "tool_call",
+        "tool_result",
+        "observation",
+        "verifier",
+        "final_answer",
+    ]
+    actor: Literal["system", "user", "assistant", "tool", "verifier", "human"]
+    origin: Literal["model", "tool", "human", "imported", "derived"]
+    verification: Literal[
+        "unverified", "human_verified", "tool_verified", "verifier_accepted", "rejected"
+    ] = "unverified"
+    content: str | None = None
+    content_ref: Ref | None = None
+    tool_call: TraceToolCall | None = None
+    tool_result: TraceToolResult | None = None
+    training_signal: TraceTrainingSignal | None = None
+    evidence_refs: list[Ref] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_segment(self) -> TraceSegment:
+        if self.kind == "tool_call":
+            if self.tool_call is None or self.tool_result is not None:
+                raise ValueError("tool_call segments require only tool_call payload")
+            if self.actor != "assistant" or self.origin not in {"model", "human", "imported"}:
+                raise ValueError("tool_call segments must be authored by assistant/model, human, or import")
+        elif self.kind == "tool_result":
+            if self.tool_result is None or self.tool_call is not None:
+                raise ValueError("tool_result segments require only tool_result payload")
+            if self.actor != "tool" or self.origin != "tool":
+                raise ValueError("tool_result segments must preserve the tool boundary")
+        else:
+            if self.tool_call is not None or self.tool_result is not None:
+                raise ValueError("tool payloads are only valid on tool_call/tool_result segments")
+            if self.content is None and self.content_ref is None:
+                raise ValueError(f"{self.kind} segments require content or content_ref")
+        if self.content is not None:
+            if not self.content.strip():
+                raise ValueError("inline trace segment content cannot be blank")
+            if "<think>" in self.content or "</think>" in self.content:
+                raise ValueError("structured trace segments cannot contain <think> markup")
+        evidence_keys = [
+            (item.id, item.hash.value if item.hash and item.hash.value else "")
+            for item in self.evidence_refs
+        ]
+        if evidence_keys != sorted(set(evidence_keys)):
+            raise ValueError("trace segment evidence_refs must be sorted and unique")
+        return self
+
+
+class TracePolicyDecision(ContractModel):
+    action: Literal["generate-trace"] = "generate-trace"
+    allowed: bool
+    policy_source: str = Field(min_length=1)
+    policy_sha256: str = Field(pattern=SHA256_PATTERN)
+    human_review_required: bool = True
+    captured_at: str = Field(min_length=1)
+
+
+class TraceProducer(ContractModel):
+    """Who produced the trace and the reproducibility/policy evidence available at capture time."""
+
+    kind: Literal["human", "model", "imported", "observed"]
+    tool: str = Field(min_length=1)
+    tool_version: str | None = Field(default=None, min_length=1)
+    backend: str | None = Field(default=None, min_length=1)
+    provider_id: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    provider_kind: str | None = Field(default=None, min_length=1)
+    requested_model_id: str | None = Field(default=None, min_length=1)
+    model_id: str | None = Field(default=None, min_length=1)
+    route_id: str | None = Field(default=None, min_length=1)
+    model_ref: Ref | None = None
+    prompt_template_version: str | None = Field(default=None, min_length=1)
+    prompt_template_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    request_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    response_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    response_metadata: JsonObject = Field(default_factory=dict)
+    decoding: JsonObject = Field(default_factory=dict)
+    seed: int | None = None
+    policy_decision: TracePolicyDecision | None = None
+    policy_snapshot: JsonObject | None = None
+
+    @model_validator(mode="after")
+    def _validate_producer(self) -> TraceProducer:
+        if self.kind == "model":
+            required = {
+                "backend": self.backend,
+                "provider_id": self.provider_id,
+                "requested_model_id": self.requested_model_id,
+                "model_id": self.model_id,
+                "prompt_template_sha256": self.prompt_template_sha256,
+                "request_sha256": self.request_sha256,
+                "response_sha256": self.response_sha256,
+                "policy_decision": self.policy_decision,
+                "policy_snapshot": self.policy_snapshot,
+            }
+            missing = sorted(
+                name
+                for name, value in required.items()
+                if value is None or (isinstance(value, str) and not value.strip())
+            )
+            if missing:
+                raise ValueError(f"model trace producers require: {', '.join(missing)}")
+            assert self.policy_decision is not None
+            if not self.policy_decision.allowed:
+                raise ValueError("model-produced trace records require an allowed generation policy")
+            if not self.policy_decision.human_review_required:
+                raise ValueError("model-produced trace records must require human review")
+        elif self.policy_decision is not None or self.policy_snapshot is not None:
+            raise ValueError("provider policy evidence is only valid for model trace producers")
+        return self
+
+
+class TraceValidationFinding(ContractModel):
+    code: str = Field(pattern=r"^[a-z0-9_]+$")
+    severity: Literal["warning", "block"]
+    location: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+
+
+class TraceValidationEvidence(ContractModel):
+    validator: str = Field(min_length=1)
+    validator_version: str = Field(min_length=1)
+    config_sha256: str = Field(pattern=SHA256_PATTERN)
+    checked_at: str = Field(min_length=1)
+    status: Literal["pass", "warn", "block"]
+    findings: list[TraceValidationFinding] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_findings(self) -> TraceValidationEvidence:
+        keys = [(item.code, item.location, item.message) for item in self.findings]
+        if keys != sorted(set(keys)):
+            raise ValueError("trace validation findings must be sorted and unique")
+        severities = {item.severity for item in self.findings}
+        expected = "block" if "block" in severities else "warn" if "warning" in severities else "pass"
+        if self.status != expected:
+            raise ValueError("trace validation status must match the strongest finding")
+        return self
+
+
+class TraceReview(ContractModel):
+    status: Literal["pending", "approved", "rejected"] = "pending"
+    reviewer: str | None = None
+    reviewed_at: str | None = None
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_review(self) -> TraceReview:
+        if self.notes != sorted(set(self.notes)):
+            raise ValueError("trace review notes must be sorted and unique")
+        if self.status == "pending":
+            if self.reviewer is not None or self.reviewed_at is not None:
+                raise ValueError("pending trace reviews cannot identify a reviewer or review time")
+        elif not self.reviewer or not self.reviewer.strip() or not self.reviewed_at:
+            raise ValueError("approved/rejected trace reviews require reviewer and reviewed_at")
+        return self
+
+
+class TraceRecord(ContractModel):
+    """A hash-sealed reasoning/tool/process record whose review gate is separate from validation.
+
+    Heuristic validation and human approval do not promote generated reasoning to ground truth.
+    Model/imported reasoning segments must remain explicitly ``unverified``.
+    """
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    trace_id: str = Field(pattern=_ID)
+    trace_hash: str = Field(pattern=SHA256_PATTERN)
+    created_at: str = Field(min_length=1)
+    trace_kind: Literal[
+        "reasoning", "tool_use", "agent", "process_supervision", "verifier", "mixed"
+    ] = "reasoning"
+    source: TraceSource
+    context: list[TraceMessage] = Field(min_length=1)
+    segments: list[TraceSegment] = Field(min_length=1)
+    producer: TraceProducer
+    validation: TraceValidationEvidence
+    review: TraceReview = Field(default_factory=TraceReview)
+    parent_trace_refs: list[Ref] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_trace_record(self) -> TraceRecord:
+        context_ids = [item.message_id for item in self.context]
+        if len(context_ids) != len(set(context_ids)):
+            raise ValueError("trace context message_ids must be unique")
+
+        sequences = [item.sequence for item in self.segments]
+        if sequences != list(range(len(self.segments))):
+            raise ValueError("trace segment sequence must be contiguous and ordered from zero")
+        segment_ids = [item.segment_id for item in self.segments]
+        if len(segment_ids) != len(set(segment_ids)):
+            raise ValueError("trace segment_ids must be unique")
+        answers = [item for item in self.segments if item.kind == "final_answer"]
+        if len(answers) != 1 or self.segments[-1].kind != "final_answer":
+            raise ValueError("trace records require exactly one final_answer as the last segment")
+
+        calls: dict[str, int] = {}
+        resolved: set[str] = set()
+        for segment in self.segments:
+            if segment.tool_call is not None:
+                call_id = segment.tool_call.call_id
+                if call_id in calls:
+                    raise ValueError("trace tool call_ids must be unique")
+                calls[call_id] = segment.sequence
+            if segment.tool_result is not None:
+                call_id = segment.tool_result.call_id
+                if call_id not in calls or calls[call_id] >= segment.sequence:
+                    raise ValueError("every tool result must follow its matching tool call")
+                if call_id in resolved:
+                    raise ValueError("each tool call can have at most one result")
+                resolved.add(call_id)
+        if set(calls) != resolved:
+            raise ValueError("every trace tool call requires exactly one later result")
+        if self.trace_kind == "tool_use" and not calls:
+            raise ValueError("tool_use traces require at least one tool call/result pair")
+
+        for segment in self.segments:
+            if (
+                segment.kind == "reasoning"
+                and segment.origin in {"model", "imported"}
+                and segment.verification != "unverified"
+            ):
+                raise ValueError("generated/imported reasoning must remain explicitly unverified")
+
+        parent_keys: list[tuple[str, str]] = []
+        for parent in self.parent_trace_refs:
+            if not _is_pinned_ref(parent):
+                raise ValueError("parent_trace_refs must be hash-pinned")
+            assert parent.hash is not None and parent.hash.value is not None
+            parent_keys.append((parent.id, parent.hash.value))
+        if parent_keys != sorted(set(parent_keys)):
+            raise ValueError("parent_trace_refs must be sorted and unique")
+        if self.tags != sorted(set(self.tags)):
+            raise ValueError("trace tags must be sorted and unique")
+        if self.notes != sorted(set(self.notes)):
+            raise ValueError("trace notes must be sorted and unique")
+        return self
+
+
+# --------------------------------------------------------------------------------------------------
 # ModelDescriptor / TokenizerDescriptor - static, dependency-light model identity and compatibility.
 # The inspector never imports model code or a heavy ML framework. MoE execution remains future work,
 # but these contracts avoid dense-only assumptions from their first version.

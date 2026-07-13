@@ -88,6 +88,7 @@ run can prove fit.
 
 - No objective is added to `RunPlan` yet; that belongs to the planned RunPlan-expansion phase.
 - No DPO/reward/distillation/MoE trainer is implemented by catalog presence.
-- No model loading, training, network access, physical scheduling, parameter-count production,
-  generalized trace contract, or checkpoint expansion is performed here.
+- No model loading, training, network access, physical scheduling, parameter-count production, or
+  checkpoint expansion is performed here. The later generalized trace contract now ships separately
+  as `TraceRecord`; catalog presence still does not implement process/tool/verifier trainers.
 - The existing advisory `training-compat` command remains separate.

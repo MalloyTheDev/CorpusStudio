@@ -11,6 +11,13 @@ from pathlib import Path
 
 import pytest
 
+import corpus_studio.training.trainer as trainer_module
+from corpus_studio.platform.trace_records import (
+    artifact_trace_source,
+    build_reasoning_trace_record,
+    imported_trace_producer,
+)
+from corpus_studio.training.traces import Trace
 from corpus_studio.training.environment import TrainingRuntimeReport
 from corpus_studio.training.trainer import (
     TINY_TOY_MODEL,
@@ -23,6 +30,7 @@ from corpus_studio.training.trainer import (
     load_run_config_from_file,
     resolve_attention_implementation,
     resolve_run_plan,
+    run_training,
     truncation_warning,
     _list_checkpoints,
 )
@@ -80,6 +88,43 @@ def test_overrides_win(tmp_path):
 def test_missing_base_or_dataset_raises(tmp_path):
     with pytest.raises(TrainerError):
         load_run_config_from_file(_config(tmp_path, base_model="", dataset_path=""))
+
+
+def test_run_training_blocks_pending_trace_record_before_runtime_probe(
+    tmp_path: Path, monkeypatch
+):
+    row = {
+        "prompt": "Q",
+        "thinking": "A sufficiently detailed reasoning process for this training example.",
+        "answer": "A",
+    }
+    record = build_reasoning_trace_record(
+        trace=Trace(**row),
+        source=artifact_trace_source(
+            artifact_ref="source.jsonl",
+            artifact_sha256="a" * 64,
+            row=row,
+            row_index=1,
+        ),
+        producer=imported_trace_producer(),
+        created_at="2026-07-13T12:00:00+00:00",
+        trace_id="trace-pending",
+    )
+    dataset = tmp_path / "traces.jsonl"
+    dataset.write_text(record.model_dump_json() + "\n", encoding="utf-8")
+
+    def must_not_probe():
+        raise AssertionError("runtime probe must happen after the trace approval gate")
+
+    monkeypatch.setattr(trainer_module, "probe_training_runtime", must_not_probe)
+    with pytest.raises(TrainerError, match="review status is pending"):
+        run_training(
+            TrainRunConfig(
+                base_model="unused",
+                dataset_path=str(dataset),
+                dataset_format="trace",
+            )
+        )
 
 
 def test_load_config_accepts_yaml_so_a_named_yaml_does_not_die(tmp_path):

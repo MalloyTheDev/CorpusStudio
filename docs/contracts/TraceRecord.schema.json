@@ -1,0 +1,1010 @@
+{
+  "$defs": {
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Ref",
+      "type": "object"
+    },
+    "TraceMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "message_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Message Id",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "role": {
+          "enum": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "tool_call_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Call Id"
+        }
+      },
+      "required": [
+        "message_id",
+        "role",
+        "content"
+      ],
+      "title": "TraceMessage",
+      "type": "object"
+    },
+    "TracePolicyDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "generate-trace",
+          "default": "generate-trace",
+          "title": "Action",
+          "type": "string"
+        },
+        "allowed": {
+          "title": "Allowed",
+          "type": "boolean"
+        },
+        "captured_at": {
+          "minLength": 1,
+          "title": "Captured At",
+          "type": "string"
+        },
+        "human_review_required": {
+          "default": true,
+          "title": "Human Review Required",
+          "type": "boolean"
+        },
+        "policy_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Policy Sha256",
+          "type": "string"
+        },
+        "policy_source": {
+          "minLength": 1,
+          "title": "Policy Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed",
+        "policy_source",
+        "policy_sha256",
+        "captured_at"
+      ],
+      "title": "TracePolicyDecision",
+      "type": "object"
+    },
+    "TraceProducer": {
+      "additionalProperties": false,
+      "description": "Who produced the trace and the reproducibility/policy evidence available at capture time.",
+      "properties": {
+        "backend": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backend"
+        },
+        "decoding": {
+          "additionalProperties": true,
+          "title": "Decoding",
+          "type": "object"
+        },
+        "kind": {
+          "enum": [
+            "human",
+            "model",
+            "imported",
+            "observed"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "model_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Id"
+        },
+        "model_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "policy_decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TracePolicyDecision"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "policy_snapshot": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Policy Snapshot"
+        },
+        "prompt_template_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt Template Sha256"
+        },
+        "prompt_template_version": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt Template Version"
+        },
+        "provider_id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Id"
+        },
+        "provider_kind": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Kind"
+        },
+        "request_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Sha256"
+        },
+        "requested_model_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested Model Id"
+        },
+        "response_metadata": {
+          "additionalProperties": true,
+          "title": "Response Metadata",
+          "type": "object"
+        },
+        "response_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Response Sha256"
+        },
+        "route_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Route Id"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        },
+        "tool": {
+          "minLength": 1,
+          "title": "Tool",
+          "type": "string"
+        },
+        "tool_version": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Version"
+        }
+      },
+      "required": [
+        "kind",
+        "tool"
+      ],
+      "title": "TraceProducer",
+      "type": "object"
+    },
+    "TraceReview": {
+      "additionalProperties": false,
+      "properties": {
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "reviewed_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed At"
+        },
+        "reviewer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewer"
+        },
+        "status": {
+          "default": "pending",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "title": "TraceReview",
+      "type": "object"
+    },
+    "TraceSegment": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "enum": [
+            "system",
+            "user",
+            "assistant",
+            "tool",
+            "verifier",
+            "human"
+          ],
+          "title": "Actor",
+          "type": "string"
+        },
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
+        },
+        "content_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/Ref"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "reasoning",
+            "action",
+            "tool_call",
+            "tool_result",
+            "observation",
+            "verifier",
+            "final_answer"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "origin": {
+          "enum": [
+            "model",
+            "tool",
+            "human",
+            "imported",
+            "derived"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "segment_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Segment Id",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "tool_call": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceToolCall"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tool_result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceToolResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "training_signal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceTrainingSignal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "human_verified",
+            "tool_verified",
+            "verifier_accepted",
+            "rejected"
+          ],
+          "title": "Verification",
+          "type": "string"
+        }
+      },
+      "required": [
+        "segment_id",
+        "sequence",
+        "kind",
+        "actor",
+        "origin"
+      ],
+      "title": "TraceSegment",
+      "type": "object"
+    },
+    "TraceSource": {
+      "additionalProperties": false,
+      "description": "Pinned identity of the exact source row used to create a trace.\n\nA source is either a hash-pinned DatasetManifest reference or a hash-pinned imported artifact.\n``source_row_id`` reuses the engine's sha256(exact_row_signature) row identity so trace lineage\nand dataset-version lineage agree rather than inventing a second row fingerprint.",
+      "properties": {
+        "artifact_ref": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Ref"
+        },
+        "artifact_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Sha256"
+        },
+        "dataset_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "row_id_algo": {
+          "const": "sha256-exact-row-signature-v1",
+          "default": "sha256-exact-row-signature-v1",
+          "title": "Row Id Algo",
+          "type": "string"
+        },
+        "source_row_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Row Id",
+          "type": "string"
+        },
+        "source_row_index": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Row Index"
+        }
+      },
+      "required": [
+        "source_row_id"
+      ],
+      "title": "TraceSource",
+      "type": "object"
+    },
+    "TraceToolCall": {
+      "additionalProperties": false,
+      "properties": {
+        "argument_schema_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "arguments": {
+          "additionalProperties": true,
+          "title": "Arguments",
+          "type": "object"
+        },
+        "call_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Call Id",
+          "type": "string"
+        },
+        "tool_name": {
+          "minLength": 1,
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "tool_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Version"
+        }
+      },
+      "required": [
+        "call_id",
+        "tool_name"
+      ],
+      "title": "TraceToolCall",
+      "type": "object"
+    },
+    "TraceToolResult": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Call Id",
+          "type": "string"
+        },
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
+        },
+        "content_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "status": {
+          "enum": [
+            "success",
+            "error",
+            "denied"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "truncated": {
+          "default": false,
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "call_id",
+        "status",
+        "content_sha256"
+      ],
+      "title": "TraceToolResult",
+      "type": "object"
+    },
+    "TraceTrainingSignal": {
+      "additionalProperties": false,
+      "description": "Optional per-segment supervision without implying the content is factual ground truth.",
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "reward": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reward"
+        },
+        "target": {
+          "default": false,
+          "title": "Target",
+          "type": "boolean"
+        },
+        "verifier_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "weight": {
+          "default": 1.0,
+          "minimum": 0,
+          "title": "Weight",
+          "type": "number"
+        }
+      },
+      "title": "TraceTrainingSignal",
+      "type": "object"
+    },
+    "TraceValidationEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "checked_at": {
+          "minLength": 1,
+          "title": "Checked At",
+          "type": "string"
+        },
+        "config_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Config Sha256",
+          "type": "string"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/TraceValidationFinding"
+          },
+          "title": "Findings",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "pass",
+            "warn",
+            "block"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "validator": {
+          "minLength": 1,
+          "title": "Validator",
+          "type": "string"
+        },
+        "validator_version": {
+          "minLength": 1,
+          "title": "Validator Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "validator",
+        "validator_version",
+        "config_sha256",
+        "checked_at",
+        "status"
+      ],
+      "title": "TraceValidationEvidence",
+      "type": "object"
+    },
+    "TraceValidationFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "pattern": "^[a-z0-9_]+$",
+          "title": "Code",
+          "type": "string"
+        },
+        "location": {
+          "minLength": 1,
+          "title": "Location",
+          "type": "string"
+        },
+        "message": {
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "warning",
+            "block"
+          ],
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "severity",
+        "location",
+        "message"
+      ],
+      "title": "TraceValidationFinding",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A hash-sealed reasoning/tool/process record whose review gate is separate from validation.\n\nHeuristic validation and human approval do not promote generated reasoning to ground truth.\nModel/imported reasoning segments must remain explicitly ``unverified``.",
+  "properties": {
+    "context": {
+      "items": {
+        "$ref": "#/$defs/TraceMessage"
+      },
+      "minItems": 1,
+      "title": "Context",
+      "type": "array"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "created_at": {
+      "minLength": 1,
+      "title": "Created At",
+      "type": "string"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    },
+    "parent_trace_refs": {
+      "items": {
+        "$ref": "#/$defs/Ref"
+      },
+      "title": "Parent Trace Refs",
+      "type": "array"
+    },
+    "producer": {
+      "$ref": "#/$defs/TraceProducer"
+    },
+    "review": {
+      "$ref": "#/$defs/TraceReview"
+    },
+    "segments": {
+      "items": {
+        "$ref": "#/$defs/TraceSegment"
+      },
+      "minItems": 1,
+      "title": "Segments",
+      "type": "array"
+    },
+    "source": {
+      "$ref": "#/$defs/TraceSource"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+    },
+    "trace_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Trace Hash",
+      "type": "string"
+    },
+    "trace_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Trace Id",
+      "type": "string"
+    },
+    "trace_kind": {
+      "default": "reasoning",
+      "enum": [
+        "reasoning",
+        "tool_use",
+        "agent",
+        "process_supervision",
+        "verifier",
+        "mixed"
+      ],
+      "title": "Trace Kind",
+      "type": "string"
+    },
+    "validation": {
+      "$ref": "#/$defs/TraceValidationEvidence"
+    }
+  },
+  "required": [
+    "trace_id",
+    "trace_hash",
+    "created_at",
+    "source",
+    "context",
+    "segments",
+    "producer",
+    "validation"
+  ],
+  "title": "TraceRecord",
+  "type": "object"
+}

@@ -388,6 +388,28 @@ def run_training(
     ``stage_callback(name, message)`` fires at setup milestones (model_loaded / quantized /
     adapter_attached / optimizer_created) so the long SILENT model-load window emits real progress a
     supervisor can see — the honest alternative to a liveness heartbeat."""
+    rows = list(read_jsonl(Path(config.dataset_path)))
+    if config.dataset_format == "trace":
+        from corpus_studio.platform.trace_records import (  # noqa: PLC0415
+            check_trace_dataset_for_training,
+        )
+        from corpus_studio.providers.overrides import load_overrides  # noqa: PLC0415
+
+        trace_check = check_trace_dataset_for_training(
+            rows,
+            provider_overrides=load_overrides(Path(config.dataset_path).parent),
+        )
+        if not trace_check.ready:
+            preview = "; ".join(trace_check.blocked[:10])
+            remainder = len(trace_check.blocked) - min(len(trace_check.blocked), 10)
+            suffix = f"; plus {remainder} more issue(s)" if remainder else ""
+            raise TrainerError(f"Trace dataset is not training-ready: {preview}{suffix}")
+        if trace_check.legacy_rows:
+            print(
+                f"[WARNING] {trace_check.legacy_rows} legacy trace row(s) are unsealed and have no "
+                "review provenance; migrate and review them for the versioned safety gate.",
+                file=sys.stderr,
+            )
     plan = resolve_run_plan(config, probe_training_runtime())
     quantize: bool = plan["quantize"]
 
@@ -479,7 +501,6 @@ def run_training(
     model = get_peft_model(model, LoraConfig(**build_lora_kwargs(config)))
     _stage("adapter_attached", "LoRA adapter attached")
 
-    rows = list(read_jsonl(Path(config.dataset_path)))
     texts = [format_example_text(row, config.dataset_format, tokenizer) for row in rows]
     dataset = Dataset.from_list([{"text": text} for text in texts if text])
     if len(dataset) == 0:

@@ -1,22 +1,28 @@
 # Running CorpusStudio training on native Linux (and reaching seq-4096)
 
-This is the path to **true long-sequence 7B QLoRA** on a 12 GB card — the thing WSL2 can't do.
+This is the planned verification runbook for long-sequence 7B QLoRA on a 12 GB card. It is not a
+record of a completed native-Linux or offload run.
+
+> **Current evidence boundary:** native Windows/WDDM and WSL2 results are labeled where measured.
+> Native-Linux RTX 5070 training, bare-Linux FlashAttention, DeepSpeed/FSDP, CPU/NVMe offload fit,
+> PCIe/NVMe throughput and sustained writes, full-sequence 7B success, and MoE runtime capability are
+> all unverified until the Linux NVMe is installed in the final desktop and those tests are run.
 
 ## Why native Linux (not WSL) for long sequences
 
-CorpusStudio treats WSL and Linux as distinct platforms for good reason (verified on an RTX 5070 this
-project):
+CorpusStudio treats WSL and native Linux as distinct platforms. Only the Windows and WSL columns have
+project measurements today:
 
 | | native Windows | WSL2 | **native Linux** |
 |---|---|---|---|
-| flash attention (Blackwell) | ✗ deadlocks (WDDM) | ✓ works | ✓ works |
-| over-VRAM behaviour | spills to shared RAM (slow) | spills, then **wedges** at scale | **hard-OOM** (clean) |
-| true seq-4096 7B QLoRA | math-attn spill | **fails** (`device not ready` — GPU-PV wall) | possible **with offload** |
-| GPU access | WDDM | GPU-PV (paravirtualised) | **direct** |
+| flash attention (Blackwell) | deadlocks (measured WDDM) | works (measured) | **unverified** |
+| over-VRAM behaviour | spills to shared RAM (measured) | spills, then wedges at scale (measured) | **unverified** |
+| true seq-4096 7B QLoRA | impractical spill | fails (`device not ready`) | **unverified** |
+| GPU access | WDDM | GPU-PV (paravirtualised) | direct access expected; verify after install |
 
-At true seq-4096 a 7B QLoRA needs ~15–20 GB — over the 12 GB card. On WSL2 the GPU-PV layer wedges
-when it spills that hard; **native Linux gives direct GPU access + clean OOM**, so you can add
-*explicit* offload (CPU/NVMe) to fit the overflow instead of relying on a fragile silent spill.
+At true seq-4096 a 7B QLoRA is expected to exceed the 12 GB card. WSL2 measurements wedge when it
+spills that hard. Native Linux is the planned direct-GPU test bed for explicit offload, but its OOM
+behavior and offload fit must be measured rather than inferred.
 
 **Measured on a real RTX 5070 under WSL2** (true full-length sequences — QLoRA r16, grad checkpointing):
 
@@ -30,7 +36,57 @@ when it spills that hard; **native Linux gives direct GPU access + clean OOM**, 
 So WSL "works" only up to seq-3072 and only by spilling at **5–11 minutes per step** — unusable for
 real training. (Short *effective* sequences — the WBG corpus is ~1.2 k tokens — stay under 12 GB and
 train fast at NATIVE_SAFE regardless of the `sequence_len` config.) True long-context needs the
-native-Linux + offload path below, or more VRAM.
+native-Linux/offload experiment below, or more VRAM; the former is not yet proven.
+
+## Before the adapter arrives: portable NVMe preparation only
+
+On the temporary Linux computer, update the OS and install host diagnostics/build prerequisites:
+
+```bash
+sudo apt update
+sudo apt full-upgrade -y
+sudo apt install -y \
+  git curl wget rsync tmux htop jq \
+  build-essential cmake ninja-build pkg-config \
+  python3 python3-dev python3-venv \
+  linux-headers-$(uname -r) \
+  pciutils nvme-cli smartmontools sysstat iotop-c
+```
+
+Verify the install is portable and `/etc/fstab` uses UUIDs, never names such as `/dev/nvme0n1p2`:
+
+```bash
+lsblk -o NAME,MODEL,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS
+cat /etc/fstab
+findmnt /boot/efi
+sudo update-initramfs -u -k all
+sudo update-grub
+```
+
+Prepare the future training mount without installing NVIDIA/CUDA yet:
+
+```bash
+sudo mkdir -p \
+  /mnt/training-nvme/environments \
+  /mnt/training-nvme/hf-cache \
+  /mnt/training-nvme/models \
+  /mnt/training-nvme/datasets/raw \
+  /mnt/training-nvme/datasets/prepared \
+  /mnt/training-nvme/checkpoints \
+  /mnt/training-nvme/runs \
+  /mnt/training-nvme/artifacts \
+  /mnt/training-nvme/evaluations \
+  /mnt/training-nvme/offload/parameters \
+  /mnt/training-nvme/offload/optimizer \
+  /mnt/training-nvme/scratch \
+  /mnt/training-nvme/tmp
+sudo chown -R "$USER:$USER" /mnt/training-nvme
+chmod 700 /mnt/training-nvme/offload
+chmod 1777 /mnt/training-nvme/tmp
+```
+
+Do not install the NVIDIA driver, CUDA userspace stack, or managed training environment until this
+NVMe is installed in the RTX 5070 desktop through the PCIe adapter.
 
 ## 1. Dedicate an NVMe + install Ubuntu
 
@@ -55,6 +111,9 @@ the headless Linux box** — exactly the platform's headless-engine + swappable-
 Ubuntu Desktop if you specifically want a GUI on the Linux box (accept the VRAM cost).
 
 ## 2. NVIDIA driver (the one gotcha for Blackwell / sm_120)
+
+Run this section only after the prepared NVMe is installed in the RTX 5070 desktop and its PCIe link,
+mount, and health have been inspected.
 
 The RTX 50-series needs a recent driver (**570+**) and a recent kernel:
 
@@ -96,52 +155,64 @@ Two things are **not** in the repo:
   (`corpus-studio model-fetch …`, or on the first run). To skip the download, copy the HF cache:
   `C:\Users\<you>\.cache\huggingface` → `~/.cache/huggingface`.
 
-## 4. Build the training env (no sudo)
+## 4. Build the managed training environment (no sudo)
 
 ```bash
-bash scripts/setup_linux_training.sh        # uv + Python 3.12 + torch cu128 + the stack + engine
-source ~/cs-train/bin/activate
-corpus-studio train-check                   # expect: READY (GPU QLoRA), sees the 5070
+python3 -m venv /mnt/training-nvme/environments/control-plane
+/mnt/training-nvme/environments/control-plane/bin/pip install -e ./engine
+source /mnt/training-nvme/environments/control-plane/bin/activate
+
+corpus-studio env-runtimes --recipe backend-corpus-studio
+corpus-studio env-plan backend-corpus-studio \
+  --env-id backend-corpus-studio \
+  --runtime /usr/bin/python3 \
+  --accelerator cu128 \
+  --manager-root /mnt/training-nvme/environments/manager
+# Review the exact argv, indexes, target, and size, then repeat with:
+corpus-studio env-create backend-corpus-studio \
+  --env-id backend-corpus-studio \
+  --runtime /usr/bin/python3 \
+  --accelerator cu128 \
+  --manager-root /mnt/training-nvme/environments/manager \
+  --confirm <resolution-hash>
+corpus-studio env-probe backend-corpus-studio \
+  --manager-root /mnt/training-nvme/environments/manager --json
 ```
 
-This mirrors the exact stack verified on WSL (torch 2.11.0+cu128, transformers 5.13.1, trl 1.8.0,
-peft 0.19.0, bnb 0.49.2) **plus** `deepspeed` + `liger-kernel` for the offload/long-seq levers.
+This step happens only on the final machine after `nvidia-smi` succeeds. The managed environment must
+be built and probed there; package installation alone is not backend or hardware support. The
+`scripts/setup_linux_training.sh` path is a manual diagnostic fallback, not the managed or offload
+backend workflow.
 
 ## 5. Reaching seq-4096 — the honest playbook
 
-seq-4096 7B QLoRA does **not** fit in 12 GB unaided on any platform. On native Linux the options,
-cheapest first:
+The current estimates say seq-4096 7B QLoRA will not fit in 12 GB unaided. Candidate experiments,
+cheapest first, are:
 
-1. **Fused-CE loss** (removes the ~2.5 GB fp32 logits spike) — CorpusStudio's `--memory-efficient` /
-   `--use-liger`. Necessary, not sufficient on its own.
-2. **Activation offload to CPU RAM** — the real long-seq lever (activations dominate). On native Linux
-   the pinned-memory transfer path is robust (it is the WSL2 GPU-PV layer, not Linux, that made this
-   fail here). This is what lets the overflow live in your system RAM.
-3. **DeepSpeed ZeRO offload → NVMe** — for when RAM is also tight; point it at one of your NVMes. Best
-   for full fine-tuning; for QLoRA the offloadable optimizer is small, so prefer (1)+(2) first.
-4. **Multiple GPUs** — shard the model + activations across cards (FSDP / DeepSpeed) to *combine* VRAM:
-   e.g. a 12 GB card + an 8 GB card ≈ 20 GB effective, enough for seq-4096 **without** CPU offload
-   (GPU↔GPU is far faster than GPU↔RAM). Caveats: a **heterogeneous** rig (e.g. Blackwell + Turing)
-   works but the older/slower card bottlenecks the step and needs a per-device memory cap so the
-   smaller card doesn't OOM; and multi-GPU is a **native-Linux** game (NCCL/FSDP — not WSL/Windows).
-   This is the real "scale up" path, and another reason the training box belongs on Linux.
+1. **Fused-CE loss** — CorpusStudio's `--memory-efficient` / `--use-liger`; measure its effect on this
+   host rather than carrying forward the Windows/WSL estimate.
+2. **Activation offload to CPU RAM** — a planned long-sequence lever that needs a real isolated backend
+   and measurement on the final host.
+3. **DeepSpeed ZeRO offload → NVMe** — planned only. CorpusStudio does not yet ship or verify this
+   backend, and NVMe offload must not be inferred from the physical `RunPlan` contract.
+4. **Multiple GPUs** — a future FSDP/DeepSpeed path, not a verified current capability. Heterogeneous
+   GPU behavior, usable combined memory, communication cost, and per-device limits all require a real
+   backend and measurements.
 5. **A bigger single card** — the clean answer; removes the whole problem.
 
-Run it through the platform (the planner seals the levers, the watchdog measures the real fit, and on
-Linux a genuine over-VRAM config now OOMs cleanly with an actionable message instead of wedging):
+The existing singleton baseline can be planned and supervised with the platform, but this command
+does not implement or prove CPU/NVMe offload:
 
 ```bash
 corpus-studio platform-plan --base-model Qwen/Qwen2.5-7B-Instruct --dataset train.jsonl \
-    --dataset-format chat --sequence-len 4096 --memory-efficient --out /tmp/plan
+    --dataset-format chat --sequence-len 1024 --memory-efficient --out /tmp/plan
 corpus-studio platform-run /tmp/plan/RunPlan.json --runner training --subprocess --out ./run
 ```
 
-**Expectations, honestly:** with offload, expect long-seq steps to be **slow** (PCIe transfers) but to
-**complete** — the point of native Linux is that a too-big config degrades to slow-but-training or a
-clean OOM, not the confusing WSL2 wedge. If your real data is short (the WBG corpus is ~1.2 k tokens),
-you do **not** need true seq-4096 — the `sequence_len=4096` *config* already trains fine at
-NATIVE_SAFE because the effective sequences are short.
+**Expectations, honestly:** no completion or fit claim exists yet. Establish the sequence-1024 native
+baseline first, increase sequence length gradually, then test CPU offload, and attempt NVMe offload
+only after baseline GPU and non-destructive storage measurements exist.
 
-> **Status:** this stack is verified on WSL2; the native-Linux path + the offload-to-fit-seq-4096
-> claim are **unverified until booted on real Linux**. Boot Ubuntu on the NVMe, run the bootstrap, and
-> we can measure the actual seq-4096 fit together.
+> **Status:** this stack is verified only where explicitly labeled on WSL2; the native-Linux and
+> offload paths remain unverified. After the adapter/final-machine installation, follow the ordered
+> baseline-to-offload measurements above.

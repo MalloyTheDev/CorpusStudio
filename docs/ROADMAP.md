@@ -24,7 +24,8 @@ reproducible run — profile → plan → predict-fit → run → measure-fit �
 a **calibrator + watchdog** (predicted-vs-measured fit, spill/stall detection), and a **supervised
 subprocess worker** that can KILL a hung run. It's exercised by a new **Tauri 2 + React** contract-first
 client (`apps/web`) alongside the WPF (shipping) and Avalonia (interim) heads. The whole lifecycle was
-verified end-to-end on a real RTX 5070 (Blackwell/sm_120), including a real GPU QLoRA run.
+verified end-to-end on a real RTX 5070 (Blackwell/sm_120) under native Windows/WDDM, including a real
+GPU QLoRA run. Native-Linux training and real CPU/NVMe offload are still unverified.
 
 On top of that loop, v1.2.1–v1.2.15 added an **IDE-like workspace shell** (Start
 Center, Universal Explorer, Problems + Output panels, one New Project wizard) and
@@ -131,7 +132,12 @@ input side. Ordered:
   state placement, offload rules, ranks/groups, evidence pins, capability gates, and tamper checks are
   explicit. Built-in workers remain singleton-only and refuse non-trivial execution. See
   [`RUN_PLAN_PHYSICAL_EXECUTION.md`](RUN_PLAN_PHYSICAL_EXECUTION.md).
-- ⏭️ **Full `TraceRecord`**, then MoE inspection, additional backend workers, and dataset mixtures.
+- ✅ **Generalized `TraceRecord` + Trace Studio engine/authoring foundation** — versioned source,
+  context, reasoning/tool/final-answer segments, producer-policy evidence, typed validation, explicit
+  immutable review, legacy migration, atomic generation reports, trainer approval gating, generated
+  JSON Schema/TypeScript, and a desktop-selectable trace draft schema. A dedicated graphical Trace
+  Studio and tool/process trainers remain future work. See [`TRACE_RECORDS.md`](TRACE_RECORDS.md).
+- ⏭️ **MoE model inspection**, then additional backend workers and dataset mixtures.
 
 - **Surface the LLM judge in the Evaluation tab** — the `--judge-model` scorer ships in
   the engine and in suites, but the desktop Evaluation tab still has no judge-model field.

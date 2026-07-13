@@ -16,7 +16,7 @@ corpus-studio platform-schemas --out docs/contracts
 # or: python -m corpus_studio.cli platform-schemas --out docs/contracts
 ```
 
-`index.json` lists all **26 root contracts** and their shared `contract_version`.
+`index.json` lists all **27 root contracts** and their shared `contract_version`.
 
 ## The contracts
 
@@ -24,6 +24,7 @@ corpus-studio platform-schemas --out docs/contracts
 |---|---|
 | `ProjectManifest` | Workspace descriptor (identity, schema, splits, registry pointers). |
 | `DatasetManifest` | Dataset version identity **+ lineage** (source → transform → teacher/prompt/seed → hashes) + token stats. |
+| `TraceRecord` | Hash-sealed source-row lineage, ordered context and reasoning/tool/final-answer segments, producer/policy evidence, typed validation, and an independent immutable review decision. |
 | `ModelDescriptor` | Static model identity, component-scoped representation, scoped parameter counts, topology/trust findings, portable file inventory, and independent verification axes. |
 | `ParameterAccountingReport` | Hash-sealed logical/active/resident/touched/updated/exposed evidence with stable coordinate scopes, structured windows, explicit gaps/conflicts, and model/run/artifact/evaluation lineage. |
 | `TokenizerDescriptor` | Static tokenizer identity, base/added/effective vocabulary, special tokens, chat-template hash, inventory/trust findings, and model-compatibility evidence. |
@@ -65,4 +66,9 @@ corpus-studio platform-schemas --out docs/contracts
   labeled `planned_not_measured`; every requested capability needs both declaration and probe proof.
 - **Grounded, not invented** — field names/constraints are taken from the existing engine models
   (see each pydantic class docstring for the model it formalizes).
+- **Trace validation is not truth** — generated/imported reasoning stays `unverified`; deterministic
+  quality evidence and human approval are separate and neither claims causal or factual correctness.
+- **Schema validation is not trace admission** — JSON Schema carries the portable shape and field
+  constraints, but cross-field ordering, tool pairing, evidence recomputation, policy binding, review,
+  and trainer-support gates must still run through the engine.
 - **Additive versioning** — a MAJOR `contract_version` bump is breaking; readers reject an unknown MAJOR.

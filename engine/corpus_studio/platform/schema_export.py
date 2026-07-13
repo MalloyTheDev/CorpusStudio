@@ -38,6 +38,7 @@ from .contracts import (
     RunPlan,
     StorageProfile,
     TokenizerDescriptor,
+    TraceRecord,
     TrainingObjective,
     WorkerMessage,
 )
@@ -46,6 +47,7 @@ from .contracts import (
 ROOT_CONTRACTS: dict[str, type[ContractModel]] = {
     "ProjectManifest": ProjectManifest,
     "DatasetManifest": DatasetManifest,
+    "TraceRecord": TraceRecord,
     "ModelDescriptor": ModelDescriptor,
     "ParameterAccountingReport": ParameterAccountingReport,
     "TokenizerDescriptor": TokenizerDescriptor,
