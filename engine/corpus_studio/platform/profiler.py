@@ -75,8 +75,8 @@ def _capability_major(compute_capability: str) -> int | None:
 
 def _operating_system() -> tuple[OperatingSystem, MemoryResidencyModel]:
     """Map the host OS to the contract enum + the memory-residency model that decides spill-vs-OOM.
-    Delegates to the shared detector so WSL is recognised as its own platform (flash-safe like Linux,
-    ``wddm`` spill like Windows) consistently with the trainer + planner."""
+    Delegates to the shared detector so WSL is recognized as its own platform with WDDM residency.
+    Its separately measured flash evidence is not generalized to bare Linux."""
     return detect_operating_system()
 
 

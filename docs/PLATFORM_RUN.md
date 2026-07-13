@@ -31,9 +31,10 @@ corpus-studio platform-probe --cache
 - `--cache` stores the report keyed by the signature, so an **unchanged host reuses it** and skips the
   (expensive, torch-loading) probes next time. `platform-profiles` lists what's cached.
 
-On a Blackwell GPU the flash-attention probe **short-circuits to `KERNEL_STALL` without executing**
-(the fused kernel deadlocks on sm_120), so `flash_attention_2` is correctly absent from the proven
-capabilities.
+On a **native-Windows/WDDM** Blackwell GPU the flash-attention probe short-circuits to
+`KERNEL_STALL` without executing (the measured fused-kernel deadlock), so `flash_attention_2` is
+correctly absent. Elsewhere the probe executes, and only its result proves that exact environment;
+WSL evidence is not bare-Linux evidence.
 
 ## 2. Plan the run (and see the predicted fit)
 
@@ -48,8 +49,8 @@ corpus-studio platform-plan \
 Resolves an **immutable, hash-sealed RunPlan** — every ambiguous field is decided *ahead of time*
 against what PROVED to work on this host:
 
-- **attention** → `math` on Blackwell (asserted from `compute_capability_major >= 12`); an explicit
-  fused/flash override on Blackwell is **refused**, not silently sealed into a deadlock.
+- **attention** → `math` on native-Windows/WDDM Blackwell; an explicit fused/flash override there
+  is refused. Elsewhere `sdpa` is sealable only when that exact environment's probe proved it.
 - **precision** → `bf16` only if proven, else `fp32`.
 - **quantization** → `nf4` only if bitsandbytes passed, else `none`.
 - **adapter** → `qlora` when quantized, else `lora` (the trainer is LoRA-only; other methods are
@@ -64,8 +65,9 @@ against what PROVED to work on this host:
 (`corpus_studio`, `unsloth`, …); pass `--backend <id>` to `platform-plan` to resolve the plan on that
 framework. The planner validates the chosen backend against the *resolved* plan — so on Blackwell,
 where `math` attention is mandatory, `--backend unsloth` is **honestly refused** (Unsloth's fused
-kernels declare no `math` path) with the backends that *do* fit named. A backend is never "supported"
-for a config it doesn't declare.
+kernels declare no `math` path) with the backends that *do* fit named. On another platform it remains
+unavailable until the required SDPA probe passes. A backend is never "supported" merely because its
+packages import or its manifest declares a feature.
 
 It also prints the **predicted fit** to stderr and writes `FitClassification.json`, e.g.:
 
@@ -95,6 +97,13 @@ corpus-studio platform-run ./plan/RunPlan.json --runner training --out ./run
   first-party trainer, reading the plan's `training_config_snapshot`).
 - Revalidates the contract and recomputes `plan_hash` before dispatch; the worker verifies it again.
   Editing a device, placement, rank, selector, or offload rule after planning is refused.
+- Newly planned runs hash-pin the exact static `BackendManifest`. Subprocess protocol 2.0 waits for a
+  worker-first `hello`, validates backend and environment/lock identity, and only then dispatches.
+  Correlation/run IDs, message order, event sequence, terminal lineage, and artifacts are fail-closed.
+  The parent owns a dedicated process group/session and terminates the full worker tree on timeout or
+  protocol failure; public in-process and subprocess entry points both reject a broken plan seal before
+  runner invocation.
+  See [`BACKEND_WORKER_PROTOCOL.md`](BACKEND_WORKER_PROTOCOL.md).
 - Refuses non-trivial physical execution before importing or invoking a trainer. The current built-in
   runner proves the singleton path only; a representable offload/distributed plan is not support proof.
 - Streams **RunEvent** envelopes to **stderr** (ordered `seq`, `stage` / `metric` with per-step loss /
@@ -148,7 +157,8 @@ saved LoRA adapter (17.6 MB) got an integrity-checked ArtifactManifest — a rea
 
 So every row of the table below is not just designed but **exercised on the real target hardware**;
 the only thing still unmeasured is a full-length 7B run's *actual* peak memory (the fit above stays
-`predicted` until then).
+`predicted` until then). This paragraph is limited to the native-Windows lifecycle case above; it is
+not native-Linux, offload, NVMe-throughput, FSDP/DeepSpeed, or MoE-runtime evidence.
 
 ## What's proven vs. what still needs a measured run
 

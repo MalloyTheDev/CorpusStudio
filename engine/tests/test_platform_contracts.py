@@ -420,7 +420,7 @@ def test_worker_message_run_dispatch_roundtrip_and_body_parse():
     plan = _valid_run_plan()
     dispatch = RunDispatchBody(run_id="r1", plan=plan)
     msg = P.WorkerMessage(
-        protocol_version="1.0.0",
+        protocol_version="2.0.0",
         message_id="m1",
         direction="core_to_worker",
         type="run_dispatch",
@@ -438,6 +438,38 @@ def test_worker_protocol_version_pattern():
     with pytest.raises(ValidationError):
         P.WorkerMessage(
             protocol_version="v1", message_id="m", direction="core_to_worker", type="heartbeat"
+        )
+
+
+def test_worker_schema_exposes_required_v2_typed_body_union():
+    schema = P.WorkerMessage.model_json_schema()
+    assert schema["properties"]["protocol_version"]["const"] == "2.0.0"
+    assert {"protocol_version", "message_id", "direction", "type", "body"} <= set(
+        schema["required"]
+    )
+    refs = {
+        item["$ref"].rsplit("/", 1)[-1]
+        for item in schema["properties"]["body"]["anyOf"]
+    }
+    assert {"HelloBody", "RunDispatchBody", "RunEvent", "TerminalResultBody"} <= refs
+
+
+def test_worker_message_rejects_wrong_direction_and_body_shape():
+    with pytest.raises(ValidationError, match="requires direction"):
+        P.WorkerMessage(
+            protocol_version="2.0.0",
+            message_id="m1",
+            direction="worker_to_core",
+            type="run_dispatch",
+            body={"run_id": "r", "plan": _valid_run_plan().model_dump(mode="json")},
+        )
+    with pytest.raises(ValidationError):
+        P.WorkerMessage(
+            protocol_version="2.0.0",
+            message_id="m2",
+            direction="worker_to_core",
+            type="heartbeat",
+            body={"run_id": "r", "pid_alive": "not-a-bool"},
         )
 
 

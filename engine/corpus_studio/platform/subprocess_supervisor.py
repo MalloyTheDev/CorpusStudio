@@ -1,10 +1,10 @@
 """The subprocess run supervisor — the PARENT side of the worker protocol.
 
 ``execute_run_subprocess`` spawns a :mod:`corpus_studio.platform.worker` child, dispatches the
-immutable RunPlan to it (a ``run_dispatch`` WorkerMessage on the child's stdin), and consumes the
-child's WorkerMessage stream (``run_accepted`` → ``event`` × N → ``terminal_result``) from its stdout,
-forwarding each :class:`RunEvent` to the sink and returning the same :class:`SupervisedRun` the
-in-process :func:`~corpus_studio.platform.supervisor.execute_run` returns.
+child's worker-first ``hello``, validates its backend/environment identity, then dispatches the
+immutable RunPlan (a ``run_dispatch`` WorkerMessage on stdin). It consumes ``run_accepted`` →
+``event`` × N → ``terminal_result`` from stdout, forwarding each :class:`RunEvent` to the sink and
+returning the same :class:`SupervisedRun` the in-process supervisor returns.
 
 Why this exists: it owns a PROCESS it can terminate, so it can do the one thing the in-process
 watchdog cannot — **time out and KILL a hung run** (e.g. the sm_120 fused-attention deadlock) and
@@ -17,11 +17,11 @@ pipes isn't portable to Windows). Dependency-light: stdlib + platform contracts 
 
 from __future__ import annotations
 
-import json
 import queue
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -29,12 +29,22 @@ from typing import Any
 from corpus_studio.platform.contracts import (
     ArtifactManifest,
     FailureRecord,
+    HeartbeatBody,
+    HelloBody,
+    RunAcceptedBody,
     RunEvent,
     RunManifest,
     RunPlan,
+    TerminalResultBody,
 )
+from corpus_studio.platform.backends import backend_manifest_digest
 from corpus_studio.platform.enums import FailureTaxonomy
 from corpus_studio.platform.artifacts import write_artifact_manifest
+from corpus_studio.platform.process_control import (
+    process_group_creation_flags,
+    start_new_process_session,
+    terminate_process_tree,
+)
 from corpus_studio.platform.supervisor import (
     RunEventSink,
     SupervisedRun,
@@ -42,14 +52,39 @@ from corpus_studio.platform.supervisor import (
     _sanitize_id,
     write_run_manifest,
 )
-from corpus_studio.platform.worker import PROTOCOL_VERSION
+from corpus_studio.platform.worker_protocol import (
+    WorkerProtocolError,
+    build_worker_message,
+    decode_worker_message,
+    encode_worker_message,
+    parse_worker_body,
+)
 
-# How long the parent waits for a KILLED/exiting child to actually die before giving up on the join.
-_REAP_TIMEOUT_S = 10.0
+def worker_identity_argv(plan: RunPlan) -> list[str]:
+    """Literal argv tokens that bind a worker process to the plan identities it must present."""
+
+    argv = [
+        "--backend-id",
+        plan.backend_ref.id,
+        "--environment-id",
+        plan.environment_ref.id,
+    ]
+    if plan.environment_ref.hash is not None and plan.environment_ref.hash.value is not None:
+        argv += ["--environment-hash", plan.environment_ref.hash.value]
+    return argv
 
 
-def _default_worker_argv(runner_name: str, max_steps: int | None) -> list[str]:
-    argv = [sys.executable, "-m", "corpus_studio.platform.worker", "--runner", runner_name]
+def _default_worker_argv(
+    plan: RunPlan, runner_name: str, max_steps: int | None
+) -> list[str]:
+    argv = [
+        sys.executable,
+        "-m",
+        "corpus_studio.platform.worker",
+        "--runner",
+        runner_name,
+        *worker_identity_argv(plan),
+    ]
     if max_steps is not None:
         argv += ["--max-steps", str(max_steps)]
     return argv
@@ -57,18 +92,17 @@ def _default_worker_argv(runner_name: str, max_steps: int | None) -> list[str]:
 
 def _dispatch_line(plan: RunPlan, run_id: str, heartbeat_interval_s: int) -> str:
     """The single ``run_dispatch`` WorkerMessage JSON the parent writes to the child's stdin."""
-    envelope = {
-        "protocol_version": PROTOCOL_VERSION,
-        "message_id": f"c-{run_id}",
-        "direction": "core_to_worker",
-        "type": "run_dispatch",
-        "body": {
+    envelope = build_worker_message(
+        "run_dispatch",
+        {
             "run_id": run_id,
             "plan": plan.model_dump(mode="json"),
             "heartbeat_interval_seconds": heartbeat_interval_s,
         },
-    }
-    return json.dumps(envelope, separators=(",", ":"))
+        message_id=f"c-{run_id}",
+        direction="core_to_worker",
+    )
+    return encode_worker_message(envelope)
 
 
 def _failed_manifest(
@@ -130,12 +164,14 @@ def execute_run_subprocess(
     """Run ``plan`` in a supervised child process and return its :class:`SupervisedRun`.
 
     The child streams ``event`` messages (one per completed step = real progress) that are forwarded to
-    ``sink`` + collected. **If no message arrives within ``silence_timeout_s``** the child is presumed
-    hung and is terminated + killed → ``KERNEL_STALL`` (the in-process-impossible outcome). A child that
-    exits without a ``terminal_result`` → ``ENVIRONMENT_FAILURE`` (a crash). The child's stderr is
-    drained on a thread (so a chatty runner can never wedge on a full pipe) and forwarded here. A
-    try/finally guarantees the child is terminated + reaped on EVERY path — a raising sink or a dispatch
-    BrokenPipe can never orphan a live GPU worker. ``worker_argv`` is injectable for tests.
+    ``sink`` + collected. **If no accepted run/event progress arrives within ``silence_timeout_s``**
+    the child is presumed hung and is terminated + killed → ``KERNEL_STALL``. Heartbeats are parsed but
+    deliberately do not extend that deadline, so an independent liveness thread cannot mask a hung
+    training thread. A child that
+    exits without a ``terminal_result`` → ``ENVIRONMENT_FAILURE`` (a crash). The child inherits stderr
+    so trainer telemetry cannot fill a parent-owned pipe. A try/finally guarantees the child is
+    terminated + reaped on EVERY path — a raising sink or a dispatch BrokenPipe can never orphan a live
+    GPU worker. ``worker_argv`` is injectable for tests.
 
     NOTE on the load window: there is no progress signal during the initial model download/load, so set
     ``silence_timeout_s`` above your cold-cache load time (or pre-fetch the model). A silent load longer
@@ -144,8 +180,28 @@ def execute_run_subprocess(
     kill)."""
     rid = _sanitize_id(run_id or plan.plan_id)
     out_dir_str = str(out_dir) if out_dir is not None else None
-    argv = worker_argv or _default_worker_argv(runner_name, max_steps)
     started = clock()
+
+    # Refuse a broken seal at the public parent boundary, before a worker sees identities or input.
+    from corpus_studio.platform.planner import verify_run_plan_hash  # noqa: PLC0415
+
+    if not verify_run_plan_hash(plan):
+        manifest = _failed_manifest(
+            plan,
+            rid,
+            taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+            message="RunPlan hash verification failed; regenerate the plan before execution",
+            target=runner_name,
+            started=started,
+            finished=clock(),
+            out_dir=out_dir_str,
+            remediation="regenerate the RunPlan from immutable inputs; do not mutate it after sealing",
+        )
+        if out_dir_str is not None:
+            write_run_manifest(manifest, out_dir_str)
+        return SupervisedRun(manifest=manifest, events=[], artifacts=[])
+
+    argv = worker_argv or _default_worker_argv(plan, runner_name, max_steps)
 
     events: list[RunEvent] = []
     artifacts: list[ArtifactManifest] = []
@@ -153,6 +209,17 @@ def execute_run_subprocess(
     terminal_seen = False
     rejection: dict[str, Any] | None = None
     killed_reason: str | None = None
+    protocol_failure: str | None = None
+    dispatched = False
+    accepted = False
+    seen_message_ids: set[str] = set()
+    last_event_seq: int | None = None
+    dispatch_message_id = f"c-{rid}"
+    progress_deadline = time.monotonic() + silence_timeout_s
+
+    def _reset_progress_deadline() -> None:
+        nonlocal progress_deadline
+        progress_deadline = time.monotonic() + silence_timeout_s
 
     def _forward(event: RunEvent) -> None:
         events.append(event)
@@ -171,6 +238,8 @@ def execute_run_subprocess(
         text=True,
         encoding="utf-8",
         bufsize=1,
+        creationflags=process_group_creation_flags(),
+        start_new_session=start_new_process_session(),
     )
     try:
         # Reader thread → a queue, so the main loop can read WITH A TIMEOUT (a silent child never
@@ -180,42 +249,114 @@ def execute_run_subprocess(
             target=_reader, args=(proc, lines), name=f"worker-reader-{rid}", daemon=True
         ).start()
 
-        _write_dispatch(proc, plan, rid, heartbeat_interval_s)
-
         while True:
+            remaining = progress_deadline - time.monotonic()
+            if remaining <= 0:
+                killed_reason = (
+                    f"the worker made no run progress for {silence_timeout_s:.0f}s and was killed "
+                    "(a hung run - for example, a fused-attention deadlock)"
+                )
+                break
             try:
-                kind, payload = lines.get(timeout=silence_timeout_s)
+                kind, payload = lines.get(timeout=remaining)
             except queue.Empty:
                 killed_reason = (
-                    f"the worker produced no output for {silence_timeout_s:.0f}s and was killed "
-                    "(a hung run — e.g. the sm_120 fused-attention deadlock)"
+                    f"the worker made no run progress for {silence_timeout_s:.0f}s and was killed "
+                    "(a hung run - for example, a fused-attention deadlock)"
                 )
                 break
             if kind == "eof":
                 break
-            message = _parse_message(payload or "")
-            if message is None:
-                continue
-            mtype, mbody = message
-            if mtype == "event":
-                try:
-                    _forward(RunEvent.model_validate(mbody))
-                except (ValueError, TypeError):
-                    continue  # a malformed event line is dropped, not fatal
-            elif mtype == "terminal_result":
-                terminal_seen = True
-                terminal_manifest = _parse_terminal(mbody, artifacts)
-                break  # the terminal is the last message
-            elif mtype in ("run_rejected", "failure"):
-                rejection = mbody  # capture the reason/taxonomy for honest classification
+            try:
+                message = decode_worker_message(
+                    payload or "", expected_direction="worker_to_core"
+                )
+                if message.message_id in seen_message_ids:
+                    raise WorkerProtocolError(
+                        f"duplicate worker message_id {message.message_id!r}"
+                    )
+                seen_message_ids.add(message.message_id)
+
+                if not dispatched:
+                    _validate_hello(message.type, parse_worker_body(message), plan)
+                    if message.correlation_id is not None:
+                        raise WorkerProtocolError("hello must not carry a correlation_id")
+                    _write_dispatch(proc, plan, rid, heartbeat_interval_s)
+                    dispatched = True
+                    _reset_progress_deadline()
+                    continue
+
+                if message.correlation_id != dispatch_message_id:
+                    raise WorkerProtocolError(
+                        f"message correlation_id {message.correlation_id!r} does not match "
+                        f"dispatch {dispatch_message_id!r}"
+                    )
+                body = parse_worker_body(message)
+                if message.type == "hello":
+                    raise WorkerProtocolError("worker sent a second hello")
+                if message.type == "run_accepted":
+                    if accepted:
+                        raise WorkerProtocolError("worker sent duplicate run_accepted")
+                    if not isinstance(body, RunAcceptedBody):  # pragma: no cover - canonical map
+                        raise WorkerProtocolError("run_accepted selected the wrong body contract")
+                    _require_run_id(body.run_id, rid, "run_accepted")
+                    accepted = True
+                    _reset_progress_deadline()
+                elif message.type == "event":
+                    if not accepted:
+                        raise WorkerProtocolError("event arrived before run_accepted")
+                    if not isinstance(body, RunEvent):  # pragma: no cover - canonical map
+                        raise WorkerProtocolError("event selected the wrong body contract")
+                    _require_run_id(body.run_id, rid, "event")
+                    if last_event_seq is not None and body.seq <= last_event_seq:
+                        raise WorkerProtocolError(
+                            f"event seq {body.seq} is not greater than prior seq {last_event_seq}"
+                        )
+                    last_event_seq = body.seq
+                    _forward(body)
+                    _reset_progress_deadline()
+                elif message.type == "heartbeat":
+                    if not accepted:
+                        raise WorkerProtocolError("heartbeat arrived before run_accepted")
+                    if not isinstance(body, HeartbeatBody):  # pragma: no cover - canonical map
+                        raise WorkerProtocolError("heartbeat selected the wrong body contract")
+                    _require_run_id(body.run_id, rid, "heartbeat")
+                elif message.type == "terminal_result":
+                    if not accepted:
+                        raise WorkerProtocolError("terminal_result arrived before run_accepted")
+                    terminal_seen = True
+                    if not isinstance(body, TerminalResultBody):  # pragma: no cover - canonical map
+                        raise WorkerProtocolError(
+                            "terminal_result selected the wrong body contract"
+                        )
+                    terminal_manifest = _parse_terminal(body, plan, rid, artifacts)
+                    break  # terminal_result is the last legal message
+                elif message.type in {"run_rejected", "failure"}:
+                    if message.type == "run_rejected" and accepted:
+                        raise WorkerProtocolError("run_rejected arrived after run_accepted")
+                    if not isinstance(body, FailureRecord):  # pragma: no cover - canonical map
+                        raise WorkerProtocolError(
+                            f"{message.type} selected the wrong body contract"
+                        )
+                    if body.run_id is not None:
+                        _require_run_id(body.run_id, rid, message.type)
+                    rejection = body.model_dump(mode="json")
+                    break
+                else:
+                    raise WorkerProtocolError(
+                        f"message type {message.type!r} is illegal during a run"
+                    )
+            except WorkerProtocolError as exc:
+                protocol_failure = str(exc)
+                break
     finally:
-        # GUARANTEE no orphan: terminate + reap the child on EVERY path (no-op if it already exited).
-        _terminate(proc)
+        # GUARANTEE no orphan: terminate the full worker tree and reap the direct child on EVERY path.
+        terminate_process_tree(proc, wait_timeout_seconds=10.0)
 
     finished = clock()
     manifest = _finalize(
         plan, rid, runner_name, terminal_manifest, terminal_seen, rejection, killed_reason,
-        proc.returncode, started, finished, out_dir_str,
+        protocol_failure, proc.returncode, started, finished, out_dir_str,
     )
     if out_dir_str is not None:
         write_run_manifest(manifest, out_dir_str)
@@ -249,21 +390,6 @@ def _write_dispatch(proc: subprocess.Popen[str], plan: RunPlan, rid: str, hb: in
         except (BrokenPipeError, OSError):  # pragma: no cover - close-after-broken-pipe is benign
             pass
 
-
-def _terminate(proc: subprocess.Popen[str]) -> None:
-    """Terminate then (if it lingers) hard-kill the child, and reap it so no zombie/orphan is left. A
-    no-op if the child already exited (Popen.terminate/kill/wait short-circuit once returncode is set)."""
-    proc.terminate()
-    try:
-        proc.wait(timeout=_REAP_TIMEOUT_S)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        try:
-            proc.wait(timeout=_REAP_TIMEOUT_S)
-        except subprocess.TimeoutExpired:  # pragma: no cover - the OS failed to reap a killed pid
-            pass
-
-
 def _taxonomy(value: Any) -> FailureTaxonomy:
     """A FailureTaxonomy string from a child message → the enum, defaulting to ENVIRONMENT_FAILURE."""
     try:
@@ -272,27 +398,85 @@ def _taxonomy(value: Any) -> FailureTaxonomy:
         return FailureTaxonomy.ENVIRONMENT_FAILURE
 
 
-def _parse_message(line: str) -> tuple[str, dict[str, Any]] | None:
-    """A WorkerMessage line → ``(type, body)``, or ``None`` for a blank/non-JSON line (telemetry a
-    misbehaving child might interleave — dropped, never fatal)."""
-    line = line.strip()
-    if not line:
-        return None
-    try:
-        envelope = json.loads(line)
-        return str(envelope["type"]), dict(envelope.get("body") or {})
-    except (ValueError, KeyError, TypeError):
-        return None
+def _require_run_id(actual: str, expected: str, message_type: str) -> None:
+    if actual != expected:
+        raise WorkerProtocolError(
+            f"{message_type} run_id {actual!r} != dispatched run_id {expected!r}"
+        )
 
 
-def _parse_terminal(body: dict[str, Any], artifacts: list[ArtifactManifest]) -> RunManifest | None:
-    try:
-        for raw in body.get("artifacts") or []:
-            artifacts.append(ArtifactManifest.model_validate(raw))
-        raw_manifest = body.get("run_manifest")
-        return RunManifest.model_validate(raw_manifest) if raw_manifest else None
-    except (ValueError, TypeError):
-        return None
+def _validate_hello(message_type: str, body: object, plan: RunPlan) -> None:
+    """Bind the worker's self-declared backend and environment to the immutable RunPlan."""
+
+    if message_type != "hello" or not isinstance(body, HelloBody):
+        raise WorkerProtocolError("the first worker message must be hello")
+    if (
+        plan.backend_ref.hash is None
+        or plan.backend_ref.hash.algo != "sha256"
+        or plan.backend_ref.hash.value is None
+    ):
+        raise WorkerProtocolError(
+            "RunPlan backend_ref is not hash-pinned; regenerate it for worker protocol 2.0.0"
+        )
+    if body.backend.backend_id != plan.backend_ref.id:
+        raise WorkerProtocolError(
+            f"worker backend {body.backend.backend_id!r} != plan backend {plan.backend_ref.id!r}"
+        )
+    actual_backend_hash = backend_manifest_digest(body.backend)
+    if actual_backend_hash != plan.backend_ref.hash.value:
+        raise WorkerProtocolError(
+            "worker backend manifest digest does not match the RunPlan backend_ref"
+        )
+    if body.environment_ref != plan.environment_ref:
+        raise WorkerProtocolError(
+            "worker environment_ref does not match the RunPlan environment_ref"
+        )
+
+
+def _parse_terminal(
+    body: TerminalResultBody,
+    plan: RunPlan,
+    rid: str,
+    artifacts: list[ArtifactManifest],
+) -> RunManifest:
+    """Validate terminal identity/linkage before accepting any child-produced artifacts."""
+
+    _require_run_id(body.run_id, rid, "terminal_result")
+    manifest = body.run_manifest
+    expected_plan_hash = manifest.plan_ref.hash.value if manifest.plan_ref.hash else None
+    expected_plan_algo = manifest.plan_ref.hash.algo if manifest.plan_ref.hash else None
+    if (
+        manifest.plan_ref.id != plan.plan_id
+        or expected_plan_algo != "sha256"
+        or expected_plan_hash != plan.plan_hash
+    ):
+        raise WorkerProtocolError("terminal run_manifest does not link to the dispatched RunPlan")
+    if manifest.environment_ref != plan.environment_ref:
+        raise WorkerProtocolError(
+            "terminal run_manifest environment_ref does not match the dispatched RunPlan"
+        )
+    if manifest.dataset_ref != plan.dataset_ref:
+        raise WorkerProtocolError(
+            "terminal run_manifest dataset_ref does not match the dispatched RunPlan"
+        )
+    if body.failure != manifest.failure:
+        raise WorkerProtocolError(
+            "terminal_result failure does not match run_manifest.failure"
+        )
+
+    parsed_artifacts = list(body.artifacts)
+    for artifact in parsed_artifacts:
+        if artifact.producer_run_ref.id != rid:
+            raise WorkerProtocolError(
+                f"artifact {artifact.artifact_id!r} links to the wrong producer run"
+            )
+    artifact_ids = [artifact.artifact_id for artifact in parsed_artifacts]
+    if artifact_ids != manifest.artifact_ids:
+        raise WorkerProtocolError(
+            "terminal artifact list does not match run_manifest.artifact_ids"
+        )
+    artifacts.extend(parsed_artifacts)
+    return manifest
 
 
 def _finalize(
@@ -303,6 +487,7 @@ def _finalize(
     terminal_seen: bool,
     rejection: dict[str, Any] | None,
     killed_reason: str | None,
+    protocol_failure: str | None,
     returncode: int | None,
     started: str,
     finished: str,
@@ -313,7 +498,7 @@ def _finalize(
             plan, rid, taxonomy=FailureTaxonomy.KERNEL_STALL, message=killed_reason,
             target=runner_name, started=started, finished=finished, out_dir=out_dir,
             exit_code=returncode,
-            remediation="use math/eager attention (the planner forces it on sm_120), lower "
+            remediation="use math/eager attention (forced for native-Windows/WDDM sm_120), lower "
             "sequence_len, pre-fetch the model, or raise --timeout if the load/step is just slow.",
         )
     if terminal_manifest is not None:
@@ -322,6 +507,20 @@ def _finalize(
         if out_dir is not None and terminal_manifest.output_dir != out_dir:
             return terminal_manifest.model_copy(update={"output_dir": out_dir})
         return terminal_manifest
+    if protocol_failure is not None:
+        return _failed_manifest(
+            plan,
+            rid,
+            taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
+            message=f"worker protocol violation: {protocol_failure}",
+            target=runner_name,
+            started=started,
+            finished=finished,
+            out_dir=out_dir,
+            exit_code=returncode,
+            remediation="regenerate the RunPlan and align the core, worker, backend manifest, and "
+            "managed environment lock",
+        )
     if rejection is not None:
         return _failed_manifest(
             plan, rid, taxonomy=_taxonomy(rejection.get("taxonomy")),

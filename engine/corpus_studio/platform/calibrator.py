@@ -22,7 +22,7 @@ from corpus_studio.platform.enums import FitClass, MemoryResidencyModel
 # the edge" and treated as MARGINAL rather than a predicted-safe fit.
 _SAFETY_MARGIN_BYTES = 1_500_000_000
 _GB = 1_000_000_000
-# Attention paths that materialize the seq-scaling attention-scores memory (Blackwell is forced here).
+# Attention paths that materialize seq-scaling attention-score memory (including the WDDM-safe path).
 _MATH_ATTENTION = frozenset({"math", "eager"})
 # Sub-16-bit quantization schemes costed at the int4 weight tier. gptq/awq/hqq aren't strictly 4-bit,
 # so this is an approximation — but far closer than the fp16 tier and it errs toward under-not-over.

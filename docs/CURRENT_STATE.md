@@ -10,8 +10,8 @@ reconciled below — the **reasoning-traces** data loop, a dataset **truncation 
 configurable **checkpoint retention**, and a dependency-light **storage safe-spill** profiler —
 plus the sealed **Environment Manager** reference lifecycle, the static MoE-safe
 **ModelDescriptor / TokenizerDescriptor** foundation with allowlisted **MoE topology inspection**,
-and the backend-independent
-**TrainingObjective registry** — plus the deep bug/security audit, 19 fixes
+the backend-independent **TrainingObjective registry**, and the identity-bound **backend worker
+protocol 2.0** — plus the deep bug/security audit, 19 fixes
 across data integrity, gate/policy
 hardening, and quality/split correctness, PRs #104–118; a residual-audit pass
 hardening the v1.3 surface, PRs #133–142; the CI dependency refresh, PRs
@@ -265,8 +265,20 @@ per-item error isolation, and off-thread document opens.
   boundary, not DeepSpeed/FSDP/NVMe or MoE execution proof. See
   [`RUN_PLAN_PHYSICAL_EXECUTION.md`](RUN_PLAN_PHYSICAL_EXECUTION.md).
 - **Multi-backend "pick your framework"**: a BackendManifest registry (`corpus_studio`, `unsloth`);
-  the planner validates the chosen backend and **honestly refuses Unsloth on Blackwell/sm_120** (which
-  needs the math attention path Unsloth doesn't provide).
+  the planner validates the chosen backend and **honestly refuses Unsloth on native-Windows/WDDM
+  Blackwell/sm_120** (which needs the math attention path Unsloth doesn't provide). Other hosts still
+  require their exact capability proof.
+- **Identity-bound backend worker protocol 2.0**: every newly generated RunPlan hash-pins the exact
+  static BackendManifest. A subprocess worker must send `hello` first with that manifest and its exact
+  environment/lock ref; only then can the core dispatch. The parent enforces protocol/direction/body,
+  correlation and run IDs, unique message IDs, acceptance/order, monotonic event sequence, terminal
+  lineage/outcome, and artifact linkage. Managed dispatch additionally checks descriptor/lock recipe
+  identity, current recipe digest/layer/target, backend digest, live health, and drift. Legacy unpinned
+  plans remain readable but must be regenerated for protocol-2 subprocess dispatch. Both public run
+  entry points verify the plan seal before a runner is invoked or spawned. Workers/installers own a
+  POSIX session or Windows process group and use bounded process-tree termination; the fake-worker
+  suite verifies a timed-out descendant does not survive. See
+  [`BACKEND_WORKER_PROTOCOL.md`](BACKEND_WORKER_PROTOCOL.md).
 - **Reliability**: an in-process watchdog detects a stall/spill + captures a measured fit; the
   subprocess worker can **KILL a hung run** (→ `KERNEL_STALL`) and isolates a crash. Verified
   end-to-end on a real RTX 5070 (Blackwell) under native Windows/WDDM: a GPU QLoRA ran in-process and

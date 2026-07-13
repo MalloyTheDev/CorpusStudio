@@ -814,10 +814,14 @@ def test_real_subprocess_runner_success_timeout_and_cancellation(tmp_path):
 
 
 def _run_plan(environment_ref: Ref) -> RunPlan:
+    from corpus_studio.platform.backends import backend_manifest_ref, get_backend
+
+    backend = get_backend("corpus_studio")
+    assert backend is not None
     draft = RunPlan(
         plan_id="plan-1",
         plan_hash="0" * 64,
-        backend_ref=Ref(id="corpus_studio"),
+        backend_ref=backend_manifest_ref(backend),
         environment_ref=environment_ref,
         dataset_ref=Ref(id="dataset-1"),
         task_type="sft",
@@ -872,6 +876,39 @@ def test_run_plan_pins_lock_hash_and_resume_verifies_state(tmp_path):
             result.descriptor.model_copy(update={"lock_ref": Ref(id="wrong")}),
             result.lock,
         )
+    with pytest.raises(EnvironmentManagerError, match="do not match"):
+        locked_environment_ref(
+            result.descriptor.model_copy(
+                update={
+                    "lock_ref": Ref(
+                        id=result.lock.lock_id,
+                        hash=HashRef(value="0" * 64),
+                    )
+                }
+            ),
+            result.lock,
+        )
+
+    recipe_mismatch = result.lock.model_copy(
+        update={"recipe_ref": Ref(id="backend-corpus-studio", hash=HashRef(value="0" * 64))}
+    )
+    recipe_blockers = verify_run_plan_environment(
+        plan, result.descriptor, recipe_mismatch
+    )
+    assert any("recipe refs do not match" in item for item in recipe_blockers)
+    assert any("lock recipe hash" in item for item in recipe_blockers)
+
+    from corpus_studio.platform.backends import backend_manifest_ref, get_backend
+
+    unsloth = get_backend("unsloth")
+    assert unsloth is not None
+    wrong_backend = plan.model_copy(update={"backend_ref": backend_manifest_ref(unsloth)})
+    assert any(
+        "recipe target" in item
+        for item in verify_run_plan_environment(
+            wrong_backend, result.descriptor, result.lock
+        )
+    )
 
 
 def test_registry_listing_skips_corruption_and_unknown_loads_are_structured(tmp_path):
@@ -1082,6 +1119,9 @@ def test_platform_run_verifies_lock_and_dispatches_with_managed_interpreter(
     worker_argv = captured["worker_argv"]
     assert worker_argv[0] == result.descriptor.python_executable
     assert worker_argv[1:3] == ["-m", "corpus_studio.platform.worker"]
+    assert worker_argv[worker_argv.index("--backend-id") + 1] == "corpus_studio"
+    assert worker_argv[worker_argv.index("--environment-id") + 1] == "run-env"
+    assert worker_argv[worker_argv.index("--environment-hash") + 1] == result.lock.lock_hash
 
     shutil.rmtree(result.descriptor.root_path)
     missing = cli.invoke(

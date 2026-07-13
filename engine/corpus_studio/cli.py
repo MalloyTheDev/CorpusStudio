@@ -557,6 +557,9 @@ def platform_run(
                 "--runner",
                 runner_name,
             ]
+            from corpus_studio.platform.subprocess_supervisor import worker_identity_argv
+
+            managed_worker_argv += worker_identity_argv(plan)
             if max_steps is not None:
                 managed_worker_argv += ["--max-steps", str(max_steps)]
         except EnvironmentManagerError as exc:
@@ -2651,8 +2654,8 @@ def training_config(
         sequence_len=sequence_len,
         micro_batch_size=micro_batch_size,
     )
-    # Higher math-attention-path estimate — used by the pre-flight OOM check on a Blackwell GPU, which
-    # is forced onto the math attention path (the fused kernels deadlock there).
+    # Higher math-attention estimate used by preflight on native-Windows/WDDM Blackwell, where the
+    # measured fused-flash deadlock forces the safe path. Other platforms remain probe-gated.
     vram_estimate_math = build_vram_estimate(
         base_model,
         lora_r=lora_r,

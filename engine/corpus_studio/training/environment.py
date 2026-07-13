@@ -150,9 +150,10 @@ def probe_training_runtime() -> TrainingRuntimeReport:
             )
         else:
             notes.append(
-                f"Blackwell GPU (sm_{sm}) on WSL/Linux: flash SDPA attention is available — the Windows "
-                "WDDM flash deadlock does not apply here, so a long sequence_len is far cheaper (O(seq) "
-                "memory) than on native Windows."
+                f"Blackwell GPU (sm_{sm}) outside native Windows: the known WDDM flash-deadlock guard "
+                "does not apply, but flash capability is not established by OS detection. Run the "
+                "flash backward probe for this exact environment before relying on it; WSL evidence "
+                "does not verify bare Linux."
             )
     if ready:
         notes.append("Ready: a 4-bit QLoRA GPU run is possible.")

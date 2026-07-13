@@ -16,6 +16,10 @@ Dependency-light: pure contracts + stdlib, no torch.
 
 from __future__ import annotations
 
+import hashlib
+import json
+
+from corpus_studio.platform.common import HashRef, Ref
 from corpus_studio.platform.contracts import (
     BackendManifest,
     EffectiveCapabilities,
@@ -38,7 +42,7 @@ _CORPUS_STUDIO = {
     "precision_modes": ["bf16", "fp16", "fp32"],
     "quantization_modes": ["none", "nf4", "int8"],
     "adapter_methods": ["lora", "qlora"],
-    # math/eager/sdpa cover the Blackwell-safe path; flash_attention_2 only where the GPU allows it.
+    # math/eager cover the known WDDM-safe path; sdpa/flash still require host capability evidence.
     "attention_impls": ["math", "eager", "sdpa", "flash_attention_2"],
     "loss_impls": ["cross_entropy", "liger_fused_ce"],
     # Declarations only. CapabilityReport intentionally leaves these empty until an end-to-end
@@ -63,9 +67,10 @@ _CORPUS_STUDIO = {
             "taxonomy": "KERNEL_STALL",
             "condition": "native Windows (WDDM) + compute_capability_major>=12 with fused flash attention",
             "description": "The fused flash SDPA backward deadlocks on Blackwell (sm_120) under the "
-            "Windows WDDM driver. WSL/Linux run the same kernel fine.",
-            "mitigation": "On native Windows the planner forces the math attention path on sm_120; run "
-            "under WSL to keep flash (O(seq) memory).",
+            "Windows WDDM driver. WSL has separate passing evidence; bare-Linux behavior remains "
+            "unverified until probed on the final host.",
+            "mitigation": "On native Windows the planner forces the math attention path on sm_120; "
+            "outside WDDM, require a passing flash-attention capability probe before selecting flash.",
         }
     ],
     "capability_probes": ["cuda_available", "bf16_matmul", "bnb_4bit_load", "flash_attn_backward"],
@@ -108,14 +113,33 @@ _UNSLOTH = {
             "taxonomy": "UNSUPPORTED_CONFIGURATION",
             "condition": "native Windows (WDDM) + compute_capability_major>=12 (Blackwell / sm_120)",
             "description": "Unsloth's fused kernels are flash/sdpa; native-Windows Blackwell needs the "
-            "math path (WDDM flash deadlock), which Unsloth lacks. On WSL/Linux Unsloth's sdpa runs.",
-            "mitigation": "Use the corpus_studio backend on native-Windows Blackwell, or run under WSL.",
+            "math path (WDDM flash deadlock), which Unsloth lacks. WSL has separate SDPA evidence; "
+            "bare-Linux capability remains unverified.",
+            "mitigation": "Use the corpus_studio backend on native-Windows Blackwell. On another "
+            "platform, select Unsloth only after its environment capability probes pass.",
         }
     ],
     "capability_probes": ["cuda_available", "bf16_matmul", "bnb_4bit_load"],
 }
 
+_ECHO = {
+    "backend_id": "echo",
+    "display_name": "CorpusStudio protocol echo worker",
+    "backend_version": "1.0.0",
+    "supported_os": ["windows", "wsl", "linux", "macos"],
+    "supported_devices": ["cpu"],
+    "task_types": ["evaluation"],
+    "attention_impls": ["math"],
+    "loss_impls": ["cross_entropy"],
+    "checkpoint_impls": ["adapter_only"],
+    "optimizers": ["adamw_torch"],
+    "placement_modes": ["single_resource"],
+    "placement_tiers": ["pageable_ram"],
+    "export_formats": ["adapter_peft"],
+}
+
 _BUILTIN = tuple(BackendManifest.model_validate(m) for m in (_CORPUS_STUDIO, _UNSLOTH))
+_ECHO_BACKEND = BackendManifest.model_validate(_ECHO)
 
 
 def builtin_backends() -> list[BackendManifest]:
@@ -126,6 +150,36 @@ def builtin_backends() -> list[BackendManifest]:
 def get_backend(backend_id: str) -> BackendManifest | None:
     """The manifest for ``backend_id``, or ``None`` if unknown."""
     return next((b for b in _BUILTIN if b.backend_id == backend_id), None)
+
+
+def get_worker_backend(backend_id: str) -> BackendManifest | None:
+    """A backend manifest a worker can present during the protocol handshake.
+
+    ``echo`` is deliberately protocol-only and is not returned by :func:`builtin_backends`, so it
+    can exercise the supervisor without appearing as a selectable training backend.
+    """
+
+    if backend_id == _ECHO_BACKEND.backend_id:
+        return _ECHO_BACKEND
+    return get_backend(backend_id)
+
+
+def backend_manifest_digest(manifest: BackendManifest) -> str:
+    """Stable content identity for a backend's static declaration."""
+
+    payload = json.dumps(
+        manifest.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def backend_manifest_ref(manifest: BackendManifest) -> Ref:
+    """Hash-pin a RunPlan to the exact static backend declaration it was planned against."""
+
+    return Ref(id=manifest.backend_id, hash=HashRef(value=backend_manifest_digest(manifest)))
 
 
 def unmet_requirements(

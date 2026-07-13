@@ -15,7 +15,7 @@
       "type": "string"
     },
     "AttentionImpl": {
-      "description": "``math``/``eager`` is forced on Blackwell sm_120 \u2014 the fused flash/mem-efficient kernels\ndeadlock on the first backward (training/environment.py, estimators.py) \u2014 at a large activation\nVRAM cost.",
+      "description": "``math``/``eager`` is forced on native-Windows/WDDM Blackwell sm_120 because the fused flash\nkernel deadlocks there. Other platforms require their own functional capability result; WSL\nevidence is not bare-Linux proof.",
       "enum": [
         "math",
         "eager",

@@ -343,7 +343,8 @@ class RunWatchdog:
         """The measured fit from the tracked peak, or ``None`` if nothing was ever sampled (CPU run).
         ``proven=False`` (the run failed/cancelled) downgrades a would-be NATIVE fit to
         ``NATIVE_UNPROVEN`` — only a completed run proves a fit (a spill still classifies honestly).
-        ``os_value`` tunes a spill's remediation (e.g. bare Linux would OOM where WDDM spills)."""
+        ``os_value`` tunes a spill's remediation (for example, the Linux dedicated-memory model
+        predicts OOM where WDDM spills; this does not turn a prediction into measured fit)."""
         peak = self.peak
         return (
             None

@@ -2410,7 +2410,7 @@ class GpuDevice(ContractModel):
     vram_total_bytes: int | None = Field(default=None, ge=0)
     vram_free_bytes: int | None = Field(default=None, ge=0)
     compute_capability: str | None = None
-    # >=12 → Blackwell, forced onto the math-attention path (environment._capability_major).
+    # >=12 means Blackwell. Native-Windows/WDDM forces math; other platforms remain probe-gated.
     compute_capability_major: int | None = None
     supported_dtypes: list[PrecisionMode] = Field(default_factory=list)
     pcie: GpuPcie | None = None
@@ -3659,8 +3659,11 @@ class RunManifest(ContractModel):
 class HelloBody(ContractModel):
     """Worker→core handshake: who I am + what I can do."""
 
-    worker_id: str
+    worker_id: str = Field(min_length=1)
     backend: BackendManifest
+    # The exact environment identity the worker process is running inside. Managed environments use
+    # their immutable lock hash; an unmanaged probe/demo environment may carry only its stable id.
+    environment_ref: Ref
     environment: EnvironmentProfile | None = None
 
 
@@ -3681,18 +3684,18 @@ class RunDispatchBody(ContractModel):
 
 
 class RunAcceptedBody(ContractModel):
-    run_id: str
+    run_id: str = Field(min_length=1)
     pid: int | None = None
     process_started_at: str | None = None
 
 
 class RunControlBody(ContractModel):
-    run_id: str
+    run_id: str = Field(min_length=1)
     action: Literal["cancel", "pause", "resume", "checkpoint_now"]
 
 
 class HeartbeatBody(ContractModel):
-    run_id: str
+    run_id: str = Field(min_length=1)
     stage: StageMarker | None = None
     optimizer_step: int | None = Field(default=None, ge=0)
     pid_alive: bool = True
@@ -3701,12 +3704,34 @@ class HeartbeatBody(ContractModel):
 class TerminalResultBody(ContractModel):
     """Worker→core: the run ended. A FailureRecord is present iff the outcome was not PASS."""
 
-    run_id: str
+    run_id: str = Field(min_length=1)
     outcome: FailureTaxonomy
-    run_manifest: RunManifest | None = None
+    run_manifest: RunManifest
     artifacts: list[ArtifactManifest] = Field(default_factory=list)
     final_eval: EvaluationResult | None = None
     failure: FailureRecord | None = None
+
+    @model_validator(mode="after")
+    def _terminal_consistency(self) -> TerminalResultBody:
+        if self.run_manifest.run_id != self.run_id:
+            raise ValueError("terminal_result run_id must match run_manifest.run_id")
+        if self.outcome == FailureTaxonomy.PASS:
+            if self.failure is not None or self.run_manifest.failure is not None:
+                raise ValueError("PASS terminal_result cannot carry a failure")
+            if self.run_manifest.state != "succeeded":
+                raise ValueError("PASS terminal_result requires a succeeded run_manifest")
+        else:
+            if self.failure is None:
+                raise ValueError("non-PASS terminal_result requires a failure")
+            if self.failure.taxonomy != self.outcome:
+                raise ValueError("terminal_result outcome must match failure taxonomy")
+            if self.failure.run_id not in {None, self.run_id}:
+                raise ValueError("terminal_result failure run_id must match run_id")
+            if self.run_manifest.state == "succeeded":
+                raise ValueError("non-PASS terminal_result cannot carry a succeeded run_manifest")
+        if self.run_manifest.failure != self.failure:
+            raise ValueError("terminal_result failure must match run_manifest.failure")
+        return self
 
 
 WorkerMessageType = Literal[
@@ -3722,9 +3747,10 @@ WorkerMessageType = Literal[
     "terminal_result",
     "failure",
 ]
+WORKER_PROTOCOL_VERSION: Literal["2.0.0"] = "2.0.0"
 
-# The body model that a given message `type` selects. Consumers parse `body` with this map; the
-# envelope keeps `body` loose so the wire stays forward-compatible.
+# The body model that a given message `type` selects. The envelope retains a language-neutral JSON
+# object on the wire, while WorkerMessage validates it against this map before accepting the message.
 WORKER_BODY_BY_TYPE: dict[str, type[ContractModel]] = {
     "hello": HelloBody,
     "capability_probe_request": CapabilityProbeRequestBody,
@@ -3739,18 +3765,48 @@ WORKER_BODY_BY_TYPE: dict[str, type[ContractModel]] = {
     "failure": FailureRecord,
 }
 
+WorkerBody = (
+    HelloBody
+    | CapabilityProbeRequestBody
+    | CapabilityReport
+    | RunDispatchBody
+    | RunAcceptedBody
+    | FailureRecord
+    | RunControlBody
+    | RunEvent
+    | HeartbeatBody
+    | TerminalResultBody
+)
+
 
 class WorkerMessage(ContractModel):
     """The versioned envelope for the core↔worker channel — realizes the 'immutable RunPlan IN,
-    structured RunEvent stream OUT' boundary. NEW; no worker/core protocol exists in the engine
-    today (the desktop owns the trainer process directly). ``protocol_version`` lets the two sides
-    negotiate compatibility independently of any single contract's version. The body shape is
-    selected by ``type`` (see :data:`WORKER_BODY_BY_TYPE`)."""
+    structured RunEvent stream OUT' boundary. Protocol 2.0 uses a mandatory worker-first identity
+    handshake. ``protocol_version`` evolves independently of any single contract's version. The body
+    union is language-neutral and must match ``type`` (see :data:`WORKER_BODY_BY_TYPE`)."""
 
-    protocol_version: str = Field(pattern=r"^\d+\.\d+\.\d+([-+].+)?$")
+    protocol_version: Literal["2.0.0"]
     message_id: str = Field(min_length=1)
     correlation_id: str | None = None
     direction: Literal["core_to_worker", "worker_to_core"]
     sent_at: str | None = None
     type: WorkerMessageType
-    body: JsonObject | None = None
+    body: WorkerBody
+
+    @model_validator(mode="after")
+    def _direction_and_body_match_type(self) -> WorkerMessage:
+        core_to_worker = {"capability_probe_request", "run_dispatch", "run_control"}
+        expected_direction = (
+            "core_to_worker" if self.type in core_to_worker else "worker_to_core"
+        )
+        if self.direction != expected_direction:
+            raise ValueError(
+                f"message type {self.type!r} requires direction {expected_direction!r}"
+            )
+        body_payload = self.body.model_dump(mode="json")
+        WORKER_BODY_BY_TYPE[self.type].model_validate(body_payload)
+        if self.type in {"run_rejected", "failure"}:
+            failure = FailureRecord.model_validate(body_payload)
+            if failure.taxonomy == FailureTaxonomy.PASS:
+                raise ValueError(f"{self.type} cannot carry PASS taxonomy")
+        return self

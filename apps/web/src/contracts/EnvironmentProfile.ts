@@ -29,8 +29,9 @@ export type Gpus = GpuDevice[];
 export type HostnameHash = string | null;
 /**
  * How the platform maps device memory. ``wddm`` (Windows) silently spills overflow to shared
- * system RAM and thrashes over PCIe; ``linux_dedicated`` hard-OOMs instead; ``unified_memory`` is
- * Apple MPS / integrated shared memory. The single most decisive field for spill-vs-OOM.
+ * system RAM and thrashes over PCIe; ``linux_dedicated`` models a hard-OOM boundary rather than a
+ * WDDM spill; ``unified_memory`` is Apple MPS / integrated shared memory. This is a planning model,
+ * not a measured-fit claim.
  */
 export type MemoryResidencyModel = "wddm" | "linux_dedicated" | "unified_memory" | "unknown";
 export type OperatingSystem = "windows" | "wsl" | "linux" | "macos" | "unknown";

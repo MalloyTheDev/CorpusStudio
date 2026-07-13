@@ -5,6 +5,7 @@ a core-only install. The real training path is user-smoke-tested (a GPU + the [t
 
 import corpus_studio.platform as P
 from corpus_studio.platform.enums import FailureTaxonomy, StageMarker
+from corpus_studio.platform.planner import compute_plan_hash, run_plan_hash_payload
 from corpus_studio.platform.runners import (
     TrainingRunner,
     classify_training_error,
@@ -14,6 +15,13 @@ from corpus_studio.platform.supervisor import execute_run
 from corpus_studio.training.trainer import TrainerError, TrainResult
 
 _CLOCK = lambda: "2026-07-11T00:00:00+00:00"  # noqa: E731
+
+
+def _reseal(body: dict) -> P.RunPlan:
+    """Build a valid test plan after intentionally changing a field covered by its seal."""
+
+    draft = P.RunPlan.model_validate(body)
+    return draft.model_copy(update={"plan_hash": compute_plan_hash(run_plan_hash_payload(draft))})
 
 
 def _fake_run_training(steps, *, loss_by_step=None, capture=None):
@@ -146,7 +154,7 @@ def test_training_runner_refuses_a_physical_plan_it_cannot_consume(monkeypatch):
             "ranks": [{"rank": 0, "resource_id": "compute-0"}],
         },
     }
-    result = execute_run(P.RunPlan.model_validate(body), TrainingRunner(), clock=_CLOCK)
+    result = execute_run(_reseal(body), TrainingRunner(), clock=_CLOCK)
     assert result.manifest.state == "failed"
     assert result.manifest.failure is not None
     assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
@@ -160,7 +168,7 @@ def test_training_runner_refuses_a_physical_plan_it_cannot_consume(monkeypatch):
 def _plan_with_backend(backend_id: str):
     body = demo_training_plan().model_dump(mode="json")
     body["backend_ref"] = {"id": backend_id}
-    return P.RunPlan.model_validate(body)
+    return _reseal(body)
 
 
 def test_training_runner_dispatches_to_the_plan_backend_corpus_studio(monkeypatch):

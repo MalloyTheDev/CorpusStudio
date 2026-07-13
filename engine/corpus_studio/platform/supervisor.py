@@ -294,6 +294,17 @@ def execute_run(
     produced: Sequence[ProducedArtifact] = []
 
     try:
+        # Defense in depth: callers can reach this public library boundary without going through the
+        # CLI or protocol worker. Never let a mutated plan reach a runner under its old seal.
+        from corpus_studio.platform.planner import verify_run_plan_hash  # noqa: PLC0415
+
+        if not verify_run_plan_hash(plan):
+            raise RunnerFailure(
+                "RunPlan hash verification failed; regenerate the plan before execution",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+                remediation="regenerate the RunPlan from immutable inputs; do not mutate it after sealing",
+            )
         produced = runner.run(ctx)
         artifact_ids = [artifact.artifact_id for artifact in produced]
         state = "succeeded"
@@ -380,11 +391,18 @@ def demo_run_plan(plan_id: str = "demo-echo") -> RunPlan:
     those is a later slice); it exists so ``platform-run --demo`` and the tests can prove the harness
     end-to-end. Attention defaults to ``math`` (the Blackwell-safe path). Built via
     ``model_validate`` so the plan body reads as the language-neutral JSON a real planner emits."""
+    from corpus_studio.platform.backends import (  # noqa: PLC0415
+        backend_manifest_ref,
+        get_worker_backend,
+    )
+
+    echo_backend = get_worker_backend("echo")
+    assert echo_backend is not None  # built-in protocol fixture
     draft = RunPlan.model_validate(
         {
             "plan_id": plan_id,
             "plan_hash": "0" * 64,
-            "backend_ref": {"id": "echo"},
+            "backend_ref": backend_manifest_ref(echo_backend).model_dump(mode="json"),
             "environment_ref": {"id": "a" * 64},
             "dataset_ref": {"id": "none"},
             "task_type": "evaluation",
