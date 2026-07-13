@@ -38,7 +38,7 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
 
 ## 2. Current git / PR state
 
-`main` is the source of truth. The foundational history entering the Phase 9B slice is:
+`main` is the source of truth. The current foundational history is:
 - **#404** configurable checkpoint retention · **#405** StorageProfile + the dependency-architecture
   correction · **#406** Environment Manager substrate (Phase 2 slice 1) · **#407** storage USB/WSL
   runtime-role risks + storage-vs-not failure diagnostic · **#408** HANDOFF/AGENTS · **#409**
@@ -77,7 +77,8 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   6 skipped / 88.38% Windows coverage, deterministic 27-root schema/TypeScript generation, web
   production build, 815 desktop tests, and zero-warning WPF/Avalonia Release builds. See
   `docs/BACKEND_WORKER_PROTOCOL.md`.
-- **The current Phase 9B slice adds effective execution truth** (`feat/effective-execution-contract`):
+- **#419 merged the Phase 9B effective-execution-truth slice** as
+  `6139b9e78ad383af95edbd2b70e34fd7808b2133`:
   a separately hash-sealed `ResolvedExecutionConfiguration`, immutable dataset/model/tokenizer refs,
   per-state precision, exact attention API/kernel/toggles, an explicit device map, complete semantic
   trainer defaults, and exact optimizer/loss/trainer-surface admission. Readiness now requires one
@@ -94,7 +95,8 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   skipped / 88.24% Windows coverage, deterministic 28-root
   schema/TypeScript generation, web typecheck + production build, Tauri `cargo fmt --check` +
   `cargo check`, 812 desktop tests, and successful WPF/Avalonia Release builds (with 22 existing
-  Avalonia `Watermark` deprecation warnings). See
+  Avalonia `Watermark` deprecation warnings). The PR and the four post-merge `main` workflows (Engine,
+  web, Desktop, and CodeQL) all passed. See
   `docs/EFFECTIVE_EXECUTION_CONFIGURATION.md`.
 
 ## 3. The architecture North Star + binding directives
@@ -189,7 +191,7 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 7. Immediate next actions (ranked)
 
-1. **Artifact and environment integrity hardening (only after Phase 9B is green and merged):** share
+1. **Artifact and environment integrity hardening:** share
    the safe model-inventory implementation
    across artifacts/checkpoints/environment inputs; verify installed bytes against `RECORD`; build and
    hash the exact worker wheel before approval; add manager/per-environment inter-process locks; make
