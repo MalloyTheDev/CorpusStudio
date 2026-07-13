@@ -2034,6 +2034,9 @@ def train_run(
     cpu_toy: bool = typer.Option(False, "--cpu-toy", help="Run the tiny CPU smoke path (a small model, a few steps, no GPU/bitsandbytes)."),
     max_steps: Optional[int] = typer.Option(None, "--max-steps", help="Cap the number of training steps."),
     attn_implementation: Optional[str] = typer.Option(None, "--attn-implementation", help="Attention backend (eager | sdpa | flash_attention_2). Default auto: on Blackwell/sm_120 the fused flash/mem-efficient SDPA is disabled (it deadlocks the first backward there) and the math SDPA path is used."),
+    optim: Optional[str] = typer.Option(None, "--optim", help="Optimizer (e.g. adamw_torch | paged_adamw_8bit). 'paged_adamw_8bit' pages optimizer state to host RAM under pressure — spike-safe on a tight GPU."),
+    use_liger: bool = typer.Option(False, "--use-liger", help="Fuse the cross-entropy loss (Liger) to drop the full-vocab logits memory spike at long sequence_len. Needs the 'liger-kernel' package; Blackwell support unverified."),
+    memory_efficient: bool = typer.Option(False, "--memory-efficient", help="Shortcut for a tight GPU: enable the memory-saving levers (paged optimizer + fused Liger loss). Explicit --optim / --use-liger override it."),
 ):
     """RUN the training in-process (first-party trainer, opt-in [train] extra): read a CorpusStudio
     training config + dataset, build a TRL SFTTrainer with peft LoRA (4-bit QLoRA on GPU), train, and
@@ -2049,6 +2052,10 @@ def train_run(
         run_training,
     )
 
+    # --memory-efficient is a shortcut; explicit --optim / --use-liger win. None = fall back to the
+    # config's value (a bool flag can't distinguish "unset" from "false", so pass None when unset).
+    resolved_optim = optim or ("paged_adamw_8bit" if memory_efficient else None)
+    resolved_liger = True if (use_liger or memory_efficient) else None
     try:
         run_config = load_run_config_from_file(
             config_path,
@@ -2058,6 +2065,8 @@ def train_run(
             cpu_toy=cpu_toy,
             max_steps=max_steps,
             attn_implementation=attn_implementation,
+            optim=resolved_optim,
+            use_liger=resolved_liger,
         )
     except (TrainerError, ValueError, json.JSONDecodeError, OSError) as exc:
         typer.echo(str(exc), err=True)
