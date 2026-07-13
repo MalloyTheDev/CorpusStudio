@@ -119,6 +119,23 @@ def test_unexpected_exception_becomes_failed_fail():
     assert result.manifest.failure.message == "kaboom"
 
 
+def test_in_process_execution_refuses_a_tampered_plan_before_runner_call():
+    class _MustNotRun:
+        name = "must-not-run"
+
+        def run(self, ctx: RunContext):
+            pytest.fail("a runner must not receive a RunPlan whose seal is invalid")
+
+    plan = demo_run_plan()
+    tampered = plan.model_copy(update={"seed": plan.seed + 1})
+    result = execute_run(tampered, _MustNotRun(), clock=_CLOCK)
+
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert "hash verification failed" in result.manifest.failure.message
+
+
 def test_produced_artifacts_are_recorded_on_the_manifest():
     class _ArtifactRunner:
         name = "artifact"

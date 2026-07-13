@@ -62,8 +62,8 @@ class TrainRunConfig(BaseModel):
     cpu_toy: bool = False
     max_steps: int | None = None
     # Attention backend passed to from_pretrained (e.g. "eager" / "sdpa" / "flash_attention_2").
-    # None = auto: honor transformers' default, but on Blackwell (sm_120) the fused flash/mem-efficient
-    # SDPA kernels deadlock on the first backward, so the trainer forces the math SDPA path there.
+    # None = auto: honor transformers' default, except native-Windows/WDDM Blackwell where measured
+    # fused flash deadlock evidence requires the safe fallback. Other hosts still need their probes.
     attn_implementation: str | None = None
     # --- memory / spill-avoidance levers (opt-in) ---
     # The optimizer TRL/transformers uses. "paged_adamw_8bit" (bitsandbytes) pages optimizer state to
@@ -357,11 +357,10 @@ def resolve_attention_implementation(
     * else on **native Windows (WDDM) + Blackwell** (sm_120) → ``(None, True)``: keep transformers'
       default SDPA but signal the caller to DISABLE the fused flash SDP backend — the only kernel that
       deadlocks there (mem-efficient + math are safe), so SDPA uses a non-deadlocking kernel;
-    * else ``(None, False)`` — no change. Crucially this includes **WSL and bare Linux on Blackwell**:
-      the deadlock is a Windows WDDM property, NOT an sm_120 kernel bug (verified on a real 5070 under
-      WSL2 that fused flash + mem-efficient SDPA both run), so flash stays enabled there — the whole
-      point of running training under WSL. ``native_windows`` (``sys.platform == "win32"``, which is
-      False under WSL) is what distinguishes the two; unknown/False hosts leave the kernel enabled.
+    * else ``(None, False)`` - no forced change. This includes WSL and bare Linux because the known
+      refusal is specific to Windows WDDM. Leaving a kernel enabled is not proof it works: the
+      environment capability probe remains authoritative. WSL has separate passing evidence;
+      bare-Linux RTX 5070 behavior is unverified.
     """
     if explicit:
         return explicit, False
@@ -463,10 +462,9 @@ def run_training(
         # Attention backend. On **native Windows (WDDM) + Blackwell (sm_120)** the fused FLASH SDPA
         # kernel DEADLOCKS on the first backward — verified on a real 5070: bnb 4-bit, the mem-efficient
         # kernel, and the math path are all fine; only flash hangs, and only under WDDM. So disable
-        # ONLY flash, and ONLY there. Under **WSL / bare Linux** the SAME sm_120 flash kernel runs fine
-        # (verified on the 5070 under WSL2 — O(seq) memory, ~1000x faster than the math fallback), so it
-        # is left ENABLED — that is the reason to train under WSL. `sys.platform == "win32"` is True only
-        # on native Windows (WSL Python reports "linux"). An explicit --attn-implementation always wins.
+        # ONLY flash, and ONLY there. Other hosts keep the default enabled because the known refusal is
+        # WDDM-specific, but they still require a passing capability probe. WSL evidence is separate;
+        # bare-Linux RTX 5070 behavior remains unverified. An explicit --attn-implementation wins.
         try:
             capability_major = torch.cuda.get_device_capability()[0] if torch.cuda.is_available() else None
         except Exception:  # noqa: BLE001 - a probe failure just means "don't special-case".

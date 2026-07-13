@@ -6,6 +6,7 @@ and the echo runner."""
 
 import io
 import json
+import subprocess
 import sys
 import time
 
@@ -14,8 +15,10 @@ import pytest
 from corpus_studio.platform.subprocess_supervisor import (
     _dispatch_line,
     execute_run_subprocess,
+    worker_identity_argv,
 )
 from corpus_studio.platform.supervisor import demo_run_plan
+from corpus_studio.platform.worker_protocol import PROTOCOL_VERSION
 from corpus_studio.platform.worker import run_worker
 
 _PLAN = demo_run_plan()
@@ -25,7 +28,13 @@ def _worker_out(runner_name: str = "echo") -> list[dict]:
     """Drive run_worker in-process with an in-memory out stream; return the emitted WorkerMessages."""
     out = io.StringIO()
     dispatch = _dispatch_line(_PLAN, "run-1", 30)
-    rc = run_worker(dispatch, runner_name=runner_name, out=out)
+    rc = run_worker(
+        dispatch,
+        runner_name=runner_name,
+        backend_id=_PLAN.backend_ref.id,
+        environment_ref=_PLAN.environment_ref,
+        out=out,
+    )
     messages = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
     return [{"rc": rc}, *messages]
 
@@ -48,7 +57,8 @@ def test_worker_streams_accepted_events_and_terminal():
     # every message is a well-formed worker->core WorkerMessage envelope
     for m in messages:
         assert m["direction"] == "worker_to_core"
-        assert m["protocol_version"] == "1.0.0"
+        assert m["protocol_version"] == PROTOCOL_VERSION
+        assert m["correlation_id"] == "c-run-1"
 
 
 def test_worker_forwards_run_events_in_order():
@@ -59,7 +69,13 @@ def test_worker_forwards_run_events_in_order():
 
 def test_worker_rejects_a_malformed_dispatch():
     out = io.StringIO()
-    rc = run_worker("this is not json", runner_name="echo", out=out)
+    rc = run_worker(
+        "this is not json",
+        runner_name="echo",
+        backend_id=_PLAN.backend_ref.id,
+        environment_ref=_PLAN.environment_ref,
+        out=out,
+    )
     assert rc == 2
     msg = json.loads(out.getvalue().splitlines()[0])
     assert msg["type"] == "run_rejected"
@@ -69,7 +85,13 @@ def test_worker_rejects_a_well_formed_but_tampered_plan():
     envelope = json.loads(_dispatch_line(_PLAN, "run-1", 30))
     envelope["body"]["plan"]["seed"] += 1
     out = io.StringIO()
-    rc = run_worker(json.dumps(envelope), runner_name="echo", out=out)
+    rc = run_worker(
+        json.dumps(envelope),
+        runner_name="echo",
+        backend_id=_PLAN.backend_ref.id,
+        environment_ref=_PLAN.environment_ref,
+        out=out,
+    )
     assert rc == 2
     msg = json.loads(out.getvalue().splitlines()[0])
     assert msg["type"] == "run_rejected"
@@ -100,7 +122,14 @@ def test_worker_events_survive_a_trainer_stdout_redirect(monkeypatch):
         )
 
     monkeypatch.setattr("corpus_studio.training.trainer.run_training", _trainer_redirecting)
-    run_worker(_dispatch_line(demo_training_plan(), "run-r", 30), runner_name="cpu_toy", out=None)
+    training_plan = demo_training_plan()
+    run_worker(
+        _dispatch_line(training_plan, "run-r", 30),
+        runner_name="cpu_toy",
+        backend_id=training_plan.backend_ref.id,
+        environment_ref=training_plan.environment_ref,
+        out=None,
+    )
     types = [json.loads(line)["type"] for line in real_stdout.getvalue().splitlines() if line.strip()]
     assert "event" in types  # the metric reached the REAL stdout (the pipe), not the redirected stderr
     assert types[-1] == "terminal_result"
@@ -121,23 +150,60 @@ def test_worker_main_runs_from_stdin(monkeypatch, capsys):
     from corpus_studio.platform import worker
 
     monkeypatch.setattr("sys.stdin", io.StringIO(_dispatch_line(_PLAN, "run-main", 30) + "\n"))
-    monkeypatch.setattr("sys.argv", ["corpus-studio-worker", "--runner", "echo"])
+    monkeypatch.setattr(
+        "sys.argv",
+        ["corpus-studio-worker", "--runner", "echo", *worker_identity_argv(_PLAN)],
+    )
     with pytest.raises(SystemExit) as exc:
         worker.main()
     assert exc.value.code == 0
     types = [json.loads(line)["type"] for line in capsys.readouterr().out.splitlines() if line.strip()]
-    assert types[0] == "run_accepted" and types[-1] == "terminal_result"
+    assert types[:2] == ["hello", "run_accepted"] and types[-1] == "terminal_result"
 
 
-def _fake_worker(messages):
-    """A stand-in worker child (python -c) that emits the given (type, body) WorkerMessages then exits —
-    for exercising the parent's handling of misbehaving/protocol-drifting children."""
+def _hello_body(plan=_PLAN):
+    from corpus_studio.platform.backends import get_worker_backend
+
+    backend = get_worker_backend(plan.backend_ref.id)
+    assert backend is not None
+    return {
+        "worker_id": "fake-worker",
+        "backend": backend.model_dump(mode="json"),
+        "environment_ref": plan.environment_ref.model_dump(mode="json"),
+        "environment": None,
+    }
+
+
+def _fake_worker(
+    messages,
+    *,
+    hello_body=None,
+    hello_protocol=PROTOCOL_VERSION,
+    hello_direction="worker_to_core",
+    post_protocol=PROTOCOL_VERSION,
+    post_direction="worker_to_core",
+    post_correlation="dispatch",
+    duplicate_post_ids=False,
+):
+    """A handshake-capable fake child for protocol/state-machine conformance tests."""
+    encoded_messages = json.dumps(messages)
+    encoded_hello = json.dumps(hello_body or _hello_body())
     script = (
         "import sys,json\n"
-        "def s(t,b):\n"
-        " sys.stdout.write(json.dumps({'protocol_version':'1.0.0','message_id':'x',"
-        "'direction':'worker_to_core','type':t,'body':b})+chr(10));sys.stdout.flush()\n"
-        + "".join(f"s({t!r},{b!r})\n" for t, b in messages)
+        "def s(t,b,mid,corr,version,direction):\n"
+        " e={'protocol_version':version,'message_id':mid,'direction':direction,'type':t,'body':b}\n"
+        " if corr is not None:e['correlation_id']=corr\n"
+        " sys.stdout.write(json.dumps(e)+chr(10));sys.stdout.flush()\n"
+        f"hello=json.loads({encoded_hello!r})\n"
+        f"s('hello',hello,'hello',None,{hello_protocol!r},{hello_direction!r})\n"
+        "line=sys.stdin.readline()\n"
+        "dispatch=json.loads(line) if line.strip() else {}\n"
+        f"messages=json.loads({encoded_messages!r})\n"
+        f"mode={post_correlation!r}\n"
+        "corr=dispatch.get('message_id') if mode=='dispatch' else mode\n"
+        "for i,item in enumerate(messages):\n"
+        f" mid='post' if {duplicate_post_ids!r} else 'post-'+str(i)\n"
+        f" s(item[0],item[1],mid,corr,{post_protocol!r},{post_direction!r})\n"
     )
     return [sys.executable, "-c", script]
 
@@ -146,25 +212,202 @@ def test_malformed_terminal_result_is_a_protocol_failure_not_a_fake_crash():
     # A terminal_result arrived but its run_manifest doesn't validate → an honest protocol failure, NOT
     # "crashed (code 0)" and NEVER a fake success.
     argv = _fake_worker([
-        ("run_accepted", {"run_id": "r", "pid": 1}),
-        ("terminal_result", {"run_id": "r", "outcome": "PASS", "run_manifest": {"bogus": 1}}),
+        ("run_accepted", {"run_id": _PLAN.plan_id, "pid": 1}),
+        ("terminal_result", {"run_id": _PLAN.plan_id, "outcome": "PASS", "run_manifest": {"bogus": 1}}),
     ])
     result = execute_run_subprocess(_PLAN, worker_argv=argv, silence_timeout_s=10)
     assert result.manifest.state == "failed"
     assert result.manifest.failure.taxonomy.value == "ENVIRONMENT_FAILURE"
-    assert "malformed terminal_result" in result.manifest.failure.message
+    assert "protocol violation" in result.manifest.failure.message
+    assert "terminal_result" in result.manifest.failure.message
 
 
 def test_run_rejected_is_classified_with_the_workers_reason():
     # The worker rejects the dispatch: its taxonomy + message must flow through, not be relabeled as a
     # generic crash.
     argv = _fake_worker([
-        ("run_rejected", {"run_id": "r", "taxonomy": "UNSUPPORTED_CONFIGURATION", "message": "nope"}),
+        ("run_rejected", {"run_id": _PLAN.plan_id, "taxonomy": "UNSUPPORTED_CONFIGURATION", "message": "nope"}),
     ])
     result = execute_run_subprocess(_PLAN, worker_argv=argv, silence_timeout_s=10)
     assert result.manifest.state == "failed"
     assert result.manifest.failure.taxonomy.value == "UNSUPPORTED_CONFIGURATION"
     assert result.manifest.failure.message == "nope"
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        ({"hello_protocol": "99.0.0"}, "protocol version"),
+        ({"hello_direction": "core_to_worker"}, "requires direction"),
+        ({"post_correlation": None}, "correlation_id"),
+    ],
+)
+def test_parent_rejects_protocol_direction_and_correlation_drift(kwargs, expected):
+    messages = [("run_accepted", {"run_id": _PLAN.plan_id, "pid": 1})]
+    result = execute_run_subprocess(
+        _PLAN, worker_argv=_fake_worker(messages, **kwargs), silence_timeout_s=10
+    )
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure.taxonomy.value == "ENVIRONMENT_FAILURE"
+    assert expected in result.manifest.failure.message
+
+
+@pytest.mark.parametrize("identity", ["backend", "environment"])
+def test_parent_rejects_worker_identity_mismatch_before_dispatch(identity):
+    hello = json.loads(json.dumps(_hello_body()))
+    if identity == "backend":
+        hello["backend"]["backend_id"] = "different-backend"
+    else:
+        hello["environment_ref"]["id"] = "different-environment"
+    result = execute_run_subprocess(
+        _PLAN,
+        worker_argv=_fake_worker([], hello_body=hello),
+        silence_timeout_s=10,
+    )
+    assert result.manifest.state == "failed"
+    assert identity in result.manifest.failure.message
+
+
+def test_parent_rejects_duplicate_message_ids():
+    messages = [
+        ("run_accepted", {"run_id": _PLAN.plan_id, "pid": 1}),
+        (
+            "failure",
+            {
+                "run_id": _PLAN.plan_id,
+                "taxonomy": "ENVIRONMENT_FAILURE",
+                "message": "failed",
+            },
+        ),
+    ]
+    result = execute_run_subprocess(
+        _PLAN,
+        worker_argv=_fake_worker(messages, duplicate_post_ids=True),
+        silence_timeout_s=10,
+    )
+    assert "duplicate worker message_id" in result.manifest.failure.message
+
+
+def test_parent_rejects_event_before_acceptance_and_nonmonotonic_sequences():
+    _, *worker_messages = _worker_out("echo")
+    event = dict(
+        next(message["body"] for message in worker_messages if message["type"] == "event")
+    )
+    event["run_id"] = _PLAN.plan_id
+
+    before = execute_run_subprocess(
+        _PLAN,
+        worker_argv=_fake_worker([("event", event)]),
+        silence_timeout_s=10,
+    )
+    assert "before run_accepted" in before.manifest.failure.message
+
+    repeated = execute_run_subprocess(
+        _PLAN,
+        worker_argv=_fake_worker(
+            [
+                ("run_accepted", {"run_id": _PLAN.plan_id, "pid": 1}),
+                ("event", event),
+                ("event", event),
+            ]
+        ),
+        silence_timeout_s=10,
+    )
+    assert "is not greater than prior seq" in repeated.manifest.failure.message
+
+
+def test_parent_rejects_terminal_manifest_linkage_mismatch():
+    from corpus_studio.platform.contracts import RunManifest
+
+    manifest = RunManifest(
+        run_id=_PLAN.plan_id,
+        plan_ref={"id": "wrong-plan", "hash": {"value": "0" * 64}},
+        environment_ref=_PLAN.environment_ref,
+        dataset_ref=_PLAN.dataset_ref,
+        created_at="2026-07-13T00:00:00+00:00",
+        updated_at="2026-07-13T00:00:00+00:00",
+        state="succeeded",
+        base_model="none",
+        target="echo",
+    )
+    result = execute_run_subprocess(
+        _PLAN,
+        worker_argv=_fake_worker(
+            [
+                ("run_accepted", {"run_id": _PLAN.plan_id, "pid": 1}),
+                (
+                    "terminal_result",
+                    {
+                        "run_id": _PLAN.plan_id,
+                        "outcome": "PASS",
+                        "run_manifest": manifest.model_dump(mode="json"),
+                        "artifacts": [],
+                        "failure": None,
+                    },
+                ),
+            ]
+        ),
+        silence_timeout_s=10,
+    )
+    assert "does not link to the dispatched RunPlan" in result.manifest.failure.message
+
+
+def test_worker_rejects_backend_identity_before_building_runner(monkeypatch):
+    from corpus_studio.platform.common import HashRef, Ref
+    from corpus_studio.platform.planner import compute_plan_hash, run_plan_hash_payload
+
+    mismatched = _PLAN.model_copy(
+        update={"backend_ref": Ref(id="echo", hash=HashRef(value="0" * 64))}
+    )
+    mismatched = mismatched.model_copy(
+        update={"plan_hash": compute_plan_hash(run_plan_hash_payload(mismatched))}
+    )
+    monkeypatch.setattr(
+        "corpus_studio.platform.worker._build_runner",
+        lambda *_args: pytest.fail("runner must not be built before identity validation"),
+    )
+    out = io.StringIO()
+    rc = run_worker(
+        _dispatch_line(mismatched, "run-identity", 30),
+        runner_name="echo",
+        backend_id="echo",
+        environment_ref=mismatched.environment_ref,
+        out=out,
+    )
+    assert rc == 2
+    assert "backend manifest identity" in out.getvalue()
+
+
+def test_parent_refuses_a_tampered_plan_before_spawning_worker(tmp_path):
+    launched = tmp_path / "worker-launched"
+    plan = _PLAN.model_copy(update={"seed": _PLAN.seed + 1})
+    result = execute_run_subprocess(
+        plan,
+        worker_argv=[
+            sys.executable,
+            "-c",
+            f"from pathlib import Path; Path({str(launched)!r}).write_text('launched')",
+        ],
+        silence_timeout_s=10,
+    )
+    assert result.manifest.failure.taxonomy.value == "UNSUPPORTED_CONFIGURATION"
+    assert "hash verification failed" in result.manifest.failure.message
+    assert not launched.exists()
+
+
+def test_worker_protocol_import_does_not_load_torch():
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import corpus_studio.platform.worker_protocol; "
+            "print('torch' in sys.modules)",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "False"
 
 
 def test_a_raising_sink_propagates_without_hanging_and_reaps_the_child():
@@ -181,7 +424,10 @@ def test_worker_main_empty_stdin_rejects(monkeypatch, capsys):
     from corpus_studio.platform import worker
 
     monkeypatch.setattr("sys.stdin", io.StringIO(""))
-    monkeypatch.setattr("sys.argv", ["corpus-studio-worker", "--runner", "echo"])
+    monkeypatch.setattr(
+        "sys.argv",
+        ["corpus-studio-worker", "--runner", "echo", *worker_identity_argv(_PLAN)],
+    )
     with pytest.raises(SystemExit) as exc:
         worker.main()
     assert exc.value.code == 2
@@ -216,6 +462,72 @@ def test_hung_worker_is_killed_and_classified_kernel_stall():
     assert elapsed < 15  # killed promptly, not after the 120s sleep
 
 
+def test_heartbeat_spam_cannot_mask_a_hung_run():
+    hello = json.dumps(_hello_body())
+    script = (
+        "import json,sys,time\n"
+        "def s(t,b,mid,corr=None):\n"
+        f" e={{'protocol_version':{PROTOCOL_VERSION!r},'message_id':mid,"
+        "'direction':'worker_to_core','type':t,'body':b}\n"
+        " if corr is not None:e['correlation_id']=corr\n"
+        " print(json.dumps(e),flush=True)\n"
+        f"s('hello',json.loads({hello!r}),'hello')\n"
+        "dispatch=json.loads(sys.stdin.readline());corr=dispatch['message_id'];"
+        "rid=dispatch['body']['run_id']\n"
+        "s('run_accepted',{'run_id':rid,'pid':1},'accepted',corr)\n"
+        "i=0\n"
+        "while True:\n"
+        " s('heartbeat',{'run_id':rid,'pid_alive':True},'hb-'+str(i),corr)\n"
+        " i+=1;time.sleep(0.02)\n"
+    )
+    result = execute_run_subprocess(
+        _PLAN,
+        worker_argv=[sys.executable, "-c", script],
+        silence_timeout_s=0.2,
+    )
+    assert result.manifest.failure.taxonomy.value == "KERNEL_STALL"
+    assert "no run progress" in result.manifest.failure.message
+
+
+def test_hung_worker_termination_kills_its_descendant(tmp_path):
+    ready = tmp_path / "descendant-ready"
+    orphan = tmp_path / "descendant-survived"
+    child_script = (
+        "import pathlib,time;"
+        f"pathlib.Path({str(ready)!r}).write_text('ready');"
+        "time.sleep(1);"
+        f"pathlib.Path({str(orphan)!r}).write_text('orphan')"
+    )
+    hello = json.dumps(_hello_body())
+    worker_script = (
+        "import json,pathlib,subprocess,sys,time\n"
+        f"subprocess.Popen([sys.executable,'-c',{child_script!r}],"
+        "stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)\n"
+        f"ready=pathlib.Path({str(ready)!r})\n"
+        "deadline=time.monotonic()+5\n"
+        "while not ready.exists() and time.monotonic()<deadline:time.sleep(0.01)\n"
+        "def s(t,b,mid,corr=None):\n"
+        f" e={{'protocol_version':{PROTOCOL_VERSION!r},'message_id':mid,"
+        "'direction':'worker_to_core','type':t,'body':b}\n"
+        " if corr is not None:e['correlation_id']=corr\n"
+        " print(json.dumps(e),flush=True)\n"
+        f"s('hello',json.loads({hello!r}),'hello')\n"
+        "dispatch=json.loads(sys.stdin.readline());corr=dispatch['message_id'];"
+        "rid=dispatch['body']['run_id']\n"
+        "s('run_accepted',{'run_id':rid,'pid':1},'accepted',corr)\n"
+        "time.sleep(120)\n"
+    )
+    result = execute_run_subprocess(
+        _PLAN,
+        worker_argv=[sys.executable, "-c", worker_script],
+        silence_timeout_s=0.2,
+    )
+    assert ready.exists(), "the worker must launch its descendant before the timeout"
+    assert result.manifest.failure.taxonomy.value == "KERNEL_STALL"
+    time.sleep(1.1)
+    assert not orphan.exists(), "a timed-out worker descendant survived process-tree termination"
+
+
 def test_crashed_worker_is_environment_failure():
     crash = [sys.executable, "-c", "import sys; sys.exit(3)"]
     result = execute_run_subprocess(_PLAN, worker_argv=crash, silence_timeout_s=10)
@@ -224,13 +536,13 @@ def test_crashed_worker_is_environment_failure():
     assert result.manifest.failure.exit_code == 3
 
 
-def test_worker_that_emits_non_json_then_exits_is_a_crash():
-    # A child that writes junk (not a WorkerMessage) then exits without a terminal_result: the junk is
-    # dropped, and the missing terminal is classified as a crash — never a fake "success".
+def test_worker_that_emits_non_json_is_a_protocol_failure():
+    # stdout is exclusively the wire channel. Junk is protocol drift, never ignored telemetry.
     noisy = [sys.executable, "-c", "print('hello from a broken worker'); print('{not json}')"]
     result = execute_run_subprocess(_PLAN, worker_argv=noisy, silence_timeout_s=10)
     assert result.manifest.state == "failed"
     assert result.manifest.failure.taxonomy.value == "ENVIRONMENT_FAILURE"
+    assert "protocol violation" in result.manifest.failure.message
     assert result.events == []  # nothing parsed as a RunEvent
 
 
@@ -269,7 +581,13 @@ def test_subprocess_persists_the_childs_artifact_manifests(tmp_path):
                              "artifacts": [am.model_dump(mode="json")], "failure": None}),
     ])
     out = tmp_path / "out"
-    result = execute_run_subprocess(_PLAN, worker_argv=argv, out_dir=str(out), silence_timeout_s=10)
+    result = execute_run_subprocess(
+        _PLAN,
+        run_id="run-x",
+        worker_argv=argv,
+        out_dir=str(out),
+        silence_timeout_s=10,
+    )
     assert result.manifest.state == "succeeded"
     assert len(result.artifacts) == 1
     assert (out / "artifacts" / "run-x-adapter.json").exists()  # actually persisted, not just reported

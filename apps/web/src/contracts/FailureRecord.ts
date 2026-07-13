@@ -6,9 +6,9 @@ export type DetectedAt = string | null;
 export type ExceptionType = string | null;
 export type ExitCode = number | null;
 /**
- * ``math``/``eager`` is forced on Blackwell sm_120 — the fused flash/mem-efficient kernels
- * deadlock on the first backward (training/environment.py, estimators.py) — at a large activation
- * VRAM cost.
+ * ``math``/``eager`` is forced on native-Windows/WDDM Blackwell sm_120 because the fused flash
+ * kernel deadlocks there. Other platforms require their own functional capability result; WSL
+ * evidence is not bare-Linux proof.
  */
 export type AttentionImpl =
   "math" | "eager" | "sdpa" | "flash_attention_2" | "flash_attention_3" | "mem_efficient" | "xformers";

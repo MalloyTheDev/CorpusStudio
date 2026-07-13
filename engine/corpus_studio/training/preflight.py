@@ -87,8 +87,8 @@ def run_training_preflight(
     memory-efficient (4-bit, flash-attention) VRAM estimate — when a GPU is detected
     it drives the OOM check. ``vram_min_gb_math`` is the higher math-attention-path
     estimate; on a **native-Windows** Blackwell GPU (sm_120, forced onto the math path
-    because the fused flash kernel deadlocks under WDDM) it is used instead. On WSL/Linux
-    flash works, so the flash estimate holds even on Blackwell.
+    because the fused flash kernel deadlocks under WDDM) it is used instead. The efficient estimate
+    on other platforms is still a prediction; only a capability-probed run proves the attention path.
     """
     checks: list[PreflightCheck] = []
 
@@ -202,9 +202,9 @@ def run_training_preflight(
     gpu = gpu_probe.probe_gpu_memory()
     if gpu is not None and vram_min_gb is not None:
         # The fused flash SDPA kernel deadlocks on Blackwell (sm_120) ONLY under native Windows (WDDM),
-        # forcing the higher-VRAM math path THERE. On WSL/Linux flash works, so the flash estimate holds
-        # — using the math estimate there would over-warn. (WSL still SPILLS via the host WDDM driver;
-        # bare Linux hard-OOMs.)
+        # forcing the higher-VRAM math path THERE. Outside native Windows this legacy preflight keeps
+        # the efficient estimate, but it is not proof of a bare-Linux attention path or fit; Platform
+        # capability probes and measured fit remain authoritative.
         is_blackwell = gpu_probe._capability_major(gpu.compute_capability) >= 12
         native_windows = sys.platform == "win32"
         if is_blackwell and native_windows and vram_min_gb_math is not None:
@@ -222,7 +222,8 @@ def run_training_preflight(
                         f"Won't fit fast: the 4-bit training peak is ~{effective_min_gb:.1f} GB{path} but the GPU has "
                         f"~{gpu.free_gb:.1f} GB free (of ~{gpu.total_gb:.1f} GB). On Windows/WSL the driver silently SPILLS "
                         "the overflow to system RAM and thrashes over PCIe — steps run 10-25x slower (looks frozen but is "
-                        "crawling); on bare Linux it OOMs. Lower sequence_len / micro-batch, or use a smaller base model."
+                        "crawling). A dedicated-memory Linux host is expected to OOM instead of WDDM-spill, but this "
+                        "specific fit remains unverified. Lower sequence_len / micro-batch, or use a smaller base model."
                     ),
                 )
             )

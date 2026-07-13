@@ -15,11 +15,9 @@ from enum import Enum
 
 class OperatingSystem(str, Enum):
     windows = "windows"
-    # WSL is its OWN platform, not Windows and not bare Linux: it runs a Linux CUDA userspace, so the
-    # fused FLASH SDPA kernel that DEADLOCKS on native Windows (WDDM) runs fine here — yet its GPU
-    # memory still spills to shared system RAM via the host WDDM driver (wddm residency), so it
-    # degrades to slow-but-training instead of hard-OOMing like bare Linux. Flash-safe like Linux,
-    # spill-prone like Windows. Verified on a real RTX 5070 under WSL2.
+    # WSL is its OWN platform, not Windows and not bare Linux. Its RTX 5070 flash path has separately
+    # labeled passing evidence, while GPU memory still spills through the host WDDM driver. Neither
+    # observation is evidence for bare-Linux behavior; every environment retains its own probes.
     wsl = "wsl"
     linux = "linux"
     macos = "macos"
@@ -28,8 +26,9 @@ class OperatingSystem(str, Enum):
 
 class MemoryResidencyModel(str, Enum):
     """How the platform maps device memory. ``wddm`` (Windows) silently spills overflow to shared
-    system RAM and thrashes over PCIe; ``linux_dedicated`` hard-OOMs instead; ``unified_memory`` is
-    Apple MPS / integrated shared memory. The single most decisive field for spill-vs-OOM."""
+    system RAM and thrashes over PCIe; ``linux_dedicated`` models a hard-OOM boundary rather than a
+    WDDM spill; ``unified_memory`` is Apple MPS / integrated shared memory. This is a planning model,
+    not a measured-fit claim."""
 
     wddm = "wddm"
     linux_dedicated = "linux_dedicated"
@@ -576,9 +575,9 @@ class AdapterMethod(str, Enum):
 
 
 class AttentionImpl(str, Enum):
-    """``math``/``eager`` is forced on Blackwell sm_120 — the fused flash/mem-efficient kernels
-    deadlock on the first backward (training/environment.py, estimators.py) — at a large activation
-    VRAM cost."""
+    """``math``/``eager`` is forced on native-Windows/WDDM Blackwell sm_120 because the fused flash
+    kernel deadlocks there. Other platforms require their own functional capability result; WSL
+    evidence is not bare-Linux proof."""
 
     math = "math"
     eager = "eager"

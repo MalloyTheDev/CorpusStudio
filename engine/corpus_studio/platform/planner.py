@@ -38,6 +38,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from corpus_studio.platform.backends import (
+    backend_manifest_ref,
     builtin_backends,
     compatible_backends,
     get_backend,
@@ -143,10 +144,9 @@ def _max_cc_major(profile: EnvironmentProfile) -> int | None:
 def _resolve_attention(
     explicit: str | None, cc_major: int | None, proven_attn: set[str], *, os_value: OperatingSystem
 ) -> str:
-    # The fused flash / mem-efficient kernels deadlock on Blackwell ONLY under the native-Windows WDDM
-    # driver model — NOT on WSL or bare Linux, where the same sm_120 kernels run fine (verified on a
-    # real 5070 under WSL2). So the "force math" mandate is native-Windows-only; on WSL/Linux Blackwell
-    # a plan may seal sdpa (→ flash), which is the whole reason to run training under WSL.
+    # The known fused-flash deadlock guard is native-Windows/WDDM-only. Other platforms are not
+    # automatically safe: a plan may seal sdpa only when that exact environment's probe proved it.
+    # WSL has separately labeled evidence; bare-Linux RTX 5070 behavior remains unverified.
     wddm_blackwell = flash_sdpa_deadlocks(os_value, cc_major)
     if explicit is not None:
         _require_enum(explicit, AttentionImpl, "attention_backend")
@@ -155,8 +155,9 @@ def _resolve_attention(
         if wddm_blackwell and explicit in _FUSED_ATTN_UNSAFE_ON_BLACKWELL:
             raise PlannerError(
                 f"attention_backend '{explicit}' is not guaranteed safe on native Windows + Blackwell "
-                f"(sm_120, cc_major>={_BLACKWELL_MAJOR}) — it can hit the deadlocking flash kernel under "
-                "the Windows WDDM driver; use math or eager, or run under WSL where flash is safe."
+                f"(sm_120, cc_major>={_BLACKWELL_MAJOR}) - it can hit the deadlocking flash kernel under "
+                "the Windows WDDM driver; use math/eager, or use a non-WDDM host only after its "
+                "flash capability probe passes."
             )
         return explicit
     if wddm_blackwell:
@@ -527,7 +528,7 @@ def build_run_plan(
     )
 
     # attn_implementation string only for real from_pretrained backends; math/sdpa → unset so the
-    # trainer's own Blackwell-safe path stays in control.
+    # trainer's native-Windows/WDDM Blackwell-safe path stays in control.
     snapshot: dict[str, Any] = {
         "base_model": constraints.base_model,
         "dataset_path": constraints.dataset_path,
@@ -557,7 +558,7 @@ def build_run_plan(
     body: dict[str, Any] = {
         "plan_id": plan_id,
         "plan_hash": "0" * 64,  # placeholder — replaced by the real seal below
-        "backend_ref": {"id": backend.backend_id},
+        "backend_ref": backend_manifest_ref(backend).model_dump(mode="json"),
         "environment_ref": (environment_ref or Ref(id=profile.environment_signature)).model_dump(
             mode="json"
         ),

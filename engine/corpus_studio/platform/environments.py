@@ -164,7 +164,9 @@ def builtin_recipes() -> list[EnvironmentRecipe]:
             requires_cuda=False,  # the CPU-toy path runs without CUDA; a real GPU run needs a CUDA build
             supported_os=all_os,
             capability_probes=["cuda_available", "bf16_matmul", "bnb_4bit_load", "checkpoint_reload"],
-            verification=RecipeVerification.hardware_verified,  # ran on a real RTX 5070 (Blackwell)
+            # Verified on native Windows/WDDM RTX 5070 plus separately labeled WSL probes; this is not
+            # native-Linux, offload, or full-sequence 7B proof.
+            verification=RecipeVerification.hardware_verified,
             notes=[
                 "A default `pip` pulls the CPU torch build; a real GPU run needs the CUDA wheel index.",
                 "bitsandbytes is CUDA-only - skipped on macOS (CPU/MPS have no 4-bit path).",

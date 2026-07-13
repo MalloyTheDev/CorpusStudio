@@ -567,6 +567,12 @@ def test_backend_ref_reflects_the_chosen_backend():
     # Unsloth on a non-Blackwell host with a proven sdpa plan.
     plan = _plan(_profile(cc_major=8), _report(attn=("sdpa",)), backend="unsloth")
     assert plan.backend_ref.id == "unsloth"
+    assert plan.backend_ref.hash is not None
+    from corpus_studio.platform.backends import backend_manifest_digest, get_backend
+
+    backend = get_backend("unsloth")
+    assert backend is not None
+    assert plan.backend_ref.hash.value == backend_manifest_digest(backend)
 
 
 def test_unknown_backend_is_rejected():

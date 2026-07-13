@@ -412,7 +412,7 @@
       "type": "object"
     },
     "MemoryResidencyModel": {
-      "description": "How the platform maps device memory. ``wddm`` (Windows) silently spills overflow to shared\nsystem RAM and thrashes over PCIe; ``linux_dedicated`` hard-OOMs instead; ``unified_memory`` is\nApple MPS / integrated shared memory. The single most decisive field for spill-vs-OOM.",
+      "description": "How the platform maps device memory. ``wddm`` (Windows) silently spills overflow to shared\nsystem RAM and thrashes over PCIe; ``linux_dedicated`` models a hard-OOM boundary rather than a\nWDDM spill; ``unified_memory`` is Apple MPS / integrated shared memory. This is a planning model,\nnot a measured-fit claim.",
       "enum": [
         "wddm",
         "linux_dedicated",

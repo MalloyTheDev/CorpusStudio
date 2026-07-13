@@ -253,8 +253,9 @@ def build_vram_estimate(
     lora_params = params * _LORA_FRACTION_AT_R16 * (lora_r / 16)
     lora_overhead = lora_params * _LORA_BYTES_PER_PARAM / 1e9
 
-    # Linear in sequence_len (gradient checkpointing makes the peak scale linearly, not seq²). The math
-    # path (Blackwell is forced onto it) materializes far more than flash/mem-efficient attention.
+    # Linear in sequence_len (gradient checkpointing makes the peak scale linearly, not seq²). The
+    # math path materializes far more than flash/mem-efficient attention; native-Windows/WDDM
+    # Blackwell uses it to avoid the measured fused-flash deadlock.
     activation_base = _ACTIVATION_GB_MATH if math_attention else _ACTIVATION_GB_FLASH
     activation_overhead = (
         activation_base
@@ -287,8 +288,9 @@ def build_vram_estimate(
             f"LoRA overhead: ~{_LORA_FRACTION_AT_R16:.1%} of params at r=16, scaled by r={lora_r}, "
             f"{_LORA_BYTES_PER_PARAM} bytes/trainable param (weight+grad+AdamW states).",
             f"Activations (~{activation_overhead:.1f} GB, {'math/eager' if math_attention else 'flash/mem-efficient'} "
-            f"attention): gradient checkpointing, seq_len {sequence_len}, micro-batch {micro_batch_size} — LINEAR "
-            "in seq_len; the math path (forced on Blackwell) uses ~5× more than flash.",
+            f"attention): gradient checkpointing, seq_len {sequence_len}, micro-batch {micro_batch_size} - LINEAR "
+            "in seq_len; the math path (forced on native-Windows/WDDM Blackwell) uses ~5x more "
+            "than flash. Other hosts require their own capability evidence.",
             f"Quantized paths add ~{quant_overhead:.1f} GB for bitsandbytes dequant/compute buffers.",
             f"+{_RUNTIME_OVERHEAD_GB:.0f} GB fixed runtime overhead.",
             "Calibrated to a real Qwen2.5-7B 4-bit QLoRA memory sweep (base ~7.9 GB + ~2.85 GB/1024 tokens).",

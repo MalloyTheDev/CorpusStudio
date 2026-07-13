@@ -20,9 +20,12 @@ history (capture/card/diff/restore) — all local-first and file-backed.
 The most recent re-scope adds a **headless platform run lifecycle**: a language-neutral contracts
 substrate (RunPlan / RunEvent / BackendManifest) that turns goal + data + hardware into a validated,
 reproducible run — profile → plan → predict-fit → run → measure-fit → artifacts — with a **multi-backend
-"pick your framework" registry** (`corpus_studio`, `unsloth`; Unsloth honestly refused on Blackwell),
+"pick your framework" registry** (`corpus_studio`, `unsloth`; Unsloth honestly refused where the
+native-Windows Blackwell math path is mandatory),
 a **calibrator + watchdog** (predicted-vs-measured fit, spill/stall detection), and a **supervised
-subprocess worker** that can KILL a hung run. It's exercised by a new **Tauri 2 + React** contract-first
+subprocess worker** that can KILL a hung run. Worker protocol 2.0 now binds the exact backend-manifest
+digest and environment/lock ref before dispatch, then fail-closes message order and terminal lineage.
+It's exercised by a new **Tauri 2 + React** contract-first
 client (`apps/web`) alongside the WPF (shipping) and Avalonia (interim) heads. The whole lifecycle was
 verified end-to-end on a real RTX 5070 (Blackwell/sm_120) under native Windows/WDDM, including a real
 GPU QLoRA run. Native-Linux training and real CPU/NVMe offload are still unverified.
@@ -140,8 +143,17 @@ input side. Ordered:
   immutable review, legacy migration, atomic generation reports, trainer approval gating, generated
   JSON Schema/TypeScript, and a desktop-selectable trace draft schema. A dedicated graphical Trace
   Studio and tool/process trainers remain future work. See [`TRACE_RECORDS.md`](TRACE_RECORDS.md).
-- ✅ **Static MoE model inspection**; next are additional isolated backend contracts/fake-worker tests,
-  Environment Manager lock/drift hardening, desktop/web contract integration, and dataset mixtures.
+- ✅ **Static MoE model inspection** — allowlisted, hash-pinned topology evidence only.
+- ✅ **Backend worker protocol 2.0 + fake-worker conformance foundation** — worker-first
+  backend/environment identity, strict typed messages, correlation/order/lineage enforcement, and
+  managed recipe-target/lock checks, public-entry plan-seal verification, and bounded worker-tree
+  termination. This is not a real new training backend. See
+  [`BACKEND_WORKER_PROTOCOL.md`](BACKEND_WORKER_PROTOCOL.md).
+- **Next: effective execution truth.** Seal and enforce one fully resolved first-party trainer
+  configuration (immutable input refs, per-state precision, exact attention toggles, explicit device
+  map, all semantic trainer defaults, no post-seal overrides or silent field removal) and require the
+  worker to echo its effective hash before model load. Then continue desktop/web integration and
+  Environment Manager drift cases; add another dense backend only after this chain closes.
 
 - **Surface the LLM judge in the Evaluation tab** — the `--judge-model` scorer ships in
   the engine and in suites, but the desktop Evaluation tab still has no judge-model field.

@@ -40,15 +40,15 @@ actionable diagnoses. » one-sentence result summary.
 
 ## III. Empirical Findings — Silent Failures
 ### A. A Windows-only fused-attention deadlock on Blackwell
-The fused flash SDPA *backward* deadlocks on sm_120 — but **only under the native-Windows WDDM driver**.
-It is *not* an sm_120 kernel bug: the identical kernel runs on WSL2 and Linux. » Table: MATH ~10466 ms
-vs. FLASH ~9 ms vs. MEM_EFFICIENT ~7 ms (raw kernel, WSL2, seq-1536, fwd+bwd). Misattributing this to
-the architecture (vs. the driver model) is the trap; the fix is OS-aware, not arch-aware.
+The fused flash SDPA *backward* deadlocks on sm_120 under the native-Windows WDDM driver. The identical
+kernel passed under WSL2; bare Linux is still unverified and must not be inferred from that result.
+» Table: MATH ~10466 ms vs. FLASH ~9 ms vs. MEM_EFFICIENT ~7 ms (raw kernel, WSL2, seq-1536,
+fwd+bwd). The guard is evidence-aware and WDDM-specific, while every other host still needs a probe.
 
 ### B. Divergent GPU behavior across native Windows / WSL2 / Linux
-The same card behaves as three platforms. » Table (attention viability; over-VRAM behavior = spill /
-wedge / clean-OOM; direct vs. WDDM vs. GPU-PV access). WSL2 is a *hybrid*: Linux CUDA (flash works)
-over the Windows host (WDDM spill) — flash-safe like Linux, spill-prone like Windows.
+The same card is represented as three platforms. » Table (measured Windows/WSL attention and spill
+behavior; unverified Linux cells; direct vs. WDDM vs. GPU-PV access). WSL2 is a measured hybrid:
+Linux CUDA userspace with WDDM-backed residency. Its evidence is not a bare-Linux result.
 
 ### C. Memory & sequence-length walls for 7B QLoRA on 12 GB
 Raw flash attention is O(seq) and trivially fits (» 0.35 GB @ seq-4096); the *full model* is the wall.
@@ -82,7 +82,8 @@ from a failed run is `NATIVE_UNPROVEN`); an observed spill classifies as `ACCIDE
 non-zero shared-memory fingerprint. → III.C.
 ### C. Per-OS platform detection & safe defaults
 `OperatingSystem.{windows,wsl,linux}` + memory-residency model; the fused-flash-disable fires only on
-native-Windows+Blackwell; WSL/Linux keep flash and the capability probe *proves* it. → III.A, III.B.
+native-Windows+Blackwell; elsewhere the probe must PASS on the exact environment before it proves
+flash. WSL evidence and the unverified bare-Linux lane remain explicitly separate. → III.A, III.B.
 ### D. Guardrails
 Truncation guardrail (warn when `seq_len` cuts the data; a pre-run `dataset-tokens` gate) → III.D;
 GPU-health probe that classifies a *wedged* GPU and emits the OS-specific reset → III.E; actionable

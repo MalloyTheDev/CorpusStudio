@@ -99,7 +99,8 @@ Shipped first-party run backends (selectable via `platform-plan --backend`, "pic
   flash attention). The Blackwell-safe default.
 - **`unsloth`** — the accelerated 4-bit QLoRA path (flash/sdpa kernels; **honestly refused on
   native-Windows Blackwell/sm_120**, which is forced onto the math path Unsloth doesn't provide.
-  On **WSL/Linux** flash works, so Unsloth's sdpa is accepted on Blackwell there).
+  Outside native Windows it is selectable only when that exact environment proves the required
+  SDPA capability. WSL evidence does not verify bare Linux).
 
 Planned additional config targets (external-launcher / config-generation): Axolotl, Hugging Face
 Trainer, LLaMA-Factory, llama.cpp fine-tuning where applicable. Corpus Studio generates tool-specific
@@ -222,12 +223,11 @@ Windows**. WSL2 testing on the 5070 showed the same flash kernel running ~1000×
 fallback. Bare-Linux FlashAttention has not yet been verified on the final machine, so WSL evidence
 must not be reported as a native-Linux result.
 
-CorpusStudio treats **WSL as its own platform** (`OperatingSystem.wsl`): flash-safe like Linux,
-but `wddm` memory-residency like Windows (it still spills — see below). So `train-run` disables
-the flash backend **only on native Windows + Blackwell**; on WSL/Linux it keeps flash, the
-capability probe actually runs the flash backward and proves it, and `platform-plan` **seals
-`sdpa` instead of `math`**. `train-check` notes which path applies to your host. Running a
-long-sequence 7B QLoRA on Blackwell? Prefer **WSL** to get the memory-efficient flash path.
+CorpusStudio treats **WSL as its own platform** (`OperatingSystem.wsl`): it has separately measured
+flash evidence but `wddm` memory-residency like Windows (it still spills — see below). `train-run`
+disables flash automatically only for the known native-Windows + Blackwell hazard. On another host,
+leaving flash enabled is not proof: the capability probe must run the backward operation and PASS
+before `platform-plan` can seal `sdpa`. Bare-Linux RTX 5070 behavior remains unverified.
 
 The real ceiling (measured, and it is **not** an attention-kernel problem): on a **12 GB** card
 the 7B 4-bit QLoRA training peak is ~10.8 GB @ `sequence_len` 1024 → 13.8 GB @ 2048, so above

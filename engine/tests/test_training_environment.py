@@ -83,9 +83,8 @@ def test_low_vram_gpu_warns_about_merge(monkeypatch):
 
 
 def test_blackwell_gpu_note_is_os_aware(monkeypatch):
-    # sm_120: on NATIVE WINDOWS the trainer forces math SDPA (the WDDM flash deadlock); on WSL/Linux
-    # flash SDPA is available. The preflight note must reflect the ACTUAL host, not a blanket "forces
-    # math" — that is the whole point of treating WSL as its own platform.
+    # sm_120: native Windows forces math for the measured WDDM deadlock. Another OS is not subject to
+    # that known-hazard guard, but OS detection alone must not claim a passing flash capability.
     _patch(
         monkeypatch,
         {p: "1.0" for p in _FULL},
@@ -97,7 +96,10 @@ def test_blackwell_gpu_note_is_os_aware(monkeypatch):
 
     monkeypatch.setattr(env.sys, "platform", "linux")
     lin_notes = env.probe_training_runtime().notes
-    assert any("Blackwell" in n and "flash SDPA attention is available" in n for n in lin_notes)
+    assert any(
+        "Blackwell" in n and "not established by OS detection" in n and "bare Linux" in n
+        for n in lin_notes
+    )
     assert not any("forces the math" in n for n in lin_notes)
 
 

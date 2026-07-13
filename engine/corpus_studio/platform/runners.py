@@ -325,7 +325,11 @@ def demo_training_plan(plan_id: str = "demo-cpu-toy") -> RunPlan:
     body = demo_run_plan(plan_id).model_dump(mode="json")
     body["task_type"] = "sft"
     body["base_model"] = "hf-internal-testing/tiny-random-gpt2"
-    body["backend_ref"] = {"id": "corpus_studio"}  # coherent for both the cpu_toy + corpus_studio paths
+    from corpus_studio.platform.backends import backend_manifest_ref, get_backend  # noqa: PLC0415
+
+    backend = get_backend("corpus_studio")
+    assert backend is not None  # built-in training backend
+    body["backend_ref"] = backend_manifest_ref(backend).model_dump(mode="json")
     body["training_config_snapshot"] = {
         "base_model": "hf-internal-testing/tiny-random-gpt2",
         "dataset_path": "examples/datasets/instruction/train.jsonl",

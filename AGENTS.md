@@ -24,7 +24,8 @@ Three surfaces:
   profiler + static, offline model/tokenizer descriptors and inspection + the sealed,
   backend-independent TrainingObjective registry and compatibility evidence checker + the versioned,
   provenance/review-safe TraceRecord workflow + hash-pinned, allowlisted static MoE topology evidence
-  (never runtime capability proof).
+  (never runtime capability proof) + the identity-bound worker protocol 2.0 and fake-worker
+  conformance/process-tree boundary (not a real new backend).
 - **UI** — WPF + Avalonia (`apps/desktop`, C#) and Tauri 2 + React (`apps/web`, TS). UI is a client
   over the engine CLI; it never owns training behavior.
 

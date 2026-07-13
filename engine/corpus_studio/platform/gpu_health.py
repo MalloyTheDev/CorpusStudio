@@ -92,7 +92,10 @@ def spill_remediation(fit_class: FitClass, os_value: OperatingSystem) -> str:
         "a smaller base model / LoRA rank, or add VRAM."
     )
     if os_value == OperatingSystem.linux:
-        guidance += " On bare Linux this configuration would hard-OOM instead of spilling."
+        guidance += (
+            " On bare Linux the dedicated-memory model predicts a hard OOM instead of WDDM spill; "
+            "that prediction is not a measured fit result."
+        )
     return guidance
 
 

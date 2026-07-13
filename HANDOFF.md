@@ -38,7 +38,7 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
 
 ## 2. Current git / PR state
 
-`main` is the source of truth; everything through **#416 is merged**:
+`main` is the source of truth; everything through **#417 is merged**:
 - **#404** configurable checkpoint retention · **#405** StorageProfile + the dependency-architecture
   correction · **#406** Environment Manager substrate (Phase 2 slice 1) · **#407** storage USB/WSL
   runtime-role risks + storage-vs-not failure diagnostic · **#408** HANDOFF/AGENTS · **#409**
@@ -59,14 +59,25 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   hash/policy/source/review evidence, legacy migration, explicit reviewed successors, external
   provider-authority and trainer gates, generated clients, and a desktop-selectable trace draft schema.
   See `docs/TRACE_RECORDS.md`.
-- **#417 is the Phase 8 static MoE model-inspection PR**: bounded, hash-pinned parsing for exact
+- **#417 merged the Phase 8 static MoE model-inspection foundation** as
+  `3262de48d106f39e8e28968c080c1461d9a68942`: bounded, hash-pinned parsing for exact
   Mixtral, Qwen2-MoE, DeepSeek V2, and DeepSeek V3 config mappings; component-scoped routed/shared
   expert groups; derived expert-instance counts; pre-Phase-8 descriptor migration; generated clients;
-  and explicit static-only/non-runtime evidence. Verify its live CI/merge state rather than inferring it
-  from this snapshot. Its local gate was Ruff clean, MyPy clean (122 files), 1,434 Python tests passed /
+  and explicit static-only/non-runtime evidence. Its local gate was Ruff clean, MyPy clean (122 files),
+  1,434 Python tests passed /
   6 skipped / 88.47% Windows coverage, deterministic 27-root schema/TypeScript generation, web
   production build, 815 desktop tests, and zero-warning WPF/Avalonia Release builds. See
   `docs/MOE_MODEL_INSPECTION.md`.
+- **#418 is the Phase 9A backend-worker protocol/isolation PR** (`feat/backend-worker-contracts`):
+  protocol 2.0 worker-first
+  backend/environment identity, typed envelope/state-machine validation, managed recipe/lock/backend
+  binding, pre-run seal checks at both public execution entry points, and shared bounded process-tree
+  termination with a real descendant fake-worker test. It adds no new training backend or hardware
+  capability. The final local gate is Ruff clean, MyPy clean (124 files), 1,450 Python tests passed /
+  6 skipped / 88.38% Windows coverage, deterministic 27-root schema/TypeScript generation, web
+  production build, 815 desktop tests, and zero-warning WPF/Avalonia Release builds. See
+  `docs/BACKEND_WORKER_PROTOCOL.md`. Verify its live CI/merge state rather than inferring it from this
+  snapshot.
 
 ## 3. The architecture North Star + binding directives
 
@@ -101,8 +112,8 @@ The big epic (memory `platform-architecture-epic`). Non-negotiables the user has
 - **Revised foundational order** (do these in order): 1 StorageProfile ✅ → 2 Env Manager reference
   lifecycle ✅ → 3 `ModelDescriptor` + `TokenizerDescriptor` foundation ✅ → 4 `TrainingObjective`
   registry ✅ → 5 parameter accounting ✅ → 6 `RunPlan` expansion ✅ → 7 `TraceRecord` ✅ → 8 static
-  MoE inspection ✅ (PR #417) → 9 dense backends → 10 existing-model MoE FT → 11 full MoE → 12 resource-elastic
-  expert runtime.
+  MoE inspection ✅ (PR #417) → 9A worker protocol/isolation → 9B effective execution truth → 9C dense
+  backends → 10 existing-model MoE FT → 11 full MoE → 12 resource-elastic expert runtime.
 
 ## 4. How to build + verify (the gate)
 
@@ -151,8 +162,8 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 - **Blackwell / sm_120**: force the **math** attention path — the fused flash-SDPA kernel **deadlocks
   on the first backward under native-Windows WDDM** (high GPU util, low power). WSL flash was measured
   separately; bare-Linux FlashAttention remains unverified until the final machine is available.
-  Unsloth is honestly **refused on Blackwell** (it declares no math path) and routed to
-  `backend-corpus-studio`.
+  Unsloth is honestly **refused on native-Windows/WDDM Blackwell** (it declares no math path) and
+  routed to `backend-corpus-studio`. Other hosts still need their own exact functional evidence.
 - **Dependency-light boundary**: `import corpus_studio.platform` pulls **no torch**; all heavy imports
   are lazy inside `run()`/functions. There is a test that asserts this.
 - **Storage guardrail (new, #405/#407)**: USB/`/mnt`-WSL/cloud-sync/in-repo/near-full paths are
@@ -160,10 +171,14 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 7. Immediate next actions (ranked)
 
-1. **Verify the live state of #417.** Finish its CI/review/merge before the next coherent slice; do not
-   call static topology evidence MoE execution or runtime capability.
-2. **Phase 9 — isolated backend contracts + fake-worker tests.** Make the next dense backend boundary
-   explicit without installing or exercising the NVIDIA/CUDA stack on the temporary machine.
+1. **Finish Phase 9A as one CI-green PR.** Verify and merge #418; do not call
+   protocol conformance, process isolation, or static topology evidence runtime capability.
+2. **Phase 9B — effective execution truth (highest priority).** The 2026-07-13 audit was reconciled
+   against live post-#417 code and confirmed plan/runtime drift around attention enforcement, precision,
+   `device_map="auto"`, optimizer/loss admission, semantic field filtering, runtime overrides/defaults,
+   mutable input identities, chat-template fallback, and swallowed first-256 truncation analysis. Add
+   one hash-sealed resolved configuration consumed and echoed by the worker; refuse deviations. Do this
+   before DeepSpeed, FSDP, offload, or another dense backend.
 3. **Continue hardware-independent hardening while the PCIe/NVMe adapter is pending:** Environment
    Manager lock/drift tests and desktop/web contract integration. Keep non-trivial placement/offload
    execution unimplemented until an isolated backend proves it.
@@ -226,6 +241,10 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   the verified config digest/paths, reports expert-instance structure, and leaves all runtime,
   backend, placement, residency, fit, and hardware claims unverified. See
   `docs/MOE_MODEL_INSPECTION.md`.
+- **Worker protocol/isolation** (Phase 9A): `platform/worker_protocol.py`,
+  `subprocess_supervisor.py`, `process_control.py`, `worker.py`, and `backends.py`; exact backend and
+  environment identity, strict message ordering/lineage, pre-run seal checks, and process-tree cleanup.
+  See `docs/BACKEND_WORKER_PROTOCOL.md`.
 - **Storage**: `platform/storage_profiler.py` (topology + per-role safe-spill guardrail + failure
   diagnostic).
 - **Trainer**: `training/trainer.py` (+ `unsloth_trainer.py`). CLI: `engine/corpus_studio/cli.py`
@@ -233,7 +252,8 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 - **Docs**: source of truth `docs/CURRENT_STATE.md`; plan `docs/IMPLEMENTATION_PLAN.md`; MoE
   `docs/MOE_ARCHITECTURE.md`; storage `docs/HARDWARE_STORAGE_PROFILE.md`; env
   `docs/ENVIRONMENT_MANAGER.md`; objectives `docs/TRAINING_OBJECTIVES.md`; parameter evidence
-  `docs/PARAMETER_ACCOUNTING.md`; platform run `docs/PLATFORM_RUN.md`.
+  `docs/PARAMETER_ACCOUNTING.md`; platform run `docs/PLATFORM_RUN.md`; worker boundary
+  `docs/BACKEND_WORKER_PROTOCOL.md`.
 - **Claude memory** (persists across Claude sessions): `C:\Users\Brend\.claude\projects\F--CorpusStudio\memory\`
   — start at `MEMORY.md` (index); `platform-architecture-epic.md` is the big one;
   `storage-migration-c-drive.md` records this move.

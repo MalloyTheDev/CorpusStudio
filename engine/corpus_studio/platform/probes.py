@@ -12,9 +12,9 @@ inside a probe body, so a core-only install still runs the framework and reports
 The one probe that must not actually execute on **native-Windows** Blackwell sm_120 is
 ``flash_attn_backward``: the fused flash SDPA backward deadlocks on the first backward under the
 Windows WDDM driver (documented in ``training/environment.py``), so there it short-circuits to
-``KERNEL_STALL`` rather than hanging the probe process. On **WSL / bare Linux** the same sm_120 kernel
-runs fine (verified on a real 5070 under WSL2), so the probe executes and proves flash/sdpa — see
-``host_platform.flash_sdpa_deadlocks`` for the exact native-Windows-only condition.
+``KERNEL_STALL`` rather than hanging the probe process. Outside native Windows, the known WDDM refusal
+does not apply, so the probe executes and must itself PASS before it proves flash/sdpa. WSL has
+separately labeled passing evidence; bare-Linux RTX 5070 behavior remains unverified.
 """
 
 from __future__ import annotations
@@ -129,14 +129,14 @@ def _probe_bnb_4bit_load(profile: EnvironmentProfile) -> ProbeOutcome:
 def _probe_flash_attn_backward(profile: EnvironmentProfile) -> ProbeOutcome:
     # Known-hazard short-circuit: the fused flash SDPA backward deadlocks on Blackwell sm_120 ONLY
     # under the native-Windows WDDM driver. Report it WITHOUT executing THERE so the probe never hangs.
-    # On WSL / bare Linux the same sm_120 kernel runs fine (verified on a real 5070 under WSL2), so the
-    # probe DOES execute and proves flash/sdpa — the whole reason WSL unlocks the memory-efficient path.
+    # Outside native Windows the known WDDM refusal does not apply, so the probe executes. Only its
+    # PASS result proves flash/sdpa on that exact host. WSL evidence does not prove bare-Linux behavior.
     if flash_sdpa_deadlocks(profile.host.os, _max_cc_major(profile)):
         return ProbeOutcome(
             _TX.KERNEL_STALL,
             "native Windows + sm_120 (Blackwell): the fused flash SDPA backward deadlocks under the "
             "Windows WDDM driver — not executed to avoid hanging the probe; use math/eager SDPA, or "
-            "run under WSL where flash is safe.",
+            "use a non-WDDM host only after its flash capability probe passes.",
         )
     try:
         import torch  # noqa: PLC0415

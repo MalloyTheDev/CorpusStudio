@@ -2,12 +2,11 @@
 residency model, and the Blackwell flash-SDPA deadlock. Pure stdlib; no torch, no heavy imports
 (``import corpus_studio.platform`` stays torch-free).
 
-WSL is a DISTINCT platform, not "Windows" and not bare "Linux" (see :class:`OperatingSystem.wsl`):
-it runs a Linux CUDA userspace, so the fused FLASH SDPA backward that DEADLOCKS on native Windows
-(WDDM) runs fine here — verified on a real RTX 5070 under WSL2 — yet its GPU memory still spills to
-shared system RAM through the host WDDM driver (``wddm`` residency), degrading to slow-but-training
-instead of hard-OOMing like bare Linux. So the flash-disable workaround must fire on **native
-Windows only**, never on WSL/Linux, while the spill-vs-OOM fit model treats WSL like Windows.
+WSL is a DISTINCT platform, not "Windows" and not bare "Linux" (see :class:`OperatingSystem.wsl`).
+The fused FLASH SDPA backward that DEADLOCKS on native Windows (WDDM) has separate passing evidence
+under WSL2 on an RTX 5070. WSL GPU memory still spills to shared system RAM through the host WDDM
+driver (``wddm`` residency). The known-deadlock guard therefore fires on native Windows only; every
+other host still needs its own capability result. Bare-Linux RTX 5070 behavior remains unverified.
 """
 
 from __future__ import annotations
@@ -44,7 +43,8 @@ def is_wsl() -> bool:
 
 def detect_operating_system() -> tuple[OperatingSystem, MemoryResidencyModel]:
     """Map the running host to ``(OperatingSystem, MemoryResidencyModel)``. WSL is its own platform:
-    ``os=wsl`` (flash-safe, Linux CUDA) with ``wddm`` residency (spills via the host, like Windows)."""
+    ``os=wsl`` with ``wddm`` residency (spills via the host, like Windows). Capability remains a
+    separate probe result, not an implication of this OS label."""
     system = platform.system()
     if system == "Windows":
         return OperatingSystem.windows, MemoryResidencyModel.wddm
@@ -67,9 +67,9 @@ def is_native_windows(os_value: OperatingSystem | None = None) -> bool:
 
 def flash_sdpa_deadlocks(os_value: OperatingSystem | None, cc_major: int | None) -> bool:
     """The fused FLASH SDPA backward deadlocks ONLY on native Windows (WDDM) + Blackwell (sm_120,
-    ``cc_major >= 12``). WSL and bare Linux run the same kernel fine (verified on a real 5070 under
-    WSL2), so they must NOT be special-cased. ``os_value=None`` is treated as 'not native Windows'
-    (unknown host → do not disable a kernel we can't prove is on the WDDM path)."""
+    ``cc_major >= 12``). Other platforms are not special-cased by this KNOWN-HAZARD predicate; that is
+    not a positive capability claim, and their flash probe must still pass. ``os_value=None`` is
+    treated as 'not native Windows' because the WDDM condition is not established."""
     return (
         os_value == OperatingSystem.windows
         and cc_major is not None

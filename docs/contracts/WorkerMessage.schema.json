@@ -1,18 +1,5194 @@
 {
+  "$defs": {
+    "AcceleratorRuntime": {
+      "additionalProperties": false,
+      "properties": {
+        "cuda_driver_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cuda Driver Version"
+        },
+        "cuda_runtime_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cuda Runtime Version"
+        },
+        "driver_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Driver Version"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeviceKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "mps_available": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mps Available"
+        },
+        "nvidia_smi_available": {
+          "default": false,
+          "title": "Nvidia Smi Available",
+          "type": "boolean"
+        },
+        "rocm_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rocm Version"
+        }
+      },
+      "title": "AcceleratorRuntime",
+      "type": "object"
+    },
+    "AdapterMethod": {
+      "enum": [
+        "none",
+        "lora",
+        "qlora",
+        "dora",
+        "ia3",
+        "full_finetune",
+        "prompt_tuning",
+        "prefix_tuning"
+      ],
+      "title": "AdapterMethod",
+      "type": "string"
+    },
+    "AdapterSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "lora_alpha": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lora Alpha"
+        },
+        "lora_dropout": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lora Dropout"
+        },
+        "lora_r": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lora R"
+        },
+        "method": {
+          "$ref": "#/$defs/AdapterMethod"
+        },
+        "target_modules": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Modules"
+        }
+      },
+      "required": [
+        "method"
+      ],
+      "title": "AdapterSpec",
+      "type": "object"
+    },
+    "AllocatorPolicy": {
+      "enum": [
+        "default",
+        "expandable_segments",
+        "max_split_size",
+        "garbage_collection"
+      ],
+      "title": "AllocatorPolicy",
+      "type": "string"
+    },
+    "ArtifactIntegrity": {
+      "additionalProperties": false,
+      "description": "Two-tier integrity: cheap size+mtime fingerprint powers the fast LIST; content_hash (sha256\nover weight bytes) powers the promote GATE. ``current_integrity`` is computed LIVE at read.",
+      "properties": {
+        "cheap_fingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cheap Fingerprint"
+        },
+        "content_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Hash"
+        },
+        "current_integrity": {
+          "default": "unknown",
+          "enum": [
+            "ok",
+            "missing",
+            "modified",
+            "unknown"
+          ],
+          "title": "Current Integrity",
+          "type": "string"
+        }
+      },
+      "title": "ArtifactIntegrity",
+      "type": "object"
+    },
+    "ArtifactManifest": {
+      "additionalProperties": false,
+      "description": "A first-class record of a weight artifact a run produced. Formalizes\nartifact_registry.ModelArtifactRecord + its two-tier integrity model. The platform NEVER\nmoves/copies/deletes the underlying weights \u2014 the manifest only references + re-checks them.",
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "base_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Model"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created At"
+        },
+        "integrity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactIntegrity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "default": "adapter",
+          "enum": [
+            "adapter",
+            "checkpoint",
+            "merged_model",
+            "gguf",
+            "onnx",
+            "quantized",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        },
+        "parameter_accounting_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "producer_run_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "reload_verified": {
+          "default": false,
+          "title": "Reload Verified",
+          "type": "boolean"
+        },
+        "status": {
+          "default": "candidate",
+          "enum": [
+            "candidate",
+            "kept",
+            "rejected"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Updated At"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "producer_run_ref",
+        "path"
+      ],
+      "title": "ArtifactManifest",
+      "type": "object"
+    },
+    "AsServed": {
+      "additionalProperties": false,
+      "description": "How the model was actually served \u2014 the RAW-vs-AS-SERVED axis. Two evals of the 'same' model\ndiffer if quantization/adapter/template/decoding differ.",
+      "properties": {
+        "adapter_applied": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Adapter Applied"
+        },
+        "backend": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backend"
+        },
+        "chat_template_applied": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chat Template Applied"
+        },
+        "decoding": {
+          "additionalProperties": true,
+          "title": "Decoding",
+          "type": "object"
+        },
+        "precision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PrecisionMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "quantization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuantizationMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "AsServed",
+      "type": "object"
+    },
+    "AttentionImpl": {
+      "description": "``math``/``eager`` is forced on native-Windows/WDDM Blackwell sm_120 because the fused flash\nkernel deadlocks there. Other platforms require their own functional capability result; WSL\nevidence is not bare-Linux proof.",
+      "enum": [
+        "math",
+        "eager",
+        "sdpa",
+        "flash_attention_2",
+        "flash_attention_3",
+        "mem_efficient",
+        "xformers"
+      ],
+      "title": "AttentionImpl",
+      "type": "string"
+    },
+    "BackendManifest": {
+      "additionalProperties": false,
+      "description": "A backend worker's STATIC self-declaration of everything it can do \u2014 the core reads this to\ndecide which backend can even attempt a RunPlan, BEFORE dispatch. Mostly NEW; generalizes the\ninference model_backends.base.ModelBackend Protocol + training/compatibility into a declarable\nmanifest for a TRAINING backend.",
+      "properties": {
+        "adapter_methods": {
+          "items": {
+            "$ref": "#/$defs/AdapterMethod"
+          },
+          "title": "Adapter Methods",
+          "type": "array"
+        },
+        "attention_impls": {
+          "items": {
+            "$ref": "#/$defs/AttentionImpl"
+          },
+          "title": "Attention Impls",
+          "type": "array"
+        },
+        "backend_id": {
+          "minLength": 1,
+          "title": "Backend Id",
+          "type": "string"
+        },
+        "backend_version": {
+          "title": "Backend Version",
+          "type": "string"
+        },
+        "capability_probes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Capability Probes",
+          "type": "array"
+        },
+        "checkpoint_impls": {
+          "items": {
+            "$ref": "#/$defs/CheckpointImpl"
+          },
+          "title": "Checkpoint Impls",
+          "type": "array"
+        },
+        "checkpoint_semantics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckpointSemantics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "communication_backends": {
+          "items": {
+            "$ref": "#/$defs/CommunicationBackend"
+          },
+          "title": "Communication Backends",
+          "type": "array"
+        },
+        "compile_modes": {
+          "items": {
+            "$ref": "#/$defs/CompileMode"
+          },
+          "title": "Compile Modes",
+          "type": "array"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "dependency_conflicts": {
+          "items": {
+            "$ref": "#/$defs/DependencyConflict"
+          },
+          "title": "Dependency Conflicts",
+          "type": "array"
+        },
+        "dependency_requirements": {
+          "items": {
+            "$ref": "#/$defs/DependencyRequirement"
+          },
+          "title": "Dependency Requirements",
+          "type": "array"
+        },
+        "display_name": {
+          "default": "",
+          "title": "Display Name",
+          "type": "string"
+        },
+        "environment_lock_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "export_compatibility": {
+          "items": {
+            "$ref": "#/$defs/ExportCompatibilityEntry"
+          },
+          "title": "Export Compatibility",
+          "type": "array"
+        },
+        "export_formats": {
+          "items": {
+            "$ref": "#/$defs/ExportFormat"
+          },
+          "title": "Export Formats",
+          "type": "array"
+        },
+        "known_failure_modes": {
+          "items": {
+            "$ref": "#/$defs/KnownFailureMode"
+          },
+          "title": "Known Failure Modes",
+          "type": "array"
+        },
+        "loss_impls": {
+          "items": {
+            "$ref": "#/$defs/LossImpl"
+          },
+          "title": "Loss Impls",
+          "type": "array"
+        },
+        "model_families": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Model Families",
+          "type": "array"
+        },
+        "objective_capabilities": {
+          "items": {
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "type": "string"
+          },
+          "title": "Objective Capabilities",
+          "type": "array"
+        },
+        "offload_strategies": {
+          "items": {
+            "$ref": "#/$defs/OffloadStrategy"
+          },
+          "title": "Offload Strategies",
+          "type": "array"
+        },
+        "optimizers": {
+          "items": {
+            "$ref": "#/$defs/Optimizer"
+          },
+          "title": "Optimizers",
+          "type": "array"
+        },
+        "parallelism_kinds": {
+          "items": {
+            "$ref": "#/$defs/ParallelismKind"
+          },
+          "title": "Parallelism Kinds",
+          "type": "array"
+        },
+        "placement_modes": {
+          "items": {
+            "$ref": "#/$defs/PlacementMode"
+          },
+          "title": "Placement Modes",
+          "type": "array"
+        },
+        "placement_tiers": {
+          "items": {
+            "$ref": "#/$defs/MemoryTier"
+          },
+          "title": "Placement Tiers",
+          "type": "array"
+        },
+        "precision_modes": {
+          "items": {
+            "$ref": "#/$defs/PrecisionMode"
+          },
+          "title": "Precision Modes",
+          "type": "array"
+        },
+        "quantization_modes": {
+          "items": {
+            "$ref": "#/$defs/QuantizationMode"
+          },
+          "title": "Quantization Modes",
+          "type": "array"
+        },
+        "required_compute_capability": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Required Compute Capability"
+        },
+        "supported_devices": {
+          "items": {
+            "$ref": "#/$defs/DeviceKind"
+          },
+          "minItems": 1,
+          "title": "Supported Devices",
+          "type": "array"
+        },
+        "supported_os": {
+          "items": {
+            "$ref": "#/$defs/OperatingSystem"
+          },
+          "minItems": 1,
+          "title": "Supported Os",
+          "type": "array"
+        },
+        "task_types": {
+          "items": {
+            "$ref": "#/$defs/TaskType"
+          },
+          "minItems": 1,
+          "title": "Task Types",
+          "type": "array"
+        },
+        "telemetry_hooks": {
+          "items": {
+            "$ref": "#/$defs/TelemetryHook"
+          },
+          "title": "Telemetry Hooks",
+          "type": "array"
+        },
+        "trainer_target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrainerTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "backend_id",
+        "backend_version",
+        "supported_os",
+        "supported_devices",
+        "task_types"
+      ],
+      "title": "BackendManifest",
+      "type": "object"
+    },
+    "BatchingSpec": {
+      "additionalProperties": false,
+      "description": "The accumulation TARGET is expressed in SUPERVISED TOKENS, not microbatch count. A\ntoken-target-CAPABLE backend accumulates until summed supervised tokens >= target and normalizes\nthe loss by supervised tokens across the window, so the effective batch is invariant to sequence\nlength + padding. The first-party ``corpus_studio`` reference trainer is NOT token-target-capable\ntoday \u2014 it honors ``fallback_grad_accumulation_steps`` (a fixed microbatch count); the token\ntarget is the contract a future token-aware backend would satisfy.",
+      "properties": {
+        "fallback_grad_accumulation_steps": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback Grad Accumulation Steps"
+        },
+        "micro_batch_size": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Micro Batch Size",
+          "type": "integer"
+        },
+        "supervised_token_accumulation_target": {
+          "minimum": 1,
+          "title": "Supervised Token Accumulation Target",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "supervised_token_accumulation_target"
+      ],
+      "title": "BatchingSpec",
+      "type": "object"
+    },
+    "CapabilityProbeRequestBody": {
+      "additionalProperties": false,
+      "description": "Core\u2192worker: run these probes on this host and reply with a CapabilityReport.",
+      "properties": {
+        "environment_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "probes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Probes",
+          "type": "array"
+        }
+      },
+      "title": "CapabilityProbeRequestBody",
+      "type": "object"
+    },
+    "CapabilityReport": {
+      "additionalProperties": false,
+      "description": "The DYNAMIC, measured counterpart of a BackendManifest: probe results against a specific\nEnvironmentProfile. Formalizes environment.probe_training_runtime (ready/cpu_toy_ready/\nbitsandbytes_ok/notes) and generalizes it to per-probe outcomes tagged with FailureTaxonomy.",
+      "properties": {
+        "backend_id": {
+          "title": "Backend Id",
+          "type": "string"
+        },
+        "backend_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backend Version"
+        },
+        "bitsandbytes_ok": {
+          "default": false,
+          "title": "Bitsandbytes Ok",
+          "type": "boolean"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "effective_capabilities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EffectiveCapabilities"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "environment_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "generated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Generated At"
+        },
+        "installed_packages": {
+          "items": {
+            "$ref": "#/$defs/PackageLock"
+          },
+          "title": "Installed Packages",
+          "type": "array"
+        },
+        "missing_packages": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Missing Packages",
+          "type": "array"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "probe_results": {
+          "items": {
+            "$ref": "#/$defs/ProbeResult"
+          },
+          "title": "Probe Results",
+          "type": "array"
+        },
+        "readiness": {
+          "enum": [
+            "ready",
+            "cpu_toy_only",
+            "not_ready"
+          ],
+          "title": "Readiness",
+          "type": "string"
+        }
+      },
+      "required": [
+        "backend_id",
+        "environment_ref",
+        "readiness"
+      ],
+      "title": "CapabilityReport",
+      "type": "object"
+    },
+    "CheckpointImpl": {
+      "enum": [
+        "full_state",
+        "adapter_only",
+        "sharded",
+        "distcp",
+        "safetensors"
+      ],
+      "title": "CheckpointImpl",
+      "type": "string"
+    },
+    "CheckpointPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "cadence_optimizer_steps": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cadence Optimizer Steps"
+        },
+        "cadence_seconds": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cadence Seconds"
+        },
+        "impl": {
+          "$ref": "#/$defs/CheckpointImpl"
+        },
+        "keep_last": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keep Last"
+        },
+        "reload_verify": {
+          "default": false,
+          "title": "Reload Verify",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "impl"
+      ],
+      "title": "CheckpointPolicy",
+      "type": "object"
+    },
+    "CheckpointSemantics": {
+      "additionalProperties": false,
+      "properties": {
+        "contains": {
+          "items": {
+            "enum": [
+              "adapter_weights",
+              "base_weights",
+              "optimizer_state",
+              "lr_scheduler",
+              "rng_state",
+              "trainer_state"
+            ],
+            "type": "string"
+          },
+          "title": "Contains",
+          "type": "array"
+        },
+        "reload_verifiable": {
+          "default": false,
+          "title": "Reload Verifiable",
+          "type": "boolean"
+        },
+        "resumable": {
+          "default": false,
+          "title": "Resumable",
+          "type": "boolean"
+        }
+      },
+      "title": "CheckpointSemantics",
+      "type": "object"
+    },
+    "CommunicationBackend": {
+      "enum": [
+        "none",
+        "nccl",
+        "gloo",
+        "mpi",
+        "ucc",
+        "backend_native"
+      ],
+      "title": "CommunicationBackend",
+      "type": "string"
+    },
+    "CompileMode": {
+      "enum": [
+        "none",
+        "eager",
+        "reduce_overhead",
+        "max_autotune",
+        "aot_inductor"
+      ],
+      "title": "CompileMode",
+      "type": "string"
+    },
+    "CountHandling": {
+      "enum": [
+        "included",
+        "excluded",
+        "deduplicated",
+        "represented_separately",
+        "not_applicable",
+        "unknown"
+      ],
+      "title": "CountHandling",
+      "type": "string"
+    },
+    "DependencyConflict": {
+      "additionalProperties": false,
+      "properties": {
+        "condition": {
+          "title": "Condition",
+          "type": "string"
+        },
+        "packages": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Packages",
+          "type": "array"
+        },
+        "severity": {
+          "default": "block",
+          "enum": [
+            "block",
+            "warn"
+          ],
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "packages",
+        "condition"
+      ],
+      "title": "DependencyConflict",
+      "type": "object"
+    },
+    "DependencyRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "optional": {
+          "default": false,
+          "title": "Optional",
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "specifier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Specifier"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "DependencyRequirement",
+      "type": "object"
+    },
+    "DeviceKind": {
+      "enum": [
+        "cuda",
+        "rocm",
+        "mps",
+        "xpu",
+        "cpu"
+      ],
+      "title": "DeviceKind",
+      "type": "string"
+    },
+    "EffectiveCapabilities": {
+      "additionalProperties": false,
+      "description": "The intersection of what a backend DECLARES and what PROVED to work on this host. The planner\nresolves a RunPlan against this, not the raw BackendManifest.",
+      "properties": {
+        "adapter_methods": {
+          "items": {
+            "$ref": "#/$defs/AdapterMethod"
+          },
+          "title": "Adapter Methods",
+          "type": "array"
+        },
+        "attention_impls": {
+          "items": {
+            "$ref": "#/$defs/AttentionImpl"
+          },
+          "title": "Attention Impls",
+          "type": "array"
+        },
+        "communication_backends": {
+          "items": {
+            "$ref": "#/$defs/CommunicationBackend"
+          },
+          "title": "Communication Backends",
+          "type": "array"
+        },
+        "objective_capabilities": {
+          "items": {
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "type": "string"
+          },
+          "title": "Objective Capabilities",
+          "type": "array"
+        },
+        "offload_strategies": {
+          "items": {
+            "$ref": "#/$defs/OffloadStrategy"
+          },
+          "title": "Offload Strategies",
+          "type": "array"
+        },
+        "parallelism_kinds": {
+          "items": {
+            "$ref": "#/$defs/ParallelismKind"
+          },
+          "title": "Parallelism Kinds",
+          "type": "array"
+        },
+        "placement_modes": {
+          "items": {
+            "$ref": "#/$defs/PlacementMode"
+          },
+          "title": "Placement Modes",
+          "type": "array"
+        },
+        "placement_tiers": {
+          "items": {
+            "$ref": "#/$defs/MemoryTier"
+          },
+          "title": "Placement Tiers",
+          "type": "array"
+        },
+        "precision_modes": {
+          "items": {
+            "$ref": "#/$defs/PrecisionMode"
+          },
+          "title": "Precision Modes",
+          "type": "array"
+        },
+        "quantization_modes": {
+          "items": {
+            "$ref": "#/$defs/QuantizationMode"
+          },
+          "title": "Quantization Modes",
+          "type": "array"
+        }
+      },
+      "title": "EffectiveCapabilities",
+      "type": "object"
+    },
+    "EnvCpu": {
+      "additionalProperties": false,
+      "properties": {
+        "instruction_sets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Instruction Sets",
+          "type": "array"
+        },
+        "logical_cores": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Logical Cores"
+        },
+        "model": {
+          "default": "",
+          "title": "Model",
+          "type": "string"
+        },
+        "physical_cores": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Physical Cores"
+        }
+      },
+      "title": "EnvCpu",
+      "type": "object"
+    },
+    "EnvHost": {
+      "additionalProperties": false,
+      "properties": {
+        "hostname_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hostname Hash"
+        },
+        "memory_residency_model": {
+          "$ref": "#/$defs/MemoryResidencyModel",
+          "default": "unknown"
+        },
+        "os": {
+          "$ref": "#/$defs/OperatingSystem"
+        },
+        "os_detail": {
+          "default": "",
+          "title": "Os Detail",
+          "type": "string"
+        },
+        "python_version": {
+          "default": "",
+          "title": "Python Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "os"
+      ],
+      "title": "EnvHost",
+      "type": "object"
+    },
+    "EnvRam": {
+      "additionalProperties": false,
+      "properties": {
+        "available_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Available Bytes"
+        },
+        "total_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Bytes"
+        }
+      },
+      "title": "EnvRam",
+      "type": "object"
+    },
+    "EnvStorage": {
+      "additionalProperties": false,
+      "properties": {
+        "free_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Free Bytes"
+        },
+        "kind": {
+          "default": "unknown",
+          "enum": [
+            "nvme",
+            "ssd",
+            "hdd",
+            "network",
+            "unknown"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "scratch_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scratch Path"
+        }
+      },
+      "title": "EnvStorage",
+      "type": "object"
+    },
+    "EnvironmentProfile": {
+      "additionalProperties": false,
+      "description": "The full, hashable SIGNATURE of a host + software environment. Formalizes + greatly extends\nenvironment.probe_training_runtime (package versions + GpuInfo), gpu_probe.probe_gpu_memory, and\nprovenance.RunProvenance. A RunManifest/RunPlan references a profile by ``environment_signature``\nso a result is always tied to the exact environment that produced it.",
+      "properties": {
+        "accelerator_runtime": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AcceleratorRuntime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "captured_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Captured At"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "cpu": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvCpu"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "engine_version": {
+          "default": "",
+          "title": "Engine Version",
+          "type": "string"
+        },
+        "environment_signature": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Environment Signature",
+          "type": "string"
+        },
+        "gpus": {
+          "items": {
+            "$ref": "#/$defs/GpuDevice"
+          },
+          "title": "Gpus",
+          "type": "array"
+        },
+        "host": {
+          "$ref": "#/$defs/EnvHost"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "packages": {
+          "items": {
+            "$ref": "#/$defs/PackageLock"
+          },
+          "title": "Packages",
+          "type": "array"
+        },
+        "ram": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvRam"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "storage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvStorage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "environment_signature",
+        "host"
+      ],
+      "title": "EnvironmentProfile",
+      "type": "object"
+    },
+    "EvalDataset": {
+      "additionalProperties": false,
+      "properties": {
+        "dataset_fingerprint": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dataset Fingerprint"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "version_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version Ref"
+        }
+      },
+      "title": "EvalDataset",
+      "type": "object"
+    },
+    "EvalGate": {
+      "additionalProperties": false,
+      "description": "Grounded in gates/models.GateReport/GateStatus (pass/warn/block, counts, effective\nthresholds behind the verdict for reproducibility).",
+      "properties": {
+        "block_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Block Count",
+          "type": "integer"
+        },
+        "max_regression_score_drop": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Regression Score Drop"
+        },
+        "min_eval_average_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Eval Average Score"
+        },
+        "min_eval_pass_rate": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Eval Pass Rate"
+        },
+        "overall_status": {
+          "enum": [
+            "pass",
+            "warn",
+            "block"
+          ],
+          "title": "Overall Status",
+          "type": "string"
+        },
+        "pass_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Pass Count",
+          "type": "integer"
+        },
+        "warn_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Warn Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "overall_status"
+      ],
+      "title": "EvalGate",
+      "type": "object"
+    },
+    "EvalMetric": {
+      "additionalProperties": false,
+      "description": "The scorer AND what it measures \u2014 so a number is never treated as quality without\nqualification (reports.EvaluationReport.metric honesty note).",
+      "properties": {
+        "judge_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Judge Model"
+        },
+        "measures": {
+          "default": "",
+          "title": "Measures",
+          "type": "string"
+        },
+        "name": {
+          "default": "keyword_overlap",
+          "enum": [
+            "keyword_overlap",
+            "llm_judge",
+            "exact_match",
+            "pass_rate",
+            "custom"
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "score_threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Score Threshold"
+        }
+      },
+      "title": "EvalMetric",
+      "type": "object"
+    },
+    "EvalSchedule": {
+      "additionalProperties": false,
+      "properties": {
+        "after_run": {
+          "default": true,
+          "title": "After Run",
+          "type": "boolean"
+        },
+        "before_run": {
+          "default": true,
+          "title": "Before Run",
+          "type": "boolean"
+        },
+        "every_optimizer_steps": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Every Optimizer Steps"
+        },
+        "suite_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Suite Ref"
+        }
+      },
+      "title": "EvalSchedule",
+      "type": "object"
+    },
+    "EvalSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "average_manual_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Average Manual Score"
+        },
+        "average_score": {
+          "title": "Average Score",
+          "type": "number"
+        },
+        "examples_tested": {
+          "minimum": 0,
+          "title": "Examples Tested",
+          "type": "integer"
+        },
+        "failed_examples": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Failed Examples",
+          "type": "integer"
+        },
+        "pass_rate": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pass Rate"
+        },
+        "weak_tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Weak Tags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "examples_tested",
+        "average_score"
+      ],
+      "title": "EvalSummary",
+      "type": "object"
+    },
+    "EvalTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Ref"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "phase": {
+          "default": "standalone",
+          "enum": [
+            "before",
+            "after",
+            "standalone"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "run_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Ref"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "title": "EvalTarget",
+      "type": "object"
+    },
+    "EvaluationResult": {
+      "additionalProperties": false,
+      "description": "The outcome of evaluating a model/dataset, with an explicit as-served vs raw distinction so a\nnumber is never presented as a quality signal without saying what produced it. Formalizes\nevaluation/reports.EvaluationReport + gates/models.GateReport.",
+      "properties": {
+        "as_served": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AsServed"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "dataset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvalDataset"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "eval_id": {
+          "minLength": 1,
+          "title": "Eval Id",
+          "type": "string"
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvalGate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "generated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Generated At"
+        },
+        "metric": {
+          "$ref": "#/$defs/EvalMetric"
+        },
+        "parameter_accounting_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "provenance_caveat": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provenance Caveat"
+        },
+        "report_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Report Ref"
+        },
+        "summary": {
+          "$ref": "#/$defs/EvalSummary"
+        },
+        "target": {
+          "$ref": "#/$defs/EvalTarget"
+        }
+      },
+      "required": [
+        "eval_id",
+        "target",
+        "metric",
+        "summary"
+      ],
+      "title": "EvaluationResult",
+      "type": "object"
+    },
+    "EventMetrics": {
+      "additionalProperties": false,
+      "description": "Present on metric/heartbeat events. All optional \u2014 a worker emits what it can sample. The\nmemory block + step_time make the WDDM spill (10-25x slowdown, non-zero shared bytes) visible.",
+      "properties": {
+        "gpu_utilization": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gpu Utilization"
+        },
+        "grad_norm": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Grad Norm"
+        },
+        "learning_rate": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Learning Rate"
+        },
+        "loss": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Loss"
+        },
+        "memory": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "memory_controller_utilization": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Controller Utilization"
+        },
+        "parameter_observations": {
+          "items": {
+            "$ref": "#/$defs/ParameterObservation"
+          },
+          "title": "Parameter Observations",
+          "type": "array"
+        },
+        "pcie_rx_bytes_per_sec": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pcie Rx Bytes Per Sec"
+        },
+        "pcie_tx_bytes_per_sec": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pcie Tx Bytes Per Sec"
+        },
+        "power_watts": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Power Watts"
+        },
+        "step_time_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step Time Seconds"
+        },
+        "supervised_tokens_per_sec": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supervised Tokens Per Sec"
+        },
+        "temperature_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature C"
+        },
+        "tokens_per_sec": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokens Per Sec"
+        }
+      },
+      "title": "EventMetrics",
+      "type": "object"
+    },
+    "ExportCompatibilityEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "$ref": "#/$defs/ExportFormat"
+        },
+        "serves_in": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Serves In",
+          "type": "array"
+        }
+      },
+      "required": [
+        "format"
+      ],
+      "title": "ExportCompatibilityEntry",
+      "type": "object"
+    },
+    "ExportFormat": {
+      "enum": [
+        "adapter_peft",
+        "merged_safetensors",
+        "merged_fp16",
+        "gguf",
+        "onnx",
+        "awq",
+        "gptq",
+        "mlx"
+      ],
+      "title": "ExportFormat",
+      "type": "string"
+    },
+    "ExportSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "$ref": "#/$defs/ExportFormat"
+        },
+        "output_dir": {
+          "default": "output",
+          "title": "Output Dir",
+          "type": "string"
+        }
+      },
+      "required": [
+        "format"
+      ],
+      "title": "ExportSpec",
+      "type": "object"
+    },
+    "FailureRecord": {
+      "additionalProperties": false,
+      "description": "A structured, classified terminal outcome for a run, capability probe, or export. The\ntaxonomy turns 'it died' into an actionable category \u2014 a real OOM vs a KERNEL_STALL (the sm_120\nfused-attention deadlock) vs an ACCIDENTAL_SPILL vs a CONTROLLED_OFFLOAD. NEW.",
+      "properties": {
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "detected_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detected At"
+        },
+        "exception_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exception Type"
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exit Code"
+        },
+        "fit_at_failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FitClassification"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "memory_at_failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "reconciled": {
+          "default": false,
+          "title": "Reconciled",
+          "type": "boolean"
+        },
+        "remediation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Remediation"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "signal": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signal"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageMarker"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "taxonomy": {
+          "$ref": "#/$defs/FailureTaxonomy"
+        }
+      },
+      "required": [
+        "taxonomy",
+        "message"
+      ],
+      "title": "FailureRecord",
+      "type": "object"
+    },
+    "FailureTaxonomy": {
+      "description": "Terminal outcome category. ``PASS`` is included so the same enum classifies a completed\nprobe/run, not only failures. Grounded in the exact hazards the engine documents: the sm_120\nfused-attention deadlock (KERNEL_STALL), the WDDM silent spill (ACCIDENTAL_SPILL vs a clean\nOOM), and env/dependency mismatches (ENVIRONMENT_FAILURE).",
+      "enum": [
+        "PASS",
+        "FAIL",
+        "OOM",
+        "TIMEOUT",
+        "KERNEL_STALL",
+        "NUMERICAL_FAILURE",
+        "CHECKPOINT_FAILURE",
+        "ENVIRONMENT_FAILURE",
+        "UNSUPPORTED_CONFIGURATION",
+        "ACCIDENTAL_SPILL",
+        "CONTROLLED_OFFLOAD"
+      ],
+      "title": "FailureTaxonomy",
+      "type": "string"
+    },
+    "FitClass": {
+      "description": "The fit verdict. ``NATIVE_*`` = fully resident. ``CONTROLLED_*`` = a deliberate, planned\noffload (acceptable, slower). ``ACCIDENTAL_*`` / ``THRASHING`` = an unplanned spill the platform\ndid silently (the failure mode the engine warns about). ``FAIL`` = will not run.",
+      "enum": [
+        "PLANNED_UNPROVEN",
+        "NATIVE_SAFE",
+        "NATIVE_TIGHT",
+        "NATIVE_UNPROVEN",
+        "MARGINAL",
+        "CONTROLLED_ACTIVATION_OFFLOAD",
+        "CONTROLLED_OPTIMIZER_OFFLOAD",
+        "CONTROLLED_PARAMETER_OFFLOAD",
+        "ACCIDENTAL_UNIFIED_MEMORY_PAGING",
+        "ACCIDENTAL_WDDM_SPILL",
+        "THRASHING",
+        "FAIL"
+      ],
+      "title": "FitClass",
+      "type": "string"
+    },
+    "FitClassification": {
+      "additionalProperties": false,
+      "description": "The planner/calibrator verdict on whether a resolved RunPlan fits the target environment, and\nHOW: a native fit, a deliberately-offloaded fit, or an ACCIDENTAL spill (the silent WDDM/unified\npaging that looks frozen but crawls at 10-25x). NEW \u2014 the engine emits only a coarse warn/pass\nVRAM band (preflight.gpu_memory, _VRAM_SAFETY_MARGIN_GB).",
+      "properties": {
+        "attention_path": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttentionImpl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "classification": {
+          "$ref": "#/$defs/FitClass"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "device_capacity_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Capacity Bytes"
+        },
+        "estimated_peak_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimated Peak Bytes"
+        },
+        "headroom_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Headroom Bytes"
+        },
+        "rationale": {
+          "default": "",
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "classification"
+      ],
+      "title": "FitClassification",
+      "type": "object"
+    },
+    "GpuDevice": {
+      "additionalProperties": false,
+      "description": "One accelerator. Grounded in environment.GpuInfo + gpu_probe.GpuMemory.",
+      "properties": {
+        "compute_capability": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Compute Capability"
+        },
+        "compute_capability_major": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Compute Capability Major"
+        },
+        "index": {
+          "minimum": 0,
+          "title": "Index",
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "pcie": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GpuPcie"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "supported_dtypes": {
+          "items": {
+            "$ref": "#/$defs/PrecisionMode"
+          },
+          "title": "Supported Dtypes",
+          "type": "array"
+        },
+        "vram_free_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vram Free Bytes"
+        },
+        "vram_total_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vram Total Bytes"
+        }
+      },
+      "required": [
+        "index",
+        "kind",
+        "name"
+      ],
+      "title": "GpuDevice",
+      "type": "object"
+    },
+    "GpuPcie": {
+      "additionalProperties": false,
+      "properties": {
+        "gen": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gen"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width"
+        }
+      },
+      "title": "GpuPcie",
+      "type": "object"
+    },
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "HeartbeatBody": {
+      "additionalProperties": false,
+      "properties": {
+        "optimizer_step": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Optimizer Step"
+        },
+        "pid_alive": {
+          "default": true,
+          "title": "Pid Alive",
+          "type": "boolean"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageMarker"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "title": "HeartbeatBody",
+      "type": "object"
+    },
+    "HelloBody": {
+      "additionalProperties": false,
+      "description": "Worker\u2192core handshake: who I am + what I can do.",
+      "properties": {
+        "backend": {
+          "$ref": "#/$defs/BackendManifest"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvironmentProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "environment_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "worker_id": {
+          "minLength": 1,
+          "title": "Worker Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "worker_id",
+        "backend",
+        "environment_ref"
+      ],
+      "title": "HelloBody",
+      "type": "object"
+    },
+    "KnownFailureMode": {
+      "additionalProperties": false,
+      "description": "Pre-declared hazards tagged with a taxonomy so the core can warn/refuse up front. The\ncanonical example: fused attention deadlocks on sm_120.",
+      "properties": {
+        "condition": {
+          "title": "Condition",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "mitigation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mitigation"
+        },
+        "taxonomy": {
+          "$ref": "#/$defs/FailureTaxonomy"
+        }
+      },
+      "required": [
+        "taxonomy",
+        "condition"
+      ],
+      "title": "KnownFailureMode",
+      "type": "object"
+    },
+    "LossImpl": {
+      "enum": [
+        "cross_entropy",
+        "liger_fused_ce",
+        "chunked_ce",
+        "dpo",
+        "orpo",
+        "kto",
+        "ipo",
+        "reward_bt"
+      ],
+      "title": "LossImpl",
+      "type": "string"
+    },
+    "MemoryMetrics": {
+      "additionalProperties": false,
+      "description": "The full memory-signature block sampled during a run. Distinguishes PyTorch's allocator view,\nraw CUDA device memory, and OS-level residency (``dedicated`` vs ``shared`` GPU memory) so a\nWindows/WDDM spill to shared memory is VISIBLE rather than hidden inside 'used VRAM'. Grounded in\ngpu_probe.GpuMemory + the estimators note that torch.max_memory_allocated counts the WDDM spill.",
+      "properties": {
+        "cuda_device_free_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cuda Device Free Bytes"
+        },
+        "cuda_device_used_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cuda Device Used Bytes"
+        },
+        "dedicated_gpu_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dedicated Gpu Bytes"
+        },
+        "process_rss_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Process Rss Bytes"
+        },
+        "shared_gpu_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shared Gpu Bytes"
+        },
+        "system_ram_used_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "System Ram Used Bytes"
+        },
+        "torch_allocated_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Allocated Bytes"
+        },
+        "torch_peak_allocated_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Peak Allocated Bytes"
+        },
+        "torch_peak_reserved_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Peak Reserved Bytes"
+        },
+        "torch_reserved_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Reserved Bytes"
+        }
+      },
+      "title": "MemoryMetrics",
+      "type": "object"
+    },
+    "MemoryResidencyModel": {
+      "description": "How the platform maps device memory. ``wddm`` (Windows) silently spills overflow to shared\nsystem RAM and thrashes over PCIe; ``linux_dedicated`` models a hard-OOM boundary rather than a\nWDDM spill; ``unified_memory`` is Apple MPS / integrated shared memory. This is a planning model,\nnot a measured-fit claim.",
+      "enum": [
+        "wddm",
+        "linux_dedicated",
+        "unified_memory",
+        "unknown"
+      ],
+      "title": "MemoryResidencyModel",
+      "type": "string"
+    },
+    "MemoryTier": {
+      "description": "A physical state tier. A RunPlan names the intended tier; only runtime evidence may claim\nactual residency there.",
+      "enum": [
+        "gpu",
+        "pinned_ram",
+        "pageable_ram",
+        "nvme",
+        "sata",
+        "remote",
+        "unknown"
+      ],
+      "title": "MemoryTier",
+      "type": "string"
+    },
+    "OffloadMechanism": {
+      "enum": [
+        "cpu_copy",
+        "cuda_unified_memory",
+        "nvme_io",
+        "backend_native"
+      ],
+      "title": "OffloadMechanism",
+      "type": "string"
+    },
+    "OffloadRule": {
+      "additionalProperties": false,
+      "properties": {
+        "eviction_policy": {
+          "default": "none",
+          "enum": [
+            "none",
+            "lru",
+            "lfu",
+            "layer_window",
+            "heat_based"
+          ],
+          "title": "Eviction Policy",
+          "type": "string"
+        },
+        "mechanism": {
+          "$ref": "#/$defs/OffloadMechanism"
+        },
+        "prefetch_policy": {
+          "default": "none",
+          "enum": [
+            "none",
+            "static",
+            "layer_window",
+            "route_prediction",
+            "heat_based"
+          ],
+          "title": "Prefetch Policy",
+          "type": "string"
+        },
+        "route_miss_action": {
+          "$ref": "#/$defs/RouteMissAction",
+          "default": "fail"
+        },
+        "rule_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "selector": {
+          "$ref": "#/$defs/PhysicalScopeSelector"
+        },
+        "source_resource_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Source Resource Id",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/PhysicalStateKind"
+        },
+        "target_resource_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Target Resource Id",
+          "type": "string"
+        },
+        "trigger": {
+          "$ref": "#/$defs/OffloadTrigger"
+        }
+      },
+      "required": [
+        "rule_id",
+        "state",
+        "selector",
+        "source_resource_id",
+        "target_resource_id",
+        "mechanism",
+        "trigger"
+      ],
+      "title": "OffloadRule",
+      "type": "object"
+    },
+    "OffloadStrategy": {
+      "description": "The ``controlled_*`` values are the deliberate, planned counterparts of the accidental spills\nin :class:`FitClass`.",
+      "enum": [
+        "none",
+        "controlled_activation_offload",
+        "controlled_optimizer_offload",
+        "controlled_parameter_offload",
+        "cpu_offload",
+        "disk_offload",
+        "deepspeed_zero2",
+        "deepspeed_zero3"
+      ],
+      "title": "OffloadStrategy",
+      "type": "string"
+    },
+    "OffloadTrigger": {
+      "enum": [
+        "static",
+        "memory_pressure",
+        "ahead_of_use",
+        "after_use"
+      ],
+      "title": "OffloadTrigger",
+      "type": "string"
+    },
+    "OperatingSystem": {
+      "enum": [
+        "windows",
+        "wsl",
+        "linux",
+        "macos",
+        "unknown"
+      ],
+      "title": "OperatingSystem",
+      "type": "string"
+    },
+    "Optimizer": {
+      "enum": [
+        "adamw_torch",
+        "adamw_torch_fused",
+        "adamw_8bit",
+        "adamw_bnb_8bit",
+        "paged_adamw_8bit",
+        "paged_adamw_32bit",
+        "adafactor",
+        "lion",
+        "sgd"
+      ],
+      "title": "Optimizer",
+      "type": "string"
+    },
+    "OptimizerSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "impl": {
+          "$ref": "#/$defs/Optimizer"
+        },
+        "learning_rate": {
+          "exclusiveMinimum": 0,
+          "title": "Learning Rate",
+          "type": "number"
+        },
+        "lr_scheduler": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lr Scheduler"
+        },
+        "warmup_ratio": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Warmup Ratio"
+        },
+        "weight_decay": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Weight Decay"
+        }
+      },
+      "required": [
+        "impl",
+        "learning_rate"
+      ],
+      "title": "OptimizerSpec",
+      "type": "object"
+    },
+    "PackageLock": {
+      "additionalProperties": false,
+      "description": "A resolved dependency and its install provenance.\n\n``hash`` seals the installed distribution's RECORD metadata when that evidence is available; it\nis not mislabelled as the original wheel hash. ``direct_url`` and ``artifact`` preserve the\nstronger source identity pip exposes for direct/VCS/local installs. ``dependencies`` is the\ninstalled metadata dependency graph, not a second resolver.",
+      "properties": {
+        "artifact": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact"
+        },
+        "dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "direct_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direct Url"
+        },
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "installer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installer"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "requested": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested"
+        },
+        "source": {
+          "default": "unknown",
+          "enum": [
+            "pypi",
+            "wheel",
+            "sdist",
+            "conda",
+            "vcs",
+            "local",
+            "unknown"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "PackageLock",
+      "type": "object"
+    },
+    "ParallelGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "communication_backend": {
+          "$ref": "#/$defs/CommunicationBackend"
+        },
+        "group_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Group Id",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ParallelismKind"
+        },
+        "parameter_scope_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "type": "string"
+          },
+          "title": "Parameter Scope Ids",
+          "type": "array"
+        },
+        "ranks": {
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 2,
+          "title": "Ranks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "group_id",
+        "kind",
+        "ranks",
+        "communication_backend"
+      ],
+      "title": "ParallelGroup",
+      "type": "object"
+    },
+    "ParallelismKind": {
+      "enum": [
+        "data",
+        "tensor",
+        "pipeline",
+        "expert",
+        "sequence",
+        "context"
+      ],
+      "title": "ParallelismKind",
+      "type": "string"
+    },
+    "ParallelismSpec": {
+      "additionalProperties": false,
+      "description": "Explicit rank/group topology. Groups may overlap across axes, so the contract never assumes\nthat data x tensor x pipeline x expert degrees form one universal product.",
+      "properties": {
+        "groups": {
+          "items": {
+            "$ref": "#/$defs/ParallelGroup"
+          },
+          "title": "Groups",
+          "type": "array"
+        },
+        "ranks": {
+          "items": {
+            "$ref": "#/$defs/RankBinding"
+          },
+          "minItems": 1,
+          "title": "Ranks",
+          "type": "array"
+        },
+        "world_size": {
+          "default": 1,
+          "minimum": 1,
+          "title": "World Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ranks"
+      ],
+      "title": "ParallelismSpec",
+      "type": "object"
+    },
+    "ParameterCountHandling": {
+      "additionalProperties": false,
+      "properties": {
+        "decompressed_caches": {
+          "$ref": "#/$defs/CountHandling",
+          "default": "not_applicable"
+        },
+        "generated": {
+          "$ref": "#/$defs/CountHandling",
+          "default": "unknown"
+        },
+        "optimizer_shadows": {
+          "$ref": "#/$defs/CountHandling",
+          "default": "not_applicable"
+        },
+        "quantized": {
+          "$ref": "#/$defs/CountHandling",
+          "default": "unknown"
+        },
+        "replicated": {
+          "$ref": "#/$defs/CountHandling",
+          "default": "unknown"
+        },
+        "shared": {
+          "$ref": "#/$defs/CountHandling",
+          "default": "unknown"
+        },
+        "tied": {
+          "$ref": "#/$defs/CountHandling",
+          "default": "unknown"
+        }
+      },
+      "title": "ParameterCountHandling",
+      "type": "object"
+    },
+    "ParameterCountKind": {
+      "description": "Distinct parameter quantities required for dense-safe and MoE-safe accounting.",
+      "enum": [
+        "logical",
+        "active_token",
+        "active_sequence",
+        "touched_window",
+        "resident",
+        "updated_window",
+        "exposed_window",
+        "effective"
+      ],
+      "title": "ParameterCountKind",
+      "type": "string"
+    },
+    "ParameterEvidenceSource": {
+      "additionalProperties": false,
+      "properties": {
+        "backend_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "captured_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Captured At"
+        },
+        "environment_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "$ref": "#/$defs/ParameterEvidenceSourceKind"
+        },
+        "method": {
+          "minLength": 1,
+          "title": "Method",
+          "type": "string"
+        },
+        "producer": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Producer",
+          "type": "string"
+        },
+        "producer_version": {
+          "minLength": 1,
+          "title": "Producer Version",
+          "type": "string"
+        },
+        "source_ref": {
+          "$ref": "#/$defs/Ref"
+        }
+      },
+      "required": [
+        "kind",
+        "producer",
+        "producer_version",
+        "method",
+        "source_ref"
+      ],
+      "title": "ParameterEvidenceSource",
+      "type": "object"
+    },
+    "ParameterEvidenceSourceKind": {
+      "enum": [
+        "model_config",
+        "model_descriptor",
+        "safetensors_header",
+        "planner",
+        "backend_worker",
+        "checkpoint_inventory",
+        "evaluation_runtime",
+        "user_supplied"
+      ],
+      "title": "ParameterEvidenceSourceKind",
+      "type": "string"
+    },
+    "ParameterIdentityBasis": {
+      "enum": [
+        "independent_coordinates",
+        "stored_tensor_elements",
+        "optimizer_addressable_coordinates",
+        "runtime_identity_set",
+        "topology_formula",
+        "declared_definition",
+        "unknown"
+      ],
+      "title": "ParameterIdentityBasis",
+      "type": "string"
+    },
+    "ParameterObservation": {
+      "additionalProperties": false,
+      "description": "One evidence-bearing parameter count. Unknown evidence is represented as a gap, never zero.",
+      "properties": {
+        "assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assumptions",
+          "type": "array"
+        },
+        "coverage": {
+          "$ref": "#/$defs/ParameterObservationCoverage"
+        },
+        "definition": {
+          "minLength": 1,
+          "title": "Definition",
+          "type": "string"
+        },
+        "evidence": {
+          "enum": [
+            "measured",
+            "estimated",
+            "declared"
+          ],
+          "title": "Evidence",
+          "type": "string"
+        },
+        "handling": {
+          "$ref": "#/$defs/ParameterCountHandling"
+        },
+        "identity_basis": {
+          "$ref": "#/$defs/ParameterIdentityBasis"
+        },
+        "kind": {
+          "$ref": "#/$defs/ParameterCountKind"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        },
+        "observation_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Observation Id",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/ParameterScope"
+        },
+        "source": {
+          "$ref": "#/$defs/ParameterEvidenceSource"
+        },
+        "unit": {
+          "default": "coordinates",
+          "enum": [
+            "coordinates",
+            "elements",
+            "parameters"
+          ],
+          "title": "Unit",
+          "type": "string"
+        },
+        "value": {
+          "minimum": 0,
+          "title": "Value",
+          "type": "integer"
+        },
+        "value_relation": {
+          "$ref": "#/$defs/ParameterValueRelation"
+        },
+        "window": {
+          "$ref": "#/$defs/ParameterWindow"
+        }
+      },
+      "required": [
+        "observation_id",
+        "kind",
+        "value",
+        "scope",
+        "window",
+        "evidence",
+        "source",
+        "coverage",
+        "value_relation",
+        "identity_basis",
+        "handling",
+        "definition"
+      ],
+      "title": "ParameterObservation",
+      "type": "object"
+    },
+    "ParameterObservationCoverage": {
+      "enum": [
+        "complete",
+        "sampled",
+        "partial"
+      ],
+      "title": "ParameterObservationCoverage",
+      "type": "string"
+    },
+    "ParameterScope": {
+      "additionalProperties": false,
+      "description": "Stable coordinate universe for an authoritative parameter observation.\n\nRuntime addresses are never identities. Sparse scopes carry stable expert IDs, and every scope\nis tied to one exact model reference plus a named coordinate universe.",
+      "properties": {
+        "component_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "type": "string"
+          },
+          "title": "Component Ids",
+          "type": "array"
+        },
+        "coordinate_universe_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Coordinate Universe Id",
+          "type": "string"
+        },
+        "coordinate_universe_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Coordinate Universe Sha256"
+        },
+        "definition": {
+          "minLength": 1,
+          "title": "Definition",
+          "type": "string"
+        },
+        "device_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Id"
+        },
+        "expert_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "type": "string"
+          },
+          "title": "Expert Ids",
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/ParameterScopeKind"
+        },
+        "memory_tier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryTier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "scope_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Scope Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope_id",
+        "kind",
+        "model_ref",
+        "coordinate_universe_id",
+        "definition"
+      ],
+      "title": "ParameterScope",
+      "type": "object"
+    },
+    "ParameterScopeKind": {
+      "enum": [
+        "model",
+        "component_set",
+        "shared",
+        "router",
+        "expert_group",
+        "expert_set",
+        "adapter",
+        "embedding",
+        "output_head",
+        "device_residency",
+        "custom"
+      ],
+      "title": "ParameterScopeKind",
+      "type": "string"
+    },
+    "ParameterValueRelation": {
+      "enum": [
+        "exact",
+        "estimate",
+        "lower_bound",
+        "upper_bound"
+      ],
+      "title": "ParameterValueRelation",
+      "type": "string"
+    },
+    "ParameterWindow": {
+      "additionalProperties": false,
+      "description": "The exact computation or scheduling window a count describes.",
+      "properties": {
+        "captured_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Captured At"
+        },
+        "definition": {
+          "minLength": 1,
+          "title": "Definition",
+          "type": "string"
+        },
+        "event_seq_end": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Seq End"
+        },
+        "event_seq_start": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Seq Start"
+        },
+        "kind": {
+          "$ref": "#/$defs/ParameterWindowKind"
+        },
+        "microstep_end": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Microstep End"
+        },
+        "microstep_start": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Microstep Start"
+        },
+        "optimizer_step_end": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Optimizer Step End"
+        },
+        "optimizer_step_start": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Optimizer Step Start"
+        },
+        "plan_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "run_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sequence_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence Id"
+        },
+        "token_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Token Index"
+        },
+        "window_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Window Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "window_id",
+        "kind",
+        "definition"
+      ],
+      "title": "ParameterWindow",
+      "type": "object"
+    },
+    "ParameterWindowKind": {
+      "enum": [
+        "static_snapshot",
+        "token",
+        "sequence",
+        "instant",
+        "microbatch",
+        "optimizer_window",
+        "run"
+      ],
+      "title": "ParameterWindowKind",
+      "type": "string"
+    },
+    "PhysicalExecutionSpec": {
+      "additionalProperties": false,
+      "description": "The physical scheduler input, kept separate from learned semantic routing. Every field is\nplanned intent sealed by RunPlan; it is not runtime residency or fit evidence.",
+      "properties": {
+        "evidence_status": {
+          "const": "planned_not_measured",
+          "default": "planned_not_measured",
+          "title": "Evidence Status",
+          "type": "string"
+        },
+        "offload_rules": {
+          "items": {
+            "$ref": "#/$defs/OffloadRule"
+          },
+          "title": "Offload Rules",
+          "type": "array"
+        },
+        "parallelism": {
+          "$ref": "#/$defs/ParallelismSpec"
+        },
+        "placements": {
+          "items": {
+            "$ref": "#/$defs/StatePlacement"
+          },
+          "minItems": 1,
+          "title": "Placements",
+          "type": "array"
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/PhysicalResource"
+          },
+          "minItems": 1,
+          "title": "Resources",
+          "type": "array"
+        },
+        "route_fidelity": {
+          "default": "preserve_or_fail",
+          "enum": [
+            "preserve_or_fail",
+            "declared_semantic_fallback"
+          ],
+          "title": "Route Fidelity",
+          "type": "string"
+        },
+        "semantic_fallback_policy_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "storage_profile_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "resources",
+        "placements",
+        "parallelism"
+      ],
+      "title": "PhysicalExecutionSpec",
+      "type": "object"
+    },
+    "PhysicalResource": {
+      "additionalProperties": false,
+      "description": "One planned physical tier/device. This is scheduling intent, never measured residency.",
+      "properties": {
+        "device_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Id"
+        },
+        "device_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeviceKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "resource_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "storage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlannedStorageBinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tier": {
+          "$ref": "#/$defs/MemoryTier"
+        }
+      },
+      "required": [
+        "resource_id",
+        "tier"
+      ],
+      "title": "PhysicalResource",
+      "type": "object"
+    },
+    "PhysicalScopeSelector": {
+      "additionalProperties": false,
+      "description": "Select planned state by stable logical identity. Empty identity lists mean nothing, never an\ninferred dense model. ``whole_model`` is the explicit dense-safe fallback for unknown topology.",
+      "properties": {
+        "component_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "type": "string"
+          },
+          "title": "Component Ids",
+          "type": "array"
+        },
+        "expert_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "type": "string"
+          },
+          "title": "Expert Ids",
+          "type": "array"
+        },
+        "parameter_scope_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "type": "string"
+          },
+          "title": "Parameter Scope Ids",
+          "type": "array"
+        },
+        "whole_model": {
+          "default": false,
+          "title": "Whole Model",
+          "type": "boolean"
+        }
+      },
+      "title": "PhysicalScopeSelector",
+      "type": "object"
+    },
+    "PhysicalStateKind": {
+      "enum": [
+        "parameters",
+        "gradients",
+        "optimizer_state",
+        "activations"
+      ],
+      "title": "PhysicalStateKind",
+      "type": "string"
+    },
+    "PlacementMode": {
+      "enum": [
+        "single_resource",
+        "identity_scoped",
+        "replicated",
+        "sharded",
+        "tiered",
+        "expert_scoped"
+      ],
+      "title": "PlacementMode",
+      "type": "string"
+    },
+    "PlacementRole": {
+      "enum": [
+        "authoritative",
+        "shard",
+        "replica",
+        "cache"
+      ],
+      "title": "PlacementRole",
+      "type": "string"
+    },
+    "PlannedStorageBinding": {
+      "additionalProperties": false,
+      "description": "The exact StorageProfile assessment accepted by a plan. ``marginal``/``unknown`` are usable\nonly when that same verdict is explicitly recorded in ``accepted_suitability``; ``unsuitable`` is\nalways refused.",
+      "properties": {
+        "accepted_suitability": {
+          "$ref": "#/$defs/StorageSuitability",
+          "default": "suitable"
+        },
+        "assessment": {
+          "$ref": "#/$defs/StorageRoleAssessment"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/StorageRole"
+        }
+      },
+      "required": [
+        "role",
+        "path",
+        "assessment"
+      ],
+      "title": "PlannedStorageBinding",
+      "type": "object"
+    },
+    "PrecisionMode": {
+      "enum": [
+        "fp32",
+        "tf32",
+        "fp16",
+        "bf16",
+        "fp8",
+        "mixed_bf16",
+        "mixed_fp16"
+      ],
+      "title": "PrecisionMode",
+      "type": "string"
+    },
+    "ProbeResult": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "measured": {
+          "additionalProperties": true,
+          "title": "Measured",
+          "type": "object"
+        },
+        "outcome": {
+          "$ref": "#/$defs/FailureTaxonomy"
+        },
+        "probe": {
+          "title": "Probe",
+          "type": "string"
+        }
+      },
+      "required": [
+        "probe",
+        "outcome"
+      ],
+      "title": "ProbeResult",
+      "type": "object"
+    },
+    "QuantizationMode": {
+      "enum": [
+        "none",
+        "int8",
+        "int4",
+        "nf4",
+        "fp4",
+        "gptq",
+        "awq",
+        "hqq"
+      ],
+      "title": "QuantizationMode",
+      "type": "string"
+    },
+    "RankBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "local_rank": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Local Rank",
+          "type": "integer"
+        },
+        "node_id": {
+          "default": "local",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "rank": {
+          "minimum": 0,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "resource_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Resource Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rank",
+        "resource_id"
+      ],
+      "title": "RankBinding",
+      "type": "object"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Ref",
+      "type": "object"
+    },
+    "RouteMissAction": {
+      "description": "What the physical scheduler does when requested state is not ready. Semantic fallback is\nnever implicit: it requires a separately pinned learned-policy reference.",
+      "enum": [
+        "wait",
+        "defer",
+        "fail",
+        "semantic_fallback"
+      ],
+      "title": "RouteMissAction",
+      "type": "string"
+    },
+    "RunAcceptedBody": {
+      "additionalProperties": false,
+      "properties": {
+        "pid": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pid"
+        },
+        "process_started_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Process Started At"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "title": "RunAcceptedBody",
+      "type": "object"
+    },
+    "RunControlBody": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "cancel",
+            "pause",
+            "resume",
+            "checkpoint_now"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "action"
+      ],
+      "title": "RunControlBody",
+      "type": "object"
+    },
+    "RunDispatchBody": {
+      "additionalProperties": false,
+      "description": "Core\u2192worker: execute this immutable plan (passed by value so the worker needs no shared\nstate).",
+      "properties": {
+        "heartbeat_interval_seconds": {
+          "default": 30,
+          "minimum": 1,
+          "title": "Heartbeat Interval Seconds",
+          "type": "integer"
+        },
+        "plan": {
+          "$ref": "#/$defs/RunPlan"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "plan"
+      ],
+      "title": "RunDispatchBody",
+      "type": "object"
+    },
+    "RunEvaluationLink": {
+      "additionalProperties": false,
+      "properties": {
+        "after_eval_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "After Eval Model"
+        },
+        "after_eval_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "After Eval Ref"
+        },
+        "before_eval_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Before Eval Ref"
+        }
+      },
+      "title": "RunEvaluationLink",
+      "type": "object"
+    },
+    "RunEvent": {
+      "additionalProperties": false,
+      "description": "One envelope in the structured telemetry stream a worker emits for a run \u2014 the RunEvent half\nof the immutable-RunPlan-in / RunEvent-stream-out worker protocol. NEW; the engine has no\nstreaming telemetry today (run_registry is a durable per-run record, not an event stream).",
+      "properties": {
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "emitted_at": {
+          "title": "Emitted At",
+          "type": "string"
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Epoch"
+        },
+        "event_type": {
+          "enum": [
+            "stage",
+            "metric",
+            "log",
+            "warning",
+            "checkpoint_written",
+            "eval_result",
+            "artifact_produced",
+            "heartbeat",
+            "terminal"
+          ],
+          "title": "Event Type",
+          "type": "string"
+        },
+        "fit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FitClassification"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Message"
+        },
+        "metrics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EventMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "microstep": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Microstep"
+        },
+        "optimizer_step": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Optimizer Step"
+        },
+        "payload": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Payload"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "seq": {
+          "minimum": 0,
+          "title": "Seq",
+          "type": "integer"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageMarker"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "event_type",
+        "run_id",
+        "seq",
+        "emitted_at"
+      ],
+      "title": "RunEvent",
+      "type": "object"
+    },
+    "RunManifest": {
+      "additionalProperties": false,
+      "description": "A single run INSTANCE: the crash-safe durable record of one execution of a RunPlan.\nFormalizes run_registry.TrainingRunRecord almost field-for-field + its state machine (terminal =\n{succeeded, failed, cancelled, interrupted}; a dead-pid 'running' record reconciles to\ninterrupted).",
+      "properties": {
+        "artifact_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Artifact Ids",
+          "type": "array"
+        },
+        "base_model": {
+          "default": "",
+          "title": "Base Model",
+          "type": "string"
+        },
+        "checkpoints": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Checkpoints",
+          "type": "array"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "created_at": {
+          "title": "Created At",
+          "type": "string"
+        },
+        "dataset_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "environment_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evaluation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunEvaluationLink"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "final_fit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FitClassification"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finished At"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        },
+        "output_dir": {
+          "default": "",
+          "title": "Output Dir",
+          "type": "string"
+        },
+        "parameter_accounting_refs": {
+          "items": {
+            "$ref": "#/$defs/Ref"
+          },
+          "title": "Parameter Accounting Refs",
+          "type": "array"
+        },
+        "plan_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "process": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunProcessInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reproducibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunReproducibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "state": {
+          "default": "prepared",
+          "enum": [
+            "prepared",
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "target": {
+          "default": "",
+          "title": "Target",
+          "type": "string"
+        },
+        "updated_at": {
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "plan_ref",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "RunManifest",
+      "type": "object"
+    },
+    "RunPlan": {
+      "additionalProperties": false,
+      "description": "The IMMUTABLE, fully-resolved execution plan the core dispatches to a worker: no ambiguity is\nleft for the worker to decide. Formalizes + hardens config_templates.TrainingConfigTemplate. Key\nupgrades: attention_backend defaults to math on Blackwell; the accumulation target is in\nSUPERVISED TOKENS; ``plan_hash`` seals immutability (a change means a NEW plan).",
+      "properties": {
+        "adapter": {
+          "$ref": "#/$defs/AdapterSpec"
+        },
+        "allocator_policy": {
+          "$ref": "#/$defs/AllocatorPolicy",
+          "default": "default"
+        },
+        "attention_backend": {
+          "$ref": "#/$defs/AttentionImpl"
+        },
+        "backend_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "base_model": {
+          "minLength": 1,
+          "title": "Base Model",
+          "type": "string"
+        },
+        "batching": {
+          "$ref": "#/$defs/BatchingSpec"
+        },
+        "checkpoint_policy": {
+          "$ref": "#/$defs/CheckpointPolicy"
+        },
+        "compile_mode": {
+          "$ref": "#/$defs/CompileMode",
+          "default": "none"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created At"
+        },
+        "dataset_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "environment_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "eval_schedule": {
+          "$ref": "#/$defs/EvalSchedule"
+        },
+        "export": {
+          "$ref": "#/$defs/ExportSpec"
+        },
+        "gradient_checkpointing": {
+          "default": true,
+          "title": "Gradient Checkpointing",
+          "type": "boolean"
+        },
+        "loss_impl": {
+          "$ref": "#/$defs/LossImpl"
+        },
+        "offload_strategy": {
+          "$ref": "#/$defs/OffloadStrategy",
+          "default": "none"
+        },
+        "optimizer": {
+          "$ref": "#/$defs/OptimizerSpec"
+        },
+        "parameter_accounting_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "physical_execution": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PhysicalExecutionSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "plan_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Plan Hash",
+          "type": "string"
+        },
+        "plan_id": {
+          "minLength": 1,
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "precision": {
+          "$ref": "#/$defs/PrecisionMode"
+        },
+        "quantization": {
+          "$ref": "#/$defs/QuantizationMode"
+        },
+        "seed": {
+          "default": 42,
+          "minimum": 0,
+          "title": "Seed",
+          "type": "integer"
+        },
+        "sequence": {
+          "$ref": "#/$defs/SequenceSpec"
+        },
+        "task_type": {
+          "$ref": "#/$defs/TaskType"
+        },
+        "training_config_snapshot": {
+          "additionalProperties": true,
+          "title": "Training Config Snapshot",
+          "type": "object"
+        }
+      },
+      "required": [
+        "plan_id",
+        "plan_hash",
+        "backend_ref",
+        "environment_ref",
+        "dataset_ref",
+        "task_type",
+        "base_model",
+        "precision",
+        "quantization",
+        "adapter",
+        "optimizer",
+        "loss_impl",
+        "attention_backend",
+        "sequence",
+        "batching",
+        "checkpoint_policy",
+        "export"
+      ],
+      "title": "RunPlan",
+      "type": "object"
+    },
+    "RunProcessInfo": {
+      "additionalProperties": false,
+      "description": "Process identity so a recycled pid is never mistaken for a live run. A 'running' record whose\npid is not alive reconciles to 'interrupted' (run_registry.reconcile_running_records).",
+      "properties": {
+        "argv": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Argv",
+          "type": "array"
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exit Code"
+        },
+        "pid": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pid"
+        },
+        "process_started_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Process Started At"
+        }
+      },
+      "title": "RunProcessInfo",
+      "type": "object"
+    },
+    "RunReproducibility": {
+      "additionalProperties": false,
+      "description": "Embedded reproducibility manifest (provenance.RunProvenance) for a self-contained audit.",
+      "properties": {
+        "config_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Config Sha256"
+        },
+        "dataset_fingerprint": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dataset Fingerprint"
+        },
+        "dataset_row_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Dataset Row Count",
+          "type": "integer"
+        },
+        "engine_version": {
+          "default": "",
+          "title": "Engine Version",
+          "type": "string"
+        },
+        "platform": {
+          "default": "",
+          "title": "Platform",
+          "type": "string"
+        },
+        "python_version": {
+          "default": "",
+          "title": "Python Version",
+          "type": "string"
+        }
+      },
+      "title": "RunReproducibility",
+      "type": "object"
+    },
+    "SequenceSpec": {
+      "additionalProperties": false,
+      "description": "Sequence handling. Buckets let variable-length rows batch efficiently; the max bucket ==\nthe trainer's sequence_len (config_templates.sequence_len, default 4096).",
+      "properties": {
+        "buckets": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Buckets",
+          "type": "array"
+        },
+        "max_sequence_len": {
+          "default": 4096,
+          "minimum": 1,
+          "title": "Max Sequence Len",
+          "type": "integer"
+        },
+        "packing": {
+          "default": false,
+          "title": "Packing",
+          "type": "boolean"
+        },
+        "truncation_allowed": {
+          "default": true,
+          "title": "Truncation Allowed",
+          "type": "boolean"
+        }
+      },
+      "title": "SequenceSpec",
+      "type": "object"
+    },
+    "StageMarker": {
+      "description": "Ordered lifecycle stage of a run, launch \u2192 export. A RunEvent carries the stage it belongs to\nso a consumer can render a precise progress spine and localize a failure to the exact stage.",
+      "enum": [
+        "process_start",
+        "env_loaded",
+        "cuda_init",
+        "model_loaded",
+        "quantized",
+        "adapter_attached",
+        "optimizer_created",
+        "batch_materialized",
+        "forward",
+        "loss",
+        "backward",
+        "optimizer_step",
+        "checkpoint",
+        "reload",
+        "evaluation",
+        "export"
+      ],
+      "title": "StageMarker",
+      "type": "string"
+    },
+    "StatePlacement": {
+      "additionalProperties": false,
+      "properties": {
+        "placement_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Placement Id",
+          "type": "string"
+        },
+        "resource_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/PlacementRole"
+        },
+        "selector": {
+          "$ref": "#/$defs/PhysicalScopeSelector"
+        },
+        "shard_count": {
+          "anyOf": [
+            {
+              "minimum": 2,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shard Count"
+        },
+        "shard_group_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shard Group Id"
+        },
+        "shard_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shard Index"
+        },
+        "source_placement_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Placement Id"
+        },
+        "state": {
+          "$ref": "#/$defs/PhysicalStateKind"
+        }
+      },
+      "required": [
+        "placement_id",
+        "state",
+        "selector",
+        "resource_id",
+        "role"
+      ],
+      "title": "StatePlacement",
+      "type": "object"
+    },
+    "StorageInterface": {
+      "description": "How a storage device attaches. The interface \u2014 not just free space \u2014 decides whether a device\ncan sustain the heavy sequential + random writes of optimizer/parameter offload and checkpointing.\nA USB bridge or a network mount will thrash under sustained offload even with terabytes free.",
+      "enum": [
+        "nvme_pcie",
+        "sata_ssd",
+        "hdd",
+        "usb",
+        "network",
+        "virtual",
+        "unknown"
+      ],
+      "title": "StorageInterface",
+      "type": "string"
+    },
+    "StorageRole": {
+      "description": "The role a path plays in a run. Roles differ in access pattern: ``optimizer_offload`` /\n``parameter_offload`` / ``scratch`` / ``checkpoints`` are WRITE-heavy; ``model_cache`` /\n``dataset_cache`` are read-LATENCY-sensitive during load; ``source_repo`` / ``python_env`` are\nthousands of SMALL files touched on every process start (an import over a USB bridge or a WSL\n``/mnt`` mount stalls); ``archive`` just wants capacity. A path's suitability is judged PER ROLE (a\nUSB SSD is fine for ``archive``, poor for ``model_cache``, unfit for ``optimizer_offload``).",
+      "enum": [
+        "os",
+        "source_repo",
+        "python_env",
+        "model_cache",
+        "dataset_cache",
+        "checkpoints",
+        "scratch",
+        "optimizer_offload",
+        "parameter_offload",
+        "artifacts",
+        "archive",
+        "logs"
+      ],
+      "title": "StorageRole",
+      "type": "string"
+    },
+    "StorageRoleAssessment": {
+      "additionalProperties": false,
+      "description": "The PER-ROLE verdict for a candidate path: can it play this role, and if not, WHY. The reasons\nare the safe-spill guardrail's human-readable justification (USB bridge / synced folder / free-space\nmargin / inside the source repo / rotational disk).",
+      "properties": {
+        "device_mount_point": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Mount Point"
+        },
+        "free_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Free Bytes"
+        },
+        "interface": {
+          "$ref": "#/$defs/StorageInterface",
+          "default": "unknown"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "reasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "required_free_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Required Free Bytes"
+        },
+        "role": {
+          "$ref": "#/$defs/StorageRole"
+        },
+        "suitability": {
+          "$ref": "#/$defs/StorageSuitability"
+        }
+      },
+      "required": [
+        "role",
+        "path",
+        "suitability"
+      ],
+      "title": "StorageRoleAssessment",
+      "type": "object"
+    },
+    "StorageSuitability": {
+      "description": "The per-role verdict for a candidate path. ``unsuitable`` is a hard no (data-loss or\nthrash-to-a-halt risk); ``marginal`` will work but degrade (e.g. an HDD for offload); ``unknown``\nwhen detection couldn't characterize the device (honest, never a false ``suitable``).",
+      "enum": [
+        "suitable",
+        "marginal",
+        "unsuitable",
+        "unknown"
+      ],
+      "title": "StorageSuitability",
+      "type": "string"
+    },
+    "TaskType": {
+      "enum": [
+        "sft",
+        "pretraining",
+        "preference",
+        "reward",
+        "classification",
+        "embedding",
+        "multimodal",
+        "evaluation",
+        "distillation",
+        "grpo"
+      ],
+      "title": "TaskType",
+      "type": "string"
+    },
+    "TelemetryHook": {
+      "additionalProperties": false,
+      "properties": {
+        "metrics": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Metrics",
+          "type": "array"
+        },
+        "stage": {
+          "$ref": "#/$defs/StageMarker"
+        }
+      },
+      "required": [
+        "stage"
+      ],
+      "title": "TelemetryHook",
+      "type": "object"
+    },
+    "TerminalResultBody": {
+      "additionalProperties": false,
+      "description": "Worker\u2192core: the run ended. A FailureRecord is present iff the outcome was not PASS.",
+      "properties": {
+        "artifacts": {
+          "items": {
+            "$ref": "#/$defs/ArtifactManifest"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "final_eval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvaluationResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "outcome": {
+          "$ref": "#/$defs/FailureTaxonomy"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "run_manifest": {
+          "$ref": "#/$defs/RunManifest"
+        }
+      },
+      "required": [
+        "run_id",
+        "outcome",
+        "run_manifest"
+      ],
+      "title": "TerminalResultBody",
+      "type": "object"
+    },
+    "TrainerTarget": {
+      "description": "Verbatim from config_templates.TrainingConfigTarget.",
+      "enum": [
+        "corpus_studio",
+        "axolotl_yaml",
+        "trl_config",
+        "unsloth_script",
+        "huggingface_trainer",
+        "llama_factory"
+      ],
+      "title": "TrainerTarget",
+      "type": "string"
+    }
+  },
   "additionalProperties": false,
-  "description": "The versioned envelope for the core\u2194worker channel \u2014 realizes the 'immutable RunPlan IN,\nstructured RunEvent stream OUT' boundary. NEW; no worker/core protocol exists in the engine\ntoday (the desktop owns the trainer process directly). ``protocol_version`` lets the two sides\nnegotiate compatibility independently of any single contract's version. The body shape is\nselected by ``type`` (see :data:`WORKER_BODY_BY_TYPE`).",
+  "description": "The versioned envelope for the core\u2194worker channel \u2014 realizes the 'immutable RunPlan IN,\nstructured RunEvent stream OUT' boundary. Protocol 2.0 uses a mandatory worker-first identity\nhandshake. ``protocol_version`` evolves independently of any single contract's version. The body\nunion is language-neutral and must match ``type`` (see :data:`WORKER_BODY_BY_TYPE`).",
   "properties": {
     "body": {
       "anyOf": [
         {
-          "additionalProperties": true,
-          "type": "object"
+          "$ref": "#/$defs/HelloBody"
         },
         {
-          "type": "null"
+          "$ref": "#/$defs/CapabilityProbeRequestBody"
+        },
+        {
+          "$ref": "#/$defs/CapabilityReport"
+        },
+        {
+          "$ref": "#/$defs/RunDispatchBody"
+        },
+        {
+          "$ref": "#/$defs/RunAcceptedBody"
+        },
+        {
+          "$ref": "#/$defs/FailureRecord"
+        },
+        {
+          "$ref": "#/$defs/RunControlBody"
+        },
+        {
+          "$ref": "#/$defs/RunEvent"
+        },
+        {
+          "$ref": "#/$defs/HeartbeatBody"
+        },
+        {
+          "$ref": "#/$defs/TerminalResultBody"
         }
       ],
-      "default": null,
       "title": "Body"
     },
     "correlation_id": {
@@ -41,7 +5217,7 @@
       "type": "string"
     },
     "protocol_version": {
-      "pattern": "^\\d+\\.\\d+\\.\\d+([-+].+)?$",
+      "const": "2.0.0",
       "title": "Protocol Version",
       "type": "string"
     },
@@ -79,7 +5255,8 @@
     "protocol_version",
     "message_id",
     "direction",
-    "type"
+    "type",
+    "body"
   ],
   "title": "WorkerMessage",
   "type": "object"

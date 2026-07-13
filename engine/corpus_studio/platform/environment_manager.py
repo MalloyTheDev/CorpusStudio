@@ -19,7 +19,6 @@ import json
 import os
 from pathlib import Path
 import re
-import signal
 import shutil
 import subprocess
 import sys
@@ -28,6 +27,7 @@ from typing import Literal, Protocol
 from urllib.parse import unquote, urlparse
 import uuid
 
+from .backends import backend_manifest_digest, get_worker_backend
 from .common import HashRef, PackageLock, PackageSource, Ref
 from .contracts import (
     CapabilityReport,
@@ -51,6 +51,11 @@ from .environments import (
     recipe_digest,
     resolution_digest,
     resolve_dependencies,
+)
+from .process_control import (
+    process_group_creation_flags,
+    start_new_process_session,
+    terminate_process_tree,
 )
 
 MANAGER_VERSION = "1.0.0"
@@ -371,9 +376,6 @@ class SubprocessCommandRunner:
     ) -> CommandOutcome:
         stdout_path.parent.mkdir(parents=True, exist_ok=True)
         process_environment = dict(environment)
-        creationflags = (
-            int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)) if os.name == "nt" else 0
-        )
         with stdout_path.open("w", encoding="utf-8", errors="replace") as stdout_file, \
                 stderr_path.open("w", encoding="utf-8", errors="replace") as stderr_file:
             process = subprocess.Popen(  # noqa: S603 - reviewed argv, shell is explicitly disabled
@@ -384,8 +386,8 @@ class SubprocessCommandRunner:
                 stderr=stderr_file,
                 text=True,
                 shell=False,
-                creationflags=creationflags,
-                start_new_session=os.name != "nt",
+                creationflags=process_group_creation_flags(),
+                start_new_session=start_new_process_session(),
             )
             started = time.monotonic()
             timed_out = False
@@ -394,65 +396,21 @@ class SubprocessCommandRunner:
                 while process.poll() is None:
                     if cancel is not None and cancel.is_set():
                         cancelled = True
-                        _terminate(process)
+                        terminate_process_tree(process)
                         break
                     if time.monotonic() - started >= timeout_seconds:
                         timed_out = True
-                        _terminate(process)
+                        terminate_process_tree(process)
                         break
                     time.sleep(0.1)
             except KeyboardInterrupt:
                 cancelled = True
-                _terminate(process)
+                terminate_process_tree(process)
             if process.poll() is None:
-                _terminate(process)
+                terminate_process_tree(process)
             return CommandOutcome(
                 exit_code=process.returncode, timed_out=timed_out, cancelled=cancelled
             )
-
-
-def _terminate(process: subprocess.Popen[str]) -> None:
-    if process.poll() is not None:
-        return
-    if os.name == "nt":
-        # Pip/build backends may spawn compiler children. Kill the new process group as a tree so a
-        # timeout never leaves an installer writing into the managed environment in the background.
-        system_root = Path(os.environ.get("SYSTEMROOT", r"C:\Windows"))
-        taskkill = system_root / "System32" / "taskkill.exe"
-        try:
-            subprocess.run(  # noqa: S603 - fixed OS utility and integer pid, no shell
-                [str(taskkill), "/PID", str(process.pid), "/T", "/F"],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=5,
-                shell=False,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            process.terminate()
-    else:
-        kill_process_group = getattr(os, "killpg")
-        try:
-            kill_process_group(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-    try:
-        process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        if os.name == "nt":
-            process.kill()
-        else:
-            kill_process_group = getattr(os, "killpg")
-            kill_signal = getattr(signal, "SIGKILL", signal.SIGTERM)
-            try:
-                kill_process_group(process.pid, kill_signal)
-            except ProcessLookupError:
-                pass
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:  # pragma: no cover - OS failed to reap a killed process
-            pass
-
 
 class EnvironmentManagerError(RuntimeError):
     def __init__(
@@ -2075,8 +2033,25 @@ def locked_environment_ref(
     """Pin a RunPlan to the immutable lock, never to the mutable environment directory."""
     if lock.lock_hash is None:
         raise EnvironmentManagerError("cannot reference an unsealed environment lock")
-    if descriptor.lock_ref is None or descriptor.lock_ref.id != lock.lock_id:
+    descriptor_lock_hash = (
+        descriptor.lock_ref.hash.value
+        if descriptor.lock_ref is not None and descriptor.lock_ref.hash is not None
+        else None
+    )
+    descriptor_lock_algo = (
+        descriptor.lock_ref.hash.algo
+        if descriptor.lock_ref is not None and descriptor.lock_ref.hash is not None
+        else None
+    )
+    if (
+        descriptor.lock_ref is None
+        or descriptor.lock_ref.id != lock.lock_id
+        or descriptor_lock_algo != "sha256"
+        or descriptor_lock_hash != lock.lock_hash
+    ):
         raise EnvironmentManagerError("descriptor and lock do not match")
+    if descriptor.recipe_ref != lock.recipe_ref:
+        raise EnvironmentManagerError("descriptor and lock recipe refs do not match")
     return Ref(id=descriptor.env_id, hash=HashRef(value=lock.lock_hash))
 
 
@@ -2085,7 +2060,14 @@ def verify_run_plan_environment(
 ) -> list[str]:
     """Return resume/dispatch blockers when the plan's pinned environment no longer matches."""
     blockers: list[str] = []
-    expected = locked_environment_ref(descriptor, lock)
+    try:
+        expected = locked_environment_ref(descriptor, lock)
+    except EnvironmentManagerError as exc:
+        blockers.append(str(exc))
+        expected = Ref(
+            id=descriptor.env_id,
+            hash=HashRef(value=lock.lock_hash) if lock.lock_hash is not None else None,
+        )
     if plan.environment_ref.id != expected.id:
         blockers.append(
             f"plan environment id {plan.environment_ref.id} != managed environment {expected.id}"
@@ -2100,4 +2082,40 @@ def verify_run_plan_environment(
         blockers.append(
             f"environment state {descriptor.state.value} is not functionally verified"
         )
+    recipe = get_recipe(descriptor.recipe_ref.id)
+    if descriptor.layer != DependencyLayer.backend_worker:
+        blockers.append("managed run environment is not a backend_worker environment")
+    if recipe is None:
+        blockers.append(f"managed environment recipe {descriptor.recipe_ref.id!r} is unknown")
+    else:
+        if recipe.layer != DependencyLayer.backend_worker:
+            blockers.append(
+                f"managed environment recipe {recipe.recipe_id!r} is not a backend worker recipe"
+            )
+        if recipe.target != plan.backend_ref.id:
+            blockers.append(
+                f"environment recipe target {recipe.target!r} != plan backend "
+                f"{plan.backend_ref.id!r}"
+            )
+        current_recipe_hash = recipe_digest(recipe)
+        for owner, recipe_ref in (
+            ("descriptor", descriptor.recipe_ref),
+            ("lock", lock.recipe_ref),
+        ):
+            actual = recipe_ref.hash.value if recipe_ref.hash else None
+            actual_algo = recipe_ref.hash.algo if recipe_ref.hash else None
+            if actual_algo != "sha256" or actual != current_recipe_hash:
+                blockers.append(f"{owner} recipe hash does not match the current recipe")
+
+    backend = get_worker_backend(plan.backend_ref.id)
+    if backend is None:
+        blockers.append(f"plan backend {plan.backend_ref.id!r} is not registered")
+    else:
+        actual_backend_hash = plan.backend_ref.hash.value if plan.backend_ref.hash else None
+        actual_backend_algo = plan.backend_ref.hash.algo if plan.backend_ref.hash else None
+        if (
+            actual_backend_algo != "sha256"
+            or actual_backend_hash != backend_manifest_digest(backend)
+        ):
+            blockers.append("plan backend_ref hash does not match the current backend manifest")
     return blockers
