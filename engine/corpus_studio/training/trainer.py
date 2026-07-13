@@ -77,6 +77,14 @@ class TrainRunConfig(BaseModel):
     # installed TRL/transformers predates `use_liger_kernel`. NOTE: Liger uses Triton kernels — its
     # support on Blackwell/sm_120 is not yet verified here.
     use_liger: bool = False
+    # --- checkpoint retention (disk-control) ---
+    # How often to checkpoint (was hardcoded to 50). Each checkpoint is the adapter + resume state
+    # (optimizer/RNG) — hundreds of MB for QLoRA, not a full base model — but with no cap they
+    # accumulate indefinitely over a long run.
+    save_steps: int = Field(default=50, gt=0)
+    # Keep only the N most recent checkpoints (passed to TRL's SFTConfig). Default 3 keeps resume
+    # capability while preventing unbounded checkpoint growth; None keeps every checkpoint.
+    save_total_limit: int | None = Field(default=3, ge=1)
 
 
 class TrainResult(BaseModel):
@@ -165,6 +173,8 @@ def load_run_config_from_file(
         attn_implementation=attn_implementation or data.get("attn_implementation"),
         optim=optim or str(data.get("optim", "adamw_torch")),
         use_liger=use_liger if use_liger is not None else bool(data.get("use_liger", False)),
+        save_steps=int(data.get("save_steps", 50)),
+        save_total_limit=data.get("save_total_limit", 3),  # int or null (keep all)
     )
 
 
@@ -225,7 +235,8 @@ def build_training_kwargs(config: TrainRunConfig) -> dict[str, Any]:
         "seed": config.seed,
         "logging_steps": 1,
         "save_strategy": "steps",
-        "save_steps": 50,
+        "save_steps": config.save_steps,
+        "save_total_limit": config.save_total_limit,  # cap checkpoint accumulation (None = keep all)
         "report_to": [],
         "dataset_text_field": "text",
         "max_seq_length": config.sequence_len,
