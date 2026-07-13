@@ -371,7 +371,9 @@ class SubprocessCommandRunner:
     ) -> CommandOutcome:
         stdout_path.parent.mkdir(parents=True, exist_ok=True)
         process_environment = dict(environment)
-        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+        creationflags = (
+            int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)) if os.name == "nt" else 0
+        )
         with stdout_path.open("w", encoding="utf-8", errors="replace") as stdout_file, \
                 stderr_path.open("w", encoding="utf-8", errors="replace") as stderr_file:
             process = subprocess.Popen(  # noqa: S603 - reviewed argv, shell is explicitly disabled
