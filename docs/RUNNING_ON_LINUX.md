@@ -34,12 +34,25 @@ native-Linux + offload path below, or more VRAM.
 
 ## 1. Dedicate an NVMe + install Ubuntu
 
-You have 3 NVMes — dedicate one to Linux (better than an external drive: full PCIe speed, native
-ext4 I/O). To protect the Windows bootloader, **temporarily disconnect/disable the other drives in
-BIOS during the Ubuntu install** so GRUB only writes to the Linux NVMe, then re-enable them and pick
-the boot drive from the UEFI boot menu.
+Dedicate one NVMe to Linux (better than an external drive: full PCIe speed, native ext4 I/O). To
+protect the Windows bootloader, **temporarily disconnect/disable the other drives in BIOS during the
+Ubuntu install** so GRUB only writes to the Linux NVMe, then re-enable them and pick the boot drive
+from the UEFI boot menu.
 
-- **Ubuntu 24.04 LTS** (best NVIDIA/CUDA support).
+**Distro:** **Ubuntu 24.04 LTS** — genuinely the best for AI (best NVIDIA/CUDA support, the most-
+tested target for every ML library and Docker image). If the Blackwell driver step worries you,
+**Pop!_OS 22.04** (Ubuntu-based) ships the NVIDIA drivers pre-configured and the `apt`-based bootstrap
+here works on it unchanged. Skip Debian (packages too old for Blackwell) and Arch/NixOS (high-
+maintenance for a stable training box).
+
+**Headless Server vs Desktop → go headless** on a tight-VRAM card. A desktop compositor holds
+~300–500 MB of VRAM just to draw the screen — VRAM you need to reach seq-4096. **Ubuntu Server**
+frees it, uses less RAM/CPU, and is more stable. You lose nothing for training: the CorpusStudio
+*engine* (train-check / platform-plan / platform-run) is CLI and runs fully headless. **SSH in from
+Windows** — or use **VS Code Remote-SSH** (editor + terminal + file browser over SSH, feels local).
+The clean split: **author + prep datasets on the Windows CorpusStudio app, run the heavy training on
+the headless Linux box** — exactly the platform's headless-engine + swappable-shell design. Only pick
+Ubuntu Desktop if you specifically want a GUI on the Linux box (accept the VRAM cost).
 
 ## 2. NVIDIA driver (the one gotcha for Blackwell / sm_120)
 
@@ -106,7 +119,13 @@ cheapest first:
    fail here). This is what lets the overflow live in your system RAM.
 3. **DeepSpeed ZeRO offload → NVMe** — for when RAM is also tight; point it at one of your NVMes. Best
    for full fine-tuning; for QLoRA the offloadable optimizer is small, so prefer (1)+(2) first.
-4. **More VRAM** — the clean answer; a bigger card removes the whole problem.
+4. **Multiple GPUs** — shard the model + activations across cards (FSDP / DeepSpeed) to *combine* VRAM:
+   e.g. a 12 GB card + an 8 GB card ≈ 20 GB effective, enough for seq-4096 **without** CPU offload
+   (GPU↔GPU is far faster than GPU↔RAM). Caveats: a **heterogeneous** rig (e.g. Blackwell + Turing)
+   works but the older/slower card bottlenecks the step and needs a per-device memory cap so the
+   smaller card doesn't OOM; and multi-GPU is a **native-Linux** game (NCCL/FSDP — not WSL/Windows).
+   This is the real "scale up" path, and another reason the training box belongs on Linux.
+5. **A bigger single card** — the clean answer; removes the whole problem.
 
 Run it through the platform (the planner seals the levers, the watchdog measures the real fit, and on
 Linux a genuine over-VRAM config now OOMs cleanly with an actionable message instead of wedging):
