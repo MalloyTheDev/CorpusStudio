@@ -4,6 +4,7 @@
 from corpus_studio.training.traces import (
     Trace,
     _split_think,
+    answer_for_scoring,
     format_trace,
     trace_from_row,
     trace_quality,
@@ -110,3 +111,16 @@ def test_trace_quality_warns_on_token_thin_reasoning():
 def test_trace_quality_no_think_baseline_is_not_a_failure():
     # A no-think example (answer only) is legitimate — the quality gate must not fail it.
     assert trace_quality(Trace(prompt="Q", answer="A")).status == "pass"
+
+
+# ---- answer_for_scoring (trace-aware eval) -----------------------------------
+
+
+def test_answer_for_scoring_strips_the_reasoning():
+    answer, had = answer_for_scoring("<think>let me work it out</think>\n\nThe answer is 391.")
+    assert answer == "The answer is 391." and had is True
+
+
+def test_answer_for_scoring_no_tags_returns_text_unchanged():
+    answer, had = answer_for_scoring("Just a plain answer, no reasoning.")
+    assert answer == "Just a plain answer, no reasoning." and had is False

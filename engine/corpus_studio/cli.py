@@ -943,6 +943,12 @@ def eval_run(
     limit: Optional[int] = typer.Option(None, "--limit", help="Maximum examples to run."),
     score_threshold: float = typer.Option(70.0, "--score-threshold"),
     timeout_seconds: int = typer.Option(120, "--timeout-seconds"),
+    reasoning: bool = typer.Option(
+        False,
+        "--reasoning",
+        help="Trace-aware: strip the model's <think>…</think> and score only the ANSWER (so a "
+        "reasoning model's thinking doesn't corrupt the score). Flags answers with no reasoning.",
+    ),
     judge_model: Optional[str] = typer.Option(
         None,
         "--judge-model",
@@ -1028,6 +1034,7 @@ def eval_run(
             limit=limit,
             score_threshold=score_threshold,
             timeout_seconds=timeout_seconds,
+            reasoning=reasoning,
         ),
         examples,
         backend_client,
