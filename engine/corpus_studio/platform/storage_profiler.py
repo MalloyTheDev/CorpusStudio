@@ -109,8 +109,10 @@ def classify_interface(
 
 
 def is_cloud_synced_path(path: str) -> bool:
-    """True when any component of ``path`` is a known cloud-sync client folder."""
-    for part in Path(path).parts:
+    """True when any component of ``path`` is a known cloud-sync client folder. Splits on BOTH path
+    separators explicitly (not ``Path().parts``) so a Windows path is checked correctly even on a
+    POSIX host — the storage profile of one OS is sometimes read on another (WSL, tests, remote)."""
+    for part in path.replace("\\", "/").split("/"):
         low = part.strip().lower()
         if low in _CLOUD_SYNC_EXACT or any(low.startswith(p) for p in _CLOUD_SYNC_PREFIXES):
             return True
@@ -302,24 +304,9 @@ def _detect_linux_devices() -> list[StorageDevice]:
             continue
         seen.add(mount_point)
         total, free = _disk_usage(mount_point)
-        notes: list[str] = []
-        # Under WSL, /mnt/<drive> and drvfs/9p mounts are the Windows host drives seen through a
-        # translation layer — the real device attributes aren't visible from Linux.
-        is_wsl_host_drive = wsl and (fstype in {"drvfs", "9p", "v9fs"} or mount_point.startswith("/mnt/"))
-        if is_wsl_host_drive:
-            interface = StorageInterface.virtual
-            removable = rotational = None
-            notes.append("WSL view of a Windows host drive - real device attributes not visible from Linux")
-        elif fstype in {"nfs", "nfs4", "cifs", "smb", "smbfs", "fuse.sshfs"}:
-            interface = StorageInterface.network
-            removable = rotational = None
-        elif fstype in {"tmpfs", "overlay", "squashfs"}:
-            interface = StorageInterface.virtual
-            removable = rotational = None
-        else:
-            removable = _linux_block_flag(device_path, "removable")
-            rotational = _linux_block_flag(device_path, "queue/rotational")
-            interface = classify_interface(device_path, removable=removable, rotational=rotational)
+        interface, removable, rotational, notes = classify_linux_mount(
+            device_path, mount_point, fstype, wsl=wsl
+        )
         devices.append(
             StorageDevice(
                 mount_point=mount_point,
@@ -337,7 +324,28 @@ def _detect_linux_devices() -> list[StorageDevice]:
     return devices
 
 
-def _detect_windows_devices() -> list[StorageDevice]:
+def classify_linux_mount(
+    device_path: str, mount_point: str, fstype: str, *, wsl: bool
+) -> tuple[StorageInterface, bool | None, bool | None, list[str]]:
+    """Classify one Linux/WSL mount into ``(interface, removable, rotational, notes)``. Pure w.r.t.
+    the filesystem type + name; only the ``else`` (a real block device) reads ``/sys/block``. Split
+    out so every branch — WSL host drive, network, virtual, real disk — is unit-tested."""
+    notes: list[str] = []
+    # Under WSL, /mnt/<drive> and drvfs/9p mounts are the Windows host drives seen through a
+    # translation layer — the real device attributes aren't visible from Linux.
+    if wsl and (fstype in {"drvfs", "9p", "v9fs"} or mount_point.startswith("/mnt/")):
+        notes.append("WSL view of a Windows host drive - real device attributes not visible from Linux")
+        return StorageInterface.virtual, None, None, notes
+    if fstype in {"nfs", "nfs4", "cifs", "smb", "smbfs", "fuse.sshfs"}:
+        return StorageInterface.network, None, None, notes
+    if fstype in {"tmpfs", "overlay", "squashfs"}:
+        return StorageInterface.virtual, None, None, notes
+    removable = _linux_block_flag(device_path, "removable")
+    rotational = _linux_block_flag(device_path, "queue/rotational")
+    return classify_interface(device_path, removable=removable, rotational=rotational), removable, rotational, notes
+
+
+def _detect_windows_devices() -> list[StorageDevice]:  # pragma: no cover - Windows-only; exercised on a real Windows host, not the Linux CI coverage runner.
     """Detect mounted volumes on Windows via GetDriveType + GetVolumeInformation + disk_usage."""
     try:
         import ctypes  # noqa: PLC0415 - Windows-only, imported lazily.
@@ -385,7 +393,7 @@ def _detect_windows_devices() -> list[StorageDevice]:
     return devices
 
 
-def _windows_filesystem(kernel32: object, root: str) -> str:
+def _windows_filesystem(kernel32: object, root: str) -> str:  # pragma: no cover - Windows-only; exercised on a real Windows host, not the Linux CI coverage runner.
     """Volume filesystem name (NTFS/FAT32/exFAT/...) via GetVolumeInformationW, or '' on failure."""
     try:
         import ctypes  # noqa: PLC0415

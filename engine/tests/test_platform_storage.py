@@ -10,13 +10,17 @@ from __future__ import annotations
 from corpus_studio.platform.contracts import StorageDevice, StorageProfile
 from corpus_studio.platform.enums import StorageInterface, StorageRole, StorageSuitability
 from corpus_studio.platform.storage_profiler import (
+    _detect_generic_devices,
+    _linux_block_flag,
     assess_path_for_role,
     assess_role,
     build_storage_profile,
     classify_interface,
+    classify_linux_mount,
     detect_storage_devices,
     find_device_for_path,
     is_cloud_synced_path,
+    is_inside_source_repo,
     min_free_bytes_for_role,
     parse_proc_mounts,
 )
@@ -62,6 +66,7 @@ def test_is_cloud_synced_path_matches_known_clients_only():
 def test_parse_proc_mounts_filters_pseudo_and_unescapes_spaces():
     text = (
         "proc /proc proc rw 0 0\n"
+        "\n"  # blank / malformed line (< 3 fields) is skipped, not a crash
         "sysfs /sys sysfs rw 0 0\n"
         "/dev/nvme0n1p2 / ext4 rw 0 0\n"
         "/dev/sdb1 /mnt/my\\040disk ext4 rw 0 0\n"
@@ -211,6 +216,66 @@ def test_assess_path_for_role_with_injected_devices(tmp_path):
 # ---- detection smoke + contract round-trip -----------------------------------
 
 
+def test_classify_linux_mount_wsl_host_drive_is_virtual_with_note():
+    interface, removable, rotational, notes = classify_linux_mount(
+        "D:", "/mnt/d", "drvfs", wsl=True
+    )
+    assert interface == StorageInterface.virtual
+    assert removable is None and rotational is None
+    assert notes and "WSL" in notes[0]
+
+
+def test_classify_linux_mount_network_and_virtual_filesystems():
+    net, *_ = classify_linux_mount("//srv/share", "/net", "nfs4", wsl=False)
+    assert net == StorageInterface.network
+    virt, *_ = classify_linux_mount("tmpfs", "/run", "tmpfs", wsl=False)
+    assert virt == StorageInterface.virtual
+
+
+def test_classify_linux_mount_real_disk_reads_block_attributes():
+    # A device absent from /sys/block → attributes unknown; an nvme* name still classifies by name.
+    interface, removable, rotational, notes = classify_linux_mount(
+        "/dev/nvme9n1p1", "/data", "ext4", wsl=False
+    )
+    assert interface == StorageInterface.nvme_pcie
+    assert removable is None and rotational is None and notes == []
+
+
+def test_detect_generic_devices_returns_the_root_volume():
+    devices = _detect_generic_devices()
+    assert isinstance(devices, list)
+    for device in devices:
+        assert isinstance(device, StorageDevice) and device.mount_point
+
+
+def test_find_device_for_path_returns_none_when_nothing_matches():
+    assert find_device_for_path("/nowhere/x", []) is None
+
+
+def test_is_inside_source_repo_detects_a_git_tree(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / "sub").mkdir()
+    # A path under a .git tree is detected. (The False branch is exercised across the suite by the
+    # many tmp paths that sit outside any git tree — its result depends on where tmp_path lives.)
+    assert is_inside_source_repo(str(repo / "sub")) is True
+
+
+def test_linux_block_flag_returns_none_for_absent_or_non_block_device():
+    # A non-block device name short-circuits to None; absent block devices (nvme partition-suffix and
+    # sd* digit-suffix parent-disk resolution) can't be read → None. Exercises both suffix branches.
+    assert _linux_block_flag("/dev/loop0", "removable") is None
+    assert _linux_block_flag("/dev/nvme9n1p1", "queue/rotational") is None
+    assert _linux_block_flag("/dev/sdz9", "removable") is None
+
+
+def test_disk_usage_error_path_returns_unknown():
+    from corpus_studio.platform.storage_profiler import _disk_usage
+
+    total, free = _disk_usage("/this/path/does/not/exist/anywhere-xyz")
+    assert total is None and free is None
+
+
 def test_detect_storage_devices_runs_without_crashing():
     devices = detect_storage_devices()
     assert isinstance(devices, list)
@@ -224,3 +289,9 @@ def test_build_storage_profile_smoke_and_round_trip():
     restored = StorageProfile.model_validate_json(profile.model_dump_json())
     assert restored.contract_version == profile.contract_version
     assert len(restored.devices) == len(profile.devices)
+
+
+def test_build_storage_profile_attaches_role_assessments(tmp_path):
+    profile = build_storage_profile({StorageRole.optimizer_offload: str(tmp_path / "offload")})
+    assert len(profile.assessments) == 1
+    assert profile.assessments[0].role == StorageRole.optimizer_offload
