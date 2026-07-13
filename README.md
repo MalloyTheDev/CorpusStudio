@@ -171,6 +171,11 @@ a training run — its own opt-in first-party trainer, or your installed trainer
   updated, and exposed coordinates distinct; static descriptor/safetensors evidence and typed runtime
   reconciliation surface explicit gaps/conflicts without converting storage elements or allocator
   bytes into stronger claims (see [`docs/PARAMETER_ACCOUNTING.md`](docs/PARAMETER_ACCOUNTING.md))
+- every new `RunPlan` seals an explicit physical-execution specification: concrete resources, state
+  placements, offload rules, rank/group bindings, and exact parameter/storage evidence references.
+  The current built-in workers prove only a single CPU or GPU resource and refuse non-trivial
+  placement before launch; representation is not an execution claim (see
+  [`docs/RUN_PLAN_PHYSICAL_EXECUTION.md`](docs/RUN_PLAN_PHYSICAL_EXECUTION.md))
 
 Corpus Studio's dependency-light core never bundles CUDA, PyTorch, or trainer packages. Training deps
 are opt-in via the `[train]` extra or installed into an explicitly reviewed managed reference-backend

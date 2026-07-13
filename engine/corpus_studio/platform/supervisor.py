@@ -380,7 +380,7 @@ def demo_run_plan(plan_id: str = "demo-echo") -> RunPlan:
     those is a later slice); it exists so ``platform-run --demo`` and the tests can prove the harness
     end-to-end. Attention defaults to ``math`` (the Blackwell-safe path). Built via
     ``model_validate`` so the plan body reads as the language-neutral JSON a real planner emits."""
-    return RunPlan.model_validate(
+    draft = RunPlan.model_validate(
         {
             "plan_id": plan_id,
             "plan_hash": "0" * 64,
@@ -401,3 +401,6 @@ def demo_run_plan(plan_id: str = "demo-echo") -> RunPlan:
             "export": {"format": "adapter_peft"},
         }
     )
+    from corpus_studio.platform.planner import compute_plan_hash, run_plan_hash_payload  # noqa: PLC0415
+
+    return draft.model_copy(update={"plan_hash": compute_plan_hash(run_plan_hash_payload(draft))})

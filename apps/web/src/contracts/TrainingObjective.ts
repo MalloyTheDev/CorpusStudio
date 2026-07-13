@@ -395,7 +395,7 @@ export interface ObjectiveResumeSemantics {
  * What may change, separate from where those components are physically resident.
  *
  * This is the MoE-safe semantic update policy. Placement, prefetch, and device scheduling remain
- * future RunPlan responsibilities.
+ * separate RunPlan physical-execution responsibilities.
  */
 export interface ObjectiveUpdatePolicy {
   exposure_tracking: ObjectiveExposureTracking;

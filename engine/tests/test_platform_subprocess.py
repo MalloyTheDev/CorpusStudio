@@ -65,6 +65,17 @@ def test_worker_rejects_a_malformed_dispatch():
     assert msg["type"] == "run_rejected"
 
 
+def test_worker_rejects_a_well_formed_but_tampered_plan():
+    envelope = json.loads(_dispatch_line(_PLAN, "run-1", 30))
+    envelope["body"]["plan"]["seed"] += 1
+    out = io.StringIO()
+    rc = run_worker(json.dumps(envelope), runner_name="echo", out=out)
+    assert rc == 2
+    msg = json.loads(out.getvalue().splitlines()[0])
+    assert msg["type"] == "run_rejected"
+    assert "plan_hash" in msg["body"]["message"]
+
+
 def test_worker_events_survive_a_trainer_stdout_redirect(monkeypatch):
     # The real trainer wraps trainer.train() in redirect_stdout(sys.stderr). The protocol channel IS
     # stdout, so if the per-step sink looked up sys.stdout AT CALL TIME it would land on stderr during

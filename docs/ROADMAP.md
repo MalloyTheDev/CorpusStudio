@@ -127,8 +127,11 @@ input side. Ordered:
   descriptor/safetensors evidence, typed runtime observations, strict reconciliation, explicit
   gaps/conflicts, and lifecycle refs. Backend workers still need real coordinate instrumentation. See
   [`PARAMETER_ACCOUNTING.md`](PARAMETER_ACCOUNTING.md).
-- ⏭️ **Offload/placement/parallelism `RunPlan` expansion**, then full `TraceRecord`, MoE inspection,
-  additional backend workers, and dataset mixtures.
+- ✅ **Offload/placement/parallelism `RunPlan` contract + planner foundation** — concrete resources,
+  state placement, offload rules, ranks/groups, evidence pins, capability gates, and tamper checks are
+  explicit. Built-in workers remain singleton-only and refuse non-trivial execution. See
+  [`RUN_PLAN_PHYSICAL_EXECUTION.md`](RUN_PLAN_PHYSICAL_EXECUTION.md).
+- ⏭️ **Full `TraceRecord`**, then MoE inspection, additional backend workers, and dataset mixtures.
 
 - **Surface the LLM judge in the Evaluation tab** — the `--judge-model` scorer ships in
   the engine and in suites, but the desktop Evaluation tab still has no judge-model field.

@@ -69,12 +69,13 @@ def test_all_root_contracts_registered():
 
 def test_failure_and_fit_taxonomies_complete():
     assert len(FailureTaxonomy) == 11
-    assert len(FitClass) == 11
+    assert len(FitClass) == 12
     assert len(StageMarker) == 16
     # the spill-vs-OOM distinction that is the whole point
     assert FailureTaxonomy.KERNEL_STALL.value == "KERNEL_STALL"
     assert FailureTaxonomy.ACCIDENTAL_SPILL.value == "ACCIDENTAL_SPILL"
     assert FitClass.ACCIDENTAL_WDDM_SPILL.value == "ACCIDENTAL_WDDM_SPILL"
+    assert FitClass.PLANNED_UNPROVEN.value == "PLANNED_UNPROVEN"
     assert FitClass.NATIVE_SAFE.value == "NATIVE_SAFE"
 
 
@@ -141,6 +142,187 @@ def test_run_plan_requires_supervised_token_target():
 def test_run_plan_hash_must_be_sha256():
     with pytest.raises(ValidationError):
         _valid_run_plan(plan_hash="not-a-hash")
+
+
+def _singleton_physical(*, selector=None):
+    return P.PhysicalExecutionSpec(
+        resources=[
+            P.PhysicalResource(
+                resource_id="compute-0", tier="gpu", device_kind="cuda", device_id="cuda:0"
+            )
+        ],
+        placements=[
+            P.StatePlacement(
+                placement_id="parameters-authoritative",
+                state="parameters",
+                selector=selector or {"whole_model": True},
+                resource_id="compute-0",
+                role="authoritative",
+            )
+        ],
+        parallelism=P.ParallelismSpec(
+            world_size=1,
+            ranks=[P.RankBinding(rank=0, resource_id="compute-0")],
+        ),
+    )
+
+
+def _optimizer_offload_physical(*, route_miss_action="fail", **over):
+    body = {
+        "resources": [
+            {
+                "resource_id": "compute-0",
+                "tier": "gpu",
+                "device_kind": "cuda",
+                "device_id": "cuda:0",
+            },
+            {
+                "resource_id": "host-ram",
+                "tier": "pageable_ram",
+                "device_kind": "cpu",
+                "device_id": "cpu:0",
+            },
+        ],
+        "placements": [
+            {
+                "placement_id": "optimizer-authoritative",
+                "state": "optimizer_state",
+                "selector": {"whole_model": True},
+                "resource_id": "compute-0",
+                "role": "authoritative",
+            }
+        ],
+        "offload_rules": [
+            {
+                "rule_id": "optimizer-offload",
+                "state": "optimizer_state",
+                "selector": {"whole_model": True},
+                "source_resource_id": "compute-0",
+                "target_resource_id": "host-ram",
+                "mechanism": "cpu_copy",
+                "trigger": "memory_pressure",
+                "route_miss_action": route_miss_action,
+            }
+        ],
+        "parallelism": {
+            "world_size": 1,
+            "ranks": [{"rank": 0, "resource_id": "compute-0"}],
+        },
+        **over,
+    }
+    return P.PhysicalExecutionSpec.model_validate(body)
+
+
+def test_run_plan_physical_execution_is_planned_not_residency_evidence():
+    physical = _singleton_physical()
+    plan = _valid_run_plan(physical_execution=physical)
+    assert plan.physical_execution is not None
+    assert plan.physical_execution.evidence_status == "planned_not_measured"
+    assert plan.physical_execution.route_fidelity == "preserve_or_fail"
+    assert P.RunPlan.model_validate_json(plan.model_dump_json()) == plan
+
+
+def test_scope_specific_placement_requires_pinned_parameter_report():
+    physical = _singleton_physical(selector={"parameter_scope_ids": ["experts.layer0"]})
+    with pytest.raises(ValidationError, match="parameter-accounting"):
+        _valid_run_plan(physical_execution=physical)
+    plan = _valid_run_plan(
+        physical_execution=physical,
+        parameter_accounting_ref={"id": "parameter-report", "hash": {"value": "a" * 64}},
+    )
+    assert plan.parameter_accounting_ref is not None
+
+
+def test_explicit_offload_rules_must_agree_with_compatibility_summary():
+    physical = _optimizer_offload_physical()
+    with pytest.raises(ValidationError, match="offload_strategy"):
+        _valid_run_plan(physical_execution=physical)
+    plan = _valid_run_plan(
+        physical_execution=physical,
+        offload_strategy="controlled_optimizer_offload",
+    )
+    assert len(plan.physical_execution.offload_rules) == 1
+
+
+def test_semantic_route_fallback_requires_a_pinned_model_policy():
+    with pytest.raises(ValidationError, match="semantic route fallback"):
+        _optimizer_offload_physical(route_miss_action="semantic_fallback")
+    physical = _optimizer_offload_physical(
+        route_miss_action="semantic_fallback",
+        route_fidelity="declared_semantic_fallback",
+        semantic_fallback_policy_ref={"id": "router-policy", "hash": {"value": "b" * 64}},
+    )
+    assert physical.route_fidelity == "declared_semantic_fallback"
+
+
+def test_storage_resource_refuses_unsuitable_and_requires_explicit_risk_acceptance():
+    assessment = {
+        "role": "parameter_offload",
+        "path": "C:/offload",
+        "suitability": "unsuitable",
+        "reasons": ["inside source repository"],
+    }
+    with pytest.raises(ValidationError, match="unsuitable"):
+        P.PhysicalResource(
+            resource_id="nvme",
+            tier="nvme",
+            storage={
+                "role": "parameter_offload",
+                "path": "C:/offload",
+                "assessment": assessment,
+                "accepted_suitability": "unsuitable",
+            },
+        )
+    assessment["suitability"] = "marginal"
+    with pytest.raises(ValidationError, match="accepted_suitability"):
+        P.PhysicalResource(
+            resource_id="nvme",
+            tier="nvme",
+            storage={
+                "role": "parameter_offload",
+                "path": "C:/offload",
+                "assessment": assessment,
+            },
+        )
+    resource = P.PhysicalResource(
+        resource_id="nvme",
+        tier="nvme",
+        storage={
+            "role": "parameter_offload",
+            "path": "C:/offload",
+            "assessment": assessment,
+            "accepted_suitability": "marginal",
+        },
+    )
+    assert resource.storage is not None
+
+
+def test_parallel_groups_are_explicit_partitions_with_stable_expert_scopes():
+    with pytest.raises(ValidationError, match="explicit communication"):
+        P.ParallelGroup(
+            group_id="data-0", kind="data", ranks=[0, 1], communication_backend="none"
+        )
+    with pytest.raises(ValidationError, match="stable parameter scope"):
+        P.ParallelGroup(
+            group_id="experts-0", kind="expert", ranks=[0, 1], communication_backend="nccl"
+        )
+    parallel = P.ParallelismSpec(
+        world_size=2,
+        ranks=[
+            P.RankBinding(rank=0, resource_id="gpu-0", local_rank=0),
+            P.RankBinding(rank=1, resource_id="gpu-1", local_rank=1),
+        ],
+        groups=[
+            P.ParallelGroup(
+                group_id="experts-0",
+                kind="expert",
+                ranks=[0, 1],
+                communication_backend="nccl",
+                parameter_scope_ids=["experts.layer0"],
+            )
+        ],
+    )
+    assert parallel.world_size == 2
 
 
 def test_contracts_forbid_unknown_fields():
@@ -280,6 +462,12 @@ def test_export_json_schemas_writes_language_neutral_files(tmp_path):
         "supervised_token_accumulation_target"
         in run_plan_schema["$defs"]["BatchingSpec"]["properties"]
     )
+    assert "PhysicalExecutionSpec" in run_plan_schema["$defs"]
+    physical = run_plan_schema["$defs"]["PhysicalExecutionSpec"]["properties"]
+    assert physical["evidence_status"]["const"] == "planned_not_measured"
+    assert "resources" in physical and "offload_rules" in physical and "parallelism" in physical
+    selector = run_plan_schema["$defs"]["PhysicalScopeSelector"]["properties"]
+    assert "parameter_scope_ids" in selector and "expert_ids" in selector
     # Descriptor schemas preserve the fail-closed trust boundary and portable evidence shapes.
     model_schema = P.contract_schemas()["ModelDescriptor"]
     trust_remote_code = model_schema["$defs"]["TrustRequirement"]["properties"][

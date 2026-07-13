@@ -26,9 +26,10 @@ Against the full-platform vision, the frontier is the **input side**. Ranked gap
 | Model & Tokenizer Lab (`ModelDescriptor`/`TokenizerDescriptor`) | ✅ **contract + static-inspection foundation shipped** | offline identity/inventory/trust/tokenizer compatibility; loading, editing/training, MoE detection, and runtime support proof remain future work — see [`MODEL_TOKENIZER_CONTRACTS.md`](MODEL_TOKENIZER_CONTRACTS.md) |
 | `TrainingObjective` as a distinct registry | ✅ **contract + registry foundation shipped** | 29 sealed objective definitions + conservative dataset/model/backend evidence checker; RunPlan integration and trainer implementation remain future work — see [`TRAINING_OBJECTIVES.md`](TRAINING_OBJECTIVES.md) |
 | MoE-safe parameter accounting | ✅ **contract + static/reconciliation foundation shipped** | Sealed reports, bounded descriptor/safetensors evidence, typed worker-observation seam, explicit gaps/conflicts, and lifecycle refs; backend runtime instrumentation remains future work — see [`PARAMETER_ACCOUNTING.md`](PARAMETER_ACCOUNTING.md) |
+| Physical `RunPlan` planning | ✅ **contract + planner foundation shipped** | Concrete resources/placements/offload/ranks/groups, sealed evidence refs, static + probed capability gates, and legacy-hash compatibility; built-in workers still refuse non-trivial physical execution — see [`RUN_PLAN_PHYSICAL_EXECUTION.md`](RUN_PLAN_PHYSICAL_EXECUTION.md) |
 | Full versioned `TraceRecord` | partial | lightweight `training/traces.py` exists |
 | Dataset mixtures + transformation graph | partial | `DatasetManifest.lineage` is the seed |
-| Offload planning (DeepSpeed/FSDP/NVMe) | planned | **depends on** StorageProfile ✅ **and** the Environment Manager |
+| Offload execution (DeepSpeed/FSDP/NVMe) | planned | the physical contract is shipped; each mechanism still needs an isolated backend plus functional and hardware proof |
 
 ## 2. Dependency & runtime architecture (reference foundation shipped)
 
@@ -137,7 +138,7 @@ contracts as they are built** (see §5 and [`MOE_ARCHITECTURE.md`](MOE_ARCHITECT
 | **3** | ✅ General **`ModelDescriptor` + `TokenizerDescriptor`** foundation + static local inspection | component-scoped representation, scoped count records, semantic routing separate from physical scheduling; actual MoE detection/runtime remains Phase 8 |
 | **4** | ✅ **`TrainingObjective` registry** (objective distinct from backend) | 29 sealed definitions; explicit labels/masks/loss components, router/expert update policy, artifacts/resume/eval/hardware implications, and independent compatibility evidence ([`TRAINING_OBJECTIVES.md`](TRAINING_OBJECTIVES.md)) |
 | **5** | ✅ **Dense-safe + MoE-safe parameter-accounting evidence foundation** (`N_logical`/`N_active`/`N_resident`/`N_touched`/`N_updated`/`N_exposed`) | hash-sealed report + strict scopes/windows/sources, bounded static producer, typed runtime reconciliation, gaps/conflicts, and planning/telemetry/checkpoint/evaluation refs shipped; actual workers must still emit measured coordinates ([`PARAMETER_ACCOUNTING.md`](PARAMETER_ACCOUNTING.md)) |
-| 6 | **Immutable `RunPlan` expansion** (offload/placement/parallelism representable) | uses StorageProfile + Env Manager |
+| **6** | ✅ **Immutable `RunPlan` expansion** (offload/placement/parallelism representable) | explicit physical specification, evidence pinning, capability gates, tamper checks, and honest singleton-only runner support shipped ([`RUN_PLAN_PHYSICAL_EXECUTION.md`](RUN_PLAN_PHYSICAL_EXECUTION.md)) |
 | 7 | Generalized **`TraceRecord`** + Trace Studio | |
 | 8 | **MoE model inspection** (detect/parse existing MoE; report logical/active/expert counts) | inference-only OK if labeled |
 | 9 | Additional **dense** training backends (one isolated env at a time: TRL → DeepSpeed → FSDP → Unsloth → Axolotl) | |

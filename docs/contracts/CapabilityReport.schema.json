@@ -28,6 +28,18 @@
       "title": "AttentionImpl",
       "type": "string"
     },
+    "CommunicationBackend": {
+      "enum": [
+        "none",
+        "nccl",
+        "gloo",
+        "mpi",
+        "ucc",
+        "backend_native"
+      ],
+      "title": "CommunicationBackend",
+      "type": "string"
+    },
     "EffectiveCapabilities": {
       "additionalProperties": false,
       "description": "The intersection of what a backend DECLARES and what PROVED to work on this host. The planner\nresolves a RunPlan against this, not the raw BackendManifest.",
@@ -46,12 +58,47 @@
           "title": "Attention Impls",
           "type": "array"
         },
+        "communication_backends": {
+          "items": {
+            "$ref": "#/$defs/CommunicationBackend"
+          },
+          "title": "Communication Backends",
+          "type": "array"
+        },
         "objective_capabilities": {
           "items": {
             "pattern": "^[A-Za-z0-9._-]+$",
             "type": "string"
           },
           "title": "Objective Capabilities",
+          "type": "array"
+        },
+        "offload_strategies": {
+          "items": {
+            "$ref": "#/$defs/OffloadStrategy"
+          },
+          "title": "Offload Strategies",
+          "type": "array"
+        },
+        "parallelism_kinds": {
+          "items": {
+            "$ref": "#/$defs/ParallelismKind"
+          },
+          "title": "Parallelism Kinds",
+          "type": "array"
+        },
+        "placement_modes": {
+          "items": {
+            "$ref": "#/$defs/PlacementMode"
+          },
+          "title": "Placement Modes",
+          "type": "array"
+        },
+        "placement_tiers": {
+          "items": {
+            "$ref": "#/$defs/MemoryTier"
+          },
+          "title": "Placement Tiers",
           "type": "array"
         },
         "precision_modes": {
@@ -120,6 +167,35 @@
       },
       "title": "HashRef",
       "type": "object"
+    },
+    "MemoryTier": {
+      "description": "A physical state tier. A RunPlan names the intended tier; only runtime evidence may claim\nactual residency there.",
+      "enum": [
+        "gpu",
+        "pinned_ram",
+        "pageable_ram",
+        "nvme",
+        "sata",
+        "remote",
+        "unknown"
+      ],
+      "title": "MemoryTier",
+      "type": "string"
+    },
+    "OffloadStrategy": {
+      "description": "The ``controlled_*`` values are the deliberate, planned counterparts of the accidental spills\nin :class:`FitClass`.",
+      "enum": [
+        "none",
+        "controlled_activation_offload",
+        "controlled_optimizer_offload",
+        "controlled_parameter_offload",
+        "cpu_offload",
+        "disk_offload",
+        "deepspeed_zero2",
+        "deepspeed_zero3"
+      ],
+      "title": "OffloadStrategy",
+      "type": "string"
     },
     "PackageLock": {
       "additionalProperties": false,
@@ -228,6 +304,30 @@
       ],
       "title": "PackageLock",
       "type": "object"
+    },
+    "ParallelismKind": {
+      "enum": [
+        "data",
+        "tensor",
+        "pipeline",
+        "expert",
+        "sequence",
+        "context"
+      ],
+      "title": "ParallelismKind",
+      "type": "string"
+    },
+    "PlacementMode": {
+      "enum": [
+        "single_resource",
+        "identity_scoped",
+        "replicated",
+        "sharded",
+        "tiered",
+        "expert_scoped"
+      ],
+      "title": "PlacementMode",
+      "type": "string"
     },
     "PrecisionMode": {
       "enum": [

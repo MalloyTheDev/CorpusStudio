@@ -71,6 +71,18 @@
       "title": "CheckpointSemantics",
       "type": "object"
     },
+    "CommunicationBackend": {
+      "enum": [
+        "none",
+        "nccl",
+        "gloo",
+        "mpi",
+        "ucc",
+        "backend_native"
+      ],
+      "title": "CommunicationBackend",
+      "type": "string"
+    },
     "CompileMode": {
       "enum": [
         "none",
@@ -301,6 +313,20 @@
       "title": "LossImpl",
       "type": "string"
     },
+    "MemoryTier": {
+      "description": "A physical state tier. A RunPlan names the intended tier; only runtime evidence may claim\nactual residency there.",
+      "enum": [
+        "gpu",
+        "pinned_ram",
+        "pageable_ram",
+        "nvme",
+        "sata",
+        "remote",
+        "unknown"
+      ],
+      "title": "MemoryTier",
+      "type": "string"
+    },
     "OffloadStrategy": {
       "description": "The ``controlled_*`` values are the deliberate, planned counterparts of the accidental spills\nin :class:`FitClass`.",
       "enum": [
@@ -340,6 +366,30 @@
         "sgd"
       ],
       "title": "Optimizer",
+      "type": "string"
+    },
+    "ParallelismKind": {
+      "enum": [
+        "data",
+        "tensor",
+        "pipeline",
+        "expert",
+        "sequence",
+        "context"
+      ],
+      "title": "ParallelismKind",
+      "type": "string"
+    },
+    "PlacementMode": {
+      "enum": [
+        "single_resource",
+        "identity_scoped",
+        "replicated",
+        "sharded",
+        "tiered",
+        "expert_scoped"
+      ],
+      "title": "PlacementMode",
       "type": "string"
     },
     "PrecisionMode": {
@@ -520,6 +570,13 @@
       ],
       "default": null
     },
+    "communication_backends": {
+      "items": {
+        "$ref": "#/$defs/CommunicationBackend"
+      },
+      "title": "Communication Backends",
+      "type": "array"
+    },
     "compile_modes": {
       "items": {
         "$ref": "#/$defs/CompileMode"
@@ -618,6 +675,27 @@
         "$ref": "#/$defs/Optimizer"
       },
       "title": "Optimizers",
+      "type": "array"
+    },
+    "parallelism_kinds": {
+      "items": {
+        "$ref": "#/$defs/ParallelismKind"
+      },
+      "title": "Parallelism Kinds",
+      "type": "array"
+    },
+    "placement_modes": {
+      "items": {
+        "$ref": "#/$defs/PlacementMode"
+      },
+      "title": "Placement Modes",
+      "type": "array"
+    },
+    "placement_tiers": {
+      "items": {
+        "$ref": "#/$defs/MemoryTier"
+      },
+      "title": "Placement Tiers",
       "type": "array"
     },
     "precision_modes": {

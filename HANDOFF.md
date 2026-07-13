@@ -37,20 +37,21 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
 
 ## 2. Current git / PR state
 
-`main` is the source of truth; everything through **#413 was merged when the Phase 5 branch began**:
+`main` is the source of truth; everything through **#414 was merged when the Phase 6 branch began**:
 - **#404** configurable checkpoint retention · **#405** StorageProfile + the dependency-architecture
   correction · **#406** Environment Manager substrate (Phase 2 slice 1) · **#407** storage USB/WSL
   runtime-role risks + storage-vs-not failure diagnostic · **#408** HANDOFF/AGENTS · **#409**
   CURRENT_STATE/CLI_REFERENCE reconciliation · **#410** the follow-up docs refresh · **#411** the
   managed `backend-corpus-studio` environment creation/lock/probe/drift/recreate lifecycle; **#412**
   adds the Phase 3 model/tokenizer descriptor and static inspection foundation; **#413** adds the
-  Phase 4 TrainingObjective registry and compatibility checker. GitHub was checked live after #413
-  merged: no competing PRs; only unrelated UI-theme issues #187 and #201 were open. **#414**
-  (`feat/parameter-accounting-evidence`) delivers the Phase 5 parameter-accounting foundation;
-  verify its live PR/merge state rather than inferring it from this snapshot. Its local gate before
-  publication was 1,346 Python tests passed / 6 skipped / 88.34% Windows coverage, full Ruff/MyPy,
-  deterministic 26-root schema/TypeScript generation, web production build, 815 desktop tests, and
-  clean WPF/Avalonia Release builds. After any
+  Phase 4 TrainingObjective registry and compatibility checker; **#414** adds the Phase 5
+  parameter-accounting foundation. GitHub was checked live at Phase 6 publication: no competing PRs;
+  only unrelated UI-theme issues #187 and #201 were open. **#415**
+  (`feat/run-plan-placement`) delivers the Phase 6 physical `RunPlan` foundation; verify its live
+  merge state rather than inferring it from this snapshot. Its local gate was 1,374 Python tests
+  passed / 6 skipped / 88.32%
+  Windows coverage, full Ruff/MyPy, deterministic 26-root schema/TypeScript generation, web
+  production build, 815 desktop tests, and clean WPF/Avalonia Release builds. After any
   `platform/` contract change,
   regenerate the committed schemas (see §4), update the count in
   `tests/test_platform_contracts.py`, and regenerate the TypeScript types.
@@ -87,8 +88,9 @@ The big epic (memory `platform-architecture-epic`). Non-negotiables the user has
   checkpoints **from day one** — retrofitting sparse later is a disruptive redesign.
 - **Revised foundational order** (do these in order): 1 StorageProfile ✅ → 2 Env Manager reference
   lifecycle ✅ → 3 `ModelDescriptor` + `TokenizerDescriptor` foundation ✅ → 4 `TrainingObjective`
-  registry ✅ → 5 parameter accounting ✅ → 6 `RunPlan` expansion → 7 `TraceRecord` → 8 MoE inspection →
-  9 dense backends → 10 existing-model MoE FT → 11 full MoE → 12 resource-elastic expert runtime.
+  registry ✅ → 5 parameter accounting ✅ → 6 `RunPlan` expansion ✅ → 7 `TraceRecord` → 8 MoE
+  inspection → 9 dense backends → 10 existing-model MoE FT → 11 full MoE → 12 resource-elastic
+  expert runtime.
 
 ## 4. How to build + verify (the gate)
 
@@ -145,14 +147,15 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 7. Immediate next actions (ranked)
 
-1. **Phase 6 — immutable `RunPlan` expansion**, making offload, placement, and parallelism explicit
-   without collapsing semantic routing into physical scheduling. Consume the sealed parameter report
-   by reference; do not invent missing runtime evidence.
+1. **Phase 7 — generalized `TraceRecord` + Trace Studio foundation.** Reconcile the existing
+   lightweight `training/traces.py` shape with a versioned language-neutral contract; preserve
+   provenance, tool/reasoning boundaries, answer-leak protections, and dataset lineage without
+   treating generated reasoning as ground truth.
 2. **Environment Manager hardware verification (explicit/networked).** After reviewing `env-plan`,
    build and probe a real `backend-corpus-studio` CUDA environment on the RTX 5070. The code and CI
    harness do not claim this newly downloaded environment exists or is hardware-verified.
-3. **Phase 6+** down the revised order (§3): `RunPlan` expansion → `TraceRecord` → MoE inspection →
-   dense backends → MoE FT → resource-elastic.
+3. **Phase 8+** down the revised order (§3): MoE inspection → dense backends → existing-model MoE FT
+   → full MoE → resource-elastic expert runtime.
 4. When a native-Linux NVMe box is ready: the **untruncated seq-4096 WBG-7B re-train** for paper numbers
    (the WBG WSL training now points at C:, not the F: USB drive — see §0).
 
@@ -189,6 +192,11 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   produce/reconcile sealed static and typed runtime evidence; stored elements/allocator bytes are not
   promoted into stronger coordinate claims. Existing workers still need measured coordinate
   instrumentation; see `docs/PARAMETER_ACCOUNTING.md`.
+- **Physical RunPlan foundation** (Phase 6): `platform/{contracts,planner,backends,probes}.py` make
+  resources, state placement, offload rules, ranks/groups, storage/report pins, and capability proof
+  explicit. `platform-run` and the worker reject hash tampering; current built-in runners support only
+  the singleton CPU/GPU path and refuse non-trivial execution; see
+  `docs/RUN_PLAN_PHYSICAL_EXECUTION.md`.
 - **Storage**: `platform/storage_profiler.py` (topology + per-role safe-spill guardrail + failure
   diagnostic).
 - **Trainer**: `training/trainer.py` (+ `unsloth_trainer.py`). CLI: `engine/corpus_studio/cli.py`

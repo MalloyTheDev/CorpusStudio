@@ -96,7 +96,9 @@ representation + precision per tier; version; last access/update; residency dura
 bytes transferred; cache hits/misses; prefetch success; eviction reason. Placement policies (static,
 LRU/LFU, predicted-next prefetch, route-cluster caching, layer-window residency, heat-based promotion,
 bandwidth/cost-budgeted) must be **inspectable and benchmarked** — this is where §Storage
-([`HARDWARE_STORAGE_PROFILE.md`](HARDWARE_STORAGE_PROFILE.md)) and future offload planning meet MoE.
+([`HARDWARE_STORAGE_PROFILE.md`](HARDWARE_STORAGE_PROFILE.md)) and the physical `RunPlan` contract
+([`RUN_PLAN_PHYSICAL_EXECUTION.md`](RUN_PLAN_PHYSICAL_EXECUTION.md)) meet MoE. The current contract can
+represent these choices; no built-in worker yet executes or measures the tiered path.
 
 ## 5. Sparse optimizer semantics — a global step is insufficient
 
@@ -189,7 +191,7 @@ coverage, staleness, throughput, energy, wall-clock, held-out improvement, and r
 | Existing contract | Change to stay dense-safe |
 |---|---|
 | `ModelDescriptor` ✅ foundation | component-scoped representation + scoped multi-count records + optional semantic routing/expert groups; physical scheduling remains owned by `RunPlan`. The static inspector leaves execution kind unknown rather than guessing dense/MoE; actual MoE parsing is Phase B. |
-| `RunPlan` | expert-placement + offload + parallelism fields must be representable; no single-param assumption |
+| `RunPlan` ✅ foundation | explicit resources, state placements, expert/component/parameter selectors, offload rules, rank bindings, and parallel groups are hash-sealed; semantic routing remains separate and non-trivial built-in execution is refused rather than inferred |
 | `CheckpointPolicy` / checkpoint | must allow multi-component sharded checkpoints + a completion manifest (§10) |
 | `RunEvent` / `EventMetrics` | routing/expert telemetry channels; locality metrics separate from quality |
 | `ArtifactManifest` | expert/router/shard artifact kinds + expert-identity lineage (§11) |
@@ -200,10 +202,9 @@ coverage, staleness, throughput, energy, wall-clock, held-out improvement, and r
 
 ## Phased MoE plan
 
-- **A — Dense-safe foundational contracts** (in progress; `ModelDescriptor`, `TrainingObjective`, and
-  parameter-accounting foundations shipped, no MoE runtime): ensure `ModelDescriptor`,
-  `TrainingObjective`, `ArtifactManifest`, `RunPlan`, checkpoint, telemetry do not assume dense
-  execution; add sparse parameter-accounting definitions.
+- **A — Dense-safe foundational contracts** (in progress; `ModelDescriptor`, `TrainingObjective`,
+  parameter-accounting, and physical `RunPlan` foundations shipped, no MoE runtime): ensure
+  `ArtifactManifest`, checkpoint, and telemetry also avoid dense-only assumptions.
 - **B — MoE model inspection**: detect existing MoE architectures; parse expert/router structure;
   report logical/active/shared/routed/expert counts; tokenizer compat. Inference-only is acceptable if
   **labeled**.

@@ -814,7 +814,7 @@ def test_real_subprocess_runner_success_timeout_and_cancellation(tmp_path):
 
 
 def _run_plan(environment_ref: Ref) -> RunPlan:
-    return RunPlan(
+    draft = RunPlan(
         plan_id="plan-1",
         plan_hash="0" * 64,
         backend_ref=Ref(id="corpus_studio"),
@@ -836,6 +836,9 @@ def _run_plan(environment_ref: Ref) -> RunPlan:
         checkpoint_policy={"impl": "adapter_only"},
         export={"format": "adapter_peft"},
     )
+    from corpus_studio.platform.planner import compute_plan_hash, run_plan_hash_payload
+
+    return draft.model_copy(update={"plan_hash": compute_plan_hash(run_plan_hash_payload(draft))})
 
 
 def test_run_plan_pins_lock_hash_and_resume_verifies_state(tmp_path):

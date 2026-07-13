@@ -870,7 +870,7 @@
     },
     "ObjectiveUpdatePolicy": {
       "additionalProperties": false,
-      "description": "What may change, separate from where those components are physically resident.\n\nThis is the MoE-safe semantic update policy. Placement, prefetch, and device scheduling remain\nfuture RunPlan responsibilities.",
+      "description": "What may change, separate from where those components are physically resident.\n\nThis is the MoE-safe semantic update policy. Placement, prefetch, and device scheduling remain\nseparate RunPlan physical-execution responsibilities.",
       "properties": {
         "exposure_tracking": {
           "$ref": "#/$defs/ObjectiveExposureTracking"

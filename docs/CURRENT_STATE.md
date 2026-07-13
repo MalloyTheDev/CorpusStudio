@@ -209,7 +209,7 @@ per-item error isolation, and off-thread document opens.
   added, effective-vocabulary, special-token, chat-template, and context metadata; and reports static
   model/tokenizer compatibility (compatible / resize required / incompatible / unverified). The model
   representation is MoE-safe: counts are scoped records, storage dtype/quantization are per component,
-  semantic routing is separate from the future `RunPlan` physical scheduler, and unknown topology
+  semantic routing is separate from the `RunPlan` physical-execution specification, and unknown topology
   remains unknown. This is **not** model loading, tokenizer training/editing, MoE detection/execution,
   backend support proof, or hardware-fit proof. See
   [`MODEL_TOKENIZER_CONTRACTS.md`](MODEL_TOKENIZER_CONTRACTS.md).
@@ -239,6 +239,17 @@ per-item error isolation, and off-thread document opens.
   `RunPlan`, `RunManifest`, `ArtifactManifest`, and `EvaluationResult` carry report refs. Existing
   trainers do not yet emit the complete measured runtime axes, and this is not MoE detection, fit
   proof, or a runtime speed claim. See [`PARAMETER_ACCOUNTING.md`](PARAMETER_ACCOUNTING.md).
+- **Physical RunPlan foundation** (`platform-plan --physical-spec`): every newly planned run seals a
+  `PhysicalExecutionSpec` containing concrete memory-tier resources, authoritative/cache/replica state
+  placements, explicit offload rules, rank bindings, and parallel groups. Parameter-scoped plans pin a
+  verified Phase 5 report; storage-backed plans pin and reproduce the exact `StorageProfile`
+  assessment, with unsuitable targets refused and marginal/unknown risk requiring explicit acceptance.
+  Static backend declarations and passing probes are both required for every non-trivial placement,
+  offload, parallelism, and communication token. `platform-run` and workers recompute the canonical
+  plan hash before execution. Built-in runners currently support only one explicit CPU or GPU resource;
+  non-trivial plans are `PLANNED_UNPROVEN` and refused before trainer invocation. This is a planning
+  boundary, not DeepSpeed/FSDP/NVMe or MoE execution proof. See
+  [`RUN_PLAN_PHYSICAL_EXECUTION.md`](RUN_PLAN_PHYSICAL_EXECUTION.md).
 - **Multi-backend "pick your framework"**: a BackendManifest registry (`corpus_studio`, `unsloth`);
   the planner validates the chosen backend and **honestly refuses Unsloth on Blackwell/sm_120** (which
   needs the math attention path Unsloth doesn't provide).

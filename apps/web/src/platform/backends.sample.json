@@ -54,6 +54,14 @@
       "adamw_bnb_8bit"
     ],
     "offload_strategies": [],
+    "placement_tiers": [
+      "gpu"
+    ],
+    "placement_modes": [
+      "single_resource"
+    ],
+    "parallelism_kinds": [],
+    "communication_backends": [],
     "compile_modes": [],
     "export_formats": [
       "adapter_peft"
@@ -169,6 +177,14 @@
       "paged_adamw_8bit"
     ],
     "offload_strategies": [],
+    "placement_tiers": [
+      "gpu"
+    ],
+    "placement_modes": [
+      "single_resource"
+    ],
+    "parallelism_kinds": [],
+    "communication_backends": [],
     "compile_modes": [],
     "export_formats": [
       "adapter_peft",

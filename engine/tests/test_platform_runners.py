@@ -98,6 +98,62 @@ def test_training_runner_name_reflects_cpu_toy_flag():
     assert TrainingRunner().name == "training"
 
 
+def test_training_runner_refuses_a_physical_plan_it_cannot_consume(monkeypatch):
+    called = []
+    monkeypatch.setattr(
+        "corpus_studio.training.trainer.run_training",
+        lambda *_args, **_kwargs: called.append(True),
+    )
+    body = demo_training_plan().model_dump(mode="json")
+    body["offload_strategy"] = "controlled_parameter_offload"
+    body["physical_execution"] = {
+        "resources": [
+            {
+                "resource_id": "compute-0",
+                "tier": "gpu",
+                "device_kind": "cuda",
+                "device_id": "cuda:0",
+            },
+            {
+                "resource_id": "host-ram",
+                "tier": "pageable_ram",
+                "device_kind": "cpu",
+                "device_id": "cpu:0",
+            },
+        ],
+        "placements": [
+            {
+                "placement_id": "parameters-authoritative",
+                "state": "parameters",
+                "selector": {"whole_model": True},
+                "resource_id": "compute-0",
+                "role": "authoritative",
+            }
+        ],
+        "offload_rules": [
+            {
+                "rule_id": "parameter-offload",
+                "state": "parameters",
+                "selector": {"whole_model": True},
+                "source_resource_id": "compute-0",
+                "target_resource_id": "host-ram",
+                "mechanism": "cpu_copy",
+                "trigger": "after_use",
+            }
+        ],
+        "parallelism": {
+            "world_size": 1,
+            "ranks": [{"rank": 0, "resource_id": "compute-0"}],
+        },
+    }
+    result = execute_run(P.RunPlan.model_validate(body), TrainingRunner(), clock=_CLOCK)
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert "cannot consume" in result.manifest.failure.message
+    assert called == []
+
+
 # ---- multi-backend dispatch --------------------------------------------------
 
 

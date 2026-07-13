@@ -211,6 +211,7 @@
     "FitClass": {
       "description": "The fit verdict. ``NATIVE_*`` = fully resident. ``CONTROLLED_*`` = a deliberate, planned\noffload (acceptable, slower). ``ACCIDENTAL_*`` / ``THRASHING`` = an unplanned spill the platform\ndid silently (the failure mode the engine warns about). ``FAIL`` = will not run.",
       "enum": [
+        "PLANNED_UNPROVEN",
         "NATIVE_SAFE",
         "NATIVE_TIGHT",
         "NATIVE_UNPROVEN",
@@ -468,6 +469,20 @@
       },
       "title": "MemoryMetrics",
       "type": "object"
+    },
+    "MemoryTier": {
+      "description": "A physical state tier. A RunPlan names the intended tier; only runtime evidence may claim\nactual residency there.",
+      "enum": [
+        "gpu",
+        "pinned_ram",
+        "pageable_ram",
+        "nvme",
+        "sata",
+        "remote",
+        "unknown"
+      ],
+      "title": "MemoryTier",
+      "type": "string"
     },
     "ParameterCountHandling": {
       "additionalProperties": false,
@@ -777,23 +792,13 @@
         "memory_tier": {
           "anyOf": [
             {
-              "enum": [
-                "gpu",
-                "pinned_ram",
-                "pageable_ram",
-                "nvme",
-                "sata",
-                "remote",
-                "unknown"
-              ],
-              "type": "string"
+              "$ref": "#/$defs/MemoryTier"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "title": "Memory Tier"
+          "default": null
         },
         "model_ref": {
           "$ref": "#/$defs/Ref"

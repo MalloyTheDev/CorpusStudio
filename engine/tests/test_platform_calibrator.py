@@ -118,6 +118,55 @@ def test_unparseable_model_name_is_native_unproven():
     assert fit.estimated_peak_bytes is None  # nothing to estimate → no fabricated number
 
 
+def test_nontrivial_physical_plan_is_planned_unproven_not_native():
+    body = _plan().model_dump(mode="json")
+    body["offload_strategy"] = "controlled_parameter_offload"
+    body["physical_execution"] = {
+        "resources": [
+            {
+                "resource_id": "compute-0",
+                "tier": "gpu",
+                "device_kind": "cuda",
+                "device_id": "cuda:0",
+            },
+            {
+                "resource_id": "host-ram",
+                "tier": "pageable_ram",
+                "device_kind": "cpu",
+                "device_id": "cpu:0",
+            },
+        ],
+        "placements": [
+            {
+                "placement_id": "parameters-authoritative",
+                "state": "parameters",
+                "selector": {"whole_model": True},
+                "resource_id": "compute-0",
+                "role": "authoritative",
+            }
+        ],
+        "offload_rules": [
+            {
+                "rule_id": "parameter-offload",
+                "state": "parameters",
+                "selector": {"whole_model": True},
+                "source_resource_id": "compute-0",
+                "target_resource_id": "host-ram",
+                "mechanism": "cpu_copy",
+                "trigger": "after_use",
+            }
+        ],
+        "parallelism": {
+            "world_size": 1,
+            "ranks": [{"rank": 0, "resource_id": "compute-0"}],
+        },
+    }
+    fit = classify_fit(P.RunPlan.model_validate(body), _profile(capacity_gb=80.0))
+    assert fit.classification == FitClass.PLANNED_UNPROVEN
+    assert fit.estimated_peak_bytes is None
+    assert "no native residency" in fit.rationale
+
+
 # ---- arithmetic + quantization selection ------------------------------------
 
 

@@ -26,6 +26,7 @@ export type AttentionImpl =
  * did silently (the failure mode the engine warns about). ``FAIL`` = will not run.
  */
 export type FitClass =
+  | "PLANNED_UNPROVEN"
   | "NATIVE_SAFE"
   | "NATIVE_TIGHT"
   | "NATIVE_UNPROVEN"
