@@ -37,16 +37,16 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
 
 ## 2. Current git / PR state
 
-`main` is the source of truth; everything through **#411 is merged**:
+`main` is the source of truth; at least everything through **#411 is merged**:
 - **#404** configurable checkpoint retention · **#405** StorageProfile + the dependency-architecture
   correction · **#406** Environment Manager substrate (Phase 2 slice 1) · **#407** storage USB/WSL
   runtime-role risks + storage-vs-not failure diagnostic · **#408** HANDOFF/AGENTS · **#409**
   CURRENT_STATE/CLI_REFERENCE reconciliation · **#410** the follow-up docs refresh · **#411** the
   managed `backend-corpus-studio` environment creation/lock/probe/drift/recreate lifecycle. GitHub was
   checked live before the Phase 3 branch began: no open PRs; only unrelated UI-theme issues #187 and
-  #201 were open. Verify GitHub live rather than trusting this snapshot. The current
-  `feat/model-tokenizer-descriptors` checkout implements the Phase 3 foundation. After any `platform/`
-  contract change, regenerate the committed schemas (see §4), update the count in
+  #201 were open. **#412 tracks the Phase 3 model/tokenizer foundation**; verify its live state rather
+  than assuming from this snapshot whether it has merged. After any `platform/` contract change,
+  regenerate the committed schemas (see §4), update the count in
   `tests/test_platform_contracts.py`, and regenerate the TypeScript types.
 
 ## 3. The architecture North Star + binding directives
