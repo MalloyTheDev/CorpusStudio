@@ -317,16 +317,48 @@ def platform_storage(
     out_dir: Optional[Path] = typer.Option(
         None, "--out", help="Write StorageProfile.json to this directory."
     ),
+    diagnose: Optional[str] = typer.Option(
+        None, "--diagnose", help="Triage a training-failure message: is STORAGE implicated (I/O error, "
+        "dropped drive, full disk) or is it a VRAM/kernel failure the disk can't explain? Prints a verdict."
+    ),
+    recommend: bool = typer.Option(
+        False, "--recommend", help="Print the recommended storage tier per run role (a recommendation, "
+        "never enforced)."
+    ),
 ):
     """Characterize the host's storage topology and judge whether a path is SAFE for a run role.
 
     Detection is dependency-light and NON-destructive (mount + capacity + cheaply-discoverable device
     attributes — no benchmark, no SMART read), so throughput/endurance stay honestly absent. With
     --path it returns the per-role suitability verdict — the safe-spill guardrail that refuses offload
-    onto a USB bridge, a cloud-sync folder, a nearly-full disk, inside the source repo, or (marginal) a
-    rotational disk."""
+    onto a USB bridge, a cloud-sync folder, a nearly-full disk, inside the source repo, small-file
+    roles (repo/venv) on a WSL /mnt mount, or (marginal) a rotational/USB device. --diagnose triages a
+    failure message (storage vs VRAM/kernel); --recommend prints the recommended per-role storage tier."""
     from corpus_studio.platform.enums import StorageRole
-    from corpus_studio.platform.storage_profiler import build_storage_profile
+    from corpus_studio.platform.storage_profiler import (
+        build_storage_profile,
+        classify_storage_failure,
+        recommended_role_placement,
+    )
+
+    if diagnose is not None:
+        verdict, signals = classify_storage_failure(diagnose)
+        if json_out:
+            typer.echo(json.dumps({"verdict": verdict, "matched_signals": signals}, indent=2))
+        else:
+            typer.echo(f"storage-failure diagnosis: {verdict.upper()}")
+            typer.echo(f"  matched signals: {', '.join(signals) if signals else '(none)'}")
+        return
+
+    if recommend:
+        placement = recommended_role_placement()
+        if json_out:
+            typer.echo(json.dumps({r.value: tier for r, tier in placement.items()}, indent=2))
+        else:
+            typer.echo("Recommended storage tier per role:")
+            for storage_role, tier in placement.items():
+                typer.echo(f"  {storage_role.value:<20} {tier}")
+        return
 
     role_paths: dict = {}
     if path is not None:

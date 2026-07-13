@@ -326,6 +326,9 @@ class StorageDevice(ContractModel):
     # True when the mount point is inside a known cloud-sync client's folder (a sync client will
     # re-upload every checkpoint/offload write and thrash the disk).
     cloud_synced: bool | None = None
+    # True when this is a Windows host drive seen from WSL through /mnt (drvfs/9p). Access crosses the
+    # NTFS translation layer — slow for small-file-heavy roles (venv/repo) and for high I/O.
+    wsl_host_drive: bool | None = None
     device_name: str | None = None
     notes: list[str] = Field(default_factory=list)
 

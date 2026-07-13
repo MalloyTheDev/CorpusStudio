@@ -164,13 +164,18 @@ class StorageInterface(str, Enum):
 
 
 class StorageRole(str, Enum):
-    """The role a path plays in a run. Roles differ in write intensity + durability needs: ``os`` and
-    ``source_repo`` want reliability; ``optimizer_offload`` / ``parameter_offload`` / ``scratch`` want
-    sustained high-throughput internal storage; ``archive`` just wants capacity. A path's suitability
-    is judged PER ROLE (a USB drive is fine for ``archive``, unfit for ``optimizer_offload``)."""
+    """The role a path plays in a run. Roles differ in access pattern: ``optimizer_offload`` /
+    ``parameter_offload`` / ``scratch`` / ``checkpoints`` are WRITE-heavy; ``model_cache`` /
+    ``dataset_cache`` are read-LATENCY-sensitive during load; ``source_repo`` / ``python_env`` are
+    thousands of SMALL files touched on every process start (an import over a USB bridge or a WSL
+    ``/mnt`` mount stalls); ``archive`` just wants capacity. A path's suitability is judged PER ROLE (a
+    USB SSD is fine for ``archive``, poor for ``model_cache``, unfit for ``optimizer_offload``)."""
 
     os = "os"
     source_repo = "source_repo"
+    # The Python virtual environment — thousands of small files imported at every process start;
+    # over USB or a WSL /mnt mount this thrashes (NTFS translation + latency + small-file overhead).
+    python_env = "python_env"
     model_cache = "model_cache"
     dataset_cache = "dataset_cache"
     checkpoints = "checkpoints"

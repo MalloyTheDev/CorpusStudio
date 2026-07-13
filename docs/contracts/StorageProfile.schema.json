@@ -98,6 +98,18 @@
           ],
           "default": null,
           "title": "Total Bytes"
+        },
+        "wsl_host_drive": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wsl Host Drive"
         }
       },
       "required": [
@@ -121,10 +133,11 @@
       "type": "string"
     },
     "StorageRole": {
-      "description": "The role a path plays in a run. Roles differ in write intensity + durability needs: ``os`` and\n``source_repo`` want reliability; ``optimizer_offload`` / ``parameter_offload`` / ``scratch`` want\nsustained high-throughput internal storage; ``archive`` just wants capacity. A path's suitability\nis judged PER ROLE (a USB drive is fine for ``archive``, unfit for ``optimizer_offload``).",
+      "description": "The role a path plays in a run. Roles differ in access pattern: ``optimizer_offload`` /\n``parameter_offload`` / ``scratch`` / ``checkpoints`` are WRITE-heavy; ``model_cache`` /\n``dataset_cache`` are read-LATENCY-sensitive during load; ``source_repo`` / ``python_env`` are\nthousands of SMALL files touched on every process start (an import over a USB bridge or a WSL\n``/mnt`` mount stalls); ``archive`` just wants capacity. A path's suitability is judged PER ROLE (a\nUSB SSD is fine for ``archive``, poor for ``model_cache``, unfit for ``optimizer_offload``).",
       "enum": [
         "os",
         "source_repo",
+        "python_env",
         "model_cache",
         "dataset_cache",
         "checkpoints",
