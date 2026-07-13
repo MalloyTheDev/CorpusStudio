@@ -36,9 +36,11 @@ def test_contract_version_is_pinned():
 
 
 def test_all_root_contracts_registered():
-    assert len(P.ROOT_CONTRACTS) == 21
+    assert len(P.ROOT_CONTRACTS) == 23
     assert "StorageProfile" in P.ROOT_CONTRACTS
     for expected in (
+        "ModelDescriptor",
+        "TokenizerDescriptor",
         "PythonRuntime",
         "EnvironmentRecipe",
         "DependencyResolution",
@@ -258,11 +260,11 @@ def test_worker_protocol_version_pattern():
 
 def test_export_json_schemas_writes_language_neutral_files(tmp_path):
     written = P.export_json_schemas(tmp_path)
-    # 21 contract schemas + index.json
-    assert len(written) == 22
+    # 23 contract schemas + index.json
+    assert len(written) == 24
     index = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
     assert index["contract_version"] == "1.0.0"
-    assert len(index["contracts"]) == 21
+    assert len(index["contracts"]) == 23
     # every emitted schema is valid JSON with a proper object shape
     for name in P.ROOT_CONTRACTS:
         schema = json.loads((tmp_path / f"{name}.schema.json").read_text(encoding="utf-8"))
@@ -275,6 +277,22 @@ def test_export_json_schemas_writes_language_neutral_files(tmp_path):
         "supervised_token_accumulation_target"
         in run_plan_schema["$defs"]["BatchingSpec"]["properties"]
     )
+    # Descriptor schemas preserve the fail-closed trust boundary and portable evidence shapes.
+    model_schema = P.contract_schemas()["ModelDescriptor"]
+    trust_remote_code = model_schema["$defs"]["TrustRequirement"]["properties"][
+        "trust_remote_code"
+    ]
+    assert trust_remote_code["const"] is False
+    descriptor_path = model_schema["$defs"]["DescriptorFile"]["properties"]["path"]
+    assert "pattern" in descriptor_path
+    assert "\\\\" in descriptor_path["pattern"]
+    resolved_commit = model_schema["$defs"]["DescriptorSource"]["properties"][
+        "resolved_commit"
+    ]
+    assert resolved_commit["anyOf"][0]["pattern"] == "^[0-9a-f]{7,64}$"
+    representation = model_schema["$defs"]["ParameterRepresentation"]["properties"]
+    assert "counts" in representation
+    assert "parameter_count" not in representation
 
 
 def test_export_json_schemas_is_byte_deterministic(tmp_path):

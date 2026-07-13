@@ -37,15 +37,16 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
 
 ## 2. Current git / PR state
 
-`main` is the source of truth; everything through **#410 is merged**:
+`main` is the source of truth; at least everything through **#411 is merged**:
 - **#404** configurable checkpoint retention · **#405** StorageProfile + the dependency-architecture
   correction · **#406** Environment Manager substrate (Phase 2 slice 1) · **#407** storage USB/WSL
   runtime-role risks + storage-vs-not failure diagnostic · **#408** HANDOFF/AGENTS · **#409**
-  CURRENT_STATE/CLI_REFERENCE reconciliation · **#410** the follow-up docs refresh. At the start of
-  the Environment Manager creation slice there were no open pull requests; verify GitHub live rather
-  than trusting this snapshot. The current `feat/environment-manager-creation` branch implements Phase
-  2 slice 2 but is not merged merely because this handoff describes it. After any `platform/` contract
-  change, regenerate the committed schemas (see §4), update the count in
+  CURRENT_STATE/CLI_REFERENCE reconciliation · **#410** the follow-up docs refresh · **#411** the
+  managed `backend-corpus-studio` environment creation/lock/probe/drift/recreate lifecycle. GitHub was
+  checked live before the Phase 3 branch began: no open PRs; only unrelated UI-theme issues #187 and
+  #201 were open. **#412 tracks the Phase 3 model/tokenizer foundation**; verify its live state rather
+  than assuming from this snapshot whether it has merged. After any `platform/` contract change,
+  regenerate the committed schemas (see §4), update the count in
   `tests/test_platform_contracts.py`, and regenerate the TypeScript types.
 
 ## 3. The architecture North Star + binding directives
@@ -79,7 +80,7 @@ The big epic (memory `platform-architecture-epic`). Non-negotiables the user has
   semantic-router-vs-physical-scheduler split, stable expert identity, and sharded transactional
   checkpoints **from day one** — retrofitting sparse later is a disruptive redesign.
 - **Revised foundational order** (do these in order): 1 StorageProfile ✅ → 2 Env Manager reference
-  lifecycle ✅ → 3 `ModelDescriptor` + `TokenizerDescriptor` (MoE-safe) → 4 `TrainingObjective`
+  lifecycle ✅ → 3 `ModelDescriptor` + `TokenizerDescriptor` foundation ✅ → 4 `TrainingObjective`
   registry → 5 parameter accounting → 6 `RunPlan` expansion → 7 `TraceRecord` → 8 MoE inspection →
   9 dense backends → 10 existing-model MoE FT → 11 full MoE → 12 resource-elastic expert runtime.
 
@@ -104,13 +105,14 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   .\.venv\Scripts\python.exe -c "from corpus_studio.platform.schema_export import export_json_schemas; export_json_schemas('../docs/contracts')"
   ```
   then fix the two counts in `tests/test_platform_contracts.py` (`len(ROOT_CONTRACTS)` + the export
-  test). This branch exports **21 root contracts**.
+  test). This branch exports **23 root contracts**.
 
 ## 5. Workflow / process conventions (the user cares about these)
 
 - **Branch first**: `git checkout -b feat/<slice>` before editing. One coherent slice per PR.
-- **One CI-green PR per slice**; the user admin-merges when they name it ("merge 407"). The auto-mode
-  classifier blocks self-authored admin-merge unless the user names the PR that turn.
+- **One CI-green PR per slice.** Do not assume merging is forbidden: the user explicitly authorized
+  completing and merging continuation PRs on 2026-07-13. Still require green checks and verify the
+  exact live PR before merging.
 - **Verify in the main loop — do NOT spawn multi-agent Workflow fan-outs** (they burn the user's usage
   limit) unless the user *explicitly* asks for N agents. (Memory: `no-audit-workflows`.)
 - **ASCII only in CLI-facing strings** (Windows console UTF-8 — no em-dashes `—`, use `-`). This repo
@@ -137,13 +139,13 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 7. Immediate next actions (ranked)
 
-1. **Phase 3 — `ModelDescriptor` + `TokenizerDescriptor`**, built **MoE-safe from day one** (§3): the
-   multi-count parameter accounting + the semantic-router-vs-physical-scheduler split baked in.
+1. **Phase 4 — `TrainingObjective` registry**, objective distinct from backend and able to express
+   dense, router-only, expert-selective, preference, reward, distillation, and trace objectives.
 2. **Environment Manager hardware verification (explicit/networked).** After reviewing `env-plan`,
    build and probe a real `backend-corpus-studio` CUDA environment on the RTX 5070. The code and CI
    harness do not claim this newly downloaded environment exists or is hardware-verified.
-3. **Phase 4+** down the revised order (§3): `TrainingObjective` registry → parameter accounting →
-   `RunPlan` expansion → `TraceRecord` → MoE inspection → dense backends → MoE FT → resource-elastic.
+3. **Phase 5+** down the revised order (§3): parameter-accounting evidence producers → `RunPlan`
+   expansion → `TraceRecord` → MoE inspection → dense backends → MoE FT → resource-elastic.
 4. When a native-Linux NVMe box is ready: the **untruncated seq-4096 WBG-7B re-train** for paper numbers
    (the WBG WSL training now points at C:, not the F: USB drive — see §0).
 
@@ -160,7 +162,7 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 9. Repository map
 
-- **Platform contracts**: `engine/corpus_studio/platform/contracts.py` (21 root contracts) + `enums.py`
+- **Platform contracts**: `engine/corpus_studio/platform/contracts.py` (23 root contracts) + `enums.py`
   + `common.py`; `schema_export.py` → `docs/contracts/*.schema.json` (language-neutral, consumed by
   `apps/web`).
 - **Lifecycle**: `platform/{profiler, probes, planner, calibrator, supervisor, runners, watchdog,
@@ -168,6 +170,9 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 - **Environment Manager** (Phase 2): `platform/environments.py` (recipes + concrete resolver) and
   `platform/environment_manager.py` (runtime discovery, creation, journals, lock/probe/drift, owned
   removal/recreation, and RunPlan compatibility).
+- **Model/Tokenizer foundation** (Phase 3): `platform/model_inspector.py` + the `ModelDescriptor` /
+  `TokenizerDescriptor` roots. `model-inspect` inventories local snapshots without network access,
+  heavy imports, link traversal, or custom-code execution; see `docs/MODEL_TOKENIZER_CONTRACTS.md`.
 - **Storage**: `platform/storage_profiler.py` (topology + per-role safe-spill guardrail + failure
   diagnostic).
 - **Trainer**: `training/trainer.py` (+ `unsloth_trainer.py`). CLI: `engine/corpus_studio/cli.py`

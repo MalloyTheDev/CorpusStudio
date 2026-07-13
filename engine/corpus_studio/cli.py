@@ -724,6 +724,115 @@ def platform_backends(
         )
 
 
+@app.command("model-inspect")
+def model_inspect(
+    path: Path = typer.Argument(..., help="Local model snapshot directory (offline inspection)."),
+    model_id: Optional[str] = typer.Option(
+        None, "--model-id", help="Stable descriptor id. Default: snapshot directory name."
+    ),
+    tokenizer: Optional[Path] = typer.Option(
+        None, "--tokenizer", help="Optional local tokenizer snapshot directory."
+    ),
+    tokenizer_id: Optional[str] = typer.Option(
+        None, "--tokenizer-id", help="Tokenizer descriptor id. Default: <model-id>-tokenizer."
+    ),
+    repository: Optional[str] = typer.Option(
+        None, "--repository", help="Repository identity, for example Qwen/Qwen2.5-7B."
+    ),
+    requested_revision: Optional[str] = typer.Option(
+        None, "--requested-revision", help="Requested branch, tag, or revision (not proof of pinning)."
+    ),
+    resolved_commit: Optional[str] = typer.Option(
+        None, "--resolved-commit", help="Immutable 7-64 character hexadecimal commit actually inspected."
+    ),
+    tokenizer_repository: Optional[str] = typer.Option(
+        None,
+        "--tokenizer-repository",
+        help="Tokenizer repository identity when it differs from the model snapshot.",
+    ),
+    tokenizer_requested_revision: Optional[str] = typer.Option(
+        None,
+        "--tokenizer-requested-revision",
+        help="Tokenizer branch, tag, or requested revision (not proof of pinning).",
+    ),
+    tokenizer_resolved_commit: Optional[str] = typer.Option(
+        None,
+        "--tokenizer-resolved-commit",
+        help="Immutable tokenizer commit actually inspected.",
+    ),
+    hash_weights: bool = typer.Option(
+        False,
+        "--hash-weights",
+        help="Stream-hash large weight files. Metadata and code files are always hashed.",
+    ),
+    out_dir: Optional[Path] = typer.Option(
+        None, "--out", help="Atomically write descriptor JSON files to this directory."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit the complete inspection bundle as JSON."),
+):
+    """Statically inspect a local model and optional tokenizer without network access or model code.
+
+    The command never imports torch/transformers, never follows links, and never authorizes
+    trust_remote_code. Compatibility is metadata evidence, not proof the model loads or trains.
+    """
+    from corpus_studio.platform.model_inspector import (
+        ModelInspectionError,
+        inspect_model_bundle,
+        write_inspection_bundle,
+    )
+
+    resolved_model_id = model_id or path.name
+    resolved_tokenizer_id = tokenizer_id or (
+        f"{resolved_model_id}-tokenizer" if tokenizer is not None else None
+    )
+    try:
+        bundle = inspect_model_bundle(
+            path,
+            model_id=resolved_model_id,
+            tokenizer_path=tokenizer,
+            tokenizer_id=resolved_tokenizer_id,
+            repository=repository,
+            requested_revision=requested_revision,
+            resolved_commit=resolved_commit,
+            tokenizer_repository=tokenizer_repository,
+            tokenizer_requested_revision=tokenizer_requested_revision,
+            tokenizer_resolved_commit=tokenizer_resolved_commit,
+            hash_weights=hash_weights,
+        )
+        written = write_inspection_bundle(bundle, out_dir) if out_dir is not None else []
+    except (ModelInspectionError, ValidationError, OSError) as exc:
+        typer.echo(
+            json.dumps({"error": "MODEL_INSPECTION_FAILED", "message": str(exc)}, indent=2),
+            err=True,
+        )
+        raise typer.Exit(2)
+
+    if json_out:
+        payload = bundle.model_dump(mode="json")
+        payload["written_files"] = [str(item) for item in written]
+        typer.echo(json.dumps(payload, indent=2))
+        return
+
+    typer.echo(f"Model: {bundle.model.model_id}")
+    typer.echo(f"Source: {bundle.model.source.kind.value}")
+    typer.echo(
+        "Formats: " + (", ".join(item.value for item in bundle.model.formats) or "unknown")
+    )
+    typer.echo(f"Metadata: {bundle.model.verification.metadata.value}")
+    typer.echo(f"Integrity: {bundle.model.verification.integrity.value}")
+    custom_code = "required" if bundle.model.trust.custom_code_required else "not detected"
+    typer.echo(f"Custom code: {custom_code} (trust_remote_code=false)")
+    if bundle.tokenizer is not None:
+        typer.echo(f"Tokenizer: {bundle.tokenizer.tokenizer_id}")
+        typer.echo(f"Tokenizer format: {bundle.tokenizer.format.value}")
+    if bundle.compatibility is not None:
+        typer.echo(f"Compatibility: {bundle.compatibility.status.value}")
+    for warning in bundle.warnings:
+        typer.echo(f"Warning: {warning}")
+    for item in written:
+        typer.echo(f"Wrote: {item}")
+
+
 @app.command("env-recipes")
 def env_recipes(
     layer: Optional[str] = typer.Option(

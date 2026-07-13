@@ -8,7 +8,9 @@ run lifecycle** re-scope: profile → plan → predict-fit → run → measure-f
 registry, and subprocess reliability, verified on a real RTX 5070; plus the post-v1.3 additions
 reconciled below — the **reasoning-traces** data loop, a dataset **truncation guardrail** +
 configurable **checkpoint retention**, and a dependency-light **storage safe-spill** profiler —
-plus the deep bug/security audit, 19 fixes across data integrity, gate/policy
+plus the sealed **Environment Manager** reference lifecycle and the static, MoE-safe
+**ModelDescriptor / TokenizerDescriptor** foundation — plus the deep bug/security audit, 19 fixes
+across data integrity, gate/policy
 hardening, and quality/split correctness, PRs #104–118; a residual-audit pass
 hardening the v1.3 surface, PRs #133–142; the CI dependency refresh, PRs
 #94–101; and the Avalonia-migration decomposition — **all per-tab view-models
@@ -197,6 +199,19 @@ per-item error isolation, and off-thread document opens.
   claimed as verified by this slice. See [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md); the full
   3-layer + MoE-safe forward plan is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) +
   [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md).
+- **Static Model/Tokenizer foundation** (`model-inspect`): two versioned root contracts,
+  `ModelDescriptor` and `TokenizerDescriptor`, plus deterministic JSON Schema and generated
+  TypeScript types. The dependency-light inspector inventories a local snapshot without network
+  access, importing torch/transformers/tokenizers, following links, or executing repository code. It
+  separates requested revision from an immutable resolved commit; records file/hash/serialization
+  risk and independent metadata/integrity/license/custom-code evidence; normalizes tokenizer base,
+  added, effective-vocabulary, special-token, chat-template, and context metadata; and reports static
+  model/tokenizer compatibility (compatible / resize required / incompatible / unverified). The model
+  representation is MoE-safe: counts are scoped records, storage dtype/quantization are per component,
+  semantic routing is separate from the future `RunPlan` physical scheduler, and unknown topology
+  remains unknown. This is **not** model loading, tokenizer training/editing, MoE detection/execution,
+  backend support proof, or hardware-fit proof. See
+  [`MODEL_TOKENIZER_CONTRACTS.md`](MODEL_TOKENIZER_CONTRACTS.md).
 - **Multi-backend "pick your framework"**: a BackendManifest registry (`corpus_studio`, `unsloth`);
   the planner validates the chosen backend and **honestly refuses Unsloth on Blackwell/sm_120** (which
   needs the math attention path Unsloth doesn't provide).
@@ -342,9 +357,10 @@ per-item error isolation, and off-thread document opens.
 - **Surface the LLM judge in the Evaluation tab** — the `--judge-model` scorer ships in
   the engine and in suites; the desktop **Evaluation** tab still defaults to keyword
   overlap with no judge-model field.
-- **A real tokenizer** (transformers/tokenizers) so token-budget / VRAM numbers are
-  exact rather than heuristic. Deliberately deferred: it would break the dependency-light
-  engine, and the current estimate is documented as a heuristic.
+- **Tokenizer training/editing and isolated functional probes.** Exact per-model counts already work
+  when the optional `[model-tokenizer]` (`tokenizers`) extra can load the target tokenizer; tiktoken
+  and the documented Unicode heuristic remain fallbacks. The static descriptor inspector deliberately
+  does not execute a tokenizer, and the dependency-light core never makes a heavy tokenizer mandatory.
 - **HF export/push** (upload/publishing) — see the hard boundary above; it stays a
   deliberate non-goal for now. (Read-only Hub *import* already ships.)
 - **Finish the Avalonia port** — Phases 0–3 are done (all view-models extracted; the whole app

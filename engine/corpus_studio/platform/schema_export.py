@@ -28,12 +28,14 @@ from .contracts import (
     EvaluationResult,
     FailureRecord,
     FitClassification,
+    ModelDescriptor,
     ProjectManifest,
     PythonRuntime,
     RunEvent,
     RunManifest,
     RunPlan,
     StorageProfile,
+    TokenizerDescriptor,
     WorkerMessage,
 )
 
@@ -41,6 +43,8 @@ from .contracts import (
 ROOT_CONTRACTS: dict[str, type[ContractModel]] = {
     "ProjectManifest": ProjectManifest,
     "DatasetManifest": DatasetManifest,
+    "ModelDescriptor": ModelDescriptor,
+    "TokenizerDescriptor": TokenizerDescriptor,
     "EnvironmentProfile": EnvironmentProfile,
     "StorageProfile": StorageProfile,
     "PythonRuntime": PythonRuntime,

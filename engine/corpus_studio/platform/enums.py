@@ -58,6 +58,144 @@ class TaskType(str, Enum):
     grpo = "grpo"
 
 
+class ModelSourceKind(str, Enum):
+    """Where a model/tokenizer identity originated. A local snapshot may still carry a repository
+    and revision, but network retrieval is never implied by this value."""
+
+    local = "local"
+    huggingface = "huggingface"
+    ollama = "ollama"
+    artifact = "artifact"
+    generated = "generated"
+    external = "external"
+    unknown = "unknown"
+
+
+class ModelFormat(str, Enum):
+    safetensors = "safetensors"
+    pytorch_pickle = "pytorch_pickle"
+    gguf = "gguf"
+    onnx = "onnx"
+    torchscript = "torchscript"
+    numpy = "numpy"
+    other = "other"
+    unknown = "unknown"
+
+
+class ModelTaskClass(str, Enum):
+    causal_lm = "causal_lm"
+    masked_lm = "masked_lm"
+    seq2seq_lm = "seq2seq_lm"
+    classification = "classification"
+    embedding = "embedding"
+    reranker = "reranker"
+    reward_model = "reward_model"
+    vision = "vision"
+    speech = "speech"
+    multimodal = "multimodal"
+    custom = "custom"
+    unknown = "unknown"
+
+
+class ParameterCountKind(str, Enum):
+    """Distinct parameter quantities required for dense-safe and MoE-safe accounting."""
+
+    logical = "logical"
+    active_token = "active_token"
+    active_sequence = "active_sequence"
+    touched_window = "touched_window"
+    resident = "resident"
+    updated_window = "updated_window"
+    exposed_window = "exposed_window"
+    effective = "effective"
+
+
+class EvidenceKind(str, Enum):
+    measured = "measured"
+    estimated = "estimated"
+    declared = "declared"
+    unknown = "unknown"
+
+
+class CountHandling(str, Enum):
+    included = "included"
+    excluded = "excluded"
+    deduplicated = "deduplicated"
+    represented_separately = "represented_separately"
+    not_applicable = "not_applicable"
+    unknown = "unknown"
+
+
+class ModelExecutionKind(str, Enum):
+    dense = "dense"
+    sparse = "sparse"
+    mixture_of_experts = "mixture_of_experts"
+    conditional = "conditional"
+    hybrid = "hybrid"
+    unknown = "unknown"
+
+
+class ModelAttentionType(str, Enum):
+    full = "full"
+    sliding_window = "sliding_window"
+    block_sparse = "block_sparse"
+    linear = "linear"
+    state_space = "state_space"
+    hybrid = "hybrid"
+    custom = "custom"
+    unknown = "unknown"
+
+
+class PositionalEncoding(str, Enum):
+    rope = "rope"
+    alibi = "alibi"
+    absolute = "absolute"
+    relative = "relative"
+    none = "none"
+    custom = "custom"
+    unknown = "unknown"
+
+
+class VerificationOutcome(str, Enum):
+    """One independent descriptor evidence axis. Integrity, compatibility, functional behavior,
+    and hardware support must never be collapsed into a misleading linear level."""
+
+    not_checked = "not_checked"
+    passed = "passed"
+    failed = "failed"
+    partial = "partial"
+    not_applicable = "not_applicable"
+
+
+class CompatibilityStatus(str, Enum):
+    compatible = "compatible"
+    resize_required = "resize_required"
+    incompatible = "incompatible"
+    unverified = "unverified"
+
+
+class TokenizerFormat(str, Enum):
+    tokenizers_json = "tokenizers_json"
+    sentencepiece = "sentencepiece"
+    tiktoken = "tiktoken"
+    custom = "custom"
+    unknown = "unknown"
+
+
+class DescriptorFileRole(str, Enum):
+    config = "config"
+    weights = "weights"
+    weight_index = "weight_index"
+    tokenizer = "tokenizer"
+    tokenizer_config = "tokenizer_config"
+    special_tokens = "special_tokens"
+    generation_config = "generation_config"
+    model_card = "model_card"
+    license = "license"
+    custom_code = "custom_code"
+    other = "other"
+
+
 class PrecisionMode(str, Enum):
     fp32 = "fp32"
     tf32 = "tf32"

@@ -9,9 +9,10 @@ language-neutral JSON Schemas the Rust core / Avalonia / Tauri consume are gener
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
 from .common import (
     CONTRACT_VERSION_LITERAL,
@@ -30,18 +31,29 @@ from .enums import (
     AllocatorPolicy,
     AttentionImpl,
     CheckpointImpl,
+    CompatibilityStatus,
     CompileMode,
+    CountHandling,
     DependencyLayer,
+    DescriptorFileRole,
     DeviceKind,
+    EvidenceKind,
     EnvironmentState,
     ExportFormat,
     FailureTaxonomy,
     FitClass,
     LossImpl,
     MemoryResidencyModel,
+    ModelAttentionType,
+    ModelExecutionKind,
+    ModelFormat,
+    ModelSourceKind,
+    ModelTaskClass,
     OffloadStrategy,
     OperatingSystem,
     Optimizer,
+    ParameterCountKind,
+    PositionalEncoding,
     PrecisionMode,
     QuantizationMode,
     RecipeVerification,
@@ -50,10 +62,32 @@ from .enums import (
     StorageRole,
     StorageSuitability,
     TaskType,
+    TokenizerFormat,
     TrainerTarget,
+    VerificationOutcome,
 )
 
 _ID = r"^[A-Za-z0-9._-]+$"
+_RELATIVE_DESCRIPTOR_PATH = (
+    r"^(?:[^/\\:.][^/\\:]*|\.[^./\\:][^/\\:]*)"
+    r"(?:/(?:[^/\\:.][^/\\:]*|\.[^./\\:][^/\\:]*))*$"
+)
+
+
+def _validate_descriptor_path(value: str) -> str:
+    """Require a portable relative POSIX path with no traversal or drive prefix."""
+
+    if "\\" in value:
+        raise ValueError("descriptor paths must use POSIX separators")
+    path = PurePosixPath(value)
+    if (
+        path.is_absolute()
+        or not path.parts
+        or value != path.as_posix()
+        or any(part in {".", ".."} or ":" in part for part in path.parts)
+    ):
+        raise ValueError("descriptor paths must be safe relative paths")
+    return value
 
 
 # --------------------------------------------------------------------------------------------------
@@ -226,6 +260,500 @@ class DatasetManifest(ContractModel):
     license: License | None = None
     links: DatasetLinks = Field(default_factory=DatasetLinks)
     notes: str = ""
+
+
+# --------------------------------------------------------------------------------------------------
+# ModelDescriptor / TokenizerDescriptor - static, dependency-light model identity and compatibility.
+# The inspector never imports model code or a heavy ML framework. MoE execution remains future work,
+# but these contracts avoid dense-only assumptions from their first version.
+# --------------------------------------------------------------------------------------------------
+class DescriptorSource(ContractModel):
+    """Identity of the requested source and the immutable revision actually inspected.
+
+    requested_revision is user intent. resolved_revision/resolved_commit are evidence. They are
+    intentionally separate so a mutable branch name is never misreported as a pinned snapshot.
+    """
+
+    kind: ModelSourceKind
+    repository: str | None = None
+    requested_revision: str | None = None
+    resolved_revision: str | None = None
+    resolved_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{7,64}$")
+    revision_pinned: bool = False
+    local_path: str | None = None
+    artifact_ref: Ref | None = None
+    snapshot_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    evidence_source: str = "user_input"
+
+    @model_validator(mode="after")
+    def _validate_identity(self) -> DescriptorSource:
+        if self.kind == ModelSourceKind.huggingface and not self.repository:
+            raise ValueError("huggingface sources require repository identity")
+        if self.kind == ModelSourceKind.local and not self.local_path:
+            raise ValueError("local sources require local_path")
+        if self.kind == ModelSourceKind.artifact and self.artifact_ref is None:
+            raise ValueError("artifact sources require artifact_ref")
+        if self.revision_pinned != (self.resolved_commit is not None):
+            raise ValueError("revision_pinned is true only with an immutable resolved_commit")
+        return self
+
+
+class DescriptorFile(ContractModel):
+    """One safe, portable inventory entry. sha256 is separate from hash_status so skipped hashing
+    and unreadable content are never confused with a verified empty digest."""
+
+    path: str = Field(min_length=1, pattern=_RELATIVE_DESCRIPTOR_PATH)
+    role: DescriptorFileRole = DescriptorFileRole.other
+    size_bytes: int = Field(ge=0)
+    format: ModelFormat | None = None
+    hash_status: Literal["verified", "not_requested", "unreadable", "skipped_unsafe"] = (
+        "not_requested"
+    )
+    sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    serialization_risk: Literal[
+        "safe", "pickle", "executable_code", "archive", "unknown"
+    ] = "unknown"
+    is_link: bool = False
+
+    @field_validator("path")
+    @classmethod
+    def _portable_path(cls, value: str) -> str:
+        return _validate_descriptor_path(value)
+
+    @model_validator(mode="after")
+    def _validate_hash_evidence(self) -> DescriptorFile:
+        if self.hash_status == "verified" and self.sha256 is None:
+            raise ValueError("verified files require sha256")
+        if self.hash_status != "verified" and self.sha256 is not None:
+            raise ValueError("sha256 may only be set when hash_status is verified")
+        if self.is_link and self.hash_status != "skipped_unsafe":
+            raise ValueError("links must be recorded as skipped_unsafe and never followed")
+        return self
+
+
+class ParameterCountHandling(ContractModel):
+    tied: CountHandling = CountHandling.unknown
+    shared: CountHandling = CountHandling.unknown
+    replicated: CountHandling = CountHandling.unknown
+    generated: CountHandling = CountHandling.unknown
+    quantized: CountHandling = CountHandling.unknown
+    optimizer_shadows: CountHandling = CountHandling.not_applicable
+    decompressed_caches: CountHandling = CountHandling.not_applicable
+
+
+class ParameterCount(ContractModel):
+    """One explicitly scoped count. There is deliberately no scalar parameter_count field."""
+
+    kind: ParameterCountKind
+    value: int = Field(ge=0)
+    unit: Literal["coordinates", "elements", "parameters"] = "coordinates"
+    scope: str = Field(min_length=1)
+    measurement_window: str = Field(min_length=1)
+    source: str = Field(min_length=1)
+    evidence: EvidenceKind
+    handling: ParameterCountHandling = Field(default_factory=ParameterCountHandling)
+    notes: str = ""
+
+
+class ParameterComponent(ContractModel):
+    """A representation component such as shared weights, router, experts, or an adapter.
+
+    Stored dtype is a raw representation string, not PrecisionMode (which describes run compute and
+    includes values such as tf32/mixed_bf16 that are not on-disk dtypes).
+    """
+
+    component_id: str = Field(pattern=_ID)
+    scope: Literal[
+        "all", "embedding", "shared", "router", "expert_group", "output_head", "adapter", "other"
+    ] = "all"
+    format: ModelFormat
+    storage_dtype: str | None = None
+    quantization: QuantizationMode | None = None
+    quantization_details: JsonObject = Field(default_factory=dict)
+    file_refs: list[str] = Field(default_factory=list)
+
+    @field_validator("file_refs")
+    @classmethod
+    def _portable_file_refs(cls, values: list[str]) -> list[str]:
+        normalized = [_validate_descriptor_path(value) for value in values]
+        if normalized != sorted(set(normalized)):
+            raise ValueError("parameter component file_refs must be sorted and unique")
+        return normalized
+
+
+class ParameterRepresentation(ContractModel):
+    kind: ModelExecutionKind = ModelExecutionKind.unknown
+    components: list[ParameterComponent] = Field(default_factory=list)
+    counts: list[ParameterCount] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_parameter_axes(self) -> ParameterRepresentation:
+        component_ids = [item.component_id for item in self.components]
+        if component_ids != sorted(component_ids) or len(component_ids) != len(set(component_ids)):
+            raise ValueError("parameter components must be sorted by unique component_id")
+        count_keys = [
+            (item.kind.value, item.scope, item.measurement_window) for item in self.counts
+        ]
+        if count_keys != sorted(count_keys) or len(count_keys) != len(set(count_keys)):
+            raise ValueError("parameter counts must be sorted and unique by kind/scope/window")
+        return self
+
+
+class SemanticRouting(ContractModel):
+    """The learned semantic selection policy. Physical placement is not represented here."""
+
+    router_type: str = Field(min_length=1)
+    routing_unit: Literal["token", "sequence", "layer", "request", "custom"] = "token"
+    selection_policy: str = Field(min_length=1)
+    top_k: int | None = Field(default=None, ge=1)
+    capacity_factor: float | None = Field(default=None, gt=0)
+    routing_noise: str | None = None
+    metadata_source: str = Field(min_length=1)
+
+
+class ExpertGroup(ContractModel):
+    group_id: str = Field(pattern=_ID)
+    layer_indices: list[int] = Field(default_factory=list)
+    expert_count: int = Field(ge=1)
+    experts_per_token: int | None = Field(default=None, ge=1)
+    shared_expert_count: int | None = Field(default=None, ge=0)
+    heterogeneous: bool = False
+    expert_identity_scheme: str | None = None
+    expert_registry_ref: Ref | None = None
+
+    @model_validator(mode="after")
+    def _validate_expert_counts(self) -> ExpertGroup:
+        if self.experts_per_token is not None and self.experts_per_token > self.expert_count:
+            raise ValueError("experts_per_token cannot exceed expert_count")
+        if self.shared_expert_count is not None and self.shared_expert_count > self.expert_count:
+            raise ValueError("shared_expert_count cannot exceed expert_count")
+        if self.layer_indices != sorted(set(self.layer_indices)):
+            raise ValueError("layer_indices must be sorted and unique")
+        return self
+
+
+class ModelTopology(ContractModel):
+    execution_kind: ModelExecutionKind = ModelExecutionKind.unknown
+    semantic_routing: SemanticRouting | None = None
+    expert_groups: list[ExpertGroup] = Field(default_factory=list)
+    # Placement/prefetch/residency decisions belong to the future RunPlan physical scheduler.
+    physical_scheduler_owner: Literal["run_plan"] = "run_plan"
+
+    @model_validator(mode="after")
+    def _validate_topology(self) -> ModelTopology:
+        group_ids = [item.group_id for item in self.expert_groups]
+        if group_ids != sorted(group_ids) or len(group_ids) != len(set(group_ids)):
+            raise ValueError("expert_groups must be sorted by unique group_id")
+        if self.execution_kind == ModelExecutionKind.dense and (
+            self.semantic_routing is not None or self.expert_groups
+        ):
+            raise ValueError("dense topology cannot declare semantic routing or expert groups")
+        return self
+
+
+class TrustRequirement(ContractModel):
+    """Static trust findings only. This descriptor can never authorize custom-code execution."""
+
+    trust_remote_code: Literal[False] = False
+    custom_code_required: bool = False
+    approval_required: bool = False
+    isolated_execution_required: bool = False
+    custom_code_files: list[str] = Field(default_factory=list)
+    detected_auto_map: JsonObject = Field(default_factory=dict)
+    notes: list[str] = Field(default_factory=list)
+
+    @field_validator("custom_code_files")
+    @classmethod
+    def _portable_code_files(cls, values: list[str]) -> list[str]:
+        normalized = [_validate_descriptor_path(value) for value in values]
+        if normalized != sorted(set(normalized)):
+            raise ValueError("custom_code_files must be sorted and unique")
+        return normalized
+
+    @model_validator(mode="after")
+    def _fail_closed_custom_code(self) -> TrustRequirement:
+        if self.custom_code_required and not (
+            self.approval_required and self.isolated_execution_required
+        ):
+            raise ValueError("custom code requires approval and isolated execution")
+        if not self.custom_code_required and (
+            self.approval_required or self.isolated_execution_required or self.custom_code_files
+        ):
+            raise ValueError("custom-code controls require custom_code_required")
+        if self.notes != sorted(set(self.notes)):
+            raise ValueError("trust notes must be sorted and unique")
+        return self
+
+
+class DescriptorVerification(ContractModel):
+    """Independent evidence axes. Integrity never implies compatibility or hardware support."""
+
+    metadata: VerificationOutcome = VerificationOutcome.not_checked
+    integrity: VerificationOutcome = VerificationOutcome.not_checked
+    license: VerificationOutcome = VerificationOutcome.not_checked
+    custom_code_policy: VerificationOutcome = VerificationOutcome.not_checked
+    inspected_at: str | None = None
+    inspector: str | None = None
+    evidence_refs: list[Ref] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_evidence_lists(self) -> DescriptorVerification:
+        evidence_ids = [item.id for item in self.evidence_refs]
+        if evidence_ids != sorted(set(evidence_ids)):
+            raise ValueError("verification evidence_refs must be sorted and unique")
+        if self.warnings != sorted(set(self.warnings)):
+            raise ValueError("verification warnings must be sorted and unique")
+        return self
+
+
+class DimensionEvidence(ContractModel):
+    value: int = Field(ge=0)
+    source: str = Field(min_length=1)
+    evidence: EvidenceKind
+
+
+class EmbeddingVocabulary(ContractModel):
+    declared_vocab_size: DimensionEvidence | None = None
+    input_embedding_rows: DimensionEvidence | None = None
+    output_head_rows: DimensionEvidence | None = None
+    tied_embeddings: bool | None = None
+
+    @model_validator(mode="after")
+    def _validate_tied_rows(self) -> EmbeddingVocabulary:
+        if (
+            self.tied_embeddings is True
+            and self.input_embedding_rows is not None
+            and self.output_head_rows is not None
+            and self.input_embedding_rows.value != self.output_head_rows.value
+        ):
+            raise ValueError("tied embeddings require matching input and output row counts")
+        return self
+
+
+class BackendCompatibilityEntry(ContractModel):
+    backend_ref: Ref
+    environment_ref: Ref | None = None
+    status: Literal["compatible", "incompatible", "unverified"] = "unverified"
+    capability_report_ref: Ref | None = None
+    reasons: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_support_evidence(self) -> BackendCompatibilityEntry:
+        if self.reasons != sorted(set(self.reasons)):
+            raise ValueError("backend compatibility reasons must be sorted and unique")
+        if self.status == "compatible" and (
+            self.environment_ref is None or self.capability_report_ref is None
+        ):
+            raise ValueError("compatible backend entries require environment and capability evidence")
+        if self.status == "incompatible" and not self.reasons:
+            raise ValueError("incompatible backend entries require reasons")
+        return self
+
+
+class CompatibilityCheck(ContractModel):
+    check: str = Field(pattern=_ID)
+    outcome: VerificationOutcome
+    evidence: str | None = None
+    message: str = ""
+    remediation: str | None = None
+
+
+class ModelTokenizerCompatibility(ContractModel):
+    model_ref: Ref
+    tokenizer_ref: Ref
+    status: CompatibilityStatus
+    checks: list[CompatibilityCheck] = Field(default_factory=list)
+    required_embedding_rows: int | None = Field(default=None, ge=0)
+    resize_input_embeddings: bool = False
+    resize_output_head: bool = False
+    warnings: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_compatibility_evidence(self) -> ModelTokenizerCompatibility:
+        check_ids = [item.check for item in self.checks]
+        if len(check_ids) != len(set(check_ids)):
+            raise ValueError("compatibility checks must have unique ids")
+        if self.warnings != sorted(set(self.warnings)):
+            raise ValueError("compatibility warnings must be sorted and unique")
+        outcomes = {item.outcome for item in self.checks}
+        if self.status == CompatibilityStatus.compatible and (
+            not self.checks or outcomes != {VerificationOutcome.passed}
+        ):
+            raise ValueError("compatible status requires one or more passed checks and no gaps")
+        if self.status == CompatibilityStatus.resize_required and not (
+            self.required_embedding_rows is not None
+            and (self.resize_input_embeddings or self.resize_output_head)
+            and VerificationOutcome.failed in outcomes
+        ):
+            raise ValueError("resize_required needs failed size evidence and an explicit resize")
+        if self.status == CompatibilityStatus.incompatible and VerificationOutcome.failed not in outcomes:
+            raise ValueError("incompatible status requires a failed check")
+        if self.status == CompatibilityStatus.unverified and VerificationOutcome.not_checked not in outcomes:
+            raise ValueError("unverified status requires a not_checked evidence gap")
+        return self
+
+
+class ModelDescriptor(ContractModel):
+    """Static identity, representation, integrity, and compatibility surface for one model snapshot.
+
+    The descriptor is safe to build in the torch-free control plane. It does not claim that the model
+    can load, train, fit a device, or execute custom code.
+    """
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    model_id: str = Field(pattern=_ID)
+    source: DescriptorSource
+    artifact_role: Literal[
+        "base", "adapter", "merged", "checkpoint", "quantized", "converted", "other", "unknown"
+    ] = "unknown"
+    architectures: list[str] = Field(default_factory=list)
+    model_family: str | None = None
+    task_classes: list[ModelTaskClass] = Field(
+        default_factory=lambda: [ModelTaskClass.unknown], min_length=1
+    )
+    formats: list[ModelFormat] = Field(
+        default_factory=lambda: [ModelFormat.unknown], min_length=1
+    )
+    parameters: ParameterRepresentation = Field(default_factory=ParameterRepresentation)
+    topology: ModelTopology = Field(default_factory=ModelTopology)
+    vocabulary: EmbeddingVocabulary = Field(default_factory=EmbeddingVocabulary)
+    context_window: DimensionEvidence | None = None
+    tokenizer_ref: Ref | None = None
+    attention_type: ModelAttentionType = ModelAttentionType.unknown
+    positional_encoding: PositionalEncoding = PositionalEncoding.unknown
+    license: License | None = None
+    trust: TrustRequirement = Field(default_factory=TrustRequirement)
+    files: list[DescriptorFile] = Field(default_factory=list)
+    inventory_complete: bool = False
+    storage_size_bytes: int = Field(default=0, ge=0)
+    inventory_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    backend_compatibility: list[BackendCompatibilityEntry] = Field(default_factory=list)
+    verification: DescriptorVerification = Field(default_factory=DescriptorVerification)
+    captured_at: str | None = None
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_model_inventory(self) -> ModelDescriptor:
+        if self.architectures != sorted(set(self.architectures)):
+            raise ValueError("architectures must be sorted and unique")
+        task_values = [item.value for item in self.task_classes]
+        if task_values != sorted(set(task_values)):
+            raise ValueError("task_classes must be sorted and unique")
+        format_values = [item.value for item in self.formats]
+        if format_values != sorted(set(format_values)):
+            raise ValueError("formats must be sorted and unique")
+        paths = [item.path for item in self.files]
+        if paths != sorted(paths) or len(paths) != len(set(paths)):
+            raise ValueError("model file inventory must be sorted by unique path")
+        if self.storage_size_bytes != sum(item.size_bytes for item in self.files):
+            raise ValueError("storage_size_bytes must equal the recorded file sizes")
+        if self.source.snapshot_sha256 is not None and (
+            not self.inventory_complete
+            or not self.files
+            or any(item.hash_status != "verified" for item in self.files)
+        ):
+            raise ValueError("snapshot_sha256 requires a complete, fully hashed inventory")
+        component_formats = {item.format for item in self.parameters.components}
+        if not component_formats.issubset(set(self.formats)):
+            raise ValueError("formats must include every parameter component format")
+        backend_keys = [
+            (item.backend_ref.id, item.environment_ref.id if item.environment_ref else "")
+            for item in self.backend_compatibility
+        ]
+        if backend_keys != sorted(set(backend_keys)):
+            raise ValueError("backend_compatibility must be sorted and unique")
+        inventory_paths = set(paths)
+        component_refs = {
+            file_ref
+            for component in self.parameters.components
+            for file_ref in component.file_refs
+        }
+        if not component_refs.issubset(inventory_paths):
+            raise ValueError("parameter component file_refs must exist in the model inventory")
+        if not set(self.trust.custom_code_files).issubset(inventory_paths):
+            raise ValueError("custom_code_files must exist in the model inventory")
+        if self.notes != sorted(set(self.notes)):
+            raise ValueError("model notes must be sorted and unique")
+        return self
+
+
+class SpecialToken(ContractModel):
+    role: str = Field(min_length=1)
+    content: str
+    token_id: int | None = Field(default=None, ge=0)
+    added: bool = False
+
+
+class TokenizerDescriptor(ContractModel):
+    """Static tokenizer identity and structure. Exact encode/decode behavior needs a later functional
+    probe in an isolated capability environment; inspection alone does not claim it."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    tokenizer_id: str = Field(pattern=_ID)
+    source: DescriptorSource
+    format: TokenizerFormat = TokenizerFormat.unknown
+    implementation_class: str | None = None
+    base_vocabulary_size: int | None = Field(default=None, ge=0)
+    added_token_count: int | None = Field(default=None, ge=0)
+    effective_vocabulary_size: int | None = Field(default=None, ge=0)
+    max_token_id: int | None = Field(default=None, ge=0)
+    model_max_length: DimensionEvidence | None = None
+    special_tokens: list[SpecialToken] = Field(default_factory=list)
+    chat_template: str | list[JsonObject] | None = None
+    chat_template_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    normalization: JsonObject | None = None
+    pre_tokenization: JsonObject | None = None
+    model_compatibility: list[ModelTokenizerCompatibility] = Field(default_factory=list)
+    trust: TrustRequirement = Field(default_factory=TrustRequirement)
+    files: list[DescriptorFile] = Field(default_factory=list)
+    inventory_complete: bool = False
+    storage_size_bytes: int = Field(default=0, ge=0)
+    inventory_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    verification: DescriptorVerification = Field(default_factory=DescriptorVerification)
+    captured_at: str | None = None
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_tokenizer_inventory(self) -> TokenizerDescriptor:
+        paths = [item.path for item in self.files]
+        if paths != sorted(paths) or len(paths) != len(set(paths)):
+            raise ValueError("tokenizer file inventory must be sorted by unique path")
+        if self.storage_size_bytes != sum(item.size_bytes for item in self.files):
+            raise ValueError("storage_size_bytes must equal the recorded file sizes")
+        if self.source.snapshot_sha256 is not None and (
+            not self.inventory_complete
+            or not self.files
+            or any(item.hash_status != "verified" for item in self.files)
+        ):
+            raise ValueError("snapshot_sha256 requires a complete, fully hashed inventory")
+        token_keys = [(item.role, item.content, item.token_id) for item in self.special_tokens]
+        if len(token_keys) != len(set(token_keys)) or token_keys != sorted(
+            token_keys,
+            key=lambda item: (item[0], item[1], item[2] if item[2] is not None else -1),
+        ):
+            raise ValueError("special_tokens must be deterministically sorted")
+        compatibility_keys = [
+            (item.model_ref.id, item.tokenizer_ref.id) for item in self.model_compatibility
+        ]
+        if compatibility_keys != sorted(set(compatibility_keys)):
+            raise ValueError("model_compatibility must be sorted and unique")
+        if not set(self.trust.custom_code_files).issubset(set(paths)):
+            raise ValueError("custom_code_files must exist in the tokenizer inventory")
+        if (
+            self.base_vocabulary_size is not None
+            and self.effective_vocabulary_size is not None
+            and self.effective_vocabulary_size < self.base_vocabulary_size
+        ):
+            raise ValueError("effective_vocabulary_size cannot be below base_vocabulary_size")
+        if self.effective_vocabulary_size is not None and self.max_token_id is not None:
+            if self.max_token_id >= self.effective_vocabulary_size:
+                raise ValueError("max_token_id must be below effective_vocabulary_size")
+        if (self.chat_template is None) != (self.chat_template_sha256 is None):
+            raise ValueError("chat_template and chat_template_sha256 must be set together")
+        if self.notes != sorted(set(self.notes)):
+            raise ValueError("tokenizer notes must be sorted and unique")
+        return self
 
 
 # --------------------------------------------------------------------------------------------------

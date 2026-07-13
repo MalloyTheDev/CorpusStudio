@@ -182,7 +182,7 @@ coverage, staleness, throughput, energy, wall-clock, held-out improvement, and r
 
 | Existing contract | Change to stay dense-safe |
 |---|---|
-| `ModelDescriptor` *(not yet built)* | build with the §1 multi-count accounting + optional `MoEModelDescriptor` extension from the start |
+| `ModelDescriptor` ✅ foundation | component-scoped representation + scoped multi-count records + optional semantic routing/expert groups; physical scheduling remains owned by `RunPlan`. The static inspector leaves execution kind unknown rather than guessing dense/MoE; actual MoE parsing is Phase B. |
 | `RunPlan` | expert-placement + offload + parallelism fields must be representable; no single-param assumption |
 | `CheckpointPolicy` / checkpoint | must allow multi-component sharded checkpoints + a completion manifest (§10) |
 | `RunEvent` / `EventMetrics` | routing/expert telemetry channels; locality metrics separate from quality |
@@ -193,7 +193,8 @@ coverage, staleness, throughput, energy, wall-clock, held-out improvement, and r
 
 ## Phased MoE plan
 
-- **A — Dense-safe foundational contracts** (no MoE runtime): ensure `ModelDescriptor`,
+- **A — Dense-safe foundational contracts** (in progress; `ModelDescriptor` foundation shipped, no
+  MoE runtime): ensure `ModelDescriptor`,
   `TrainingObjective`, `ArtifactManifest`, `RunPlan`, checkpoint, telemetry do not assume dense
   execution; add sparse parameter-accounting definitions.
 - **B — MoE model inspection**: detect existing MoE architectures; parse expert/router structure;

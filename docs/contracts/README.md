@@ -16,7 +16,7 @@ corpus-studio platform-schemas --out docs/contracts
 # or: python -m corpus_studio.cli platform-schemas --out docs/contracts
 ```
 
-`index.json` lists the contract set and its `contract_version`.
+`index.json` lists all **23 root contracts** and their shared `contract_version`.
 
 ## The contracts
 
@@ -24,7 +24,17 @@ corpus-studio platform-schemas --out docs/contracts
 |---|---|
 | `ProjectManifest` | Workspace descriptor (identity, schema, splits, registry pointers). |
 | `DatasetManifest` | Dataset version identity **+ lineage** (source → transform → teacher/prompt/seed → hashes) + token stats. |
+| `ModelDescriptor` | Static model identity, component-scoped representation, scoped parameter counts, topology/trust findings, portable file inventory, and independent verification axes. |
+| `TokenizerDescriptor` | Static tokenizer identity, base/added/effective vocabulary, special tokens, chat-template hash, inventory/trust findings, and model-compatibility evidence. |
 | `EnvironmentProfile` | Hashable host + software **signature** (OS, residency model, GPUs, driver/runtime, package locks). |
+| `StorageProfile` | Non-destructive storage topology plus per-role safe-spill suitability and risk evidence. |
+| `PythonRuntime` | A bounded-probed Python interpreter candidate and recipe compatibility. |
+| `EnvironmentRecipe` | Declarative dependency-layer/backend environment recipe; declaration is not support proof. |
+| `DependencyResolution` | Hash-sealed preview of exact no-shell install argv, indexes, requirements, and estimates. |
+| `EnvironmentInstallation` | Durable bounded-command journal and installation outcome. |
+| `EnvironmentLock` | Immutable interpreter/package/source/hash and accelerator lock evidence. |
+| `EnvironmentDescriptor` | Managed environment identity, ownership, state, lock, and verification references. |
+| `EnvironmentHealthReport` | Independent import/dependency/functional/hardware/drift health axes. |
 | `BackendManifest` | A backend's **static** declaration of what it can do (OS/device/precision/quant/adapter/attn/loss/offload, deps + conflicts, known-failure modes, probes). |
 | `CapabilityReport` | The **measured** counterpart — per-probe outcomes on a specific host (declared ∩ proven). |
 | `RunPlan` | The **immutable, fully-resolved** execution plan (`plan_hash`-sealed); accumulation target is in **supervised tokens**. |
