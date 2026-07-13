@@ -105,6 +105,10 @@ class PlannerConstraints:
     attention_backend: str | None = None  # explicit override; else resolved from the host
     export_format: str = "adapter_peft"
     backend: str = "corpus_studio"  # the training framework to run on (see platform.backends)
+    # Memory / spill-avoidance levers (opt-in), validated against the backend's declared surface: a
+    # paged optimizer (spill optimizer state to RAM) + a fused-CE loss (drop the long-seq logits spike).
+    optim: str = "adamw_torch"
+    use_liger: bool = False
     allow_cpu_toy: bool = False
 
 
@@ -266,9 +270,12 @@ def build_run_plan(
         "gradient_accumulation_steps": constraints.gradient_accumulation_steps,
         "learning_rate": constraints.learning_rate,
         "seed": constraints.seed,
+        "optim": constraints.optim,  # the trainer reads this → SFTConfig optim (paged optimizer = safe-spill)
     }
     if attention_backend in _EXPLICIT_ATTN:
         snapshot["attn_implementation"] = attention_backend
+    if constraints.use_liger:
+        snapshot["use_liger"] = True  # fused CE — the trainer drops the long-seq logits spike
     if cpu_toy:
         snapshot["cpu_toy"] = True
 
@@ -288,8 +295,8 @@ def build_run_plan(
         "precision": precision,
         "quantization": quantization,
         "adapter": adapter,
-        "optimizer": {"impl": "adamw_torch", "learning_rate": constraints.learning_rate},
-        "loss_impl": "cross_entropy",
+        "optimizer": {"impl": constraints.optim, "learning_rate": constraints.learning_rate},
+        "loss_impl": "liger_fused_ce" if constraints.use_liger else "cross_entropy",
         "attention_backend": attention_backend,
         "sequence": {"max_sequence_len": constraints.sequence_len},
         "batching": {

@@ -125,6 +125,20 @@ def test_platform_plan_output_dir_flows_into_the_snapshot(monkeypatch):
     assert snap["output_dir"] == "/some/project/adapters/wbg"
 
 
+def test_platform_plan_memory_efficient_sets_the_levers(monkeypatch):
+    # --memory-efficient (a tight-GPU shortcut) must seal the paged optimizer + fused Liger loss into
+    # the snapshot the trainer replays, so the platform path — not just train-run — gets them.
+    _ready_host(monkeypatch)
+    result = runner.invoke(
+        app,
+        ["platform-plan", "--base-model", "m", "--dataset", "d.jsonl", "--memory-efficient", "--json"],
+    )
+    assert result.exit_code == 0
+    snap = json.loads(result.stdout)["run_plan"]["training_config_snapshot"]
+    assert snap["optim"] == "paged_adamw_8bit"
+    assert snap["use_liger"] is True
+
+
 def test_platform_plan_backend_flows_through_the_cli(monkeypatch):
     # A proven-sdpa host: Unsloth declares sdpa, so it can run this plan → backend_ref reflects it.
     _ready_host(monkeypatch, cc_major=8, attn="sdpa")
