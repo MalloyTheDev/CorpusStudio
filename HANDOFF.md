@@ -18,6 +18,10 @@ forward plan see [`docs/ROADMAP.md`](docs/ROADMAP.md) + [`docs/IMPLEMENTATION_PL
 - WorldBibleGenerator (the "WBG" reference project): **`C:\WorldBibleGenerator`** holds the *important*
   stuff (source + datasets + trained adapters, ~2.4 GB). The large merged/GGUF models + pretrain data
   (~260 GB) were intentionally left on `F:\WorldBibleGenerator` (reproducible from adapters).
+- **WBG WSL training now points to C:** — the launch scripts / configs / README under
+  `C:\WorldBibleGenerator\training` were repointed off `/mnt/f` → `/mnt/c` (the venv stays on the Linux
+  FS `~/wbg-venv`, which is correct). The base model loads from the HF cache, so the data→adapter path
+  is self-contained on C:. (Those edits are uncommitted in the WBG git repo.)
 
 ## 1. What CorpusStudio is
 
@@ -33,22 +37,38 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
 
 ## 2. Current git / PR state
 
-Merged to `main`: **#404** (configurable checkpoint retention), **#405** (StorageProfile).
+`main` is the source of truth; everything through **#409 is merged**:
+- **#404** configurable checkpoint retention · **#405** StorageProfile + the dependency-architecture
+  correction · **#406** Environment Manager substrate (Phase 2 slice 1) · **#407** storage USB/WSL
+  runtime-role risks + storage-vs-not failure diagnostic · **#408** HANDOFF/AGENTS · **#409**
+  CURRENT_STATE/CLI_REFERENCE reconciliation.
 
-**Open, CI-green, awaiting the user's admin-merge** (the user says "merge NNN" to authorize each):
-- **#406** — Environment Manager substrate (Phase 2 slice 1). Branch `feat/environment-manager-substrate`.
-- **#407** — Storage USB/WSL runtime-role risks + storage-vs-not failure diagnostic. Branch
-  `feat/storage-runtime-risks` (the branch the C: copy is currently on).
+**Open:** **#410** — a docs follow-up (folds Environment Manager + storage runtime-risks into
+CURRENT_STATE/CLI_REFERENCE, plus this HANDOFF/AGENTS refresh). Merge it and the docs are fully in sync.
 
-**Merge-order note:** #406 and #407 both touch `platform/enums.py` + `platform/contracts.py` but in
-different sections (env contracts vs storage) — they should auto-merge. After merging, if the *set* of
-root contracts changed, regenerate the committed schemas (see §4) and bump the count in
-`tests/test_platform_contracts.py`.
+**Admin-merge note:** the auto-mode classifier blocks a self-authored admin-merge unless the user names
+the PR that turn ("merge 410"). After merging any `platform/` contract change, regenerate the committed
+schemas (see §4) and bump the count in `tests/test_platform_contracts.py` (currently **19 root
+contracts**).
 
 ## 3. The architecture North Star + binding directives
 
-The big epic (memory `platform-architecture-epic`): evolve CorpusStudio into a **universal local-first
-AI-lifecycle platform**. Non-negotiables the user has set:
+**The bigger picture (the end state).** CorpusStudio is becoming a complete **local-first,
+hardware-aware AI engineering platform** covering the whole lifecycle: raw sources → dataset
+construction (multiple training objectives, mixtures, reasoning/tool **traces**) → model + tokenizer
+management (a Model/Tokenizer Lab) → hardware- and storage-aware **run planning** → training through
+**swappable, isolated backends** → live-telemetry supervision → checkpoint + **artifact lineage** →
+evaluation → deployment prep → reproducible experimentation. The **control plane stays lightweight and
+torch-free**; heavy frameworks live in **isolated worker environments** behind the versioned
+`WorkerMessage` protocol; the **UI is always a client**, never the owner of training behavior. A
+concrete research North Star driving the contract design: **resource-elastic MoE** — training a
+~30B-logical / 2–4B-active / 50–200M-resident model on consumer hardware
+(`N_resident << N_active << N_logical`), which is exactly why the foundational contracts must be
+MoE-safe *now*. The WBG-7B / RTX-5070 work is the **reference stress-test** that surfaces the generic
+requirements — not the product scope. The eventual shell strangles WPF → Avalonia (interim) → Tauri 2 +
+React, over the stable language-neutral contracts, with a progressively Rust-ified core.
+
+The big epic (memory `platform-architecture-epic`). Non-negotiables the user has set:
 
 - **3-layer dependency model** ([`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) §2):
   "dependency-light" describes the **CONTROL PLANE only**, not the whole product. Layers = control
@@ -119,14 +139,18 @@ with **`--cov-fail-under=88`**, plus `avalonia-linux-build`, `desktop-tests`, C#
 
 ## 7. Immediate next actions (ranked)
 
-1. **Merge #406 + #407** (ask the user; they authorize per-PR).
-2. **Phase 2 slice 2 — Environment Manager CREATION**: actually create the venv, run the bounded argv
-   installers (with explicit confirmation), record the exact `EnvironmentLock` (package + source +
-   hash), run import/functional/hardware probes → `EnvironmentHealthReport`, drift detection,
-   repair/recreate, and associate the environment hash with each `RunPlan`. Side-effectful → verify on
-   the real 5070 (create a real `backend-corpus-studio` env + probe it).
-3. **Phase 3 — `ModelDescriptor` + `TokenizerDescriptor`**, built **MoE-safe from day one** (§3).
-4. When a native-Linux NVMe box is ready: the **untruncated seq-4096 WBG-7B re-train** for paper numbers.
+1. **Phase 2 slice 2 — Environment Manager CREATION.** The substrate (recipes + install-preview) is
+   merged; next is the side-effectful half: create the isolated venv, run the bounded argv installers
+   (with explicit confirmation), record the exact `EnvironmentLock` (package + source + hash), run
+   import/functional/hardware probes → `EnvironmentHealthReport`, drift detection, repair/recreate, and
+   associate the environment hash with each `RunPlan`. Verify on the real 5070 (build + probe a real
+   `backend-corpus-studio` env).
+2. **Phase 3 — `ModelDescriptor` + `TokenizerDescriptor`**, built **MoE-safe from day one** (§3): the
+   multi-count parameter accounting + the semantic-router-vs-physical-scheduler split baked in.
+3. **Phase 4+** down the revised order (§3): `TrainingObjective` registry → parameter accounting →
+   `RunPlan` expansion → `TraceRecord` → MoE inspection → dense backends → MoE FT → resource-elastic.
+4. When a native-Linux NVMe box is ready: the **untruncated seq-4096 WBG-7B re-train** for paper numbers
+   (the WBG WSL training now points at C:, not the F: USB drive — see §0).
 
 ## 8. Hardware + environments
 
