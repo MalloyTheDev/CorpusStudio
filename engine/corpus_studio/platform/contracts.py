@@ -66,7 +66,16 @@ from .enums import (
     ObjectiveSelectionMode,
     ObjectiveUpdateScope,
     ObjectiveVerificationStatus,
+    ParameterAccountingProfile,
+    ParameterAccountingStatus,
     ParameterCountKind,
+    ParameterEvidenceSourceKind,
+    ParameterGapReason,
+    ParameterIdentityBasis,
+    ParameterObservationCoverage,
+    ParameterScopeKind,
+    ParameterValueRelation,
+    ParameterWindowKind,
     PositionalEncoding,
     PrecisionMode,
     QuantizationMode,
@@ -87,6 +96,23 @@ _RELATIVE_DESCRIPTOR_PATH = (
     r"(?:/(?:[^/\\:.][^/\\:]*|\.[^./\\:][^/\\:]*))*$"
 )
 ObjectiveCapability = Annotated[str, Field(pattern=_ID)]
+ParameterId = Annotated[str, Field(pattern=_ID)]
+
+
+def _is_digest_value(value: str | None) -> bool:
+    return bool(
+        value
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _is_pinned_ref(ref: Ref) -> bool:
+    return bool(
+        ref.hash is not None
+        and ref.hash.algo != "none"
+        and _is_digest_value(ref.hash.value)
+    )
 
 
 def _validate_descriptor_path(value: str) -> str:
@@ -411,6 +437,576 @@ class ParameterRepresentation(ContractModel):
         ]
         if count_keys != sorted(count_keys) or len(count_keys) != len(set(count_keys)):
             raise ValueError("parameter counts must be sorted and unique by kind/scope/window")
+        return self
+
+
+class ParameterScope(ContractModel):
+    """Stable coordinate universe for an authoritative parameter observation.
+
+    Runtime addresses are never identities. Sparse scopes carry stable expert IDs, and every scope
+    is tied to one exact model reference plus a named coordinate universe.
+    """
+
+    scope_id: ParameterId
+    kind: ParameterScopeKind
+    model_ref: Ref
+    coordinate_universe_id: ParameterId
+    coordinate_universe_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    component_ids: list[ParameterId] = Field(default_factory=list)
+    expert_ids: list[ParameterId] = Field(default_factory=list)
+    device_id: str | None = None
+    memory_tier: Literal[
+        "gpu",
+        "pinned_ram",
+        "pageable_ram",
+        "nvme",
+        "sata",
+        "remote",
+        "unknown",
+    ] | None = None
+    definition: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _validate_scope(self) -> ParameterScope:
+        if self.component_ids != sorted(set(self.component_ids)):
+            raise ValueError("parameter scope component_ids must be sorted and unique")
+        if self.expert_ids != sorted(set(self.expert_ids)):
+            raise ValueError("parameter scope expert_ids must be sorted and unique")
+        if self.kind in {ParameterScopeKind.expert_group, ParameterScopeKind.expert_set}:
+            if not self.expert_ids or self.coordinate_universe_sha256 is None:
+                raise ValueError(
+                    "expert parameter scopes require stable expert IDs and a coordinate-universe hash"
+                )
+        if self.kind == ParameterScopeKind.device_residency and (
+            not self.device_id or self.memory_tier is None
+        ):
+            raise ValueError("device-residency scopes require device_id and memory_tier")
+        return self
+
+
+class ParameterWindow(ContractModel):
+    """The exact computation or scheduling window a count describes."""
+
+    window_id: ParameterId
+    kind: ParameterWindowKind
+    definition: str = Field(min_length=1)
+    plan_ref: Ref | None = None
+    run_ref: Ref | None = None
+    sequence_id: ParameterId | None = None
+    token_index: int | None = Field(default=None, ge=0)
+    event_seq_start: int | None = Field(default=None, ge=0)
+    event_seq_end: int | None = Field(default=None, ge=0)
+    microstep_start: int | None = Field(default=None, ge=0)
+    microstep_end: int | None = Field(default=None, ge=0)
+    optimizer_step_start: int | None = Field(default=None, ge=0)
+    optimizer_step_end: int | None = Field(default=None, ge=0)
+    captured_at: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_window(self) -> ParameterWindow:
+        anchor_present = self.plan_ref is not None or self.run_ref is not None
+        if self.kind != ParameterWindowKind.static_snapshot and not anchor_present:
+            raise ValueError("dynamic parameter windows require a plan_ref or run_ref")
+        if self.kind == ParameterWindowKind.token and (
+            self.sequence_id is None or self.token_index is None
+        ):
+            raise ValueError("token windows require sequence_id and token_index")
+        if self.kind == ParameterWindowKind.sequence and self.sequence_id is None:
+            raise ValueError("sequence windows require sequence_id")
+        if self.kind == ParameterWindowKind.microbatch and self.microstep_start is None:
+            raise ValueError("microbatch windows require microstep_start")
+        if self.kind == ParameterWindowKind.optimizer_window and (
+            self.optimizer_step_start is None or self.optimizer_step_end is None
+        ):
+            raise ValueError("optimizer windows require optimizer step bounds")
+        if self.kind == ParameterWindowKind.run and self.run_ref is None:
+            raise ValueError("run windows require run_ref")
+        for start, end, label in (
+            (self.event_seq_start, self.event_seq_end, "event sequence"),
+            (self.microstep_start, self.microstep_end, "microstep"),
+            (self.optimizer_step_start, self.optimizer_step_end, "optimizer step"),
+        ):
+            if end is not None and start is None:
+                raise ValueError(f"{label} end requires a start")
+            if start is not None and end is not None and end < start:
+                raise ValueError(f"{label} end cannot precede its start")
+        return self
+
+
+class ParameterEvidenceSource(ContractModel):
+    kind: ParameterEvidenceSourceKind
+    producer: ParameterId
+    producer_version: str = Field(min_length=1)
+    method: str = Field(min_length=1)
+    captured_at: str | None = None
+    source_ref: Ref
+    environment_ref: Ref | None = None
+    backend_ref: Ref | None = None
+
+
+class ParameterObservation(ContractModel):
+    """One evidence-bearing parameter count. Unknown evidence is represented as a gap, never zero."""
+
+    observation_id: ParameterId
+    kind: ParameterCountKind
+    value: int = Field(ge=0)
+    unit: Literal["coordinates", "elements", "parameters"] = "coordinates"
+    scope: ParameterScope
+    window: ParameterWindow
+    evidence: Literal[
+        EvidenceKind.measured,
+        EvidenceKind.estimated,
+        EvidenceKind.declared,
+    ]
+    source: ParameterEvidenceSource
+    coverage: ParameterObservationCoverage
+    value_relation: ParameterValueRelation
+    identity_basis: ParameterIdentityBasis
+    handling: ParameterCountHandling
+    definition: str = Field(min_length=1)
+    assumptions: list[str] = Field(default_factory=list)
+    notes: str = ""
+
+    @field_validator("evidence", mode="before")
+    @classmethod
+    def _known_evidence(cls, value: object) -> object:
+        if value == EvidenceKind.unknown or value == EvidenceKind.unknown.value:
+            raise ValueError("unknown parameter evidence must be represented as a gap")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_observation(self) -> ParameterObservation:
+        if self.kind != ParameterCountKind.effective and self.unit != "coordinates":
+            raise ValueError("authoritative parameter axes use coordinate units")
+        if (
+            self.kind == ParameterCountKind.resident
+            and self.scope.kind != ParameterScopeKind.device_residency
+        ):
+            raise ValueError("resident observations require a device-residency scope")
+        if self.coverage != ParameterObservationCoverage.complete and (
+            self.value_relation == ParameterValueRelation.exact
+        ):
+            raise ValueError("partial or sampled observations cannot claim an exact value")
+        if (
+            self.evidence == EvidenceKind.estimated
+            and self.value_relation == ParameterValueRelation.exact
+        ):
+            raise ValueError("estimated parameter evidence cannot claim an exact value")
+        if self.assumptions != sorted(set(self.assumptions)):
+            raise ValueError("parameter observation assumptions must be sorted and unique")
+        if self.evidence == EvidenceKind.measured:
+            if self.source.captured_at is None or not _is_pinned_ref(
+                self.source.source_ref
+            ):
+                raise ValueError(
+                    "measured parameter evidence requires capture time and a hash-pinned source"
+                )
+        required_windows: dict[ParameterCountKind, set[ParameterWindowKind]] = {
+            ParameterCountKind.logical: {ParameterWindowKind.static_snapshot},
+            ParameterCountKind.active_token: {ParameterWindowKind.token},
+            ParameterCountKind.active_sequence: {ParameterWindowKind.sequence},
+            ParameterCountKind.touched_window: {
+                ParameterWindowKind.token,
+                ParameterWindowKind.sequence,
+                ParameterWindowKind.microbatch,
+                ParameterWindowKind.optimizer_window,
+                ParameterWindowKind.run,
+            },
+            ParameterCountKind.resident: {ParameterWindowKind.instant},
+            ParameterCountKind.updated_window: {
+                ParameterWindowKind.optimizer_window,
+                ParameterWindowKind.run,
+            },
+            ParameterCountKind.exposed_window: {
+                ParameterWindowKind.token,
+                ParameterWindowKind.sequence,
+                ParameterWindowKind.microbatch,
+                ParameterWindowKind.optimizer_window,
+                ParameterWindowKind.run,
+            },
+        }
+        accepted = required_windows.get(self.kind)
+        if accepted is not None and self.window.kind not in accepted:
+            raise ValueError(
+                f"{self.kind.value} observations require one of "
+                f"{sorted(item.value for item in accepted)} windows"
+            )
+        if (
+            self.evidence == EvidenceKind.measured
+            and self.window.kind == ParameterWindowKind.instant
+            and self.window.captured_at is None
+        ):
+            raise ValueError("measured instant observations require window captured_at")
+        return self
+
+
+class ParameterEvidenceGap(ContractModel):
+    gap_id: ParameterId
+    kind: ParameterCountKind
+    scope: ParameterScope
+    window: ParameterWindow
+    reason: ParameterGapReason
+    explanation: str = Field(min_length=1)
+    resolution: str = Field(min_length=1)
+
+
+class ParameterConflict(ContractModel):
+    conflict_id: ParameterId
+    observation_ids: list[ParameterId] = Field(min_length=2)
+    reason_code: ParameterId
+    explanation: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _validate_conflict(self) -> ParameterConflict:
+        if self.observation_ids != sorted(set(self.observation_ids)):
+            raise ValueError("parameter conflict observation_ids must be sorted and unique")
+        return self
+
+
+_PARAMETER_REQUIRED_KINDS: dict[ParameterAccountingProfile, set[ParameterCountKind]] = {
+    ParameterAccountingProfile.model_static: {ParameterCountKind.logical},
+    ParameterAccountingProfile.training_plan: {
+        ParameterCountKind.logical,
+        ParameterCountKind.active_token,
+        ParameterCountKind.touched_window,
+        ParameterCountKind.resident,
+        ParameterCountKind.updated_window,
+        ParameterCountKind.exposed_window,
+    },
+    ParameterAccountingProfile.training_runtime: {
+        ParameterCountKind.logical,
+        ParameterCountKind.active_token,
+        ParameterCountKind.touched_window,
+        ParameterCountKind.resident,
+        ParameterCountKind.updated_window,
+        ParameterCountKind.exposed_window,
+    },
+    ParameterAccountingProfile.inference_runtime: {
+        ParameterCountKind.logical,
+        ParameterCountKind.active_token,
+        ParameterCountKind.touched_window,
+        ParameterCountKind.resident,
+    },
+    ParameterAccountingProfile.checkpoint: {
+        ParameterCountKind.logical,
+        ParameterCountKind.updated_window,
+    },
+    ParameterAccountingProfile.evaluation: {
+        ParameterCountKind.logical,
+        ParameterCountKind.active_sequence,
+        ParameterCountKind.touched_window,
+        ParameterCountKind.resident,
+    },
+}
+
+
+def required_parameter_kinds(
+    profile: ParameterAccountingProfile,
+) -> set[ParameterCountKind]:
+    """Return a copy of the minimum evidence axes for one accounting profile."""
+
+    return set(_PARAMETER_REQUIRED_KINDS[profile])
+
+
+class ParameterAccountingReport(ContractModel):
+    """Hash-sealed, auditable reconciliation of parameter evidence for one exact model context."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    report_id: ParameterId
+    report_hash: str = Field(pattern=SHA256_PATTERN)
+    generated_at: str
+    profile: ParameterAccountingProfile
+    status: ParameterAccountingStatus
+    model_ref: Ref
+    plan_ref: Ref | None = None
+    run_ref: Ref | None = None
+    artifact_refs: list[Ref] = Field(default_factory=list)
+    evaluation_refs: list[Ref] = Field(default_factory=list)
+    parent_report_refs: list[Ref] = Field(default_factory=list)
+    observations: list[ParameterObservation] = Field(default_factory=list)
+    gaps: list[ParameterEvidenceGap] = Field(default_factory=list)
+    conflicts: list[ParameterConflict] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+    @staticmethod
+    def _ref_key(ref: Ref) -> tuple[str, str, str]:
+        return (
+            ref.id,
+            ref.hash.algo if ref.hash is not None else "",
+            (ref.hash.value or "") if ref.hash is not None else "",
+        )
+
+    @staticmethod
+    def _scope_key(observation: ParameterObservation) -> tuple[str, str, str, str]:
+        scope = observation.scope
+        return (
+            scope.model_ref.id,
+            scope.coordinate_universe_id,
+            scope.coordinate_universe_sha256 or "",
+            scope.scope_id,
+        )
+
+    @staticmethod
+    def _handling_complete(observation: ParameterObservation) -> bool:
+        return CountHandling.unknown not in {
+            observation.handling.tied,
+            observation.handling.shared,
+            observation.handling.replicated,
+            observation.handling.generated,
+            observation.handling.quantized,
+            observation.handling.optimizer_shadows,
+            observation.handling.decompressed_caches,
+        }
+
+    def _qualifies(self, observation: ParameterObservation) -> bool:
+        if not self._handling_complete(observation):
+            return False
+        if observation.identity_basis in {
+            ParameterIdentityBasis.unknown,
+            ParameterIdentityBasis.stored_tensor_elements,
+        }:
+            return False
+        runtime_profiles = {
+            ParameterAccountingProfile.training_runtime,
+            ParameterAccountingProfile.inference_runtime,
+            ParameterAccountingProfile.checkpoint,
+            ParameterAccountingProfile.evaluation,
+        }
+        if self.profile in runtime_profiles and observation.kind != ParameterCountKind.logical:
+            return (
+                observation.evidence == EvidenceKind.measured
+                and observation.coverage == ParameterObservationCoverage.complete
+                and observation.value_relation == ParameterValueRelation.exact
+            )
+        if self.profile == ParameterAccountingProfile.training_plan:
+            return (
+                observation.coverage == ParameterObservationCoverage.complete
+                and observation.value_relation
+                in {ParameterValueRelation.exact, ParameterValueRelation.estimate}
+            )
+        if self.profile == ParameterAccountingProfile.model_static:
+            return (
+                observation.evidence == EvidenceKind.measured
+                and observation.coverage == ParameterObservationCoverage.complete
+                and observation.value_relation == ParameterValueRelation.exact
+            )
+        return (
+            observation.coverage == ParameterObservationCoverage.complete
+            and observation.value_relation == ParameterValueRelation.exact
+        )
+
+    @model_validator(mode="after")
+    def _validate_accounting_report(self) -> ParameterAccountingReport:
+        for refs, label in (
+            (self.artifact_refs, "artifact_refs"),
+            (self.evaluation_refs, "evaluation_refs"),
+            (self.parent_report_refs, "parent_report_refs"),
+        ):
+            keys = [self._ref_key(ref) for ref in refs]
+            if keys != sorted(set(keys)):
+                raise ValueError(f"{label} must be sorted and unique")
+        observation_ids = [item.observation_id for item in self.observations]
+        if observation_ids != sorted(observation_ids) or len(observation_ids) != len(
+            set(observation_ids)
+        ):
+            raise ValueError("parameter observations must be sorted by unique observation_id")
+        gap_ids = [item.gap_id for item in self.gaps]
+        if gap_ids != sorted(gap_ids) or len(gap_ids) != len(set(gap_ids)):
+            raise ValueError("parameter gaps must be sorted by unique gap_id")
+        conflict_ids = [item.conflict_id for item in self.conflicts]
+        if conflict_ids != sorted(conflict_ids) or len(conflict_ids) != len(set(conflict_ids)):
+            raise ValueError("parameter conflicts must be sorted by unique conflict_id")
+        if self.notes != sorted(set(self.notes)):
+            raise ValueError("parameter accounting notes must be sorted and unique")
+        scopes_by_id: dict[str, ParameterScope] = {}
+        windows_by_id: dict[str, ParameterWindow] = {}
+
+        def register_evidence_shape(scope: ParameterScope, window: ParameterWindow) -> None:
+            if scope.model_ref != self.model_ref:
+                raise ValueError("every parameter scope must reference the report model")
+            previous_scope = scopes_by_id.get(scope.scope_id)
+            if previous_scope is not None and previous_scope.model_dump(
+                exclude={"definition"}
+            ) != scope.model_dump(exclude={"definition"}):
+                raise ValueError("a parameter scope_id must have one definition per report")
+            scopes_by_id[scope.scope_id] = scope
+            previous_window = windows_by_id.get(window.window_id)
+            if previous_window is not None and previous_window.model_dump(
+                exclude={"definition"}
+            ) != window.model_dump(exclude={"definition"}):
+                raise ValueError("a parameter window_id must have one definition per report")
+            windows_by_id[window.window_id] = window
+
+        for observation in self.observations:
+            register_evidence_shape(observation.scope, observation.window)
+        for gap in self.gaps:
+            register_evidence_shape(gap.scope, gap.window)
+        if self.profile == ParameterAccountingProfile.training_plan and self.plan_ref is None:
+            raise ValueError("training-plan accounting requires plan_ref")
+        if self.profile in {
+            ParameterAccountingProfile.training_runtime,
+            ParameterAccountingProfile.inference_runtime,
+        } and self.run_ref is None:
+            raise ValueError("runtime accounting requires run_ref")
+        if self.profile == ParameterAccountingProfile.checkpoint and (
+            not self.artifact_refs or not all(_is_pinned_ref(ref) for ref in self.artifact_refs)
+        ):
+            raise ValueError("checkpoint accounting requires hash-pinned artifact_refs")
+        if self.profile == ParameterAccountingProfile.evaluation and (
+            not self.evaluation_refs or not all(_is_pinned_ref(ref) for ref in self.evaluation_refs)
+        ):
+            raise ValueError("evaluation accounting requires hash-pinned evaluation_refs")
+        if not all(_is_pinned_ref(ref) for ref in self.parent_report_refs):
+            raise ValueError("parent_report_refs must be hash-pinned")
+
+        runtime_profiles = {
+            ParameterAccountingProfile.training_runtime,
+            ParameterAccountingProfile.inference_runtime,
+            ParameterAccountingProfile.checkpoint,
+            ParameterAccountingProfile.evaluation,
+        }
+        def validate_window_anchor(window: ParameterWindow) -> None:
+            if window.kind == ParameterWindowKind.static_snapshot:
+                return
+            if self.profile in runtime_profiles and window.run_ref != self.run_ref:
+                raise ValueError(
+                    "dynamic runtime evidence must reference the report run_ref"
+                )
+            if (
+                self.profile == ParameterAccountingProfile.training_plan
+                and window.plan_ref != self.plan_ref
+            ):
+                raise ValueError(
+                    "dynamic training-plan evidence must reference the report plan_ref"
+                )
+
+        for observation in self.observations:
+            validate_window_anchor(observation.window)
+        for gap in self.gaps:
+            if gap.window.kind == ParameterWindowKind.static_snapshot:
+                continue
+            validate_window_anchor(gap.window)
+
+        known_observations = set(observation_ids)
+        for conflict in self.conflicts:
+            if not set(conflict.observation_ids).issubset(known_observations):
+                raise ValueError("parameter conflicts must reference observations in the report")
+
+        gaps_by_kind = {item.kind for item in self.gaps}
+        for kind in required_parameter_kinds(self.profile):
+            candidates = [item for item in self.observations if item.kind == kind]
+            if not any(self._qualifies(item) for item in candidates) and kind not in gaps_by_kind:
+                raise ValueError(f"unproven required parameter axis '{kind.value}' needs a gap")
+
+        conflict_sets = [set(item.observation_ids) for item in self.conflicts]
+        exact_groups: dict[tuple[object, ...], list[ParameterObservation]] = {}
+        for observation in self.observations:
+            if (
+                observation.coverage == ParameterObservationCoverage.complete
+                and observation.value_relation == ParameterValueRelation.exact
+            ):
+                key = (
+                    observation.kind.value,
+                    *self._scope_key(observation),
+                    observation.window.window_id,
+                    observation.unit,
+                )
+                exact_groups.setdefault(key, []).append(observation)
+        required_pairs: set[frozenset[str]] = set()
+        for group in exact_groups.values():
+            if len({item.value for item in group}) > 1:
+                for left in group:
+                    for right in group:
+                        if left.value != right.value:
+                            required_pairs.add(frozenset({left.observation_id, right.observation_id}))
+
+        logical_by_scope: dict[tuple[str, str, str, str], list[ParameterObservation]] = {}
+        for observation in self.observations:
+            if (
+                observation.kind == ParameterCountKind.logical
+                and observation.coverage == ParameterObservationCoverage.complete
+                and observation.value_relation == ParameterValueRelation.exact
+                and observation.unit == "coordinates"
+            ):
+                logical_by_scope.setdefault(self._scope_key(observation), []).append(observation)
+        for observation in self.observations:
+            if (
+                observation.kind in {
+                    ParameterCountKind.active_token,
+                    ParameterCountKind.active_sequence,
+                    ParameterCountKind.touched_window,
+                    ParameterCountKind.resident,
+                    ParameterCountKind.updated_window,
+                    ParameterCountKind.exposed_window,
+                }
+                and observation.coverage == ParameterObservationCoverage.complete
+                and observation.value_relation == ParameterValueRelation.exact
+                and observation.unit == "coordinates"
+            ):
+                for logical in logical_by_scope.get(self._scope_key(observation), []):
+                    if observation.value > logical.value:
+                        required_pairs.add(
+                            frozenset({observation.observation_id, logical.observation_id})
+                        )
+
+        for left in self.observations:
+            for right in self.observations:
+                if not all(
+                    item.coverage == ParameterObservationCoverage.complete
+                    and item.value_relation == ParameterValueRelation.exact
+                    and item.unit == "coordinates"
+                    for item in (left, right)
+                ):
+                    continue
+                if self._scope_key(left) != self._scope_key(right):
+                    continue
+                if left.window.window_id != right.window.window_id:
+                    continue
+                if (
+                    left.kind == ParameterCountKind.updated_window
+                    and right.kind == ParameterCountKind.touched_window
+                    and left.value > right.value
+                ):
+                    required_pairs.add(frozenset({left.observation_id, right.observation_id}))
+        token_observations = [
+            item
+            for item in self.observations
+            if item.kind == ParameterCountKind.active_token
+            and item.coverage == ParameterObservationCoverage.complete
+            and item.value_relation == ParameterValueRelation.exact
+            and item.unit == "coordinates"
+        ]
+        sequence_observations = [
+            item
+            for item in self.observations
+            if item.kind == ParameterCountKind.active_sequence
+            and item.coverage == ParameterObservationCoverage.complete
+            and item.value_relation == ParameterValueRelation.exact
+            and item.unit == "coordinates"
+        ]
+        for token in token_observations:
+            for sequence in sequence_observations:
+                if (
+                    self._scope_key(token) == self._scope_key(sequence)
+                    and token.window.sequence_id == sequence.window.sequence_id
+                    and token.value > sequence.value
+                ):
+                    required_pairs.add(frozenset({token.observation_id, sequence.observation_id}))
+        for pair in required_pairs:
+            if not any(pair.issubset(conflict_set) for conflict_set in conflict_sets):
+                raise ValueError(
+                    "conflicting or algebraically impossible observations require a conflict record"
+                )
+
+        expected_status = (
+            ParameterAccountingStatus.conflicting
+            if self.conflicts
+            else ParameterAccountingStatus.incomplete
+            if self.gaps
+            else ParameterAccountingStatus.complete
+        )
+        if self.status != expected_status:
+            raise ValueError(f"parameter accounting status must be {expected_status.value}")
         return self
 
 
@@ -1807,6 +2403,8 @@ class RunPlan(ContractModel):
     seed: int = Field(default=42, ge=0)
     # The exact rendered trainer config folded in verbatim for byte-exact reproducibility.
     training_config_snapshot: JsonObject = Field(default_factory=dict)
+    # Pins the parameter evidence the planner consumed; it does not manufacture missing counts.
+    parameter_accounting_ref: Ref | None = None
 
 
 # --------------------------------------------------------------------------------------------------
@@ -1841,6 +2439,7 @@ class ArtifactManifest(ContractModel):
     reload_verified: bool = False
     # Resolved LIVE from the source run at display time, never stored.
     base_model: str | None = None
+    parameter_accounting_ref: Ref | None = None
     notes: str = ""
 
 
@@ -1923,6 +2522,7 @@ class EvaluationResult(ContractModel):
     # Presenting a before/after delta requires this to be null (weight_card provenance guard).
     provenance_caveat: str | None = None
     report_ref: str | None = None
+    parameter_accounting_ref: Ref | None = None
 
 
 # --------------------------------------------------------------------------------------------------
@@ -1946,6 +2546,17 @@ class EventMetrics(ContractModel):
     loss: float | None = None
     grad_norm: float | None = Field(default=None, ge=0)
     learning_rate: float | None = Field(default=None, ge=0)
+    parameter_observations: list[ParameterObservation] = Field(default_factory=list)
+
+    @field_validator("parameter_observations")
+    @classmethod
+    def _sorted_parameter_observations(
+        cls, values: list[ParameterObservation]
+    ) -> list[ParameterObservation]:
+        ids = [item.observation_id for item in values]
+        if ids != sorted(ids) or len(ids) != len(set(ids)):
+            raise ValueError("event parameter observations must be sorted by unique observation_id")
+        return values
 
 
 class RunEvent(ContractModel):
@@ -2035,6 +2646,7 @@ class RunManifest(ContractModel):
     output_dir: str = ""
     checkpoints: list[str] = Field(default_factory=list)
     artifact_ids: list[str] = Field(default_factory=list)
+    parameter_accounting_refs: list[Ref] = Field(default_factory=list)
     evaluation: RunEvaluationLink | None = None
     reproducibility: RunReproducibility | None = None
     # Present on abnormal termination (state in {failed, interrupted}).
@@ -2042,6 +2654,21 @@ class RunManifest(ContractModel):
     # Post-run fit reconciliation from observed peak memory (planned NATIVE_SAFE, or a spill?).
     final_fit: FitClassification | None = None
     notes: str = ""
+
+    @field_validator("parameter_accounting_refs")
+    @classmethod
+    def _sorted_parameter_accounting_refs(cls, values: list[Ref]) -> list[Ref]:
+        keys = [
+            (
+                item.id,
+                item.hash.algo if item.hash is not None else "",
+                (item.hash.value or "") if item.hash is not None else "",
+            )
+            for item in values
+        ]
+        if keys != sorted(set(keys)):
+            raise ValueError("parameter_accounting_refs must be sorted and unique")
+        return values
 
 
 # --------------------------------------------------------------------------------------------------

@@ -123,8 +123,12 @@ input side. Ordered:
   resume/eval/hardware implications, and conservative dataset/model/backend compatibility axes. This
   does not yet wire an objective into `RunPlan` or add trainer implementations. See
   [`TRAINING_OBJECTIVES.md`](TRAINING_OBJECTIVES.md).
-- ⏭️ **Parameter-accounting evidence producers**, then offload/placement RunPlan expansion, full
-  `TraceRecord`, MoE inspection, additional backend workers, and dataset mixtures.
+- ✅ **Parameter-accounting evidence foundation** — sealed dense/MoE-safe reports, bounded static
+  descriptor/safetensors evidence, typed runtime observations, strict reconciliation, explicit
+  gaps/conflicts, and lifecycle refs. Backend workers still need real coordinate instrumentation. See
+  [`PARAMETER_ACCOUNTING.md`](PARAMETER_ACCOUNTING.md).
+- ⏭️ **Offload/placement/parallelism `RunPlan` expansion**, then full `TraceRecord`, MoE inspection,
+  additional backend workers, and dataset mixtures.
 
 - **Surface the LLM judge in the Evaluation tab** — the `--judge-model` scorer ships in
   the engine and in suites, but the desktop Evaluation tab still has no judge-model field.

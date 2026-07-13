@@ -226,6 +226,19 @@ per-item error isolation, and off-thread document opens.
   only `declared_compatible`; installed packages or broad `TaskType` support never become verified
   objective support. This does **not** modify `RunPlan` or add new trainers. See
   [`TRAINING_OBJECTIVES.md`](TRAINING_OBJECTIVES.md).
+- **MoE-safe parameter-accounting foundation** (`model-inspect --parameter-accounting` /
+  `parameter-account`): a hash-sealed `ParameterAccountingReport` keeps logical, per-token,
+  per-sequence, touched, resident, updated, exposed, and optional effective counts distinct. Every
+  observation carries an exact model/coordinate scope, structured window, evidence source, coverage,
+  value relation, identity basis, and resolved tied/shared/replica/quantized/state handling; unknown is
+  an explicit gap, never zero. The static producer preserves descriptor declarations and performs
+  bounded safetensors-header validation, promoting a header total to exact logical evidence only when
+  the complete snapshot matches its recorded content hashes, identity handling is resolved, and the
+  declaration agrees. Typed `RunEvent` observations can be reconciled into complete/incomplete/
+  conflicting runtime reports, while allocator bytes are never converted into resident coordinates.
+  `RunPlan`, `RunManifest`, `ArtifactManifest`, and `EvaluationResult` carry report refs. Existing
+  trainers do not yet emit the complete measured runtime axes, and this is not MoE detection, fit
+  proof, or a runtime speed claim. See [`PARAMETER_ACCOUNTING.md`](PARAMETER_ACCOUNTING.md).
 - **Multi-backend "pick your framework"**: a BackendManifest registry (`corpus_studio`, `unsloth`);
   the planner validates the chosen backend and **honestly refuses Unsloth on Blackwell/sm_120** (which
   needs the math attention path Unsloth doesn't provide).

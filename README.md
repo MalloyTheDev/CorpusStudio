@@ -167,6 +167,10 @@ a training run — its own opt-in first-party trainer, or your installed trainer
   model/update/backend requirements, artifacts, resume/evaluation, and MoE-safe router/expert intent
   independently from backend implementation; its checker keeps declarations separate from measured
   capability evidence (see [`docs/TRAINING_OBJECTIVES.md`](docs/TRAINING_OBJECTIVES.md))
+- a hash-sealed, MoE-safe parameter-accounting boundary keeps logical, active, resident, touched,
+  updated, and exposed coordinates distinct; static descriptor/safetensors evidence and typed runtime
+  reconciliation surface explicit gaps/conflicts without converting storage elements or allocator
+  bytes into stronger claims (see [`docs/PARAMETER_ACCOUNTING.md`](docs/PARAMETER_ACCOUNTING.md))
 
 Corpus Studio's dependency-light core never bundles CUDA, PyTorch, or trainer packages. Training deps
 are opt-in via the `[train]` extra or installed into an explicitly reviewed managed reference-backend

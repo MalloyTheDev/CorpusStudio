@@ -102,6 +102,7 @@ export type FailureTaxonomy =
 export type FinishedAt = string | null;
 export type Notes = string;
 export type OutputDir = string;
+export type ParameterAccountingRefs = Ref[];
 export type Argv = string[];
 export type ExitCode1 = number | null;
 export type Pid = number | null;
@@ -138,6 +139,7 @@ export interface RunManifest {
   finished_at?: FinishedAt;
   notes?: Notes;
   output_dir?: OutputDir;
+  parameter_accounting_refs?: ParameterAccountingRefs;
   plan_ref: Ref;
   process?: RunProcessInfo | null;
   reproducibility?: RunReproducibility | null;

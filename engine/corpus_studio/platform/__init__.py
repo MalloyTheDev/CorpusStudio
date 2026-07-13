@@ -41,6 +41,7 @@ from .contracts import (
     FitClassification,
     ModelDescriptor,
     ObjectiveCompatibilityReport,
+    ParameterAccountingReport,
     ProjectManifest,
     PythonRuntime,
     RunEvent,
@@ -58,6 +59,15 @@ from .objectives import (
     objective_hash_for,
     validate_objective_catalog,
     verify_objective_hash,
+)
+from .parameter_accounting import (
+    ParameterAccountingError,
+    build_model_parameter_accounting,
+    load_parameter_events,
+    parameter_accounting_hash_for,
+    reconcile_parameter_accounting_events,
+    verify_parameter_accounting_hash,
+    write_parameter_accounting_report,
 )
 from .profiler import build_environment_profile
 from .probes import BUILTIN_PROBES, ProbeOutcome, run_capability_probes
@@ -79,6 +89,7 @@ __all__ = [
     "ProjectManifest",
     "DatasetManifest",
     "ModelDescriptor",
+    "ParameterAccountingReport",
     "TokenizerDescriptor",
     "TrainingObjective",
     "ObjectiveCompatibilityReport",
@@ -109,4 +120,11 @@ __all__ = [
     "validate_objective_catalog",
     "verify_objective_hash",
     "check_objective_compatibility",
+    "ParameterAccountingError",
+    "build_model_parameter_accounting",
+    "load_parameter_events",
+    "parameter_accounting_hash_for",
+    "reconcile_parameter_accounting_events",
+    "verify_parameter_accounting_hash",
+    "write_parameter_accounting_report",
 ]

@@ -605,6 +605,17 @@
     "optimizer": {
       "$ref": "#/$defs/OptimizerSpec"
     },
+    "parameter_accounting_ref": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ref"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "plan_hash": {
       "pattern": "^[0-9a-f]{64}$",
       "title": "Plan Hash",

@@ -11,7 +11,7 @@ the source of truth. Nothing here is claimed as implemented unless it links to a
 The **run lifecycle is largely built and hardware-verified.** The `engine/corpus_studio/platform/`
 package is a real, torch-free contract substrate + lifecycle, not a plan on paper:
 
-- **25 root versioned contracts** (`platform/contracts.py`) → deterministic language-neutral JSON
+- **26 root versioned contracts** (`platform/contracts.py`) → deterministic language-neutral JSON
   Schema (`docs/contracts/`) → generated TypeScript client types.
 - **profile → plan (hash-sealed) → predict-fit → run → measure-fit → account-for-artifacts**, with a
   multi-backend registry (`corpus_studio`, `unsloth`), a watchdog (measured fit + spill/stall), and a
@@ -25,6 +25,7 @@ Against the full-platform vision, the frontier is the **input side**. Ranked gap
 | **Environment Manager + dependency profiles** | ✅ **reference lifecycle shipped** | §2 below — sealed creation/lock/probe/drift/recreate for `backend-corpus-studio`; other backends remain separate future slices |
 | Model & Tokenizer Lab (`ModelDescriptor`/`TokenizerDescriptor`) | ✅ **contract + static-inspection foundation shipped** | offline identity/inventory/trust/tokenizer compatibility; loading, editing/training, MoE detection, and runtime support proof remain future work — see [`MODEL_TOKENIZER_CONTRACTS.md`](MODEL_TOKENIZER_CONTRACTS.md) |
 | `TrainingObjective` as a distinct registry | ✅ **contract + registry foundation shipped** | 29 sealed objective definitions + conservative dataset/model/backend evidence checker; RunPlan integration and trainer implementation remain future work — see [`TRAINING_OBJECTIVES.md`](TRAINING_OBJECTIVES.md) |
+| MoE-safe parameter accounting | ✅ **contract + static/reconciliation foundation shipped** | Sealed reports, bounded descriptor/safetensors evidence, typed worker-observation seam, explicit gaps/conflicts, and lifecycle refs; backend runtime instrumentation remains future work — see [`PARAMETER_ACCOUNTING.md`](PARAMETER_ACCOUNTING.md) |
 | Full versioned `TraceRecord` | partial | lightweight `training/traces.py` exists |
 | Dataset mixtures + transformation graph | partial | `DatasetManifest.lineage` is the seed |
 | Offload planning (DeepSpeed/FSDP/NVMe) | planned | **depends on** StorageProfile ✅ **and** the Environment Manager |
@@ -135,7 +136,7 @@ contracts as they are built** (see §5 and [`MOE_ARCHITECTURE.md`](MOE_ARCHITECT
 | **2** | ✅ **Environment Manager + isolated backend runtimes** (3-layer deps, §2) — reference `backend-corpus-studio` creation, command journal, lock, probes, drift, safe remove/recreate, and RunPlan pinning shipped ([`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md)) | new frameworks still require one isolated, verified backend slice each |
 | **3** | ✅ General **`ModelDescriptor` + `TokenizerDescriptor`** foundation + static local inspection | component-scoped representation, scoped count records, semantic routing separate from physical scheduling; actual MoE detection/runtime remains Phase 8 |
 | **4** | ✅ **`TrainingObjective` registry** (objective distinct from backend) | 29 sealed definitions; explicit labels/masks/loss components, router/expert update policy, artifacts/resume/eval/hardware implications, and independent compatibility evidence ([`TRAINING_OBJECTIVES.md`](TRAINING_OBJECTIVES.md)) |
-| 5 | **Dense-safe + MoE-safe parameter-accounting evidence producers** (`N_logical`/`N_active`/`N_resident`/`N_touched`/`N_updated`/`N_exposed`) | Phase 3 provides the scoped representation; this phase derives/validates counts and integrates them across planning, telemetry, checkpoints, and evaluation |
+| **5** | ✅ **Dense-safe + MoE-safe parameter-accounting evidence foundation** (`N_logical`/`N_active`/`N_resident`/`N_touched`/`N_updated`/`N_exposed`) | hash-sealed report + strict scopes/windows/sources, bounded static producer, typed runtime reconciliation, gaps/conflicts, and planning/telemetry/checkpoint/evaluation refs shipped; actual workers must still emit measured coordinates ([`PARAMETER_ACCOUNTING.md`](PARAMETER_ACCOUNTING.md)) |
 | 6 | **Immutable `RunPlan` expansion** (offload/placement/parallelism representable) | uses StorageProfile + Env Manager |
 | 7 | Generalized **`TraceRecord`** + Trace Studio | |
 | 8 | **MoE model inspection** (detect/parse existing MoE; report logical/active/expert counts) | inference-only OK if labeled |

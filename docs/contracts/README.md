@@ -16,7 +16,7 @@ corpus-studio platform-schemas --out docs/contracts
 # or: python -m corpus_studio.cli platform-schemas --out docs/contracts
 ```
 
-`index.json` lists all **25 root contracts** and their shared `contract_version`.
+`index.json` lists all **26 root contracts** and their shared `contract_version`.
 
 ## The contracts
 
@@ -25,6 +25,7 @@ corpus-studio platform-schemas --out docs/contracts
 | `ProjectManifest` | Workspace descriptor (identity, schema, splits, registry pointers). |
 | `DatasetManifest` | Dataset version identity **+ lineage** (source → transform → teacher/prompt/seed → hashes) + token stats. |
 | `ModelDescriptor` | Static model identity, component-scoped representation, scoped parameter counts, topology/trust findings, portable file inventory, and independent verification axes. |
+| `ParameterAccountingReport` | Hash-sealed logical/active/resident/touched/updated/exposed evidence with stable coordinate scopes, structured windows, explicit gaps/conflicts, and model/run/artifact/evaluation lineage. |
 | `TokenizerDescriptor` | Static tokenizer identity, base/added/effective vocabulary, special tokens, chat-template hash, inventory/trust findings, and model-compatibility evidence. |
 | `TrainingObjective` | Hash-sealed, backend-independent objective semantics: dataset/labels/masks/losses, model/update/backend requirements, artifacts, resume/eval/hardware implications, and verification. |
 | `ObjectiveCompatibilityReport` | Independent dataset/model/backend evidence axes; static declarations are distinct from functionally verified compatibility. |
@@ -56,6 +57,9 @@ corpus-studio platform-schemas --out docs/contracts
   fused-attention deadlock machine-actionable instead of buried in warning text.
 - **Supervised-token accounting end-to-end** — `RunPlan.batching.supervised_token_accumulation_target`
   pairs with `RunEvent.metrics.supervised_tokens_per_sec` and `TokenStats.supervised_tokens`.
+- **One parameter count is not enough** — `ParameterAccountingReport` keeps coordinate universes and
+  windows explicit; stored tensor elements and allocator bytes never silently become logical or
+  resident coordinates.
 - **Grounded, not invented** — field names/constraints are taken from the existing engine models
   (see each pydantic class docstring for the model it formalizes).
 - **Additive versioning** — a MAJOR `contract_version` bump is breaking; readers reject an unknown MAJOR.

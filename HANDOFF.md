@@ -37,16 +37,20 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
 
 ## 2. Current git / PR state
 
-`main` is the source of truth; everything through **#412 was merged when the Phase 4 branch began**:
+`main` is the source of truth; everything through **#413 was merged when the Phase 5 branch began**:
 - **#404** configurable checkpoint retention · **#405** StorageProfile + the dependency-architecture
   correction · **#406** Environment Manager substrate (Phase 2 slice 1) · **#407** storage USB/WSL
   runtime-role risks + storage-vs-not failure diagnostic · **#408** HANDOFF/AGENTS · **#409**
   CURRENT_STATE/CLI_REFERENCE reconciliation · **#410** the follow-up docs refresh · **#411** the
   managed `backend-corpus-studio` environment creation/lock/probe/drift/recreate lifecycle; **#412**
-  adds the Phase 3 model/tokenizer descriptor and static inspection foundation. GitHub was checked
-  live before the Phase 4 branch began: no open PRs; only unrelated UI-theme issues #187 and #201
-  were open. **#413 delivers the Phase 4 TrainingObjective registry and compatibility checker in this
-  changeset; verify its live state rather than inferring merge status from this snapshot.** After any
+  adds the Phase 3 model/tokenizer descriptor and static inspection foundation; **#413** adds the
+  Phase 4 TrainingObjective registry and compatibility checker. GitHub was checked live after #413
+  merged: no competing PRs; only unrelated UI-theme issues #187 and #201 were open. **#414**
+  (`feat/parameter-accounting-evidence`) delivers the Phase 5 parameter-accounting foundation;
+  verify its live PR/merge state rather than inferring it from this snapshot. Its local gate before
+  publication was 1,346 Python tests passed / 6 skipped / 88.34% Windows coverage, full Ruff/MyPy,
+  deterministic 26-root schema/TypeScript generation, web production build, 815 desktop tests, and
+  clean WPF/Avalonia Release builds. After any
   `platform/` contract change,
   regenerate the committed schemas (see §4), update the count in
   `tests/test_platform_contracts.py`, and regenerate the TypeScript types.
@@ -83,7 +87,7 @@ The big epic (memory `platform-architecture-epic`). Non-negotiables the user has
   checkpoints **from day one** — retrofitting sparse later is a disruptive redesign.
 - **Revised foundational order** (do these in order): 1 StorageProfile ✅ → 2 Env Manager reference
   lifecycle ✅ → 3 `ModelDescriptor` + `TokenizerDescriptor` foundation ✅ → 4 `TrainingObjective`
-  registry ✅ → 5 parameter accounting → 6 `RunPlan` expansion → 7 `TraceRecord` → 8 MoE inspection →
+  registry ✅ → 5 parameter accounting ✅ → 6 `RunPlan` expansion → 7 `TraceRecord` → 8 MoE inspection →
   9 dense backends → 10 existing-model MoE FT → 11 full MoE → 12 resource-elastic expert runtime.
 
 ## 4. How to build + verify (the gate)
@@ -107,7 +111,7 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   .\.venv\Scripts\python.exe -c "from corpus_studio.platform.schema_export import export_json_schemas; export_json_schemas('../docs/contracts')"
   ```
   then fix the two counts in `tests/test_platform_contracts.py` (`len(ROOT_CONTRACTS)` + the export
-  test). This branch exports **25 root contracts**.
+  test). This branch exports **26 root contracts**.
 
 ## 5. Workflow / process conventions (the user cares about these)
 
@@ -141,8 +145,9 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 7. Immediate next actions (ranked)
 
-1. **Phase 5 — parameter-accounting evidence producers**, deriving and validating distinct logical,
-   active, resident, touched, updated, and exposed counts across model/planning/telemetry evidence.
+1. **Phase 6 — immutable `RunPlan` expansion**, making offload, placement, and parallelism explicit
+   without collapsing semantic routing into physical scheduling. Consume the sealed parameter report
+   by reference; do not invent missing runtime evidence.
 2. **Environment Manager hardware verification (explicit/networked).** After reviewing `env-plan`,
    build and probe a real `backend-corpus-studio` CUDA environment on the RTX 5070. The code and CI
    harness do not claim this newly downloaded environment exists or is hardware-verified.
@@ -164,7 +169,7 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 9. Repository map
 
-- **Platform contracts**: `engine/corpus_studio/platform/contracts.py` (25 root contracts) + `enums.py`
+- **Platform contracts**: `engine/corpus_studio/platform/contracts.py` (26 root contracts) + `enums.py`
   + `common.py`; `schema_export.py` → `docs/contracts/*.schema.json` (language-neutral, consumed by
   `apps/web`).
 - **Lifecycle**: `platform/{profiler, probes, planner, calibrator, supervisor, runners, watchdog,
@@ -179,14 +184,19 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   `ObjectiveCompatibilityReport` roots. The sealed 29-entry registry is backend-independent;
   `training-objectives` and `training-objective-check` expose definitions and conservative evidence
   axes. It does not add RunPlan wiring or trainer implementations; see `docs/TRAINING_OBJECTIVES.md`.
+- **Parameter-accounting foundation** (Phase 5): `platform/parameter_accounting.py` + the
+  `ParameterAccountingReport` root. `model-inspect --parameter-accounting` and `parameter-account`
+  produce/reconcile sealed static and typed runtime evidence; stored elements/allocator bytes are not
+  promoted into stronger coordinate claims. Existing workers still need measured coordinate
+  instrumentation; see `docs/PARAMETER_ACCOUNTING.md`.
 - **Storage**: `platform/storage_profiler.py` (topology + per-role safe-spill guardrail + failure
   diagnostic).
 - **Trainer**: `training/trainer.py` (+ `unsloth_trainer.py`). CLI: `engine/corpus_studio/cli.py`
   (including `platform-*`, the full `env-*` lifecycle, and `train-*`).
 - **Docs**: source of truth `docs/CURRENT_STATE.md`; plan `docs/IMPLEMENTATION_PLAN.md`; MoE
   `docs/MOE_ARCHITECTURE.md`; storage `docs/HARDWARE_STORAGE_PROFILE.md`; env
-  `docs/ENVIRONMENT_MANAGER.md`; objectives `docs/TRAINING_OBJECTIVES.md`; platform run
-  `docs/PLATFORM_RUN.md`.
+  `docs/ENVIRONMENT_MANAGER.md`; objectives `docs/TRAINING_OBJECTIVES.md`; parameter evidence
+  `docs/PARAMETER_ACCOUNTING.md`; platform run `docs/PLATFORM_RUN.md`.
 - **Claude memory** (persists across Claude sessions): `C:\Users\Brend\.claude\projects\F--CorpusStudio\memory\`
   — start at `MEMORY.md` (index); `platform-architecture-epic.md` is the big one;
   `storage-migration-c-drive.md` records this move.

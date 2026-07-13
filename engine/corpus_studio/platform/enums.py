@@ -287,6 +287,98 @@ class ParameterCountKind(str, Enum):
     effective = "effective"
 
 
+class ParameterAccountingProfile(str, Enum):
+    """The evidence set a report is trying to complete."""
+
+    model_static = "model_static"
+    training_plan = "training_plan"
+    training_runtime = "training_runtime"
+    inference_runtime = "inference_runtime"
+    checkpoint = "checkpoint"
+    evaluation = "evaluation"
+
+
+class ParameterAccountingStatus(str, Enum):
+    complete = "complete"
+    incomplete = "incomplete"
+    conflicting = "conflicting"
+
+
+class ParameterScopeKind(str, Enum):
+    model = "model"
+    component_set = "component_set"
+    shared = "shared"
+    router = "router"
+    expert_group = "expert_group"
+    expert_set = "expert_set"
+    adapter = "adapter"
+    embedding = "embedding"
+    output_head = "output_head"
+    device_residency = "device_residency"
+    custom = "custom"
+
+
+class ParameterWindowKind(str, Enum):
+    static_snapshot = "static_snapshot"
+    token = "token"
+    sequence = "sequence"
+    instant = "instant"
+    microbatch = "microbatch"
+    optimizer_window = "optimizer_window"
+    run = "run"
+
+
+class ParameterEvidenceSourceKind(str, Enum):
+    model_config = "model_config"
+    model_descriptor = "model_descriptor"
+    safetensors_header = "safetensors_header"
+    planner = "planner"
+    backend_worker = "backend_worker"
+    checkpoint_inventory = "checkpoint_inventory"
+    evaluation_runtime = "evaluation_runtime"
+    user_supplied = "user_supplied"
+
+
+class ParameterObservationCoverage(str, Enum):
+    complete = "complete"
+    sampled = "sampled"
+    partial = "partial"
+
+
+class ParameterValueRelation(str, Enum):
+    exact = "exact"
+    estimate = "estimate"
+    lower_bound = "lower_bound"
+    upper_bound = "upper_bound"
+
+
+class ParameterIdentityBasis(str, Enum):
+    independent_coordinates = "independent_coordinates"
+    stored_tensor_elements = "stored_tensor_elements"
+    optimizer_addressable_coordinates = "optimizer_addressable_coordinates"
+    runtime_identity_set = "runtime_identity_set"
+    topology_formula = "topology_formula"
+    declared_definition = "declared_definition"
+    unknown = "unknown"
+
+
+class ParameterGapReason(str, Enum):
+    missing_observation = "missing_observation"
+    unknown_handling = "unknown_handling"
+    unpinned_model = "unpinned_model"
+    unstructured_claim = "unstructured_claim"
+    stored_elements_not_logical = "stored_elements_not_logical"
+    incomplete_inventory = "incomplete_inventory"
+    unsupported_format = "unsupported_format"
+    malformed_evidence = "malformed_evidence"
+    changed_during_read = "changed_during_read"
+    runtime_instrumentation_required = "runtime_instrumentation_required"
+    estimated_only = "estimated_only"
+    measured_evidence_required = "measured_evidence_required"
+    conflicting_evidence = "conflicting_evidence"
+    incomparable_evidence = "incomparable_evidence"
+
+
 class EvidenceKind(str, Enum):
     measured = "measured"
     estimated = "estimated"

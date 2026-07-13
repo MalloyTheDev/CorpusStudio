@@ -15,6 +15,7 @@ export type { FailureRecord } from "./FailureRecord";
 export type { FitClassification } from "./FitClassification";
 export type { ModelDescriptor } from "./ModelDescriptor";
 export type { ObjectiveCompatibilityReport } from "./ObjectiveCompatibilityReport";
+export type { ParameterAccountingReport } from "./ParameterAccountingReport";
 export type { ProjectManifest } from "./ProjectManifest";
 export type { PythonRuntime } from "./PythonRuntime";
 export type { RunEvent } from "./RunEvent";

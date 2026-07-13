@@ -22,6 +22,9 @@ export type JudgeModel = string | null;
 export type Measures = string;
 export type Name1 = "keyword_overlap" | "llm_judge" | "exact_match" | "pass_rate" | "custom";
 export type ScoreThreshold = number | null;
+export type Algo = "sha256" | "sha256-ordered-exact-v1" | "blake3" | "none";
+export type Value = string | null;
+export type Id = string;
 export type ProvenanceCaveat = string | null;
 export type ReportRef = string | null;
 export type AverageManualScore = number | null;
@@ -48,6 +51,7 @@ export interface EvaluationResult {
   gate?: EvalGate | null;
   generated_at?: GeneratedAt;
   metric: EvalMetric;
+  parameter_accounting_ref?: Ref | null;
   provenance_caveat?: ProvenanceCaveat;
   report_ref?: ReportRef;
   summary: EvalSummary;
@@ -95,6 +99,22 @@ export interface EvalMetric {
   measures?: Measures;
   name?: Name1;
   score_threshold?: ScoreThreshold;
+}
+/**
+ * A stable reference to another contract instance by id, optionally pinned to a content hash so
+ * the reference cannot silently re-point.
+ */
+export interface Ref {
+  hash?: HashRef | null;
+  id: Id;
+}
+/**
+ * An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future
+ * migration additive (cf. versions/version_registry.FINGERPRINT_ALGO).
+ */
+export interface HashRef {
+  algo?: Algo;
+  value?: Value;
 }
 export interface EvalSummary {
   average_manual_score?: AverageManualScore;

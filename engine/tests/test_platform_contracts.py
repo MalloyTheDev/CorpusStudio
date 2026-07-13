@@ -36,10 +36,11 @@ def test_contract_version_is_pinned():
 
 
 def test_all_root_contracts_registered():
-    assert len(P.ROOT_CONTRACTS) == 25
+    assert len(P.ROOT_CONTRACTS) == 26
     assert "StorageProfile" in P.ROOT_CONTRACTS
     for expected in (
         "ModelDescriptor",
+        "ParameterAccountingReport",
         "TokenizerDescriptor",
         "TrainingObjective",
         "ObjectiveCompatibilityReport",
@@ -262,11 +263,11 @@ def test_worker_protocol_version_pattern():
 
 def test_export_json_schemas_writes_language_neutral_files(tmp_path):
     written = P.export_json_schemas(tmp_path)
-    # 25 contract schemas + index.json
-    assert len(written) == 26
+    # 26 contract schemas + index.json
+    assert len(written) == 27
     index = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
     assert index["contract_version"] == "1.0.0"
-    assert len(index["contracts"]) == 25
+    assert len(index["contracts"]) == 26
     # every emitted schema is valid JSON with a proper object shape
     for name in P.ROOT_CONTRACTS:
         schema = json.loads((tmp_path / f"{name}.schema.json").read_text(encoding="utf-8"))

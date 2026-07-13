@@ -54,6 +54,12 @@ handling of tied / shared / replicated / generated / quantized parameters, optim
 decompressed caches. Do **not** say "independent degrees of freedom" when only optimizer-addressable
 coordinates were measured.
 
+The Phase 5 `ParameterAccountingReport` foundation now implements this distinction with stable
+coordinate scopes, structured windows, pinned evidence sources, coverage/value relations, explicit
+identity bases, gaps, and comparable-evidence conflicts. Static descriptor/safetensors evidence and a
+typed `RunEvent` reconciliation seam ship; current backend workers do not yet claim full runtime
+measurement. See [`PARAMETER_ACCOUNTING.md`](PARAMETER_ACCOUNTING.md).
+
 ## 2. Coordinate & expert identity
 
 A stable **expert registry** maps `expert_id → (model revision, layer, expert index, tensor set,
@@ -190,11 +196,12 @@ coverage, staleness, throughput, energy, wall-clock, held-out improvement, and r
 | `EvaluationResult` | router/expert-behavior axis alongside model quality (§11) |
 | `BackendManifest` | MoE capability flags, each functionally probed (§9) |
 | `TrainingObjective` ✅ foundation | semantic update scopes distinguish router/selected experts/all experts/adapters/shared components; expert-scoped policies require stable identity + per-expert exposure and carry optimizer-clock/starvation/collapse requirements; separately keyed loss components allow future router/load-balance/z-loss terms without conflating physical scheduling |
+| `ParameterAccountingReport` ✅ foundation | separate logical/active/resident/touched/updated/exposed axes; stable expert/coordinate identity; structured token/sequence/run/instant windows; explicit measured/estimated/gap/conflict status; bytes never masquerade as resident coordinates |
 
 ## Phased MoE plan
 
-- **A — Dense-safe foundational contracts** (in progress; `ModelDescriptor` and
-  `TrainingObjective` foundations shipped, no MoE runtime): ensure `ModelDescriptor`,
+- **A — Dense-safe foundational contracts** (in progress; `ModelDescriptor`, `TrainingObjective`, and
+  parameter-accounting foundations shipped, no MoE runtime): ensure `ModelDescriptor`,
   `TrainingObjective`, `ArtifactManifest`, `RunPlan`, checkpoint, telemetry do not assume dense
   execution; add sparse parameter-accounting definitions.
 - **B — MoE model inspection**: detect existing MoE architectures; parse expert/router structure;

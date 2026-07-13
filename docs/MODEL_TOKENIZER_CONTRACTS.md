@@ -123,9 +123,11 @@ the static inspector can identify them:
 - physical placement, residency, paging, and prefetch remain owned by the future immutable `RunPlan`
   scheduler.
 
-Phase 3 supplies this representation substrate. Phase 5 will produce and validate logical/active/
-resident/touched/updated/exposed counts across the lifecycle. Phase 8 will inspect known MoE families.
-Until then, `model-inspect` emits `execution_kind: unknown` and no expert groups.
+Phase 3 supplies this representation substrate. The Phase 5
+[`ParameterAccountingReport`](PARAMETER_ACCOUNTING.md) now produces and validates separately scoped
+logical/active/resident/touched/updated/exposed evidence and can be requested with
+`model-inspect --parameter-accounting`. Phase 8 will inspect known MoE families. Until then,
+`model-inspect` emits `execution_kind: unknown` and no expert groups.
 
 ## Verification axes
 
@@ -145,6 +147,6 @@ cd C:\CorpusStudio\apps\web
 npm run gen:contracts
 ```
 
-The committed artifacts are `docs/contracts/ModelDescriptor.schema.json`,
-`docs/contracts/TokenizerDescriptor.schema.json`, and their counterparts under
-`apps/web/src/contracts/`.
+The committed artifacts include `docs/contracts/ModelDescriptor.schema.json`,
+`docs/contracts/TokenizerDescriptor.schema.json`, `docs/contracts/ParameterAccountingReport.schema.json`,
+and their counterparts under `apps/web/src/contracts/`.
