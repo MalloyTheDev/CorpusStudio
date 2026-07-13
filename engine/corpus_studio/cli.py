@@ -2090,21 +2090,27 @@ def trace_validate(
     show: int = typer.Option(5, "--show", help="Show up to N invalid rows."),
 ):
     """Validate a reasoning-TRACE corpus: each row must parse to a Trace (prompt/context + thinking +
-    answer) and pass the structural checks (answer present, reasoning not a verbatim copy of the
-    answer). Reports how many rows carry a real thinking trace. Exit 3 if any row is invalid — a
-    guardrail to run before training a reasoning model."""
+    answer), pass the STRUCTURAL checks (answer present, reasoning not a verbatim copy), AND the
+    reasoning-QUALITY gate (no answer leaked into the prompt, no stray <think> tags, reasoning not
+    token-thin). Reports how many rows carry a real thinking trace + the quality distribution. Exit 3
+    if any row is structurally invalid OR a quality FAIL — the guardrail before training a reasoner."""
     from corpus_studio.importers.jsonl_importer import read_jsonl
-    from corpus_studio.training.traces import trace_from_row, validate_trace
+    from corpus_studio.training.traces import trace_from_row, trace_quality, validate_trace
 
     rows = list(read_jsonl(dataset_path))
     total = len(rows)
     with_thinking = 0
+    quality = {"pass": 0, "warn": 0, "fail": 0}
     invalid: list[tuple[int, list[str]]] = []
     for index, row in enumerate(rows):
-        verdict = validate_trace(trace_from_row(row))
+        trace = trace_from_row(row)
+        verdict = validate_trace(trace)
+        gate = trace_quality(trace)
         with_thinking += int(verdict.has_thinking)
-        if not verdict.valid:
-            invalid.append((index, verdict.errors))
+        quality[gate.status] += 1
+        problems = list(verdict.errors) + ([f"quality:{i}" for i in gate.issues] if gate.status == "fail" else [])
+        if not verdict.valid or gate.status == "fail":
+            invalid.append((index, problems))
     pct_think = round(100 * with_thinking / total) if total else 0
     if json_out:
         typer.echo(
@@ -2112,18 +2118,21 @@ def trace_validate(
                 {
                     "total": total,
                     "with_thinking": with_thinking,
-                    "invalid": len(invalid),
-                    "errors": [{"row": i, "errors": e} for i, e in invalid[:50]],
+                    "quality": quality,
+                    "blocked": len(invalid),
+                    "issues": [{"row": i, "problems": e} for i, e in invalid[:50]],
                 },
                 indent=2,
             )
         )
     else:
         typer.echo(
-            f"{total} traces | {with_thinking} have a thinking trace ({pct_think}%) | {len(invalid)} invalid"
+            f"{total} traces | {with_thinking} with thinking ({pct_think}%) | "
+            f"quality pass={quality['pass']} warn={quality['warn']} fail={quality['fail']} | "
+            f"{len(invalid)} blocked"
         )
-        for index, errors in invalid[:show]:
-            typer.echo(f"  row {index}: {', '.join(errors)}")
+        for index, problems in invalid[:show]:
+            typer.echo(f"  row {index}: {', '.join(problems)}")
     if invalid:
         raise typer.Exit(code=3)
 
