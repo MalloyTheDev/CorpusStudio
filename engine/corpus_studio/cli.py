@@ -2294,6 +2294,8 @@ def train_run(
     optim: Optional[str] = typer.Option(None, "--optim", help="Optimizer (e.g. adamw_torch | paged_adamw_8bit). 'paged_adamw_8bit' pages optimizer state to host RAM under pressure — spike-safe on a tight GPU."),
     use_liger: bool = typer.Option(False, "--use-liger", help="Fuse the cross-entropy loss (Liger) to drop the full-vocab logits memory spike at long sequence_len. Needs the 'liger-kernel' package; Blackwell support unverified."),
     memory_efficient: bool = typer.Option(False, "--memory-efficient", help="Shortcut for a tight GPU: enable the memory-saving levers (paged optimizer + fused Liger loss). Explicit --optim / --use-liger override it."),
+    save_steps: Optional[int] = typer.Option(None, "--save-steps", help="Checkpoint every N optimizer steps (default 50)."),
+    save_total_limit: Optional[int] = typer.Option(None, "--save-total-limit", help="Keep only the N most recent checkpoints (default 3; pass 0 to keep ALL — old behavior)."),
 ):
     """RUN the training in-process (first-party trainer, opt-in [train] extra): read a CorpusStudio
     training config + dataset, build a TRL SFTTrainer with peft LoRA (4-bit QLoRA on GPU), train, and
@@ -2328,6 +2330,16 @@ def train_run(
     except (TrainerError, ValueError, json.JSONDecodeError, OSError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
+
+    # CLI overrides for checkpoint retention (None = leave the config/default). `--save-total-limit 0`
+    # is the escape hatch for "keep ALL checkpoints" (maps to None, since the field requires >= 1).
+    retention_updates: dict[str, object] = {}
+    if save_steps is not None:
+        retention_updates["save_steps"] = save_steps
+    if save_total_limit is not None:
+        retention_updates["save_total_limit"] = None if save_total_limit == 0 else save_total_limit
+    if retention_updates:
+        run_config = run_config.model_copy(update=retention_updates)
 
     def _progress(step: int, total: int, loss: Optional[float]) -> None:
         line = f"[{step}/{total}] step" + (f" loss={loss:.4f}" if loss is not None else "")

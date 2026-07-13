@@ -191,6 +191,42 @@ def test_load_config_reads_optim_and_liger(tmp_path):
     assert base.optim == "adamw_torch" and base.use_liger is False
 
 
+# ---- checkpoint retention ----------------------------------------------------
+
+
+def test_build_kwargs_default_checkpoint_retention():
+    # A default run caps accumulation: checkpoint every 50 steps, keep the 3 most recent — so a
+    # long run cannot fill the disk with an unbounded chain of checkpoints.
+    kwargs = build_training_kwargs(TrainRunConfig(base_model="m", dataset_path="d"))
+    assert kwargs["save_steps"] == 50
+    assert kwargs["save_total_limit"] == 3
+
+
+def test_build_kwargs_configurable_checkpoint_retention():
+    cfg = TrainRunConfig(base_model="m", dataset_path="d", save_steps=200, save_total_limit=1)
+    kwargs = build_training_kwargs(cfg)
+    assert kwargs["save_steps"] == 200
+    assert kwargs["save_total_limit"] == 1
+
+
+def test_build_kwargs_save_total_limit_none_keeps_all_checkpoints():
+    # Opt back into the old behavior — no cap, every checkpoint retained.
+    cfg = TrainRunConfig(base_model="m", dataset_path="d", save_total_limit=None)
+    kwargs = build_training_kwargs(cfg)
+    assert kwargs["save_total_limit"] is None
+
+
+def test_load_config_reads_checkpoint_retention(tmp_path):
+    cfg = load_run_config_from_file(_config(tmp_path, save_steps=100, save_total_limit=5))
+    assert cfg.save_steps == 100 and cfg.save_total_limit == 5
+    # A config can null the limit to keep every checkpoint.
+    keep_all = load_run_config_from_file(_config(tmp_path, save_total_limit=None))
+    assert keep_all.save_total_limit is None
+    # Sensible defaults when the keys are absent.
+    base = load_run_config_from_file(_config(tmp_path))
+    assert base.save_steps == 50 and base.save_total_limit == 3
+
+
 def test_resolve_attention_native_windows_blackwell_disables_flash_sdpa():
     # NATIVE WINDOWS + Blackwell (sm_120 → capability major 12): the fused FLASH SDPA kernel deadlocks
     # on the first backward under the Windows WDDM driver (verified on a real 5070; mem-efficient + math
