@@ -170,6 +170,12 @@ Trustworthy scoring comes from two places:
   exposes the judge **model, backend, and base-url** (all optional): leaving the judge
   backend/base-url blank reuses the eval run's own provider, or set them for a **local eval
   (Ollama) scored by a cloud judge** (openai-compatible) — the classic mixed setup.
+- **Reasoning-model scoring** (`eval-run --reasoning`) — for a model that emits
+  `<think>reasoning</think>answer`, the `<think>…</think>` block is **stripped before scoring**
+  (the reasoning is not the reference and would corrupt the score) while the full output is kept in
+  the record for inspection; a "reasoning" model that emitted no reasoning is flagged
+  (`no_reasoning`). Works with either scorer above. See the trace loop in
+  [CLI_REFERENCE.md](CLI_REFERENCE.md) (`trace-generate` / `trace-validate`).
 
 ## Current Desktop MVP
 
