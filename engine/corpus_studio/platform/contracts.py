@@ -9,6 +9,7 @@ language-neutral JSON Schemas the Rust core / Avalonia / Tauri consume are gener
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
 
@@ -1355,26 +1356,168 @@ class SemanticRouting(ContractModel):
     capacity_factor: float | None = Field(default=None, gt=0)
     routing_noise: str | None = None
     metadata_source: str = Field(min_length=1)
+    details: JsonObject = Field(default_factory=dict)
+
+
+class TopologyInspection(ContractModel):
+    """Evidence for a bounded static topology classification.
+
+    This is config metadata evidence only. It cannot authorize model code, prove that a backend can
+    load the snapshot, or claim inference/training/hardware support.
+    """
+
+    status: Literal[
+        "not_checked",
+        "no_recognized_moe_evidence",
+        "detected",
+        "incomplete",
+        "unsupported_family",
+    ] = "not_checked"
+    method: Literal["not_checked", "static_config_v1"] = "not_checked"
+    family: str | None = None
+    config_file: str | None = None
+    config_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    evidence_paths: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    evidence_level: Literal["not_checked", "static_metadata_only"] = "not_checked"
+    runtime_capability: Literal["unverified"] = "unverified"
+
+    @field_validator("config_file")
+    @classmethod
+    def _portable_config_file(cls, value: str | None) -> str | None:
+        return _validate_descriptor_path(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def _validate_inspection(self) -> TopologyInspection:
+        if self.evidence_paths != sorted(set(self.evidence_paths)):
+            raise ValueError("topology evidence_paths must be sorted and unique")
+        if self.warnings != sorted(set(self.warnings)):
+            raise ValueError("topology warnings must be sorted and unique")
+        if self.method == "not_checked":
+            if (
+                self.status != "not_checked"
+                or any(
+                    (
+                        self.family,
+                        self.config_file,
+                        self.config_sha256,
+                        self.evidence_paths,
+                        self.warnings,
+                    )
+                )
+                or self.evidence_level != "not_checked"
+            ):
+                raise ValueError("not-checked topology inspection cannot carry static evidence")
+            return self
+        if self.status == "not_checked":
+            raise ValueError("static topology inspection requires an explicit result status")
+        if self.evidence_level != "static_metadata_only":
+            raise ValueError("static topology inspection must be labeled static_metadata_only")
+        if self.config_file is None or self.config_sha256 is None:
+            raise ValueError("static topology inspection requires a hash-pinned config file")
+        if self.status in {"detected", "incomplete", "unsupported_family"} and not self.family:
+            raise ValueError(f"{self.status} topology inspection requires a model family")
+        if self.status == "detected" and not self.evidence_paths:
+            raise ValueError("detected topology requires config evidence paths")
+        return self
 
 
 class ExpertGroup(ContractModel):
+    """One routed-expert layout repeated at each listed layer.
+
+    expert_count is the total logical expert identities per listed layer. routed_expert_count and
+    always-active shared_expert_count partition that total. experts_per_token counts only routed
+    experts selected per token; neither it nor any other field here is a parameter count.
+    """
+
     group_id: str = Field(pattern=_ID)
+    layer_namespace: str = Field(default="decoder", pattern=_ID)
+    component_path: str | None = Field(default=None, min_length=1)
     layer_indices: list[int] = Field(default_factory=list)
     expert_count: int = Field(ge=1)
+    routed_expert_count: int | None = Field(default=None, ge=1)
     experts_per_token: int | None = Field(default=None, ge=1)
     shared_expert_count: int | None = Field(default=None, ge=0)
     heterogeneous: bool = False
     expert_identity_scheme: str | None = None
     expert_registry_ref: Ref | None = None
+    metadata_sources: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_expert_counts(cls, value: Any) -> Any:
+        """Accept pre-Phase-8 expert groups and normalize their implicit routed partition."""
+
+        if not isinstance(value, Mapping):
+            return value
+        migrated = dict(value)
+        shared = migrated.get("shared_expert_count")
+        if shared is None:
+            shared = 0
+            migrated["shared_expert_count"] = shared
+        if migrated.get("routed_expert_count") is None:
+            total = migrated.get("expert_count")
+            if (
+                isinstance(total, int)
+                and not isinstance(total, bool)
+                and isinstance(shared, int)
+                and not isinstance(shared, bool)
+            ):
+                migrated["routed_expert_count"] = total - shared
+        return migrated
 
     @model_validator(mode="after")
     def _validate_expert_counts(self) -> ExpertGroup:
-        if self.experts_per_token is not None and self.experts_per_token > self.expert_count:
-            raise ValueError("experts_per_token cannot exceed expert_count")
-        if self.shared_expert_count is not None and self.shared_expert_count > self.expert_count:
-            raise ValueError("shared_expert_count cannot exceed expert_count")
+        if self.routed_expert_count is None or self.shared_expert_count is None:
+            raise ValueError("expert groups require a routed/shared expert partition")
+        if self.expert_count != self.routed_expert_count + self.shared_expert_count:
+            raise ValueError("expert_count must equal routed plus shared expert counts")
+        if self.experts_per_token is not None and self.experts_per_token > self.routed_expert_count:
+            raise ValueError("experts_per_token cannot exceed routed_expert_count")
         if self.layer_indices != sorted(set(self.layer_indices)):
             raise ValueError("layer_indices must be sorted and unique")
+        if self.metadata_sources != sorted(set(self.metadata_sources)):
+            raise ValueError("expert metadata_sources must be sorted and unique")
+        return self
+
+
+class ExpertTopologyCounts(ContractModel):
+    """Derived structural counts across one full model pass for one token.
+
+    The unit is expert instances, not parameter coordinates. These values therefore never substitute
+    for N_logical/N_active in ParameterAccountingReport.
+    """
+
+    unit: Literal["expert_instances"] = "expert_instances"
+    moe_layer_count: int = Field(ge=1)
+    routed_expert_instances: int = Field(ge=1)
+    shared_expert_instances: int = Field(ge=0)
+    logical_expert_instances: int = Field(ge=1)
+    active_routed_expert_instances_per_token: int = Field(ge=1)
+    active_shared_expert_instances_per_token: int = Field(ge=0)
+    active_expert_instances_per_token: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _validate_totals(self) -> ExpertTopologyCounts:
+        if self.logical_expert_instances != (
+            self.routed_expert_instances + self.shared_expert_instances
+        ):
+            raise ValueError("logical expert instances must equal routed plus shared instances")
+        if self.active_expert_instances_per_token != (
+            self.active_routed_expert_instances_per_token
+            + self.active_shared_expert_instances_per_token
+        ):
+            raise ValueError(
+                "active expert instances must equal active routed plus shared instances"
+            )
+        if self.active_routed_expert_instances_per_token > self.routed_expert_instances:
+            raise ValueError(
+                "active routed expert instances cannot exceed logical routed instances"
+            )
+        if self.active_shared_expert_instances_per_token > self.shared_expert_instances:
+            raise ValueError(
+                "active shared expert instances cannot exceed logical shared instances"
+            )
         return self
 
 
@@ -1382,6 +1525,8 @@ class ModelTopology(ContractModel):
     execution_kind: ModelExecutionKind = ModelExecutionKind.unknown
     semantic_routing: SemanticRouting | None = None
     expert_groups: list[ExpertGroup] = Field(default_factory=list)
+    expert_counts: ExpertTopologyCounts | None = None
+    inspection: TopologyInspection = Field(default_factory=TopologyInspection)
     # Placement/prefetch/residency decisions belong to the RunPlan physical-execution layer.
     physical_scheduler_owner: Literal["run_plan"] = "run_plan"
 
@@ -1390,10 +1535,87 @@ class ModelTopology(ContractModel):
         group_ids = [item.group_id for item in self.expert_groups]
         if group_ids != sorted(group_ids) or len(group_ids) != len(set(group_ids)):
             raise ValueError("expert_groups must be sorted by unique group_id")
-        if self.execution_kind == ModelExecutionKind.dense and (
-            self.semantic_routing is not None or self.expert_groups
+        if self.execution_kind in {ModelExecutionKind.dense, ModelExecutionKind.unknown} and (
+            self.semantic_routing is not None
+            or self.expert_groups
+            or self.expert_counts is not None
         ):
-            raise ValueError("dense topology cannot declare semantic routing or expert groups")
+            raise ValueError("dense/unknown topology cannot declare expert routing or counts")
+        if self.semantic_routing is not None and self.semantic_routing.top_k is not None:
+            if any(
+                group.experts_per_token != self.semantic_routing.top_k
+                for group in self.expert_groups
+            ):
+                raise ValueError("global router top_k must match every expert group")
+        if self.inspection.status == "detected":
+            if self.execution_kind not in {
+                ModelExecutionKind.sparse,
+                ModelExecutionKind.mixture_of_experts,
+                ModelExecutionKind.conditional,
+                ModelExecutionKind.hybrid,
+            }:
+                raise ValueError("detected expert topology requires an expert-bearing execution kind")
+            if (
+                self.semantic_routing is None
+                or not self.expert_groups
+                or self.expert_counts is None
+                or any(group.component_path is None for group in self.expert_groups)
+            ):
+                raise ValueError(
+                    "detected MoE topology requires routing, component-scoped groups, and counts"
+                )
+        elif (
+            self.inspection.method == "static_config_v1"
+            and self.execution_kind != ModelExecutionKind.unknown
+        ):
+            raise ValueError("non-detected static inspection must leave execution_kind unknown")
+        if self.expert_counts is not None:
+            if not self.expert_groups or any(
+                not group.layer_indices or group.experts_per_token is None
+                for group in self.expert_groups
+            ):
+                raise ValueError("expert counts require complete layer and top-k group structure")
+            layers = {
+                (group.layer_namespace, layer)
+                for group in self.expert_groups
+                for layer in group.layer_indices
+            }
+            routed = sum(
+                len(group.layer_indices) * int(group.routed_expert_count or 0)
+                for group in self.expert_groups
+            )
+            shared = sum(
+                len(group.layer_indices) * int(group.shared_expert_count or 0)
+                for group in self.expert_groups
+            )
+            logical = sum(
+                len(group.layer_indices) * group.expert_count for group in self.expert_groups
+            )
+            active_routed = sum(
+                len(group.layer_indices) * int(group.experts_per_token or 0)
+                for group in self.expert_groups
+            )
+            active_shared = shared
+            expected = (
+                len(layers),
+                routed,
+                shared,
+                logical,
+                active_routed,
+                active_shared,
+                active_routed + active_shared,
+            )
+            actual = (
+                self.expert_counts.moe_layer_count,
+                self.expert_counts.routed_expert_instances,
+                self.expert_counts.shared_expert_instances,
+                self.expert_counts.logical_expert_instances,
+                self.expert_counts.active_routed_expert_instances_per_token,
+                self.expert_counts.active_shared_expert_instances_per_token,
+                self.expert_counts.active_expert_instances_per_token,
+            )
+            if actual != expected:
+                raise ValueError("expert topology counts do not match the declared expert groups")
         return self
 
 
@@ -1619,6 +1841,15 @@ class ModelDescriptor(ContractModel):
             raise ValueError("parameter component file_refs must exist in the model inventory")
         if not set(self.trust.custom_code_files).issubset(inventory_paths):
             raise ValueError("custom_code_files must exist in the model inventory")
+        if (
+            self.parameters.kind != ModelExecutionKind.unknown
+            and self.topology.execution_kind != ModelExecutionKind.unknown
+            and self.parameters.kind != self.topology.execution_kind
+        ) or (
+            self.topology.inspection.status == "detected"
+            and self.parameters.kind != self.topology.execution_kind
+        ):
+            raise ValueError("parameter representation kind must match topology execution_kind")
         if self.notes != sorted(set(self.notes)):
             raise ValueError("model notes must be sorted and unique")
         return self

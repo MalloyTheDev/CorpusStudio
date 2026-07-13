@@ -908,6 +908,29 @@ def model_inspect(
     )
     typer.echo(f"Metadata: {bundle.model.verification.metadata.value}")
     typer.echo(f"Integrity: {bundle.model.verification.integrity.value}")
+    topology = bundle.model.topology
+    typer.echo(
+        f"Topology: {topology.execution_kind.value} "
+        f"({topology.inspection.status}; {topology.inspection.evidence_level})"
+    )
+    if topology.inspection.status == "detected" and topology.expert_counts is not None:
+        counts = topology.expert_counts
+        typer.echo(f"MoE family: {topology.inspection.family}")
+        typer.echo(f"MoE layers: {counts.moe_layer_count}")
+        typer.echo(
+            "Expert instances: "
+            f"logical={counts.logical_expert_instances}, "
+            f"routed={counts.routed_expert_instances}, "
+            f"shared={counts.shared_expert_instances}"
+        )
+        typer.echo(
+            "Active expert instances/token: "
+            f"total={counts.active_expert_instances_per_token}, "
+            f"routed={counts.active_routed_expert_instances_per_token}, "
+            f"shared={counts.active_shared_expert_instances_per_token}"
+        )
+        typer.echo("Resident experts: unknown - runtime measurement required")
+        typer.echo("Execution support: not evaluated")
     custom_code = "required" if bundle.model.trust.custom_code_required else "not detected"
     typer.echo(f"Custom code: {custom_code} (trust_remote_code=false)")
     if bundle.tokenizer is not None:

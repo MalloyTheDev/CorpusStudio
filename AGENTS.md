@@ -23,7 +23,8 @@ Three surfaces:
   reference-backend creation, locks, probes, drift, and safe recreation) and the storage safe-spill
   profiler + static, offline model/tokenizer descriptors and inspection + the sealed,
   backend-independent TrainingObjective registry and compatibility evidence checker + the versioned,
-  provenance/review-safe TraceRecord workflow.
+  provenance/review-safe TraceRecord workflow + hash-pinned, allowlisted static MoE topology evidence
+  (never runtime capability proof).
 - **UI** — WPF + Avalonia (`apps/desktop`, C#) and Tauri 2 + React (`apps/web`, TS). UI is a client
   over the engine CLI; it never owns training behavior.
 

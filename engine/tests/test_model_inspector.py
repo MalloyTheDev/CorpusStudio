@@ -161,6 +161,9 @@ def test_inspection_bundle_captures_static_evidence_and_compatibility(tmp_path: 
     assert model.parameters.counts[0].value == 1234
     assert model.topology.execution_kind.value == "unknown"
     assert model.topology.expert_groups == []
+    assert model.topology.inspection.status == "no_recognized_moe_evidence"
+    assert model.topology.inspection.evidence_level == "static_metadata_only"
+    assert model.topology.inspection.runtime_capability == "unverified"
     assert model.attention_type.value == "sliding_window"
     assert model.positional_encoding.value == "rope"
     assert model.license is not None and model.license.name == "apache-2.0"
@@ -585,6 +588,7 @@ def test_moe_contract_is_component_scoped_and_has_no_dense_only_scalar():
                     "group_id": "decoder",
                     "layer_indices": [1, 2],
                     "expert_count": 8,
+                    "routed_expert_count": 8,
                     "experts_per_token": 2,
                 }
             ],
@@ -823,6 +827,50 @@ def test_cli_json_output_is_atomic_and_human_output_is_ascii(tmp_path: Path):
     assert human.exit_code == 0
     assert "Model: model" in human.stdout
     assert "trust_remote_code=false" in human.stdout
+    human.stdout.encode("ascii")
+
+
+def test_moe_model_inspection_integrates_tokenizer_json_and_ascii_cli(tmp_path: Path):
+    model = _make_model(
+        tmp_path / "mixtral",
+        model_type="mixtral",
+        architectures=["MixtralForCausalLM"],
+        num_hidden_layers=4,
+        num_local_experts=8,
+        num_experts_per_tok=2,
+    )
+    tokenizer = _make_tokenizer(tmp_path / "tokenizer")
+    bundle = inspect_model_bundle(
+        model,
+        model_id="mixtral",
+        tokenizer_path=tokenizer,
+        tokenizer_id="mixtral-tokenizer",
+        now=_fixed_now,
+    )
+    assert bundle.model.parameters.kind.value == "mixture_of_experts"
+    assert bundle.model.topology.inspection.status == "detected"
+    assert bundle.model.topology.inspection.config_sha256 == next(
+        item.sha256 for item in bundle.model.files if item.path == "config.json"
+    )
+    assert bundle.model.backend_compatibility == []
+    assert bundle.compatibility is not None
+    assert bundle.compatibility.status == CompatibilityStatus.compatible
+
+    human = runner.invoke(
+        app,
+        [
+            "model-inspect",
+            str(model),
+            "--tokenizer",
+            str(tokenizer),
+        ],
+    )
+    assert human.exit_code == 0, human.output
+    assert "Topology: mixture_of_experts (detected; static_metadata_only)" in human.stdout
+    assert "MoE layers: 4" in human.stdout
+    assert "logical=32, routed=32, shared=0" in human.stdout
+    assert "Resident experts: unknown - runtime measurement required" in human.stdout
+    assert "Execution support: not evaluated" in human.stdout
     human.stdout.encode("ascii")
 
 

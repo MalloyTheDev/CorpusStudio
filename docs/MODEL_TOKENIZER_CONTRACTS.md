@@ -4,7 +4,9 @@ CorpusStudio's Phase 3 foundation describes model and tokenizer snapshots withou
 source of truth is the pydantic contracts in
 [`engine/corpus_studio/platform/contracts.py`](../engine/corpus_studio/platform/contracts.py); the
 dependency-light inspector is
-[`engine/corpus_studio/platform/model_inspector.py`](../engine/corpus_studio/platform/model_inspector.py).
+[`engine/corpus_studio/platform/model_inspector.py`](../engine/corpus_studio/platform/model_inspector.py),
+with allowlisted MoE config parsing in
+[`engine/corpus_studio/platform/moe_inspector.py`](../engine/corpus_studio/platform/moe_inspector.py).
 
 ## What ships
 
@@ -17,12 +19,13 @@ dependency-light inspector is
   normalization/pre-tokenization metadata, trust/inventory evidence, and model compatibility results.
 - `model-inspect`: bounded, offline inspection of a local model directory and optional local tokenizer
   directory. It can emit one JSON bundle or atomically persist the individual descriptor and
-  compatibility records.
+  compatibility records. For four allowlisted `model_type` values it also emits hash-pinned static
+  expert-topology evidence.
 - Deterministic draft-2020-12 JSON Schemas and generated TypeScript types for both root contracts.
 
 This slice does **not** fetch from a model registry, import torch/transformers/tokenizers, instantiate a
 model or tokenizer, execute custom code, train/edit/convert weights, prove a backend can load the
-snapshot, predict hardware fit, or detect/execute MoE topology.
+snapshot, predict hardware fit, execute MoE topology, or prove any MoE runtime capability.
 
 ## Static inspection
 
@@ -58,7 +61,9 @@ The inspector:
 - flags pickle-based weights and repository `.py` files / `auto_map` metadata;
 - always emits `trust_remote_code: false`; custom code requires a future, separate exact-revision
   approval in an isolated environment;
-- keeps an unknown execution topology **unknown** rather than guessing dense or MoE from a model name.
+- recognizes only the explicit Mixtral, Qwen2-MoE, DeepSeek V2, and DeepSeek V3 config mappings;
+- keeps malformed allowlisted metadata and unsupported MoE-like families **unknown** rather than
+  guessing a runnable topology from names or similar keys.
 
 `inventory_sha256` seals the canonical inventory record, including each file's hash status. It is not
 automatically a full content digest. `source.snapshot_sha256` is populated only when the complete
@@ -110,8 +115,8 @@ limit governs.
 
 ## MoE-safe representation
 
-The contract provides representation space for sparse and conditional models without claiming that
-the static inspector can identify them:
+The contract provides representation space for sparse and conditional models, and Phase 8 now fills
+that space from a narrow static-config allowlist:
 
 - `parameters.components[]` scopes format, stored dtype, quantization, and files to shared weights,
   router, expert group, embeddings, output head, adapter, or another component;
@@ -119,15 +124,23 @@ the static inspector can identify them:
   measurement window, unit, evidence source, and explicit handling of tied/shared/replicated/generated/
   quantized state, optimizer shadows, and decompressed caches;
 - `topology.semantic_routing` describes the learned selection policy;
-- `topology.expert_groups[]` provides stable group identity and expert-count structure;
-- physical placement, residency, paging, and prefetch remain owned by the future immutable `RunPlan`
-  scheduler.
+- `topology.expert_groups[]` provides stable group/layer/component identity and partitions the logical
+  expert count into routed and always-active shared experts;
+- `topology.expert_counts` derives **expert-instance** totals for a full token pass, not parameter
+  coordinates;
+- `topology.inspection` pins the config hash, evidence paths, parser method, and
+  `static_metadata_only` evidence level while keeping runtime capability `unverified`;
+- physical placement, residency, paging, and prefetch remain owned by the immutable `RunPlan`
+  physical-execution specification.
 
 Phase 3 supplies this representation substrate. The Phase 5
 [`ParameterAccountingReport`](PARAMETER_ACCOUNTING.md) now produces and validates separately scoped
 logical/active/resident/touched/updated/exposed evidence and can be requested with
-`model-inspect --parameter-accounting`. Phase 8 will inspect known MoE families. Until then,
-`model-inspect` emits `execution_kind: unknown` and no expert groups.
+`model-inspect --parameter-accounting`. Phase 8 recognizes only `mixtral`, `qwen2_moe`,
+`deepseek_v2`, and `deepseek_v3`; see [`MOE_MODEL_INSPECTION.md`](MOE_MODEL_INSPECTION.md). A complete
+allowlisted mapping may set `execution_kind: mixture_of_experts` and emit structural expert-instance
+counts. Those counts do not populate active or resident parameter-coordinate evidence, establish
+loadability/backend support, or prove MoE execution. Every other topology remains unknown.
 
 ## Verification axes
 

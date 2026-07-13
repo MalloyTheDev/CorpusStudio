@@ -9,7 +9,8 @@ registry, and subprocess reliability, verified on a real RTX 5070 under native W
 reconciled below — the **reasoning-traces** data loop, a dataset **truncation guardrail** +
 configurable **checkpoint retention**, and a dependency-light **storage safe-spill** profiler —
 plus the sealed **Environment Manager** reference lifecycle, the static MoE-safe
-**ModelDescriptor / TokenizerDescriptor** foundation, and the backend-independent
+**ModelDescriptor / TokenizerDescriptor** foundation with allowlisted **MoE topology inspection**,
+and the backend-independent
 **TrainingObjective registry** — plus the deep bug/security audit, 19 fixes
 across data integrity, gate/policy
 hardening, and quality/split correctness, PRs #104–118; a residual-audit pass
@@ -217,10 +218,14 @@ per-item error isolation, and off-thread document opens.
   added, effective-vocabulary, special-token, chat-template, and context metadata; and reports static
   model/tokenizer compatibility (compatible / resize required / incompatible / unverified). The model
   representation is MoE-safe: counts are scoped records, storage dtype/quantization are per component,
-  semantic routing is separate from the `RunPlan` physical-execution specification, and unknown topology
-  remains unknown. This is **not** model loading, tokenizer training/editing, MoE detection/execution,
-  backend support proof, or hardware-fit proof. See
-  [`MODEL_TOKENIZER_CONTRACTS.md`](MODEL_TOKENIZER_CONTRACTS.md).
+  semantic routing is separate from the `RunPlan` physical-execution specification, and unsupported
+  topology remains unknown. A pure static parser recognizes hash-pinned Mixtral, Qwen2-MoE, DeepSeek
+  V2, and DeepSeek V3 config structure; emits routed/shared/logical/active-per-token **expert-instance**
+  counts; and labels runtime capability unverified. Malformed allowlisted metadata fails closed and
+  MoE-like unsupported families are never guessed. This is **not** model loading, tokenizer
+  training/editing, MoE execution, backend support proof, parameter-coordinate activity/residency, or
+  hardware-fit proof. See [`MODEL_TOKENIZER_CONTRACTS.md`](MODEL_TOKENIZER_CONTRACTS.md) and
+  [`MOE_MODEL_INSPECTION.md`](MOE_MODEL_INSPECTION.md) for the exact static evidence boundary.
 - **Training objective foundation** (`training-objectives` / `training-objective-check`): a
   hash-sealed registry of 29 backend-independent definitions spanning pretraining, full/adapter SFT,
   completion/response masks, preference and reward optimization, four distillation modes,
@@ -245,8 +250,9 @@ per-item error isolation, and off-thread document opens.
   declaration agrees. Typed `RunEvent` observations can be reconciled into complete/incomplete/
   conflicting runtime reports, while allocator bytes are never converted into resident coordinates.
   `RunPlan`, `RunManifest`, `ArtifactManifest`, and `EvaluationResult` carry report refs. Existing
-  trainers do not yet emit the complete measured runtime axes, and this is not MoE detection, fit
-  proof, or a runtime speed claim. See [`PARAMETER_ACCOUNTING.md`](PARAMETER_ACCOUNTING.md).
+  trainers do not yet emit the complete measured runtime axes. Static expert-instance counts do not
+  populate active/resident parameter-coordinate evidence, prove fit, or make a runtime speed claim.
+  See [`PARAMETER_ACCOUNTING.md`](PARAMETER_ACCOUNTING.md).
 - **Physical RunPlan foundation** (`platform-plan --physical-spec`): every newly planned run seals a
   `PhysicalExecutionSpec` containing concrete memory-tier resources, authoritative/cache/replica state
   placements, explicit offload rules, rank bindings, and parallel groups. Parameter-scoped plans pin a
