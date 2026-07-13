@@ -33,6 +33,7 @@ from .enums import (
     PrecisionMode,
     QuantizationMode,
 )
+from .gpu_health import classify_gpu_health, probe_gpu_responsive, wedged_gpu_remediation
 from .host_platform import flash_sdpa_deadlocks
 
 _TX = FailureTaxonomy
@@ -179,7 +180,24 @@ def _probe_checkpoint_reload(profile: EnvironmentProfile) -> ProbeOutcome:
         return ProbeOutcome(_TX.CHECKPOINT_FAILURE, str(exc))
 
 
+def _probe_gpu_responsive(profile: EnvironmentProfile) -> ProbeOutcome:
+    # Detect a WEDGED GPU up front — the WSL2 GPU-PV state a crashed run leaves behind, where every
+    # subsequent process fails with 'device not ready' regardless of config. Diagnosing it here (with
+    # the OS-specific reset instruction) turns a cascade of cryptic failures into one clear "reset your
+    # GPU" message. Runs first so a wedge is caught before the heavier probes hit the same wall.
+    error = probe_gpu_responsive()
+    health = classify_gpu_health(error)
+    if health == "healthy":
+        return ProbeOutcome(_TX.PASS, "GPU responds to a tiny CUDA op (not wedged)")
+    if health == "absent":
+        return ProbeOutcome(_TX.UNSUPPORTED_CONFIGURATION, error or "no CUDA GPU for a health probe")
+    if health == "wedged":
+        return ProbeOutcome(_TX.ENVIRONMENT_FAILURE, wedged_gpu_remediation(profile.host.os))
+    return ProbeOutcome(_TX.FAIL, f"GPU health probe returned an unclassified error: {error}")
+
+
 BUILTIN_PROBES: dict[str, ProbeFn] = {
+    "gpu_responsive": _probe_gpu_responsive,
     "cuda_available": _probe_cuda_available,
     "bf16_matmul": _probe_bf16_matmul,
     "bnb_4bit_load": _probe_bnb_4bit_load,

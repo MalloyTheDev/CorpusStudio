@@ -221,6 +221,32 @@ def test_flash_probe_executes_on_wsl_blackwell_not_short_circuited():
     assert out.taxonomy != FailureTaxonomy.KERNEL_STALL
 
 
+def test_gpu_responsive_probe_flags_a_wedged_gpu(monkeypatch):
+    from corpus_studio.platform import probes
+
+    # A wedged GPU (the WSL2 GPU-PV state a crashed run leaves) → ENVIRONMENT_FAILURE with the
+    # OS-specific reset instruction, not a generic failure the operator can't act on.
+    monkeypatch.setattr(probes, "probe_gpu_responsive", lambda: "CUDA error: device not ready")
+    out = probes._probe_gpu_responsive(_profile(os_enum=OperatingSystem.wsl))
+    assert out.taxonomy == FailureTaxonomy.ENVIRONMENT_FAILURE
+    assert "wsl --terminate" in (out.detail or "")
+
+
+def test_gpu_responsive_probe_passes_on_a_live_gpu(monkeypatch):
+    from corpus_studio.platform import probes
+
+    monkeypatch.setattr(probes, "probe_gpu_responsive", lambda: None)
+    assert probes._probe_gpu_responsive(_profile()).taxonomy == FailureTaxonomy.PASS
+
+
+def test_gpu_responsive_probe_absent_is_not_a_wedge(monkeypatch):
+    from corpus_studio.platform import probes
+
+    # No GPU is UNSUPPORTED (nothing to reset), never a false wedge that tells CI to reset a GPU.
+    monkeypatch.setattr(probes, "probe_gpu_responsive", lambda: "no CUDA GPU available")
+    assert probes._probe_gpu_responsive(_profile()).taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+
+
 def test_builtin_probes_degrade_cleanly_without_torch():
     # the real registry against a real profile in a torch-absent venv → not_ready, no crash
     profile = P.build_environment_profile()

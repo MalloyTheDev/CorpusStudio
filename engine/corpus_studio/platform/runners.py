@@ -27,6 +27,7 @@ from pydantic import ValidationError
 
 from corpus_studio.platform.contracts import RunPlan
 from corpus_studio.platform.enums import FailureTaxonomy, StageMarker
+from corpus_studio.platform.gpu_health import classify_gpu_health
 from corpus_studio.platform.supervisor import (
     ProducedArtifact,
     RunCancelled,
@@ -69,6 +70,19 @@ def classify_training_error(exc: BaseException) -> tuple[FailureTaxonomy, str | 
     memory-signature classifier, not to error-string matching. Anything unrecognized stays ``FAIL``
     rather than being mislabeled."""
     message = str(exc).lower()
+    if classify_gpu_health(message) == "wedged":
+        # 'device not ready' & friends: the GPU/driver is in a poisoned transient state (classically the
+        # WSL2 GPU-PV wedge a prior crashed run leaves behind) — NOT a config bug. Surface the reset,
+        # or the operator burns runs chasing a phantom that a `wsl --terminate` clears (this session's
+        # own trap). Checked first: a wedged GPU can masquerade as any downstream failure.
+        return (
+            FailureTaxonomy.ENVIRONMENT_FAILURE,
+            "The GPU appears WEDGED (a prior crashed CUDA process poisoned the driver / GPU-PV state) — "
+            "this is NOT a config problem, so re-running the same command will keep failing. Reset the "
+            "GPU and re-run: on WSL, `wsl --terminate <distro>` (or `wsl --shutdown`) from Windows "
+            "PowerShell; on native Windows, restart or reset the display driver (Win+Ctrl+Shift+B); on "
+            "Linux, `nvidia-smi --gpu-reset` or reboot.",
+        )
     if type(exc).__name__ == "OutOfMemoryError" or any(marker in message for marker in _OOM_MARKERS):
         return (
             FailureTaxonomy.OOM,
