@@ -46,6 +46,14 @@
           "title": "Attention Impls",
           "type": "array"
         },
+        "objective_capabilities": {
+          "items": {
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "type": "string"
+          },
+          "title": "Objective Capabilities",
+          "type": "array"
+        },
         "precision_modes": {
           "items": {
             "$ref": "#/$defs/PrecisionMode"

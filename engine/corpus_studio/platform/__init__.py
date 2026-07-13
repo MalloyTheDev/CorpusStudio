@@ -40,14 +40,24 @@ from .contracts import (
     FailureRecord,
     FitClassification,
     ModelDescriptor,
+    ObjectiveCompatibilityReport,
     ProjectManifest,
     PythonRuntime,
     RunEvent,
     RunManifest,
     RunPlan,
     TokenizerDescriptor,
+    TrainingObjective,
     WorkerMessage,
     WORKER_BODY_BY_TYPE,
+)
+from .objectives import (
+    builtin_objectives,
+    check_objective_compatibility,
+    get_objective,
+    objective_hash_for,
+    validate_objective_catalog,
+    verify_objective_hash,
 )
 from .profiler import build_environment_profile
 from .probes import BUILTIN_PROBES, ProbeOutcome, run_capability_probes
@@ -70,6 +80,8 @@ __all__ = [
     "DatasetManifest",
     "ModelDescriptor",
     "TokenizerDescriptor",
+    "TrainingObjective",
+    "ObjectiveCompatibilityReport",
     "EnvironmentProfile",
     "PythonRuntime",
     "EnvironmentRecipe",
@@ -91,4 +103,10 @@ __all__ = [
     "ROOT_CONTRACTS",
     "contract_schemas",
     "export_json_schemas",
+    "builtin_objectives",
+    "get_objective",
+    "objective_hash_for",
+    "validate_objective_catalog",
+    "verify_objective_hash",
+    "check_objective_compatibility",
 ]

@@ -16,7 +16,7 @@ corpus-studio platform-schemas --out docs/contracts
 # or: python -m corpus_studio.cli platform-schemas --out docs/contracts
 ```
 
-`index.json` lists all **23 root contracts** and their shared `contract_version`.
+`index.json` lists all **25 root contracts** and their shared `contract_version`.
 
 ## The contracts
 
@@ -26,6 +26,8 @@ corpus-studio platform-schemas --out docs/contracts
 | `DatasetManifest` | Dataset version identity **+ lineage** (source → transform → teacher/prompt/seed → hashes) + token stats. |
 | `ModelDescriptor` | Static model identity, component-scoped representation, scoped parameter counts, topology/trust findings, portable file inventory, and independent verification axes. |
 | `TokenizerDescriptor` | Static tokenizer identity, base/added/effective vocabulary, special tokens, chat-template hash, inventory/trust findings, and model-compatibility evidence. |
+| `TrainingObjective` | Hash-sealed, backend-independent objective semantics: dataset/labels/masks/losses, model/update/backend requirements, artifacts, resume/eval/hardware implications, and verification. |
+| `ObjectiveCompatibilityReport` | Independent dataset/model/backend evidence axes; static declarations are distinct from functionally verified compatibility. |
 | `EnvironmentProfile` | Hashable host + software **signature** (OS, residency model, GPUs, driver/runtime, package locks). |
 | `StorageProfile` | Non-destructive storage topology plus per-role safe-spill suitability and risk evidence. |
 | `PythonRuntime` | A bounded-probed Python interpreter candidate and recipe compatibility. |

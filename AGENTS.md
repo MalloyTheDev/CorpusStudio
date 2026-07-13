@@ -21,7 +21,8 @@ Three surfaces:
 - **Platform** (`engine/corpus_studio/platform/`) — a **contract-first, torch-free** run lifecycle
   (profile → plan → predict-fit → run → measure-fit → artifacts) + the Environment Manager (sealed
   reference-backend creation, locks, probes, drift, and safe recreation) and the storage safe-spill
-  profiler + static, offline model/tokenizer descriptors and inspection.
+  profiler + static, offline model/tokenizer descriptors and inspection + the sealed,
+  backend-independent TrainingObjective registry and compatibility evidence checker.
 - **UI** — WPF + Avalonia (`apps/desktop`, C#) and Tauri 2 + React (`apps/web`, TS). UI is a client
   over the engine CLI; it never owns training behavior.
 

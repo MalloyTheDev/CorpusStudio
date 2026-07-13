@@ -1,0 +1,206 @@
+{
+  "$defs": {
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "ObjectiveCompatibilityAxis": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "reasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/ObjectiveCompatibilityStatus"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "ObjectiveCompatibilityAxis",
+      "type": "object"
+    },
+    "ObjectiveCompatibilityStatus": {
+      "enum": [
+        "declared_compatible",
+        "verified_compatible",
+        "incompatible",
+        "unverified",
+        "not_applicable"
+      ],
+      "title": "ObjectiveCompatibilityStatus",
+      "type": "string"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Ref",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Independent compatibility axes. A static backend declaration can earn only\n``declared_compatible``; a matching functional capability report is required for verified\ncompatibility.",
+  "properties": {
+    "backend": {
+      "$ref": "#/$defs/ObjectiveCompatibilityAxis"
+    },
+    "backend_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Backend Id"
+    },
+    "capability_environment_ref": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ref"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "dataset": {
+      "$ref": "#/$defs/ObjectiveCompatibilityAxis"
+    },
+    "dataset_schema_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Dataset Schema Id"
+    },
+    "dataset_schema_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Dataset Schema Version"
+    },
+    "model": {
+      "$ref": "#/$defs/ObjectiveCompatibilityAxis"
+    },
+    "model_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model Id"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    },
+    "objective_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "objective_version": {
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "title": "Objective Version",
+      "type": "string"
+    },
+    "overall_status": {
+      "$ref": "#/$defs/ObjectiveCompatibilityStatus"
+    }
+  },
+  "required": [
+    "objective_ref",
+    "objective_version",
+    "dataset",
+    "model",
+    "backend",
+    "overall_status"
+  ],
+  "title": "ObjectiveCompatibilityReport",
+  "type": "object"
+}

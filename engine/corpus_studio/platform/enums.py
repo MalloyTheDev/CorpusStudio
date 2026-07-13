@@ -58,6 +58,183 @@ class TaskType(str, Enum):
     grpo = "grpo"
 
 
+class ObjectiveKind(str, Enum):
+    """The semantic family of a training objective.
+
+    Concrete registry entries remain more specific than this coarse family. For example, LoRA and
+    QLoRA are distinct entries with different adaptation and hardware requirements while both are
+    supervised-fine-tuning objectives.
+    """
+
+    pretraining = "pretraining"
+    supervised_fine_tuning = "supervised_fine_tuning"
+    preference_optimization = "preference_optimization"
+    reward_modeling = "reward_modeling"
+    distillation = "distillation"
+    process_supervision = "process_supervision"
+    verifier_training = "verifier_training"
+    tool_use = "tool_use"
+    embedding = "embedding"
+    reranking = "reranking"
+    classification = "classification"
+    multimodal = "multimodal"
+    evaluation = "evaluation"
+    merge = "merge"
+    conversion = "conversion"
+    quantization = "quantization"
+
+
+class ObjectiveExecutionKind(str, Enum):
+    training = "training"
+    evaluation = "evaluation"
+    artifact_operation = "artifact_operation"
+
+
+class ObjectiveDatasetAvailability(str, Enum):
+    builtin = "builtin"
+    structural = "structural"
+    planned = "planned"
+
+
+class ObjectiveLabelKind(str, Enum):
+    next_token = "next_token"
+    completion_tokens = "completion_tokens"
+    response_tokens = "response_tokens"
+    preference_pair = "preference_pair"
+    scalar_reward = "scalar_reward"
+    class_id = "class_id"
+    contrastive_pair = "contrastive_pair"
+    teacher_distribution = "teacher_distribution"
+    teacher_sequence = "teacher_sequence"
+    trace_step = "trace_step"
+    verifier_target = "verifier_target"
+    multimodal_target = "multimodal_target"
+    none = "none"
+
+
+class ObjectiveLossMaskKind(str, Enum):
+    all_non_padding = "all_non_padding"
+    completion_only = "completion_only"
+    response_only = "response_only"
+    chosen_rejected = "chosen_rejected"
+    labeled_positions = "labeled_positions"
+    trace_steps = "trace_steps"
+    multimodal_target = "multimodal_target"
+    none = "none"
+    custom = "custom"
+
+
+class ObjectiveLossComponentKind(str, Enum):
+    cross_entropy = "cross_entropy"
+    preference = "preference"
+    odds_ratio = "odds_ratio"
+    reward_pairwise = "reward_pairwise"
+    classification = "classification"
+    contrastive = "contrastive"
+    ranking = "ranking"
+    knowledge_distillation = "knowledge_distillation"
+    sequence_distillation = "sequence_distillation"
+    logit_distillation = "logit_distillation"
+    rationale_distillation = "rationale_distillation"
+    process_supervision = "process_supervision"
+    verifier = "verifier"
+    router_auxiliary = "router_auxiliary"
+    load_balancing = "load_balancing"
+    router_z_loss = "router_z_loss"
+    entropy = "entropy"
+    overflow = "overflow"
+    specialization = "specialization"
+    none = "none"
+
+
+class ObjectiveUpdateScope(str, Enum):
+    all_parameters = "all_parameters"
+    shared_parameters = "shared_parameters"
+    embeddings = "embeddings"
+    output_head = "output_head"
+    adapters = "adapters"
+    router = "router"
+    selected_experts = "selected_experts"
+    all_experts = "all_experts"
+    projector = "projector"
+    task_head = "task_head"
+    none = "none"
+
+
+class ObjectiveSelectionMode(str, Enum):
+    all = "all"
+    adapter_only = "adapter_only"
+    router_only = "router_only"
+    selected_experts = "selected_experts"
+    routed_experts = "routed_experts"
+    task_head_only = "task_head_only"
+    none = "none"
+    backend_defined = "backend_defined"
+
+
+class ObjectiveExposureTracking(str, Enum):
+    none = "none"
+    per_component = "per_component"
+    per_expert = "per_expert"
+    router_and_expert = "router_and_expert"
+    backend_defined = "backend_defined"
+
+
+class ObjectiveOptimizerClock(str, Enum):
+    none = "none"
+    global_clock = "global"
+    per_component = "per_component"
+    per_expert = "per_expert"
+    backend_defined = "backend_defined"
+
+
+class ObjectiveArtifactKind(str, Enum):
+    full_model = "full_model"
+    adapter = "adapter"
+    checkpoint = "checkpoint"
+    optimizer_state = "optimizer_state"
+    scheduler_state = "scheduler_state"
+    trainer_state = "trainer_state"
+    reward_model = "reward_model"
+    embedding_model = "embedding_model"
+    reranker_model = "reranker_model"
+    classifier_model = "classifier_model"
+    multimodal_model = "multimodal_model"
+    distillation_student = "distillation_student"
+    verifier_model = "verifier_model"
+    evaluation_result = "evaluation_result"
+    merged_model = "merged_model"
+    converted_model = "converted_model"
+    quantized_model = "quantized_model"
+    routing_state = "routing_state"
+    expert_shards = "expert_shards"
+    provenance_manifest = "provenance_manifest"
+
+
+class ObjectiveResumeMode(str, Enum):
+    exact = "exact"
+    fork_only = "fork_only"
+    restart_only = "restart_only"
+    not_applicable = "not_applicable"
+
+
+class ObjectiveVerificationStatus(str, Enum):
+    not_verified = "not_verified"
+    declared = "declared"
+    contract_validated = "contract_validated"
+    functional_verified = "functional_verified"
+    hardware_verified = "hardware_verified"
+    not_applicable = "not_applicable"
+
+
+class ObjectiveCompatibilityStatus(str, Enum):
+    declared_compatible = "declared_compatible"
+    verified_compatible = "verified_compatible"
+    incompatible = "incompatible"
+    unverified = "unverified"
+    not_applicable = "not_applicable"
+
+
 class ModelSourceKind(str, Enum):
     """Where a model/tokenizer identity originated. A local snapshot may still carry a repository
     and revision, but network retrieval is never implied by this value."""

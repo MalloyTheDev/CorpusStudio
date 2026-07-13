@@ -1,0 +1,1160 @@
+{
+  "$defs": {
+    "AdapterMethod": {
+      "enum": [
+        "none",
+        "lora",
+        "qlora",
+        "dora",
+        "ia3",
+        "full_finetune",
+        "prompt_tuning",
+        "prefix_tuning"
+      ],
+      "title": "AdapterMethod",
+      "type": "string"
+    },
+    "LossImpl": {
+      "enum": [
+        "cross_entropy",
+        "liger_fused_ce",
+        "chunked_ce",
+        "dpo",
+        "orpo",
+        "kto",
+        "ipo",
+        "reward_bt"
+      ],
+      "title": "LossImpl",
+      "type": "string"
+    },
+    "ModelExecutionKind": {
+      "enum": [
+        "dense",
+        "sparse",
+        "mixture_of_experts",
+        "conditional",
+        "hybrid",
+        "unknown"
+      ],
+      "title": "ModelExecutionKind",
+      "type": "string"
+    },
+    "ModelTaskClass": {
+      "enum": [
+        "causal_lm",
+        "masked_lm",
+        "seq2seq_lm",
+        "classification",
+        "embedding",
+        "reranker",
+        "reward_model",
+        "vision",
+        "speech",
+        "multimodal",
+        "custom",
+        "unknown"
+      ],
+      "title": "ModelTaskClass",
+      "type": "string"
+    },
+    "ObjectiveArtifactExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "component_scoped": {
+          "default": false,
+          "title": "Component Scoped",
+          "type": "boolean"
+        },
+        "condition": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Condition"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ObjectiveArtifactKind"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "description"
+      ],
+      "title": "ObjectiveArtifactExpectation",
+      "type": "object"
+    },
+    "ObjectiveArtifactKind": {
+      "enum": [
+        "full_model",
+        "adapter",
+        "checkpoint",
+        "optimizer_state",
+        "scheduler_state",
+        "trainer_state",
+        "reward_model",
+        "embedding_model",
+        "reranker_model",
+        "classifier_model",
+        "multimodal_model",
+        "distillation_student",
+        "verifier_model",
+        "evaluation_result",
+        "merged_model",
+        "converted_model",
+        "quantized_model",
+        "routing_state",
+        "expert_shards",
+        "provenance_manifest"
+      ],
+      "title": "ObjectiveArtifactKind",
+      "type": "string"
+    },
+    "ObjectiveBackendRequirement": {
+      "additionalProperties": false,
+      "description": "Semantic backend requirements. Backend IDs never belong in an objective definition.\n\nA backend may match any listed loss, adaptation, and quantization mode; every listed objective\ncapability token is required. Static matches remain declarations until a capability report proves\nthe same objective tokens on the selected environment.",
+      "properties": {
+        "adaptation_methods": {
+          "items": {
+            "$ref": "#/$defs/AdapterMethod"
+          },
+          "title": "Adaptation Methods",
+          "type": "array"
+        },
+        "functional_probe_required": {
+          "default": true,
+          "title": "Functional Probe Required",
+          "type": "boolean"
+        },
+        "hardware_verification_required": {
+          "default": true,
+          "title": "Hardware Verification Required",
+          "type": "boolean"
+        },
+        "loss_impls": {
+          "items": {
+            "$ref": "#/$defs/LossImpl"
+          },
+          "title": "Loss Impls",
+          "type": "array"
+        },
+        "objective_capabilities": {
+          "items": {
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "type": "string"
+          },
+          "title": "Objective Capabilities",
+          "type": "array"
+        },
+        "quantization_modes": {
+          "items": {
+            "$ref": "#/$defs/QuantizationMode"
+          },
+          "title": "Quantization Modes",
+          "type": "array"
+        },
+        "task_type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ObjectiveBackendRequirement",
+      "type": "object"
+    },
+    "ObjectiveDatasetAvailability": {
+      "enum": [
+        "builtin",
+        "structural",
+        "planned"
+      ],
+      "title": "ObjectiveDatasetAvailability",
+      "type": "string"
+    },
+    "ObjectiveDatasetField": {
+      "additionalProperties": false,
+      "properties": {
+        "field_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Field Type"
+        },
+        "name": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "semantic_role": {
+          "minLength": 1,
+          "title": "Semantic Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "semantic_role"
+      ],
+      "title": "ObjectiveDatasetField",
+      "type": "object"
+    },
+    "ObjectiveDatasetInput": {
+      "additionalProperties": false,
+      "properties": {
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "role": {
+          "enum": [
+            "train",
+            "validation",
+            "teacher",
+            "preference",
+            "evaluation"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "row_validation_required": {
+          "default": true,
+          "title": "Row Validation Required",
+          "type": "boolean"
+        },
+        "split_isolation_required": {
+          "default": true,
+          "title": "Split Isolation Required",
+          "type": "boolean"
+        },
+        "variants": {
+          "items": {
+            "$ref": "#/$defs/ObjectiveDatasetVariant"
+          },
+          "minItems": 1,
+          "title": "Variants",
+          "type": "array"
+        }
+      },
+      "required": [
+        "role",
+        "variants"
+      ],
+      "title": "ObjectiveDatasetInput",
+      "type": "object"
+    },
+    "ObjectiveDatasetVariant": {
+      "additionalProperties": false,
+      "description": "One accepted dataset shape. ``planned`` means the shape is specified but CorpusStudio does\nnot yet ship a matching built-in schema; registry presence never turns that into support.",
+      "properties": {
+        "availability": {
+          "$ref": "#/$defs/ObjectiveDatasetAvailability"
+        },
+        "dataset_format": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dataset Format"
+        },
+        "required_fields": {
+          "items": {
+            "$ref": "#/$defs/ObjectiveDatasetField"
+          },
+          "minItems": 1,
+          "title": "Required Fields",
+          "type": "array"
+        },
+        "schema_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Schema Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Schema Version"
+        }
+      },
+      "required": [
+        "schema_id",
+        "availability",
+        "required_fields"
+      ],
+      "title": "ObjectiveDatasetVariant",
+      "type": "object"
+    },
+    "ObjectiveEvaluationRequirements": {
+      "additionalProperties": false,
+      "properties": {
+        "after_run": {
+          "default": true,
+          "title": "After Run",
+          "type": "boolean"
+        },
+        "before_run": {
+          "default": false,
+          "title": "Before Run",
+          "type": "boolean"
+        },
+        "during_run": {
+          "default": false,
+          "title": "During Run",
+          "type": "boolean"
+        },
+        "expert_system_metrics": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Expert System Metrics",
+          "type": "array"
+        },
+        "gate_required": {
+          "default": true,
+          "title": "Gate Required",
+          "type": "boolean"
+        },
+        "holdout_required": {
+          "default": true,
+          "title": "Holdout Required",
+          "type": "boolean"
+        },
+        "metrics": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Metrics",
+          "type": "array"
+        }
+      },
+      "title": "ObjectiveEvaluationRequirements",
+      "type": "object"
+    },
+    "ObjectiveExecutionKind": {
+      "enum": [
+        "training",
+        "evaluation",
+        "artifact_operation"
+      ],
+      "title": "ObjectiveExecutionKind",
+      "type": "string"
+    },
+    "ObjectiveExposureTracking": {
+      "enum": [
+        "none",
+        "per_component",
+        "per_expert",
+        "router_and_expert",
+        "backend_defined"
+      ],
+      "title": "ObjectiveExposureTracking",
+      "type": "string"
+    },
+    "ObjectiveHardwareImplications": {
+      "additionalProperties": false,
+      "properties": {
+        "communication": {
+          "default": "unknown",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "unknown"
+          ],
+          "title": "Communication",
+          "type": "string"
+        },
+        "compute": {
+          "default": "unknown",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "unknown"
+          ],
+          "title": "Compute",
+          "type": "string"
+        },
+        "device_memory": {
+          "default": "unknown",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "unknown"
+          ],
+          "title": "Device Memory",
+          "type": "string"
+        },
+        "fit_claim": {
+          "const": "none",
+          "default": "none",
+          "title": "Fit Claim",
+          "type": "string"
+        },
+        "host_memory": {
+          "default": "unknown",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "unknown"
+          ],
+          "title": "Host Memory",
+          "type": "string"
+        },
+        "implications": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Implications",
+          "type": "array"
+        },
+        "storage_io": {
+          "default": "unknown",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "unknown"
+          ],
+          "title": "Storage Io",
+          "type": "string"
+        }
+      },
+      "title": "ObjectiveHardwareImplications",
+      "type": "object"
+    },
+    "ObjectiveKind": {
+      "description": "The semantic family of a training objective.\n\nConcrete registry entries remain more specific than this coarse family. For example, LoRA and\nQLoRA are distinct entries with different adaptation and hardware requirements while both are\nsupervised-fine-tuning objectives.",
+      "enum": [
+        "pretraining",
+        "supervised_fine_tuning",
+        "preference_optimization",
+        "reward_modeling",
+        "distillation",
+        "process_supervision",
+        "verifier_training",
+        "tool_use",
+        "embedding",
+        "reranking",
+        "classification",
+        "multimodal",
+        "evaluation",
+        "merge",
+        "conversion",
+        "quantization"
+      ],
+      "title": "ObjectiveKind",
+      "type": "string"
+    },
+    "ObjectiveLabelConstruction": {
+      "additionalProperties": false,
+      "properties": {
+        "construction": {
+          "minLength": 1,
+          "title": "Construction",
+          "type": "string"
+        },
+        "ignore_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ignore Index"
+        },
+        "kind": {
+          "$ref": "#/$defs/ObjectiveLabelKind"
+        },
+        "label_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Label Id",
+          "type": "string"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "source_fields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Fields",
+          "type": "array"
+        }
+      },
+      "required": [
+        "label_id",
+        "kind",
+        "construction"
+      ],
+      "title": "ObjectiveLabelConstruction",
+      "type": "object"
+    },
+    "ObjectiveLabelKind": {
+      "enum": [
+        "next_token",
+        "completion_tokens",
+        "response_tokens",
+        "preference_pair",
+        "scalar_reward",
+        "class_id",
+        "contrastive_pair",
+        "teacher_distribution",
+        "teacher_sequence",
+        "trace_step",
+        "verifier_target",
+        "multimodal_target",
+        "none"
+      ],
+      "title": "ObjectiveLabelKind",
+      "type": "string"
+    },
+    "ObjectiveLossComponent": {
+      "additionalProperties": false,
+      "properties": {
+        "component_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Component Id",
+          "type": "string"
+        },
+        "construction": {
+          "minLength": 1,
+          "title": "Construction",
+          "type": "string"
+        },
+        "default_weight": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1.0,
+          "title": "Default Weight"
+        },
+        "kind": {
+          "$ref": "#/$defs/ObjectiveLossComponentKind"
+        },
+        "label_ref": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label Ref"
+        },
+        "mask_ref": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mask Ref"
+        },
+        "reduction": {
+          "default": "mean",
+          "enum": [
+            "mean",
+            "sum",
+            "token_mean",
+            "pair_mean",
+            "none"
+          ],
+          "title": "Reduction",
+          "type": "string"
+        }
+      },
+      "required": [
+        "component_id",
+        "kind",
+        "construction"
+      ],
+      "title": "ObjectiveLossComponent",
+      "type": "object"
+    },
+    "ObjectiveLossComponentKind": {
+      "enum": [
+        "cross_entropy",
+        "preference",
+        "odds_ratio",
+        "reward_pairwise",
+        "classification",
+        "contrastive",
+        "ranking",
+        "knowledge_distillation",
+        "sequence_distillation",
+        "logit_distillation",
+        "rationale_distillation",
+        "process_supervision",
+        "verifier",
+        "router_auxiliary",
+        "load_balancing",
+        "router_z_loss",
+        "entropy",
+        "overflow",
+        "specialization",
+        "none"
+      ],
+      "title": "ObjectiveLossComponentKind",
+      "type": "string"
+    },
+    "ObjectiveLossMask": {
+      "additionalProperties": false,
+      "properties": {
+        "construction": {
+          "minLength": 1,
+          "title": "Construction",
+          "type": "string"
+        },
+        "empty_mask_action": {
+          "default": "reject",
+          "enum": [
+            "reject",
+            "skip",
+            "zero_loss",
+            "not_applicable"
+          ],
+          "title": "Empty Mask Action",
+          "type": "string"
+        },
+        "include_padding": {
+          "default": false,
+          "title": "Include Padding",
+          "type": "boolean"
+        },
+        "include_special_tokens": {
+          "default": false,
+          "title": "Include Special Tokens",
+          "type": "boolean"
+        },
+        "kind": {
+          "$ref": "#/$defs/ObjectiveLossMaskKind"
+        },
+        "mask_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Mask Id",
+          "type": "string"
+        },
+        "source_fields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Fields",
+          "type": "array"
+        }
+      },
+      "required": [
+        "mask_id",
+        "kind",
+        "construction"
+      ],
+      "title": "ObjectiveLossMask",
+      "type": "object"
+    },
+    "ObjectiveLossMaskKind": {
+      "enum": [
+        "all_non_padding",
+        "completion_only",
+        "response_only",
+        "chosen_rejected",
+        "labeled_positions",
+        "trace_steps",
+        "multimodal_target",
+        "none",
+        "custom"
+      ],
+      "title": "ObjectiveLossMaskKind",
+      "type": "string"
+    },
+    "ObjectiveModelRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "custom_code_policy": {
+          "default": "isolated_approval",
+          "enum": [
+            "forbid",
+            "isolated_approval",
+            "backend_defined"
+          ],
+          "title": "Custom Code Policy",
+          "type": "string"
+        },
+        "execution_kinds": {
+          "items": {
+            "$ref": "#/$defs/ModelExecutionKind"
+          },
+          "minItems": 1,
+          "title": "Execution Kinds",
+          "type": "array"
+        },
+        "requires_multimodal_projector": {
+          "default": false,
+          "title": "Requires Multimodal Projector",
+          "type": "boolean"
+        },
+        "requires_output_head": {
+          "default": true,
+          "title": "Requires Output Head",
+          "type": "boolean"
+        },
+        "requires_reference_model": {
+          "default": false,
+          "title": "Requires Reference Model",
+          "type": "boolean"
+        },
+        "requires_reward_head": {
+          "default": false,
+          "title": "Requires Reward Head",
+          "type": "boolean"
+        },
+        "requires_tokenizer": {
+          "default": true,
+          "title": "Requires Tokenizer",
+          "type": "boolean"
+        },
+        "task_classes": {
+          "items": {
+            "$ref": "#/$defs/ModelTaskClass"
+          },
+          "minItems": 1,
+          "title": "Task Classes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "task_classes",
+        "execution_kinds"
+      ],
+      "title": "ObjectiveModelRequirement",
+      "type": "object"
+    },
+    "ObjectiveOptimizerClock": {
+      "enum": [
+        "none",
+        "global",
+        "per_component",
+        "per_expert",
+        "backend_defined"
+      ],
+      "title": "ObjectiveOptimizerClock",
+      "type": "string"
+    },
+    "ObjectiveResumeMode": {
+      "enum": [
+        "exact",
+        "fork_only",
+        "restart_only",
+        "not_applicable"
+      ],
+      "title": "ObjectiveResumeMode",
+      "type": "string"
+    },
+    "ObjectiveResumeSemantics": {
+      "additionalProperties": false,
+      "properties": {
+        "component_scoped_resume": {
+          "default": false,
+          "title": "Component Scoped Resume",
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/$defs/ObjectiveResumeMode"
+        },
+        "non_exact_resume_creates_lineage": {
+          "default": true,
+          "title": "Non Exact Resume Creates Lineage",
+          "type": "boolean"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "required_state": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required State",
+          "type": "array"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "ObjectiveResumeSemantics",
+      "type": "object"
+    },
+    "ObjectiveSelectionMode": {
+      "enum": [
+        "all",
+        "adapter_only",
+        "router_only",
+        "selected_experts",
+        "routed_experts",
+        "task_head_only",
+        "none",
+        "backend_defined"
+      ],
+      "title": "ObjectiveSelectionMode",
+      "type": "string"
+    },
+    "ObjectiveUpdatePolicy": {
+      "additionalProperties": false,
+      "description": "What may change, separate from where those components are physically resident.\n\nThis is the MoE-safe semantic update policy. Placement, prefetch, and device scheduling remain\nfuture RunPlan responsibilities.",
+      "properties": {
+        "exposure_tracking": {
+          "$ref": "#/$defs/ObjectiveExposureTracking"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "optimizer_clock": {
+          "$ref": "#/$defs/ObjectiveOptimizerClock"
+        },
+        "routing_collapse_gate_required_when_routed": {
+          "default": false,
+          "title": "Routing Collapse Gate Required When Routed",
+          "type": "boolean"
+        },
+        "scopes": {
+          "items": {
+            "$ref": "#/$defs/ObjectiveUpdateScope"
+          },
+          "minItems": 1,
+          "title": "Scopes",
+          "type": "array"
+        },
+        "selection_mode": {
+          "$ref": "#/$defs/ObjectiveSelectionMode"
+        },
+        "stable_expert_identity": {
+          "enum": [
+            "not_required",
+            "when_expert_scoped",
+            "required"
+          ],
+          "title": "Stable Expert Identity",
+          "type": "string"
+        },
+        "starvation_gate_required_when_expert_scoped": {
+          "default": false,
+          "title": "Starvation Gate Required When Expert Scoped",
+          "type": "boolean"
+        },
+        "update_window_definition": {
+          "minLength": 1,
+          "title": "Update Window Definition",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scopes",
+        "selection_mode",
+        "stable_expert_identity",
+        "exposure_tracking",
+        "optimizer_clock",
+        "update_window_definition"
+      ],
+      "title": "ObjectiveUpdatePolicy",
+      "type": "object"
+    },
+    "ObjectiveUpdateScope": {
+      "enum": [
+        "all_parameters",
+        "shared_parameters",
+        "embeddings",
+        "output_head",
+        "adapters",
+        "router",
+        "selected_experts",
+        "all_experts",
+        "projector",
+        "task_head",
+        "none"
+      ],
+      "title": "ObjectiveUpdateScope",
+      "type": "string"
+    },
+    "ObjectiveVerification": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "$ref": "#/$defs/ObjectiveVerificationStatus",
+          "default": "declared"
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "hardware": {
+          "$ref": "#/$defs/ObjectiveVerificationStatus",
+          "default": "not_verified"
+        },
+        "implementation": {
+          "$ref": "#/$defs/ObjectiveVerificationStatus",
+          "default": "not_verified"
+        }
+      },
+      "title": "ObjectiveVerification",
+      "type": "object"
+    },
+    "ObjectiveVerificationStatus": {
+      "enum": [
+        "not_verified",
+        "declared",
+        "contract_validated",
+        "functional_verified",
+        "hardware_verified",
+        "not_applicable"
+      ],
+      "title": "ObjectiveVerificationStatus",
+      "type": "string"
+    },
+    "QuantizationMode": {
+      "enum": [
+        "none",
+        "int8",
+        "int4",
+        "nf4",
+        "fp4",
+        "gptq",
+        "awq",
+        "hqq"
+      ],
+      "title": "QuantizationMode",
+      "type": "string"
+    },
+    "TaskType": {
+      "enum": [
+        "sft",
+        "pretraining",
+        "preference",
+        "reward",
+        "classification",
+        "embedding",
+        "multimodal",
+        "evaluation",
+        "distillation",
+        "grpo"
+      ],
+      "title": "TaskType",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A versioned semantic objective, deliberately independent from trainer implementation.\n\nThe objective hash seals the canonical definition. Registry helpers verify it; deserializing an\narbitrary contract alone does not imply that its hash or execution claims are trusted.",
+  "properties": {
+    "adaptation_methods": {
+      "items": {
+        "$ref": "#/$defs/AdapterMethod"
+      },
+      "title": "Adaptation Methods",
+      "type": "array"
+    },
+    "backend_requirement": {
+      "$ref": "#/$defs/ObjectiveBackendRequirement"
+    },
+    "coarse_task_type": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TaskType"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "dataset_inputs": {
+      "items": {
+        "$ref": "#/$defs/ObjectiveDatasetInput"
+      },
+      "title": "Dataset Inputs",
+      "type": "array"
+    },
+    "description": {
+      "minLength": 1,
+      "title": "Description",
+      "type": "string"
+    },
+    "display_name": {
+      "minLength": 1,
+      "title": "Display Name",
+      "type": "string"
+    },
+    "evaluation": {
+      "$ref": "#/$defs/ObjectiveEvaluationRequirements"
+    },
+    "execution_kind": {
+      "$ref": "#/$defs/ObjectiveExecutionKind"
+    },
+    "expected_artifacts": {
+      "items": {
+        "$ref": "#/$defs/ObjectiveArtifactExpectation"
+      },
+      "title": "Expected Artifacts",
+      "type": "array"
+    },
+    "hardware": {
+      "$ref": "#/$defs/ObjectiveHardwareImplications"
+    },
+    "kind": {
+      "$ref": "#/$defs/ObjectiveKind"
+    },
+    "labels": {
+      "items": {
+        "$ref": "#/$defs/ObjectiveLabelConstruction"
+      },
+      "title": "Labels",
+      "type": "array"
+    },
+    "limitations": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Limitations",
+      "type": "array"
+    },
+    "loss_components": {
+      "items": {
+        "$ref": "#/$defs/ObjectiveLossComponent"
+      },
+      "title": "Loss Components",
+      "type": "array"
+    },
+    "loss_masks": {
+      "items": {
+        "$ref": "#/$defs/ObjectiveLossMask"
+      },
+      "title": "Loss Masks",
+      "type": "array"
+    },
+    "model_requirement": {
+      "$ref": "#/$defs/ObjectiveModelRequirement"
+    },
+    "objective_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Objective Hash",
+      "type": "string"
+    },
+    "objective_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Objective Id",
+      "type": "string"
+    },
+    "objective_version": {
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "title": "Objective Version",
+      "type": "string"
+    },
+    "resume": {
+      "$ref": "#/$defs/ObjectiveResumeSemantics"
+    },
+    "update_policy": {
+      "$ref": "#/$defs/ObjectiveUpdatePolicy"
+    },
+    "verification": {
+      "$ref": "#/$defs/ObjectiveVerification"
+    }
+  },
+  "required": [
+    "objective_id",
+    "objective_version",
+    "objective_hash",
+    "display_name",
+    "description",
+    "kind",
+    "execution_kind",
+    "model_requirement",
+    "update_policy",
+    "backend_requirement",
+    "resume",
+    "evaluation",
+    "hardware"
+  ],
+  "title": "TrainingObjective",
+  "type": "object"
+}

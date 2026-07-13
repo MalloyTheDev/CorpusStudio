@@ -10,7 +10,7 @@ language-neutral JSON Schemas the Rust core / Avalonia / Tauri consume are gener
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
 
@@ -52,6 +52,20 @@ from .enums import (
     OffloadStrategy,
     OperatingSystem,
     Optimizer,
+    ObjectiveArtifactKind,
+    ObjectiveCompatibilityStatus,
+    ObjectiveDatasetAvailability,
+    ObjectiveExecutionKind,
+    ObjectiveExposureTracking,
+    ObjectiveKind,
+    ObjectiveLabelKind,
+    ObjectiveLossComponentKind,
+    ObjectiveLossMaskKind,
+    ObjectiveOptimizerClock,
+    ObjectiveResumeMode,
+    ObjectiveSelectionMode,
+    ObjectiveUpdateScope,
+    ObjectiveVerificationStatus,
     ParameterCountKind,
     PositionalEncoding,
     PrecisionMode,
@@ -72,6 +86,7 @@ _RELATIVE_DESCRIPTOR_PATH = (
     r"^(?:[^/\\:.][^/\\:]*|\.[^./\\:][^/\\:]*)"
     r"(?:/(?:[^/\\:.][^/\\:]*|\.[^./\\:][^/\\:]*))*$"
 )
+ObjectiveCapability = Annotated[str, Field(pattern=_ID)]
 
 
 def _validate_descriptor_path(value: str) -> str:
@@ -757,6 +772,445 @@ class TokenizerDescriptor(ContractModel):
 
 
 # --------------------------------------------------------------------------------------------------
+# TrainingObjective / ObjectiveCompatibilityReport - objective semantics, independent of a backend.
+# --------------------------------------------------------------------------------------------------
+class ObjectiveDatasetField(ContractModel):
+    name: str = Field(pattern=_ID)
+    field_type: str | None = None
+    semantic_role: str = Field(min_length=1)
+
+
+class ObjectiveDatasetVariant(ContractModel):
+    """One accepted dataset shape. ``planned`` means the shape is specified but CorpusStudio does
+    not yet ship a matching built-in schema; registry presence never turns that into support."""
+
+    schema_id: str = Field(pattern=_ID)
+    availability: ObjectiveDatasetAvailability
+    schema_version: str | None = None
+    dataset_format: str | None = None
+    required_fields: list[ObjectiveDatasetField] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _validate_fields(self) -> ObjectiveDatasetVariant:
+        names = [item.name for item in self.required_fields]
+        if names != sorted(names) or len(names) != len(set(names)):
+            raise ValueError("objective dataset fields must be sorted by unique name")
+        return self
+
+
+class ObjectiveDatasetInput(ContractModel):
+    role: Literal["train", "validation", "teacher", "preference", "evaluation"]
+    variants: list[ObjectiveDatasetVariant] = Field(min_length=1)
+    row_validation_required: bool = True
+    split_isolation_required: bool = True
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_variants(self) -> ObjectiveDatasetInput:
+        keys = [(item.schema_id, item.schema_version or "") for item in self.variants]
+        if keys != sorted(keys) or len(keys) != len(set(keys)):
+            raise ValueError("objective dataset variants must be sorted and unique")
+        if self.notes != sorted(set(self.notes)):
+            raise ValueError("objective dataset notes must be sorted and unique")
+        return self
+
+
+class ObjectiveLabelConstruction(ContractModel):
+    label_id: str = Field(pattern=_ID)
+    kind: ObjectiveLabelKind
+    source_fields: list[str] = Field(default_factory=list)
+    construction: str = Field(min_length=1)
+    ignore_index: int | None = None
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_label(self) -> ObjectiveLabelConstruction:
+        if self.source_fields != sorted(set(self.source_fields)):
+            raise ValueError("label source_fields must be sorted and unique")
+        if self.notes != sorted(set(self.notes)):
+            raise ValueError("label notes must be sorted and unique")
+        return self
+
+
+class ObjectiveLossMask(ContractModel):
+    mask_id: str = Field(pattern=_ID)
+    kind: ObjectiveLossMaskKind
+    source_fields: list[str] = Field(default_factory=list)
+    include_padding: bool = False
+    include_special_tokens: bool = False
+    empty_mask_action: Literal["reject", "skip", "zero_loss", "not_applicable"] = "reject"
+    construction: str = Field(min_length=1)
+
+    @field_validator("source_fields")
+    @classmethod
+    def _sorted_mask_fields(cls, values: list[str]) -> list[str]:
+        if values != sorted(set(values)):
+            raise ValueError("loss-mask source_fields must be sorted and unique")
+        return values
+
+
+class ObjectiveLossComponent(ContractModel):
+    component_id: str = Field(pattern=_ID)
+    kind: ObjectiveLossComponentKind
+    construction: str = Field(min_length=1)
+    label_ref: str | None = Field(default=None, pattern=_ID)
+    mask_ref: str | None = Field(default=None, pattern=_ID)
+    default_weight: float | None = Field(default=1.0, ge=0)
+    reduction: Literal["mean", "sum", "token_mean", "pair_mean", "none"] = "mean"
+
+
+class ObjectiveModelRequirement(ContractModel):
+    task_classes: list[ModelTaskClass] = Field(min_length=1)
+    execution_kinds: list[ModelExecutionKind] = Field(min_length=1)
+    requires_tokenizer: bool = True
+    requires_output_head: bool = True
+    requires_reference_model: bool = False
+    requires_reward_head: bool = False
+    requires_multimodal_projector: bool = False
+    custom_code_policy: Literal["forbid", "isolated_approval", "backend_defined"] = (
+        "isolated_approval"
+    )
+
+    @model_validator(mode="after")
+    def _validate_model_requirements(self) -> ObjectiveModelRequirement:
+        task_values = [item.value for item in self.task_classes]
+        if task_values != sorted(set(task_values)):
+            raise ValueError("objective model task_classes must be sorted and unique")
+        execution_values = [item.value for item in self.execution_kinds]
+        if execution_values != sorted(set(execution_values)):
+            raise ValueError("objective model execution_kinds must be sorted and unique")
+        if ModelExecutionKind.unknown in self.execution_kinds:
+            raise ValueError("unknown is an evidence gap, not an accepted execution kind")
+        return self
+
+
+class ObjectiveUpdatePolicy(ContractModel):
+    """What may change, separate from where those components are physically resident.
+
+    This is the MoE-safe semantic update policy. Placement, prefetch, and device scheduling remain
+    future RunPlan responsibilities.
+    """
+
+    scopes: list[ObjectiveUpdateScope] = Field(min_length=1)
+    selection_mode: ObjectiveSelectionMode
+    stable_expert_identity: Literal["not_required", "when_expert_scoped", "required"]
+    exposure_tracking: ObjectiveExposureTracking
+    optimizer_clock: ObjectiveOptimizerClock
+    update_window_definition: str = Field(min_length=1)
+    starvation_gate_required_when_expert_scoped: bool = False
+    routing_collapse_gate_required_when_routed: bool = False
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_sparse_update_policy(self) -> ObjectiveUpdatePolicy:
+        values = [item.value for item in self.scopes]
+        if values != sorted(set(values)):
+            raise ValueError("objective update scopes must be sorted and unique")
+        scopes = set(self.scopes)
+        expert_scopes = {ObjectiveUpdateScope.selected_experts, ObjectiveUpdateScope.all_experts}
+        if self.selection_mode == ObjectiveSelectionMode.none:
+            if scopes != {ObjectiveUpdateScope.none}:
+                raise ValueError("selection_mode none requires the none update scope")
+        else:
+            if ObjectiveUpdateScope.none in scopes:
+                raise ValueError("none cannot be combined with trainable update scopes")
+            if self.selection_mode == ObjectiveSelectionMode.adapter_only and scopes != {
+                ObjectiveUpdateScope.adapters
+            }:
+                raise ValueError("adapter_only requires exactly the adapters scope")
+            if self.selection_mode == ObjectiveSelectionMode.router_only and scopes != {
+                ObjectiveUpdateScope.router
+            }:
+                raise ValueError("router_only requires exactly the router scope")
+            if self.selection_mode in {
+                ObjectiveSelectionMode.selected_experts,
+                ObjectiveSelectionMode.routed_experts,
+            } and scopes != {ObjectiveUpdateScope.selected_experts}:
+                raise ValueError("expert selection requires exactly the selected_experts scope")
+            if self.selection_mode == ObjectiveSelectionMode.task_head_only and (
+                ObjectiveUpdateScope.task_head not in scopes
+                or not scopes.issubset(
+                    {ObjectiveUpdateScope.task_head, ObjectiveUpdateScope.projector}
+                )
+            ):
+                raise ValueError("task_head_only allows only task_head and optional projector scopes")
+            if (
+                self.selection_mode == ObjectiveSelectionMode.all
+                and ObjectiveUpdateScope.all_parameters in scopes
+                and scopes != {ObjectiveUpdateScope.all_parameters}
+            ):
+                raise ValueError("all_parameters cannot be combined with narrower update scopes")
+        if scopes.intersection(expert_scopes):
+            if self.stable_expert_identity == "not_required":
+                raise ValueError("expert-scoped updates require stable expert identity")
+            if self.exposure_tracking not in {
+                ObjectiveExposureTracking.per_expert,
+                ObjectiveExposureTracking.router_and_expert,
+            }:
+                raise ValueError("expert-scoped updates require per-expert exposure tracking")
+            if self.optimizer_clock != ObjectiveOptimizerClock.per_expert:
+                raise ValueError("expert-scoped updates require per-expert optimizer clocks")
+        if self.notes != sorted(set(self.notes)):
+            raise ValueError("objective update notes must be sorted and unique")
+        return self
+
+
+class ObjectiveBackendRequirement(ContractModel):
+    """Semantic backend requirements. Backend IDs never belong in an objective definition.
+
+    A backend may match any listed loss, adaptation, and quantization mode; every listed objective
+    capability token is required. Static matches remain declarations until a capability report proves
+    the same objective tokens on the selected environment.
+    """
+
+    task_type: TaskType | None = None
+    loss_impls: list[LossImpl] = Field(default_factory=list)
+    adaptation_methods: list[AdapterMethod] = Field(default_factory=list)
+    quantization_modes: list[QuantizationMode] = Field(default_factory=list)
+    objective_capabilities: list[ObjectiveCapability] = Field(default_factory=list)
+    functional_probe_required: bool = True
+    hardware_verification_required: bool = True
+
+    @model_validator(mode="after")
+    def _validate_backend_requirements(self) -> ObjectiveBackendRequirement:
+        for field_name in ("loss_impls", "adaptation_methods", "quantization_modes"):
+            items = getattr(self, field_name)
+            values = [item.value for item in items]
+            if values != sorted(set(values)):
+                raise ValueError(f"{field_name} must be sorted and unique")
+        if self.objective_capabilities != sorted(set(self.objective_capabilities)):
+            raise ValueError("objective_capabilities must be sorted and unique")
+        return self
+
+
+class ObjectiveArtifactExpectation(ContractModel):
+    kind: ObjectiveArtifactKind
+    required: bool = True
+    component_scoped: bool = False
+    condition: str | None = None
+    description: str = Field(min_length=1)
+
+
+class ObjectiveResumeSemantics(ContractModel):
+    mode: ObjectiveResumeMode
+    required_state: list[str] = Field(default_factory=list)
+    component_scoped_resume: bool = False
+    non_exact_resume_creates_lineage: bool = True
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_resume(self) -> ObjectiveResumeSemantics:
+        if self.required_state != sorted(set(self.required_state)):
+            raise ValueError("resume required_state must be sorted and unique")
+        if self.notes != sorted(set(self.notes)):
+            raise ValueError("resume notes must be sorted and unique")
+        if self.mode == ObjectiveResumeMode.not_applicable and self.required_state:
+            raise ValueError("not-applicable resume cannot require state")
+        return self
+
+
+class ObjectiveEvaluationRequirements(ContractModel):
+    before_run: bool = False
+    during_run: bool = False
+    after_run: bool = True
+    holdout_required: bool = True
+    gate_required: bool = True
+    metrics: list[str] = Field(default_factory=list)
+    expert_system_metrics: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_evaluation(self) -> ObjectiveEvaluationRequirements:
+        if self.metrics != sorted(set(self.metrics)):
+            raise ValueError("evaluation metrics must be sorted and unique")
+        if self.expert_system_metrics != sorted(set(self.expert_system_metrics)):
+            raise ValueError("expert-system metrics must be sorted and unique")
+        return self
+
+
+class ObjectiveHardwareImplications(ContractModel):
+    compute: Literal["none", "low", "medium", "high", "unknown"] = "unknown"
+    device_memory: Literal["none", "low", "medium", "high", "unknown"] = "unknown"
+    host_memory: Literal["none", "low", "medium", "high", "unknown"] = "unknown"
+    storage_io: Literal["none", "low", "medium", "high", "unknown"] = "unknown"
+    communication: Literal["none", "low", "medium", "high", "unknown"] = "unknown"
+    # Only a measured run may prove fit; an objective definition never makes that claim.
+    fit_claim: Literal["none"] = "none"
+    implications: list[str] = Field(default_factory=list)
+
+    @field_validator("implications")
+    @classmethod
+    def _sorted_implications(cls, values: list[str]) -> list[str]:
+        if values != sorted(set(values)):
+            raise ValueError("hardware implications must be sorted and unique")
+        return values
+
+
+class ObjectiveVerification(ContractModel):
+    definition: ObjectiveVerificationStatus = ObjectiveVerificationStatus.declared
+    implementation: ObjectiveVerificationStatus = ObjectiveVerificationStatus.not_verified
+    hardware: ObjectiveVerificationStatus = ObjectiveVerificationStatus.not_verified
+    evidence_refs: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_verification(self) -> ObjectiveVerification:
+        if self.evidence_refs != sorted(set(self.evidence_refs)):
+            raise ValueError("objective verification evidence_refs must be sorted and unique")
+        proven = {
+            ObjectiveVerificationStatus.functional_verified,
+            ObjectiveVerificationStatus.hardware_verified,
+        }
+        if (self.implementation in proven or self.hardware in proven) and not self.evidence_refs:
+            raise ValueError("verified objective claims require evidence_refs")
+        definition_proven = {
+            ObjectiveVerificationStatus.contract_validated,
+            ObjectiveVerificationStatus.functional_verified,
+            ObjectiveVerificationStatus.hardware_verified,
+        }
+        implementation_proven = {
+            ObjectiveVerificationStatus.functional_verified,
+            ObjectiveVerificationStatus.hardware_verified,
+        }
+        if self.implementation in implementation_proven and self.definition not in definition_proven:
+            raise ValueError("functional implementation proof requires a validated definition")
+        if (
+            self.hardware == ObjectiveVerificationStatus.hardware_verified
+            and self.implementation not in implementation_proven
+        ):
+            raise ValueError("hardware proof requires functionally verified implementation")
+        return self
+
+
+class TrainingObjective(ContractModel):
+    """A versioned semantic objective, deliberately independent from trainer implementation.
+
+    The objective hash seals the canonical definition. Registry helpers verify it; deserializing an
+    arbitrary contract alone does not imply that its hash or execution claims are trusted.
+    """
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    objective_id: str = Field(pattern=_ID)
+    objective_version: str = Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")
+    objective_hash: str = Field(pattern=SHA256_PATTERN)
+    display_name: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    kind: ObjectiveKind
+    execution_kind: ObjectiveExecutionKind
+    coarse_task_type: TaskType | None = None
+    dataset_inputs: list[ObjectiveDatasetInput] = Field(default_factory=list)
+    labels: list[ObjectiveLabelConstruction] = Field(default_factory=list)
+    loss_masks: list[ObjectiveLossMask] = Field(default_factory=list)
+    loss_components: list[ObjectiveLossComponent] = Field(default_factory=list)
+    model_requirement: ObjectiveModelRequirement
+    adaptation_methods: list[AdapterMethod] = Field(default_factory=list)
+    update_policy: ObjectiveUpdatePolicy
+    backend_requirement: ObjectiveBackendRequirement
+    expected_artifacts: list[ObjectiveArtifactExpectation] = Field(default_factory=list)
+    resume: ObjectiveResumeSemantics
+    evaluation: ObjectiveEvaluationRequirements
+    hardware: ObjectiveHardwareImplications
+    limitations: list[str] = Field(default_factory=list)
+    verification: ObjectiveVerification = Field(default_factory=ObjectiveVerification)
+
+    @model_validator(mode="after")
+    def _validate_objective(self) -> TrainingObjective:
+        input_roles = [item.role for item in self.dataset_inputs]
+        if input_roles != sorted(input_roles) or len(input_roles) != len(set(input_roles)):
+            raise ValueError("dataset_inputs must be sorted by unique role")
+        for field_name, id_attr in (
+            ("labels", "label_id"),
+            ("loss_masks", "mask_id"),
+            ("loss_components", "component_id"),
+        ):
+            items = getattr(self, field_name)
+            ids = [getattr(item, id_attr) for item in items]
+            if ids != sorted(ids) or len(ids) != len(set(ids)):
+                raise ValueError(f"{field_name} must be sorted by unique id")
+        label_ids = {item.label_id for item in self.labels}
+        mask_ids = {item.mask_id for item in self.loss_masks}
+        for component in self.loss_components:
+            if component.label_ref is not None and component.label_ref not in label_ids:
+                raise ValueError("loss component references an unknown label")
+            if component.mask_ref is not None and component.mask_ref not in mask_ids:
+                raise ValueError("loss component references an unknown mask")
+        adaptation_values = [item.value for item in self.adaptation_methods]
+        if adaptation_values != sorted(set(adaptation_values)):
+            raise ValueError("adaptation_methods must be sorted and unique")
+        artifact_values = [item.kind.value for item in self.expected_artifacts]
+        if artifact_values != sorted(set(artifact_values)):
+            raise ValueError("expected_artifacts must be sorted by unique kind")
+        if self.limitations != sorted(set(self.limitations)):
+            raise ValueError("objective limitations must be sorted and unique")
+        if self.execution_kind == ObjectiveExecutionKind.training:
+            if not self.loss_components or not self.labels:
+                raise ValueError("training objectives require label and loss construction")
+            if self.update_policy.selection_mode == ObjectiveSelectionMode.none:
+                raise ValueError("training objectives require a trainable update policy")
+        elif self.update_policy.selection_mode != ObjectiveSelectionMode.none:
+            raise ValueError("non-training objectives cannot declare trainable updates")
+        return self
+
+
+class ObjectiveCompatibilityAxis(ContractModel):
+    status: ObjectiveCompatibilityStatus
+    reasons: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_axis(self) -> ObjectiveCompatibilityAxis:
+        if self.reasons != sorted(set(self.reasons)):
+            raise ValueError("compatibility reasons must be sorted and unique")
+        if self.evidence != sorted(set(self.evidence)):
+            raise ValueError("compatibility evidence must be sorted and unique")
+        if self.status == ObjectiveCompatibilityStatus.incompatible and not self.reasons:
+            raise ValueError("incompatible axes require reasons")
+        if self.status in {
+            ObjectiveCompatibilityStatus.declared_compatible,
+            ObjectiveCompatibilityStatus.verified_compatible,
+        } and not self.evidence:
+            raise ValueError("compatible axes require evidence")
+        return self
+
+
+class ObjectiveCompatibilityReport(ContractModel):
+    """Independent compatibility axes. A static backend declaration can earn only
+    ``declared_compatible``; a matching functional capability report is required for verified
+    compatibility."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    objective_ref: Ref
+    objective_version: str = Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")
+    dataset_schema_id: str | None = None
+    dataset_schema_version: str | None = None
+    model_id: str | None = None
+    backend_id: str | None = None
+    capability_environment_ref: Ref | None = None
+    dataset: ObjectiveCompatibilityAxis
+    model: ObjectiveCompatibilityAxis
+    backend: ObjectiveCompatibilityAxis
+    overall_status: ObjectiveCompatibilityStatus
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_overall(self) -> ObjectiveCompatibilityReport:
+        statuses = {self.dataset.status, self.model.status, self.backend.status}
+        if statuses == {ObjectiveCompatibilityStatus.not_applicable}:
+            expected = ObjectiveCompatibilityStatus.not_applicable
+        elif ObjectiveCompatibilityStatus.incompatible in statuses:
+            expected = ObjectiveCompatibilityStatus.incompatible
+        elif ObjectiveCompatibilityStatus.unverified in statuses:
+            expected = ObjectiveCompatibilityStatus.unverified
+        elif ObjectiveCompatibilityStatus.declared_compatible in statuses:
+            expected = ObjectiveCompatibilityStatus.declared_compatible
+        else:
+            expected = ObjectiveCompatibilityStatus.verified_compatible
+        if self.overall_status != expected:
+            raise ValueError(f"overall_status must be {expected.value} for the axis statuses")
+        if self.notes != sorted(set(self.notes)):
+            raise ValueError("compatibility report notes must be sorted and unique")
+        return self
+
+
+# --------------------------------------------------------------------------------------------------
 # EnvironmentProfile — the hashable host + software signature. Formalizes + extends environment.py.
 # --------------------------------------------------------------------------------------------------
 class EnvHost(ContractModel):
@@ -964,6 +1418,9 @@ class BackendManifest(ContractModel):
     adapter_methods: list[AdapterMethod] = Field(default_factory=list)
     attention_impls: list[AttentionImpl] = Field(default_factory=list)
     loss_impls: list[LossImpl] = Field(default_factory=list)
+    # Semantic objective capabilities (for example causal_lm_sft or adapter_qlora). This is still a
+    # STATIC declaration; only the matching field in EffectiveCapabilities can prove it on a host.
+    objective_capabilities: list[ObjectiveCapability] = Field(default_factory=list)
     checkpoint_impls: list[CheckpointImpl] = Field(default_factory=list)
     optimizers: list[Optimizer] = Field(default_factory=list)
     offload_strategies: list[OffloadStrategy] = Field(default_factory=list)
@@ -977,6 +1434,13 @@ class BackendManifest(ContractModel):
     known_failure_modes: list[KnownFailureMode] = Field(default_factory=list)
     capability_probes: list[str] = Field(default_factory=list)
     telemetry_hooks: list[TelemetryHook] = Field(default_factory=list)
+
+    @field_validator("objective_capabilities")
+    @classmethod
+    def _sorted_objective_capabilities(cls, values: list[str]) -> list[str]:
+        if values != sorted(set(values)):
+            raise ValueError("objective_capabilities must be sorted and unique")
+        return values
 
 
 class ProbeResult(ContractModel):
@@ -994,6 +1458,14 @@ class EffectiveCapabilities(ContractModel):
     quantization_modes: list[QuantizationMode] = Field(default_factory=list)
     attention_impls: list[AttentionImpl] = Field(default_factory=list)
     adapter_methods: list[AdapterMethod] = Field(default_factory=list)
+    objective_capabilities: list[ObjectiveCapability] = Field(default_factory=list)
+
+    @field_validator("objective_capabilities")
+    @classmethod
+    def _sorted_effective_objective_capabilities(cls, values: list[str]) -> list[str]:
+        if values != sorted(set(values)):
+            raise ValueError("effective objective_capabilities must be sorted and unique")
+        return values
 
 
 class CapabilityReport(ContractModel):

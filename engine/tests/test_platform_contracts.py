@@ -36,11 +36,13 @@ def test_contract_version_is_pinned():
 
 
 def test_all_root_contracts_registered():
-    assert len(P.ROOT_CONTRACTS) == 23
+    assert len(P.ROOT_CONTRACTS) == 25
     assert "StorageProfile" in P.ROOT_CONTRACTS
     for expected in (
         "ModelDescriptor",
         "TokenizerDescriptor",
+        "TrainingObjective",
+        "ObjectiveCompatibilityReport",
         "PythonRuntime",
         "EnvironmentRecipe",
         "DependencyResolution",
@@ -260,11 +262,11 @@ def test_worker_protocol_version_pattern():
 
 def test_export_json_schemas_writes_language_neutral_files(tmp_path):
     written = P.export_json_schemas(tmp_path)
-    # 23 contract schemas + index.json
-    assert len(written) == 24
+    # 25 contract schemas + index.json
+    assert len(written) == 26
     index = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
     assert index["contract_version"] == "1.0.0"
-    assert len(index["contracts"]) == 23
+    assert len(index["contracts"]) == 25
     # every emitted schema is valid JSON with a proper object shape
     for name in P.ROOT_CONTRACTS:
         schema = json.loads((tmp_path / f"{name}.schema.json").read_text(encoding="utf-8"))
@@ -293,6 +295,15 @@ def test_export_json_schemas_writes_language_neutral_files(tmp_path):
     representation = model_schema["$defs"]["ParameterRepresentation"]["properties"]
     assert "counts" in representation
     assert "parameter_count" not in representation
+    # Objective schemas preserve independent loss components/masks and the no-fit-claim boundary.
+    objective_schema = P.contract_schemas()["TrainingObjective"]
+    objective_properties = objective_schema["properties"]
+    assert "loss_components" in objective_properties
+    assert "loss_masks" in objective_properties
+    fit_claim = objective_schema["$defs"]["ObjectiveHardwareImplications"]["properties"][
+        "fit_claim"
+    ]
+    assert fit_claim["const"] == "none"
 
 
 def test_export_json_schemas_is_byte_deterministic(tmp_path):

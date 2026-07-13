@@ -70,6 +70,7 @@ export type KnownFailureModes = KnownFailureMode[];
 export type LossImpl = "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt";
 export type LossImpls = LossImpl[];
 export type ModelFamilies = string[];
+export type ObjectiveCapabilities = string[];
 /**
  * The ``controlled_*`` values are the deliberate, planned counterparts of the accidental spills
  * in :class:`FitClass`.
@@ -179,6 +180,7 @@ export interface BackendManifest {
   known_failure_modes?: KnownFailureModes;
   loss_impls?: LossImpls;
   model_families?: ModelFamilies;
+  objective_capabilities?: ObjectiveCapabilities;
   offload_strategies?: OffloadStrategies;
   optimizers?: Optimizers;
   precision_modes?: PrecisionModes;
