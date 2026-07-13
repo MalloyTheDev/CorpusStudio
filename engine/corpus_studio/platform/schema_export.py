@@ -29,6 +29,7 @@ from .contracts import (
     FailureRecord,
     FitClassification,
     ModelDescriptor,
+    ObjectiveCompatibilityReport,
     ProjectManifest,
     PythonRuntime,
     RunEvent,
@@ -36,6 +37,7 @@ from .contracts import (
     RunPlan,
     StorageProfile,
     TokenizerDescriptor,
+    TrainingObjective,
     WorkerMessage,
 )
 
@@ -45,6 +47,8 @@ ROOT_CONTRACTS: dict[str, type[ContractModel]] = {
     "DatasetManifest": DatasetManifest,
     "ModelDescriptor": ModelDescriptor,
     "TokenizerDescriptor": TokenizerDescriptor,
+    "TrainingObjective": TrainingObjective,
+    "ObjectiveCompatibilityReport": ObjectiveCompatibilityReport,
     "EnvironmentProfile": EnvironmentProfile,
     "StorageProfile": StorageProfile,
     "PythonRuntime": PythonRuntime,

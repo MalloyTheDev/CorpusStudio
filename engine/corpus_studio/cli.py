@@ -833,6 +833,150 @@ def model_inspect(
         typer.echo(f"Wrote: {item}")
 
 
+@app.command("training-objectives")
+def training_objectives(
+    objective_id: Optional[str] = typer.Argument(
+        None, help="Optional objective id to show; omit to list the registry."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit full objective contracts as JSON."),
+):
+    """List or inspect versioned training objectives independently from backend support."""
+    from corpus_studio.platform.objectives import builtin_objectives, get_objective
+
+    if objective_id is not None:
+        objective = get_objective(objective_id)
+        if objective is None:
+            typer.echo(f"Unknown training objective: {objective_id}", err=True)
+            raise typer.Exit(2)
+        if json_out:
+            typer.echo(objective.model_dump_json(indent=2))
+            return
+        typer.echo(f"{objective.objective_id} v{objective.objective_version} - {objective.display_name}")
+        typer.echo(f"  kind: {objective.kind.value}")
+        typer.echo(f"  execution: {objective.execution_kind.value}")
+        typer.echo(f"  hash: {objective.objective_hash}")
+        typer.echo(f"  definition: {objective.verification.definition.value}")
+        typer.echo(f"  implementation: {objective.verification.implementation.value}")
+        return
+
+    objectives = builtin_objectives()
+    if json_out:
+        typer.echo(json.dumps([item.model_dump(mode="json") for item in objectives], indent=2))
+        return
+    for objective in objectives:
+        typer.echo(
+            f"{objective.objective_id}  [{objective.kind.value}]  - {objective.display_name}"
+        )
+
+
+@app.command("training-objective-check")
+def training_objective_check(
+    objective_id: str = typer.Argument(..., help="Objective id from training-objectives."),
+    schema_id: Optional[str] = typer.Option(
+        None, "--schema", help="Dataset schema id. Built-in fields are loaded automatically."
+    ),
+    schema_version: Optional[str] = typer.Option(
+        None,
+        "--schema-version",
+        help="Dataset schema version. Built-in versions are loaded automatically.",
+    ),
+    fields: Optional[str] = typer.Option(
+        None,
+        "--fields",
+        help="Override/provide declared fields as comma-separated name:type pairs.",
+    ),
+    model_descriptor: Optional[Path] = typer.Option(
+        None, "--model-descriptor", help="ModelDescriptor JSON to check."
+    ),
+    backend_id: Optional[str] = typer.Option(
+        None, "--backend", help="Registered backend manifest id to check."
+    ),
+    capability_report: Optional[Path] = typer.Option(
+        None, "--capability-report", help="CapabilityReport JSON for functional evidence."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit the full compatibility report."),
+):
+    """Check objective dataset, model, and backend evidence without predicting hardware fit."""
+    from corpus_studio.platform.backends import get_backend
+    from corpus_studio.platform.contracts import CapabilityReport, ModelDescriptor
+    from corpus_studio.platform.objectives import (
+        check_objective_compatibility,
+        get_objective,
+    )
+
+    objective = get_objective(objective_id)
+    if objective is None:
+        typer.echo(f"Unknown training objective: {objective_id}", err=True)
+        raise typer.Exit(2)
+
+    declared_fields: dict[str, str] | None = None
+    resolved_schema_version = schema_version
+    builtin_schema = None
+    if schema_id is not None:
+        try:
+            builtin_schema = load_builtin_schema(schema_id)
+        except ValueError:
+            pass
+        else:
+            if resolved_schema_version is None:
+                resolved_schema_version = builtin_schema.version
+
+    if fields is not None:
+        declared_fields = {}
+        try:
+            for item in fields.split(","):
+                name, field_type = (part.strip() for part in item.split(":", 1))
+                if not name or not field_type or name in declared_fields:
+                    raise ValueError
+                declared_fields[name] = field_type
+        except ValueError:
+            typer.echo("--fields must be unique comma-separated name:type pairs", err=True)
+            raise typer.Exit(2)
+    elif builtin_schema is not None:
+        declared_fields = {item.name: item.type for item in builtin_schema.fields}
+
+    try:
+        model = (
+            ModelDescriptor.model_validate_json(model_descriptor.read_text(encoding="utf-8"))
+            if model_descriptor is not None
+            else None
+        )
+        report = (
+            CapabilityReport.model_validate_json(capability_report.read_text(encoding="utf-8"))
+            if capability_report is not None
+            else None
+        )
+    except (OSError, ValidationError) as exc:
+        typer.echo(f"Invalid compatibility evidence: {exc}", err=True)
+        raise typer.Exit(2)
+
+    selected_backend_id = backend_id or (report.backend_id if report is not None else None)
+    backend = get_backend(selected_backend_id) if selected_backend_id is not None else None
+    if selected_backend_id is not None and backend is None:
+        typer.echo(f"Unknown training backend: {selected_backend_id}", err=True)
+        raise typer.Exit(2)
+
+    result = check_objective_compatibility(
+        objective,
+        dataset_schema_id=schema_id,
+        dataset_schema_version=resolved_schema_version,
+        dataset_fields=declared_fields,
+        model_descriptor=model,
+        backend_manifest=backend,
+        capability_report=report,
+    )
+    if json_out:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+    typer.echo(f"Objective: {objective.objective_id} v{objective.objective_version}")
+    typer.echo(f"Dataset: {result.dataset.status.value}")
+    typer.echo(f"Model: {result.model.status.value}")
+    typer.echo(f"Backend: {result.backend.status.value}")
+    typer.echo(f"Overall: {result.overall_status.value}")
+    for reason in sorted(result.dataset.reasons + result.model.reasons + result.backend.reasons):
+        typer.echo(f"Reason: {reason}")
+
+
 @app.command("env-recipes")
 def env_recipes(
     layer: Optional[str] = typer.Option(

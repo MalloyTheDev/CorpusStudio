@@ -15,6 +15,7 @@ export type AdapterMethods = AdapterMethod[];
 export type AttentionImpl =
   "math" | "eager" | "sdpa" | "flash_attention_2" | "flash_attention_3" | "mem_efficient" | "xformers";
 export type AttentionImpls = AttentionImpl[];
+export type ObjectiveCapabilities = string[];
 export type PrecisionMode = "fp32" | "tf32" | "fp16" | "bf16" | "fp8" | "mixed_bf16" | "mixed_fp16";
 export type PrecisionModes = PrecisionMode[];
 export type QuantizationMode = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
@@ -83,6 +84,7 @@ export interface CapabilityReport {
 export interface EffectiveCapabilities {
   adapter_methods?: AdapterMethods;
   attention_impls?: AttentionImpls;
+  objective_capabilities?: ObjectiveCapabilities;
   precision_modes?: PrecisionModes;
   quantization_modes?: QuantizationModes;
 }

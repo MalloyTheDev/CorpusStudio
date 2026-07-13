@@ -189,12 +189,12 @@ coverage, staleness, throughput, energy, wall-clock, held-out improvement, and r
 | `ArtifactManifest` | expert/router/shard artifact kinds + expert-identity lineage (§11) |
 | `EvaluationResult` | router/expert-behavior axis alongside model quality (§11) |
 | `BackendManifest` | MoE capability flags, each functionally probed (§9) |
-| `TrainingObjective` *(not yet built)* | objectives must express router-vs-expert training, exposure policy, sparse loss set |
+| `TrainingObjective` ✅ foundation | semantic update scopes distinguish router/selected experts/all experts/adapters/shared components; expert-scoped policies require stable identity + per-expert exposure and carry optimizer-clock/starvation/collapse requirements; separately keyed loss components allow future router/load-balance/z-loss terms without conflating physical scheduling |
 
 ## Phased MoE plan
 
-- **A — Dense-safe foundational contracts** (in progress; `ModelDescriptor` foundation shipped, no
-  MoE runtime): ensure `ModelDescriptor`,
+- **A — Dense-safe foundational contracts** (in progress; `ModelDescriptor` and
+  `TrainingObjective` foundations shipped, no MoE runtime): ensure `ModelDescriptor`,
   `TrainingObjective`, `ArtifactManifest`, `RunPlan`, checkpoint, telemetry do not assume dense
   execution; add sparse parameter-accounting definitions.
 - **B — MoE model inspection**: detect existing MoE architectures; parse expert/router structure;

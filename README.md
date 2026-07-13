@@ -159,6 +159,14 @@ a training run — its own opt-in first-party trainer, or your installed trainer
 - managed run plans pin the environment's immutable lock hash and dispatch through that interpreter;
   additional frameworks remain separate backend slices rather than being piled into one environment
   (see [`docs/ENVIRONMENT_MANAGER.md`](docs/ENVIRONMENT_MANAGER.md))
+- static, offline `ModelDescriptor` / `TokenizerDescriptor` inspection records source pins, portable
+  inventory/hashes, trust findings, component-scoped representations, and tokenizer compatibility
+  without importing model code or claiming loadability/fit (see
+  [`docs/MODEL_TOKENIZER_CONTRACTS.md`](docs/MODEL_TOKENIZER_CONTRACTS.md))
+- a 29-entry, hash-sealed `TrainingObjective` registry describes datasets, labels, masks, losses,
+  model/update/backend requirements, artifacts, resume/evaluation, and MoE-safe router/expert intent
+  independently from backend implementation; its checker keeps declarations separate from measured
+  capability evidence (see [`docs/TRAINING_OBJECTIVES.md`](docs/TRAINING_OBJECTIVES.md))
 
 Corpus Studio's dependency-light core never bundles CUDA, PyTorch, or trainer packages. Training deps
 are opt-in via the `[train]` extra or installed into an explicitly reviewed managed reference-backend

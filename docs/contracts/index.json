@@ -18,6 +18,14 @@
       "file": "TokenizerDescriptor.schema.json"
     },
     {
+      "contract": "TrainingObjective",
+      "file": "TrainingObjective.schema.json"
+    },
+    {
+      "contract": "ObjectiveCompatibilityReport",
+      "file": "ObjectiveCompatibilityReport.schema.json"
+    },
+    {
       "contract": "EnvironmentProfile",
       "file": "EnvironmentProfile.schema.json"
     },

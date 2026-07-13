@@ -8,8 +8,9 @@ run lifecycle** re-scope: profile → plan → predict-fit → run → measure-f
 registry, and subprocess reliability, verified on a real RTX 5070; plus the post-v1.3 additions
 reconciled below — the **reasoning-traces** data loop, a dataset **truncation guardrail** +
 configurable **checkpoint retention**, and a dependency-light **storage safe-spill** profiler —
-plus the sealed **Environment Manager** reference lifecycle and the static, MoE-safe
-**ModelDescriptor / TokenizerDescriptor** foundation — plus the deep bug/security audit, 19 fixes
+plus the sealed **Environment Manager** reference lifecycle, the static MoE-safe
+**ModelDescriptor / TokenizerDescriptor** foundation, and the backend-independent
+**TrainingObjective registry** — plus the deep bug/security audit, 19 fixes
 across data integrity, gate/policy
 hardening, and quality/split correctness, PRs #104–118; a residual-audit pass
 hardening the v1.3 surface, PRs #133–142; the CI dependency refresh, PRs
@@ -212,6 +213,19 @@ per-item error isolation, and off-thread document opens.
   remains unknown. This is **not** model loading, tokenizer training/editing, MoE detection/execution,
   backend support proof, or hardware-fit proof. See
   [`MODEL_TOKENIZER_CONTRACTS.md`](MODEL_TOKENIZER_CONTRACTS.md).
+- **Training objective foundation** (`training-objectives` / `training-objective-check`): a
+  hash-sealed registry of 29 backend-independent definitions spanning pretraining, full/adapter SFT,
+  completion/response masks, preference and reward optimization, four distillation modes,
+  process/verifier/tool-use training, embedding/reranking/classification/multimodal work, and
+  evaluation/merge/conversion/quantization-only operations. Every definition carries explicit
+  dataset fields, label construction, masks, separately keyed loss components, model requirements,
+  expected artifacts, resume/evaluation/hardware implications, and limitations. MoE-safe update
+  policies can express shared/router/selected-expert/all-expert scopes, stable identity, exposure,
+  optimizer clocks, starvation, and routing-collapse gates without owning physical placement. The
+  compatibility report keeps dataset/model/backend evidence independent: a static manifest can earn
+  only `declared_compatible`; installed packages or broad `TaskType` support never become verified
+  objective support. This does **not** modify `RunPlan` or add new trainers. See
+  [`TRAINING_OBJECTIVES.md`](TRAINING_OBJECTIVES.md).
 - **Multi-backend "pick your framework"**: a BackendManifest registry (`corpus_studio`, `unsloth`);
   the planner validates the chosen backend and **honestly refuses Unsloth on Blackwell/sm_120** (which
   needs the math attention path Unsloth doesn't provide).

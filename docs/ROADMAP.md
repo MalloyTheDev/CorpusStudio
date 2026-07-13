@@ -118,9 +118,13 @@ input side. Ordered:
   custom-code findings, tokenizer vocabulary/compatibility evidence, JSON Schema, and generated TS
   types. This does not yet load/train/edit models or tokenizers, detect MoE topology, or prove backend
   support. See [`MODEL_TOKENIZER_CONTRACTS.md`](MODEL_TOKENIZER_CONTRACTS.md).
-- ⏭️ **TrainingObjective registry**, then parameter-accounting evidence producers,
-  offload/placement RunPlan expansion, full `TraceRecord`, MoE inspection, additional backend workers,
-  and dataset mixtures.
+- ✅ **TrainingObjective contract + registry foundation** — 29 hash-sealed, backend-independent
+  definitions with dataset/label/mask/loss semantics, MoE-safe update scope/exposure rules, artifacts,
+  resume/eval/hardware implications, and conservative dataset/model/backend compatibility axes. This
+  does not yet wire an objective into `RunPlan` or add trainer implementations. See
+  [`TRAINING_OBJECTIVES.md`](TRAINING_OBJECTIVES.md).
+- ⏭️ **Parameter-accounting evidence producers**, then offload/placement RunPlan expansion, full
+  `TraceRecord`, MoE inspection, additional backend workers, and dataset mixtures.
 
 - **Surface the LLM judge in the Evaluation tab** — the `--judge-model` scorer ships in
   the engine and in suites, but the desktop Evaluation tab still has no judge-model field.

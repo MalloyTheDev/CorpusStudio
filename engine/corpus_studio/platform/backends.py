@@ -36,6 +36,9 @@ _CORPUS_STUDIO = {
     # math/eager/sdpa cover the Blackwell-safe path; flash_attention_2 only where the GPU allows it.
     "attention_impls": ["math", "eager", "sdpa", "flash_attention_2"],
     "loss_impls": ["cross_entropy", "liger_fused_ce"],
+    # Declarations only. CapabilityReport intentionally leaves these empty until an end-to-end
+    # objective probe proves them in the selected environment.
+    "objective_capabilities": ["adapter_lora", "adapter_qlora", "causal_lm_sft"],
     "checkpoint_impls": ["adapter_only", "safetensors"],
     "optimizers": ["adamw_torch", "adamw_8bit", "paged_adamw_8bit", "adamw_bnb_8bit"],
     "export_formats": ["adapter_peft"],
@@ -78,6 +81,7 @@ _UNSLOTH = {
     # requires math) will not select Unsloth. This is declared honestly, not hidden.
     "attention_impls": ["flash_attention_2", "sdpa"],
     "loss_impls": ["cross_entropy"],
+    "objective_capabilities": ["adapter_lora", "adapter_qlora", "causal_lm_sft"],
     "checkpoint_impls": ["adapter_only", "safetensors"],
     "optimizers": ["adamw_8bit", "paged_adamw_8bit"],
     "export_formats": ["adapter_peft", "merged_safetensors", "merged_fp16", "gguf"],
