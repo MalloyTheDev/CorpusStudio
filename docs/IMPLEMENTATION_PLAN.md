@@ -116,26 +116,33 @@ GPU-architecture compatibility, and packages whose support can't be expressed vi
 
 ## 3. Phased roadmap
 
-Each phase is a coherent, tested, non-destabilizing set of vertical slices. Contracts and tests land
-with (or before) implementation; docs record only implemented facts.
+Each phase is a coherent, tested, non-destabilizing vertical slice. Contracts and tests land with (or
+before) implementation; docs record only implemented facts. This is the **foundational order** — MoE
+*execution* can come later, but **dense-only assumptions must be removed from the foundational
+contracts as they are built** (see §5 and [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md)).
 
-| Phase | Deliverable | Depends on |
+| # | Deliverable | Notes |
 |---|---|---|
 | **0** | ✅ Platform contracts + lifecycle (profile→plan→fit→run→artifact→watchdog→subprocess) | shipped |
-| **1** | ✅ **StorageProfile** (control-plane storage detection + role suitability) | shipped (this slice) |
-| **2** | ⏭️ **Environment Manager + 3-layer dependency profiles** (§2) | Phase 0/1 |
-| 3 | Model & Tokenizer Lab (`ModelDescriptor`/`TokenizerDescriptor` + inspection/convert/merge) | Phase 2 |
-| 4 | `TrainingObjective` registry (objective distinct from backend) | Phase 0 |
-| 5 | Offload planning wired into the planner (DeepSpeed/FSDP/NVMe) — **uses StorageProfile + Env Manager** | Phase 1 + 2 |
-| 6 | Additional backend workers, one isolated env at a time (TRL → DeepSpeed → FSDP → Unsloth → Axolotl) | Phase 2 |
-| 7 | Full versioned `TraceRecord` + Trace Studio | Phase 0 |
-| 8 | Dataset mixtures + transformation graph | Phase 0 |
-| 9 | Evaluation expansion (periodic/checkpoint-comparison/trace/tool-use), multimodal, serving/export | Phase 3–6 |
+| **1** | ✅ **StorageProfile** — `StorageDevice` / volume / path-role assessment | shipped (this slice) |
+| **2** | ⏭️ **Environment Manager + isolated backend runtimes** (3-layer deps, §2) | gate before DeepSpeed/FSDP/multimodal |
+| 3 | General **`ModelDescriptor` + `TokenizerDescriptor`** | **must be MoE-safe from the start** (§1 of MoE doc) |
+| 4 | **`TrainingObjective` registry** (objective distinct from backend) | must express router-vs-expert training |
+| 5 | **Dense-safe + MoE-safe parameter accounting** (`N_logical`/`N_active`/`N_resident`/`N_touched`/`N_updated`/`N_exposed`) | no runtime needed — contracts only |
+| 6 | **Immutable `RunPlan` expansion** (offload/placement/parallelism representable) | uses StorageProfile + Env Manager |
+| 7 | Generalized **`TraceRecord`** + Trace Studio | |
+| 8 | **MoE model inspection** (detect/parse existing MoE; report logical/active/expert counts) | inference-only OK if labeled |
+| 9 | Additional **dense** training backends (one isolated env at a time: TRL → DeepSpeed → FSDP → Unsloth → Axolotl) | |
+| 10 | **Existing-model MoE fine-tuning** (router and/or selected experts, verified backend) | one backend + family first |
+| 11 | **Full MoE training + expert parallelism** (exposure clocks, starvation/collapse gates, all-to-all, distributed ckpt) | |
+| 12 | **Resource-elastic VRAM/RAM/NVMe expert runtime** (`N_resident << N_active << N_logical`) | measured, not claimed |
 
-**Ordering rationale:** the Environment Manager (Phase 2) is the gate before DeepSpeed, FSDP,
-multimodal, or additional objectives — those all need isolated, capability-probed environments to be
-added honestly. Building them onto the single `[train]` env first would create exactly the dependency
-conflicts this correction exists to prevent.
+**Ordering rationale:** (a) the Environment Manager (Phase 2) is the gate before any heavy backend —
+those need isolated, capability-probed environments to be added honestly; (b) `ModelDescriptor` /
+`TrainingObjective` / parameter-accounting / `RunPlan` (Phases 3–6) are the foundational contracts that
+**must be MoE-safe when written**, because retrofitting sparse semantics into dense-assuming contracts
+later would force a disruptive redesign of the model, optimizer, checkpoint, telemetry, and artifact
+systems all at once. MoE execution (8, 10–12) comes later; the contracts do not.
 
 ## 4. Invariants preserved throughout
 
@@ -144,3 +151,17 @@ provenance/gate honesty, no-shell argv execution, "a completed step ≠ proven f
 truncation, and "installed ≠ supported" all carry forward unchanged. No working functionality is
 deleted without migration coverage; no on-disk format changes silently; no irreversible migration
 without backup/rollback.
+
+## 5. Dense-safe / MoE-safe foundational contracts (binding constraint)
+
+**No new foundational contract may assume dense execution.** Even while the implementation stays
+dense/QLoRA-oriented in early phases, `ModelDescriptor`, `TrainingObjective`, `ArtifactManifest`,
+`RunPlan`, checkpoint, telemetry, and evaluation contracts must be built so that Mixture-of-Experts,
+sparse models, and conditional computation slot in **without a redesign**. Specifically, no foundational
+contract may assume: every parameter active per token; all parameters resident; one optimizer clock;
+one monolithic checkpoint; one global parameter count; routing == physical placement; equal expert
+exposure; sparse activation ⇒ sparse data movement; or sparse activation ⇒ reduced wall-clock. The full
+requirement — parameter accounting, expert identity, semantic-router-vs-physical-scheduler separation,
+sparse optimizer clocks, exposure gates, MoE-aware fit prediction, sharded transactional checkpoints,
+expert lineage, and the A–G MoE phase plan — is specified in
+[`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md).

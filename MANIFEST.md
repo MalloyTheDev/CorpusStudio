@@ -256,6 +256,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/IMPLEMENTATION_PLAN.md`
 - `docs/IMPORT_EXPORT.md`
 - `docs/LOCAL_FIRST.md`
+- `docs/MOE_ARCHITECTURE.md`
 - `docs/MODEL_BACKENDS.md`
 - `docs/PRODUCT_SPEC.md`
 - `docs/PROVIDER_POLICY.md`
