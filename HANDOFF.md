@@ -45,9 +45,12 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   managed `backend-corpus-studio` environment creation/lock/probe/drift/recreate lifecycle; **#412**
   adds the Phase 3 model/tokenizer descriptor and static inspection foundation; **#413** adds the
   Phase 4 TrainingObjective registry and compatibility checker. GitHub was checked live after #413
-  merged: no open PRs; only unrelated UI-theme issues #187 and #201 were open. The current
-  `feat/parameter-accounting-evidence` changeset delivers the Phase 5 parameter-accounting foundation;
-  verify its live PR/merge state rather than inferring it from this snapshot. After any
+  merged: no competing PRs; only unrelated UI-theme issues #187 and #201 were open. **#414**
+  (`feat/parameter-accounting-evidence`) delivers the Phase 5 parameter-accounting foundation;
+  verify its live PR/merge state rather than inferring it from this snapshot. Its local gate before
+  publication was 1,346 Python tests passed / 6 skipped / 88.34% Windows coverage, full Ruff/MyPy,
+  deterministic 26-root schema/TypeScript generation, web production build, 815 desktop tests, and
+  clean WPF/Avalonia Release builds. After any
   `platform/` contract change,
   regenerate the committed schemas (see §4), update the count in
   `tests/test_platform_contracts.py`, and regenerate the TypeScript types.
