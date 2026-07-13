@@ -43,6 +43,21 @@ _NO_SOURCE_REPO_ROLES: frozenset[StorageRole] = _HIGH_WRITE_ROLES | frozenset({S
 _OFFLOAD_ROLES: frozenset[StorageRole] = frozenset(
     {StorageRole.optimizer_offload, StorageRole.parameter_offload}
 )
+# Read-latency-sensitive roles: model shards + the dataset are read during load. USB/network latency
+# (not just write throughput) drags these — a stall while loading model shards or preparing data.
+_LOAD_LATENCY_ROLES: frozenset[StorageRole] = frozenset(
+    {StorageRole.model_cache, StorageRole.dataset_cache}
+)
+# Small-file-heavy roles: the repo + the venv are thousands of tiny files touched at every process
+# start. Over a USB bridge or a WSL /mnt mount (NTFS translation) an import or a git op stalls badly.
+_SMALL_FILE_ROLES: frozenset[StorageRole] = frozenset(
+    {StorageRole.source_repo, StorageRole.python_env}
+)
+# Every role that is part of the active training RUNTIME (vs archival). A Windows drive accessed from
+# WSL through /mnt is a poor home for all of these — the NTFS translation layer adds latency to each.
+_RUNTIME_ROLES: frozenset[StorageRole] = (
+    _HIGH_WRITE_ROLES | _LOAD_LATENCY_ROLES | _SMALL_FILE_ROLES
+)
 
 _GB = 1_000_000_000
 # Advisory minimum free-space margins per role (bytes). Heuristic, documented as such — a floor to
@@ -59,6 +74,7 @@ _MIN_FREE_BYTES: dict[StorageRole, int] = {
     StorageRole.archive: 1 * _GB,
     StorageRole.os: 5 * _GB,
     StorageRole.source_repo: 2 * _GB,
+    StorageRole.python_env: 5 * _GB,  # a [train] venv (torch+CUDA) is several GB
     StorageRole.logs: 1 * _GB,
 }
 
@@ -195,6 +211,33 @@ def assess_role(
     ):
         marginal.append("on a rotational disk - offload will be I/O-bound and slow; prefer internal NVMe")
 
+    # USB latency drags the LOAD-heavy roles (model shards + dataset are read during load) - a stall
+    # while loading, even though these are not written continuously. Marginal, not fatal.
+    if role in _LOAD_LATENCY_ROLES and device.interface == StorageInterface.usb:
+        marginal.append(
+            "on a USB device - latency slows loading model shards / preparing the dataset; prefer internal storage"
+        )
+
+    # The repo + venv are thousands of small files touched at every process start. Over a USB bridge
+    # they stall on import; over a WSL /mnt mount (NTFS translation) it is far worse.
+    if role in _SMALL_FILE_ROLES:
+        if device.wsl_host_drive:
+            unsuitable.append(
+                "the venv/repo on a Windows drive accessed from WSL (/mnt) - NTFS translation makes "
+                "thousands of small-file imports crawl; put it on the Linux filesystem"
+            )
+        elif device.interface == StorageInterface.usb:
+            marginal.append(
+                "on a USB device - thousands of small files (repo/venv) will stall on import; prefer internal storage"
+            )
+
+    # Any other active-runtime role on a WSL host drive (/mnt) pays the NTFS-translation latency tax.
+    if device.wsl_host_drive and role in (_RUNTIME_ROLES - _SMALL_FILE_ROLES):
+        marginal.append(
+            "on a Windows drive accessed from WSL (/mnt) - the NTFS translation layer adds I/O latency; "
+            "prefer a path on the Linux filesystem"
+        )
+
     # Free-space margin: a nearly-full disk will fail mid-run.
     if required is not None and device.free_bytes is not None and device.free_bytes < required:
         unsuitable.append(
@@ -304,7 +347,7 @@ def _detect_linux_devices() -> list[StorageDevice]:
             continue
         seen.add(mount_point)
         total, free = _disk_usage(mount_point)
-        interface, removable, rotational, notes = classify_linux_mount(
+        interface, removable, rotational, notes, wsl_host = classify_linux_mount(
             device_path, mount_point, fstype, wsl=wsl
         )
         devices.append(
@@ -317,6 +360,7 @@ def _detect_linux_devices() -> list[StorageDevice]:
                 removable=removable,
                 rotational=rotational,
                 cloud_synced=is_cloud_synced_path(mount_point),
+                wsl_host_drive=wsl_host,
                 device_name=device_path,
                 notes=notes,
             )
@@ -326,23 +370,24 @@ def _detect_linux_devices() -> list[StorageDevice]:
 
 def classify_linux_mount(
     device_path: str, mount_point: str, fstype: str, *, wsl: bool
-) -> tuple[StorageInterface, bool | None, bool | None, list[str]]:
-    """Classify one Linux/WSL mount into ``(interface, removable, rotational, notes)``. Pure w.r.t.
-    the filesystem type + name; only the ``else`` (a real block device) reads ``/sys/block``. Split
-    out so every branch — WSL host drive, network, virtual, real disk — is unit-tested."""
+) -> tuple[StorageInterface, bool | None, bool | None, list[str], bool]:
+    """Classify one Linux/WSL mount into ``(interface, removable, rotational, notes, wsl_host_drive)``.
+    Pure w.r.t. the filesystem type + name; only the ``else`` (a real block device) reads ``/sys/block``.
+    Split out so every branch — WSL host drive, network, virtual, real disk — is unit-tested."""
     notes: list[str] = []
     # Under WSL, /mnt/<drive> and drvfs/9p mounts are the Windows host drives seen through a
     # translation layer — the real device attributes aren't visible from Linux.
     if wsl and (fstype in {"drvfs", "9p", "v9fs"} or mount_point.startswith("/mnt/")):
         notes.append("WSL view of a Windows host drive - real device attributes not visible from Linux")
-        return StorageInterface.virtual, None, None, notes
+        return StorageInterface.virtual, None, None, notes, True
     if fstype in {"nfs", "nfs4", "cifs", "smb", "smbfs", "fuse.sshfs"}:
-        return StorageInterface.network, None, None, notes
+        return StorageInterface.network, None, None, notes, False
     if fstype in {"tmpfs", "overlay", "squashfs"}:
-        return StorageInterface.virtual, None, None, notes
+        return StorageInterface.virtual, None, None, notes, False
     removable = _linux_block_flag(device_path, "removable")
     rotational = _linux_block_flag(device_path, "queue/rotational")
-    return classify_interface(device_path, removable=removable, rotational=rotational), removable, rotational, notes
+    interface = classify_interface(device_path, removable=removable, rotational=rotational)
+    return interface, removable, rotational, notes, False
 
 
 def _detect_windows_devices() -> list[StorageDevice]:  # pragma: no cover - Windows-only; exercised on a real Windows host, not the Linux CI coverage runner.
@@ -498,3 +543,86 @@ def build_storage_profile(
         assessments=assessments,
         notes=notes,
     )
+
+
+# --------------------------------------------------------------------------------------------------
+# Failure diagnostic: was a training failure caused by storage, or by something else (VRAM/kernel)?
+# --------------------------------------------------------------------------------------------------
+# Substrings (case-insensitive) that implicate the storage/filesystem path: I/O errors, a dropped USB
+# drive, permission/path problems, a full disk. These point at the disk, not the GPU.
+_STORAGE_FAILURE_SIGNALS: tuple[str, ...] = (
+    "input/output error",
+    "i/o error",
+    "errno 5",
+    "oserror",
+    "ioerror",
+    "permissionerror",
+    "permission denied",
+    "device not ready",
+    "the device is not connected",
+    "no such file or directory",
+    "cannot find the path",
+    "filenotfounderror",
+    "no space left",
+    "disk full",
+    "read-only file system",
+    "stale file handle",
+    "semaphore timeout",
+    "the specified network name is no longer available",
+)
+# Substrings that point AWAY from storage — a VRAM/kernel/driver failure the disk cannot explain.
+_NON_STORAGE_FAILURE_SIGNALS: tuple[str, ...] = (
+    "out of memory",
+    "cuda error",
+    "cuda out of memory",
+    "cublas",
+    "cudnn",
+    "device-side assert",
+    "sm_120",
+    "flashattention",
+    "flash attention",
+    "kernel image",
+    "nan",
+    "no kernel image is available",
+)
+
+
+def classify_storage_failure(message: str) -> tuple[str, list[str]]:
+    """Triage a training failure message: is the STORAGE path implicated, or is it a VRAM/kernel/driver
+    failure the disk can't explain? Returns ``(verdict, matched_signals)`` where verdict is
+    ``storage_implicated`` / ``not_storage`` / ``unknown``. Pure string heuristic — a first-pass
+    router, not a proof (the WDDM flash-SDPA deadlock and a CUDA OOM are NOT storage; an ``Errno 5`` on
+    a checkpoint write IS). When both kinds of signal appear it stays ``unknown`` rather than guess."""
+    low = message.lower()
+    storage_hits = [s for s in _STORAGE_FAILURE_SIGNALS if s in low]
+    non_storage_hits = [s for s in _NON_STORAGE_FAILURE_SIGNALS if s in low]
+    if storage_hits and not non_storage_hits:
+        return "storage_implicated", storage_hits
+    if non_storage_hits and not storage_hits:
+        return "not_storage", non_storage_hits
+    if storage_hits and non_storage_hits:
+        return "unknown", storage_hits + non_storage_hits
+    return "unknown", []
+
+
+def recommended_role_placement() -> dict[StorageRole, str]:
+    """The recommended storage tier per role — a topology recommendation, never enforced. Grounded in
+    the access patterns: small-file + reliability roles want an internal SSD; the high-I/O training
+    roles want internal PCIe NVMe; archival belongs on external/USB storage."""
+    internal_ssd = "internal SSD (SATA is sufficient)"
+    internal_nvme = "internal PCIe NVMe (high I/O)"
+    external = "USB / external SSD (backups + archive only)"
+    return {
+        StorageRole.os: internal_ssd,
+        StorageRole.source_repo: internal_ssd,
+        StorageRole.python_env: internal_ssd,
+        StorageRole.model_cache: internal_nvme,
+        StorageRole.dataset_cache: internal_nvme,
+        StorageRole.scratch: internal_nvme,
+        StorageRole.checkpoints: internal_nvme,
+        StorageRole.optimizer_offload: internal_nvme,
+        StorageRole.parameter_offload: internal_nvme,
+        StorageRole.artifacts: internal_nvme,
+        StorageRole.logs: internal_ssd,
+        StorageRole.archive: external,
+    }
