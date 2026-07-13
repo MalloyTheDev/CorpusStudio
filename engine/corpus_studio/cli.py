@@ -302,6 +302,82 @@ def platform_probe(
     typer.echo("\n".join(lines))
 
 
+@app.command("platform-storage")
+def platform_storage(
+    path: Optional[Path] = typer.Option(
+        None, "--path", help="A candidate directory to judge for a run role (e.g. an offload/checkpoint dir)."
+    ),
+    role: Optional[str] = typer.Option(
+        None,
+        "--role",
+        help="The role to assess --path for (e.g. optimizer_offload, checkpoints, scratch, model_cache). "
+        "Omit to assess it across the offload + checkpoint roles.",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit the full StorageProfile JSON."),
+    out_dir: Optional[Path] = typer.Option(
+        None, "--out", help="Write StorageProfile.json to this directory."
+    ),
+):
+    """Characterize the host's storage topology and judge whether a path is SAFE for a run role.
+
+    Detection is dependency-light and NON-destructive (mount + capacity + cheaply-discoverable device
+    attributes — no benchmark, no SMART read), so throughput/endurance stay honestly absent. With
+    --path it returns the per-role suitability verdict — the safe-spill guardrail that refuses offload
+    onto a USB bridge, a cloud-sync folder, a nearly-full disk, inside the source repo, or (marginal) a
+    rotational disk."""
+    from corpus_studio.platform.enums import StorageRole
+    from corpus_studio.platform.storage_profiler import build_storage_profile
+
+    role_paths: dict = {}
+    if path is not None:
+        if role is not None:
+            if role not in {r.value for r in StorageRole}:
+                valid = ", ".join(r.value for r in StorageRole)
+                typer.echo(f"Unknown role '{role}'; expected one of: {valid}", err=True)
+                raise typer.Exit(2)
+            roles_to_check = [StorageRole(role)]
+        else:
+            roles_to_check = [
+                StorageRole.optimizer_offload,
+                StorageRole.parameter_offload,
+                StorageRole.checkpoints,
+                StorageRole.scratch,
+            ]
+        role_paths = {r: str(path) for r in roles_to_check}
+
+    profile = build_storage_profile(role_paths or None)
+
+    if out_dir is not None:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "StorageProfile.json").write_text(
+            profile.model_dump_json(indent=2), encoding="utf-8"
+        )
+
+    if json_out:
+        typer.echo(json.dumps(profile.model_dump(mode="json"), indent=2))
+        return
+
+    def _gb(value: Optional[int]) -> str:
+        return f"{value / 1_000_000_000:.1f} GB" if value is not None else "?"
+
+    lines = ["Platform storage", "  devices:"]
+    for device in profile.devices:
+        tag = "  (cloud-synced)" if device.cloud_synced else ""
+        note = f"  - {device.notes[0]}" if device.notes else ""
+        lines.append(
+            f"    {device.mount_point:<16} {device.filesystem:<8} {device.interface.value:<11} "
+            f"free {_gb(device.free_bytes)} / {_gb(device.total_bytes)}{tag}{note}"
+        )
+    if not profile.devices:
+        lines.append("    (none characterized)")
+    if profile.assessments:
+        lines.append("  assessments:")
+        for a in profile.assessments:
+            reason = f" - {a.reasons[0]}" if a.reasons else ""
+            lines.append(f"    {a.role.value:<20} {a.suitability.value.upper()}{reason}")
+    typer.echo("\n".join(lines))
+
+
 @app.command("platform-profiles")
 def platform_profiles(
     store: Optional[Path] = typer.Option(

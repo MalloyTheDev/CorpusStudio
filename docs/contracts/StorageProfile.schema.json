@@ -1,0 +1,270 @@
+{
+  "$defs": {
+    "StorageDevice": {
+      "additionalProperties": false,
+      "description": "One characterized storage location, from a dependency-light, NON-destructive probe (mount +\ncapacity + cheaply-discoverable device attributes). The heavy metrics the spec envisions \u2014\nmeasured sequential/random throughput, SMART/NVMe endurance, temperature \u2014 are deliberately absent\nhere: they require a bounded benchmark or a privileged SMART read (a later, consent-gated slice).\nUnknown fields stay ``None``/``unknown`` \u2014 an honest gap, never a guessed value.",
+      "properties": {
+        "cloud_synced": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cloud Synced"
+        },
+        "device_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Name"
+        },
+        "filesystem": {
+          "default": "",
+          "title": "Filesystem",
+          "type": "string"
+        },
+        "free_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Free Bytes"
+        },
+        "interface": {
+          "$ref": "#/$defs/StorageInterface",
+          "default": "unknown"
+        },
+        "mount_point": {
+          "minLength": 1,
+          "title": "Mount Point",
+          "type": "string"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "removable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Removable"
+        },
+        "rotational": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rotational"
+        },
+        "total_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Bytes"
+        }
+      },
+      "required": [
+        "mount_point"
+      ],
+      "title": "StorageDevice",
+      "type": "object"
+    },
+    "StorageInterface": {
+      "description": "How a storage device attaches. The interface \u2014 not just free space \u2014 decides whether a device\ncan sustain the heavy sequential + random writes of optimizer/parameter offload and checkpointing.\nA USB bridge or a network mount will thrash under sustained offload even with terabytes free.",
+      "enum": [
+        "nvme_pcie",
+        "sata_ssd",
+        "hdd",
+        "usb",
+        "network",
+        "virtual",
+        "unknown"
+      ],
+      "title": "StorageInterface",
+      "type": "string"
+    },
+    "StorageRole": {
+      "description": "The role a path plays in a run. Roles differ in write intensity + durability needs: ``os`` and\n``source_repo`` want reliability; ``optimizer_offload`` / ``parameter_offload`` / ``scratch`` want\nsustained high-throughput internal storage; ``archive`` just wants capacity. A path's suitability\nis judged PER ROLE (a USB drive is fine for ``archive``, unfit for ``optimizer_offload``).",
+      "enum": [
+        "os",
+        "source_repo",
+        "model_cache",
+        "dataset_cache",
+        "checkpoints",
+        "scratch",
+        "optimizer_offload",
+        "parameter_offload",
+        "artifacts",
+        "archive",
+        "logs"
+      ],
+      "title": "StorageRole",
+      "type": "string"
+    },
+    "StorageRoleAssessment": {
+      "additionalProperties": false,
+      "description": "The PER-ROLE verdict for a candidate path: can it play this role, and if not, WHY. The reasons\nare the safe-spill guardrail's human-readable justification (USB bridge / synced folder / free-space\nmargin / inside the source repo / rotational disk).",
+      "properties": {
+        "device_mount_point": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Mount Point"
+        },
+        "free_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Free Bytes"
+        },
+        "interface": {
+          "$ref": "#/$defs/StorageInterface",
+          "default": "unknown"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "reasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "required_free_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Required Free Bytes"
+        },
+        "role": {
+          "$ref": "#/$defs/StorageRole"
+        },
+        "suitability": {
+          "$ref": "#/$defs/StorageSuitability"
+        }
+      },
+      "required": [
+        "role",
+        "path",
+        "suitability"
+      ],
+      "title": "StorageRoleAssessment",
+      "type": "object"
+    },
+    "StorageSuitability": {
+      "description": "The per-role verdict for a candidate path. ``unsuitable`` is a hard no (data-loss or\nthrash-to-a-halt risk); ``marginal`` will work but degrade (e.g. an HDD for offload); ``unknown``\nwhen detection couldn't characterize the device (honest, never a false ``suitable``).",
+      "enum": [
+        "suitable",
+        "marginal",
+        "unsuitable",
+        "unknown"
+      ],
+      "title": "StorageSuitability",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The host's storage topology + optional per-role path assessments \u2014 the input the run planner\nneeds to assign offload/checkpoint/scratch paths SAFELY (\u00a711/\u00a720). Standalone (not folded into\nEnvironmentProfile) so it never perturbs the ``environment_signature``. NEW: the engine has no\nstorage detection today (EnvStorage was a scratch_path/free_bytes/kind stub).",
+  "properties": {
+    "assessments": {
+      "items": {
+        "$ref": "#/$defs/StorageRoleAssessment"
+      },
+      "title": "Assessments",
+      "type": "array"
+    },
+    "captured_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Captured At"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "devices": {
+      "items": {
+        "$ref": "#/$defs/StorageDevice"
+      },
+      "title": "Devices",
+      "type": "array"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    }
+  },
+  "title": "StorageProfile",
+  "type": "object"
+}

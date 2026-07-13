@@ -43,6 +43,9 @@ from .enums import (
     PrecisionMode,
     QuantizationMode,
     StageMarker,
+    StorageInterface,
+    StorageRole,
+    StorageSuitability,
     TaskType,
     TrainerTarget,
 )
@@ -299,6 +302,59 @@ class EnvironmentProfile(ContractModel):
     accelerator_runtime: AcceleratorRuntime | None = None
     storage: EnvStorage | None = None
     packages: list[PackageLock] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------------------------------
+# StorageProfile — the storage topology + per-role path suitability. NEW (EnvStorage was a stub).
+# --------------------------------------------------------------------------------------------------
+class StorageDevice(ContractModel):
+    """One characterized storage location, from a dependency-light, NON-destructive probe (mount +
+    capacity + cheaply-discoverable device attributes). The heavy metrics the spec envisions —
+    measured sequential/random throughput, SMART/NVMe endurance, temperature — are deliberately absent
+    here: they require a bounded benchmark or a privileged SMART read (a later, consent-gated slice).
+    Unknown fields stay ``None``/``unknown`` — an honest gap, never a guessed value."""
+
+    mount_point: str = Field(min_length=1)
+    filesystem: str = ""
+    interface: StorageInterface = StorageInterface.unknown
+    total_bytes: int | None = Field(default=None, ge=0)
+    free_bytes: int | None = Field(default=None, ge=0)
+    # Cheaply-discoverable flags (removable/rotational from GetDriveType / /sys/block); None = unknown.
+    removable: bool | None = None
+    rotational: bool | None = None
+    # True when the mount point is inside a known cloud-sync client's folder (a sync client will
+    # re-upload every checkpoint/offload write and thrash the disk).
+    cloud_synced: bool | None = None
+    device_name: str | None = None
+    notes: list[str] = Field(default_factory=list)
+
+
+class StorageRoleAssessment(ContractModel):
+    """The PER-ROLE verdict for a candidate path: can it play this role, and if not, WHY. The reasons
+    are the safe-spill guardrail's human-readable justification (USB bridge / synced folder / free-space
+    margin / inside the source repo / rotational disk)."""
+
+    role: StorageRole
+    path: str
+    suitability: StorageSuitability
+    device_mount_point: str | None = None
+    interface: StorageInterface = StorageInterface.unknown
+    free_bytes: int | None = Field(default=None, ge=0)
+    required_free_bytes: int | None = Field(default=None, ge=0)
+    reasons: list[str] = Field(default_factory=list)
+
+
+class StorageProfile(ContractModel):
+    """The host's storage topology + optional per-role path assessments — the input the run planner
+    needs to assign offload/checkpoint/scratch paths SAFELY (§11/§20). Standalone (not folded into
+    EnvironmentProfile) so it never perturbs the ``environment_signature``. NEW: the engine has no
+    storage detection today (EnvStorage was a scratch_path/free_bytes/kind stub)."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    captured_at: str | None = None
+    devices: list[StorageDevice] = Field(default_factory=list)
+    assessments: list[StorageRoleAssessment] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
 

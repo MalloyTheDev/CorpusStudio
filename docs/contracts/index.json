@@ -14,6 +14,10 @@
       "file": "EnvironmentProfile.schema.json"
     },
     {
+      "contract": "StorageProfile",
+      "file": "StorageProfile.schema.json"
+    },
+    {
       "contract": "BackendManifest",
       "file": "BackendManifest.schema.json"
     },
