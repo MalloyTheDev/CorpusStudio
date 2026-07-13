@@ -38,7 +38,7 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
 
 ## 2. Current git / PR state
 
-`main` is the source of truth; everything through **#417 is merged**:
+`main` is the source of truth. The foundational history entering the Phase 9B slice is:
 - **#404** configurable checkpoint retention · **#405** StorageProfile + the dependency-architecture
   correction · **#406** Environment Manager substrate (Phase 2 slice 1) · **#407** storage USB/WSL
   runtime-role risks + storage-vs-not failure diagnostic · **#408** HANDOFF/AGENTS · **#409**
@@ -68,7 +68,7 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   6 skipped / 88.47% Windows coverage, deterministic 27-root schema/TypeScript generation, web
   production build, 815 desktop tests, and zero-warning WPF/Avalonia Release builds. See
   `docs/MOE_MODEL_INSPECTION.md`.
-- **#418 is the Phase 9A backend-worker protocol/isolation PR** (`feat/backend-worker-contracts`):
+- **#418 merged the Phase 9A backend-worker protocol/isolation foundation** as `bca5246`:
   protocol 2.0 worker-first
   backend/environment identity, typed envelope/state-machine validation, managed recipe/lock/backend
   binding, pre-run seal checks at both public execution entry points, and shared bounded process-tree
@@ -76,8 +76,26 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   capability. The final local gate is Ruff clean, MyPy clean (124 files), 1,450 Python tests passed /
   6 skipped / 88.38% Windows coverage, deterministic 27-root schema/TypeScript generation, web
   production build, 815 desktop tests, and zero-warning WPF/Avalonia Release builds. See
-  `docs/BACKEND_WORKER_PROTOCOL.md`. Verify its live CI/merge state rather than inferring it from this
-  snapshot.
+  `docs/BACKEND_WORKER_PROTOCOL.md`.
+- **The current Phase 9B slice adds effective execution truth** (`feat/effective-execution-contract`):
+  a separately hash-sealed `ResolvedExecutionConfiguration`, immutable dataset/model/tokenizer refs,
+  per-state precision, exact attention API/kernel/toggles, an explicit device map, complete semantic
+  trainer defaults, and exact optimizer/loss/trainer-surface admission. Readiness now requires one
+  passing complete execution tuple instead of unioning independent probes. Runner lanes are bound
+  fail-closed (echo cannot consume training), the worker echoes the hash, datasets are consumed from
+  stabilized bytes, local model/tokenizer roots are checked after load, and post-adapter
+  precision/placement is observed. Runner identity now derives from the pinned backend, every plan and
+  execution gets a collision-resistant UUIDv7 identity, outputs are run-scoped, and success requires
+  optimizer-step plus recognized adapter-weight evidence at the exact derived path. The shipping
+  desktop no longer exposes the unsealed direct trainer; its external-trainer path remains separate.
+  The Tauri/React live planner requires an immutable model revision and displays the nested
+  hash/kernel/device map. This is contract and CPU/fake-test evidence, not a new hardware-verification
+  claim. The final local gate is Ruff clean, MyPy clean (125 files), 1,497 Python tests passed / 6
+  skipped / 88.24% Windows coverage, deterministic 28-root
+  schema/TypeScript generation, web typecheck + production build, Tauri `cargo fmt --check` +
+  `cargo check`, 812 desktop tests, and successful WPF/Avalonia Release builds (with 22 existing
+  Avalonia `Watermark` deprecation warnings). See
+  `docs/EFFECTIVE_EXECUTION_CONFIGURATION.md`.
 
 ## 3. The architecture North Star + binding directives
 
@@ -112,7 +130,7 @@ The big epic (memory `platform-architecture-epic`). Non-negotiables the user has
 - **Revised foundational order** (do these in order): 1 StorageProfile ✅ → 2 Env Manager reference
   lifecycle ✅ → 3 `ModelDescriptor` + `TokenizerDescriptor` foundation ✅ → 4 `TrainingObjective`
   registry ✅ → 5 parameter accounting ✅ → 6 `RunPlan` expansion ✅ → 7 `TraceRecord` ✅ → 8 static
-  MoE inspection ✅ (PR #417) → 9A worker protocol/isolation → 9B effective execution truth → 9C dense
+  MoE inspection ✅ (PR #417) → 9A worker protocol/isolation ✅ → 9B effective execution truth ✅ → 9C dense
   backends → 10 existing-model MoE FT → 11 full MoE → 12 resource-elastic expert runtime.
 
 ## 4. How to build + verify (the gate)
@@ -136,7 +154,7 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   .\.venv\Scripts\python.exe -c "from corpus_studio.platform.schema_export import export_json_schemas; export_json_schemas('../docs/contracts')"
   ```
   then fix the two counts in `tests/test_platform_contracts.py` (`len(ROOT_CONTRACTS)` + the export
-  test). This branch exports **27 root contracts**.
+  test). This branch exports **28 root contracts**.
 
 ## 5. Workflow / process conventions (the user cares about these)
 
@@ -171,20 +189,18 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 7. Immediate next actions (ranked)
 
-1. **Finish Phase 9A as one CI-green PR.** Verify and merge #418; do not call
-   protocol conformance, process isolation, or static topology evidence runtime capability.
-2. **Phase 9B — effective execution truth (highest priority).** The 2026-07-13 audit was reconciled
-   against live post-#417 code and confirmed plan/runtime drift around attention enforcement, precision,
-   `device_map="auto"`, optimizer/loss admission, semantic field filtering, runtime overrides/defaults,
-   mutable input identities, chat-template fallback, and swallowed first-256 truncation analysis. Add
-   one hash-sealed resolved configuration consumed and echoed by the worker; refuse deviations. Do this
-   before DeepSpeed, FSDP, offload, or another dense backend.
-3. **Continue hardware-independent hardening while the PCIe/NVMe adapter is pending:** Environment
-   Manager lock/drift tests and desktop/web contract integration. Keep non-trivial placement/offload
-   execution unimplemented until an isolated backend proves it.
-4. **Then continue down the revised order (§3):** dense backends → existing-model MoE FT
+1. **Artifact and environment integrity hardening (only after Phase 9B is green and merged):** share
+   the safe model-inventory implementation
+   across artifacts/checkpoints/environment inputs; verify installed bytes against `RECORD`; build and
+   hash the exact worker wheel before approval; add manager/per-environment inter-process locks; make
+   recreation blue/green. Keep this one coherent slice.
+2. **Continue hardware-independent work while the PCIe/NVMe adapter is pending:** bounded event
+   journaling, prepared-dataset/transactional row-store groundwork, TraceRecord identity/governance,
+   and remaining desktop/web contracts. Keep non-trivial placement/offload execution unimplemented
+   until an isolated backend proves it.
+3. **Then continue down the revised order (§3):** dense backends → existing-model MoE FT
    → full MoE → resource-elastic expert runtime.
-5. **Only after the Linux NVMe is installed in the RTX 5070 desktop:** install the NVIDIA/CUDA stack,
+4. **Only after the Linux NVMe is installed in the RTX 5070 desktop:** install the NVIDIA/CUDA stack,
    build/probe `backend-corpus-studio`, run a tiny GPU smoke, benchmark the NVMe non-destructively,
    then step the 7B workload from sequence 1024 upward before CPU and finally NVMe offload.
 
@@ -205,11 +221,12 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 9. Repository map
 
-- **Platform contracts**: `engine/corpus_studio/platform/contracts.py` (27 root contracts) + `enums.py`
+- **Platform contracts**: `engine/corpus_studio/platform/contracts.py` (28 root contracts) + `enums.py`
   + `common.py`; `schema_export.py` → `docs/contracts/*.schema.json` (language-neutral, consumed by
   `apps/web`).
 - **Lifecycle**: `platform/{profiler, probes, planner, calibrator, supervisor, runners, watchdog,
-  subprocess_supervisor, worker, backends}.py`.
+  subprocess_supervisor, worker, backends}.py`; Phase 9B hashing/immutable-input helpers live in
+  `platform/execution_config.py`.
 - **Environment Manager** (Phase 2): `platform/environments.py` (recipes + concrete resolver) and
   `platform/environment_manager.py` (runtime discovery, creation, journals, lock/probe/drift, owned
   removal/recreation, and RunPlan compatibility).

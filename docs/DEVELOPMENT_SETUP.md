@@ -131,9 +131,9 @@ inspectable `project.json`/`examples.jsonl` files.
 
 These commands require Ollama, LM Studio, or another compatible local backend to
 already be running. They do not pull models or install ML packages. (First-party
-training is a separate **opt-in** feature — install the `[train]` extra and use
-`train-check` / `train-run` / `train-merge` / `model-fetch`; see `CLI_REFERENCE.md`
-and `TRAINING.md`.)
+training is a separate **opt-in** feature - build the managed `[train]` worker and
+use `platform-plan` / `platform-run`; `train-check`, `train-merge`, and
+`model-fetch` remain supporting tools. See `CLI_REFERENCE.md` and `TRAINING.md`.)
 
 ```powershell
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli model-list --backend ollama

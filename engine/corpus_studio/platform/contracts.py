@@ -10,6 +10,8 @@ language-neutral JSON Schemas the Rust core / Avalonia / Tauri consume are gener
 from __future__ import annotations
 
 from collections.abc import Mapping
+import hashlib
+import json
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
 
@@ -31,6 +33,7 @@ from .enums import (
     AdapterMethod,
     AllocatorPolicy,
     AttentionImpl,
+    AttentionKernel,
     CheckpointImpl,
     CommunicationBackend,
     CompatibilityStatus,
@@ -40,6 +43,7 @@ from .enums import (
     DescriptorFileRole,
     DeviceKind,
     EvidenceKind,
+    ExecutionVerificationRequirement,
     EnvironmentState,
     ExportFormat,
     FailureTaxonomy,
@@ -48,6 +52,7 @@ from .enums import (
     MemoryTier,
     MemoryResidencyModel,
     ModelAttentionType,
+    ModelAttentionApi,
     ModelExecutionKind,
     ModelFormat,
     ModelSourceKind,
@@ -123,6 +128,16 @@ def _is_pinned_ref(ref: Ref) -> bool:
         and ref.hash.algo != "none"
         and _is_digest_value(ref.hash.value)
     )
+
+
+def _canonical_contract_sha256(payload: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _validate_descriptor_path(value: str) -> str:
@@ -2579,12 +2594,16 @@ class BackendManifest(ContractModel):
     quantization_modes: list[QuantizationMode] = Field(default_factory=list)
     adapter_methods: list[AdapterMethod] = Field(default_factory=list)
     attention_impls: list[AttentionImpl] = Field(default_factory=list)
+    attention_kernels: list[AttentionKernel] = Field(default_factory=list)
     loss_impls: list[LossImpl] = Field(default_factory=list)
     # Semantic objective capabilities (for example causal_lm_sft or adapter_qlora). This is still a
     # STATIC declaration; only the matching field in EffectiveCapabilities can prove it on a host.
     objective_capabilities: list[ObjectiveCapability] = Field(default_factory=list)
     checkpoint_impls: list[CheckpointImpl] = Field(default_factory=list)
     optimizers: list[Optimizer] = Field(default_factory=list)
+    execution_contract_versions: list[str] = Field(default_factory=list)
+    trainer_fields: list[str] = Field(default_factory=list)
+    trainer_init_fields: list[str] = Field(default_factory=list)
     offload_strategies: list[OffloadStrategy] = Field(default_factory=list)
     placement_tiers: list[MemoryTier] = Field(default_factory=list)
     placement_modes: list[PlacementMode] = Field(default_factory=list)
@@ -2609,6 +2628,7 @@ class BackendManifest(ContractModel):
         return values
 
     @field_validator(
+        "attention_kernels",
         "offload_strategies",
         "placement_tiers",
         "placement_modes",
@@ -2621,12 +2641,81 @@ class BackendManifest(ContractModel):
             raise ValueError("physical capability lists must be sorted and unique")
         return values
 
+    @field_validator(
+        "execution_contract_versions",
+        "trainer_fields",
+        "trainer_init_fields",
+    )
+    @classmethod
+    def _sorted_backend_tokens(cls, values: list[str]) -> list[str]:
+        if values != sorted(set(values)):
+            raise ValueError("backend token lists must be sorted and unique")
+        return values
+
+
+class ExecutionCapabilityCombination(ContractModel):
+    """One execution tuple demonstrated together by a bounded functional probe.
+
+    Independent successes on precision, quantization, adapter, optimizer, loss, attention, and
+    checkpoint axes are diagnostic only. The planner may seal a run only from one of these complete
+    tuples, preventing a union of unrelated probes from becoming a fictional capability.
+    """
+
+    runtime_mode: Literal["training", "cpu_toy"]
+    device: DeviceKind
+    precision: PrecisionMode
+    quantization: QuantizationMode
+    adapter_method: AdapterMethod
+    attention_impl: AttentionImpl
+    attention_kernel: AttentionKernel
+    optimizer: Optimizer
+    loss_impl: LossImpl
+    checkpoint_impl: CheckpointImpl
+    export_format: ExportFormat
+    execution_contract_version: str = Field(pattern=_ID)
+    probe: str = Field(pattern=_ID)
+
+    def canonical_key(self) -> tuple[str, ...]:
+        return (
+            self.runtime_mode,
+            self.device.value,
+            self.precision.value,
+            self.quantization.value,
+            self.adapter_method.value,
+            self.attention_impl.value,
+            self.attention_kernel.value,
+            self.optimizer.value,
+            self.loss_impl.value,
+            self.checkpoint_impl.value,
+            self.export_format.value,
+            self.execution_contract_version,
+            self.probe,
+        )
+
 
 class ProbeResult(ContractModel):
     probe: str
     outcome: FailureTaxonomy
     detail: str | None = None
     measured: JsonObject = Field(default_factory=dict)
+    proves: dict[str, list[str]] = Field(default_factory=dict)
+    execution_combinations: list[ExecutionCapabilityCombination] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_evidence(self) -> ProbeResult:
+        for axis, values in self.proves.items():
+            if values != sorted(set(values)):
+                raise ValueError(f"probe proof axis {axis!r} must be sorted and unique")
+        keys = [item.canonical_key() for item in self.execution_combinations]
+        if keys != sorted(set(keys)):
+            raise ValueError("probe execution combinations must be sorted and unique")
+        if any(item.probe != self.probe for item in self.execution_combinations):
+            raise ValueError("an execution combination must name the probe that emitted it")
+        if self.outcome != FailureTaxonomy.PASS and (
+            self.proves or self.execution_combinations
+        ):
+            raise ValueError("only a passing probe may carry capability evidence")
+        return self
 
 
 class EffectiveCapabilities(ContractModel):
@@ -2636,7 +2725,15 @@ class EffectiveCapabilities(ContractModel):
     precision_modes: list[PrecisionMode] = Field(default_factory=list)
     quantization_modes: list[QuantizationMode] = Field(default_factory=list)
     attention_impls: list[AttentionImpl] = Field(default_factory=list)
+    attention_kernels: list[AttentionKernel] = Field(default_factory=list)
     adapter_methods: list[AdapterMethod] = Field(default_factory=list)
+    loss_impls: list[LossImpl] = Field(default_factory=list)
+    optimizers: list[Optimizer] = Field(default_factory=list)
+    checkpoint_impls: list[CheckpointImpl] = Field(default_factory=list)
+    execution_contract_versions: list[str] = Field(default_factory=list)
+    execution_combinations: list[ExecutionCapabilityCombination] = Field(default_factory=list)
+    trainer_fields: list[str] = Field(default_factory=list)
+    trainer_init_fields: list[str] = Field(default_factory=list)
     objective_capabilities: list[ObjectiveCapability] = Field(default_factory=list)
     offload_strategies: list[OffloadStrategy] = Field(default_factory=list)
     placement_tiers: list[MemoryTier] = Field(default_factory=list)
@@ -2652,6 +2749,7 @@ class EffectiveCapabilities(ContractModel):
         return values
 
     @field_validator(
+        "attention_kernels",
         "offload_strategies",
         "placement_tiers",
         "placement_modes",
@@ -2662,6 +2760,27 @@ class EffectiveCapabilities(ContractModel):
     def _sorted_effective_physical_capabilities(cls, values: list[Any]) -> list[Any]:
         if values != sorted(set(values), key=lambda item: item.value):
             raise ValueError("effective physical capability lists must be sorted and unique")
+        return values
+
+    @field_validator(
+        "execution_contract_versions",
+        "trainer_fields",
+        "trainer_init_fields",
+    )
+    @classmethod
+    def _sorted_effective_tokens(cls, values: list[str]) -> list[str]:
+        if values != sorted(set(values)):
+            raise ValueError("effective token lists must be sorted and unique")
+        return values
+
+    @field_validator("execution_combinations")
+    @classmethod
+    def _sorted_execution_combinations(
+        cls, values: list[ExecutionCapabilityCombination]
+    ) -> list[ExecutionCapabilityCombination]:
+        keys = [item.canonical_key() for item in values]
+        if keys != sorted(set(keys)):
+            raise ValueError("execution combinations must be sorted and unique")
         return values
 
 
@@ -2682,6 +2801,71 @@ class CapabilityReport(ContractModel):
     probe_results: list[ProbeResult] = Field(default_factory=list)
     effective_capabilities: EffectiveCapabilities | None = None
     notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_effective_evidence(self) -> CapabilityReport:
+        effective = self.effective_capabilities
+        # Legacy/imported reports may predate embedded proof payloads. They remain readable for
+        # inspection and objective compatibility, but the execution planner separately requires a
+        # matching passing ProbeResult for every exact execution combination it consumes.
+        if effective is None or not self.probe_results:
+            return self
+        passing = [item for item in self.probe_results if item.outcome == FailureTaxonomy.PASS]
+        proven: dict[str, set[str]] = {}
+        combinations: list[ExecutionCapabilityCombination] = []
+        for result in passing:
+            for axis, values in result.proves.items():
+                proven.setdefault(axis, set()).update(values)
+            combinations.extend(result.execution_combinations)
+        axis_fields = {
+            "precision": "precision_modes",
+            "quantization": "quantization_modes",
+            "attention": "attention_impls",
+            "attention_kernel": "attention_kernels",
+            "adapter": "adapter_methods",
+            "loss": "loss_impls",
+            "optimizer": "optimizers",
+            "checkpoint": "checkpoint_impls",
+            "trainer_field": "trainer_fields",
+            "trainer_init_field": "trainer_init_fields",
+            "objective": "objective_capabilities",
+            "offload": "offload_strategies",
+            "placement_tier": "placement_tiers",
+            "placement_mode": "placement_modes",
+            "parallelism": "parallelism_kinds",
+            "communication_backend": "communication_backends",
+        }
+        for axis, field_name in axis_fields.items():
+            actual = [
+                value.value if hasattr(value, "value") else value
+                for value in getattr(effective, field_name)
+            ]
+            expected = sorted(proven.get(axis, set()))
+            if actual != expected:
+                raise ValueError(
+                    f"effective {field_name} does not equal passing probe evidence"
+                )
+        actual_combinations = [item.canonical_key() for item in effective.execution_combinations]
+        expected_combinations = sorted(item.canonical_key() for item in combinations)
+        if actual_combinations != expected_combinations:
+            raise ValueError("effective execution combinations do not equal passing probe evidence")
+        trainer_surface_passed = any(item.probe == "trainer_contract" for item in passing)
+        expected_contracts = ["1.0.0"] if trainer_surface_passed and combinations else []
+        if effective.execution_contract_versions != expected_contracts:
+            raise ValueError("execution contract support lacks its conjunctive probe evidence")
+        expected_readiness = (
+            "ready"
+            if any(item.runtime_mode == "training" for item in combinations)
+            else "cpu_toy_only"
+            if any(item.runtime_mode == "cpu_toy" for item in combinations)
+            else "not_ready"
+        )
+        if self.readiness != expected_readiness:
+            raise ValueError("readiness does not match complete execution-combination evidence")
+        bnb_passed = any(item.probe == "bnb_4bit_load" for item in passing)
+        if self.bitsandbytes_ok != bnb_passed:
+            raise ValueError("bitsandbytes_ok does not match the NF4 probe outcome")
+        return self
 
 
 # --------------------------------------------------------------------------------------------------
@@ -2913,12 +3097,17 @@ class AdapterSpec(ContractModel):
     lora_alpha: int | None = Field(default=None, ge=1)
     lora_dropout: float | None = Field(default=None, ge=0, le=1)
     target_modules: list[str] | None = None
+    bias: Literal["none", "all", "lora_only"] | None = None
 
 
 class OptimizerSpec(ContractModel):
     impl: Optimizer
     learning_rate: float = Field(gt=0)
     weight_decay: float | None = Field(default=None, ge=0)
+    adam_beta1: float = Field(default=0.9, ge=0, lt=1)
+    adam_beta2: float = Field(default=0.999, ge=0, lt=1)
+    adam_epsilon: float = Field(default=1e-8, gt=0)
+    max_grad_norm: float = Field(default=1.0, ge=0)
     lr_scheduler: str | None = None
     warmup_ratio: float | None = Field(default=None, ge=0, le=1)
 
@@ -2955,6 +3144,374 @@ class CheckpointPolicy(ContractModel):
     keep_last: int | None = Field(default=None, ge=1)
     # Reload each checkpoint and assert integrity (feeds ArtifactManifest.reload_verified).
     reload_verify: bool = False
+
+
+class ExecutionInputBinding(ContractModel):
+    """One immutable input consumed by the worker.
+
+    Local inputs pin the exact bytes (a stable file or directory digest). Hugging Face inputs pin an
+    immutable repository commit; a branch or tag is never sufficient execution identity.
+    """
+
+    kind: Literal["dataset", "model", "tokenizer"]
+    ref: Ref
+    source: Literal["local_file", "local_directory", "huggingface"]
+    location: str = Field(min_length=1)
+    resolved_revision: str | None = Field(
+        default=None,
+        pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+    )
+    content_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def _validate_immutable_input(self) -> ExecutionInputBinding:
+        if not _is_pinned_ref(self.ref):
+            raise ValueError("execution input refs must be hash-pinned")
+        if self.source == "huggingface":
+            if self.kind == "dataset" or self.resolved_revision is None:
+                raise ValueError("Hugging Face model/tokenizer inputs require an immutable commit")
+        elif self.content_sha256 is None:
+            raise ValueError("local execution inputs require a stable content digest")
+        if self.kind == "dataset" and self.source != "local_file":
+            raise ValueError("the current dense trainer consumes a pinned local dataset file")
+        return self
+
+
+class ExecutionInputs(ContractModel):
+    dataset: ExecutionInputBinding
+    model: ExecutionInputBinding
+    tokenizer: ExecutionInputBinding
+
+    @model_validator(mode="after")
+    def _validate_kinds(self) -> ExecutionInputs:
+        if (
+            self.dataset.kind != "dataset"
+            or self.model.kind != "model"
+            or self.tokenizer.kind != "tokenizer"
+        ):
+            raise ValueError("execution input slots must carry their matching input kind")
+        return self
+
+
+class PrecisionExecutionPolicy(ContractModel):
+    """The numerical representation of each material training state.
+
+    ``weight_storage_dtype`` describes an unquantized frozen base; quantized bases use
+    ``quantized_storage_format`` instead. ``master_weight_dtype`` describes the trainable adapter
+    parameters. An 8-bit optimizer may use quantized primary state plus FP32 auxiliary tensors.
+    """
+
+    weight_storage_dtype: PrecisionMode | None = None
+    quantized_storage_format: QuantizationMode = QuantizationMode.none
+    dequantization_dtype: PrecisionMode
+    forward_compute_dtype: PrecisionMode
+    gradient_dtype: PrecisionMode
+    optimizer_state_dtype: PrecisionMode | QuantizationMode
+    optimizer_auxiliary_dtype: PrecisionMode = PrecisionMode.fp32
+    master_weight_dtype: PrecisionMode | None = None
+
+    @model_validator(mode="after")
+    def _validate_storage_precision(self) -> PrecisionExecutionPolicy:
+        quantized = self.quantized_storage_format != QuantizationMode.none
+        if quantized == (self.weight_storage_dtype is not None):
+            raise ValueError(
+                "quantized weights omit weight_storage_dtype; unquantized weights require it"
+            )
+        return self
+
+
+class AttentionExecutionPolicy(ContractModel):
+    """Exact model attention API plus the one runtime kernel that is permitted."""
+
+    model_attention_api: ModelAttentionApi
+    effective_backend_required: AttentionKernel
+    flash_sdp_enabled: bool
+    mem_efficient_sdp_enabled: bool
+    math_sdp_enabled: bool
+    flash_attention_package: PackageLock | None = None
+    kernel_probe_ref: Ref
+    evidence_kind: Literal["functional_probe", "cpu_reference"]
+    safety_mandate: str | None = None
+    verification_requirement: ExecutionVerificationRequirement = (
+        ExecutionVerificationRequirement.require_verified
+    )
+    fallback_policy: Literal["refuse"] = "refuse"
+
+    @model_validator(mode="after")
+    def _validate_attention_policy(self) -> AttentionExecutionPolicy:
+        if not _is_pinned_ref(self.kernel_probe_ref):
+            raise ValueError("attention kernel_probe_ref must be hash-pinned")
+        toggles = (
+            self.flash_sdp_enabled,
+            self.mem_efficient_sdp_enabled,
+            self.math_sdp_enabled,
+        )
+        required = self.effective_backend_required
+        expected: tuple[bool, bool, bool]
+        if required == AttentionKernel.torch_sdpa_flash:
+            expected = (True, False, False)
+        elif required == AttentionKernel.torch_sdpa_mem_efficient:
+            expected = (False, True, False)
+        elif required == AttentionKernel.torch_sdpa_math:
+            expected = (False, False, True)
+        else:
+            # Eager/external implementations do not dispatch through PyTorch SDPA. Keep only the
+            # safe math fallback globally enabled for unrelated framework operations.
+            expected = (False, False, True)
+        if toggles != expected:
+            raise ValueError("SDPA toggles must permit exactly the required attention backend")
+        if self.model_attention_api == ModelAttentionApi.sdpa and required not in {
+            AttentionKernel.torch_sdpa_flash,
+            AttentionKernel.torch_sdpa_mem_efficient,
+            AttentionKernel.torch_sdpa_math,
+        }:
+            raise ValueError("the sdpa model API requires one exact PyTorch SDPA kernel")
+        if self.model_attention_api == ModelAttentionApi.eager and required != AttentionKernel.eager:
+            raise ValueError("the eager model API requires the eager backend")
+        if (
+            self.model_attention_api == ModelAttentionApi.xformers
+            and required != AttentionKernel.xformers
+        ):
+            raise ValueError("the xformers model API requires the xformers backend")
+        external = {
+            ModelAttentionApi.flash_attention_2: AttentionKernel.flash_attention_2,
+            ModelAttentionApi.flash_attention_3: AttentionKernel.flash_attention_3,
+        }
+        if self.model_attention_api in external:
+            if (
+                required != external[self.model_attention_api]
+                or self.flash_attention_package is None
+                or self.flash_attention_package.version is None
+            ):
+                raise ValueError("external FlashAttention requires its exact package and kernel")
+        elif self.flash_attention_package is not None:
+            raise ValueError("flash_attention_package is only valid for an external FlashAttention API")
+        return self
+
+
+class DeviceMapEntry(ContractModel):
+    module: str
+    device: str = Field(min_length=1)
+
+    @field_validator("device")
+    @classmethod
+    def _explicit_device(cls, value: str) -> str:
+        if value == "auto":
+            raise ValueError("device placement must be explicit; 'auto' is forbidden")
+        return value
+
+
+class TrainingSchedule(ContractModel):
+    max_steps: int | None = Field(default=None, ge=1)
+    num_train_epochs: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _one_stop_condition(self) -> TrainingSchedule:
+        if (self.max_steps is None) == (self.num_train_epochs is None):
+            raise ValueError("exactly one of max_steps or num_train_epochs must be sealed")
+        return self
+
+
+class TrainingDataPolicy(ContractModel):
+    dataset_format: Literal["instruction", "chat", "trace"]
+    formatter_id: str = Field(min_length=1)
+    formatter_sha256: str = Field(pattern=SHA256_PATTERN)
+    chat_template_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    truncation_policy: Literal["refuse", "allow"] = "refuse"
+    truncation_analysis: Literal["full_pinned_dataset"] = "full_pinned_dataset"
+    packing: bool = False
+    dataset_text_field: str = "text"
+
+    @model_validator(mode="after")
+    def _chat_template_required(self) -> TrainingDataPolicy:
+        if (self.dataset_format == "chat") != (self.chat_template_sha256 is not None):
+            raise ValueError("chat datasets require one exact chat-template digest")
+        return self
+
+
+class TrainerInterfacePolicy(ContractModel):
+    """Version- and field-exact adapter to the installed TRL/Transformers surface."""
+
+    package_versions: list[PackageLock] = Field(min_length=1)
+    required_sft_config_fields: list[str] = Field(min_length=1)
+    sequence_length_field: Literal["max_seq_length", "max_length"]
+    tokenizer_parameter: Literal["tokenizer", "processing_class"]
+    logging_steps: int = Field(default=1, ge=1)
+    report_to: list[str] = Field(default_factory=list)
+    disable_tqdm: bool = True
+
+    @model_validator(mode="after")
+    def _deterministic_interface(self) -> TrainerInterfacePolicy:
+        names = [item.name for item in self.package_versions]
+        if names != sorted(set(names)):
+            raise ValueError("trainer package versions must be sorted by unique name")
+        if any(item.version is None for item in self.package_versions):
+            raise ValueError("trainer package versions must be exact")
+        if self.required_sft_config_fields != sorted(set(self.required_sft_config_fields)):
+            raise ValueError("required trainer fields must be sorted and unique")
+        if self.sequence_length_field not in self.required_sft_config_fields:
+            raise ValueError("the exact sequence-length field must be required")
+        if self.report_to != sorted(set(self.report_to)):
+            raise ValueError("report destinations must be sorted and unique")
+        return self
+
+
+class ResolvedExecutionConfiguration(ContractModel):
+    """The hash-sealed configuration consumed directly by an isolated training worker.
+
+    It contains every execution-affecting default. Workers may refuse it, but may not fill in,
+    filter, reinterpret, or override semantic fields after this configuration is sealed.
+    """
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    configuration_id: str = Field(pattern=_ID)
+    configuration_hash: str = Field(pattern=SHA256_PATTERN)
+    backend_ref: Ref
+    environment_ref: Ref
+    environment_binding: Literal["profile_snapshot", "managed_lock"]
+    capability_report_ref: Ref
+    inputs: ExecutionInputs
+    objective_ref: Ref
+    runtime_mode: Literal["training", "cpu_toy"]
+    precision: PrecisionExecutionPolicy
+    attention: AttentionExecutionPolicy
+    device_map: list[DeviceMapEntry] = Field(min_length=1)
+    adapter: AdapterSpec
+    optimizer: OptimizerSpec
+    loss_impl: LossImpl
+    sequence: SequenceSpec
+    batching: BatchingSpec
+    checkpoint_policy: CheckpointPolicy
+    schedule: TrainingSchedule
+    data: TrainingDataPolicy
+    trainer_interface: TrainerInterfacePolicy
+    export_format: ExportFormat
+    trust_remote_code: Literal[False] = False
+    use_safetensors: Literal[True] = True
+    bnb_4bit_use_double_quant: bool
+    adapter_task_type: Literal["CAUSAL_LM"] = "CAUSAL_LM"
+    save_strategy: Literal["steps"] = "steps"
+    gradient_checkpointing: bool = True
+    output_dir: str = Field(min_length=1)
+    # The sealed path is a ROOT, not the final trainer directory. Every execution derives its own
+    # collision-free adapter/checkpoint directory from the fresh run_id under this layout.
+    output_layout: Literal["run_scoped_v1"] = "run_scoped_v1"
+    seed: int = Field(default=42, ge=0)
+    data_seed: int = Field(default=42, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_resolved_configuration(self) -> ResolvedExecutionConfiguration:
+        for label, ref in (
+            ("backend_ref", self.backend_ref),
+            ("environment_ref", self.environment_ref),
+            ("capability_report_ref", self.capability_report_ref),
+            ("objective_ref", self.objective_ref),
+        ):
+            if not _is_pinned_ref(ref):
+                raise ValueError(f"resolved execution {label} must be hash-pinned")
+        environment_hash = self.environment_ref.hash
+        assert environment_hash is not None and environment_hash.value is not None
+        if (
+            self.environment_binding == "profile_snapshot"
+            and self.environment_ref.id != environment_hash.value
+        ):
+            raise ValueError("profile-snapshot environment identity must be its content hash")
+        if (
+            self.environment_binding == "managed_lock"
+            and self.environment_ref.id == environment_hash.value
+        ):
+            raise ValueError("managed-lock environment identity must name the managed environment")
+        keys = [item.module for item in self.device_map]
+        if keys != sorted(set(keys)) or "" not in keys:
+            raise ValueError("device_map must be sorted, unique, and bind the root module")
+        if self.runtime_mode == "cpu_toy" and self.device_map != [
+            DeviceMapEntry(module="", device="cpu")
+        ]:
+            raise ValueError("cpu_toy execution must bind the entire model to CPU")
+        if self.adapter.method in {
+            AdapterMethod.lora,
+            AdapterMethod.qlora,
+            AdapterMethod.dora,
+        } and any(
+            value is None
+            for value in (
+                self.adapter.lora_r,
+                self.adapter.lora_alpha,
+                self.adapter.lora_dropout,
+                self.adapter.target_modules,
+                self.adapter.bias,
+            )
+        ):
+            raise ValueError("LoRA-family execution must seal every adapter default")
+        if self.adapter.method in {
+            AdapterMethod.lora,
+            AdapterMethod.qlora,
+            AdapterMethod.dora,
+        } and self.precision.master_weight_dtype is None:
+            raise ValueError("LoRA-family execution must seal the trainable master-weight dtype")
+        if (
+            self.precision.quantized_storage_format == QuantizationMode.none
+            and self.precision.weight_storage_dtype
+            != self.precision.forward_compute_dtype
+        ):
+            raise ValueError(
+                "the first-party unquantized trainer requires weight and forward dtypes to match"
+            )
+        if (
+            self.precision.quantized_storage_format != QuantizationMode.none
+            and self.precision.dequantization_dtype
+            != self.precision.forward_compute_dtype
+        ):
+            raise ValueError(
+                "the first-party quantized trainer requires dequantization and forward dtypes to match"
+            )
+        if self.batching.fallback_grad_accumulation_steps is None:
+            raise ValueError("the first-party trainer requires exact gradient accumulation")
+        expected_token_target = (
+            self.sequence.max_sequence_len
+            * self.batching.micro_batch_size
+            * self.batching.fallback_grad_accumulation_steps
+        )
+        if self.batching.supervised_token_accumulation_target != expected_token_target:
+            raise ValueError(
+                "the fixed-microbatch trainer requires its advisory token target to be derived exactly"
+            )
+        if self.sequence.buckets:
+            raise ValueError("the first-party trainer does not implement sequence buckets")
+        if self.sequence.packing != self.data.packing:
+            raise ValueError("sequence and data packing policies must match")
+        if any(
+            value is None
+            for value in (
+                self.optimizer.weight_decay,
+                self.optimizer.lr_scheduler,
+                self.optimizer.warmup_ratio,
+                self.checkpoint_policy.cadence_optimizer_steps,
+            )
+        ):
+            raise ValueError("the first-party trainer requires all optimizer/checkpoint defaults")
+        if self.checkpoint_policy.cadence_seconds is not None:
+            raise ValueError("the first-party trainer does not implement time-based checkpoints")
+        if self.checkpoint_policy.reload_verify:
+            raise ValueError("the first-party trainer does not implement checkpoint reload verification")
+        if self.checkpoint_policy.impl != CheckpointImpl.adapter_only:
+            raise ValueError("the first-party trainer implements adapter-only checkpoints")
+        quantized = self.precision.quantized_storage_format != QuantizationMode.none
+        if not quantized and self.bnb_4bit_use_double_quant:
+            raise ValueError("double quantization is invalid for unquantized execution")
+        if self.export_format != ExportFormat.adapter_peft:
+            raise ValueError("the first-party resolved executor emits PEFT adapters only")
+        external_package = self.attention.flash_attention_package
+        if external_package is not None:
+            exact_packages = {
+                (item.name.lower(), item.version)
+                for item in self.trainer_interface.package_versions
+            }
+            if (external_package.name.lower(), external_package.version) not in exact_packages:
+                raise ValueError(
+                    "external FlashAttention must be included in exact trainer package versions"
+                )
+        return self
 
 
 class EvalSchedule(ContractModel):
@@ -3359,8 +3916,10 @@ class RunPlan(ContractModel):
     eval_schedule: EvalSchedule = Field(default_factory=EvalSchedule)
     export: ExportSpec
     seed: int = Field(default=42, ge=0)
-    # The exact rendered trainer config folded in verbatim for byte-exact reproducibility.
+    # Legacy compatibility surface. New plans leave this empty and execute only the independently
+    # sealed, typed resolved_execution contract below.
     training_config_snapshot: JsonObject = Field(default_factory=dict)
+    resolved_execution: ResolvedExecutionConfiguration | None = None
     # Pins the parameter evidence the planner consumed; it does not manufacture missing counts.
     parameter_accounting_ref: Ref | None = None
     # ``None`` identifies a legacy plan. The planner always emits a fully resolved spec for new plans.
@@ -3372,6 +3931,57 @@ class RunPlan(ContractModel):
             self.parameter_accounting_ref
         ):
             raise ValueError("parameter_accounting_ref must pin the sealed report hash")
+        execution = self.resolved_execution
+        if execution is not None:
+            expected_hash = _canonical_contract_sha256(
+                execution.model_dump(mode="json", exclude={"configuration_hash"})
+            )
+            if execution.configuration_hash != expected_hash:
+                raise ValueError("resolved_execution configuration_hash does not match its body")
+            if self.training_config_snapshot:
+                raise ValueError("new resolved plans cannot carry a second trainer-config authority")
+            if execution.backend_ref != self.backend_ref:
+                raise ValueError("resolved execution backend_ref must match the RunPlan")
+            if execution.environment_ref != self.environment_ref:
+                raise ValueError("resolved execution environment_ref must match the RunPlan")
+            if execution.inputs.dataset.ref != self.dataset_ref:
+                raise ValueError("resolved execution dataset ref must match the RunPlan")
+            if execution.inputs.model.location != self.base_model:
+                raise ValueError("resolved execution model location must match base_model")
+            if execution.precision.forward_compute_dtype != self.precision:
+                raise ValueError("resolved forward precision must match the RunPlan summary")
+            if execution.precision.quantized_storage_format != self.quantization:
+                raise ValueError("resolved quantization must match the RunPlan summary")
+            for label, resolved, summary in (
+                ("adapter", execution.adapter, self.adapter),
+                ("optimizer", execution.optimizer, self.optimizer),
+                ("loss", execution.loss_impl, self.loss_impl),
+                ("sequence", execution.sequence, self.sequence),
+                ("batching", execution.batching, self.batching),
+                ("checkpoint", execution.checkpoint_policy, self.checkpoint_policy),
+            ):
+                if resolved != summary:
+                    raise ValueError(f"resolved {label} policy must match the RunPlan summary")
+            attention_summary = {
+                AttentionKernel.eager: AttentionImpl.eager,
+                AttentionKernel.torch_sdpa_math: AttentionImpl.math,
+                AttentionKernel.torch_sdpa_flash: AttentionImpl.sdpa,
+                AttentionKernel.torch_sdpa_mem_efficient: AttentionImpl.sdpa,
+                AttentionKernel.flash_attention_2: AttentionImpl.flash_attention_2,
+                AttentionKernel.flash_attention_3: AttentionImpl.flash_attention_3,
+                AttentionKernel.xformers: AttentionImpl.xformers,
+            }[execution.attention.effective_backend_required]
+            if attention_summary != self.attention_backend:
+                raise ValueError("resolved attention policy must match the RunPlan summary")
+            if execution.seed != self.seed or (
+                execution.gradient_checkpointing != self.gradient_checkpointing
+            ):
+                raise ValueError("resolved seed/checkpointing must match the RunPlan summary")
+            if (
+                execution.export_format != self.export.format
+                or execution.output_dir != self.export.output_dir
+            ):
+                raise ValueError("resolved export format/output must match the RunPlan summary")
         if self.physical_execution is None:
             return self
         if (
@@ -3386,6 +3996,15 @@ class RunPlan(ContractModel):
             raise ValueError(
                 "offload_strategy must agree with the explicit physical offload rules"
             )
+        if execution is not None:
+            planned_devices = {item.device for item in execution.device_map}
+            resource_devices = {
+                "cpu" if item.device_id == "cpu:0" else item.device_id
+                for item in self.physical_execution.resources
+                if item.device_id is not None
+            }
+            if not planned_devices.issubset(resource_devices):
+                raise ValueError("resolved device_map references an unplanned physical resource")
         return self
 
 
@@ -3687,6 +4306,7 @@ class RunAcceptedBody(ContractModel):
     run_id: str = Field(min_length=1)
     pid: int | None = None
     process_started_at: str | None = None
+    execution_configuration_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
 
 
 class RunControlBody(ContractModel):

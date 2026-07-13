@@ -51,7 +51,12 @@ def classify_fit(plan: RunPlan, profile: EnvironmentProfile) -> FitClassificatio
     from corpus_studio.training.estimators import build_vram_estimate  # noqa: PLC0415 - torch-free
 
     # A cpu-toy plan runs on CPU — GPU VRAM fit is not applicable.
-    if plan.training_config_snapshot.get("cpu_toy"):
+    is_cpu_toy = (
+        plan.resolved_execution.runtime_mode == "cpu_toy"
+        if plan.resolved_execution is not None
+        else bool(plan.training_config_snapshot.get("cpu_toy"))
+    )
+    if is_cpu_toy:
         return FitClassification(
             classification=FitClass.NATIVE_UNPROVEN,
             rationale="cpu-toy plan runs on CPU; GPU VRAM fit is not applicable.",

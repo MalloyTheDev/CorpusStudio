@@ -4,6 +4,7 @@ install. Mirrors the round-trip idiom of test_platform_contracts.py."""
 
 import pytest
 from pydantic import ValidationError
+from uuid import UUID
 
 import corpus_studio.platform as P
 from corpus_studio.platform.enums import FailureTaxonomy, StageMarker
@@ -81,8 +82,8 @@ def test_cancellation_yields_cancelled_state_and_no_failure():
 
 
 def test_runner_failure_is_classified_with_its_taxonomy():
-    class _FailRunner:
-        name = "boom"
+    class _FailRunner(EchoRunner):
+        name = "echo"
 
         def run(self, ctx: RunContext):
             ctx.emit_stage(StageMarker.process_start)
@@ -104,8 +105,8 @@ def test_runner_failure_is_classified_with_its_taxonomy():
 
 
 def test_unexpected_exception_becomes_failed_fail():
-    class _CrashRunner:
-        name = "crash"
+    class _CrashRunner(EchoRunner):
+        name = "echo"
 
         def run(self, ctx: RunContext):
             raise ValueError("kaboom")
@@ -137,8 +138,8 @@ def test_in_process_execution_refuses_a_tampered_plan_before_runner_call():
 
 
 def test_produced_artifacts_are_recorded_on_the_manifest():
-    class _ArtifactRunner:
-        name = "artifact"
+    class _ArtifactRunner(EchoRunner):
+        name = "echo"
 
         def run(self, ctx: RunContext):
             art = ProducedArtifact(artifact_id="run-1-adapter", kind="adapter", path="out/adapter")
@@ -160,13 +161,14 @@ def test_manifest_roundtrips():
 
 def test_manifest_written_atomically_to_out_dir(tmp_path):
     result = execute_run(demo_run_plan(), EchoRunner(), out_dir=tmp_path, clock=_CLOCK)
-    written = tmp_path / "RunManifest.json"
+    record_dir = tmp_path / "runs" / result.manifest.run_id
+    written = record_dir / "RunManifest.json"
     assert written.is_file()
     reloaded = P.RunManifest.model_validate_json(written.read_text(encoding="utf-8"))
     assert reloaded == result.manifest
-    assert reloaded.output_dir == str(tmp_path)
+    assert reloaded.output_dir == "output"
     # No temp file left behind.
-    assert list(tmp_path.glob(".RunManifest.*.tmp")) == []
+    assert list(record_dir.glob(".RunManifest.*.tmp")) == []
 
 
 def test_write_run_manifest_creates_missing_dirs(tmp_path):
@@ -196,9 +198,19 @@ def test_run_id_all_punctuation_falls_back_to_run():
     assert result.manifest.run_id == "run"
 
 
+def test_default_run_ids_are_distinct_uuidv7_instances():
+    first = execute_run(demo_run_plan(), EchoRunner(), clock=_CLOCK).manifest.run_id
+    second = execute_run(demo_run_plan(), EchoRunner(), clock=_CLOCK).manifest.run_id
+
+    assert first != second
+    assert first.startswith("run-") and second.startswith("run-")
+    assert UUID(first.removeprefix("run-")).version == 7
+    assert UUID(second.removeprefix("run-")).version == 7
+
+
 def test_log_and_warning_events_are_emitted():
-    class _ChattyRunner:
-        name = "chatty"
+    class _ChattyRunner(EchoRunner):
+        name = "echo"
 
         def run(self, ctx: RunContext):
             ctx.emit_log("loading")

@@ -42,6 +42,7 @@ Use a sealed Phase 5 report when a physical spec names parameter scopes, compone
 ```powershell
 corpus-studio platform-plan `
   --base-model Qwen/Qwen2.5-7B-Instruct `
+  --model-revision a09a35458c702b33eeacc393d103063234e8bc28 `
   --dataset .\data\examples.jsonl `
   --physical-spec .\PhysicalExecutionSpec.json `
   --parameter-accounting-report .\ParameterAccountingReport.json `

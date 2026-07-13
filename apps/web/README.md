@@ -26,9 +26,11 @@ engine (Python)  ──JSON-Schema contracts──►  TS types  ──►  Reac
 
 The **run lifecycle** — profile → plan → predicted-fit → run — from real contract data: the host +
 proven capabilities, the resolved `RunPlan` (with the Blackwell → math note), the **predicted**
-`FitClassification` (honestly labeled *not measured*; a WDDM spill is distinguished from an OOM), and
-the run's `RunManifest` + `RunEvent` stream. `src/platform/sample.json` is a real engine-generated
-snapshot (a 5070 / Blackwell scenario) so the contract → UI pipeline is exercised end to end.
+  `FitClassification` (honestly labeled *not measured*; a WDDM spill is distinguished from an OOM),
+  the sealed effective attention kernel/device map/configuration hash, and the run's `RunManifest` +
+  `RunEvent` stream. Live planning requires an immutable Hub model revision. The committed
+  `src/platform/sample.json` is a pre-Phase-9B engine snapshot retained as migration evidence; the UI
+  labels it `legacy plan - regenerate before execution` instead of treating it as current proof.
 
 ## Develop
 
@@ -46,6 +48,7 @@ npm run tauri build     # bundle the desktop app
 
 ## Status
 
-Slice 1: the contract → TS → Nocturne-React pipeline + the platform lifecycle view (verified: type-check
-+ vite build + a real engine-generated render). **Next:** wire the live host flow (probe → plan → run
-against the local machine via the Tauri commands), then port the Studio screens 1:1 from the Avalonia head.
+The contract → TS → Nocturne-React pipeline and live probe → immutable-revision plan flow are wired.
+The lifecycle view displays the effective kernel, explicit device map, and nested execution hash, and
+warns on legacy plans. The Tauri shell remains a thin CLI client; live run streaming/cancellation and
+the remaining Studio screen port are future work.

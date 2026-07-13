@@ -453,13 +453,15 @@ def platform_run(
         False, "--demo", help="Execute a built-in minimal plan (echo needs nothing; cpu_toy needs [train])."
     ),
     runner_name: str = typer.Option(
-        "echo",
+        "auto",
         "--runner",
-        help="Runner: echo | cpu_toy | training. 'training' dispatches by the plan's backend "
-        "(corpus_studio / unsloth — see 'platform-backends').",
+        help="Runner: auto | echo | cpu_toy | training. Auto selects the only lane permitted by a "
+        "sealed plan.",
     ),
     max_steps: Optional[int] = typer.Option(
-        None, "--max-steps", help="Cap optimizer steps (cpu_toy / training runners)."
+        None,
+        "--max-steps",
+        help="Compatibility assertion only; must equal the schedule already sealed in the RunPlan.",
     ),
     out_dir: Optional[Path] = typer.Option(
         None, "--out", help="Write the terminal RunManifest.json to this directory (atomic)."
@@ -481,22 +483,23 @@ def platform_run(
 ):
     """Execute a RunPlan through the headless run supervisor: stream RunEvents to stderr and produce
     a RunManifest on stdout. 'echo' is a dependency-light no-op that proves the supervisor without a
-    GPU or the [train] extra; 'cpu_toy' / 'training' run the real trainer (via the TrainingRunner,
-    reading the plan's training_config_snapshot). 'training' dispatches to the framework the plan
-    picked (backend_ref: corpus_studio → the first-party trainer, unsloth → the Unsloth backend).
+    GPU or the [train] extra; 'cpu_toy' / 'training' run the real trainer from the plan's independently
+    sealed ResolvedExecutionConfiguration. Training dispatches only to a backend that declares and
+    enforces that exact contract (currently the first-party corpus_studio backend).
     --subprocess runs it in a supervised child process the parent can time out + KILL (a hung run
     becomes a real KERNEL_STALL; a crash is isolated). The RunManifest classifies the terminal state
     (succeeded / failed / cancelled) with a FailureRecord taxonomy on abnormal termination."""
     from corpus_studio.platform.contracts import RunPlan
     from corpus_studio.platform.supervisor import EchoRunner, Runner, demo_run_plan, execute_run
 
-    if runner_name not in ("echo", "cpu_toy", "training"):
-        typer.echo(f"Unknown runner '{runner_name}' (echo | cpu_toy | training).", err=True)
+    if runner_name not in ("auto", "echo", "cpu_toy", "training"):
+        typer.echo(f"Unknown runner '{runner_name}' (auto | echo | cpu_toy | training).", err=True)
         raise typer.Exit(2)
 
     if demo:
-        if runner_name == "echo":
+        if runner_name in ("auto", "echo"):
             plan = demo_run_plan()
+            runner_name = "echo"
         else:
             from corpus_studio.platform.runners import demo_training_plan
 
@@ -516,8 +519,25 @@ def platform_run(
         typer.echo("Provide a RunPlan path argument, or pass --demo.", err=True)
         raise typer.Exit(2)
 
+    if runner_name == "auto":
+        from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+            ExecutionConfigurationError,
+            required_runner_lane,
+        )
+
+        try:
+            runner_name = required_runner_lane(plan)
+        except ExecutionConfigurationError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(2) from exc
+
     managed_worker_argv = None
-    if plan.environment_ref.hash is not None:
+    managed_environment = (
+        plan.resolved_execution.environment_binding == "managed_lock"
+        if plan.resolved_execution is not None
+        else plan.environment_ref.hash is not None
+    )
+    if managed_environment:
         from corpus_studio.platform.environment_manager import (
             EnvironmentManager,
             EnvironmentManagerError,
@@ -560,8 +580,6 @@ def platform_run(
             from corpus_studio.platform.subprocess_supervisor import worker_identity_argv
 
             managed_worker_argv += worker_identity_argv(plan)
-            if max_steps is not None:
-                managed_worker_argv += ["--max-steps", str(max_steps)]
         except EnvironmentManagerError as exc:
             typer.echo(exc.failure.model_dump_json(indent=2), err=True)
             raise typer.Exit(2) from exc
@@ -599,16 +617,49 @@ def platform_run(
 @app.command("platform-plan")
 def platform_plan(
     base_model: str = typer.Option(..., "--base-model", help="The base model to fine-tune."),
+    model_revision: Optional[str] = typer.Option(
+        None,
+        "--model-revision",
+        help="Immutable Hugging Face commit. Required unless --base-model is a local directory.",
+    ),
+    tokenizer_revision: Optional[str] = typer.Option(
+        None,
+        "--tokenizer-revision",
+        help="Immutable tokenizer commit when it differs from --model-revision.",
+    ),
     dataset_path: str = typer.Option(..., "--dataset", help="Path to the training JSONL."),
     dataset_ref: str = typer.Option("dataset", "--dataset-ref", help="Stable id for the dataset the plan references."),
     task_type: str = typer.Option("sft", "--task-type", help="Training task type (sft / preference / …)."),
     dataset_format: str = typer.Option("instruction", "--dataset-format", help="Row format: instruction (Alpaca) or chat (messages)."),
-    output_dir: str = typer.Option("output", "--output-dir", help="Where the trainer saves the adapter (flows into the plan's training snapshot)."),
+    output_dir: str = typer.Option(
+        "output",
+        "--output-dir",
+        help=(
+            "Sealed output root. Each execution writes beneath "
+            "<root>/runs/<run-id>/artifacts/adapter."
+        ),
+    ),
     sequence_len: int = typer.Option(4096, "--sequence-len", help="Max sequence length (flows into the plan verbatim)."),
+    max_steps: Optional[int] = typer.Option(
+        None, "--max-steps", help="Seal an optimizer-step stop condition into the plan."
+    ),
+    num_train_epochs: float = typer.Option(
+        1.0, "--epochs", help="Sealed epoch stop condition when --max-steps is absent."
+    ),
+    allow_truncation: bool = typer.Option(
+        False,
+        "--allow-truncation",
+        help="Explicitly permit examples longer than --sequence-len; default is fail closed.",
+    ),
+    chat_template_sha256: Optional[str] = typer.Option(
+        None,
+        "--chat-template-sha256",
+        help="Required exact tokenizer chat-template digest for --dataset-format chat.",
+    ),
     backend: str = typer.Option("corpus_studio", "--backend", help="Training framework to run on (see platform-backends)."),
-    optim: Optional[str] = typer.Option(None, "--optim", help="Optimizer (e.g. adamw_torch | paged_adamw_8bit). Paged pages optimizer state to host RAM under pressure — a spike-safe safe-spill; validated against the backend."),
-    use_liger: bool = typer.Option(False, "--use-liger", help="Fuse the cross-entropy loss (Liger) to drop the long-seq logits memory spike. Needs liger-kernel; Blackwell support unverified."),
-    memory_efficient: bool = typer.Option(False, "--memory-efficient", help="Shortcut for a tight GPU: enable the memory-saving levers (paged optimizer + fused Liger loss). Explicit --optim / --use-liger override it."),
+    optim: Optional[str] = typer.Option(None, "--optim", help="Request an optimizer (e.g. adamw_torch | paged_adamw_8bit). Planning requires a passing complete execution tuple for the exact optimizer."),
+    use_liger: bool = typer.Option(False, "--use-liger", help="Request fused Liger cross-entropy. Package/field presence is insufficient; planning requires a passing complete execution tuple."),
+    memory_efficient: bool = typer.Option(False, "--memory-efficient", help="Request paged_adamw_8bit + Liger together. Refused unless that exact complete execution tuple passed in the selected environment."),
     allow_cpu_toy: bool = typer.Option(False, "--allow-cpu-toy", help="Permit a cpu-toy plan when the host is cpu-toy-only."),
     environment_id: Optional[str] = typer.Option(
         None,
@@ -653,7 +704,7 @@ def platform_plan(
     attention / adapter) is resolved against what PROVED to work on THIS host: bf16 only when proven,
     nf4 only when bitsandbytes passed, and math attention on Blackwell (sm_120). An unready host is a
     clean PlannerError, never a silent downgrade."""
-    from corpus_studio.platform.common import Ref
+    from corpus_studio.platform.common import HashRef, Ref, new_uuid7_id
     from corpus_studio.platform.contracts import (
         ParameterAccountingReport,
         PhysicalExecutionSpec,
@@ -667,13 +718,35 @@ def platform_plan(
     )
     # --memory-efficient is a shortcut; explicit --optim / --use-liger win.
     resolved_optim = optim or ("paged_adamw_8bit" if memory_efficient else "adamw_torch")
+    from corpus_studio.platform.execution_config import (
+        ExecutionConfigurationError,
+        stable_directory_sha256,
+        stable_file_sha256,
+    )
+
+    try:
+        dataset_digest = stable_file_sha256(dataset_path)
+        base_path = Path(base_model)
+        model_digest = stable_directory_sha256(base_path) if base_path.is_dir() else None
+    except ExecutionConfigurationError as exc:
+        typer.echo(f"invalid immutable execution input: {exc}", err=True)
+        raise typer.Exit(2) from exc
     constraints = PlannerConstraints(
         base_model=base_model,
+        model_revision=model_revision,
+        tokenizer_revision=tokenizer_revision,
+        model_content_sha256=model_digest,
+        tokenizer_content_sha256=model_digest,
         dataset_path=dataset_path,
+        dataset_content_sha256=dataset_digest,
         task_type=task_type,
         dataset_format=dataset_format,
         output_dir=output_dir,
         sequence_len=sequence_len,
+        max_steps=max_steps,
+        num_train_epochs=num_train_epochs,
+        truncation_allowed=allow_truncation,
+        chat_template_sha256=chat_template_sha256,
         backend=backend,
         optim=resolved_optim,
         use_liger=use_liger or memory_efficient,
@@ -737,9 +810,9 @@ def platform_plan(
         plan = build_run_plan(
             profile=profile,
             capabilities=report,
-            dataset_ref=Ref(id=dataset_ref),
+            dataset_ref=Ref(id=dataset_ref, hash=HashRef(value=dataset_digest)),
             constraints=constraints,
-            plan_id=f"plan-{profile.environment_signature[:8]}",
+            plan_id=new_uuid7_id("plan"),
             environment_ref=managed_environment_ref,
             parameter_accounting=parameter_accounting,
             physical_execution=physical_execution,
@@ -787,9 +860,8 @@ def platform_plan(
 def platform_backends(
     json_out: bool = typer.Option(False, "--json", help="Emit the full BackendManifests as JSON."),
 ):
-    """List the registered training backends — the frameworks you can pick to train on (corpus_studio,
-    unsloth, …). Each declares what it can run; the planner resolves a plan against the chosen
-    backend's declared support intersected with what actually proved to work on the host."""
+    """List registered backend manifests. Registration is not execution support: the planner admits a
+    backend only when its declared execution contract intersects exact passing host evidence."""
     from corpus_studio.platform.backends import builtin_backends
 
     backends = builtin_backends()
@@ -2674,8 +2746,14 @@ def training_config(
     )
 
     warnings = [
-        "This command exports the config only; launch it with the emitted command or "
-        "from the desktop Training tab.",
+        (
+            "This first-party config is inspectable input only; create a sealed RunPlan with "
+            "platform-plan and dispatch it with platform-run. The desktop does not execute this "
+            "mutable config directly."
+            if normalized_target == "corpus_studio"
+            else "This command exports the config only; launch it with the emitted command or "
+            "from the desktop Training tab."
+        ),
         "Review dataset rights, eval readiness, compute budget, and target tool docs before training.",
     ]
     if eval_dataset_path is None:
@@ -2715,7 +2793,7 @@ def training_config(
             {
                 "target": normalized_target,
                 "output_path": str(output_path),
-                "training_launcher_implemented": True,
+                "training_launcher_implemented": normalized_target != "corpus_studio",
                 "config": template.to_training_dict(),
                 "config_text": config_text,
                 "token_budget": token_budget.model_dump(),
@@ -3716,6 +3794,12 @@ def trace_generate(
 @app.command("train-run")
 def train_run(
     config_path: Path,
+    allow_unsealed_direct_execution: bool = typer.Option(
+        False,
+        "--allow-unsealed-direct-execution",
+        help="Development-only escape hatch. This path has no sealed RunPlan, managed-worker "
+        "lineage, or reproducibility guarantee.",
+    ),
     dataset_path: Optional[Path] = typer.Option(None, "--dataset-path", help="Override the config's dataset_path (e.g. the train split)."),
     output_dir: Optional[Path] = typer.Option(None, "--output-dir", help="Override where the adapter/checkpoints are written."),
     base_model: Optional[str] = typer.Option(None, "--base-model", help="Override the base model."),
@@ -3728,13 +3812,28 @@ def train_run(
     save_steps: Optional[int] = typer.Option(None, "--save-steps", help="Checkpoint every N optimizer steps (default 50)."),
     save_total_limit: Optional[int] = typer.Option(None, "--save-total-limit", help="Keep only the N most recent checkpoints (default 3; pass 0 to keep ALL — old behavior)."),
 ):
-    """RUN the training in-process (first-party trainer, opt-in [train] extra): read a CorpusStudio
+    """Development-only direct trainer entry point (opt-in [train] extra): read a CorpusStudio
     training config + dataset, build a TRL SFTTrainer with peft LoRA (4-bit QLoRA on GPU), train, and
     save the adapter + tokenizer + checkpoints. Preflighted by train-check — refuses with an install
     hint if the runtime is missing. Progress ('[step/total]') goes to stderr; the JSON result to stdout.
 
     A real GPU QLoRA cannot be run without a CUDA GPU + bitsandbytes; --cpu-toy proves the pipeline on
-    CPU. Exit 2 when the runtime can't run the request."""
+    CPU. Shipping clients use platform-plan -> platform-run; this command refuses unless the caller
+    explicitly acknowledges its unsealed, non-reproducible status. Exit 2 on refusal or when the
+    runtime cannot run the request."""
+
+    if not allow_unsealed_direct_execution:
+        typer.echo(
+            "REFUSED: train-run is UNSEALED_DIRECT_EXECUTION / NON_REPRODUCIBLE / "
+            "NO_PLATFORM_LINEAGE. Use platform-plan followed by platform-run. For isolated "
+            "development only, pass --allow-unsealed-direct-execution.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    typer.echo(
+        "WARNING: UNSEALED_DIRECT_EXECUTION | NON_REPRODUCIBLE | NO_PLATFORM_LINEAGE",
+        err=True,
+    )
 
     from corpus_studio.training.trainer import (
         TrainerError,
@@ -3782,7 +3881,15 @@ def train_run(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
 
-    typer.echo(result.model_dump_json(indent=2))
+    payload = result.model_dump(mode="json")
+    payload.update(
+        {
+            "execution_mode": "UNSEALED_DIRECT_EXECUTION",
+            "reproducibility": "NON_REPRODUCIBLE",
+            "platform_lineage": "NO_PLATFORM_LINEAGE",
+        }
+    )
+    typer.echo(json.dumps(payload, indent=2))
 
 
 @app.command("train-merge")

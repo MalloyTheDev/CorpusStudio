@@ -2528,66 +2528,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public System.Threading.Tasks.Task ResumeTrainingAsync() =>
         RunTrainingAsync(Training.TrainingResumeArgv, Training.TrainingResumeCommand);
 
-    /// <summary>Preflight + run Corpus Studio's own first-party trainer. train-check gates the launch
-    /// honestly (a real GPU run needs <c>ready</c>; the CPU smoke path needs <c>cpu_toy_ready</c>), then
-    /// the train-run argv is built with the ENGINE'S interpreter — the same one train-check probed — so
-    /// the run and the preflight can never disagree. It then flows through the exact same streamed run
-    /// lifecycle (records / checkpoints / cancellation) as an external launch.</summary>
+    /// <summary>Refuse the legacy mutable-config launch. First-party training is authoritative only
+    /// through a hash-sealed RunPlan and the Platform worker protocol.</summary>
     public async System.Threading.Tasks.Task LaunchFirstPartyTrainingAsync()
     {
-        if (Training.IsTrainingRunning)
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(Training.TrainingConfigPath))
-        {
-            await _dialogs.ShowAsync(
-                "Generate a training config first — the first-party trainer runs from it.",
-                "Corpus Studio", DialogSeverity.Information);
-            return;
-        }
-
-        TrainingRuntimeReport report;
-        try
-        {
-            SetBusy("Checking the training runtime...");
-            report = await _engine.CheckTrainingRuntimeAsync();
-            Training.ApplyTrainingRuntime(report);
-        }
-        catch (System.Exception ex)
-        {
-            Training.SetTrainingRuntimeError(ex.Message);
-            await _dialogs.ShowAsync(
-                $"The training runtime check failed.\n\n{ex.Message}", "Corpus Studio", DialogSeverity.Warning);
-            return;
-        }
-        finally
-        {
-            ClearBusy();
-        }
-
-        var decision = TrainingViewModel.DecideFirstPartyLaunch(report, Training.CpuToyMode);
-        if (!decision.CanLaunch)
-        {
-            await _dialogs.ShowAsync(decision.Message, "Training runtime not ready", DialogSeverity.Warning);
-            return;
-        }
-
-        var argv = _engine.BuildFirstPartyTrainArgv(
-            Training.TrainingConfigPath,
-            string.IsNullOrWhiteSpace(Training.TrainingOutputDirectory) ? null : Training.TrainingOutputDirectory,
-            decision.CpuToy,
-            maxSteps: null);
-
-        var baseCommand = string.IsNullOrWhiteSpace(Training.TrainingLaunchCommand)
-            ? "corpus-studio train-run"
-            : Training.TrainingLaunchCommand;
-        var command = decision.CpuToy
-            ? $"{baseCommand}  --cpu-toy\n\n⚠ {decision.Message}"
-            : baseCommand;
-
-        await RunTrainingAsync(argv, command, _engine.EngineWorkingDirectory);
+        await _dialogs.ShowAsync(
+            "Direct first-party config launch is disabled because it bypasses RunPlan, backend, "
+            + "environment, input, and worker-protocol lineage. Create a sealed plan with "
+            + "platform-plan and execute it with platform-run. The low-level train-run command is "
+            + "development-only and is never used by the shipping desktop.",
+            "Sealed RunPlan required", DialogSeverity.Information);
     }
 
     /// <summary>Preflight the first-party training runtime (train-check) and surface it, without

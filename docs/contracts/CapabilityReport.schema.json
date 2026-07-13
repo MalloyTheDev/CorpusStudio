@@ -28,6 +28,31 @@
       "title": "AttentionImpl",
       "type": "string"
     },
+    "AttentionKernel": {
+      "description": "The exact attention implementation an execution policy permits at runtime.",
+      "enum": [
+        "eager",
+        "torch_sdpa_math",
+        "torch_sdpa_flash",
+        "torch_sdpa_mem_efficient",
+        "flash_attention_2",
+        "flash_attention_3",
+        "xformers"
+      ],
+      "title": "AttentionKernel",
+      "type": "string"
+    },
+    "CheckpointImpl": {
+      "enum": [
+        "full_state",
+        "adapter_only",
+        "sharded",
+        "distcp",
+        "safetensors"
+      ],
+      "title": "CheckpointImpl",
+      "type": "string"
+    },
     "CommunicationBackend": {
       "enum": [
         "none",
@@ -38,6 +63,17 @@
         "backend_native"
       ],
       "title": "CommunicationBackend",
+      "type": "string"
+    },
+    "DeviceKind": {
+      "enum": [
+        "cuda",
+        "rocm",
+        "mps",
+        "xpu",
+        "cpu"
+      ],
+      "title": "DeviceKind",
       "type": "string"
     },
     "EffectiveCapabilities": {
@@ -58,11 +94,46 @@
           "title": "Attention Impls",
           "type": "array"
         },
+        "attention_kernels": {
+          "items": {
+            "$ref": "#/$defs/AttentionKernel"
+          },
+          "title": "Attention Kernels",
+          "type": "array"
+        },
+        "checkpoint_impls": {
+          "items": {
+            "$ref": "#/$defs/CheckpointImpl"
+          },
+          "title": "Checkpoint Impls",
+          "type": "array"
+        },
         "communication_backends": {
           "items": {
             "$ref": "#/$defs/CommunicationBackend"
           },
           "title": "Communication Backends",
+          "type": "array"
+        },
+        "execution_combinations": {
+          "items": {
+            "$ref": "#/$defs/ExecutionCapabilityCombination"
+          },
+          "title": "Execution Combinations",
+          "type": "array"
+        },
+        "execution_contract_versions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Execution Contract Versions",
+          "type": "array"
+        },
+        "loss_impls": {
+          "items": {
+            "$ref": "#/$defs/LossImpl"
+          },
+          "title": "Loss Impls",
           "type": "array"
         },
         "objective_capabilities": {
@@ -78,6 +149,13 @@
             "$ref": "#/$defs/OffloadStrategy"
           },
           "title": "Offload Strategies",
+          "type": "array"
+        },
+        "optimizers": {
+          "items": {
+            "$ref": "#/$defs/Optimizer"
+          },
+          "title": "Optimizers",
           "type": "array"
         },
         "parallelism_kinds": {
@@ -114,10 +192,109 @@
           },
           "title": "Quantization Modes",
           "type": "array"
+        },
+        "trainer_fields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Trainer Fields",
+          "type": "array"
+        },
+        "trainer_init_fields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Trainer Init Fields",
+          "type": "array"
         }
       },
       "title": "EffectiveCapabilities",
       "type": "object"
+    },
+    "ExecutionCapabilityCombination": {
+      "additionalProperties": false,
+      "description": "One execution tuple demonstrated together by a bounded functional probe.\n\nIndependent successes on precision, quantization, adapter, optimizer, loss, attention, and\ncheckpoint axes are diagnostic only. The planner may seal a run only from one of these complete\ntuples, preventing a union of unrelated probes from becoming a fictional capability.",
+      "properties": {
+        "adapter_method": {
+          "$ref": "#/$defs/AdapterMethod"
+        },
+        "attention_impl": {
+          "$ref": "#/$defs/AttentionImpl"
+        },
+        "attention_kernel": {
+          "$ref": "#/$defs/AttentionKernel"
+        },
+        "checkpoint_impl": {
+          "$ref": "#/$defs/CheckpointImpl"
+        },
+        "device": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "execution_contract_version": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Execution Contract Version",
+          "type": "string"
+        },
+        "export_format": {
+          "$ref": "#/$defs/ExportFormat"
+        },
+        "loss_impl": {
+          "$ref": "#/$defs/LossImpl"
+        },
+        "optimizer": {
+          "$ref": "#/$defs/Optimizer"
+        },
+        "precision": {
+          "$ref": "#/$defs/PrecisionMode"
+        },
+        "probe": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Probe",
+          "type": "string"
+        },
+        "quantization": {
+          "$ref": "#/$defs/QuantizationMode"
+        },
+        "runtime_mode": {
+          "enum": [
+            "training",
+            "cpu_toy"
+          ],
+          "title": "Runtime Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtime_mode",
+        "device",
+        "precision",
+        "quantization",
+        "adapter_method",
+        "attention_impl",
+        "attention_kernel",
+        "optimizer",
+        "loss_impl",
+        "checkpoint_impl",
+        "export_format",
+        "execution_contract_version",
+        "probe"
+      ],
+      "title": "ExecutionCapabilityCombination",
+      "type": "object"
+    },
+    "ExportFormat": {
+      "enum": [
+        "adapter_peft",
+        "merged_safetensors",
+        "merged_fp16",
+        "gguf",
+        "onnx",
+        "awq",
+        "gptq",
+        "mlx"
+      ],
+      "title": "ExportFormat",
+      "type": "string"
     },
     "FailureTaxonomy": {
       "description": "Terminal outcome category. ``PASS`` is included so the same enum classifies a completed\nprobe/run, not only failures. Grounded in the exact hazards the engine documents: the sm_120\nfused-attention deadlock (KERNEL_STALL), the WDDM silent spill (ACCIDENTAL_SPILL vs a clean\nOOM), and env/dependency mismatches (ENVIRONMENT_FAILURE).",
@@ -168,6 +345,20 @@
       "title": "HashRef",
       "type": "object"
     },
+    "LossImpl": {
+      "enum": [
+        "cross_entropy",
+        "liger_fused_ce",
+        "chunked_ce",
+        "dpo",
+        "orpo",
+        "kto",
+        "ipo",
+        "reward_bt"
+      ],
+      "title": "LossImpl",
+      "type": "string"
+    },
     "MemoryTier": {
       "description": "A physical state tier. A RunPlan names the intended tier; only runtime evidence may claim\nactual residency there.",
       "enum": [
@@ -195,6 +386,21 @@
         "deepspeed_zero3"
       ],
       "title": "OffloadStrategy",
+      "type": "string"
+    },
+    "Optimizer": {
+      "enum": [
+        "adamw_torch",
+        "adamw_torch_fused",
+        "adamw_8bit",
+        "adamw_bnb_8bit",
+        "paged_adamw_8bit",
+        "paged_adamw_32bit",
+        "adafactor",
+        "lion",
+        "sgd"
+      ],
+      "title": "Optimizer",
       "type": "string"
     },
     "PackageLock": {
@@ -357,6 +563,13 @@
           "default": null,
           "title": "Detail"
         },
+        "execution_combinations": {
+          "items": {
+            "$ref": "#/$defs/ExecutionCapabilityCombination"
+          },
+          "title": "Execution Combinations",
+          "type": "array"
+        },
         "measured": {
           "additionalProperties": true,
           "title": "Measured",
@@ -368,6 +581,16 @@
         "probe": {
           "title": "Probe",
           "type": "string"
+        },
+        "proves": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Proves",
+          "type": "object"
         }
       },
       "required": [

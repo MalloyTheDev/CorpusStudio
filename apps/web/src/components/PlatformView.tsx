@@ -41,6 +41,7 @@ export function PlatformView({
   const eff = snap.capabilities.effective_capabilities;
   const fit = snap.fit;
   const manifest = snap.manifest;
+  const execution = snap.plan.resolved_execution;
 
   return (
     <div className="cs-body">
@@ -99,6 +100,21 @@ export function PlatformView({
               <span className="cs-honest">Blackwell → math</span>
             ) : null}
           </Row>
+          {execution ? (
+            <>
+              <Row k="Effective kernel">{execution.attention.effective_backend_required}</Row>
+              <Row k="Physical device">
+                {execution.device_map.map((entry) => `${entry.module || "<root>"}=${entry.device}`).join(", ")}
+              </Row>
+              <Row k="Execution config hash">
+                <Hash value={execution.configuration_hash} />
+              </Row>
+            </>
+          ) : (
+            <Row k="Execution config">
+              <Chip tone="warn">legacy plan - regenerate before execution</Chip>
+            </Row>
+          )}
           <Row k="Adapter">{snap.plan.adapter.method}</Row>
           <Row k="Sequence length">{snap.plan.sequence.max_sequence_len}</Row>
           <Row k="Plan hash">

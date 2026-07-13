@@ -22,6 +22,18 @@ export type AdapterMethods = AdapterMethod[];
 export type AttentionImpl =
   "math" | "eager" | "sdpa" | "flash_attention_2" | "flash_attention_3" | "mem_efficient" | "xformers";
 export type AttentionImpls = AttentionImpl[];
+/**
+ * The exact attention implementation an execution policy permits at runtime.
+ */
+export type AttentionKernel =
+  | "eager"
+  | "torch_sdpa_math"
+  | "torch_sdpa_flash"
+  | "torch_sdpa_mem_efficient"
+  | "flash_attention_2"
+  | "flash_attention_3"
+  | "xformers";
+export type AttentionKernels = AttentionKernel[];
 export type BackendId = string;
 export type BackendVersion = string;
 export type CapabilityProbes = string[];
@@ -53,6 +65,7 @@ export type DisplayName = string;
 export type Algo = "sha256" | "sha256-ordered-exact-v1" | "blake3" | "none";
 export type Value = string | null;
 export type Id = string;
+export type ExecutionContractVersions = string[];
 export type ExportFormat =
   "adapter_peft" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
 export type ServesIn = string[];
@@ -159,6 +172,10 @@ export type StageMarker =
   | "process_start"
   | "env_loaded"
   | "cuda_init"
+  | "execution_config_verified"
+  | "attention_policy_applied"
+  | "placement_verified"
+  | "placement_deviation"
   | "model_loaded"
   | "quantized"
   | "adapter_attached"
@@ -173,6 +190,8 @@ export type StageMarker =
   | "evaluation"
   | "export";
 export type TelemetryHooks = TelemetryHook[];
+export type TrainerFields = string[];
+export type TrainerInitFields = string[];
 /**
  * Verbatim from config_templates.TrainingConfigTarget.
  */
@@ -235,23 +254,36 @@ export type BitsandbytesOk = boolean;
 export type ContractVersion2 = "1.0.0";
 export type AdapterMethods1 = AdapterMethod[];
 export type AttentionImpls1 = AttentionImpl[];
+export type AttentionKernels1 = AttentionKernel[];
+export type CheckpointImpls1 = CheckpointImpl[];
 export type CommunicationBackends1 = CommunicationBackend[];
+export type ExecutionContractVersion = string;
+export type Probe = string;
+export type RuntimeMode = "training" | "cpu_toy";
+export type ExecutionCombinations = ExecutionCapabilityCombination[];
+export type ExecutionContractVersions1 = string[];
+export type LossImpls1 = LossImpl[];
 export type ObjectiveCapabilities1 = string[];
 export type OffloadStrategies1 = OffloadStrategy[];
+export type Optimizers1 = Optimizer[];
 export type ParallelismKinds1 = ParallelismKind[];
 export type PlacementModes1 = PlacementMode[];
 export type PlacementTiers1 = MemoryTier[];
 export type PrecisionModes1 = PrecisionMode[];
 export type QuantizationModes1 = QuantizationMode[];
+export type TrainerFields1 = string[];
+export type TrainerInitFields1 = string[];
 export type GeneratedAt = string | null;
 export type InstalledPackages = PackageLock[];
 export type MissingPackages = string[];
 export type Notes1 = string[];
 export type Detail = string | null;
-export type Probe = string;
+export type ExecutionCombinations1 = ExecutionCapabilityCombination[];
+export type Probe1 = string;
 export type ProbeResults = ProbeResult[];
 export type Readiness = "ready" | "cpu_toy_only" | "not_ready";
 export type HeartbeatIntervalSeconds = number;
+export type Bias = ("none" | "all" | "lora_only") | null;
 export type LoraAlpha = number | null;
 export type LoraDropout = number | null;
 export type LoraR = number | null;
@@ -287,8 +319,12 @@ export type OffloadStrategy1 =
   | "disk_offload"
   | "deepspeed_zero2"
   | "deepspeed_zero3";
+export type AdamBeta1 = number;
+export type AdamBeta2 = number;
+export type AdamEpsilon = number;
 export type LearningRate = number;
 export type LrScheduler = string | null;
+export type MaxGradNorm = number;
 export type WarmupRatio = number | null;
 export type WeightDecay = number | null;
 export type EvidenceStatus = "planned_not_measured";
@@ -391,16 +427,86 @@ export type Path1 = string;
 export type RouteFidelity = "preserve_or_fail" | "declared_semantic_fallback";
 export type PlanHash = string;
 export type PlanId = string;
+export type AdapterTaskType = "CAUSAL_LM";
+export type EvidenceKind = "functional_probe" | "cpu_reference";
+export type FallbackPolicy = "refuse";
+export type FlashSdpEnabled = boolean;
+export type MathSdpEnabled = boolean;
+export type MemEfficientSdpEnabled = boolean;
+/**
+ * The model-loader API selected before execution.
+ *
+ * This is deliberately separate from :class:`AttentionKernel`: ``sdpa`` is an API that can
+ * dispatch to several materially different PyTorch kernels.
+ */
+export type ModelAttentionApi = "eager" | "sdpa" | "flash_attention_2" | "flash_attention_3" | "xformers";
+export type SafetyMandate = string | null;
+/**
+ * Whether the planner may seal a capability that lacks functional evidence.
+ */
+export type ExecutionVerificationRequirement = "require_verified" | "allow_unverified";
+export type Bnb4BitUseDoubleQuant = boolean;
+export type ConfigurationHash = string;
+export type ConfigurationId = string;
+export type ContractVersion4 = "1.0.0";
+export type ChatTemplateSha256 = string | null;
+export type DatasetFormat = "instruction" | "chat" | "trace";
+export type DatasetTextField = string;
+export type FormatterId = string;
+export type FormatterSha256 = string;
+export type Packing = boolean;
+export type TruncationAnalysis = "full_pinned_dataset";
+export type TruncationPolicy = "refuse" | "allow";
+export type DataSeed = number;
+/**
+ * @minItems 1
+ */
+export type DeviceMap = [DeviceMapEntry, ...DeviceMapEntry[]];
+export type Device = string;
+export type Module = string;
+export type EnvironmentBinding = "profile_snapshot" | "managed_lock";
+export type GradientCheckpointing1 = boolean;
+export type ContentSha256 = string | null;
+export type Kind1 = "dataset" | "model" | "tokenizer";
+export type Location = string;
+export type ResolvedRevision = string | null;
+export type Source1 = "local_file" | "local_directory" | "huggingface";
+export type OutputDir1 = string;
+export type OutputLayout = "run_scoped_v1";
+export type PrecisionMode1 = "fp32" | "tf32" | "fp16" | "bf16" | "fp8" | "mixed_bf16" | "mixed_fp16";
+export type OptimizerStateDtype = PrecisionMode | QuantizationMode;
+export type QuantizationMode1 = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
+export type RuntimeMode1 = "training" | "cpu_toy";
+export type SaveStrategy = "steps";
+export type MaxSteps = number | null;
+export type NumTrainEpochs = number | null;
 export type Seed = number;
 export type Buckets = number[];
 export type MaxSequenceLen = number;
-export type Packing = boolean;
+export type Packing1 = boolean;
 export type TruncationAllowed = boolean;
+export type DisableTqdm = boolean;
+export type LoggingSteps = number;
+/**
+ * @minItems 1
+ */
+export type PackageVersions = [PackageLock, ...PackageLock[]];
+export type ReportTo = string[];
+/**
+ * @minItems 1
+ */
+export type RequiredSftConfigFields = [string, ...string[]];
+export type SequenceLengthField = "max_seq_length" | "max_length";
+export type TokenizerParameter = "tokenizer" | "processing_class";
+export type TrustRemoteCode = false;
+export type UseSafetensors = true;
+export type Seed1 = number;
 export type RunId = string;
+export type ExecutionConfigurationHash = string | null;
 export type Pid = number | null;
 export type ProcessStartedAt = string | null;
 export type RunId1 = string;
-export type ContractVersion4 = "1.0.0";
+export type ContractVersion5 = "1.0.0";
 export type Detail1 = string | null;
 export type DetectedAt = string | null;
 export type ExceptionType = string | null;
@@ -423,7 +529,7 @@ export type FitClass =
   | "ACCIDENTAL_WDDM_SPILL"
   | "THRASHING"
   | "FAIL";
-export type ContractVersion5 = "1.0.0";
+export type ContractVersion6 = "1.0.0";
 export type DeviceCapacityBytes = number | null;
 export type EstimatedPeakBytes = number | null;
 export type HeadroomBytes = number | null;
@@ -445,7 +551,7 @@ export type RunId2 = string | null;
 export type Signal = string | null;
 export type Action = "cancel" | "pause" | "resume" | "checkpoint_now";
 export type RunId3 = string;
-export type ContractVersion6 = "1.0.0";
+export type ContractVersion7 = "1.0.0";
 export type EmittedAt = string;
 export type Epoch = number | null;
 export type EventType =
@@ -572,12 +678,12 @@ export type PidAlive = boolean;
 export type RunId5 = string;
 export type ArtifactId = string;
 export type BaseModel1 = string | null;
-export type ContractVersion7 = "1.0.0";
+export type ContractVersion8 = "1.0.0";
 export type CreatedAt1 = string | null;
 export type CheapFingerprint = string | null;
 export type ContentHash = string | null;
 export type CurrentIntegrity = "ok" | "missing" | "modified" | "unknown";
-export type Kind1 = "adapter" | "checkpoint" | "merged_model" | "gguf" | "onnx" | "quantized" | "other";
+export type Kind2 = "adapter" | "checkpoint" | "merged_model" | "gguf" | "onnx" | "quantized" | "other";
 export type Notes3 = string;
 export type Path2 = string;
 export type ReloadVerified = boolean;
@@ -587,7 +693,7 @@ export type Artifacts = ArtifactManifest[];
 export type AdapterApplied = boolean | null;
 export type Backend = string | null;
 export type ChatTemplateApplied = boolean | null;
-export type ContractVersion8 = "1.0.0";
+export type ContractVersion9 = "1.0.0";
 export type DatasetFingerprint = string | null;
 export type Name3 = string;
 export type VersionRef = string | null;
@@ -620,14 +726,14 @@ export type RunId6 = string;
 export type ArtifactIds = string[];
 export type BaseModel2 = string;
 export type Checkpoints = string[];
-export type ContractVersion9 = "1.0.0";
+export type ContractVersion10 = "1.0.0";
 export type CreatedAt2 = string;
 export type AfterEvalModel = string | null;
 export type AfterEvalRef = string | null;
 export type BeforeEvalRef = string | null;
 export type FinishedAt = string | null;
 export type Notes4 = string;
-export type OutputDir1 = string;
+export type OutputDir2 = string;
 export type ParameterAccountingRefs = Ref[];
 export type Argv = string[];
 export type ExitCode1 = number | null;
@@ -695,6 +801,7 @@ export interface HelloBody {
 export interface BackendManifest {
   adapter_methods?: AdapterMethods;
   attention_impls?: AttentionImpls;
+  attention_kernels?: AttentionKernels;
   backend_id: BackendId;
   backend_version: BackendVersion;
   capability_probes?: CapabilityProbes;
@@ -707,6 +814,7 @@ export interface BackendManifest {
   dependency_requirements?: DependencyRequirements;
   display_name?: DisplayName;
   environment_lock_ref?: Ref | null;
+  execution_contract_versions?: ExecutionContractVersions;
   export_compatibility?: ExportCompatibility;
   export_formats?: ExportFormats;
   known_failure_modes?: KnownFailureModes;
@@ -725,6 +833,8 @@ export interface BackendManifest {
   supported_os: SupportedOs;
   task_types: TaskTypes;
   telemetry_hooks?: TelemetryHooks;
+  trainer_fields?: TrainerFields;
+  trainer_init_fields?: TrainerInitFields;
   trainer_target?: TrainerTarget | null;
 }
 export interface CheckpointSemantics {
@@ -898,23 +1008,58 @@ export interface CapabilityReport {
 export interface EffectiveCapabilities {
   adapter_methods?: AdapterMethods1;
   attention_impls?: AttentionImpls1;
+  attention_kernels?: AttentionKernels1;
+  checkpoint_impls?: CheckpointImpls1;
   communication_backends?: CommunicationBackends1;
+  execution_combinations?: ExecutionCombinations;
+  execution_contract_versions?: ExecutionContractVersions1;
+  loss_impls?: LossImpls1;
   objective_capabilities?: ObjectiveCapabilities1;
   offload_strategies?: OffloadStrategies1;
+  optimizers?: Optimizers1;
   parallelism_kinds?: ParallelismKinds1;
   placement_modes?: PlacementModes1;
   placement_tiers?: PlacementTiers1;
   precision_modes?: PrecisionModes1;
   quantization_modes?: QuantizationModes1;
+  trainer_fields?: TrainerFields1;
+  trainer_init_fields?: TrainerInitFields1;
+}
+/**
+ * One execution tuple demonstrated together by a bounded functional probe.
+ *
+ * Independent successes on precision, quantization, adapter, optimizer, loss, attention, and
+ * checkpoint axes are diagnostic only. The planner may seal a run only from one of these complete
+ * tuples, preventing a union of unrelated probes from becoming a fictional capability.
+ */
+export interface ExecutionCapabilityCombination {
+  adapter_method: AdapterMethod;
+  attention_impl: AttentionImpl;
+  attention_kernel: AttentionKernel;
+  checkpoint_impl: CheckpointImpl;
+  device: DeviceKind;
+  execution_contract_version: ExecutionContractVersion;
+  export_format: ExportFormat;
+  loss_impl: LossImpl;
+  optimizer: Optimizer;
+  precision: PrecisionMode;
+  probe: Probe;
+  quantization: QuantizationMode;
+  runtime_mode: RuntimeMode;
 }
 export interface ProbeResult {
   detail?: Detail;
+  execution_combinations?: ExecutionCombinations1;
   measured?: Measured;
   outcome: FailureTaxonomy;
-  probe: Probe;
+  probe: Probe1;
+  proves?: Proves;
 }
 export interface Measured {
   [k: string]: unknown;
+}
+export interface Proves {
+  [k: string]: string[];
 }
 /**
  * Core→worker: execute this immutable plan (passed by value so the worker needs no shared
@@ -956,12 +1101,14 @@ export interface RunPlan {
   plan_id: PlanId;
   precision: PrecisionMode;
   quantization: QuantizationMode;
-  seed?: Seed;
+  resolved_execution?: ResolvedExecutionConfiguration | null;
+  seed?: Seed1;
   sequence: SequenceSpec;
   task_type: TaskType;
   training_config_snapshot?: TrainingConfigSnapshot;
 }
 export interface AdapterSpec {
+  bias?: Bias;
   lora_alpha?: LoraAlpha;
   lora_dropout?: LoraDropout;
   lora_r?: LoraR;
@@ -999,9 +1146,13 @@ export interface ExportSpec {
   output_dir?: OutputDir;
 }
 export interface OptimizerSpec {
+  adam_beta1?: AdamBeta1;
+  adam_beta2?: AdamBeta2;
+  adam_epsilon?: AdamEpsilon;
   impl: Optimizer;
   learning_rate: LearningRate;
   lr_scheduler?: LrScheduler;
+  max_grad_norm?: MaxGradNorm;
   warmup_ratio?: WarmupRatio;
   weight_decay?: WeightDecay;
 }
@@ -1111,19 +1262,143 @@ export interface StorageRoleAssessment {
   suitability: StorageSuitability1;
 }
 /**
+ * The hash-sealed configuration consumed directly by an isolated training worker.
+ *
+ * It contains every execution-affecting default. Workers may refuse it, but may not fill in,
+ * filter, reinterpret, or override semantic fields after this configuration is sealed.
+ */
+export interface ResolvedExecutionConfiguration {
+  adapter: AdapterSpec;
+  adapter_task_type?: AdapterTaskType;
+  attention: AttentionExecutionPolicy;
+  backend_ref: Ref;
+  batching: BatchingSpec;
+  bnb_4bit_use_double_quant: Bnb4BitUseDoubleQuant;
+  capability_report_ref: Ref;
+  checkpoint_policy: CheckpointPolicy;
+  configuration_hash: ConfigurationHash;
+  configuration_id: ConfigurationId;
+  contract_version?: ContractVersion4;
+  data: TrainingDataPolicy;
+  data_seed?: DataSeed;
+  device_map: DeviceMap;
+  environment_binding: EnvironmentBinding;
+  environment_ref: Ref;
+  export_format: ExportFormat;
+  gradient_checkpointing?: GradientCheckpointing1;
+  inputs: ExecutionInputs;
+  loss_impl: LossImpl;
+  objective_ref: Ref;
+  optimizer: OptimizerSpec;
+  output_dir: OutputDir1;
+  output_layout?: OutputLayout;
+  precision: PrecisionExecutionPolicy;
+  runtime_mode: RuntimeMode1;
+  save_strategy?: SaveStrategy;
+  schedule: TrainingSchedule;
+  seed?: Seed;
+  sequence: SequenceSpec;
+  trainer_interface: TrainerInterfacePolicy;
+  trust_remote_code?: TrustRemoteCode;
+  use_safetensors?: UseSafetensors;
+}
+/**
+ * Exact model attention API plus the one runtime kernel that is permitted.
+ */
+export interface AttentionExecutionPolicy {
+  effective_backend_required: AttentionKernel;
+  evidence_kind: EvidenceKind;
+  fallback_policy?: FallbackPolicy;
+  flash_attention_package?: PackageLock | null;
+  flash_sdp_enabled: FlashSdpEnabled;
+  kernel_probe_ref: Ref;
+  math_sdp_enabled: MathSdpEnabled;
+  mem_efficient_sdp_enabled: MemEfficientSdpEnabled;
+  model_attention_api: ModelAttentionApi;
+  safety_mandate?: SafetyMandate;
+  verification_requirement?: ExecutionVerificationRequirement;
+}
+export interface TrainingDataPolicy {
+  chat_template_sha256?: ChatTemplateSha256;
+  dataset_format: DatasetFormat;
+  dataset_text_field?: DatasetTextField;
+  formatter_id: FormatterId;
+  formatter_sha256: FormatterSha256;
+  packing?: Packing;
+  truncation_analysis?: TruncationAnalysis;
+  truncation_policy?: TruncationPolicy;
+}
+export interface DeviceMapEntry {
+  device: Device;
+  module: Module;
+}
+export interface ExecutionInputs {
+  dataset: ExecutionInputBinding;
+  model: ExecutionInputBinding;
+  tokenizer: ExecutionInputBinding;
+}
+/**
+ * One immutable input consumed by the worker.
+ *
+ * Local inputs pin the exact bytes (a stable file or directory digest). Hugging Face inputs pin an
+ * immutable repository commit; a branch or tag is never sufficient execution identity.
+ */
+export interface ExecutionInputBinding {
+  content_sha256?: ContentSha256;
+  kind: Kind1;
+  location: Location;
+  ref: Ref;
+  resolved_revision?: ResolvedRevision;
+  source: Source1;
+}
+/**
+ * The numerical representation of each material training state.
+ *
+ * ``weight_storage_dtype`` describes an unquantized frozen base; quantized bases use
+ * ``quantized_storage_format`` instead. ``master_weight_dtype`` describes the trainable adapter
+ * parameters. An 8-bit optimizer may use quantized primary state plus FP32 auxiliary tensors.
+ */
+export interface PrecisionExecutionPolicy {
+  dequantization_dtype: PrecisionMode;
+  forward_compute_dtype: PrecisionMode;
+  gradient_dtype: PrecisionMode;
+  master_weight_dtype?: PrecisionMode | null;
+  optimizer_auxiliary_dtype?: PrecisionMode1;
+  optimizer_state_dtype: OptimizerStateDtype;
+  quantized_storage_format?: QuantizationMode1;
+  weight_storage_dtype?: PrecisionMode | null;
+}
+export interface TrainingSchedule {
+  max_steps?: MaxSteps;
+  num_train_epochs?: NumTrainEpochs;
+}
+/**
  * Sequence handling. Buckets let variable-length rows batch efficiently; the max bucket ==
  * the trainer's sequence_len (config_templates.sequence_len, default 4096).
  */
 export interface SequenceSpec {
   buckets?: Buckets;
   max_sequence_len?: MaxSequenceLen;
-  packing?: Packing;
+  packing?: Packing1;
   truncation_allowed?: TruncationAllowed;
+}
+/**
+ * Version- and field-exact adapter to the installed TRL/Transformers surface.
+ */
+export interface TrainerInterfacePolicy {
+  disable_tqdm?: DisableTqdm;
+  logging_steps?: LoggingSteps;
+  package_versions: PackageVersions;
+  report_to?: ReportTo;
+  required_sft_config_fields: RequiredSftConfigFields;
+  sequence_length_field: SequenceLengthField;
+  tokenizer_parameter: TokenizerParameter;
 }
 export interface TrainingConfigSnapshot {
   [k: string]: unknown;
 }
 export interface RunAcceptedBody {
+  execution_configuration_hash?: ExecutionConfigurationHash;
   pid?: Pid;
   process_started_at?: ProcessStartedAt;
   run_id: RunId1;
@@ -1134,7 +1409,7 @@ export interface RunAcceptedBody {
  * fused-attention deadlock) vs an ACCIDENTAL_SPILL vs a CONTROLLED_OFFLOAD. NEW.
  */
 export interface FailureRecord {
-  contract_version?: ContractVersion4;
+  contract_version?: ContractVersion5;
   detail?: Detail1;
   detected_at?: DetectedAt;
   exception_type?: ExceptionType;
@@ -1158,7 +1433,7 @@ export interface FailureRecord {
 export interface FitClassification {
   attention_path?: AttentionImpl | null;
   classification: FitClass;
-  contract_version?: ContractVersion5;
+  contract_version?: ContractVersion6;
   device_capacity_bytes?: DeviceCapacityBytes;
   estimated_peak_bytes?: EstimatedPeakBytes;
   headroom_bytes?: HeadroomBytes;
@@ -1192,7 +1467,7 @@ export interface RunControlBody {
  * streaming telemetry today (run_registry is a durable per-run record, not an event stream).
  */
 export interface RunEvent {
-  contract_version?: ContractVersion6;
+  contract_version?: ContractVersion7;
   emitted_at: EmittedAt;
   epoch?: Epoch;
   event_type: EventType;
@@ -1327,10 +1602,10 @@ export interface TerminalResultBody {
 export interface ArtifactManifest {
   artifact_id: ArtifactId;
   base_model?: BaseModel1;
-  contract_version?: ContractVersion7;
+  contract_version?: ContractVersion8;
   created_at?: CreatedAt1;
   integrity?: ArtifactIntegrity | null;
-  kind?: Kind1;
+  kind?: Kind2;
   notes?: Notes3;
   parameter_accounting_ref?: Ref | null;
   path: Path2;
@@ -1355,7 +1630,7 @@ export interface ArtifactIntegrity {
  */
 export interface EvaluationResult {
   as_served?: AsServed | null;
-  contract_version?: ContractVersion8;
+  contract_version?: ContractVersion9;
   dataset?: EvalDataset | null;
   eval_id: EvalId;
   gate?: EvalGate | null;
@@ -1434,7 +1709,7 @@ export interface RunManifest {
   artifact_ids?: ArtifactIds;
   base_model?: BaseModel2;
   checkpoints?: Checkpoints;
-  contract_version?: ContractVersion9;
+  contract_version?: ContractVersion10;
   created_at: CreatedAt2;
   dataset_ref?: Ref | null;
   environment_ref?: Ref | null;
@@ -1443,7 +1718,7 @@ export interface RunManifest {
   final_fit?: FitClassification | null;
   finished_at?: FinishedAt;
   notes?: Notes4;
-  output_dir?: OutputDir1;
+  output_dir?: OutputDir2;
   parameter_accounting_refs?: ParameterAccountingRefs;
   plan_ref: Ref;
   process?: RunProcessInfo | null;

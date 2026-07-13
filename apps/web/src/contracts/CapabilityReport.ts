@@ -15,8 +15,44 @@ export type AdapterMethods = AdapterMethod[];
 export type AttentionImpl =
   "math" | "eager" | "sdpa" | "flash_attention_2" | "flash_attention_3" | "mem_efficient" | "xformers";
 export type AttentionImpls = AttentionImpl[];
+/**
+ * The exact attention implementation an execution policy permits at runtime.
+ */
+export type AttentionKernel =
+  | "eager"
+  | "torch_sdpa_math"
+  | "torch_sdpa_flash"
+  | "torch_sdpa_mem_efficient"
+  | "flash_attention_2"
+  | "flash_attention_3"
+  | "xformers";
+export type AttentionKernels = AttentionKernel[];
+export type CheckpointImpl = "full_state" | "adapter_only" | "sharded" | "distcp" | "safetensors";
+export type CheckpointImpls = CheckpointImpl[];
 export type CommunicationBackend = "none" | "nccl" | "gloo" | "mpi" | "ucc" | "backend_native";
 export type CommunicationBackends = CommunicationBackend[];
+export type DeviceKind = "cuda" | "rocm" | "mps" | "xpu" | "cpu";
+export type ExecutionContractVersion = string;
+export type ExportFormat =
+  "adapter_peft" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
+export type LossImpl = "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt";
+export type Optimizer =
+  | "adamw_torch"
+  | "adamw_torch_fused"
+  | "adamw_8bit"
+  | "adamw_bnb_8bit"
+  | "paged_adamw_8bit"
+  | "paged_adamw_32bit"
+  | "adafactor"
+  | "lion"
+  | "sgd";
+export type PrecisionMode = "fp32" | "tf32" | "fp16" | "bf16" | "fp8" | "mixed_bf16" | "mixed_fp16";
+export type Probe = string;
+export type QuantizationMode = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
+export type RuntimeMode = "training" | "cpu_toy";
+export type ExecutionCombinations = ExecutionCapabilityCombination[];
+export type ExecutionContractVersions = string[];
+export type LossImpls = LossImpl[];
 export type ObjectiveCapabilities = string[];
 /**
  * The ``controlled_*`` values are the deliberate, planned counterparts of the accidental spills
@@ -32,6 +68,7 @@ export type OffloadStrategy =
   | "deepspeed_zero2"
   | "deepspeed_zero3";
 export type OffloadStrategies = OffloadStrategy[];
+export type Optimizers = Optimizer[];
 export type ParallelismKind = "data" | "tensor" | "pipeline" | "expert" | "sequence" | "context";
 export type ParallelismKinds = ParallelismKind[];
 export type PlacementMode =
@@ -43,10 +80,10 @@ export type PlacementModes = PlacementMode[];
  */
 export type MemoryTier = "gpu" | "pinned_ram" | "pageable_ram" | "nvme" | "sata" | "remote" | "unknown";
 export type PlacementTiers = MemoryTier[];
-export type PrecisionMode = "fp32" | "tf32" | "fp16" | "bf16" | "fp8" | "mixed_bf16" | "mixed_fp16";
 export type PrecisionModes = PrecisionMode[];
-export type QuantizationMode = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
 export type QuantizationModes = QuantizationMode[];
+export type TrainerFields = string[];
+export type TrainerInitFields = string[];
 export type Algo = "sha256" | "sha256-ordered-exact-v1" | "blake3" | "none";
 export type Value = string | null;
 export type Id = string;
@@ -63,6 +100,7 @@ export type InstalledPackages = PackageLock[];
 export type MissingPackages = string[];
 export type Notes = string[];
 export type Detail = string | null;
+export type ExecutionCombinations1 = ExecutionCapabilityCombination[];
 /**
  * Terminal outcome category. ``PASS`` is included so the same enum classifies a completed
  * probe/run, not only failures. Grounded in the exact hazards the engine documents: the sm_120
@@ -81,7 +119,7 @@ export type FailureTaxonomy =
   | "UNSUPPORTED_CONFIGURATION"
   | "ACCIDENTAL_SPILL"
   | "CONTROLLED_OFFLOAD";
-export type Probe = string;
+export type Probe1 = string;
 export type ProbeResults = ProbeResult[];
 export type Readiness = "ready" | "cpu_toy_only" | "not_ready";
 
@@ -111,14 +149,44 @@ export interface CapabilityReport {
 export interface EffectiveCapabilities {
   adapter_methods?: AdapterMethods;
   attention_impls?: AttentionImpls;
+  attention_kernels?: AttentionKernels;
+  checkpoint_impls?: CheckpointImpls;
   communication_backends?: CommunicationBackends;
+  execution_combinations?: ExecutionCombinations;
+  execution_contract_versions?: ExecutionContractVersions;
+  loss_impls?: LossImpls;
   objective_capabilities?: ObjectiveCapabilities;
   offload_strategies?: OffloadStrategies;
+  optimizers?: Optimizers;
   parallelism_kinds?: ParallelismKinds;
   placement_modes?: PlacementModes;
   placement_tiers?: PlacementTiers;
   precision_modes?: PrecisionModes;
   quantization_modes?: QuantizationModes;
+  trainer_fields?: TrainerFields;
+  trainer_init_fields?: TrainerInitFields;
+}
+/**
+ * One execution tuple demonstrated together by a bounded functional probe.
+ *
+ * Independent successes on precision, quantization, adapter, optimizer, loss, attention, and
+ * checkpoint axes are diagnostic only. The planner may seal a run only from one of these complete
+ * tuples, preventing a union of unrelated probes from becoming a fictional capability.
+ */
+export interface ExecutionCapabilityCombination {
+  adapter_method: AdapterMethod;
+  attention_impl: AttentionImpl;
+  attention_kernel: AttentionKernel;
+  checkpoint_impl: CheckpointImpl;
+  device: DeviceKind;
+  execution_contract_version: ExecutionContractVersion;
+  export_format: ExportFormat;
+  loss_impl: LossImpl;
+  optimizer: Optimizer;
+  precision: PrecisionMode;
+  probe: Probe;
+  quantization: QuantizationMode;
+  runtime_mode: RuntimeMode;
 }
 /**
  * A stable reference to another contract instance by id, optionally pinned to a content hash so
@@ -157,10 +225,15 @@ export interface PackageLock {
 }
 export interface ProbeResult {
   detail?: Detail;
+  execution_combinations?: ExecutionCombinations1;
   measured?: Measured;
   outcome: FailureTaxonomy;
-  probe: Probe;
+  probe: Probe1;
+  proves?: Proves;
 }
 export interface Measured {
   [k: string]: unknown;
+}
+export interface Proves {
+  [k: string]: string[];
 }

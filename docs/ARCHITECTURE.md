@@ -196,10 +196,10 @@ goes through the existing validator and explicit user action.
 
 ## Lab boundaries
 
-Evaluation Lab, AI Assist Lab, and Training all build on the engine. Training is now **shipped and
-opt-in**: the first-party QLoRA trainer (the `[train]` extra) runs in-process, driven by the platform
-run lifecycle — the core stays dependency-light (torch is lazy-imported only when a training command
-runs). The engine can also generate a config to launch an external trainer.
+Evaluation Lab, AI Assist Lab, and Training all build on the engine. Training is **shipped and
+opt-in**: the first-party QLoRA backend (the `[train]` extra) is admitted and executed only through the
+hash-sealed Platform lifecycle. Heavy imports remain lazy inside its worker, so the control plane stays
+dependency-light. The engine can also generate a config to launch an external trainer.
 
 ```text
 Desktop Future Labs
@@ -209,9 +209,11 @@ Desktop Future Labs
   +-- Training Lab   -> split/export outputs + training config templates + rendered config files
 ```
 
-Model calls stay behind backend adapters. Real training launch has shipped (the first-party trainer +
-the `platform-run` supervisor); the UI heads drive it as clients — they never contain the training
-logic.
+Model calls stay behind backend adapters. Real first-party execution is owned by `platform-plan` →
+`platform-run`; backend identity, environment, capabilities, immutable inputs, and runner lane form
+one chain. The Tauri/React Platform client drives that lifecycle. WPF/Avalonia still launches reviewed
+external-trainer argv, but deliberately refuses its former direct first-party `train-run` path. No UI
+head contains training logic.
 
 The Training Lab MVP uses the same desktop-to-engine boundary:
 
@@ -219,10 +221,9 @@ The Training Lab MVP uses the same desktop-to-engine boundary:
 Desktop Training tab -> Python training-config CLI -> training templates -> rendered config file
 ```
 
-The `training-config` command writes inspectable config files only. In-app trainer
-launch (exact argv, no shell), live log streaming, checkpoint tracking, and
-resume-from-latest are separate shipped features — the config generator never
-runs a trainer itself. See [`TRAINING.md`](TRAINING.md).
+The `training-config` command writes inspectable config files only. External targets may expose an
+exact no-shell launch argv. A first-party config exposes no executable argv: it must become a sealed
+RunPlan before dispatch. See [`TRAINING.md`](TRAINING.md).
 
 ## Design rule
 

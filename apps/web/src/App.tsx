@@ -19,6 +19,7 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>("dark");
   const [inputs, setInputs] = useState<PlanInputs>({
     baseModel: "Qwen/Qwen2.5-7B-Instruct",
+    modelRevision: "a09a35458c702b33eeacc393d103063234e8bc28",
     dataset: "data/train.jsonl",
     sequenceLen: 4096,
     backend: "corpus_studio",
@@ -132,6 +133,14 @@ export default function App() {
             <input
               value={inputs.dataset}
               onChange={(e) => setInputs((i) => ({ ...i, dataset: e.target.value }))}
+            />
+          </label>
+          <label className="cs-field cs-field-grow">
+            <span>Model revision (immutable)</span>
+            <input
+              value={inputs.modelRevision}
+              onChange={(e) => setInputs((i) => ({ ...i, modelRevision: e.target.value }))}
+              placeholder="40-character Hub commit; blank for a local model directory"
             />
           </label>
           <label className="cs-field">

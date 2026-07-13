@@ -16,7 +16,7 @@ corpus-studio platform-schemas --out docs/contracts
 # or: python -m corpus_studio.cli platform-schemas --out docs/contracts
 ```
 
-`index.json` lists all **27 root contracts** and their shared `contract_version`.
+`index.json` lists all **28 root contracts** and their shared `contract_version`.
 
 ## The contracts
 

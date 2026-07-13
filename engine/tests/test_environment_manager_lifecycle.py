@@ -845,6 +845,31 @@ def _run_plan(environment_ref: Ref) -> RunPlan:
     return draft.model_copy(update={"plan_hash": compute_plan_hash(run_plan_hash_payload(draft))})
 
 
+def _resolved_run_plan(environment_ref: Ref) -> RunPlan:
+    from corpus_studio.platform.execution_config import execution_configuration_hash_for
+    from corpus_studio.platform.planner import compute_plan_hash, run_plan_hash_payload
+    from corpus_studio.platform.runners import demo_training_plan
+
+    plan = demo_training_plan("managed-plan")
+    assert plan.resolved_execution is not None
+    execution = plan.resolved_execution.model_copy(
+        update={
+            "configuration_hash": "0" * 64,
+            "environment_ref": environment_ref,
+            "environment_binding": "managed_lock",
+        }
+    )
+    execution = execution.model_copy(
+        update={"configuration_hash": execution_configuration_hash_for(execution)}
+    )
+    body = plan.model_dump(mode="json")
+    body["plan_hash"] = "0" * 64
+    body["environment_ref"] = environment_ref.model_dump(mode="json")
+    body["resolved_execution"] = execution.model_dump(mode="json")
+    draft = RunPlan.model_validate(body)
+    return draft.model_copy(update={"plan_hash": compute_plan_hash(run_plan_hash_payload(draft))})
+
+
 def test_run_plan_pins_lock_hash_and_resume_verifies_state(tmp_path):
     _, _, result = _create(tmp_path, FakeEnvironmentRunner())
     environment_ref = locked_environment_ref(result.descriptor, result.lock)
@@ -1091,7 +1116,7 @@ def test_platform_run_verifies_lock_and_dispatches_with_managed_interpreter(
 ):
     fake = FakeEnvironmentRunner()
     manager, _, result = _create(tmp_path, fake, "run-env")
-    plan = _run_plan(locked_environment_ref(result.descriptor, result.lock))
+    plan = _resolved_run_plan(locked_environment_ref(result.descriptor, result.lock))
     plan_path = tmp_path / "RunPlan.json"
     plan_path.write_text(plan.model_dump_json(indent=2), encoding="utf-8")
     monkeypatch.setattr(
@@ -1105,11 +1130,11 @@ def test_platform_run_verifies_lock_and_dispatches_with_managed_interpreter(
 
     captured: dict[str, Any] = {}
     import corpus_studio.platform.subprocess_supervisor as subprocess_module
-    from corpus_studio.platform.supervisor import EchoRunner, execute_run
+    from corpus_studio.platform.supervisor import EchoRunner, demo_run_plan, execute_run
 
     def fake_subprocess(run_plan, **kwargs):
         captured["worker_argv"] = kwargs["worker_argv"]
-        return execute_run(run_plan, EchoRunner())
+        return execute_run(demo_run_plan(), EchoRunner())
 
     monkeypatch.setattr(subprocess_module, "execute_run_subprocess", fake_subprocess)
     dispatched = cli.invoke(
@@ -1134,10 +1159,100 @@ def test_platform_run_verifies_lock_and_dispatches_with_managed_interpreter(
 def test_platform_plan_profiles_the_managed_interpreter_and_pins_its_lock(
     tmp_path, monkeypatch
 ):
+    from corpus_studio.platform.backends import get_backend
+    from corpus_studio.platform.contracts import (
+        EffectiveCapabilities,
+        ExecutionCapabilityCombination,
+        ProbeResult,
+    )
+
     fake = FakeEnvironmentRunner(cuda=True)
     manager, _, result = _create(tmp_path, fake, "plan-env")
+    original_capability_snapshot = manager.capability_snapshot
+    first_party = get_backend("corpus_studio")
+    assert first_party is not None
+
+    def sealed_capability_snapshot(env_id):
+        profile, report = original_capability_snapshot(env_id)
+        combination = ExecutionCapabilityCombination.model_validate(
+            {
+                "runtime_mode": "training",
+                "device": "cuda",
+                "precision": "bf16",
+                "quantization": "nf4",
+                "adapter_method": "qlora",
+                "attention_impl": "math",
+                "attention_kernel": "torch_sdpa_math",
+                "optimizer": "adamw_torch",
+                "loss_impl": "cross_entropy",
+                "checkpoint_impl": "adapter_only",
+                "export_format": "adapter_peft",
+                "execution_contract_version": "1.0.0",
+                "probe": "synthetic_execution",
+            }
+        )
+        probe_results = [
+            ProbeResult(
+                probe="synthetic_axes",
+                outcome="PASS",
+                proves={
+                    "adapter": ["qlora"],
+                    "attention": ["math"],
+                    "attention_kernel": ["torch_sdpa_math"],
+                    "checkpoint": ["adapter_only"],
+                    "loss": ["cross_entropy", "liger_fused_ce"],
+                    "optimizer": ["adamw_torch", "paged_adamw_8bit"],
+                    "precision": ["bf16"],
+                },
+            ),
+            ProbeResult(
+                probe="bnb_4bit_load", outcome="PASS", proves={"quantization": ["nf4"]}
+            ),
+            ProbeResult(
+                probe="trainer_contract",
+                outcome="PASS",
+                proves={
+                    "trainer_field": first_party.trainer_fields,
+                    "trainer_init_field": first_party.trainer_init_fields,
+                },
+            ),
+            ProbeResult(
+                probe="synthetic_execution",
+                outcome="PASS",
+                execution_combinations=[combination],
+            ),
+        ]
+        effective = EffectiveCapabilities(
+            precision_modes=["bf16"],
+            quantization_modes=["nf4"],
+            attention_impls=["math"],
+            attention_kernels=["torch_sdpa_math"],
+            adapter_methods=["qlora"],
+            optimizers=["adamw_torch", "paged_adamw_8bit"],
+            loss_impls=["cross_entropy", "liger_fused_ce"],
+            checkpoint_impls=["adapter_only"],
+            execution_contract_versions=["1.0.0"],
+            execution_combinations=[combination],
+            trainer_fields=first_party.trainer_fields,
+            trainer_init_fields=first_party.trainer_init_fields,
+        )
+        return profile, report.model_copy(
+            update={
+                "installed_packages": result.lock.packages,
+                "backend_version": first_party.backend_version,
+                "probe_results": probe_results,
+                "effective_capabilities": effective,
+            }
+        )
+
+    monkeypatch.setattr(manager, "capability_snapshot", sealed_capability_snapshot)
     monkeypatch.setattr(
         manager_module, "EnvironmentManager", lambda root=None: manager
+    )
+    dataset = tmp_path / "dataset.jsonl"
+    dataset.write_text(
+        json.dumps({"instruction": "Say hello.", "output": "Hello."}) + "\n",
+        encoding="utf-8",
     )
     cli = CliRunner()
     planned = cli.invoke(
@@ -1146,8 +1261,10 @@ def test_platform_plan_profiles_the_managed_interpreter_and_pins_its_lock(
             "platform-plan",
             "--base-model",
             "model",
+            "--model-revision",
+            "1" * 40,
             "--dataset",
-            "dataset.jsonl",
+            str(dataset),
             "--environment",
             "plan-env",
             "--json",
@@ -1157,6 +1274,9 @@ def test_platform_plan_profiles_the_managed_interpreter_and_pins_its_lock(
     plan = json.loads(planned.stdout)["run_plan"]
     assert plan["environment_ref"]["id"] == "plan-env"
     assert plan["environment_ref"]["hash"]["value"] == result.lock.lock_hash
+    resolved = plan["resolved_execution"]
+    assert resolved["environment_ref"] == plan["environment_ref"]
+    assert resolved["trainer_interface"]["package_versions"]
     capability_call = next(
         call for call in reversed(fake.calls) if call["phase"] == "capability_probe"
     )

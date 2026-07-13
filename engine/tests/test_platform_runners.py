@@ -3,6 +3,10 @@ supervisor. Pure tests (no torch): ``run_training`` is monkeypatched, so the pro
 adaptation, the produced-artifact handoff, and the failure/cancel classification are all provable on
 a core-only install. The real training path is user-smoke-tested (a GPU + the [train] extra)."""
 
+from pathlib import Path
+
+import pytest
+
 import corpus_studio.platform as P
 from corpus_studio.platform.enums import FailureTaxonomy, StageMarker
 from corpus_studio.platform.planner import compute_plan_hash, run_plan_hash_payload
@@ -12,9 +16,25 @@ from corpus_studio.platform.runners import (
     demo_training_plan,
 )
 from corpus_studio.platform.supervisor import execute_run
-from corpus_studio.training.trainer import TrainerError, TrainResult
+from corpus_studio.training.trainer import (
+    ExecutionPlacementDeviation,
+    TrainerError,
+    TrainResult,
+)
 
 _CLOCK = lambda: "2026-07-11T00:00:00+00:00"  # noqa: E731
+
+
+@pytest.fixture(autouse=True)
+def _isolate_relative_training_outputs(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+
+def _write_fake_adapter(path: str) -> str:
+    adapter = Path(path)
+    adapter.mkdir(parents=True, exist_ok=True)
+    (adapter / "adapter_model.safetensors").write_bytes(b"fake-adapter-weights")
+    return str(adapter)
 
 
 def _reseal(body: dict) -> P.RunPlan:
@@ -35,9 +55,10 @@ def _fake_run_training(steps, *, loss_by_step=None, capture=None):
             if progress_callback is not None:
                 loss = (loss_by_step or {}).get(step)
                 progress_callback(step, steps, loss)
+        adapter_path = _write_fake_adapter(config.output_dir)
         return TrainResult(
             output_dir=config.output_dir,
-            adapter_path=f"{config.output_dir}/adapter",
+            adapter_path=adapter_path,
             base_model=config.base_model,
             cpu_toy=config.cpu_toy,
             steps=steps,
@@ -51,10 +72,36 @@ def _fake_run_training(steps, *, loss_by_step=None, capture=None):
 # ---- demo plan ---------------------------------------------------------------
 
 
-def test_demo_training_plan_is_valid_and_carries_a_snapshot():
+def test_demo_training_plan_is_valid_and_carries_resolved_execution():
     plan = demo_training_plan()
     assert P.RunPlan.model_validate_json(plan.model_dump_json()) == plan
-    assert plan.training_config_snapshot["base_model"].startswith("hf-internal-testing")
+    assert plan.resolved_execution is not None
+    assert plan.resolved_execution.inputs.model.location.startswith("hf-internal-testing")
+    assert plan.training_config_snapshot == {}
+
+
+def test_resolved_training_plan_cannot_succeed_through_echo_runner():
+    from corpus_studio.platform.supervisor import EchoRunner
+
+    result = execute_run(demo_training_plan(), EchoRunner(), clock=_CLOCK)
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert "sealed lane" in result.manifest.failure.message
+
+
+def test_resolved_training_plan_refuses_a_training_runner_subclass():
+    class _ImpostorTrainingRunner(TrainingRunner):
+        pass
+
+    result = execute_run(
+        demo_training_plan(), _ImpostorTrainingRunner(cpu_toy=True), clock=_CLOCK
+    )
+
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert "first-party TrainingRunner adapter" in result.manifest.failure.message
 
 
 # ---- success path (mocked trainer) -------------------------------------------
@@ -71,8 +118,8 @@ def test_training_runner_success_adapts_progress_and_produces_the_adapter(monkey
     )
 
     assert result.manifest.state == "succeeded"
-    assert result.manifest.target == "cpu_toy"
-    # cpu_toy override flowed into the resolved trainer config.
+    assert result.manifest.target == "corpus_studio"
+    # The sealed cpu_toy mode flowed into the trainer config unchanged.
     assert capture["config"].cpu_toy is True
 
     metrics = [e for e in result.events if e.event_type == "metric"]
@@ -81,24 +128,88 @@ def test_training_runner_success_adapts_progress_and_produces_the_adapter(monkey
     assert metrics[0].metrics.loss == 0.9
 
     # The saved adapter is recorded as a produced artifact + an artifact_produced event.
-    assert result.manifest.artifact_ids == ["run-1-adapter"]
+    from corpus_studio.training.artifact_registry import compute_content_hash
+
+    adapter_path = Path("output") / "runs" / "run-1" / "artifacts" / "adapter"
+    content_hash = compute_content_hash(str(adapter_path))
+    assert content_hash is not None
+    artifact_id = f"run-1-adapter-{content_hash[:12]}"
+    assert result.manifest.artifact_ids == [artifact_id]
+    assert result.manifest.output_dir == str(adapter_path)
     produced = next(e for e in result.events if e.event_type == "artifact_produced")
     assert produced.payload == {
-        "artifact_id": "run-1-adapter",
+        "artifact_id": artifact_id,
         "kind": "adapter",
-        "path": "output/adapter",
+        "path": str(adapter_path),
     }
     # A checkpoint log line was emitted.
     assert any(e.event_type == "log" and "checkpoint-3" in (e.message or "") for e in result.events)
 
 
-def test_max_steps_override_flows_into_the_config(monkeypatch):
+def test_training_runner_refuses_a_readable_adapter_outside_the_run_scope(monkeypatch):
+    def _rogue(config, *, progress_callback=None, **_kw):
+        if progress_callback is not None:
+            progress_callback(1, 1, 0.1)
+        rogue = _write_fake_adapter(str(Path(config.output_dir).parent / "rogue-adapter"))
+        return TrainResult(
+            output_dir=rogue,
+            adapter_path=rogue,
+            base_model=config.base_model,
+            cpu_toy=config.cpu_toy,
+            steps=1,
+        )
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _rogue)
+    result = execute_run(
+        demo_training_plan(), TrainingRunner(cpu_toy=True), run_id="run-rogue", clock=_CLOCK
+    )
+
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.CHECKPOINT_FAILURE
+    assert "run-scoped" in result.manifest.failure.message
+    assert result.manifest.artifact_ids == []
+
+
+def test_training_runner_refuses_descriptor_only_adapter_output(monkeypatch):
+    def _descriptor_only(config, *, progress_callback=None, **_kw):
+        if progress_callback is not None:
+            progress_callback(1, 1, 0.1)
+        output = Path(config.output_dir)
+        output.mkdir(parents=True, exist_ok=True)
+        (output / "adapter_config.json").write_text('{"r": 16}', encoding="utf-8")
+        return TrainResult(
+            output_dir=str(output),
+            adapter_path=str(output),
+            base_model=config.base_model,
+            cpu_toy=config.cpu_toy,
+            steps=1,
+        )
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _descriptor_only)
+    result = execute_run(
+        demo_training_plan(), TrainingRunner(cpu_toy=True), run_id="run-no-weights", clock=_CLOCK
+    )
+
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.CHECKPOINT_FAILURE
+    assert "weight bytes" in result.manifest.failure.message
+    assert result.manifest.artifact_ids == []
+
+
+def test_max_steps_override_is_refused_without_calling_the_trainer(monkeypatch):
     capture: dict = {}
     monkeypatch.setattr(
         "corpus_studio.training.trainer.run_training", _fake_run_training(1, capture=capture)
     )
-    execute_run(demo_training_plan(), TrainingRunner(cpu_toy=True, max_steps=5), clock=_CLOCK)
-    assert capture["config"].max_steps == 5
+    result = execute_run(
+        demo_training_plan(), TrainingRunner(cpu_toy=True, max_steps=5), clock=_CLOCK
+    )
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert "cannot override" in result.manifest.failure.message
+    assert "config" not in capture
 
 
 def test_training_runner_name_reflects_cpu_toy_flag():
@@ -118,13 +229,13 @@ def test_training_runner_refuses_a_physical_plan_it_cannot_consume(monkeypatch):
         "resources": [
             {
                 "resource_id": "compute-0",
-                "tier": "gpu",
-                "device_kind": "cuda",
-                "device_id": "cuda:0",
+                "tier": "pageable_ram",
+                "device_kind": "cpu",
+                "device_id": "cpu:0",
             },
             {
                 "resource_id": "host-ram",
-                "tier": "pageable_ram",
+                "tier": "pinned_ram",
                 "device_kind": "cpu",
                 "device_id": "cpu:0",
             },
@@ -154,7 +265,7 @@ def test_training_runner_refuses_a_physical_plan_it_cannot_consume(monkeypatch):
             "ranks": [{"rank": 0, "resource_id": "compute-0"}],
         },
     }
-    result = execute_run(_reseal(body), TrainingRunner(), clock=_CLOCK)
+    result = execute_run(_reseal(body), TrainingRunner(cpu_toy=True), clock=_CLOCK)
     assert result.manifest.state == "failed"
     assert result.manifest.failure is not None
     assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
@@ -162,50 +273,37 @@ def test_training_runner_refuses_a_physical_plan_it_cannot_consume(monkeypatch):
     assert called == []
 
 
-# ---- multi-backend dispatch --------------------------------------------------
+# ---- backend and lane identity ----------------------------------------------
 
 
-def _plan_with_backend(backend_id: str):
+def test_runplan_rejects_backend_identity_drift():
     body = demo_training_plan().model_dump(mode="json")
-    body["backend_ref"] = {"id": backend_id}
-    return _reseal(body)
+    body["backend_ref"] = {"id": "unsloth", "hash": {"value": "f" * 64}}
+    with pytest.raises(ValueError, match="backend_ref must match"):
+        P.RunPlan.model_validate(body)
 
 
-def test_training_runner_dispatches_to_the_plan_backend_corpus_studio(monkeypatch):
-    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _fake_run_training(1))
-    result = execute_run(_plan_with_backend("corpus_studio"), TrainingRunner(), clock=_CLOCK)
-    assert result.manifest.state == "succeeded"
-    assert result.manifest.target == "corpus_studio"  # the manifest names the framework that ran
-
-
-def test_training_runner_dispatches_to_unsloth(monkeypatch):
-    # The 'training' runner reads the plan's backend_ref and drives the Unsloth trainer for it. The
-    # Unsloth function is mocked (the real one needs a GPU + unsloth); dispatch + labeling is what we
-    # prove here.
+def test_cpu_toy_lane_cannot_override_a_training_mode(monkeypatch):
+    called = []
     monkeypatch.setattr(
-        "corpus_studio.training.unsloth_trainer.run_unsloth_training", _fake_run_training(2)
+        "corpus_studio.training.trainer.run_training",
+        lambda *_args, **_kwargs: called.append(True),
     )
-    result = execute_run(_plan_with_backend("unsloth"), TrainingRunner(), clock=_CLOCK)
-    assert result.manifest.state == "succeeded"
-    assert result.manifest.target == "unsloth"
-    assert [m.optimizer_step for m in result.events if m.event_type == "metric"] == [1, 2]
+    plan = demo_training_plan()
+    execution = plan.resolved_execution
+    assert execution is not None
+    changed = execution.model_copy(update={"runtime_mode": "training"})
+    from corpus_studio.platform.execution_config import execution_configuration_hash_for
 
-
-def test_unknown_backend_is_unsupported_configuration():
-    result = execute_run(_plan_with_backend("megatron"), TrainingRunner(), clock=_CLOCK)
-    assert result.manifest.state == "failed"
+    changed = changed.model_copy(update={"configuration_hash": execution_configuration_hash_for(changed)})
+    tampered = plan.model_copy(update={"resolved_execution": changed})
+    tampered = tampered.model_copy(
+        update={"plan_hash": compute_plan_hash(run_plan_hash_payload(tampered))}
+    )
+    result = execute_run(tampered, TrainingRunner(cpu_toy=True), clock=_CLOCK)
     assert result.manifest.failure is not None
     assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
-    assert "megatron" in (result.manifest.failure.message or "")
-
-
-def test_cpu_toy_always_uses_the_first_party_path_regardless_of_backend(monkeypatch):
-    # A plan can carry any backend_ref, but --runner cpu_toy is the first-party CPU smoke path — it must
-    # NOT silently route to Unsloth (which has no CPU path). It runs run_training and labels 'cpu_toy'.
-    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _fake_run_training(1))
-    result = execute_run(_plan_with_backend("unsloth"), TrainingRunner(cpu_toy=True), clock=_CLOCK)
-    assert result.manifest.state == "succeeded"
-    assert result.manifest.target == "cpu_toy"
+    assert called == []
 
 
 # ---- the run watchdog (measured fit / spill / stall) -------------------------
@@ -232,8 +330,13 @@ def test_runner_streams_setup_stage_events_from_the_trainer(monkeypatch):
             stage_callback("optimizer_created", "trainer ready")
         if progress_callback is not None:
             progress_callback(1, 1, 0.5)
+        adapter_path = _write_fake_adapter(config.output_dir)
         return TrainResult(
-            output_dir="o", adapter_path="o", base_model=config.base_model, cpu_toy=True, steps=1
+            output_dir=config.output_dir,
+            adapter_path=adapter_path,
+            base_model=config.base_model,
+            cpu_toy=True,
+            steps=1,
         )
 
     monkeypatch.setattr("corpus_studio.training.trainer.run_training", _trainer_with_stages)
@@ -282,8 +385,13 @@ def test_runner_does_not_abort_on_a_stall_and_warns_instead(monkeypatch):
         if progress_callback is not None:
             progress_callback(1, 3, 0.9)  # one beat, then go silent
         time.sleep(0.4)  # > heartbeat_timeout_s; the watchdog thread trips (heads-up only, no cancel)
+        adapter_path = _write_fake_adapter(config.output_dir)
         return TrainResult(
-            output_dir="o", adapter_path="o", base_model=config.base_model, cpu_toy=True, steps=3
+            output_dir=config.output_dir,
+            adapter_path=adapter_path,
+            base_model=config.base_model,
+            cpu_toy=True,
+            steps=3,
         )
 
     monkeypatch.setattr("corpus_studio.training.trainer.run_training", _stalling_trainer)
@@ -395,6 +503,22 @@ def test_missing_runtime_is_environment_failure(monkeypatch):
     assert "train-check" in (result.manifest.failure.remediation or "")
 
 
+def test_placement_deviation_is_structured_and_fails_closed(monkeypatch):
+    def _raise(config, *, stage_callback=None, **_kw):
+        if stage_callback is not None:
+            stage_callback("placement_deviation", "requested CPU, observed CUDA")
+        raise ExecutionPlacementDeviation(
+            "PLACEMENT_DEVIATION: requested CPU, observed CUDA"
+        )
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _raise)
+    result = execute_run(demo_training_plan(), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert result.manifest.failure.stage == StageMarker.placement_deviation
+    assert any(event.stage == StageMarker.placement_deviation for event in result.events)
+
+
 def test_cancellation_during_training_yields_cancelled(monkeypatch):
     from corpus_studio.platform.supervisor import CancelToken
 
@@ -495,8 +619,8 @@ def test_runner_unrecognized_error_stays_fail(monkeypatch):
     assert result.manifest.failure.taxonomy == FailureTaxonomy.FAIL
 
 
-def test_empty_snapshot_is_unsupported_configuration():
-    # The plain echo demo plan has no training_config_snapshot.
+def test_missing_resolved_execution_is_unsupported_configuration():
+    # The plain echo demo plan has no training execution contract.
     from corpus_studio.platform.supervisor import demo_run_plan
 
     result = execute_run(demo_run_plan(), TrainingRunner(cpu_toy=True), clock=_CLOCK)
@@ -505,10 +629,51 @@ def test_empty_snapshot_is_unsupported_configuration():
     assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
 
 
-def test_invalid_snapshot_is_unsupported_configuration():
-    # A snapshot missing the required base_model / dataset_path can't build a TrainRunConfig.
-    plan = demo_training_plan().model_copy(update={"training_config_snapshot": {"lora_r": 4}})
-    result = execute_run(plan, TrainingRunner(cpu_toy=True), clock=_CLOCK)
+def test_stale_inner_execution_hash_is_unsupported_configuration():
+    plan = demo_training_plan()
+    execution = plan.resolved_execution
+    assert execution is not None
+    stale = execution.model_copy(update={"seed": execution.seed + 1})
+    tampered = plan.model_copy(update={"resolved_execution": stale})
+    # Reseal only the outer plan to prove the independent inner seal is checked at execution.
+    tampered = tampered.model_copy(
+        update={"plan_hash": compute_plan_hash(run_plan_hash_payload(tampered))}
+    )
+    result = execute_run(tampered, TrainingRunner(cpu_toy=True), clock=_CLOCK)
     assert result.manifest.state == "failed"
     assert result.manifest.failure is not None
     assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+
+
+def test_stale_objective_hash_is_refused_before_trainer_invocation(monkeypatch):
+    from corpus_studio.platform.execution_config import execution_configuration_hash_for
+
+    called = False
+
+    def _trainer(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("trainer must not be called")
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _trainer)
+    plan = demo_training_plan()
+    execution = plan.resolved_execution
+    assert execution is not None
+    stale_objective = execution.objective_ref.model_copy(
+        update={"hash": P.HashRef(value="f" * 64)}
+    )
+    changed = execution.model_copy(
+        update={"configuration_hash": "0" * 64, "objective_ref": stale_objective}
+    )
+    changed = changed.model_copy(
+        update={"configuration_hash": execution_configuration_hash_for(changed)}
+    )
+    tampered = plan.model_copy(update={"resolved_execution": changed})
+    tampered = tampered.model_copy(
+        update={"plan_hash": compute_plan_hash(run_plan_hash_payload(tampered))}
+    )
+    result = execute_run(tampered, TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert "objective hash" in result.manifest.failure.message
+    assert called is False

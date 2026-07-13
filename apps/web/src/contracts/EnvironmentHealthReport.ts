@@ -68,6 +68,10 @@ export type StageMarker =
   | "process_start"
   | "env_loaded"
   | "cuda_init"
+  | "execution_config_verified"
+  | "attention_policy_applied"
+  | "placement_verified"
+  | "placement_deviation"
   | "model_loaded"
   | "quantized"
   | "adapter_attached"
@@ -113,7 +117,41 @@ export type InterpreterMissing = boolean;
 export type LockMismatch = boolean;
 export type MissingRequirements = string[];
 export type Detail1 = string | null;
+export type AdapterMethod =
+  "none" | "lora" | "qlora" | "dora" | "ia3" | "full_finetune" | "prompt_tuning" | "prefix_tuning";
+/**
+ * The exact attention implementation an execution policy permits at runtime.
+ */
+export type AttentionKernel =
+  | "eager"
+  | "torch_sdpa_math"
+  | "torch_sdpa_flash"
+  | "torch_sdpa_mem_efficient"
+  | "flash_attention_2"
+  | "flash_attention_3"
+  | "xformers";
+export type CheckpointImpl = "full_state" | "adapter_only" | "sharded" | "distcp" | "safetensors";
+export type DeviceKind = "cuda" | "rocm" | "mps" | "xpu" | "cpu";
+export type ExecutionContractVersion = string;
+export type ExportFormat =
+  "adapter_peft" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
+export type LossImpl = "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt";
+export type Optimizer =
+  | "adamw_torch"
+  | "adamw_torch_fused"
+  | "adamw_8bit"
+  | "adamw_bnb_8bit"
+  | "paged_adamw_8bit"
+  | "paged_adamw_32bit"
+  | "adafactor"
+  | "lion"
+  | "sgd";
+export type PrecisionMode = "fp32" | "tf32" | "fp16" | "bf16" | "fp8" | "mixed_bf16" | "mixed_fp16";
 export type Probe = string;
+export type QuantizationMode = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
+export type RuntimeMode = "training" | "cpu_toy";
+export type ExecutionCombinations = ExecutionCapabilityCombination[];
+export type Probe1 = string;
 export type ProbeResults = ProbeResult[];
 export type PythonVersion = string;
 export type RecipeDriftDetected = boolean;
@@ -256,10 +294,37 @@ export interface PackageLock {
 }
 export interface ProbeResult {
   detail?: Detail1;
+  execution_combinations?: ExecutionCombinations;
   measured?: Measured;
   outcome: FailureTaxonomy;
+  probe: Probe1;
+  proves?: Proves;
+}
+/**
+ * One execution tuple demonstrated together by a bounded functional probe.
+ *
+ * Independent successes on precision, quantization, adapter, optimizer, loss, attention, and
+ * checkpoint axes are diagnostic only. The planner may seal a run only from one of these complete
+ * tuples, preventing a union of unrelated probes from becoming a fictional capability.
+ */
+export interface ExecutionCapabilityCombination {
+  adapter_method: AdapterMethod;
+  attention_impl: AttentionImpl;
+  attention_kernel: AttentionKernel;
+  checkpoint_impl: CheckpointImpl;
+  device: DeviceKind;
+  execution_contract_version: ExecutionContractVersion;
+  export_format: ExportFormat;
+  loss_impl: LossImpl;
+  optimizer: Optimizer;
+  precision: PrecisionMode;
   probe: Probe;
+  quantization: QuantizationMode;
+  runtime_mode: RuntimeMode;
 }
 export interface Measured {
   [k: string]: unknown;
+}
+export interface Proves {
+  [k: string]: string[];
 }

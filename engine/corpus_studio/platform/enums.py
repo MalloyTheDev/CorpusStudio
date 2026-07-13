@@ -588,6 +588,39 @@ class AttentionImpl(str, Enum):
     xformers = "xformers"
 
 
+class ModelAttentionApi(str, Enum):
+    """The model-loader API selected before execution.
+
+    This is deliberately separate from :class:`AttentionKernel`: ``sdpa`` is an API that can
+    dispatch to several materially different PyTorch kernels.
+    """
+
+    eager = "eager"
+    sdpa = "sdpa"
+    flash_attention_2 = "flash_attention_2"
+    flash_attention_3 = "flash_attention_3"
+    xformers = "xformers"
+
+
+class AttentionKernel(str, Enum):
+    """The exact attention implementation an execution policy permits at runtime."""
+
+    eager = "eager"
+    torch_sdpa_math = "torch_sdpa_math"
+    torch_sdpa_flash = "torch_sdpa_flash"
+    torch_sdpa_mem_efficient = "torch_sdpa_mem_efficient"
+    flash_attention_2 = "flash_attention_2"
+    flash_attention_3 = "flash_attention_3"
+    xformers = "xformers"
+
+
+class ExecutionVerificationRequirement(str, Enum):
+    """Whether the planner may seal a capability that lacks functional evidence."""
+
+    require_verified = "require_verified"
+    allow_unverified = "allow_unverified"
+
+
 class LossImpl(str, Enum):
     cross_entropy = "cross_entropy"
     liger_fused_ce = "liger_fused_ce"
@@ -769,6 +802,10 @@ class StageMarker(str, Enum):
     process_start = "process_start"
     env_loaded = "env_loaded"
     cuda_init = "cuda_init"
+    execution_config_verified = "execution_config_verified"
+    attention_policy_applied = "attention_policy_applied"
+    placement_verified = "placement_verified"
+    placement_deviation = "placement_deviation"
     model_loaded = "model_loaded"
     quantized = "quantized"
     adapter_attached = "adapter_attached"

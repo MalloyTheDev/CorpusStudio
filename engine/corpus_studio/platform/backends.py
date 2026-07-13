@@ -6,10 +6,11 @@ dispatch — resolving the plan's requirements against each backend's *declared*
 with what actually PROVED to work on the host (``effective_capabilities``). "No backend supported
 until the probes pass."
 
-Built-in backends today: the first-party ``corpus_studio`` trainer (HF + TRL + PEFT, LoRA/QLoRA) and
-``unsloth`` (the accelerated QLoRA path). Both are declared honestly — e.g. Unsloth's fused kernels
-are flash/sdpa, so on Blackwell (sm_120, which needs the ``math`` path) Unsloth is correctly filtered
-OUT and the plan routes to the first-party math-path trainer. Adding a backend is adding a manifest.
+Built-in manifests today: the first-party ``corpus_studio`` trainer (HF + TRL + PEFT, LoRA/QLoRA)
+and ``unsloth`` (the accelerated QLoRA path). Registration is not execution support: Unsloth does not
+yet declare the resolved execution contract and is therefore refused on every host. Adding an
+executable backend requires a manifest, isolated recipe, exact functional probes, and a worker that
+enforces the declared contract.
 
 Dependency-light: pure contracts + stdlib, no torch.
 """
@@ -44,12 +45,54 @@ _CORPUS_STUDIO = {
     "adapter_methods": ["lora", "qlora"],
     # math/eager cover the known WDDM-safe path; sdpa/flash still require host capability evidence.
     "attention_impls": ["math", "eager", "sdpa", "flash_attention_2"],
+    "attention_kernels": [
+        "eager",
+        "flash_attention_2",
+        "torch_sdpa_flash",
+        "torch_sdpa_math",
+        "torch_sdpa_mem_efficient",
+    ],
     "loss_impls": ["cross_entropy", "liger_fused_ce"],
     # Declarations only. CapabilityReport intentionally leaves these empty until an end-to-end
     # objective probe proves them in the selected environment.
     "objective_capabilities": ["adapter_lora", "adapter_qlora", "causal_lm_sft"],
     "checkpoint_impls": ["adapter_only", "safetensors"],
     "optimizers": ["adamw_torch", "adamw_8bit", "paged_adamw_8bit", "adamw_bnb_8bit"],
+    "execution_contract_versions": ["1.0.0"],
+    "trainer_fields": [
+        "adam_beta1",
+        "adam_beta2",
+        "adam_epsilon",
+        "bf16",
+        "data_seed",
+        "dataset_text_field",
+        "disable_tqdm",
+        "fp16",
+        "gradient_accumulation_steps",
+        "gradient_checkpointing",
+        "learning_rate",
+        "logging_steps",
+        "lr_scheduler_type",
+        "max_grad_norm",
+        "max_length",
+        "max_seq_length",
+        "max_steps",
+        "num_train_epochs",
+        "optim",
+        "output_dir",
+        "packing",
+        "per_device_train_batch_size",
+        "report_to",
+        "save_steps",
+        "save_strategy",
+        "save_total_limit",
+        "seed",
+        "use_cpu",
+        "use_liger_kernel",
+        "warmup_ratio",
+        "weight_decay",
+    ],
+    "trainer_init_fields": ["processing_class", "tokenizer"],
     "placement_modes": ["single_resource"],
     "placement_tiers": ["gpu"],
     "export_formats": ["adapter_peft"],
@@ -73,7 +116,18 @@ _CORPUS_STUDIO = {
             "outside WDDM, require a passing flash-attention capability probe before selecting flash.",
         }
     ],
-    "capability_probes": ["cuda_available", "bf16_matmul", "bnb_4bit_load", "flash_attn_backward"],
+    "capability_probes": [
+        "cuda_available",
+        "bf16_matmul",
+        "bnb_4bit_load",
+        "math_sdpa_backward",
+        "flash_attn_backward",
+        "dense_optimizer_step",
+        "trainer_contract",
+        "checkpoint_reload",
+        "cpu_lora_execution",
+        "cuda_qlora_math_execution",
+    ],
 }
 
 _UNSLOTH = {
@@ -92,6 +146,7 @@ _UNSLOTH = {
     # Unsloth's kernels are flash/sdpa — it does NOT provide the math path, so a Blackwell plan (which
     # requires math) will not select Unsloth. This is declared honestly, not hidden.
     "attention_impls": ["flash_attention_2", "sdpa"],
+    "attention_kernels": ["flash_attention_2", "torch_sdpa_flash"],
     "loss_impls": ["cross_entropy"],
     "objective_capabilities": ["adapter_lora", "adapter_qlora", "causal_lm_sft"],
     "checkpoint_impls": ["adapter_only", "safetensors"],
@@ -115,8 +170,8 @@ _UNSLOTH = {
             "description": "Unsloth's fused kernels are flash/sdpa; native-Windows Blackwell needs the "
             "math path (WDDM flash deadlock), which Unsloth lacks. WSL has separate SDPA evidence; "
             "bare-Linux capability remains unverified.",
-            "mitigation": "Use the corpus_studio backend on native-Windows Blackwell. On another "
-            "platform, select Unsloth only after its environment capability probes pass.",
+            "mitigation": "Use the corpus_studio backend. Unsloth remains unavailable on every host "
+            "until it declares, proves, and enforces the resolved execution contract.",
         }
     ],
     "capability_probes": ["cuda_available", "bf16_matmul", "bnb_4bit_load"],
@@ -192,6 +247,12 @@ def unmet_requirements(
     quantization: str,
     adapter_method: str,
     attention: str,
+    attention_kernel: str | None = None,
+    optimizer: str | None = None,
+    loss: str | None = None,
+    checkpoint: str | None = None,
+    export_format: str | None = None,
+    execution_contract_version: str | None = None,
 ) -> list[str]:
     """The reasons ``manifest`` cannot run the given plan requirements — empty when it can. Each check
     is against what the backend DECLARES it supports (the caller resolves those against the proven
@@ -212,6 +273,29 @@ def unmet_requirements(
         reasons.append(f"adapter '{adapter_method}' not supported")
     if attention not in {a.value for a in manifest.attention_impls}:
         reasons.append(f"attention '{attention}' not supported")
+    if attention_kernel is not None and attention_kernel not in {
+        item.value for item in manifest.attention_kernels
+    }:
+        reasons.append(f"attention kernel '{attention_kernel}' not supported")
+    if optimizer is not None and optimizer not in {item.value for item in manifest.optimizers}:
+        reasons.append(f"optimizer '{optimizer}' not supported")
+    if loss is not None and loss not in {item.value for item in manifest.loss_impls}:
+        reasons.append(f"loss '{loss}' not supported")
+    if checkpoint is not None and checkpoint not in {
+        item.value for item in manifest.checkpoint_impls
+    }:
+        reasons.append(f"checkpoint '{checkpoint}' not supported")
+    if export_format is not None and export_format not in {
+        item.value for item in manifest.export_formats
+    }:
+        reasons.append(f"export format '{export_format}' not supported")
+    if (
+        execution_contract_version is not None
+        and execution_contract_version not in manifest.execution_contract_versions
+    ):
+        reasons.append(
+            f"resolved execution contract '{execution_contract_version}' not supported"
+        )
     return reasons
 
 
@@ -224,6 +308,12 @@ def compatible_backends(
     quantization: str,
     adapter_method: str,
     attention: str,
+    attention_kernel: str | None = None,
+    optimizer: str | None = None,
+    loss: str | None = None,
+    checkpoint: str | None = None,
+    export_format: str | None = None,
+    execution_contract_version: str | None = None,
 ) -> list[BackendManifest]:
     """Every registered backend that DECLARES support for the given plan requirements."""
     return [
@@ -238,6 +328,12 @@ def compatible_backends(
             quantization=quantization,
             adapter_method=adapter_method,
             attention=attention,
+            attention_kernel=attention_kernel,
+            optimizer=optimizer,
+            loss=loss,
+            checkpoint=checkpoint,
+            export_format=export_format,
+            execution_contract_version=execution_contract_version,
         )
     ]
 

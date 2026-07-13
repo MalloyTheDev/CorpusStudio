@@ -151,18 +151,20 @@ per-item error isolation, and off-thread document opens.
   (tokens-per-epoch after truncation, over-length counts), a rough arithmetic
   VRAM planning estimate (never inspects hardware), a LoRA rank/alpha suggestion,
   and the exact launch command.
-- In-app launch of **the first-party `corpus_studio` QLoRA trainer** (the opt-in `[train]` extra, run
-  via the engine's own interpreter) **or** the user's installed external trainer — with explicit
-  confirmation of the exact argv (no shell), live log streaming, and a Stop that kills the process
-  tree. The first-party CLI: `train-check` / `train-run` / `train-merge` / `model-fetch`.
+- The WPF/Avalonia Training Lab launches reviewed, no-shell argv for installed **external** trainers.
+  It intentionally emits no direct first-party launch and refuses the old mutable-config path. The
+  Tauri/React Platform client plans and executes first-party work through `platform-plan` →
+  `platform-run`. Supporting first-party commands are `train-check`, `train-merge`, and `model-fetch`;
+  low-level `train-run` is an explicitly acknowledged and labeled development-only route.
 - **Truncation guardrail** (`dataset-tokens`): measures a dataset's token-length distribution and how
-  many examples a given `sequence_len` would **truncate** (cutting the end — including the model's
-  answer), so you never silently train on cut-off outputs; `train-run` also samples the data and prints
-  a `[WARNING] TRUNCATION` before training. Exact when a tokenizer extra is installed, a documented
-  heuristic otherwise.
-- **Configurable checkpoint retention**: `train-run --save-steps N` (default 50) + `--save-total-limit
-  N` (default 3 — keep only the N most recent checkpoints so a long run can't fill the disk; `0` keeps
-  all). The trainer saves the **LoRA adapter** + tokenizer + a model card, not a full base copy.
+  many examples a given `sequence_len` would **truncate** (cutting the end - including the model's
+  answer). New platform plans render and tokenize the complete hash-pinned JSONL with the exact pinned
+  tokenizer/template; over-length rows fail closed unless `allow_truncation` is explicit in the seal.
+  The standalone report retains a documented heuristic when the tokenizer extra is absent.
+- **Resolved checkpoint/output policy**: cadence and retention are explicit in the effective execution
+  seal, and each run writes beneath `<output-root>/runs/<run-id>/`. The trainer saves the **LoRA
+  adapter** + tokenizer + model card, not a full base copy. Atomic checkpoint promotion and exact-resume
+  verification remain future integrity work and are not claimed by this slice.
 - **Versioned reasoning/tool trace foundation** — the language-neutral, hash-sealed `TraceRecord`
   preserves exact source-row lineage, ordered role context, reasoning/action/tool/result/final-answer
   boundaries, producer/model/prompt/request/response evidence, typed validation findings, and a
@@ -170,7 +172,7 @@ per-item error isolation, and off-thread document opens.
   policy before any backend call, reauthorizes the backend-reported model, writes pending records plus
   a sanitized per-attempt report, and never promotes self-filtering to review. `trace-migrate`
   explicitly seals legacy rows; `trace-review` recomputes engine validation and writes
-  approved/rejected successors; `trace-validate --require-approved` and `train-run` recheck
+  approved/rejected successors; `trace-validate --require-approved` and first-party trainer admission recheck
   validation, current external project policy (unknown/frontier default-deny), and segment semantics,
   then refuse pending/rejected/tampered/unsupported records before model loading. The built-in `trace` draft
   schema makes the ordinary desktop Writing Studio the authoring foundation. Legacy rows and the
@@ -264,10 +266,12 @@ per-item error isolation, and off-thread document opens.
   non-trivial plans are `PLANNED_UNPROVEN` and refused before trainer invocation. This is a planning
   boundary, not DeepSpeed/FSDP/NVMe or MoE execution proof. See
   [`RUN_PLAN_PHYSICAL_EXECUTION.md`](RUN_PLAN_PHYSICAL_EXECUTION.md).
-- **Multi-backend "pick your framework"**: a BackendManifest registry (`corpus_studio`, `unsloth`);
-  the planner validates the chosen backend and **honestly refuses Unsloth on native-Windows/WDDM
-  Blackwell/sm_120** (which needs the math attention path Unsloth doesn't provide). Other hosts still
-  require their exact capability proof.
+- **Multi-backend registry with execution-contract admission**: a `BackendManifest` registry currently
+  describes `corpus_studio` and `unsloth`. The first-party backend declares and proves the exact dense
+  execution-contract surface. Unsloth has no Phase 9B execution-contract declaration or matching
+  functional proof, so newly planned training is refused on every host rather than inferred from an
+  import or static feature list. Native-Windows/WDDM Blackwell remains an additional hard refusal
+  because its required math path is unavailable there.
 - **Identity-bound backend worker protocol 2.0**: every newly generated RunPlan hash-pins the exact
   static BackendManifest. A subprocess worker must send `hello` first with that manifest and its exact
   environment/lock ref; only then can the core dispatch. The parent enforces protocol/direction/body,
@@ -279,10 +283,29 @@ per-item error isolation, and off-thread document opens.
   POSIX session or Windows process group and use bounded process-tree termination; the fake-worker
   suite verifies a timed-out descendant does not survive. See
   [`BACKEND_WORKER_PROTOCOL.md`](BACKEND_WORKER_PROTOCOL.md).
+- **Effective execution contract (Phase 9B)**: every new first-party training plan embeds a separately
+  hash-sealed `ResolvedExecutionConfiguration`. It pins exact dataset bytes, immutable model/tokenizer
+  revisions or local hashes, objective/environment/capability/backend identities, per-state precision,
+  quantization, the model attention API and all three PyTorch SDPA toggles, one explicit device map,
+  every LoRA/optimizer/loss/schedule/checkpoint/data-format default, and the exact installed trainer
+  interface. Backend admission requires one complete passing execution-combination probe plus the
+  matching trainer surface; independent precision/quantization/optimizer/loss/kernel results cannot
+  be unioned into support. The worker verifies and echoes the configuration hash before model
+  loading, reapplies kernel toggles, consumes stabilized dataset bytes, rechecks local model/tokenizer
+  roots after load, and observes post-adapter placement/precision. Echo cannot execute a training
+  plan. Runtime lane/`max_steps` flags are assertions only; they cannot alter the seal. Chat-template
+  errors block and truncation analysis covers the complete pinned JSONL unless the plan explicitly
+  permits truncation. Runner selection derives from the pinned backend manifest, successful training
+  requires optimizer-step and adapter-byte evidence, every execution gets a fresh UUIDv7 run ID, and
+  adapter/checkpoint output is isolated under `<output-root>/runs/<run-id>/`. Adapter IDs include the
+  run, role, and weight-content hash; persisted manifests live under `<record-root>/runs/<run-id>/`.
+  Legacy plans remain readable but are not executable by the training runner; regenerate them. See
+  [`EFFECTIVE_EXECUTION_CONFIGURATION.md`](EFFECTIVE_EXECUTION_CONFIGURATION.md).
 - **Reliability**: an in-process watchdog detects a stall/spill + captures a measured fit; the
-  subprocess worker can **KILL a hung run** (→ `KERNEL_STALL`) and isolates a crash. Verified
-  end-to-end on a real RTX 5070 (Blackwell) under native Windows/WDDM: a GPU QLoRA ran in-process and
-  in a subprocess. This is not bare-Linux, NVMe/offload, full-sequence 7B, or MoE-runtime proof.
+  subprocess worker can **KILL a hung run** (→ `KERNEL_STALL`) and isolates a crash. The pre-Phase-9B
+  lifecycle ran end to end on a real RTX 5070 under native Windows/WDDM, in-process and subprocess.
+  That historical run does not verify the new effective-execution enforcement and is not bare-Linux,
+  NVMe/offload, full-sequence 7B, or MoE-runtime proof.
 - Consumed by a new **Tauri 2 + React** contract-first client (`apps/web`) alongside the WPF + Avalonia
   heads.
 - Checkpoint tracking during and after runs, resume-from-latest for targets
@@ -402,14 +425,15 @@ per-item error isolation, and off-thread document opens.
 
 ## Hard boundaries (by design)
 
-- The engine **core** is dependency-light and is **not** a deep-learning framework
-  (no backprop/optimizers/distributed training of its own). CUDA/PyTorch/Transformers
-  are **opt-in** via the `[train]` extra, which adds a first-party TRL/peft QLoRA
-  trainer (`train-run`/`train-merge`, all heavy imports lazy) — it delegates to those
-  libraries rather than implementing a training loop. Without the extra the core pulls
-  none of them. See [`TRAINING.md`](TRAINING.md).
-- Trainer launches show the exact argv, require explicit confirmation, use no
-  shell, and write inspectable run metadata. No hidden trainer behavior.
+- The engine **control plane** is dependency-light and is **not** a deep-learning framework
+  (no backprop/optimizers/distributed training of its own). CUDA/PyTorch/Transformers live in an
+  opt-in `[train]` worker runtime. The authoritative first-party path is sealed
+  `platform-plan` -> supervised `platform-run`; the low-level `train-run` compatibility command is
+  refused by default and labeled non-reproducible when explicitly enabled. See
+  [`TRAINING.md`](TRAINING.md).
+- External trainer launches show exact argv and require confirmation. First-party launches bind an
+  exact backend/runner/environment/input/effective-configuration chain, use no shell, and write
+  inspectable per-run metadata. No hidden lane switching.
 - The engine never moves, copies, or deletes the user's weight files or
   `examples.jsonl` (reference paths only; the desktop is the single writer of
   `examples.jsonl`).

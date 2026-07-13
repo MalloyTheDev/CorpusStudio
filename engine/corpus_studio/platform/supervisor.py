@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from corpus_studio.platform.artifacts import build_artifact_manifest, write_artifact_manifest
-from corpus_studio.platform.common import HashRef, Ref
+from corpus_studio.platform.common import HashRef, Ref, new_uuid7_id
 from corpus_studio.platform.contracts import (
     ArtifactManifest,
     EventMetrics,
@@ -67,6 +67,12 @@ def _sanitize_id(value: str) -> str:
     """Coerce an arbitrary string into a value matching ``RunManifest.run_id`` (``_ID``)."""
     cleaned = _ID_UNSAFE.sub("-", value).strip("-")
     return cleaned or "run"
+
+
+def run_record_directory(root: str | Path, run_id: str) -> Path:
+    """Return the collision-free platform record directory for one immutable run instance."""
+
+    return Path(root) / "runs" / _sanitize_id(run_id)
 
 
 # --------------------------------------------------------------------------------------------------
@@ -272,10 +278,11 @@ def execute_run(
     """Execute ``plan`` through ``runner``, collecting the ``RunEvent`` stream and returning the
     terminal :class:`RunManifest`. Terminal classification is total: :class:`RunCancelled` →
     ``cancelled``; :class:`RunnerFailure` → ``failed`` with its taxonomy; any other exception →
-    ``failed`` / ``FAIL`` (the supervisor never leaks a runner crash). With ``out_dir`` the manifest
-    is written atomically to ``<out_dir>/RunManifest.json``. Events are appended to the returned
-    list and, if ``sink`` is given, forwarded to it live."""
-    rid = _sanitize_id(run_id or plan.plan_id)
+    ``failed`` / ``FAIL`` (the supervisor never leaks a runner crash). Every invocation mints a fresh
+    UUIDv7 run identity unless a test/integration caller supplies one. With ``out_dir`` the manifest
+    is written atomically to ``<out_dir>/runs/<run_id>/RunManifest.json``. Events are appended to the
+    returned list and, if ``sink`` is given, forwarded to it live."""
+    rid = _sanitize_id(run_id or new_uuid7_id("run"))
     cancel = cancel or CancelToken()
     events: list[RunEvent] = []
 
@@ -305,8 +312,67 @@ def execute_run(
                 stage=StageMarker.env_loaded,
                 remediation="regenerate the RunPlan from immutable inputs; do not mutate it after sealing",
             )
+        if plan.resolved_execution is not None:
+            from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+                verify_execution_configuration_hash,
+            )
+
+            if not verify_execution_configuration_hash(plan.resolved_execution):
+                raise RunnerFailure(
+                    "resolved execution configuration hash verification failed",
+                    taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                    stage=StageMarker.env_loaded,
+                    remediation="regenerate the RunPlan; do not mutate resolved execution fields",
+                )
+        from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+            ExecutionConfigurationError,
+            verify_runner_lane,
+        )
+
+        try:
+            verify_runner_lane(plan, runner.name)
+        except ExecutionConfigurationError as exc:
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+                remediation="dispatch the plan through its sealed runner lane",
+            ) from exc
+        if plan.resolved_execution is not None:
+            from corpus_studio.platform.runners import TrainingRunner  # noqa: PLC0415
+
+            if type(runner) is not TrainingRunner:
+                raise RunnerFailure(
+                    "resolved training plans require the first-party TrainingRunner adapter",
+                    taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                    stage=StageMarker.env_loaded,
+                )
+        elif not isinstance(runner, EchoRunner):
+            raise RunnerFailure(
+                "echo plans require the built-in EchoRunner adapter",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+            )
         produced = runner.run(ctx)
         artifact_ids = [artifact.artifact_id for artifact in produced]
+        if plan.resolved_execution is not None:
+            if not any(
+                event.event_type == "metric"
+                and event.optimizer_step is not None
+                and event.optimizer_step > 0
+                for event in events
+            ):
+                raise RunnerFailure(
+                    "resolved training returned without optimizer-step evidence",
+                    taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                    stage=StageMarker.optimizer_step,
+                )
+            if "adapter" not in {artifact.kind for artifact in produced}:
+                raise RunnerFailure(
+                    "resolved training returned without its required adapter artifact",
+                    taxonomy=FailureTaxonomy.CHECKPOINT_FAILURE,
+                    stage=StageMarker.export,
+                )
         state = "succeeded"
         ctx.emit_terminal("succeeded")
     except RunCancelled:
@@ -348,8 +414,15 @@ def execute_run(
         finished_at=finished,
         state=state,
         base_model=plan.base_model,
-        target=runner.name,
-        output_dir=str(out_dir) if out_dir is not None else plan.export.output_dir,
+        target=plan.backend_ref.id if plan.resolved_execution is not None else runner.name,
+        output_dir=(
+            next(
+                (artifact.path for artifact in produced if artifact.kind == "adapter"),
+                plan.export.output_dir,
+            )
+            if plan.resolved_execution is not None
+            else plan.export.output_dir
+        ),
         artifact_ids=artifact_ids,
         failure=failure,
         final_fit=ctx.final_fit,  # the MEASURED fit, when a runner captured one (via the watchdog)
@@ -366,9 +439,10 @@ def execute_run(
         for artifact in produced
     ]
     if out_dir is not None:
-        write_run_manifest(manifest, out_dir)
+        record_dir = run_record_directory(out_dir, rid)
+        write_run_manifest(manifest, record_dir)
         for artifact_manifest in artifact_manifests:
-            write_artifact_manifest(artifact_manifest, out_dir)
+            write_artifact_manifest(artifact_manifest, record_dir)
     return SupervisedRun(manifest=manifest, events=events, artifacts=artifact_manifests)
 
 

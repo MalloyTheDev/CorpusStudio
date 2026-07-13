@@ -13,12 +13,14 @@ from corpus_studio.platform.contracts import (
     EffectiveCapabilities,
     EnvironmentProfile,
     EnvHost,
+    ExecutionCapabilityCombination,
     GpuDevice,
     ParameterAccountingReport,
     ParameterEvidenceGap,
     ParameterScope,
     ParameterWindow,
     PhysicalExecutionSpec,
+    ProbeResult,
     StorageProfile,
     StorageRoleAssessment,
 )
@@ -35,7 +37,7 @@ from corpus_studio.platform.planner import (
     verify_run_plan_hash,
 )
 from corpus_studio.platform.parameter_accounting import parameter_accounting_hash_for
-from corpus_studio.training.trainer import TrainRunConfig
+from corpus_studio.training.trainer import train_config_from_resolved
 
 _SIG = "a" * 64
 _NOW = "2026-07-11T00:00:00+00:00"
@@ -57,22 +59,144 @@ def _report(
     *,
     readiness="ready",
     bnb=True,
-    precisions=("bf16",),
-    attn=("sdpa",),
+    precisions=("bf16", "fp32"),
+    attn=("math", "sdpa"),
+    kernels=("torch_sdpa_flash", "torch_sdpa_math"),
     missing=(),
     physical=False,
+    backend_id="corpus_studio",
 ):
+    from corpus_studio.platform.backends import get_backend
+
+    backend = get_backend(backend_id)
+    trainer_backend = get_backend("corpus_studio")
+    assert trainer_backend is not None
+    precision_values = sorted(set(precisions))
+    attention_values = sorted(set(attn))
+    kernel_values = sorted(set(kernels))
+    adapter_values = ["lora", "qlora"] if bnb else ["lora"]
+    optimizer_values = ["adamw_torch", "paged_adamw_8bit"]
+    loss_values = ["cross_entropy", "liger_fused_ce"]
+    if readiness == "cpu_toy_only":
+        precision_values = sorted(set((*precision_values, "fp32")))
+        attention_values = sorted(set((*attention_values, "eager")))
+        kernel_values = sorted(set((*kernel_values, "eager")))
+
+    exact: ExecutionCapabilityCombination | None = None
+    if readiness != "not_ready":
+        precision = "bf16" if "bf16" in precision_values else "fp32" if "fp32" in precision_values else None
+        if readiness == "cpu_toy_only":
+            exact_attention = ("eager", "eager")
+        elif "math" in attention_values and "torch_sdpa_math" in kernel_values:
+            exact_attention = ("math", "torch_sdpa_math")
+        elif "sdpa" in attention_values and "torch_sdpa_flash" in kernel_values:
+            exact_attention = ("sdpa", "torch_sdpa_flash")
+        elif "sdpa" in attention_values and "torch_sdpa_math" in kernel_values:
+            exact_attention = ("sdpa", "torch_sdpa_math")
+        elif "eager" in attention_values and "eager" in kernel_values:
+            exact_attention = ("eager", "eager")
+        else:
+            exact_attention = None
+        if precision is not None and exact_attention is not None:
+            exact = ExecutionCapabilityCombination.model_validate(
+                {
+                    "runtime_mode": "cpu_toy" if readiness == "cpu_toy_only" else "training",
+                    "device": "cpu" if readiness == "cpu_toy_only" else "cuda",
+                    "precision": "fp32" if readiness == "cpu_toy_only" else precision,
+                    "quantization": "none" if readiness == "cpu_toy_only" or not bnb else "nf4",
+                    "adapter_method": "lora" if readiness == "cpu_toy_only" or not bnb else "qlora",
+                    "attention_impl": exact_attention[0],
+                    "attention_kernel": exact_attention[1],
+                    "optimizer": "adamw_torch",
+                    "loss_impl": "cross_entropy",
+                    "checkpoint_impl": "adapter_only",
+                    "export_format": "adapter_peft",
+                    "execution_contract_version": "1.0.0",
+                    "probe": "synthetic_execution",
+                }
+            )
+    axis_proofs = {
+        "adapter": adapter_values,
+        "attention": attention_values,
+        "attention_kernel": kernel_values,
+        "checkpoint": ["adapter_only"],
+        "loss": loss_values,
+        "optimizer": optimizer_values,
+        "precision": precision_values,
+    }
+    if physical:
+        axis_proofs.update(
+            {"placement_mode": ["single_resource"], "placement_tier": ["gpu"]}
+        )
+    probe_results = [
+        ProbeResult(probe="synthetic_axes", outcome="PASS", proves=axis_proofs),
+        ProbeResult(
+            probe="trainer_contract",
+            outcome="PASS",
+            proves={
+                "trainer_field": trainer_backend.trainer_fields,
+                "trainer_init_field": trainer_backend.trainer_init_fields,
+            },
+        ),
+    ]
+    if bnb:
+        probe_results.append(
+            ProbeResult(
+                probe="bnb_4bit_load",
+                outcome="PASS",
+                proves={"quantization": ["nf4"]},
+            )
+        )
+    if exact is not None:
+        probe_results.append(
+            ProbeResult(
+                probe="synthetic_execution",
+                outcome="PASS",
+                execution_combinations=[exact],
+            )
+        )
+    actual_readiness = (
+        "ready"
+        if exact is not None and exact.runtime_mode == "training"
+        else "cpu_toy_only"
+        if exact is not None
+        else "not_ready"
+    )
     eff = EffectiveCapabilities(
-        precision_modes=list(precisions),
+        precision_modes=precision_values,
         quantization_modes=["nf4"] if bnb else [],
-        attention_impls=list(attn),
-        adapter_methods=["qlora"],
+        attention_impls=attention_values,
+        attention_kernels=kernel_values,
+        adapter_methods=adapter_values,
+        optimizers=optimizer_values,
+        loss_impls=loss_values,
+        checkpoint_impls=["adapter_only"],
+        execution_contract_versions=["1.0.0"] if exact is not None else [],
+        execution_combinations=[exact] if exact is not None else [],
+        trainer_fields=trainer_backend.trainer_fields,
+        trainer_init_fields=trainer_backend.trainer_init_fields,
         placement_tiers=["gpu"] if physical else [],
         placement_modes=["single_resource"] if physical else [],
     )
     return CapabilityReport(
-        backend_id="corpus_studio", environment_ref=Ref(id=_SIG), readiness=readiness,
+        backend_id=backend_id,
+        backend_version=backend.backend_version if backend is not None else None,
+        environment_ref=Ref(id=_SIG), readiness=actual_readiness,
         bitsandbytes_ok=bnb, effective_capabilities=eff, missing_packages=list(missing),
+        probe_results=probe_results,
+        installed_packages=[
+            P.PackageLock(name=name, version="1.0")
+            for name in [
+                "accelerate",
+                "bitsandbytes",
+                "datasets",
+                "liger-kernel",
+                "peft",
+                "torch",
+                "transformers",
+                "trl",
+            ]
+        ],
     )
 
 
@@ -90,9 +214,13 @@ def _plan(
 ):
     kw.setdefault("base_model", "Qwen/Qwen2.5-7B-Instruct")
     kw.setdefault("dataset_path", "data/examples.jsonl")
+    kw.setdefault("model_revision", "1" * 40)
+    kw.setdefault("dataset_content_sha256", "d" * 64)
     constraints = PlannerConstraints(**kw)
     return build_run_plan(
-        profile=profile, capabilities=report, dataset_ref=Ref(id="ds-1"),
+        profile=profile,
+        capabilities=report,
+        dataset_ref=Ref(id="ds-1", hash=P.HashRef(value="d" * 64)),
         constraints=constraints, plan_id="p1", now=now,
         parameter_accounting=parameter_accounting,
         physical_execution=physical_execution,
@@ -271,8 +399,19 @@ def test_native_windows_blackwell_host_forces_math_bf16_nf4_qlora():
     assert plan.precision.value == "bf16"
     assert plan.quantization.value == "nf4"
     assert plan.adapter.method.value == "qlora"
-    # math is not a from_pretrained string → the snapshot leaves the trainer's own path in control.
-    assert "attn_implementation" not in plan.training_config_snapshot
+    assert plan.resolved_execution is not None
+    attention = plan.resolved_execution.attention
+    assert attention.model_attention_api.value == "sdpa"
+    assert attention.effective_backend_required.value == "torch_sdpa_math"
+    assert (attention.flash_sdp_enabled, attention.mem_efficient_sdp_enabled) == (False, False)
+    assert attention.math_sdp_enabled is True
+    assert attention.safety_mandate == "native_windows_blackwell_math_or_eager_only"
+
+
+def test_native_windows_blackwell_refuses_math_without_a_passing_math_probe():
+    report = _report(attn=("sdpa",), kernels=("torch_sdpa_flash",))
+    with pytest.raises(PlannerError, match="no passing functional probe"):
+        _plan(_profile(cc_major=12, os="windows"), report)
 
 
 def test_managed_environment_lock_reference_is_sealed_into_plan():
@@ -280,10 +419,12 @@ def test_managed_environment_lock_reference_is_sealed_into_plan():
     plan = build_run_plan(
         profile=_profile(cc_major=8),
         capabilities=_report(),
-        dataset_ref=Ref(id="ds-1"),
+        dataset_ref=Ref(id="ds-1", hash=P.HashRef(value="d" * 64)),
         constraints=PlannerConstraints(
             base_model="Qwen/Qwen2.5-7B-Instruct",
+            model_revision="1" * 40,
             dataset_path="data/examples.jsonl",
+            dataset_content_sha256="d" * 64,
         ),
         plan_id="p-managed",
         environment_ref=environment_ref,
@@ -471,45 +612,49 @@ def test_non_blackwell_with_proven_sdpa_uses_sdpa():
 # ---- memory / spill-avoidance levers flow through the platform ---------------
 
 
-def test_optim_and_liger_flow_into_the_plan_and_snapshot():
-    # The avoid-spill levers reach the SEALED plan (validated against the backend) AND the training
-    # snapshot the trainer replays — so `platform-run` (not just `train-run`) gets them.
-    plan = _plan(_profile(cc_major=8), _report(), optim="paged_adamw_8bit", use_liger=True)
-    assert plan.optimizer.impl.value == "paged_adamw_8bit"
-    assert plan.loss_impl.value == "liger_fused_ce"
-    assert plan.training_config_snapshot["optim"] == "paged_adamw_8bit"
-    assert plan.training_config_snapshot["use_liger"] is True
+def test_independently_proven_optimizer_and_loss_are_refused_without_an_exact_tuple():
+    with pytest.raises(PlannerError, match="complete requested execution tuple"):
+        _plan(_profile(cc_major=8), _report(), optim="paged_adamw_8bit", use_liger=True)
 
 
 def test_default_optim_and_no_liger():
     plan = _plan(_profile(cc_major=8), _report())
     assert plan.optimizer.impl.value == "adamw_torch"
     assert plan.loss_impl.value == "cross_entropy"
-    assert plan.training_config_snapshot["optim"] == "adamw_torch"
-    assert "use_liger" not in plan.training_config_snapshot  # opt-in — absent by default
+    assert plan.resolved_execution is not None
+    assert plan.resolved_execution.optimizer.impl.value == "adamw_torch"
+    assert plan.training_config_snapshot == {}
 
 
 def test_invalid_optim_is_rejected():
     # optim is sealed as an Optimizer enum; a bogus value → a clean PlannerError, not a raw pydantic error.
-    with pytest.raises(PlannerError, match="invalid"):
+    with pytest.raises(PlannerError, match="unsupported optimizer"):
         _plan(_profile(cc_major=8), _report(), optim="not_a_real_optimizer")
 
 
-def test_snapshot_with_levers_round_trips_as_a_trainrunconfig():
-    plan = _plan(_profile(cc_major=8), _report(), optim="paged_adamw_8bit", use_liger=True)
-    cfg = TrainRunConfig.model_validate(plan.training_config_snapshot)
-    assert cfg.optim == "paged_adamw_8bit" and cfg.use_liger is True
+def test_resolved_execution_round_trips_as_a_trainrunconfig():
+    plan = _plan(_profile(cc_major=8), _report())
+    assert plan.resolved_execution is not None
+    cfg = train_config_from_resolved(plan.resolved_execution)
+    assert cfg.optim == "adamw_torch" and cfg.use_liger is False
+    assert cfg.optimizer_state_dtype == "fp32"
+    assert cfg.optimizer_auxiliary_dtype == "fp32"
+    assert cfg.master_weight_dtype == "fp32" and cfg.gradient_dtype == "fp32"
 
 
-def test_no_proven_attention_falls_back_to_eager():
-    plan = _plan(_profile(cc_major=8), _report(attn=()))
-    assert plan.attention_backend.value == "eager"
-    assert plan.training_config_snapshot["attn_implementation"] == "eager"
+def test_no_proven_attention_is_refused():
+    with pytest.raises(PlannerError, match="not ready"):
+        _plan(_profile(cc_major=8), _report(attn=(), kernels=()))
 
 
 def test_bf16_not_proven_falls_back_to_fp32():
-    plan = _plan(_profile(cc_major=8), _report(precisions=("fp16",)))
+    plan = _plan(_profile(cc_major=8), _report(precisions=("fp16", "fp32")))
     assert plan.precision.value == "fp32"
+
+
+def test_no_proven_training_precision_is_refused():
+    with pytest.raises(PlannerError, match="not ready"):
+        _plan(_profile(cc_major=8), _report(precisions=("fp16",)))
 
 
 def test_no_bitsandbytes_gives_no_quant_and_lora():
@@ -518,10 +663,25 @@ def test_no_bitsandbytes_gives_no_quant_and_lora():
     assert plan.adapter.method.value == "lora"
 
 
-def test_explicit_attention_override_wins():
-    plan = _plan(_profile(cc_major=8), _report(), attention_backend="flash_attention_2")
-    assert plan.attention_backend.value == "flash_attention_2"
-    assert plan.training_config_snapshot["attn_implementation"] == "flash_attention_2"
+def test_explicit_unproven_attention_override_is_refused():
+    with pytest.raises(PlannerError, match="not functionally proven"):
+        _plan(_profile(cc_major=8), _report(), attention_backend="flash_attention_2")
+
+
+def test_explicit_proven_sdpa_resolves_one_exact_kernel():
+    plan = _plan(
+        _profile(cc_major=8),
+        _report(attn=("sdpa",)),
+        attention_backend="sdpa",
+    )
+    assert plan.resolved_execution is not None
+    policy = plan.resolved_execution.attention
+    assert policy.effective_backend_required.value == "torch_sdpa_flash"
+    assert (policy.flash_sdp_enabled, policy.mem_efficient_sdp_enabled, policy.math_sdp_enabled) == (
+        True,
+        False,
+        False,
+    )
 
 
 def test_native_windows_blackwell_rejects_an_explicit_unsafe_attention_override():
@@ -535,14 +695,32 @@ def test_native_windows_blackwell_rejects_an_explicit_unsafe_attention_override(
 
 def test_wsl_blackwell_allows_an_explicit_sdpa_override():
     # On WSL the deadlock does not apply, so an explicit sdpa override is honored (not refused).
-    plan = _plan(_profile(cc_major=12, os="wsl"), _report(), attention_backend="sdpa")
+    plan = _plan(
+        _profile(cc_major=12, os="wsl"),
+        _report(attn=("sdpa",)),
+        attention_backend="sdpa",
+    )
     assert plan.attention_backend.value == "sdpa"
 
 
-def test_native_windows_blackwell_allows_only_math_and_eager_explicit_attention():
-    for safe in ("eager", "math"):
-        plan = _plan(_profile(cc_major=12, os="windows"), _report(), attention_backend=safe)
-        assert plan.attention_backend.value == safe
+def test_native_windows_blackwell_allows_only_proven_math_and_eager_attention():
+    math_plan = _plan(
+        _profile(cc_major=12, os="windows"),
+        _report(),
+        attention_backend="math",
+    )
+    assert math_plan.attention_backend.value == "math"
+
+    eager_report = _report(
+        attn=("eager",),
+        kernels=("eager",),
+    )
+    eager_plan = _plan(
+        _profile(cc_major=12, os="windows"),
+        eager_report,
+        attention_backend="eager",
+    )
+    assert eager_plan.attention_backend.value == "eager"
 
 
 def test_unsloth_refused_on_native_windows_blackwell_even_with_an_explicit_sdpa_override():
@@ -563,16 +741,9 @@ def test_unsupported_adapter_method_is_rejected():
 # ---- multi-backend selection ------------------------------------------------
 
 
-def test_backend_ref_reflects_the_chosen_backend():
-    # Unsloth on a non-Blackwell host with a proven sdpa plan.
-    plan = _plan(_profile(cc_major=8), _report(attn=("sdpa",)), backend="unsloth")
-    assert plan.backend_ref.id == "unsloth"
-    assert plan.backend_ref.hash is not None
-    from corpus_studio.platform.backends import backend_manifest_digest, get_backend
-
-    backend = get_backend("unsloth")
-    assert backend is not None
-    assert plan.backend_ref.hash.value == backend_manifest_digest(backend)
+def test_backend_without_resolved_execution_contract_is_refused():
+    with pytest.raises(PlannerError, match="capability report belongs"):
+        _plan(_profile(cc_major=8), _report(), backend="unsloth")
 
 
 def test_unknown_backend_is_rejected():
@@ -583,7 +754,7 @@ def test_unknown_backend_is_rejected():
 def test_backend_that_cannot_run_the_resolved_plan_is_rejected_with_alternatives():
     # Unsloth can't do the math attention a NATIVE-WINDOWS Blackwell plan requires → refused,
     # corpus_studio named. (On WSL the plan seals sdpa, which Unsloth CAN run — see the CLI test.)
-    with pytest.raises(PlannerError, match="can't run this plan"):
+    with pytest.raises(PlannerError, match="capability report belongs"):
         _plan(_profile(cc_major=12, os="windows"), _report(), backend="unsloth")
 
 
@@ -605,7 +776,9 @@ def test_cpu_toy_only_with_optin_yields_a_cpu_toy_plan():
     assert plan.precision.value == "fp32"
     assert plan.quantization.value == "none"
     assert plan.attention_backend.value == "eager"
-    assert plan.training_config_snapshot["cpu_toy"] is True
+    assert plan.resolved_execution is not None
+    assert plan.resolved_execution.runtime_mode == "cpu_toy"
+    assert plan.resolved_execution.schedule.max_steps == 3
 
 
 def test_cpu_toy_only_without_optin_raises():
@@ -634,23 +807,32 @@ def test_unsupported_attention_override_raises():
 def test_sequence_len_flows_verbatim():
     plan = _plan(_profile(cc_major=12), _report(), sequence_len=1792)
     assert plan.sequence.max_sequence_len == 1792
-    assert plan.training_config_snapshot["sequence_len"] == 1792
+    assert plan.resolved_execution is not None
+    assert plan.resolved_execution.sequence.max_sequence_len == 1792
 
 
-# ---- the snapshot round-trips through the real trainer config ---------------
+# ---- the resolved configuration maps exactly to the trainer boundary --------
 
 
-def test_snapshot_validates_as_a_trainrunconfig():
+def test_resolved_execution_validates_as_a_trainrunconfig():
     plan = _plan(_profile(cc_major=12), _report())
-    cfg = TrainRunConfig.model_validate(plan.training_config_snapshot)
+    assert plan.resolved_execution is not None
+    cfg = train_config_from_resolved(plan.resolved_execution)
     assert cfg.base_model == "Qwen/Qwen2.5-7B-Instruct"
     assert cfg.dataset_format == "instruction"  # NOT silently defaulted from a wrong "format" key
 
 
-def test_snapshot_uses_dataset_format_key_not_format():
-    plan = _plan(_profile(cc_major=12), _report(), dataset_format="chat")
-    assert plan.training_config_snapshot["dataset_format"] == "chat"
-    assert "format" not in plan.training_config_snapshot
+def test_chat_format_requires_and_seals_exact_template_hash():
+    with pytest.raises(ValueError, match="chat datasets require"):
+        _plan(_profile(cc_major=12), _report(), dataset_format="chat")
+    plan = _plan(
+        _profile(cc_major=12),
+        _report(),
+        dataset_format="chat",
+        chat_template_sha256="e" * 64,
+    )
+    assert plan.resolved_execution is not None
+    assert plan.resolved_execution.data.chat_template_sha256 == "e" * 64
 
 
 # ---- plan_hash (the immutability seal) --------------------------------------
@@ -687,8 +869,8 @@ def test_plan_hash_seals_physical_execution_and_detects_tampering():
     assert changed_physical == plan.physical_execution
     tampered_body = plan.model_dump(mode="json")
     tampered_body["physical_execution"]["resources"][0]["device_id"] = "cuda:9"
-    tampered = P.RunPlan.model_validate(tampered_body)
-    assert not verify_run_plan_hash(tampered)
+    with pytest.raises(ValueError, match="unplanned physical resource"):
+        P.RunPlan.model_validate(tampered_body)
 
 
 def test_legacy_hash_payload_omits_absent_physical_execution():

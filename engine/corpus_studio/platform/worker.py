@@ -64,7 +64,7 @@ def _send(
     stream.flush()
 
 
-def _build_runner(runner_name: str, max_steps: int | None) -> Any:
+def _build_runner(runner_name: str) -> Any:
     """The Runner for ``runner_name`` — mirrors the ``platform-run`` selection (echo needs nothing;
     cpu_toy/training lazy-import the trainer)."""
     from corpus_studio.platform.supervisor import EchoRunner  # noqa: PLC0415
@@ -73,7 +73,7 @@ def _build_runner(runner_name: str, max_steps: int | None) -> Any:
         return EchoRunner()
     from corpus_studio.platform.runners import TrainingRunner  # noqa: PLC0415
 
-    return TrainingRunner(cpu_toy=(runner_name == "cpu_toy"), max_steps=max_steps)
+    return TrainingRunner(cpu_toy=(runner_name == "cpu_toy"))
 
 
 def run_worker(
@@ -82,7 +82,6 @@ def run_worker(
     runner_name: str,
     backend_id: str,
     environment_ref: Ref,
-    max_steps: int | None = None,
     out: Any = None,
 ) -> int:
     """Execute one dispatched run and stream it back. ``dispatch_line`` is the raw ``run_dispatch``
@@ -117,6 +116,16 @@ def run_worker(
 
         if not verify_run_plan_hash(plan):
             raise ValueError("plan_hash does not match the canonical plan body")
+        if plan.resolved_execution is not None:
+            from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+                verify_execution_configuration_hash,
+            )
+
+            if not verify_execution_configuration_hash(plan.resolved_execution):
+                raise ValueError("resolved execution configuration hash mismatch")
+        from corpus_studio.platform.execution_config import verify_runner_lane  # noqa: PLC0415
+
+        verify_runner_lane(plan, runner_name)
         backend = get_worker_backend(backend_id)
         if backend is None:
             raise WorkerProtocolError(f"unknown worker backend {backend_id!r}")
@@ -150,12 +159,20 @@ def run_worker(
 
     _send(
         "run_accepted",
-        {"run_id": run_id, "pid": os.getpid()},
+        {
+            "run_id": run_id,
+            "pid": os.getpid(),
+            "execution_configuration_hash": (
+                plan.resolved_execution.configuration_hash
+                if plan.resolved_execution is not None
+                else None
+            ),
+        },
         correlation_id=correlation_id,
         out=stream,
     )
 
-    runner = _build_runner(runner_name, max_steps)
+    runner = _build_runner(runner_name)
     # Stream each RunEvent to the parent as it is produced (the sink runs synchronously inside
     # execute_run, so ordering + backpressure are preserved over the pipe). Each metric event is a
     # COMPLETED STEP — real progress — which is what resets the parent's silence timer; a hung training
@@ -199,7 +216,6 @@ def main() -> None:
     parser.add_argument("--backend-id", required=True)
     parser.add_argument("--environment-id", required=True)
     parser.add_argument("--environment-hash")
-    parser.add_argument("--max-steps", type=int, default=None)
     args = parser.parse_args()
 
     environment_ref = Ref(
@@ -242,7 +258,6 @@ def main() -> None:
             runner_name=args.runner,
             backend_id=args.backend_id,
             environment_ref=environment_ref,
-            max_steps=args.max_steps,
         )
     )
 

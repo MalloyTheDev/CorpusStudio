@@ -36,7 +36,7 @@ def test_contract_version_is_pinned():
 
 
 def test_all_root_contracts_registered():
-    assert len(P.ROOT_CONTRACTS) == 27
+    assert len(P.ROOT_CONTRACTS) == 28
     assert "StorageProfile" in P.ROOT_CONTRACTS
     for expected in (
         "ModelDescriptor",
@@ -52,6 +52,7 @@ def test_all_root_contracts_registered():
         "EnvironmentLock",
         "EnvironmentDescriptor",
         "EnvironmentHealthReport",
+        "ResolvedExecutionConfiguration",
     ):
         assert expected in P.ROOT_CONTRACTS
     for name, model in P.ROOT_CONTRACTS.items():
@@ -71,7 +72,7 @@ def test_all_root_contracts_registered():
 def test_failure_and_fit_taxonomies_complete():
     assert len(FailureTaxonomy) == 11
     assert len(FitClass) == 12
-    assert len(StageMarker) == 16
+    assert len(StageMarker) == 20
     # the spill-vs-OOM distinction that is the whole point
     assert FailureTaxonomy.KERNEL_STALL.value == "KERNEL_STALL"
     assert FailureTaxonomy.ACCIDENTAL_SPILL.value == "ACCIDENTAL_SPILL"
@@ -478,11 +479,11 @@ def test_worker_message_rejects_wrong_direction_and_body_shape():
 
 def test_export_json_schemas_writes_language_neutral_files(tmp_path):
     written = P.export_json_schemas(tmp_path)
-    # 27 contract schemas + index.json
-    assert len(written) == 28
+    # 28 contract schemas + index.json
+    assert len(written) == 29
     index = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
     assert index["contract_version"] == "1.0.0"
-    assert len(index["contracts"]) == 27
+    assert len(index["contracts"]) == 28
     # every emitted schema is valid JSON with a proper object shape
     for name in P.ROOT_CONTRACTS:
         schema = json.loads((tmp_path / f"{name}.schema.json").read_text(encoding="utf-8"))

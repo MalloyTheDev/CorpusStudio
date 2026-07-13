@@ -160,18 +160,6 @@ public sealed class EngineCommandTests
         public TrainingRuntimeReport RuntimeReport { get; set; } = new();
         public bool CheckRuntimeCalled { get; private set; }
         public Task<TrainingRuntimeReport> CheckTrainingRuntimeAsync() { CheckRuntimeCalled = true; return Task.FromResult(RuntimeReport); }
-        public IReadOnlyList<string> LastFirstPartyArgv { get; private set; } = Array.Empty<string>();
-        public bool LastFirstPartyCpuToy { get; private set; }
-        public IReadOnlyList<string> BuildFirstPartyTrainArgv(string configPath, string? outputDir, bool cpuToy, int? maxSteps)
-        {
-            var argv = new List<string> { "python", "-m", "corpus_studio.cli", "train-run", configPath };
-            if (!string.IsNullOrEmpty(outputDir)) { argv.Add("--output-dir"); argv.Add(outputDir); }
-            if (cpuToy) { argv.Add("--cpu-toy"); }
-            LastFirstPartyArgv = argv;
-            LastFirstPartyCpuToy = cpuToy;
-            return argv;
-        }
-        public string EngineWorkingDirectory => @"C:\engine";
         public MergeResult MergeResultToReturn { get; set; } = new();
         public bool MergeCalled { get; private set; }
         public string? LastMergeStrategy { get; private set; }
@@ -229,9 +217,16 @@ public sealed class EngineCommandTests
     private sealed class FakeDialogService : IDialogService
     {
         private readonly bool _confirm;
+        public string? LastMessage { get; private set; }
+        public string? LastTitle { get; private set; }
         public FakeDialogService(bool confirm) => _confirm = confirm;
         public Task<bool> ConfirmAsync(string message, string title, DialogButtons buttons = DialogButtons.YesNo, DialogSeverity severity = DialogSeverity.Question, bool defaultAffirmative = false) => Task.FromResult(_confirm);
-        public Task ShowAsync(string message, string title, DialogSeverity severity = DialogSeverity.Information) => Task.CompletedTask;
+        public Task ShowAsync(string message, string title, DialogSeverity severity = DialogSeverity.Information)
+        {
+            LastMessage = message;
+            LastTitle = title;
+            return Task.CompletedTask;
+        }
         public Task<string?> PromptAsync(string title, string message, string defaultValue = "") => Task.FromResult<string?>(null);
     }
 
@@ -1248,68 +1243,25 @@ public sealed class EngineCommandTests
     }
 
     [Fact]
-    public async Task LaunchFirstParty_Ready_RunsWithTheEngineInterpreterArgv()
+    public async Task LaunchFirstParty_RefusesTheUnsealedDesktopPath()
     {
-        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { RuntimeReport = new TrainingRuntimeReport { Ready = true } };
-        var runner = new FakeTrainingProcessRunner { ExitCode = 0, Lines = new[] { "[1/2] step" } };
-        var vm = VmWith(engine, new FakeDialogService(confirm: true), trainingRunner: runner);
-        SelectFakeProject(vm);
-        SetFirstPartyConfig(vm);
-
-        await vm.LaunchTrainingAsync(); // routes to the first-party path (IsFirstPartyTarget)
-
-        Assert.True(engine.CheckRuntimeCalled);                       // preflighted
-        Assert.True(runner.RunCalled);                               // launched
-        Assert.False(engine.LastFirstPartyCpuToy);                   // a real GPU run, not the toy path
-        Assert.Equal("python", engine.LastFirstPartyArgv[0]);        // the engine's interpreter, not PATH corpus-studio
-        Assert.Contains("train-run", engine.LastFirstPartyArgv);
-    }
-
-    [Fact]
-    public async Task LaunchFirstParty_CpuToyMode_AddsTheCpuToyFlag()
-    {
-        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { RuntimeReport = new TrainingRuntimeReport { CpuToyReady = true } };
-        var runner = new FakeTrainingProcessRunner { ExitCode = 0 };
-        var vm = VmWith(engine, new FakeDialogService(confirm: true), trainingRunner: runner);
-        SelectFakeProject(vm);
-        SetFirstPartyConfig(vm);
-        vm.Training.CpuToyMode = true;
-
-        await vm.LaunchTrainingAsync();
-
-        Assert.True(runner.RunCalled);
-        Assert.True(engine.LastFirstPartyCpuToy);
-        Assert.Contains("--cpu-toy", engine.LastFirstPartyArgv);
-    }
-
-    [Fact]
-    public async Task LaunchFirstParty_RuntimeNotReady_DoesNotRun()
-    {
-        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { RuntimeReport = new TrainingRuntimeReport() }; // nothing installed
+        var engine = new FakeEngine(new DebtReport { Grade = "A" })
+        {
+            RuntimeReport = new TrainingRuntimeReport { Ready = true },
+        };
         var runner = new FakeTrainingProcessRunner();
-        var vm = VmWith(engine, new FakeDialogService(confirm: true), trainingRunner: runner);
+        var dialogs = new FakeDialogService(confirm: true);
+        var vm = VmWith(engine, dialogs, trainingRunner: runner);
         SelectFakeProject(vm);
         SetFirstPartyConfig(vm);
-
-        await vm.LaunchTrainingAsync();
-
-        Assert.True(engine.CheckRuntimeCalled);
-        Assert.False(runner.RunCalled); // gated: no runtime → no launch, even though the user confirmed
-    }
-
-    [Fact]
-    public async Task LaunchFirstParty_WithoutAConfig_DoesNotPreflightOrRun()
-    {
-        var engine = new FakeEngine(new DebtReport { Grade = "A" }) { RuntimeReport = new TrainingRuntimeReport { Ready = true } };
-        var runner = new FakeTrainingProcessRunner();
-        var vm = VmWith(engine, new FakeDialogService(confirm: true), trainingRunner: runner);
-        SelectFakeProject(vm);
-        vm.Training.TrainingTarget = "corpus_studio"; // first-party target, but no config generated
 
         await vm.LaunchTrainingAsync();
 
         Assert.False(engine.CheckRuntimeCalled);
         Assert.False(runner.RunCalled);
+        Assert.Contains("platform-plan", dialogs.LastMessage);
+        Assert.Contains("platform-run", dialogs.LastMessage);
+        Assert.Equal("Sealed RunPlan required", dialogs.LastTitle);
     }
 
     [Fact]
