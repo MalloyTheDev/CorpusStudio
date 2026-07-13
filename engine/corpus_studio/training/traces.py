@@ -78,6 +78,16 @@ def _split_think(content: str, open_tag: str = DEFAULT_THINK_OPEN, close_tag: st
     return "", content.strip()
 
 
+def answer_for_scoring(
+    model_output: str, *, think_open: str = DEFAULT_THINK_OPEN, think_close: str = DEFAULT_THINK_CLOSE
+) -> tuple[str, bool]:
+    """Strip a reasoning model's ``<think>…</think>`` block for evaluation, returning
+    ``(answer, had_thinking)`` — so a scorer compares the model's ANSWER to the reference, not its
+    reasoning (which would corrupt the score). No tags → ``(text_unchanged, False)``."""
+    thinking, answer = _split_think(model_output, think_open, think_close)
+    return answer, bool(thinking)
+
+
 def format_trace(
     trace: Trace,
     *,

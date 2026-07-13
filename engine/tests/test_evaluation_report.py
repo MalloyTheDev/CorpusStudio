@@ -209,3 +209,58 @@ def test_extract_evaluation_examples_builds_chat_request_from_last_assistant_mes
         {"role": "system", "content": "Be concise."},
         {"role": "user", "content": "What is recursion?"},
     ]
+
+
+class _ReasoningBackend:
+    """A reasoning model: emits <think>…</think> before the answer."""
+
+    def generate(self, request):
+        return BackendGenerateResponse(
+            text="<think>recall the definition of recursion</think>Recursion is a function calling itself.",
+            model_name="fake-reasoner",
+        )
+
+
+class _RecordingScorer:
+    """Captures the `actual` text it is asked to score, so we can prove what the evaluator scored."""
+
+    metric = "keyword_overlap"
+
+    def __init__(self):
+        self.actuals: list[str] = []
+
+    def score(self, prompt, expected, actual):
+        from corpus_studio.evaluation.scorers import ScoreResult
+
+        self.actuals.append(actual)
+        return ScoreResult(score=100.0)
+
+
+def _recursion_examples():
+    rows = [{"instruction": "Explain recursion.", "input": "", "output": "Recursion is a function calling itself."}]
+    return extract_evaluation_examples(rows, "instruction")
+
+
+def test_reasoning_mode_scores_the_answer_not_the_thinking():
+    scorer = _RecordingScorer()
+    report = run_evaluation(
+        EvaluationRunConfig(dataset="d", model="m", schema_id="instruction", limit=1, reasoning=True),
+        _recursion_examples(),
+        _ReasoningBackend(),
+        scorer=scorer,
+    )
+    # The scorer saw only the ANSWER — the <think> block was stripped before scoring.
+    assert scorer.actuals == ["Recursion is a function calling itself."]
+    # But the FULL output (with the reasoning) is preserved in the record for inspection.
+    assert "<think>" in report.results[0].model_output
+
+
+def test_default_eval_scores_the_full_output_including_thinking():
+    scorer = _RecordingScorer()
+    run_evaluation(
+        EvaluationRunConfig(dataset="d", model="m", schema_id="instruction", limit=1),  # reasoning off
+        _recursion_examples(),
+        _ReasoningBackend(),
+        scorer=scorer,
+    )
+    assert "<think>" in scorer.actuals[0]  # default mode scores the whole output, thinking included

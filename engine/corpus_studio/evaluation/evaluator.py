@@ -28,6 +28,9 @@ class EvaluationRunConfig(BaseModel):
     score_threshold: float = 70.0
     timeout_seconds: int = 120
     tags: list[str] = Field(default_factory=list)
+    # Reasoning/trace-aware eval: when the model emits <think>…</think>answer, score the ANSWER only —
+    # its reasoning is not the reference and would corrupt the score. Off by default.
+    reasoning: bool = False
 
     def to_report_settings(self) -> EvaluationRunSettings:
         """Return the repeatable settings stored with an evaluation report."""
@@ -162,8 +165,19 @@ def _evaluate_example(
             error=format_backend_error(exc),
         )
 
+    # Trace-aware eval: score the ANSWER only (strip <think>…</think>) so the reference is not compared
+    # against the model's reasoning, which would corrupt the score. `had_reasoning=False` in this mode
+    # flags a "reasoning" model that emitted no reasoning.
+    scoring_output = response.text
+    reasoning_missing = False
+    if config.reasoning:
+        from corpus_studio.training.traces import answer_for_scoring  # noqa: PLC0415
+
+        scoring_output, had_reasoning = answer_for_scoring(response.text)
+        reasoning_missing = not had_reasoning
+
     try:
-        scored = active_scorer.score(example.prompt, example.expected_output, response.text)
+        scored = active_scorer.score(example.prompt, example.expected_output, scoring_output)
     except BACKEND_ERROR_TYPES as exc:
         # BACKEND_ERROR_TYPES = (OSError, ValueError), so this also covers JSON decode
         # errors (json.JSONDecodeError subclasses ValueError) from a judge response.
@@ -183,6 +197,12 @@ def _evaluate_example(
             error=format_backend_error(exc),
         )
 
+    failure_note = _score_failure_note(scored.score, config.score_threshold)
+    notes = (
+        ("no_reasoning" + (f"; {failure_note}" if failure_note else ""))
+        if reasoning_missing
+        else failure_note
+    )
     return EvaluationExampleResult(
         example_id=example.example_id,
         prompt=example.prompt,
@@ -191,7 +211,7 @@ def _evaluate_example(
         score=scored.score,
         passed=scored.score >= config.score_threshold,
         tags=example.tags or config.tags,
-        notes=_score_failure_note(scored.score, config.score_threshold),
+        notes=notes,
         rationale=scored.rationale,
     )
 
