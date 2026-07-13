@@ -54,13 +54,14 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   `platform/` contract change,
   regenerate the committed schemas (see §4), update the count in
   `tests/test_platform_contracts.py`, and regenerate the TypeScript types.
-- **Phase 7 is implemented locally on `feat/trace-record-foundation` and awaiting publish/CI**: one
-  `TraceRecord` root, hash/policy/source/review evidence, legacy migration, explicit reviewed
-  successors, external provider-authority and trainer gates, generated clients, and a
-  desktop-selectable trace draft schema. Local gate: Ruff clean, MyPy clean (121 files), 1,412 Python
-  tests passed / 6 skipped / 88.50% Windows coverage, deterministic 27-root schema/TypeScript
-  generation, web production build, 815 desktop tests, and clean WPF/Avalonia Release builds (the
-  existing Avalonia Watermark deprecation warnings remain). See `docs/TRACE_RECORDS.md`.
+- **#416 contains the Phase 7 generalized `TraceRecord` foundation**: one `TraceRecord` root,
+  hash/policy/source/review evidence, legacy migration, explicit reviewed successors, external
+  provider-authority and trainer gates, generated clients, and a desktop-selectable trace draft
+  schema. Verify its live merge/CI state rather than inferring it from this snapshot. Its local gate
+  was Ruff clean, MyPy clean (121 files), 1,412 Python tests passed / 6 skipped / 88.50% Windows
+  coverage, deterministic 27-root schema/TypeScript generation, web production build, 815 desktop
+  tests, and clean WPF/Avalonia Release builds (the existing Avalonia Watermark deprecation warnings
+  remain). See `docs/TRACE_RECORDS.md`.
 
 ## 3. The architecture North Star + binding directives
 
@@ -154,8 +155,8 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 7. Immediate next actions (ranked)
 
-1. **Finish/publish Phase 7** and verify its full local/CI gate; the implementation branch is named
-   above. Do not call the built-in draft schema a dedicated graphical Trace Studio.
+1. **Verify the live state of #416.** If it has not landed, finish its CI/review/merge; once it lands,
+   continue with Phase 8. Do not call the built-in draft schema a dedicated graphical Trace Studio.
 2. **Phase 8 — MoE model inspection.** Detect and report existing MoE topology/count evidence without
    claiming execution support; keep semantic routing separate from physical placement.
 3. **Continue hardware-independent foundations while the PCIe/NVMe adapter is pending:** MoE-safe
