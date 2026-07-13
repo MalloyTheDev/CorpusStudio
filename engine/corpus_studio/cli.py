@@ -432,6 +432,9 @@ def platform_plan(
     output_dir: str = typer.Option("output", "--output-dir", help="Where the trainer saves the adapter (flows into the plan's training snapshot)."),
     sequence_len: int = typer.Option(4096, "--sequence-len", help="Max sequence length (flows into the plan verbatim)."),
     backend: str = typer.Option("corpus_studio", "--backend", help="Training framework to run on (see platform-backends)."),
+    optim: Optional[str] = typer.Option(None, "--optim", help="Optimizer (e.g. adamw_torch | paged_adamw_8bit). Paged pages optimizer state to host RAM under pressure — a spike-safe safe-spill; validated against the backend."),
+    use_liger: bool = typer.Option(False, "--use-liger", help="Fuse the cross-entropy loss (Liger) to drop the long-seq logits memory spike. Needs liger-kernel; Blackwell support unverified."),
+    memory_efficient: bool = typer.Option(False, "--memory-efficient", help="Shortcut for a tight GPU: enable the memory-saving levers (paged optimizer + fused Liger loss). Explicit --optim / --use-liger override it."),
     allow_cpu_toy: bool = typer.Option(False, "--allow-cpu-toy", help="Permit a cpu-toy plan when the host is cpu-toy-only."),
     out_dir: Optional[Path] = typer.Option(None, "--out", help="Write the sealed RunPlan.json to this directory."),
     json_out: bool = typer.Option(
@@ -454,6 +457,8 @@ def platform_plan(
     with contextlib.redirect_stdout(sys.stderr):
         profile = build_environment_profile()
         report = run_capability_probes(profile)
+    # --memory-efficient is a shortcut; explicit --optim / --use-liger win.
+    resolved_optim = optim or ("paged_adamw_8bit" if memory_efficient else "adamw_torch")
     constraints = PlannerConstraints(
         base_model=base_model,
         dataset_path=dataset_path,
@@ -462,6 +467,8 @@ def platform_plan(
         output_dir=output_dir,
         sequence_len=sequence_len,
         backend=backend,
+        optim=resolved_optim,
+        use_liger=use_liger or memory_efficient,
         allow_cpu_toy=allow_cpu_toy,
     )
     try:

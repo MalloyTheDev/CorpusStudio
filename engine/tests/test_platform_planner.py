@@ -88,6 +88,39 @@ def test_non_blackwell_with_proven_sdpa_uses_sdpa():
     assert plan.attention_backend.value == "sdpa"
 
 
+# ---- memory / spill-avoidance levers flow through the platform ---------------
+
+
+def test_optim_and_liger_flow_into_the_plan_and_snapshot():
+    # The avoid-spill levers reach the SEALED plan (validated against the backend) AND the training
+    # snapshot the trainer replays — so `platform-run` (not just `train-run`) gets them.
+    plan = _plan(_profile(cc_major=8), _report(), optim="paged_adamw_8bit", use_liger=True)
+    assert plan.optimizer.impl.value == "paged_adamw_8bit"
+    assert plan.loss_impl.value == "liger_fused_ce"
+    assert plan.training_config_snapshot["optim"] == "paged_adamw_8bit"
+    assert plan.training_config_snapshot["use_liger"] is True
+
+
+def test_default_optim_and_no_liger():
+    plan = _plan(_profile(cc_major=8), _report())
+    assert plan.optimizer.impl.value == "adamw_torch"
+    assert plan.loss_impl.value == "cross_entropy"
+    assert plan.training_config_snapshot["optim"] == "adamw_torch"
+    assert "use_liger" not in plan.training_config_snapshot  # opt-in — absent by default
+
+
+def test_invalid_optim_is_rejected():
+    # optim is sealed as an Optimizer enum; a bogus value → a clean PlannerError, not a raw pydantic error.
+    with pytest.raises(PlannerError, match="invalid"):
+        _plan(_profile(cc_major=8), _report(), optim="not_a_real_optimizer")
+
+
+def test_snapshot_with_levers_round_trips_as_a_trainrunconfig():
+    plan = _plan(_profile(cc_major=8), _report(), optim="paged_adamw_8bit", use_liger=True)
+    cfg = TrainRunConfig.model_validate(plan.training_config_snapshot)
+    assert cfg.optim == "paged_adamw_8bit" and cfg.use_liger is True
+
+
 def test_no_proven_attention_falls_back_to_eager():
     plan = _plan(_profile(cc_major=8), _report(attn=()))
     assert plan.attention_backend.value == "eager"
