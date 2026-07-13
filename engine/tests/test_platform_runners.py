@@ -355,6 +355,22 @@ class OutOfMemoryError(Exception):
     is needed and the message can be empty (torch's OOM often carries the signal only in the type)."""
 
 
+def test_classify_wedged_gpu_recommends_a_reset():
+    # 'device not ready' (the WSL2 GPU-PV wedge from a prior crashed run) is NOT a config bug — the
+    # classifier must surface a RESET, not a generic FAIL, or the operator burns runs re-running it.
+    taxonomy, remediation = classify_training_error(
+        RuntimeError("CUDA error: device not ready\nCUDA kernel errors might be reported asynchronously")
+    )
+    assert taxonomy == FailureTaxonomy.ENVIRONMENT_FAILURE
+    assert remediation and "wsl --terminate" in remediation and "NOT a config problem" in remediation
+
+
+def test_classify_wedged_beats_a_coincidental_oom_word():
+    # A wedged GPU is checked first; an unrelated 'out of memory' phrasing shouldn't hide the wedge.
+    taxonomy, _ = classify_training_error(RuntimeError("device not ready (was out of memory earlier)"))
+    assert taxonomy == FailureTaxonomy.ENVIRONMENT_FAILURE
+
+
 def test_classify_oom_from_message():
     taxonomy, remediation = classify_training_error(
         RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")

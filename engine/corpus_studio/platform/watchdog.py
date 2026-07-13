@@ -33,7 +33,8 @@ import threading
 from collections.abc import Callable
 
 from corpus_studio.platform.contracts import FitClassification, MemoryMetrics
-from corpus_studio.platform.enums import FitClass, MemoryResidencyModel
+from corpus_studio.platform.enums import FitClass, MemoryResidencyModel, OperatingSystem
+from corpus_studio.platform.gpu_health import spill_remediation
 
 # A sampler returns a point-in-time MemoryMetrics, or None when there's no CUDA device to read.
 MemorySampler = Callable[[], "MemoryMetrics | None"]
@@ -133,6 +134,7 @@ def reconcile_measured_fit(
     *,
     residency: MemoryResidencyModel = MemoryResidencyModel.unknown,
     proven: bool = True,
+    os_value: OperatingSystem = OperatingSystem.unknown,
 ) -> FitClassification:
     """The MEASURED fit from an observed peak — the post-run reconciliation of the calibrator's
     *predicted* fit. Unlike the estimate, a **completed** run that stayed on-device legitimately earns
@@ -164,8 +166,8 @@ def reconcile_measured_fit(
         )
         rationale = (
             f"MEASURED: the run reserved ~{_gb(peak_bytes)} GB, ~{_gb(peak.shared_gpu_bytes)} GB of it "
-            "spilled to shared system RAM (10-25x slowdown, not a clean OOM). Reduce sequence_len / "
-            "micro_batch_size or offload."
+            "spilled to shared system RAM (not a clean OOM). "
+            + spill_remediation(classification, os_value)
         )
     elif not proven:
         # The run did NOT complete — the sampled peak is only what it reserved before failing, so a
@@ -336,11 +338,15 @@ class RunWatchdog:
         residency: MemoryResidencyModel = MemoryResidencyModel.unknown,
         *,
         proven: bool = True,
+        os_value: OperatingSystem = OperatingSystem.unknown,
     ) -> FitClassification | None:
         """The measured fit from the tracked peak, or ``None`` if nothing was ever sampled (CPU run).
         ``proven=False`` (the run failed/cancelled) downgrades a would-be NATIVE fit to
-        ``NATIVE_UNPROVEN`` — only a completed run proves a fit (a spill still classifies honestly)."""
+        ``NATIVE_UNPROVEN`` — only a completed run proves a fit (a spill still classifies honestly).
+        ``os_value`` tunes a spill's remediation (e.g. bare Linux would OOM where WDDM spills)."""
         peak = self.peak
         return (
-            None if peak is None else reconcile_measured_fit(peak, residency=residency, proven=proven)
+            None
+            if peak is None
+            else reconcile_measured_fit(peak, residency=residency, proven=proven, os_value=os_value)
         )
