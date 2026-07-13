@@ -29,6 +29,7 @@ from corpus_studio.providers.policy import (
     DEFAULT_PROVIDER_POLICIES,
     ProviderPolicyError,
     ProviderRole,
+    authorize_action,
     infer_provider_id,
     resolve_policy,
 )
@@ -3177,47 +3178,105 @@ def trace_validate(
     dataset_path: Path,
     json_out: bool = typer.Option(False, "--json", help="Emit the validation summary as JSON."),
     show: int = typer.Option(5, "--show", help="Show up to N invalid rows."),
+    require_approved: bool = typer.Option(
+        False,
+        "--require-approved",
+        help="Also require every versioned record to be approved and supported by the current trace trainer.",
+    ),
+    project_dir: Optional[Path] = typer.Option(
+        None,
+        "--project-dir",
+        help="Project holding external provider-policy authority (default: dataset parent).",
+    ),
 ):
-    """Validate a reasoning-TRACE corpus: each row must parse to a Trace (prompt/context + thinking +
-    answer), pass the STRUCTURAL checks (answer present, reasoning not a verbatim copy), AND the
-    reasoning-QUALITY gate (no answer leaked into the prompt, no stray <think> tags, reasoning not
-    token-thin). Reports how many rows carry a real thinking trace + the quality distribution. Exit 3
-    if any row is structurally invalid OR a quality FAIL — the guardrail before training a reasoner."""
-    from corpus_studio.importers.jsonl_importer import read_jsonl
+    """Validate legacy traces and hash-sealed TraceRecords; optionally enforce training approval."""
+    from corpus_studio.importers.jsonl_importer import iter_jsonl
+    from corpus_studio.platform.trace_records import (
+        check_trace_dataset_for_training,
+        is_trace_record_row,
+        legacy_trace_from_record,
+        parse_trace_record,
+        trace_record_training_issues,
+        trace_validation_evidence_issues,
+    )
     from corpus_studio.training.traces import trace_from_row, trace_quality, validate_trace
 
-    rows = list(read_jsonl(dataset_path))
-    total = len(rows)
+    total = 0
+    record_rows = 0
+    legacy_rows = 0
     with_thinking = 0
     quality = {"pass": 0, "warn": 0, "fail": 0}
+    reviews = {"pending": 0, "approved": 0, "rejected": 0}
     invalid: list[tuple[int, list[str]]] = []
-    for index, row in enumerate(rows):
-        trace = trace_from_row(row)
+    provider_overrides = load_overrides(project_dir or dataset_path.parent)
+    try:
+        parsed_rows = list(iter_jsonl(dataset_path))
+    except OSError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    for parsed in parsed_rows:
+        total += 1
+        if parsed.error is not None or not isinstance(parsed.value, dict):
+            problem = parsed.error or f"expected a JSON object, got {type(parsed.value).__name__}"
+            invalid.append((parsed.line_number, [problem]))
+            continue
+        row = parsed.value
+        problems: list[str] = []
+        try:
+            if is_trace_record_row(row):
+                record_rows += 1
+                record = parse_trace_record(row)
+                trace = legacy_trace_from_record(record)
+                reviews[record.review.status] += 1
+                problems.extend(trace_validation_evidence_issues(record))
+                if record.validation.status == "block":
+                    problems.extend(f"stored:{item.message}" for item in record.validation.findings)
+                if require_approved:
+                    problems.extend(trace_record_training_issues(record, provider_overrides))
+            else:
+                legacy_rows += 1
+                trace = trace_from_row(row)
+                if require_approved:
+                    training_check = check_trace_dataset_for_training(
+                        [row], provider_overrides=provider_overrides
+                    )
+                    problems.extend(
+                        problem.partition(": ")[2] or problem
+                        for problem in training_check.blocked
+                    )
+        except (TypeError, ValueError, RecursionError) as exc:
+            invalid.append((parsed.line_number, [str(exc)]))
+            continue
         verdict = validate_trace(trace)
         gate = trace_quality(trace)
         with_thinking += int(verdict.has_thinking)
         quality[gate.status] += 1
-        problems = list(verdict.errors) + ([f"quality:{i}" for i in gate.issues] if gate.status == "fail" else [])
-        if not verdict.valid or gate.status == "fail":
-            invalid.append((index, problems))
+        problems.extend(verdict.errors)
+        if gate.status == "fail":
+            problems.extend(f"quality:{issue}" for issue in gate.issues)
+        if problems:
+            invalid.append((parsed.line_number, sorted(set(problems))))
     pct_think = round(100 * with_thinking / total) if total else 0
+    payload = {
+        "total": total,
+        "record_rows": record_rows,
+        "legacy_rows": legacy_rows,
+        "with_thinking": with_thinking,
+        "quality": quality,
+        "reviews": reviews,
+        "require_approved": require_approved,
+        "blocked": len(invalid),
+        "issues": [{"row": i, "problems": e} for i, e in invalid[:50]],
+    }
     if json_out:
-        typer.echo(
-            json.dumps(
-                {
-                    "total": total,
-                    "with_thinking": with_thinking,
-                    "quality": quality,
-                    "blocked": len(invalid),
-                    "issues": [{"row": i, "problems": e} for i, e in invalid[:50]],
-                },
-                indent=2,
-            )
-        )
+        typer.echo(json.dumps(payload, indent=2))
     else:
         typer.echo(
-            f"{total} traces | {with_thinking} with thinking ({pct_think}%) | "
+            f"{total} traces (records={record_rows}, legacy={legacy_rows}) | "
+            f"{with_thinking} with thinking ({pct_think}%) | "
             f"quality pass={quality['pass']} warn={quality['warn']} fail={quality['fail']} | "
+            f"review pending={reviews['pending']} approved={reviews['approved']} "
+            f"rejected={reviews['rejected']} | "
             f"{len(invalid)} blocked"
         )
         for index, problems in invalid[:show]:
@@ -3226,12 +3285,142 @@ def trace_validate(
         raise typer.Exit(code=3)
 
 
+@app.command("trace-migrate")
+def trace_migrate(
+    input_path: Path,
+    out: Path = typer.Option(..., "--out", help="Write hash-sealed TraceRecord JSONL here."),
+    source_ref: Optional[str] = typer.Option(
+        None,
+        "--source-ref",
+        help="Portable source artifact label (default: input filename).",
+    ),
+):
+    """Explicitly migrate legacy prompt/thinking/answer rows to pending TraceRecords."""
+    from corpus_studio.importers.jsonl_importer import read_jsonl
+    from corpus_studio.platform.trace_records import (
+        artifact_trace_source,
+        is_trace_record_row,
+        parse_trace_record,
+        sha256_file,
+        trace_record_from_legacy_row,
+        utc_now_iso,
+        write_trace_records,
+    )
+
+    try:
+        if input_path.resolve() == out.resolve():
+            raise ValueError("trace-migrate requires a distinct --out path")
+        rows = list(read_jsonl(input_path))
+        artifact_hash = sha256_file(input_path)
+        stamp = utc_now_iso()
+        records = []
+        migrated = 0
+        retained = 0
+        for index, row in enumerate(rows, start=1):
+            if is_trace_record_row(row):
+                records.append(parse_trace_record(row))
+                retained += 1
+                continue
+            source = artifact_trace_source(
+                artifact_ref=source_ref or input_path.name,
+                artifact_sha256=artifact_hash,
+                row=row,
+                row_index=index,
+            )
+            records.append(
+                trace_record_from_legacy_row(row, source=source, created_at=stamp)
+            )
+            migrated += 1
+        write_trace_records(records, out)
+    except (OSError, TypeError, ValueError, RecursionError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    blocked = sum(record.validation.status == "block" for record in records)
+    typer.echo(
+        f"rows {len(records)} | migrated {migrated} | retained {retained} | "
+        f"pending {len(records)} | validation-blocked {blocked} -> {out}",
+        err=True,
+    )
+    typer.echo(str(out))
+    if blocked:
+        raise typer.Exit(code=3)
+
+
+@app.command("trace-review")
+def trace_review(
+    input_path: Path,
+    out: Path = typer.Option(..., "--out", help="Write reviewed successor records here."),
+    reviewer: str = typer.Option(..., "--reviewer", help="Human reviewer identity."),
+    decision: str = typer.Option(..., "--decision", help="approved or rejected."),
+    trace_ids: list[str] = typer.Option([], "--trace-id", help="Review one trace id; repeatable."),
+    all_records: bool = typer.Option(False, "--all", help="Apply the decision to every record."),
+    notes: list[str] = typer.Option([], "--note", help="Review note; repeatable."),
+    project_dir: Optional[Path] = typer.Option(
+        None,
+        "--project-dir",
+        help="Project holding external provider-policy authority (default: input parent).",
+    ),
+):
+    """Write immutable reviewed successors; approval remains distinct from validation or truth."""
+    from corpus_studio.importers.jsonl_importer import read_jsonl
+    from corpus_studio.platform.trace_records import (
+        parse_trace_record,
+        review_trace_record,
+        utc_now_iso,
+        write_trace_records,
+    )
+
+    try:
+        normalized = decision.strip().lower()
+        if normalized not in {"approved", "rejected"}:
+            raise ValueError("--decision must be approved or rejected")
+        if not reviewer.strip():
+            raise ValueError("--reviewer cannot be blank")
+        if all_records == bool(trace_ids):
+            raise ValueError("choose exactly one of --all or one or more --trace-id options")
+        if input_path.resolve() == out.resolve():
+            raise ValueError("trace-review requires a distinct --out path to preserve predecessors")
+        rows = list(read_jsonl(input_path))
+        records = [parse_trace_record(row) for row in rows]
+        selected = {record.trace_id for record in records} if all_records else set(trace_ids)
+        missing = selected - {record.trace_id for record in records}
+        if missing:
+            raise ValueError("unknown trace ids: " + ", ".join(sorted(missing)))
+        stamp = utc_now_iso()
+        provider_overrides = load_overrides(project_dir or input_path.parent)
+        reviewed = [
+            review_trace_record(
+                record,
+                decision=normalized,  # type: ignore[arg-type]
+                reviewer=reviewer,
+                reviewed_at=stamp,
+                notes=notes,
+                provider_overrides=provider_overrides,
+            )
+            if record.trace_id in selected
+            else record
+            for record in records
+        ]
+        write_trace_records(reviewed, out)
+    except (OSError, TypeError, ValueError, RecursionError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    typer.echo(
+        f"records {len(records)} | {normalized} {len(selected)} | unchanged "
+        f"{len(records) - len(selected)} -> {out}",
+        err=True,
+    )
+    typer.echo(str(out))
+
+
 @app.command("trace-generate")
 def trace_generate(
     prompts_path: Path,
-    out: Path = typer.Option(..., "--out", help="Write the accepted traces JSONL here (dataset_format=trace)."),
+    out: Path = typer.Option(..., "--out", help="Write accepted pending TraceRecord JSONL here."),
     backend: str = typer.Option("ollama", "--backend", help="Model backend: ollama | openai-compatible."),
-    model: str = typer.Option(..., "--model", help="The model that GENERATES the reasoning — your own model (self-distillation) or a stronger teacher."),
+    model: str = typer.Option(..., "--model", help="The approved model that generates the candidate reasoning."),
     base_url: Optional[str] = typer.Option(None, "--base-url", help="Backend base URL (default: the provider's local default)."),
     api_key: Optional[str] = typer.Option(None, "--api-key", help="API key for an openai-compatible teacher."),
     max_tokens: int = typer.Option(1024, "--max-tokens", help="Max tokens per generation (reasoning + answer)."),
@@ -3239,50 +3428,260 @@ def trace_generate(
     system: Optional[str] = typer.Option(None, "--system", help="Override the reasoning system prompt."),
     timeout_seconds: int = typer.Option(180, "--timeout-seconds"),
     limit: int = typer.Option(0, "--limit", help="Only the first N prompts (0 = all)."),
+    project_dir: Optional[Path] = typer.Option(
+        None,
+        "--project-dir",
+        help="Project whose provider_overrides.json supplies generation approval (default: input parent).",
+    ),
+    report_path: Optional[Path] = typer.Option(
+        None,
+        "--report",
+        help="Write the accepted/rejected attempt report here (default: <out>.report.json).",
+    ),
+    legacy_output: bool = typer.Option(
+        False,
+        "--legacy-output",
+        help=(
+            "Compatibility only: write non-trainable flat rows plus a reviewable "
+            "<out>.trace-records.jsonl sidecar."
+        ),
+    ),
 ):
-    """GENERATE reasoning traces from a prompt corpus via a model backend — self-distill (point --model
-    at your own model) or a teacher (a bigger local model / an API model). Each output is
-    prompt + <think>reasoning</think> + answer; the pipeline SELF-FILTERS — only traces with real
-    reasoning that pass the quality gate are kept. Writes the accepted traces (train with
-    --dataset-format trace). A per-prompt backend error rejects that prompt, never aborts the batch."""
+    """Generate pending, provenance-sealed trace candidates under fail-closed provider policy."""
     from corpus_studio.importers.jsonl_importer import read_jsonl
+    from corpus_studio.platform.trace_records import (
+        artifact_trace_source,
+        build_reasoning_trace_record,
+        canonical_sha256,
+        model_trace_producer,
+        sha256_file,
+        source_row_id,
+        text_sha256,
+        utc_now_iso,
+        write_json_atomic,
+        write_jsonl_artifact,
+        write_trace_records,
+    )
     from corpus_studio.training.trace_generation import (
         DEFAULT_REASONING_SYSTEM,
         backend_generate_fn,
-        generate_traces,
-        prompt_from_row,
+        context_from_row,
+        generate_trace,
     )
 
+    resolved_report = report_path or out.with_name(f"{out.stem}.report.json")
+    trace_records_sidecar = (
+        out.with_name(f"{out.stem}.trace-records.jsonl") if legacy_output else None
+    )
     try:
+        resolved_paths = [prompts_path.resolve(), out.resolve(), resolved_report.resolve()]
+        if trace_records_sidecar is not None:
+            resolved_paths.append(trace_records_sidecar.resolve())
+    except OSError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    if len(set(resolved_paths)) != len(resolved_paths):
+        typer.echo(
+            "trace-generate requires distinct input, output, report, and sidecar paths",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    output_paths = [out, resolved_report]
+    if trace_records_sidecar is not None:
+        output_paths.append(trace_records_sidecar)
+    if any(path.name.casefold() == "examples.jsonl" for path in output_paths):
+        typer.echo(
+            "the engine never writes examples.jsonl; choose separate trace artifacts",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    provider_id = infer_provider_id(backend, base_url)
+    requested_route_id = model if provider_id == "openrouter" else None
+    overrides = load_overrides(project_dir or prompts_path.parent)
+    requested_policy = resolve_policy(
+        provider_id,
+        model_id=model,
+        route_id=requested_route_id,
+        overrides=overrides,
+    )
+    try:
+        authorize_action(requested_policy, "generate-trace")
         client = _build_backend(backend, model, base_url, api_key, timeout_seconds)
+    except ProviderPolicyError as exc:
+        typer.echo(f"Provider policy blocked trace generation: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
     except ValueError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
 
-    rows = list(read_jsonl(prompts_path))
-    if limit > 0:
-        rows = rows[:limit]
-    prompts = [p for p in (prompt_from_row(row) for row in rows) if p]
-    if not prompts:
+    try:
+        rows = list(read_jsonl(prompts_path))
+        artifact_hash = sha256_file(prompts_path)
+    except (OSError, ValueError, RecursionError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    selected_rows = rows[:limit] if limit > 0 else rows
+    usable = [
+        (index, row, context_from_row(row))
+        for index, row in enumerate(selected_rows, start=1)
+    ]
+    if not any(context for _, _, context in usable):
         typer.echo("No usable prompts found (expected a prompt/instruction/question field or messages).", err=True)
         raise typer.Exit(code=2)
 
     generate_fn = backend_generate_fn(client, max_tokens=max_tokens, temperature=temperature)
-    results = generate_traces(prompts, generate_fn, system=system or DEFAULT_REASONING_SYSTEM)
-    accepted = [r for r in results if r.accepted and r.trace is not None]
-
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "w", encoding="utf-8") as handle:
-        for result in accepted:
-            trace = result.trace
-            assert trace is not None
-            handle.write(
-                json.dumps({"prompt": trace.prompt, "thinking": trace.thinking, "answer": trace.answer})
-                + "\n"
+    system_prompt = system or DEFAULT_REASONING_SYSTEM
+    stamp = utc_now_iso()
+    records = []
+    attempts: list[dict[str, object]] = []
+    for index, row, context in usable:
+        row_id = source_row_id(row)
+        if not context:
+            attempts.append(
+                {
+                    "source_row_index": index,
+                    "source_row_id": row_id,
+                    "accepted": False,
+                    "reason": "no usable prompt/context",
+                }
             )
+            continue
+        result = generate_trace(context, generate_fn, system=system_prompt)
+        trace_id = None
+        reason = result.reason
+        if result.accepted and result.trace is not None and result.response_sha256 is not None:
+            try:
+                resolved_model = (result.response_model or "").strip()
+                if not resolved_model:
+                    raise ProviderPolicyError(
+                        "the backend did not report the model identity that produced the response"
+                    )
+                resolved_route_id = resolved_model if provider_id == "openrouter" else None
+                resolved_policy = resolve_policy(
+                    provider_id,
+                    model_id=resolved_model,
+                    route_id=resolved_route_id,
+                    overrides=overrides,
+                )
+                authorize_action(resolved_policy, "generate-trace")
+                policy_snapshot = resolved_policy.model_dump(mode="json")
+                source = artifact_trace_source(
+                    artifact_ref=prompts_path.name,
+                    artifact_sha256=artifact_hash,
+                    row=row,
+                    row_index=index,
+                )
+                metadata = {**result.response_metadata}
+                producer = model_trace_producer(
+                    backend=backend.replace("_", "-").lower(),
+                    provider_id=provider_id,
+                    provider_kind=resolved_policy.provider_kind,
+                    requested_model_id=model,
+                    model_id=resolved_model,
+                    route_id=resolved_route_id,
+                    prompt_template_version="reasoning-system-v1",
+                    prompt_template=system_prompt,
+                    request={"messages": result.request_messages},
+                    response_sha256=result.response_sha256,
+                    response_metadata=metadata,
+                    decoding={"max_tokens": max_tokens, "temperature": temperature},
+                    seed=None,
+                    policy_snapshot=policy_snapshot,
+                    policy_source=resolved_policy.default_policy_source,
+                    captured_at=stamp,
+                )
+                record = build_reasoning_trace_record(
+                    trace=result.trace,
+                    source=source,
+                    producer=producer,
+                    created_at=stamp,
+                )
+                records.append(record)
+                trace_id = record.trace_id
+            except (ProviderPolicyError, TypeError, ValueError, RecursionError) as exc:
+                reason = f"record construction error: {exc}"
+        attempts.append(
+            {
+                "source_row_index": index,
+                "source_row_id": row_id,
+                "prompt_sha256": text_sha256(result.prompt),
+                "accepted": trace_id is not None,
+                "trace_id": trace_id,
+                "response_sha256": result.response_sha256,
+                "response_model": result.response_model,
+                "reason": "" if trace_id is not None else reason,
+            }
+        )
+
+    try:
+        if legacy_output:
+            assert trace_records_sidecar is not None
+            legacy_rows = []
+            for record in records:
+                reasoning = "\n\n".join(
+                    segment.content or ""
+                    for segment in record.segments
+                    if segment.kind == "reasoning"
+                ).strip()
+                answer = next(
+                    segment.content or ""
+                    for segment in record.segments
+                    if segment.kind == "final_answer"
+                )
+                prompt = "\n".join(message.content for message in record.context)
+                legacy_rows.append(
+                    {
+                        "prompt": prompt,
+                        "thinking": reasoning,
+                        "answer": answer,
+                        "meta": {
+                            "teacher": record.producer.model_id,
+                            "trace_record_hash": record.trace_hash,
+                            "trace_record_ref": trace_records_sidecar.name,
+                            "review_status": "pending",
+                        },
+                    }
+                )
+            write_trace_records(records, trace_records_sidecar)
+            write_jsonl_artifact(legacy_rows, out)
+        else:
+            write_trace_records(records, out)
+        write_json_atomic(
+            {
+                "report_version": "1.0.0",
+                "created_at": stamp,
+                "input_ref": prompts_path.name,
+                "input_sha256": artifact_hash,
+                "backend": backend,
+                "provider_id": provider_id,
+                "model_id": model,
+                "requested_policy_sha256": canonical_sha256(
+                    requested_policy.model_dump(mode="json")
+                ),
+                "output_format": "legacy" if legacy_output else "trace_record",
+                "trace_records_ref": (
+                    trace_records_sidecar.name if trace_records_sidecar is not None else out.name
+                ),
+                "total_rows": len(selected_rows),
+                "accepted": len(records),
+                "rejected": len(selected_rows) - len(records),
+                "attempts": attempts,
+            },
+            resolved_report,
+        )
+    except (OSError, TypeError, ValueError, RecursionError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    if legacy_output:
+        typer.echo(
+            "WARNING: --legacy-output rows are unsealed and non-trainable; review the "
+            f"pending TraceRecords in {trace_records_sidecar} instead.",
+            err=True,
+        )
     typer.echo(
-        f"prompts {len(prompts)} | accepted {len(accepted)} | rejected {len(results) - len(accepted)} "
-        f"-> {out}",
+        f"rows {len(selected_rows)} | accepted {len(records)} pending review | "
+        f"rejected {len(selected_rows) - len(records)} | report {resolved_report} -> {out}",
         err=True,
     )
     typer.echo(str(out))

@@ -5,7 +5,7 @@ doc disagrees with this file, this file wins (and the other doc should be fixed)
 
 Last reconciled: 2026-07-13 (through **v1.3** — Evaluation Suites & Chat Gates — plus the **platform
 run lifecycle** re-scope: profile → plan → predict-fit → run → measure-fit → artifacts, a multi-backend
-registry, and subprocess reliability, verified on a real RTX 5070; plus the post-v1.3 additions
+registry, and subprocess reliability, verified on a real RTX 5070 under native Windows/WDDM; plus the post-v1.3 additions
 reconciled below — the **reasoning-traces** data loop, a dataset **truncation guardrail** +
 configurable **checkpoint retention**, and a dependency-light **storage safe-spill** profiler —
 plus the sealed **Environment Manager** reference lifecycle, the static MoE-safe
@@ -162,13 +162,21 @@ per-item error isolation, and off-thread document opens.
 - **Configurable checkpoint retention**: `train-run --save-steps N` (default 50) + `--save-total-limit
   N` (default 3 — keep only the N most recent checkpoints so a long run can't fill the disk; `0` keeps
   all). The trainer saves the **LoRA adapter** + tokenizer + a model card, not a full base copy.
-- **Reasoning traces** — a create → validate → train → eval loop for `<think>reasoning</think>answer`
-  data (DeepSeek-R1 / Qwen convention), plus a no-think baseline. `trace-generate` synthesizes traces
-  from a prompt set via a local / OpenAI-compatible backend (self-filtered to well-formed traces,
-  provider policy enforced); `trace-validate` checks a trace corpus's structure (answer present,
-  reasoning not a verbatim copy, no answer-leak); the trainer accepts the `trace` dataset format; and
-  `eval-run --reasoning` scores the **answer only** (strips `<think>…</think>` before scoring, keeps
-  the full output, flags a "reasoning" model that emitted none).
+- **Versioned reasoning/tool trace foundation** — the language-neutral, hash-sealed `TraceRecord`
+  preserves exact source-row lineage, ordered role context, reasoning/action/tool/result/final-answer
+  boundaries, producer/model/prompt/request/response evidence, typed validation findings, and a
+  separate immutable human-review decision. `trace-generate` now fails closed on requested-provider
+  policy before any backend call, reauthorizes the backend-reported model, writes pending records plus
+  a sanitized per-attempt report, and never promotes self-filtering to review. `trace-migrate`
+  explicitly seals legacy rows; `trace-review` recomputes engine validation and writes
+  approved/rejected successors; `trace-validate --require-approved` and `train-run` recheck
+  validation, current external project policy (unknown/frontier default-deny), and segment semantics,
+  then refuse pending/rejected/tampered/unsupported records before model loading. The built-in `trace` draft
+  schema makes the ordinary desktop Writing Studio the authoring foundation. Legacy rows and the
+  `<think>reasoning</think>answer` training renderer/no-think baseline remain compatible, and
+  `eval-run --reasoning` still scores only the final answer. Generated/imported reasoning remains
+  explicitly unverified. No dedicated graphical Trace Studio, tool executor, semantic correctness
+  judge, or tool/process trainer is claimed. See [`TRACE_RECORDS.md`](TRACE_RECORDS.md).
 
 **Platform run lifecycle** (headless, contract-first)
 - A language-neutral contracts substrate (`engine/corpus_studio/platform/`) turns goal + data +
@@ -255,7 +263,8 @@ per-item error isolation, and off-thread document opens.
   needs the math attention path Unsloth doesn't provide).
 - **Reliability**: an in-process watchdog detects a stall/spill + captures a measured fit; the
   subprocess worker can **KILL a hung run** (→ `KERNEL_STALL`) and isolates a crash. Verified
-  end-to-end on a real RTX 5070 (Blackwell): a GPU QLoRA ran in-process and in a subprocess.
+  end-to-end on a real RTX 5070 (Blackwell) under native Windows/WDDM: a GPU QLoRA ran in-process and
+  in a subprocess. This is not bare-Linux, NVMe/offload, full-sequence 7B, or MoE-runtime proof.
 - Consumed by a new **Tauri 2 + React** contract-first client (`apps/web`) alongside the WPF + Avalonia
   heads.
 - Checkpoint tracking during and after runs, resume-from-latest for targets

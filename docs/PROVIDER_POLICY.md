@@ -12,7 +12,7 @@ desktop, and tests, so no surface can bypass it.
 - **Evaluator / Judge / Critic** — may score, critique, classify, label, compare
   outputs, and judge preference strength, producing **non-trainable metadata**.
 
-Trainable-generating AI Assist actions today: `rewrite-output`, `draft-example`.
+Trainable-generating actions today: `rewrite-output`, `draft-example`, `generate-trace`.
 Evaluator actions: `review`, `suggest-tags`, `judge-preference-strength`.
 
 ## Defaults
@@ -34,6 +34,7 @@ Evaluator-only output never enters trainable fields through the normal save flow
 ## Policy resolution
 
 `resolve_policy(provider_id, model_id, route_id, overrides)`:
+0. Normalize provider identity to a lowercase canonical ID; blank IDs are invalid.
 1. Start from the built-in default for `provider_id` (evaluator-only fallback if unknown).
 2. For OpenRouter, apply route inheritance (`openai/*`, `anthropic/*` → blocked; others → generator role allowed but still needs approval).
 3. Apply the most-specific project override (`provider/route:…`, `provider/model:…`, or `provider`).
@@ -59,6 +60,10 @@ cannot be identified from the host alone).
   route id (e.g. `gpt-4o`) cannot be vetted and is treated as frontier — denied.
 - `authorize_action` is default-deny: an action that is neither a known trainable
   nor a known evaluator action is rejected, not permitted as an evaluator call.
+- A `TraceRecord` policy snapshot is provenance, not authority. Trace review and training reload the
+  project-local override file, re-resolve both requested and backend-reported model identities, and
+  require the current authoritative policy to reproduce the stored snapshot. Unknown providers,
+  case tricks, revocation, drift, and frontier routes therefore fail closed at admission time too.
 
 ## Approving a local model (local-first, inspectable)
 

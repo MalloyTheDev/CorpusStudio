@@ -71,6 +71,7 @@ def test_ollama_approved_model_can_generate():
     assert policy.can_generate_trainable() is True
     assert policy.requires_human_review is True
     authorize_action(policy, "rewrite-output")  # does not raise
+    authorize_action(policy, "generate-trace")  # trace candidates use the same fail-closed gate
 
 
 def test_ollama_approval_is_per_model():
@@ -212,3 +213,19 @@ def test_effective_capability_is_serialized():
         overrides={"ollama/model:llama3": {"outputs_trainable": True, "user_approved_generation": True}},
     ).model_dump()
     assert approved["generation_allowed"] is True
+
+
+def test_frontier_classifier_is_public_and_non_overridable():
+    from corpus_studio.providers.policy import is_frontier_generation_source
+
+    assert is_frontier_generation_source("openai")
+    assert is_frontier_generation_source("anthropic")
+    assert is_frontier_generation_source("openrouter", "openai/gpt-4o")
+    assert is_frontier_generation_source("openrouter", "bare-model-slug")
+    assert not is_frontier_generation_source(
+        "openrouter", "meta-llama/llama-3-70b-instruct"
+    )
+    assert not is_frontier_generation_source("ollama")
+    assert is_frontier_generation_source(" OpenAI ")
+    assert resolve_policy(" OpenAI ").provider_id == "openai"
+    assert not resolve_policy(" OpenAI ").can_generate_trainable()

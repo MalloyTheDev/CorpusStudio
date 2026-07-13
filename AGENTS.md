@@ -22,7 +22,8 @@ Three surfaces:
   (profile → plan → predict-fit → run → measure-fit → artifacts) + the Environment Manager (sealed
   reference-backend creation, locks, probes, drift, and safe recreation) and the storage safe-spill
   profiler + static, offline model/tokenizer descriptors and inspection + the sealed,
-  backend-independent TrainingObjective registry and compatibility evidence checker.
+  backend-independent TrainingObjective registry and compatibility evidence checker + the versioned,
+  provenance/review-safe TraceRecord workflow.
 - **UI** — WPF + Avalonia (`apps/desktop`, C#) and Tauri 2 + React (`apps/web`, TS). UI is a client
   over the engine CLI; it never owns training behavior.
 
@@ -52,6 +53,10 @@ CI runs on **Linux / Python 3.11** with `pytest --cov=corpus_studio --cov-fail-u
 - **ASCII in CLI-facing strings** (Windows console UTF-8 — no `—`, use `-`).
 - **Contracts are the boundary**: change `platform/contracts.py` (pydantic) → regenerate
   `docs/contracts/*.schema.json` → the TS types in `apps/web/src/contracts/` derive from those.
+- **Hardware claims stay evidence-bound**: until the Linux NVMe is installed in the final RTX 5070
+  machine, do not claim native-Linux training, DeepSpeed/FSDP/NVMe offload, bare-Linux
+  FlashAttention, PCIe/NVMe throughput or endurance, full-sequence 7B success, real offload fit, or
+  MoE runtime capability. Contracts, fake workers, and CI are not hardware verification.
 
 ## Process
 - Branch first (`git checkout -b feat/<slice>`), one coherent CI-green PR per slice.

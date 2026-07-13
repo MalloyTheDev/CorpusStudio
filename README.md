@@ -18,6 +18,7 @@ It is designed to be a one-stop shop for authoring, importing, cleaning, validat
 - classification datasets
 - retrieval/embedding datasets
 - evaluation datasets
+- reasoning-trace draft datasets
 
 Corpus Studio is not just a JSONL editor. It is a writing-first dataset IDE plus a contract-first
 run control plane covering the dataset-to-model workflow: create datasets, validate them,
@@ -131,6 +132,11 @@ a training run — its own opt-in first-party trainer, or your installed trainer
   preflights the runtime, `train-run` runs a 4-bit QLoRA in-process and writes the
   adapter + a model card, `train-merge` merges it back (with a small-VRAM fallback),
   and `model-fetch` reliably downloads a permissive base model with its license
+- versioned `TraceRecord` artifacts preserve source rows, role context, reasoning/tool/final-answer
+  boundaries, producer-policy evidence, validation, and separate human review. Generated candidates
+  are pending by default; `trace-review` writes immutable successors and `train-run` refuses
+  pending/rejected/tampered records before model loading (see
+  [`docs/TRACE_RECORDS.md`](docs/TRACE_RECORDS.md))
 - in-app launch of the first-party trainer or your installed trainer (explicit
   confirmation showing the exact command, no shell), live log streaming, and a Stop
   that kills the process tree

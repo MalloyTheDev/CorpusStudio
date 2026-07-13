@@ -181,6 +181,26 @@ train. All heavy imports are lazy — importing the engine never pulls torch.
 `corpus_studio`):** `model-fetch Qwen/Qwen2.5-7B` → `train-check` → `train-run
 <config>` → `train-merge <adapter>` → the adapter's `MODEL_CARD.md` documents the run.
 
+### Reasoning trace approval gate
+
+The `trace` dataset format accepts legacy prompt/thinking/answer rows for compatibility and approved
+versioned `TraceRecord` rows. Generated records are pending candidates, not ready-to-train data:
+
+1. generate or explicitly migrate to a separate pending JSONL artifact;
+2. inspect and write an approved successor with `trace-review`;
+3. run `trace-validate --require-approved`;
+4. point `train-run` at the approved artifact.
+
+`train-run` verifies record structure, canonical hash, recomputed engine validation evidence, review
+decision, current project-local provider-policy authority/frontier restrictions, and current segment
+supervision support **before**
+runtime probing or model loading. It refuses pending, rejected, tampered, foreign-validator,
+generated legacy-compatibility, tool-use, agent, verifier, and process-supervision records because
+the first-party trainer currently implements only assistant-authored inline reasoning + final-answer
+SFT rendering. Ordinary legacy rows remain usable but print an explicit warning that they carry no
+versioned review provenance. See
+[`TRACE_RECORDS.md`](TRACE_RECORDS.md).
+
 ### From the desktop
 
 The **Training tab** runs all of this for you when the target is `corpus_studio`:
@@ -198,8 +218,9 @@ On brand-new **Blackwell** GPUs (RTX 50-series, compute capability sm_120) the f
 native-Windows WDDM driver** — the training step hangs at 100% GPU util but ~55 W (a real step
 pulls 150–250 W). Verified on a real RTX 5070: bitsandbytes 4-bit, the *mem-efficient* SDPA
 kernel, and the *math* path all work — **only the fused flash kernel hangs, and only on native
-Windows**. It is a WDDM property, **not** an sm_120 kernel bug: on **WSL / bare Linux** the same
-flash kernel runs fine (verified on the 5070 under WSL2 — ~1000× faster than the math fallback).
+Windows**. WSL2 testing on the 5070 showed the same flash kernel running ~1000× faster than the math
+fallback. Bare-Linux FlashAttention has not yet been verified on the final machine, so WSL evidence
+must not be reported as a native-Linux result.
 
 CorpusStudio treats **WSL as its own platform** (`OperatingSystem.wsl`): flash-safe like Linux,
 but `wddm` memory-residency like Windows (it still spills — see below). So `train-run` disables
@@ -211,8 +232,9 @@ long-sequence 7B QLoRA on Blackwell? Prefer **WSL** to get the memory-efficient 
 The real ceiling (measured, and it is **not** an attention-kernel problem): on a **12 GB** card
 the 7B 4-bit QLoRA training peak is ~10.8 GB @ `sequence_len` 1024 → 13.8 GB @ 2048, so above
 ~seq 1280 the run exceeds 12 GB. On Windows (and WSL2, which shares the same WDDM driver) the
-driver then silently **spills to system RAM and thrashes over PCIe** — steps 10–25× slower,
-*looks* frozen but is crawling; native Linux OOMs. The pre-flight warns about this.
+driver then silently **spills to system RAM and thrashes over PCIe** — steps 10–25× slower and
+*looks* frozen while crawling. Native-Linux over-VRAM behavior remains unverified here. The
+pre-flight warns about the measured Windows/WSL risk.
 
 **A faster attention kernel does NOT lift this ceiling.** We tested `flash_attention_2` (the
 Dao flash-attn Blackwell wheel) against the real 7B on the actual sm_120 card: it is **faster**

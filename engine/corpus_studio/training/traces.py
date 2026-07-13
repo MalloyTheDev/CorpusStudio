@@ -11,6 +11,8 @@ dataset format here; the ``trace-validate`` CLI checks a trace corpus before a r
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from typing import Any
 
 from pydantic import BaseModel
@@ -48,6 +50,15 @@ def trace_from_row(row: dict[str, Any]) -> Trace:
     """Build a :class:`Trace` from a JSONL row, tolerant of common field aliases. If the row is chat
     (messages) and the last message is the assistant's, its content is split into thinking/answer when
     it already carries ``<think>`` tags — so an existing reasoning corpus round-trips."""
+    from corpus_studio.platform.trace_records import (  # noqa: PLC0415
+        is_trace_record_row,
+        legacy_trace_from_record,
+        parse_trace_record,
+    )
+
+    if is_trace_record_row(row):
+        return legacy_trace_from_record(parse_trace_record(row))
+
     messages = row.get("messages") if isinstance(row.get("messages"), list) else None
     thinking = _pick(row, _THINKING_KEYS)
     answer = _pick(row, _ANSWER_KEYS)
@@ -69,13 +80,35 @@ def trace_from_row(row: dict[str, Any]) -> Trace:
     )
 
 
-def _split_think(content: str, open_tag: str = DEFAULT_THINK_OPEN, close_tag: str = DEFAULT_THINK_CLOSE) -> tuple[str, str]:
-    """Split ``<think>reasoning</think>answer`` → (reasoning, answer). No tags → ("", content)."""
-    if open_tag in content and close_tag in content:
-        head, _, rest = content.partition(open_tag)
-        reasoning, _, answer = rest.partition(close_tag)
-        return reasoning.strip(), (head + answer).strip()
-    return "", content.strip()
+def _split_think(
+    content: str,
+    open_tag: str = DEFAULT_THINK_OPEN,
+    close_tag: str = DEFAULT_THINK_CLOSE,
+) -> tuple[str, str]:
+    """Strict legacy/import parser for ``<think>reasoning</think>answer``.
+
+    Structured :class:`TraceRecord` segments never contain delimiter markup. At an import boundary,
+    no tags means an answer-only baseline; any partial, repeated, reversed, or nested tag structure
+    is rejected instead of being silently flattened into misleading training data.
+    """
+    open_count = content.count(open_tag)
+    close_count = content.count(close_tag)
+    if not open_count and not close_count:
+        return "", content.strip()
+    if open_count != 1 or close_count != 1:
+        raise ValueError("malformed reasoning markup: expected exactly one <think>...</think> pair")
+    open_index = content.index(open_tag)
+    close_index = content.index(close_tag)
+    if close_index < open_index + len(open_tag):
+        raise ValueError("malformed reasoning markup: closing tag precedes the opening tag")
+    head = content[:open_index]
+    if head.strip():
+        raise ValueError("malformed reasoning markup: content before the opening <think> tag")
+    reasoning = content[open_index + len(open_tag) : close_index]
+    answer = content[close_index + len(close_tag) :]
+    if open_tag in reasoning or close_tag in reasoning:
+        raise ValueError("malformed reasoning markup: nested reasoning tags are not supported")
+    return reasoning.strip(), answer.strip()
 
 
 def answer_for_scoring(
@@ -84,7 +117,12 @@ def answer_for_scoring(
     """Strip a reasoning model's ``<think>…</think>`` block for evaluation, returning
     ``(answer, had_thinking)`` — so a scorer compares the model's ANSWER to the reference, not its
     reasoning (which would corrupt the score). No tags → ``(text_unchanged, False)``."""
-    thinking, answer = _split_think(model_output, think_open, think_close)
+    try:
+        thinking, answer = _split_think(model_output, think_open, think_close)
+    except ValueError:
+        # Evaluation must not crash on malformed model output. Leave it unchanged so the scorer sees
+        # the actual failure instead of accidentally stripping or repairing it.
+        return model_output.strip(), False
     return answer, bool(thinking)
 
 
@@ -162,6 +200,13 @@ def _worse(a: str, b: str) -> str:
     return a if _STATUS_RANK[a] >= _STATUS_RANK[b] else b
 
 
+class TraceQualityFinding(BaseModel):
+    code: str
+    severity: str
+    location: str
+    message: str
+
+
 class TraceQualityReport(BaseModel):
     """A trace's REASONING-quality verdict — the checks that a structurally-valid trace can still
     fail: a leaked answer, malformed tags, or a token-thin "reasoning" that teaches nothing.
@@ -169,9 +214,15 @@ class TraceQualityReport(BaseModel):
 
     status: str
     issues: list[str]
+    findings: list[TraceQualityFinding]
     thinking_chars: int
     answer_chars: int
     thinking_to_answer_ratio: float
+
+
+def _normalized_exact(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def trace_quality(
@@ -186,7 +237,7 @@ def trace_quality(
     * **token-thin reasoning** — a thinking trace far shorter than the answer (or trivially short) is
       not real reasoning → ``warn``.
     """
-    issues: list[str] = []
+    findings: list[TraceQualityFinding] = []
     status = "pass"
 
     prompt_text = trace.prompt or " ".join(
@@ -195,24 +246,59 @@ def trace_quality(
     answer = trace.answer.strip()
     thinking = trace.thinking.strip()
 
-    if answer and len(answer) >= leak_min_chars and answer in prompt_text:
-        issues.append("answer appears verbatim in the prompt (leakage)")
+    normalized_answer = _normalized_exact(answer)
+    normalized_prompt = _normalized_exact(prompt_text)
+    if (
+        normalized_answer
+        and len(normalized_answer) >= leak_min_chars
+        and normalized_answer in normalized_prompt
+    ):
+        findings.append(
+            TraceQualityFinding(
+                code="answer_leak_normalized_exact",
+                severity="block",
+                location="context",
+                message="answer leakage: answer appears in the prompt after Unicode/case/whitespace normalization",
+            )
+        )
         status = _worse(status, "fail")
     if DEFAULT_THINK_OPEN in trace.answer or DEFAULT_THINK_CLOSE in trace.answer:
-        issues.append("stray <think> tags remain in the answer (malformed/unsplit)")
+        findings.append(
+            TraceQualityFinding(
+                code="stray_think_markup",
+                severity="block",
+                location="final_answer",
+                message="stray <think> tags remain in the answer (malformed/unsplit)",
+            )
+        )
         status = _worse(status, "fail")
 
     ratio = (len(thinking) / len(answer)) if answer else 0.0
     if thinking and len(thinking) < min_thinking_chars:
-        issues.append(f"reasoning is trivially short ({len(thinking)} chars) — not real reasoning")
+        findings.append(
+            TraceQualityFinding(
+                code="reasoning_too_short",
+                severity="warning",
+                location="reasoning",
+                message=f"reasoning is trivially short ({len(thinking)} chars) - not substantial",
+            )
+        )
         status = _worse(status, "warn")
     elif thinking and answer and ratio < min_ratio:
-        issues.append(f"reasoning is very short vs the answer (ratio {ratio:.2f})")
+        findings.append(
+            TraceQualityFinding(
+                code="reasoning_answer_ratio_low",
+                severity="warning",
+                location="reasoning",
+                message=f"reasoning is very short vs the answer (ratio {ratio:.2f})",
+            )
+        )
         status = _worse(status, "warn")
 
     return TraceQualityReport(
         status=status,
-        issues=issues,
+        issues=[item.message for item in findings],
+        findings=findings,
         thinking_chars=len(thinking),
         answer_chars=len(answer),
         thinking_to_answer_ratio=round(ratio, 3),

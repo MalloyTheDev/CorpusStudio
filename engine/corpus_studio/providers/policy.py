@@ -8,6 +8,7 @@ a human review step follows.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import Enum
 from typing import Any
 from urllib.parse import urlsplit
@@ -24,7 +25,7 @@ class ProviderRole(str, Enum):
 
 # AI Assist actions that produce trainable dataset content (rows a user could
 # accept into the dataset). These require generation-approved policy.
-TRAINABLE_ACTIONS = frozenset({"rewrite-output", "draft-example"})
+TRAINABLE_ACTIONS = frozenset({"rewrite-output", "draft-example", "generate-trace"})
 # Evaluator/critic actions producing non-trainable metadata only.
 EVALUATOR_ACTIONS = frozenset({"review", "suggest-tags", "judge-preference-strength"})
 
@@ -243,6 +244,7 @@ _OVERRIDE_ALLOWED_KEYS = frozenset(
 def _is_frontier(provider_id: str, route_id: str | None) -> bool:
     """Whether generation must be hard-blocked regardless of overrides/approval."""
 
+    provider_id = provider_id.strip().lower()
     if provider_id in _FRONTIER_ROUTE_PARENTS:
         return True
     if provider_id == "openrouter" and route_id:
@@ -252,6 +254,17 @@ def _is_frontier(provider_id: str, route_id: str | None) -> bool:
             return True
         return route_parent(route_id) in _FRONTIER_ROUTE_PARENTS
     return False
+
+
+def is_frontier_generation_source(provider_id: str, route_id: str | None = None) -> bool:
+    """Public fail-closed classifier used again when trace data reaches training.
+
+    Provider-policy snapshots are provenance, not authority. Admission code must reapply this
+    non-overridable built-in rule instead of trusting a self-contained snapshot to authorize a
+    frontier provider or OpenRouter route.
+    """
+
+    return _is_frontier(provider_id, route_id)
 
 
 def _apply_frontier_block(policy: ProviderPolicy) -> ProviderPolicy:
@@ -268,7 +281,7 @@ def resolve_policy(
     provider_id: str,
     model_id: str | None = None,
     route_id: str | None = None,
-    overrides: dict[str, dict[str, Any]] | None = None,
+    overrides: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> ProviderPolicy:
     """Resolve the effective policy for a provider/model/route.
 
@@ -277,6 +290,9 @@ def resolve_policy(
     or route-id spelling can grant generation to a frontier provider/route.
     """
 
+    provider_id = provider_id.strip().lower()
+    if not provider_id:
+        raise ValueError("provider_id cannot be blank")
     base = DEFAULT_PROVIDER_POLICIES.get(provider_id) or _fallback_policy(provider_id)
     policy = base.model_copy(update={"model_id": model_id, "route_id": route_id})
     frontier = _is_frontier(provider_id, route_id)
@@ -317,6 +333,9 @@ def most_specific_override_key(
 ) -> str:
     """The single most-specific override key for a provider/model/route."""
 
+    provider_id = provider_id.strip().lower()
+    if not provider_id:
+        raise ValueError("provider_id cannot be blank")
     if route_id:
         return f"{provider_id}/route:{route_id}"
     if model_id:

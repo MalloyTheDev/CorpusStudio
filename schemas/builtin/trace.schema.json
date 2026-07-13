@@ -1,0 +1,38 @@
+{
+  "id": "trace",
+  "name": "Reasoning Trace Draft Dataset",
+  "version": "1.0.0",
+  "description": "Author legacy-compatible reasoning drafts as prompt, optional thinking, and final answer. Use trace-migrate to create hash-sealed TraceRecords and trace-review before training generated records.",
+  "fields": [
+    {
+      "name": "prompt",
+      "type": "text",
+      "required": true,
+      "description": "The task or user question presented to the model."
+    },
+    {
+      "name": "thinking",
+      "type": "markdown",
+      "required": false,
+      "description": "Explicit reasoning supplied for training. Generated reasoning is unverified until separately reviewed."
+    },
+    {
+      "name": "answer",
+      "type": "markdown",
+      "required": true,
+      "description": "The final answer, kept separate from the reasoning."
+    },
+    {
+      "name": "tags",
+      "type": "list",
+      "item_type": "string",
+      "required": false
+    }
+  ],
+  "example": {
+    "prompt": "What is 17 multiplied by 23?",
+    "thinking": "Break 23 into 20 plus 3: 17 times 20 is 340 and 17 times 3 is 51; 340 plus 51 is 391.",
+    "answer": "391",
+    "tags": ["arithmetic", "reasoning"]
+  }
+}

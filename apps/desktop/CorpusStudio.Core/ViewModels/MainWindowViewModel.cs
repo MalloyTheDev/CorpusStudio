@@ -5628,6 +5628,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             "raw_text" => "{\n  \"text\": \"A compiler translates source code into machine instructions.\"\n}",
             "chat" => "{\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"What is recursion?\"},\n    {\"role\": \"assistant\", \"content\": \"Recursion is when a function calls itself.\"}\n  ]\n}",
             "preference" => "{\n  \"prompt\": \"Explain recursion simply.\",\n  \"chosen\": \"Recursion is when a function calls itself.\",\n  \"rejected\": \"Recursion is when code does things again.\"\n}",
+            "trace" => "{\n  \"prompt\": \"What is 17 multiplied by 23?\",\n  \"thinking\": \"17 times 20 is 340, and 17 times 3 is 51; 340 plus 51 is 391.\",\n  \"answer\": \"391\"\n}",
             _ => "{\n  \"instruction\": \"Explain what a variable is.\",\n  \"input\": \"\",\n  \"output\": \"A variable stores a value.\"\n}",
         };
     }

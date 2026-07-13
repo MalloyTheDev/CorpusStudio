@@ -2,12 +2,17 @@
 reasoning-quality gate. No network: every backend call is a fake function."""
 
 from corpus_studio.training.trace_generation import (
+    GeneratedCompletion,
+    backend_generate_fn,
     build_reasoning_messages,
+    context_from_row,
     generate_trace,
     generate_traces,
     parse_generated_trace,
     prompt_from_row,
 )
+from corpus_studio.model_backends.base import BackendGenerateResponse
+from corpus_studio.platform.trace_records import canonical_sha256
 
 
 def test_build_reasoning_messages_elicits_think_tags():
@@ -34,6 +39,14 @@ def test_generate_trace_rejects_no_reasoning():
 def test_generate_trace_rejects_no_answer():
     result = generate_trace("Q?", lambda m: "<think>thinking but nothing after</think>")
     assert not result.accepted and "no answer" in result.reason
+
+
+def test_generate_trace_rejects_malformed_reasoning_markup():
+    result = generate_trace("Q?", lambda m: "<think>one<think>two</think>A")
+    assert not result.accepted and "malformed reasoning markup" in result.reason
+
+    result = generate_trace("Q?", lambda m: "answer first<think>post-hoc rationale</think>")
+    assert not result.accepted and "content before" in result.reason
 
 
 def test_generate_trace_rejects_a_quality_failure():
@@ -74,3 +87,66 @@ def test_prompt_from_row_aliases_and_messages():
     # The assistant turn is excluded (that's what we're generating).
     assert prompt_from_row({"messages": [{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}]}) == "q"
     assert prompt_from_row({}) == ""
+
+
+def test_context_from_row_preserves_roles_and_only_trims_trailing_target():
+    context = context_from_row(
+        {
+            "messages": [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "first"},
+                {"role": "assistant", "content": "prior turn"},
+                {"role": "user", "content": "next"},
+                {"role": "assistant", "content": "target"},
+            ]
+        }
+    )
+    assert [message["role"] for message in context] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert context[-1]["content"] == "next"
+
+
+def test_generate_trace_retains_response_evidence():
+    result = generate_trace(
+        "Q?",
+        lambda messages: GeneratedCompletion(
+            text="<think>A detailed reasoning process for the result.</think>A",
+            model_name="model@revision",
+            response_sha256="a" * 64,
+            metadata={"usage": {"completion_tokens": 10}},
+        ),
+    )
+    assert result.accepted
+    assert result.response_model == "model@revision"
+    assert result.response_sha256 == "a" * 64
+    assert result.response_metadata["usage"]["completion_tokens"] == 10
+
+
+def test_backend_response_hash_binds_text_model_and_raw_evidence():
+    class FakeBackend:
+        def generate(self, request):
+            return BackendGenerateResponse(
+                text="completion text",
+                model_name="requested-alias",
+                raw={"model": "resolved-model", "id": "response-1", "secret_body": "not stored"},
+            )
+
+    completion = backend_generate_fn(FakeBackend())([{"role": "user", "content": "Q"}])
+    raw_hash = canonical_sha256(
+        {"model": "resolved-model", "id": "response-1", "secret_body": "not stored"}
+    )
+    assert isinstance(completion, GeneratedCompletion)
+    assert completion.model_name == "resolved-model"
+    assert completion.metadata["raw_response_sha256"] == raw_hash
+    assert "secret_body" not in completion.metadata
+    assert completion.response_sha256 == canonical_sha256(
+        {
+            "text": "completion text",
+            "model_name": "resolved-model",
+            "raw_response_sha256": raw_hash,
+        }
+    )

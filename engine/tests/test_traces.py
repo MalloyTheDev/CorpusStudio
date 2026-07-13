@@ -1,6 +1,8 @@
 """Reasoning-trace substrate — the data layer for training reasoning models (prompt +
 ``<think>reasoning</think>`` + answer), plus the no-think baseline + validation guardrail."""
 
+import pytest
+
 from corpus_studio.training.traces import (
     Trace,
     _split_think,
@@ -34,6 +36,15 @@ def test_trace_from_row_splits_embedded_think_in_chat():
 def test_split_think():
     assert _split_think("<think>r</think>a") == ("r", "a")
     assert _split_think("no tags here") == ("", "no tags here")
+
+
+def test_split_think_rejects_partial_or_repeated_markup():
+    with pytest.raises(ValueError, match="exactly one"):
+        _split_think("<think>reasoning only")
+    with pytest.raises(ValueError, match="exactly one"):
+        _split_think("<think>one<think>two</think>A")
+    with pytest.raises(ValueError, match="content before"):
+        _split_think("FINAL-FIRST<think>post-hoc rationale</think>")
 
 
 def test_format_trace_shows_reasoning():

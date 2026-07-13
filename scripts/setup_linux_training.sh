@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # CorpusStudio — native-Linux GPU training bootstrap (Ubuntu 24.04+, NVIDIA RTX 50-series / Blackwell).
 #
-# Purpose: get a fresh Ubuntu to a working QLoRA-training env with NO sudo Python fuss, mirroring the
-# stack verified on WSL2 this session (torch 2.11.0+cu128 supports sm_120) — PLUS the offload packages
-# (DeepSpeed, liger-kernel) that let a 12 GB card reach TRUE long sequence_len, which WSL2 cannot (the
-# WSL GPU-PV layer wedges at seq-4096; bare Linux has direct GPU access + explicit offload instead).
+# Purpose: build a manual first-party QLoRA environment after the final Linux/RTX host exists. This
+# script is not native-Linux, offload, long-sequence, or hardware proof. The managed Environment
+# Manager workflow is preferred; this remains a transparent diagnostic fallback.
 #
 # It does NOT install the NVIDIA DRIVER (that needs sudo + a reboot + Secure-Boot MOK enrolment). Do
 # that first (see docs/RUNNING_ON_LINUX.md) and confirm `nvidia-smi` shows your GPU; this script then
@@ -14,7 +13,7 @@
 set -euo pipefail
 
 ENGINE_DIR="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../engine" && pwd)}"
-VENV="$HOME/cs-train"
+VENV="${CORPUS_STUDIO_TRAIN_VENV:-/mnt/training-nvme/environments/backend-corpus-studio-manual}"
 PY_VERSION="3.12"
 
 echo "== 0. preflight: NVIDIA driver =="
@@ -25,6 +24,11 @@ if ! command -v nvidia-smi >/dev/null 2>&1; then
   exit 1
 fi
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader | head -1
+if [ ! -d "$(dirname "$VENV")" ]; then
+  echo "!! Training NVMe environment root is missing: $(dirname "$VENV")"
+  echo "   Prepare and mount /mnt/training-nvme first; see docs/RUNNING_ON_LINUX.md."
+  exit 1
+fi
 
 echo "== 1. uv (userspace, no sudo) + CPython ${PY_VERSION} =="
 if ! command -v uv >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/uv" ]; then
@@ -44,11 +48,11 @@ PY="$VENV/bin/python"
 echo "== 3. torch 2.11.0 + cu128 (Blackwell sm_120) =="
 "$UV" pip install --python "$PY" torch==2.11.0 --index-url https://download.pytorch.org/whl/cu128
 
-echo "== 4. training stack (Windows/WSL-verified pins) + offload packages =="
+echo "== 4. first-party training stack (no DeepSpeed/FSDP/NVMe backend) =="
 "$UV" pip install --python "$PY" \
   "transformers==5.13.1" "trl==1.8.0" "peft==0.19.0" \
   "accelerate==1.14.0" "datasets==5.0.0" "bitsandbytes==0.49.2" \
-  "deepspeed" "liger-kernel"          # deepspeed = NVMe/CPU offload; liger = fused CE (long-seq lever)
+  "liger-kernel"
 
 echo "== 5. CorpusStudio engine (editable) from ${ENGINE_DIR} =="
 "$UV" pip install --python "$PY" -e "$ENGINE_DIR"
@@ -69,9 +73,7 @@ PYEOF
 cat <<EOF
 
 Done. Activate with:  source ${VENV}/bin/activate
-Then:  corpus-studio train-check          # should report READY (GPU QLoRA)
-For a long-seq run:  corpus-studio platform-plan --base-model … --dataset … --sequence-len 4096 \\
-                        --memory-efficient --out /tmp/plan && \\
-                     corpus-studio platform-run /tmp/plan/RunPlan.json --runner training --subprocess --out ./run
-See docs/RUNNING_ON_LINUX.md for the seq-4096 offload playbook + honest expectations.
+Then:  corpus-studio train-check          # must prove readiness on this exact host
+This manual environment does not implement DeepSpeed/FSDP/NVMe offload. Establish the sequence-1024
+baseline first and follow docs/RUNNING_ON_LINUX.md without promoting installation to proof.
 EOF

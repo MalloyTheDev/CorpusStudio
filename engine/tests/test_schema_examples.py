@@ -28,6 +28,7 @@ def test_readme_advertised_schemas_all_ship():
         "classification",
         "retrieval",
         "evaluation",
+        "trace",
     }
     shipped = {schema.id for schema in list_builtin_schemas()}
     missing = advertised - shipped
