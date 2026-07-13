@@ -249,6 +249,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/DATASET_TESTING_WORKFLOW.md`
 - `docs/DEBT.md`
 - `docs/DEVELOPMENT_SETUP.md`
+- `docs/ENVIRONMENT_MANAGER.md`
 - `docs/EVALUATION_LAB.md`
 - `docs/EVALUATION_SUITES.md`
 - `docs/GATES.md`
@@ -369,6 +370,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/platform/backends.py`
 - `engine/corpus_studio/platform/planner.py`
 - `engine/corpus_studio/platform/storage_profiler.py`
+- `engine/corpus_studio/platform/environments.py`
 - `engine/corpus_studio/platform/calibrator.py`
 - `engine/corpus_studio/platform/supervisor.py`
 - `engine/corpus_studio/platform/runners.py`

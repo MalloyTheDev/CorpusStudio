@@ -1,0 +1,188 @@
+{
+  "$defs": {
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "PackageLock": {
+      "additionalProperties": false,
+      "description": "A resolved dependency: distribution name \u2192 installed version + optional wheel/artifact hash.\nGrounded in environment.probe_training_runtime (importlib.metadata.version, no import).",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "source": {
+          "default": "unknown",
+          "enum": [
+            "pypi",
+            "wheel",
+            "sdist",
+            "conda",
+            "vcs",
+            "local",
+            "unknown"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "PackageLock",
+      "type": "object"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Ref",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The exact, reproducible record of what an environment actually contains \u2014 the post-install\ncounterpart of a recipe (which is only intent). ``packages`` are the resolved installs with\nversions + hashes; ``lock_hash`` seals the set for drift detection. NEW.",
+  "properties": {
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "created_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Created At"
+    },
+    "index_urls": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Index Urls",
+      "type": "array"
+    },
+    "lock_hash": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Lock Hash"
+    },
+    "lock_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Lock Id",
+      "type": "string"
+    },
+    "packages": {
+      "items": {
+        "$ref": "#/$defs/PackageLock"
+      },
+      "title": "Packages",
+      "type": "array"
+    },
+    "platform_tag": {
+      "default": "",
+      "title": "Platform Tag",
+      "type": "string"
+    },
+    "python_version": {
+      "default": "",
+      "title": "Python Version",
+      "type": "string"
+    },
+    "recipe_ref": {
+      "$ref": "#/$defs/Ref"
+    }
+  },
+  "required": [
+    "lock_id",
+    "recipe_ref"
+  ],
+  "title": "EnvironmentLock",
+  "type": "object"
+}

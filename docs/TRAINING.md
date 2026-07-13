@@ -173,7 +173,7 @@ train. All heavy imports are lazy — importing the engine never pulls torch.
 |---|---|
 | `train-check [--json]` | Preflight: which deps are present, the CUDA GPU + VRAM, and whether a real 4-bit QLoRA run — or only the CPU toy path — is possible. |
 | `model-fetch <repo> [--local-dir …]` | Resumably download a base model from the HF Hub and report its **license** (read from the downloaded card). Prefer MIT/Apache/permissive models. |
-| `train-run <config> [--cpu-toy --max-steps N …]` | Run the QLoRA in-process (TRL `SFTTrainer` + peft LoRA, 4-bit on GPU); saves the adapter + tokenizer + checkpoints, and writes a `MODEL_CARD.md` next to the adapter. `--cpu-toy` is a tiny-model CPU smoke test, not a real train. |
+| `train-run <config> [--cpu-toy --max-steps N …]` | Run the QLoRA in-process (TRL `SFTTrainer` + peft LoRA, 4-bit on GPU); saves the adapter + tokenizer + checkpoints, and writes a `MODEL_CARD.md` next to the adapter. `--cpu-toy` is a tiny-model CPU smoke test, not a real train. Checkpoint retention is configurable — `--save-steps N` (default 50) + `--save-total-limit N` (default 3; `0` keeps all) so a long run can't fill the disk. |
 | `train-merge <adapter> [--strategy auto\|gpu\|cpu\|adapter-only]` | Merge the adapter into the base. A 7B fp16 merge (~14 GB) won't fit 12 GB, so `auto` walks GPU → CPU-offload → adapter-only. |
 | `model-card <adapter> [--base-model … --config … --output …]` | (Re)render the adapter's Markdown model card — base model + the reminder that ITS license governs the result, the LoRA hyper-parameters (from `adapter_config.json`), the training settings, and honesty notes. `train-run` already writes it; this regenerates it. |
 

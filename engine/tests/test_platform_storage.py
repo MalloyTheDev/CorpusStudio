@@ -17,12 +17,14 @@ from corpus_studio.platform.storage_profiler import (
     build_storage_profile,
     classify_interface,
     classify_linux_mount,
+    classify_storage_failure,
     detect_storage_devices,
     find_device_for_path,
     is_cloud_synced_path,
     is_inside_source_repo,
     min_free_bytes_for_role,
     parse_proc_mounts,
+    recommended_role_placement,
 )
 
 _GB = 1_000_000_000
@@ -38,6 +40,7 @@ def _device(**overrides) -> StorageDevice:
         removable=False,
         rotational=False,
         cloud_synced=False,
+        wsl_host_drive=False,
     )
     base.update(overrides)
     return StorageDevice(**base)
@@ -169,6 +172,53 @@ def test_rotational_disk_is_marginal_for_offload_not_forbidden():
     assert any("rotational" in r for r in a.reasons)
 
 
+def test_usb_is_marginal_for_load_latency_roles():
+    # A USB SSD is not high-write for the model cache, but its latency drags shard/dataset loading.
+    a = assess_role(
+        role=StorageRole.model_cache,
+        path="/media/usb/models",
+        device=_device(interface=StorageInterface.usb, removable=True, free_bytes=500 * _GB),
+        inside_source_repo=False,
+    )
+    assert a.suitability == StorageSuitability.marginal
+    assert any("latency" in r for r in a.reasons)
+
+
+def test_usb_is_marginal_for_small_file_roles():
+    a = assess_role(
+        role=StorageRole.python_env,
+        path="/media/usb/.venv",
+        device=_device(interface=StorageInterface.usb, removable=True, free_bytes=500 * _GB),
+        inside_source_repo=False,
+    )
+    assert a.suitability == StorageSuitability.marginal
+    assert any("small files" in r for r in a.reasons)
+
+
+def test_wsl_host_drive_is_unsuitable_for_the_venv():
+    # The venv/repo on /mnt/f (a Windows drive from WSL) is the worst case — NTFS translation makes
+    # thousands of small-file imports crawl.
+    a = assess_role(
+        role=StorageRole.python_env,
+        path="/mnt/f/CorpusStudio/.venv",
+        device=_device(interface=StorageInterface.virtual, wsl_host_drive=True, free_bytes=500 * _GB),
+        inside_source_repo=False,
+    )
+    assert a.suitability == StorageSuitability.unsuitable
+    assert any("WSL" in r for r in a.reasons)
+
+
+def test_wsl_host_drive_is_marginal_for_other_runtime_roles():
+    a = assess_role(
+        role=StorageRole.checkpoints,
+        path="/mnt/f/ck",
+        device=_device(interface=StorageInterface.virtual, wsl_host_drive=True, free_bytes=500 * _GB),
+        inside_source_repo=False,
+    )
+    assert a.suitability == StorageSuitability.marginal
+    assert any("WSL" in r for r in a.reasons)
+
+
 def test_nearly_full_disk_is_unsuitable():
     a = assess_role(
         role=StorageRole.optimizer_offload,
@@ -217,12 +267,13 @@ def test_assess_path_for_role_with_injected_devices(tmp_path):
 
 
 def test_classify_linux_mount_wsl_host_drive_is_virtual_with_note():
-    interface, removable, rotational, notes = classify_linux_mount(
+    interface, removable, rotational, notes, wsl_host = classify_linux_mount(
         "D:", "/mnt/d", "drvfs", wsl=True
     )
     assert interface == StorageInterface.virtual
     assert removable is None and rotational is None
     assert notes and "WSL" in notes[0]
+    assert wsl_host is True  # flagged so the role assessment can penalize small-file roles here
 
 
 def test_classify_linux_mount_network_and_virtual_filesystems():
@@ -234,11 +285,12 @@ def test_classify_linux_mount_network_and_virtual_filesystems():
 
 def test_classify_linux_mount_real_disk_reads_block_attributes():
     # A device absent from /sys/block → attributes unknown; an nvme* name still classifies by name.
-    interface, removable, rotational, notes = classify_linux_mount(
+    interface, removable, rotational, notes, wsl_host = classify_linux_mount(
         "/dev/nvme9n1p1", "/data", "ext4", wsl=False
     )
     assert interface == StorageInterface.nvme_pcie
     assert removable is None and rotational is None and notes == []
+    assert wsl_host is False
 
 
 def test_detect_generic_devices_returns_the_root_volume():
@@ -295,3 +347,34 @@ def test_build_storage_profile_attaches_role_assessments(tmp_path):
     profile = build_storage_profile({StorageRole.optimizer_offload: str(tmp_path / "offload")})
     assert len(profile.assessments) == 1
     assert profile.assessments[0].role == StorageRole.optimizer_offload
+
+
+# ---- failure diagnostic + recommended placement ------------------------------
+
+
+def test_classify_storage_failure_flags_io_errors():
+    verdict, signals = classify_storage_failure(
+        "OSError: [Errno 5] Input/output error while writing checkpoint-50"
+    )
+    assert verdict == "storage_implicated" and signals
+
+
+def test_classify_storage_failure_exonerates_vram_and_kernel_failures():
+    assert classify_storage_failure("torch.cuda.OutOfMemoryError: CUDA out of memory")[0] == "not_storage"
+    assert classify_storage_failure("first backward hung on sm_120 flashattention")[0] == "not_storage"
+
+
+def test_classify_storage_failure_ambiguous_or_empty_is_unknown():
+    # Both kinds of signal → don't guess.
+    assert classify_storage_failure("cuda error and Input/output error")[0] == "unknown"
+    assert classify_storage_failure("training diverged")[0] == "unknown"
+
+
+def test_recommended_role_placement_puts_archive_external_and_training_on_nvme():
+    placement = recommended_role_placement()
+    assert "USB" in placement[StorageRole.archive]
+    assert "NVMe" in placement[StorageRole.checkpoints]
+    assert "NVMe" in placement[StorageRole.model_cache]
+    assert "SATA" in placement[StorageRole.python_env]  # the venv wants a reliable internal SSD
+    # Every role has a recommendation.
+    assert set(placement) == set(StorageRole)

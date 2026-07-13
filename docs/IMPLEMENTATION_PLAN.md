@@ -125,7 +125,7 @@ contracts as they are built** (see §5 and [`MOE_ARCHITECTURE.md`](MOE_ARCHITECT
 |---|---|---|
 | **0** | ✅ Platform contracts + lifecycle (profile→plan→fit→run→artifact→watchdog→subprocess) | shipped |
 | **1** | ✅ **StorageProfile** — `StorageDevice` / volume / path-role assessment | shipped (this slice) |
-| **2** | ⏭️ **Environment Manager + isolated backend runtimes** (3-layer deps, §2) | gate before DeepSpeed/FSDP/multimodal |
+| **2** | 🔨 **Environment Manager + isolated backend runtimes** (3-layer deps, §2) — **substrate shipped** (recipe registry + install-preview resolver, [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md)); env creation/health/drift/lock is the next slice | gate before DeepSpeed/FSDP/multimodal |
 | 3 | General **`ModelDescriptor` + `TokenizerDescriptor`** | **must be MoE-safe from the start** (§1 of MoE doc) |
 | 4 | **`TrainingObjective` registry** (objective distinct from backend) | must express router-vs-expert training |
 | 5 | **Dense-safe + MoE-safe parameter accounting** (`N_logical`/`N_active`/`N_resident`/`N_touched`/`N_updated`/`N_exposed`) | no runtime needed — contracts only |

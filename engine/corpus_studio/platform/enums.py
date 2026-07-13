@@ -149,6 +149,49 @@ class OffloadStrategy(str, Enum):
     deepspeed_zero3 = "deepspeed_zero3"
 
 
+class DependencyLayer(str, Enum):
+    """The three dependency layers. The CONTROL PLANE stays lightweight + always installable (opening
+    CorpusStudio must never require CUDA/DeepSpeed/an ML framework); CAPABILITY profiles are opt-in
+    feature stacks added to the core process with graceful fallback; BACKEND_WORKER environments are
+    isolated per-framework runtimes (heavy frameworks pin conflicting torch/CUDA/xformers builds and
+    cannot coexist — they talk to the core via the WorkerMessage protocol, never by import)."""
+
+    control_plane = "control_plane"
+    capability = "capability"
+    backend_worker = "backend_worker"
+
+
+class EnvironmentState(str, Enum):
+    """The lifecycle state of a managed environment. The escalation is deliberate — "installed" is
+    NEVER "supported": a package importing (IMPORTABLE) is not proof a kernel runs
+    (FUNCTIONAL_PROBE_PASSED), which is not proof the hardware supports it (HARDWARE_VERIFIED). Only
+    HARDWARE_VERIFIED earns "supported". The terminal-degraded states record WHY an env is unusable."""
+
+    not_installed = "NOT_INSTALLED"
+    installing = "INSTALLING"
+    installed_unchecked = "INSTALLED_UNCHECKED"
+    importable = "IMPORTABLE"
+    dependency_probe_passed = "DEPENDENCY_PROBE_PASSED"
+    functional_probe_passed = "FUNCTIONAL_PROBE_PASSED"
+    hardware_verified = "HARDWARE_VERIFIED"
+    degraded = "DEGRADED"
+    incompatible = "INCOMPATIBLE"
+    drifted = "DRIFTED"
+    broken = "BROKEN"
+
+
+class RecipeVerification(str, Enum):
+    """How far a recipe has been proven — the recipe-level twin of EnvironmentState. A recipe is a
+    DECLARATION of what to install; this says whether that declaration has ever produced a working
+    environment, and at what level. ``declared`` = we can render the install plan but have not built +
+    verified it; higher tiers require actual evidence (a real install / probe / hardware run)."""
+
+    declared = "declared"
+    build_verified = "build_verified"
+    functional_verified = "functional_verified"
+    hardware_verified = "hardware_verified"
+
+
 class StorageInterface(str, Enum):
     """How a storage device attaches. The interface — not just free space — decides whether a device
     can sustain the heavy sequential + random writes of optimizer/parameter offload and checkpointing.
@@ -164,13 +207,18 @@ class StorageInterface(str, Enum):
 
 
 class StorageRole(str, Enum):
-    """The role a path plays in a run. Roles differ in write intensity + durability needs: ``os`` and
-    ``source_repo`` want reliability; ``optimizer_offload`` / ``parameter_offload`` / ``scratch`` want
-    sustained high-throughput internal storage; ``archive`` just wants capacity. A path's suitability
-    is judged PER ROLE (a USB drive is fine for ``archive``, unfit for ``optimizer_offload``)."""
+    """The role a path plays in a run. Roles differ in access pattern: ``optimizer_offload`` /
+    ``parameter_offload`` / ``scratch`` / ``checkpoints`` are WRITE-heavy; ``model_cache`` /
+    ``dataset_cache`` are read-LATENCY-sensitive during load; ``source_repo`` / ``python_env`` are
+    thousands of SMALL files touched on every process start (an import over a USB bridge or a WSL
+    ``/mnt`` mount stalls); ``archive`` just wants capacity. A path's suitability is judged PER ROLE (a
+    USB SSD is fine for ``archive``, poor for ``model_cache``, unfit for ``optimizer_offload``)."""
 
     os = "os"
     source_repo = "source_repo"
+    # The Python virtual environment — thousands of small files imported at every process start;
+    # over USB or a WSL /mnt mount this thrashes (NTFS translation + latency + small-file overhead).
+    python_env = "python_env"
     model_cache = "model_cache"
     dataset_cache = "dataset_cache"
     checkpoints = "checkpoints"

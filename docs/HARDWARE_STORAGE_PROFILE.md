@@ -63,17 +63,49 @@ human-readable reasons. A single **unsuitable** reason (data-loss or thrash-to-a
 whole verdict unsuitable; otherwise a **marginal** reason (works but degraded) wins over suitable.
 When the device can't be characterized the verdict is **unknown** — never a false `suitable`.
 
-| Condition | High-write roles* | Offload roles |
+| Condition | Affected roles | Verdict |
 |---|---|---|
-| Cloud-sync folder | **unsuitable** — a sync client re-uploads every write | |
-| Inside the source repository | **unsuitable** — generated state must not pollute source | |
-| USB / removable device | **unsuitable** — can't sustain the write traffic | |
-| Network mount | **unsuitable** — latency/reliability unfit | |
-| Rotational disk (HDD) | | **marginal** — I/O-bound; prefer internal NVMe |
-| Free space below the role floor | **unsuitable** | **unsuitable** |
-| Internal NVMe with headroom | **suitable** | **suitable** |
+| Cloud-sync folder | high-write*, artifacts | **unsuitable** — a sync client re-uploads every write |
+| Inside the source repository | high-write*, artifacts | **unsuitable** — generated state must not pollute source |
+| USB / removable device | high-write* | **unsuitable** — can't sustain the write traffic |
+| Network mount | high-write* | **unsuitable** — latency/reliability unfit |
+| Rotational disk (HDD) | offload | **marginal** — I/O-bound; prefer internal NVMe |
+| **USB device** | **model_cache, dataset_cache** | **marginal** — USB latency slows shard/dataset loading |
+| **USB device** | **source_repo, python_env** | **marginal** — thousands of small files stall on import |
+| **WSL `/mnt` host drive** | **source_repo, python_env (venv)** | **unsuitable** — NTFS translation makes small-file imports crawl |
+| **WSL `/mnt` host drive** | other runtime roles | **marginal** — NTFS-translation latency; prefer the Linux filesystem |
+| Free space below the role floor | any | **unsuitable** |
+| Internal NVMe with headroom | any | **suitable** |
 
 \* high-write = `checkpoints`, `scratch`, `optimizer_offload`, `parameter_offload`.
+
+The USB and WSL-`/mnt` rows exist because a USB SSD (like a Seagate One Touch) or a Windows drive
+accessed from WSL is fine for *archival* but a poor home for the active runtime — the repo, the venv
+(thousands of small files imported every process start), the model cache, and the dataset. Note this is
+about **I/O-stage** stalls (import, shard load, dataset prep, checkpoint writes, a dropped drive
+letter), **not** CUDA/VRAM/kernel failures — see the failure diagnostic below.
+
+## Is a failure storage-related? (`--diagnose`)
+
+`classify_storage_failure(message)` triages a training failure: **storage-implicated** (I/O error,
+`Errno 5`, dropped drive, full disk, permission/path error) vs **not-storage** (CUDA OOM, the sm_120
+flash-SDPA deadlock, a driver/kernel fault the disk can't explain) vs **unknown** (both or neither
+signal — it won't guess). It's a first-pass router, not a proof.
+
+```
+corpus-studio platform-storage --diagnose "OSError: [Errno 5] Input/output error writing checkpoint-50"
+  → STORAGE_IMPLICATED
+corpus-studio platform-storage --diagnose "torch.cuda.OutOfMemoryError: CUDA out of memory"
+  → NOT_STORAGE
+```
+
+## Recommended placement (`--recommend`)
+
+`recommended_role_placement()` maps each role to a storage tier (a recommendation, never enforced):
+
+- **internal SSD (SATA ok)** — OS, source repo, **python env (venv)**, logs;
+- **internal PCIe NVMe** — model cache, dataset cache, scratch, checkpoints, offload, active artifacts;
+- **USB / external SSD** — backups + archive only.
 
 ## CLI
 

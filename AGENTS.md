@@ -8,6 +8,7 @@ Instructions for AI coding agents (Codex, Claude, etc.) working in this repo.
 - Engine venv: `C:\CorpusStudio\engine\.venv` (Python 3.12.10).
 
 ## What this is
+<<<<<<< HEAD
 A **local-first, hardware-aware AI engineering platform** covering the whole lifecycle — sources →
 dataset construction (objectives / mixtures / reasoning traces) → model + tokenizer management →
 storage/hardware-aware run planning → training through swappable **isolated backends** → telemetry +
@@ -21,6 +22,13 @@ Three surfaces:
 - **Platform** (`engine/corpus_studio/platform/`) — a **contract-first, torch-free** run lifecycle
   (profile → plan → predict-fit → run → measure-fit → artifacts) + the Environment Manager (recipes +
   install-preview) and the storage safe-spill profiler.
+=======
+A local-first AI dataset→model→evaluation lifecycle platform. Three surfaces:
+- **Engine** (`engine/corpus_studio/`, Python) — a **dependency-light** core (no torch at import) +
+  an opt-in `[train]` QLoRA trainer extra.
+- **Platform** (`engine/corpus_studio/platform/`) — a **contract-first, torch-free** run lifecycle
+  (profile → plan → predict-fit → run → measure-fit → artifacts).
+>>>>>>> 34e325e345a3e23158aae133813272a52554dc07
 - **UI** — WPF + Avalonia (`apps/desktop`, C#) and Tauri 2 + React (`apps/web`, TS). UI is a client
   over the engine CLI; it never owns training behavior.
 

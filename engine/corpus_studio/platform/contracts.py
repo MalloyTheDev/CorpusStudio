@@ -31,7 +31,9 @@ from .enums import (
     AttentionImpl,
     CheckpointImpl,
     CompileMode,
+    DependencyLayer,
     DeviceKind,
+    EnvironmentState,
     ExportFormat,
     FailureTaxonomy,
     FitClass,
@@ -42,6 +44,7 @@ from .enums import (
     Optimizer,
     PrecisionMode,
     QuantizationMode,
+    RecipeVerification,
     StageMarker,
     StorageInterface,
     StorageRole,
@@ -326,6 +329,9 @@ class StorageDevice(ContractModel):
     # True when the mount point is inside a known cloud-sync client's folder (a sync client will
     # re-upload every checkpoint/offload write and thrash the disk).
     cloud_synced: bool | None = None
+    # True when this is a Windows host drive seen from WSL through /mnt (drvfs/9p). Access crosses the
+    # NTFS translation layer — slow for small-file-heavy roles (venv/repo) and for high I/O.
+    wsl_host_drive: bool | None = None
     device_name: str | None = None
     notes: list[str] = Field(default_factory=list)
 
@@ -479,6 +485,130 @@ class CapabilityReport(ContractModel):
     probe_results: list[ProbeResult] = Field(default_factory=list)
     effective_capabilities: EffectiveCapabilities | None = None
     notes: list[str] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------------------------------
+# Environment Manager — recipes, resolution preview, locks, descriptors, health. NEW (Phase 2).
+# The 3-layer dependency model: a lightweight always-installable control plane, opt-in capability
+# profiles, and ISOLATED per-backend worker environments (heavy frameworks pin conflicting builds).
+# --------------------------------------------------------------------------------------------------
+class EnvironmentRecipe(ContractModel):
+    """A declarative, platform/CUDA-aware recipe for building one isolated environment — the WHAT to
+    install, not the act of installing. A recipe is only a declaration: ``verification`` says whether
+    it has ever produced a working environment (declared → hardware_verified). Grounded in the engine's
+    real optional extras (pyproject ``[train]`` / ``[parquet]`` / ``[tokenizer]``)."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    recipe_id: str = Field(pattern=_ID)
+    display_name: str = ""
+    layer: DependencyLayer
+    description: str = ""
+    # The backend_id (backend_worker layer) or capability-profile name this recipe provisions.
+    target: str = ""
+    python_requires: str = ">=3.10"
+    dependency_requirements: list[DependencyRequirement] = Field(default_factory=list)
+    # PyPI index by default; a CUDA/ROCm build overrides it per accelerator tag (see cuda_index_urls).
+    default_index_url: str | None = None
+    extra_index_urls: list[str] = Field(default_factory=list)
+    # Accelerator tag → wheel index (e.g. "cu128" → the PyTorch cu128 index). The resolver picks one by
+    # the host's detected CUDA, so a Blackwell host gets cu128 wheels, a CPU host the cpu index.
+    cuda_index_urls: dict[str, str] = Field(default_factory=dict)
+    requires_cuda: bool = False
+    # A dependency that builds a native extension needs a compiler toolchain present (e.g. DeepSpeed).
+    requires_native_build: bool = False
+    min_compute_capability: str | None = None
+    supported_os: list[OperatingSystem] = Field(default_factory=list)
+    known_conflicts: list[DependencyConflict] = Field(default_factory=list)
+    capability_probes: list[str] = Field(default_factory=list)
+    verification: RecipeVerification = RecipeVerification.declared
+    notes: list[str] = Field(default_factory=list)
+
+
+class InstallStep(ContractModel):
+    """One bounded, argv-structured install command — NEVER a shell string, so an untrusted package or
+    index name can't inject a command (mirrors the no-shell trainer-launch invariant). ``argv[0]`` is
+    the executable; the rest are literal arguments."""
+
+    phase: Literal["create_venv", "upgrade_pip", "install", "verify"]
+    description: str = ""
+    argv: list[str] = Field(min_length=1)
+
+
+class DependencyResolution(ContractModel):
+    """The resolved PREVIEW of provisioning a recipe on a specific host — the exact argv steps, the
+    chosen wheel index, and the disk/network cost — for explicit user confirmation BEFORE anything is
+    installed. Pure/derivable; no environment is created to produce it. NEW."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    recipe_ref: Ref
+    python_version: str = ""
+    os: OperatingSystem = OperatingSystem.unknown
+    # The accelerator tag the resolver selected (e.g. "cu128", "cpu") + the index it maps to.
+    accelerator_tag: str = "cpu"
+    resolved_index_urls: list[str] = Field(default_factory=list)
+    install_steps: list[InstallStep] = Field(default_factory=list)
+    # Rough, explicitly-heuristic size estimates (download + on-disk installed footprint).
+    estimated_download_bytes: int | None = Field(default=None, ge=0)
+    estimated_disk_bytes: int | None = Field(default=None, ge=0)
+    # A recipe the host cannot satisfy (unmet python_requires / unsupported OS / cuda required, absent)
+    # resolves with resolvable=False and the blocking reasons; warnings are non-blocking caveats.
+    resolvable: bool = True
+    blocking_reasons: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class EnvironmentLock(ContractModel):
+    """The exact, reproducible record of what an environment actually contains — the post-install
+    counterpart of a recipe (which is only intent). ``packages`` are the resolved installs with
+    versions + hashes; ``lock_hash`` seals the set for drift detection. NEW."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    lock_id: str = Field(pattern=_ID)
+    recipe_ref: Ref
+    created_at: str | None = None
+    python_version: str = ""
+    platform_tag: str = ""
+    index_urls: list[str] = Field(default_factory=list)
+    packages: list[PackageLock] = Field(default_factory=list)
+    # sha256 over the canonicalized (name, version) set — the immutability seal for drift checks.
+    lock_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
+
+
+class EnvironmentDescriptor(ContractModel):
+    """A managed, ISOLATED environment instance. Its ``root_path`` is the isolation boundary — the
+    Environment Manager only ever installs into this env's own interpreter, never another's, so one
+    backend can't corrupt another's runtime. NEW."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    env_id: str = Field(pattern=_ID)
+    recipe_ref: Ref
+    layer: DependencyLayer
+    root_path: str = ""
+    python_executable: str = ""
+    state: EnvironmentState = EnvironmentState.not_installed
+    lock_ref: Ref | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    notes: list[str] = Field(default_factory=list)
+
+
+class EnvironmentHealthReport(ContractModel):
+    """The live health of a managed environment: its state, drift vs the recorded lock, and probe
+    outcomes. ``drift_detected`` means the installed set no longer matches the lock (a package changed
+    under the env). NEW."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    environment_ref: Ref
+    recipe_ref: Ref | None = None
+    state: EnvironmentState
+    python_version: str = ""
+    checked_at: str | None = None
+    installed_packages: list[PackageLock] = Field(default_factory=list)
+    missing_requirements: list[str] = Field(default_factory=list)
+    drifted_packages: list[str] = Field(default_factory=list)
+    drift_detected: bool = False
+    probe_results: list[ProbeResult] = Field(default_factory=list)
+    remediation: str | None = None
 
 
 # --------------------------------------------------------------------------------------------------

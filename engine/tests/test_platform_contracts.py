@@ -36,8 +36,11 @@ def test_contract_version_is_pinned():
 
 
 def test_all_root_contracts_registered():
-    assert len(P.ROOT_CONTRACTS) == 14
+    assert len(P.ROOT_CONTRACTS) == 19
     assert "StorageProfile" in P.ROOT_CONTRACTS
+    for expected in ("EnvironmentRecipe", "DependencyResolution", "EnvironmentLock",
+                     "EnvironmentDescriptor", "EnvironmentHealthReport"):
+        assert expected in P.ROOT_CONTRACTS
     for name, model in P.ROOT_CONTRACTS.items():
         if name == "WorkerMessage":
             # the wire envelope negotiates its own protocol_version, independent of any single
@@ -248,11 +251,11 @@ def test_worker_protocol_version_pattern():
 
 def test_export_json_schemas_writes_language_neutral_files(tmp_path):
     written = P.export_json_schemas(tmp_path)
-    # 14 contract schemas + index.json
-    assert len(written) == 15
+    # 19 contract schemas + index.json
+    assert len(written) == 20
     index = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
     assert index["contract_version"] == "1.0.0"
-    assert len(index["contracts"]) == 14
+    assert len(index["contracts"]) == 19
     # every emitted schema is valid JSON with a proper object shape
     for name in P.ROOT_CONTRACTS:
         schema = json.loads((tmp_path / f"{name}.schema.json").read_text(encoding="utf-8"))

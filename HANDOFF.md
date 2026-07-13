@@ -18,10 +18,13 @@ forward plan see [`docs/ROADMAP.md`](docs/ROADMAP.md) + [`docs/IMPLEMENTATION_PL
 - WorldBibleGenerator (the "WBG" reference project): **`C:\WorldBibleGenerator`** holds the *important*
   stuff (source + datasets + trained adapters, ~2.4 GB). The large merged/GGUF models + pretrain data
   (~260 GB) were intentionally left on `F:\WorldBibleGenerator` (reproducible from adapters).
+<<<<<<< HEAD
 - **WBG WSL training now points to C:** — the launch scripts / configs / README under
   `C:\WorldBibleGenerator\training` were repointed off `/mnt/f` → `/mnt/c` (the venv stays on the Linux
   FS `~/wbg-venv`, which is correct). The base model loads from the HF cache, so the data→adapter path
   is self-contained on C:. (Those edits are uncommitted in the WBG git repo.)
+=======
+>>>>>>> 34e325e345a3e23158aae133813272a52554dc07
 
 ## 1. What CorpusStudio is
 
@@ -37,6 +40,7 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
 
 ## 2. Current git / PR state
 
+<<<<<<< HEAD
 `main` is the source of truth; everything through **#409 is merged**:
 - **#404** configurable checkpoint retention · **#405** StorageProfile + the dependency-architecture
   correction · **#406** Environment Manager substrate (Phase 2 slice 1) · **#407** storage USB/WSL
@@ -69,6 +73,24 @@ requirements — not the product scope. The eventual shell strangles WPF → Ava
 React, over the stable language-neutral contracts, with a progressively Rust-ified core.
 
 The big epic (memory `platform-architecture-epic`). Non-negotiables the user has set:
+=======
+Merged to `main`: **#404** (configurable checkpoint retention), **#405** (StorageProfile).
+
+**Open, CI-green, awaiting the user's admin-merge** (the user says "merge NNN" to authorize each):
+- **#406** — Environment Manager substrate (Phase 2 slice 1). Branch `feat/environment-manager-substrate`.
+- **#407** — Storage USB/WSL runtime-role risks + storage-vs-not failure diagnostic. Branch
+  `feat/storage-runtime-risks` (the branch the C: copy is currently on).
+
+**Merge-order note:** #406 and #407 both touch `platform/enums.py` + `platform/contracts.py` but in
+different sections (env contracts vs storage) — they should auto-merge. After merging, if the *set* of
+root contracts changed, regenerate the committed schemas (see §4) and bump the count in
+`tests/test_platform_contracts.py`.
+
+## 3. The architecture North Star + binding directives
+
+The big epic (memory `platform-architecture-epic`): evolve CorpusStudio into a **universal local-first
+AI-lifecycle platform**. Non-negotiables the user has set:
+>>>>>>> 34e325e345a3e23158aae133813272a52554dc07
 
 - **3-layer dependency model** ([`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) §2):
   "dependency-light" describes the **CONTROL PLANE only**, not the whole product. Layers = control
@@ -139,6 +161,7 @@ with **`--cov-fail-under=88`**, plus `avalonia-linux-build`, `desktop-tests`, C#
 
 ## 7. Immediate next actions (ranked)
 
+<<<<<<< HEAD
 1. **Phase 2 slice 2 — Environment Manager CREATION.** The substrate (recipes + install-preview) is
    merged; next is the side-effectful half: create the isolated venv, run the bounded argv installers
    (with explicit confirmation), record the exact `EnvironmentLock` (package + source + hash), run
@@ -151,6 +174,16 @@ with **`--cov-fail-under=88`**, plus `avalonia-linux-build`, `desktop-tests`, C#
    `RunPlan` expansion → `TraceRecord` → MoE inspection → dense backends → MoE FT → resource-elastic.
 4. When a native-Linux NVMe box is ready: the **untruncated seq-4096 WBG-7B re-train** for paper numbers
    (the WBG WSL training now points at C:, not the F: USB drive — see §0).
+=======
+1. **Merge #406 + #407** (ask the user; they authorize per-PR).
+2. **Phase 2 slice 2 — Environment Manager CREATION**: actually create the venv, run the bounded argv
+   installers (with explicit confirmation), record the exact `EnvironmentLock` (package + source +
+   hash), run import/functional/hardware probes → `EnvironmentHealthReport`, drift detection,
+   repair/recreate, and associate the environment hash with each `RunPlan`. Side-effectful → verify on
+   the real 5070 (create a real `backend-corpus-studio` env + probe it).
+3. **Phase 3 — `ModelDescriptor` + `TokenizerDescriptor`**, built **MoE-safe from day one** (§3).
+4. When a native-Linux NVMe box is ready: the **untruncated seq-4096 WBG-7B re-train** for paper numbers.
+>>>>>>> 34e325e345a3e23158aae133813272a52554dc07
 
 ## 8. Hardware + environments
 

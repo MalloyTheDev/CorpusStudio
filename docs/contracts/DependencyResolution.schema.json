@@ -1,0 +1,199 @@
+{
+  "$defs": {
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "InstallStep": {
+      "additionalProperties": false,
+      "description": "One bounded, argv-structured install command \u2014 NEVER a shell string, so an untrusted package or\nindex name can't inject a command (mirrors the no-shell trainer-launch invariant). ``argv[0]`` is\nthe executable; the rest are literal arguments.",
+      "properties": {
+        "argv": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Argv",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "create_venv",
+            "upgrade_pip",
+            "install",
+            "verify"
+          ],
+          "title": "Phase",
+          "type": "string"
+        }
+      },
+      "required": [
+        "phase",
+        "argv"
+      ],
+      "title": "InstallStep",
+      "type": "object"
+    },
+    "OperatingSystem": {
+      "enum": [
+        "windows",
+        "wsl",
+        "linux",
+        "macos",
+        "unknown"
+      ],
+      "title": "OperatingSystem",
+      "type": "string"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Ref",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The resolved PREVIEW of provisioning a recipe on a specific host \u2014 the exact argv steps, the\nchosen wheel index, and the disk/network cost \u2014 for explicit user confirmation BEFORE anything is\ninstalled. Pure/derivable; no environment is created to produce it. NEW.",
+  "properties": {
+    "accelerator_tag": {
+      "default": "cpu",
+      "title": "Accelerator Tag",
+      "type": "string"
+    },
+    "blocking_reasons": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Blocking Reasons",
+      "type": "array"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "estimated_disk_bytes": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Estimated Disk Bytes"
+    },
+    "estimated_download_bytes": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Estimated Download Bytes"
+    },
+    "install_steps": {
+      "items": {
+        "$ref": "#/$defs/InstallStep"
+      },
+      "title": "Install Steps",
+      "type": "array"
+    },
+    "os": {
+      "$ref": "#/$defs/OperatingSystem",
+      "default": "unknown"
+    },
+    "python_version": {
+      "default": "",
+      "title": "Python Version",
+      "type": "string"
+    },
+    "recipe_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "resolvable": {
+      "default": true,
+      "title": "Resolvable",
+      "type": "boolean"
+    },
+    "resolved_index_urls": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Resolved Index Urls",
+      "type": "array"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "recipe_ref"
+  ],
+  "title": "DependencyResolution",
+  "type": "object"
+}

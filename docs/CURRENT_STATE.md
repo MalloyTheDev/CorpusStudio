@@ -3,9 +3,11 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-07-12 (through **v1.3** — Evaluation Suites & Chat Gates — plus the **platform
+Last reconciled: 2026-07-13 (through **v1.3** — Evaluation Suites & Chat Gates — plus the **platform
 run lifecycle** re-scope: profile → plan → predict-fit → run → measure-fit → artifacts, a multi-backend
-registry, and subprocess reliability, verified on a real RTX 5070 —
+registry, and subprocess reliability, verified on a real RTX 5070; plus the post-v1.3 additions
+reconciled below — the **reasoning-traces** data loop, a dataset **truncation guardrail** +
+configurable **checkpoint retention**, and a dependency-light **storage safe-spill** profiler —
 plus the deep bug/security audit, 19 fixes across data integrity, gate/policy
 hardening, and quality/split correctness, PRs #104–118; a residual-audit pass
 hardening the v1.3 surface, PRs #133–142; the CI dependency refresh, PRs
@@ -149,6 +151,21 @@ per-item error isolation, and off-thread document opens.
   via the engine's own interpreter) **or** the user's installed external trainer — with explicit
   confirmation of the exact argv (no shell), live log streaming, and a Stop that kills the process
   tree. The first-party CLI: `train-check` / `train-run` / `train-merge` / `model-fetch`.
+- **Truncation guardrail** (`dataset-tokens`): measures a dataset's token-length distribution and how
+  many examples a given `sequence_len` would **truncate** (cutting the end — including the model's
+  answer), so you never silently train on cut-off outputs; `train-run` also samples the data and prints
+  a `[WARNING] TRUNCATION` before training. Exact when a tokenizer extra is installed, a documented
+  heuristic otherwise.
+- **Configurable checkpoint retention**: `train-run --save-steps N` (default 50) + `--save-total-limit
+  N` (default 3 — keep only the N most recent checkpoints so a long run can't fill the disk; `0` keeps
+  all). The trainer saves the **LoRA adapter** + tokenizer + a model card, not a full base copy.
+- **Reasoning traces** — a create → validate → train → eval loop for `<think>reasoning</think>answer`
+  data (DeepSeek-R1 / Qwen convention), plus a no-think baseline. `trace-generate` synthesizes traces
+  from a prompt set via a local / OpenAI-compatible backend (self-filtered to well-formed traces,
+  provider policy enforced); `trace-validate` checks a trace corpus's structure (answer present,
+  reasoning not a verbatim copy, no answer-leak); the trainer accepts the `trace` dataset format; and
+  `eval-run --reasoning` scores the **answer only** (strips `<think>…</think>` before scoring, keeps
+  the full output, flags a "reasoning" model that emitted none).
 
 **Platform run lifecycle** (headless, contract-first)
 - A language-neutral contracts substrate (`engine/corpus_studio/platform/`) turns goal + data +
@@ -156,7 +173,27 @@ per-item error isolation, and off-thread document opens.
   hash-sealed RunPlan → predict the **fit** (never `NATIVE_SAFE` from an estimate) → **run** it (via
   the supervisor, in-process or a kill-able **subprocess** worker) → **measure** the fit (watchdog) →
   account for the **artifact** (integrity-checked). CLI: `platform-probe / -plan / -run / -backends /
-  -profiles / -schemas`.
+  -profiles / -storage / -schemas`.
+- **Storage safe-spill profiler** (`platform-storage`): a dependency-light, **non-destructive** probe
+  of the host's storage topology (mount / capacity / interface — NVMe / SATA / USB / network / virtual;
+  no benchmark, no SMART read) plus a **per-role suitability** verdict that refuses an offload /
+  checkpoint / scratch path on a USB bridge, a cloud-sync folder, a nearly-full disk, or inside the
+  source repository — and flags the *runtime* risks a USB SSD or a WSL `/mnt` host drive creates for
+  the model cache, dataset, repo, and venv (small-file / load-latency stalls). `--diagnose "<error>"`
+  triages a training failure as storage-implicated (I/O error, dropped drive, full disk) vs a
+  VRAM/kernel failure the disk can't explain; `--recommend` prints the per-role storage tier. The
+  prerequisite for honest offload planning. See [`HARDWARE_STORAGE_PROFILE.md`](HARDWARE_STORAGE_PROFILE.md).
+- **Environment Manager substrate** (`env-recipes` / `env-plan`): the 3-layer dependency model in
+  code — a lightweight always-installable **control plane**, opt-in **capability profiles**, and
+  **isolated per-backend worker environments** (heavy frameworks pin conflicting torch/CUDA/xformers
+  and can't coexist). A registry of declarative `EnvironmentRecipe`s (grounded in the real extras —
+  `backend-corpus-studio` = the `[train]` extra, `backend-unsloth`, the capability profiles) and a
+  **pure install-preview** resolver: `env-plan` renders the exact argv install steps (never a shell
+  string), picks the CUDA-aware wheel index (a Blackwell host → `cu128`), and reports disk/network
+  cost — for confirmation *before* anything is installed. `EnvironmentState` encodes "installed ≠
+  supported". Env *creation* is the next slice. See [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md);
+  the full 3-layer + MoE-safe forward plan is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) +
+  [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md).
 - **Multi-backend "pick your framework"**: a BackendManifest registry (`corpus_studio`, `unsloth`);
   the planner validates the chosen backend and **honestly refuses Unsloth on Blackwell/sm_120** (which
   needs the math attention path Unsloth doesn't provide).
