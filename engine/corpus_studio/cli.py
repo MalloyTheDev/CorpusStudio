@@ -2137,6 +2137,68 @@ def trace_validate(
         raise typer.Exit(code=3)
 
 
+@app.command("trace-generate")
+def trace_generate(
+    prompts_path: Path,
+    out: Path = typer.Option(..., "--out", help="Write the accepted traces JSONL here (dataset_format=trace)."),
+    backend: str = typer.Option("ollama", "--backend", help="Model backend: ollama | openai-compatible."),
+    model: str = typer.Option(..., "--model", help="The model that GENERATES the reasoning — your own model (self-distillation) or a stronger teacher."),
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="Backend base URL (default: the provider's local default)."),
+    api_key: Optional[str] = typer.Option(None, "--api-key", help="API key for an openai-compatible teacher."),
+    max_tokens: int = typer.Option(1024, "--max-tokens", help="Max tokens per generation (reasoning + answer)."),
+    temperature: float = typer.Option(0.7, "--temperature"),
+    system: Optional[str] = typer.Option(None, "--system", help="Override the reasoning system prompt."),
+    timeout_seconds: int = typer.Option(180, "--timeout-seconds"),
+    limit: int = typer.Option(0, "--limit", help="Only the first N prompts (0 = all)."),
+):
+    """GENERATE reasoning traces from a prompt corpus via a model backend — self-distill (point --model
+    at your own model) or a teacher (a bigger local model / an API model). Each output is
+    prompt + <think>reasoning</think> + answer; the pipeline SELF-FILTERS — only traces with real
+    reasoning that pass the quality gate are kept. Writes the accepted traces (train with
+    --dataset-format trace). A per-prompt backend error rejects that prompt, never aborts the batch."""
+    from corpus_studio.importers.jsonl_importer import read_jsonl
+    from corpus_studio.training.trace_generation import (
+        DEFAULT_REASONING_SYSTEM,
+        backend_generate_fn,
+        generate_traces,
+        prompt_from_row,
+    )
+
+    try:
+        client = _build_backend(backend, model, base_url, api_key, timeout_seconds)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    rows = list(read_jsonl(prompts_path))
+    if limit > 0:
+        rows = rows[:limit]
+    prompts = [p for p in (prompt_from_row(row) for row in rows) if p]
+    if not prompts:
+        typer.echo("No usable prompts found (expected a prompt/instruction/question field or messages).", err=True)
+        raise typer.Exit(code=2)
+
+    generate_fn = backend_generate_fn(client, max_tokens=max_tokens, temperature=temperature)
+    results = generate_traces(prompts, generate_fn, system=system or DEFAULT_REASONING_SYSTEM)
+    accepted = [r for r in results if r.accepted and r.trace is not None]
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w", encoding="utf-8") as handle:
+        for result in accepted:
+            trace = result.trace
+            assert trace is not None
+            handle.write(
+                json.dumps({"prompt": trace.prompt, "thinking": trace.thinking, "answer": trace.answer})
+                + "\n"
+            )
+    typer.echo(
+        f"prompts {len(prompts)} | accepted {len(accepted)} | rejected {len(results) - len(accepted)} "
+        f"-> {out}",
+        err=True,
+    )
+    typer.echo(str(out))
+
+
 @app.command("train-run")
 def train_run(
     config_path: Path,
