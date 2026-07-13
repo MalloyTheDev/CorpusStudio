@@ -18,6 +18,26 @@
       "file": "StorageProfile.schema.json"
     },
     {
+      "contract": "EnvironmentRecipe",
+      "file": "EnvironmentRecipe.schema.json"
+    },
+    {
+      "contract": "DependencyResolution",
+      "file": "DependencyResolution.schema.json"
+    },
+    {
+      "contract": "EnvironmentLock",
+      "file": "EnvironmentLock.schema.json"
+    },
+    {
+      "contract": "EnvironmentDescriptor",
+      "file": "EnvironmentDescriptor.schema.json"
+    },
+    {
+      "contract": "EnvironmentHealthReport",
+      "file": "EnvironmentHealthReport.schema.json"
+    },
+    {
       "contract": "BackendManifest",
       "file": "BackendManifest.schema.json"
     },

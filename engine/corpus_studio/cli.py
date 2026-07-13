@@ -609,6 +609,110 @@ def platform_backends(
         )
 
 
+@app.command("env-recipes")
+def env_recipes(
+    layer: Optional[str] = typer.Option(
+        None, "--layer", help="Filter by dependency layer: control_plane | capability | backend_worker."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit the full EnvironmentRecipes as JSON."),
+):
+    """List the built-in environment recipes across the three dependency layers — the always-installable
+    control plane, opt-in capability profiles, and isolated per-backend worker environments. A recipe is
+    a DECLARATION of what to install; 'verification' says whether it has ever produced a working env."""
+    from corpus_studio.platform.enums import DependencyLayer
+    from corpus_studio.platform.environments import builtin_recipes, recipes_for_layer
+
+    if layer is not None and layer not in {m.value for m in DependencyLayer}:
+        valid = ", ".join(m.value for m in DependencyLayer)
+        typer.echo(f"Unknown layer '{layer}'; expected one of: {valid}", err=True)
+        raise typer.Exit(2)
+    recipes = recipes_for_layer(DependencyLayer(layer)) if layer else builtin_recipes()
+
+    if json_out:
+        typer.echo(json.dumps([r.model_dump(mode="json") for r in recipes], indent=2))
+        return
+    for recipe in recipes:
+        deps = ", ".join(d.name for d in recipe.dependency_requirements) or "(none)"
+        typer.echo(f"{recipe.recipe_id}  [{recipe.layer.value}]  - {recipe.display_name}")
+        typer.echo(f"    verification: {recipe.verification.value}  |  deps: {deps}")
+
+
+@app.command("env-plan")
+def env_plan(
+    recipe_id: str = typer.Argument(..., help="Recipe id (see 'env-recipes')."),
+    accelerator: Optional[str] = typer.Option(
+        None, "--accelerator", help="PyTorch wheel tag override: cu128 | cu126 | cu121 | cu118 | cpu. "
+        "Default: detected from the host GPU/CUDA."
+    ),
+    python_version: Optional[str] = typer.Option(
+        None, "--python", help="Target Python version (e.g. 3.12). Default: this interpreter."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit the full DependencyResolution JSON."),
+):
+    """PREVIEW provisioning a recipe on this host — the exact argv install steps, the CUDA-aware wheel
+    index, and rough disk/network cost — WITHOUT installing anything. This is the explicit-confirmation
+    surface: nothing is created until a later 'env-create' acts on this plan."""
+    import platform as _platform  # noqa: PLC0415
+
+    from corpus_studio.platform.environments import (
+        get_recipe,
+        resolve_dependencies,
+        select_accelerator_tag,
+    )
+
+    recipe = get_recipe(recipe_id)
+    if recipe is None:
+        typer.echo(f"Unknown recipe '{recipe_id}' (see 'env-recipes').", err=True)
+        raise typer.Exit(2)
+
+    # Detect the host OS + accelerator tag from the environment profile (redirect probe stdout so a
+    # library banner can't corrupt JSON on stdout).
+    with contextlib.redirect_stdout(sys.stderr):
+        from corpus_studio.platform.profiler import build_environment_profile
+
+        profile = build_environment_profile()
+    gpu = profile.gpus[0] if profile.gpus else None
+    tag = accelerator or select_accelerator_tag(
+        cuda_runtime_version=profile.accelerator_runtime.cuda_runtime_version
+        if profile.accelerator_runtime
+        else None,
+        compute_capability_major=gpu.compute_capability_major if gpu else None,
+        has_gpu=gpu is not None,
+    )
+    resolution = resolve_dependencies(
+        recipe,
+        os_value=profile.host.os,
+        accelerator_tag=tag,
+        python_version=python_version or _platform.python_version(),
+    )
+
+    if json_out:
+        typer.echo(json.dumps(resolution.model_dump(mode="json"), indent=2))
+        raise typer.Exit(0 if resolution.resolvable else 1)
+
+    def _gb(value: Optional[int]) -> str:
+        return f"{value / 1_000_000_000:.2f} GB" if value is not None else "?"
+
+    lines = [
+        f"Install plan: {recipe.recipe_id}  [{recipe.layer.value}]",
+        f"  host: {resolution.os.value}  |  accelerator: {resolution.accelerator_tag}  |  "
+        f"python {resolution.python_version}",
+        f"  resolvable: {resolution.resolvable}",
+        f"  estimated download: {_gb(resolution.estimated_download_bytes)}  |  "
+        f"on disk: {_gb(resolution.estimated_disk_bytes)}",
+    ]
+    for reason in resolution.blocking_reasons:
+        lines.append(f"  BLOCKED: {reason}")
+    for warning in resolution.warnings:
+        lines.append(f"  warning: {warning}")
+    lines.append("  steps:")
+    for step in resolution.install_steps:
+        lines.append(f"    [{step.phase}] {' '.join(step.argv)}")
+    typer.echo("\n".join(lines))
+    if not resolution.resolvable:
+        raise typer.Exit(1)
+
+
 @app.command()
 def validate(path: Path, schema: str):
     """Validate a JSONL file against a built-in schema."""

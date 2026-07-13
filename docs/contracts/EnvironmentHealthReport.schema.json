@@ -1,0 +1,281 @@
+{
+  "$defs": {
+    "EnvironmentState": {
+      "description": "The lifecycle state of a managed environment. The escalation is deliberate \u2014 \"installed\" is\nNEVER \"supported\": a package importing (IMPORTABLE) is not proof a kernel runs\n(FUNCTIONAL_PROBE_PASSED), which is not proof the hardware supports it (HARDWARE_VERIFIED). Only\nHARDWARE_VERIFIED earns \"supported\". The terminal-degraded states record WHY an env is unusable.",
+      "enum": [
+        "NOT_INSTALLED",
+        "INSTALLING",
+        "INSTALLED_UNCHECKED",
+        "IMPORTABLE",
+        "DEPENDENCY_PROBE_PASSED",
+        "FUNCTIONAL_PROBE_PASSED",
+        "HARDWARE_VERIFIED",
+        "DEGRADED",
+        "INCOMPATIBLE",
+        "DRIFTED",
+        "BROKEN"
+      ],
+      "title": "EnvironmentState",
+      "type": "string"
+    },
+    "FailureTaxonomy": {
+      "description": "Terminal outcome category. ``PASS`` is included so the same enum classifies a completed\nprobe/run, not only failures. Grounded in the exact hazards the engine documents: the sm_120\nfused-attention deadlock (KERNEL_STALL), the WDDM silent spill (ACCIDENTAL_SPILL vs a clean\nOOM), and env/dependency mismatches (ENVIRONMENT_FAILURE).",
+      "enum": [
+        "PASS",
+        "FAIL",
+        "OOM",
+        "TIMEOUT",
+        "KERNEL_STALL",
+        "NUMERICAL_FAILURE",
+        "CHECKPOINT_FAILURE",
+        "ENVIRONMENT_FAILURE",
+        "UNSUPPORTED_CONFIGURATION",
+        "ACCIDENTAL_SPILL",
+        "CONTROLLED_OFFLOAD"
+      ],
+      "title": "FailureTaxonomy",
+      "type": "string"
+    },
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "PackageLock": {
+      "additionalProperties": false,
+      "description": "A resolved dependency: distribution name \u2192 installed version + optional wheel/artifact hash.\nGrounded in environment.probe_training_runtime (importlib.metadata.version, no import).",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "source": {
+          "default": "unknown",
+          "enum": [
+            "pypi",
+            "wheel",
+            "sdist",
+            "conda",
+            "vcs",
+            "local",
+            "unknown"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "PackageLock",
+      "type": "object"
+    },
+    "ProbeResult": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "measured": {
+          "additionalProperties": true,
+          "title": "Measured",
+          "type": "object"
+        },
+        "outcome": {
+          "$ref": "#/$defs/FailureTaxonomy"
+        },
+        "probe": {
+          "title": "Probe",
+          "type": "string"
+        }
+      },
+      "required": [
+        "probe",
+        "outcome"
+      ],
+      "title": "ProbeResult",
+      "type": "object"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Ref",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The live health of a managed environment: its state, drift vs the recorded lock, and probe\noutcomes. ``drift_detected`` means the installed set no longer matches the lock (a package changed\nunder the env). NEW.",
+  "properties": {
+    "checked_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Checked At"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "drift_detected": {
+      "default": false,
+      "title": "Drift Detected",
+      "type": "boolean"
+    },
+    "drifted_packages": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Drifted Packages",
+      "type": "array"
+    },
+    "environment_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "installed_packages": {
+      "items": {
+        "$ref": "#/$defs/PackageLock"
+      },
+      "title": "Installed Packages",
+      "type": "array"
+    },
+    "missing_requirements": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Missing Requirements",
+      "type": "array"
+    },
+    "probe_results": {
+      "items": {
+        "$ref": "#/$defs/ProbeResult"
+      },
+      "title": "Probe Results",
+      "type": "array"
+    },
+    "python_version": {
+      "default": "",
+      "title": "Python Version",
+      "type": "string"
+    },
+    "recipe_ref": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ref"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "remediation": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Remediation"
+    },
+    "state": {
+      "$ref": "#/$defs/EnvironmentState"
+    }
+  },
+  "required": [
+    "environment_ref",
+    "state"
+  ],
+  "title": "EnvironmentHealthReport",
+  "type": "object"
+}

@@ -1,0 +1,174 @@
+{
+  "$defs": {
+    "DependencyLayer": {
+      "description": "The three dependency layers. The CONTROL PLANE stays lightweight + always installable (opening\nCorpusStudio must never require CUDA/DeepSpeed/an ML framework); CAPABILITY profiles are opt-in\nfeature stacks added to the core process with graceful fallback; BACKEND_WORKER environments are\nisolated per-framework runtimes (heavy frameworks pin conflicting torch/CUDA/xformers builds and\ncannot coexist \u2014 they talk to the core via the WorkerMessage protocol, never by import).",
+      "enum": [
+        "control_plane",
+        "capability",
+        "backend_worker"
+      ],
+      "title": "DependencyLayer",
+      "type": "string"
+    },
+    "EnvironmentState": {
+      "description": "The lifecycle state of a managed environment. The escalation is deliberate \u2014 \"installed\" is\nNEVER \"supported\": a package importing (IMPORTABLE) is not proof a kernel runs\n(FUNCTIONAL_PROBE_PASSED), which is not proof the hardware supports it (HARDWARE_VERIFIED). Only\nHARDWARE_VERIFIED earns \"supported\". The terminal-degraded states record WHY an env is unusable.",
+      "enum": [
+        "NOT_INSTALLED",
+        "INSTALLING",
+        "INSTALLED_UNCHECKED",
+        "IMPORTABLE",
+        "DEPENDENCY_PROBE_PASSED",
+        "FUNCTIONAL_PROBE_PASSED",
+        "HARDWARE_VERIFIED",
+        "DEGRADED",
+        "INCOMPATIBLE",
+        "DRIFTED",
+        "BROKEN"
+      ],
+      "title": "EnvironmentState",
+      "type": "string"
+    },
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Ref",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A managed, ISOLATED environment instance. Its ``root_path`` is the isolation boundary \u2014 the\nEnvironment Manager only ever installs into this env's own interpreter, never another's, so one\nbackend can't corrupt another's runtime. NEW.",
+  "properties": {
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "created_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Created At"
+    },
+    "env_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Env Id",
+      "type": "string"
+    },
+    "layer": {
+      "$ref": "#/$defs/DependencyLayer"
+    },
+    "lock_ref": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ref"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    },
+    "python_executable": {
+      "default": "",
+      "title": "Python Executable",
+      "type": "string"
+    },
+    "recipe_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "root_path": {
+      "default": "",
+      "title": "Root Path",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/EnvironmentState",
+      "default": "NOT_INSTALLED"
+    },
+    "updated_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Updated At"
+    }
+  },
+  "required": [
+    "env_id",
+    "recipe_ref",
+    "layer"
+  ],
+  "title": "EnvironmentDescriptor",
+  "type": "object"
+}

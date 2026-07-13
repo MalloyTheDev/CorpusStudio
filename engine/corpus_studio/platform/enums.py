@@ -149,6 +149,49 @@ class OffloadStrategy(str, Enum):
     deepspeed_zero3 = "deepspeed_zero3"
 
 
+class DependencyLayer(str, Enum):
+    """The three dependency layers. The CONTROL PLANE stays lightweight + always installable (opening
+    CorpusStudio must never require CUDA/DeepSpeed/an ML framework); CAPABILITY profiles are opt-in
+    feature stacks added to the core process with graceful fallback; BACKEND_WORKER environments are
+    isolated per-framework runtimes (heavy frameworks pin conflicting torch/CUDA/xformers builds and
+    cannot coexist — they talk to the core via the WorkerMessage protocol, never by import)."""
+
+    control_plane = "control_plane"
+    capability = "capability"
+    backend_worker = "backend_worker"
+
+
+class EnvironmentState(str, Enum):
+    """The lifecycle state of a managed environment. The escalation is deliberate — "installed" is
+    NEVER "supported": a package importing (IMPORTABLE) is not proof a kernel runs
+    (FUNCTIONAL_PROBE_PASSED), which is not proof the hardware supports it (HARDWARE_VERIFIED). Only
+    HARDWARE_VERIFIED earns "supported". The terminal-degraded states record WHY an env is unusable."""
+
+    not_installed = "NOT_INSTALLED"
+    installing = "INSTALLING"
+    installed_unchecked = "INSTALLED_UNCHECKED"
+    importable = "IMPORTABLE"
+    dependency_probe_passed = "DEPENDENCY_PROBE_PASSED"
+    functional_probe_passed = "FUNCTIONAL_PROBE_PASSED"
+    hardware_verified = "HARDWARE_VERIFIED"
+    degraded = "DEGRADED"
+    incompatible = "INCOMPATIBLE"
+    drifted = "DRIFTED"
+    broken = "BROKEN"
+
+
+class RecipeVerification(str, Enum):
+    """How far a recipe has been proven — the recipe-level twin of EnvironmentState. A recipe is a
+    DECLARATION of what to install; this says whether that declaration has ever produced a working
+    environment, and at what level. ``declared`` = we can render the install plan but have not built +
+    verified it; higher tiers require actual evidence (a real install / probe / hardware run)."""
+
+    declared = "declared"
+    build_verified = "build_verified"
+    functional_verified = "functional_verified"
+    hardware_verified = "hardware_verified"
+
+
 class StorageInterface(str, Enum):
     """How a storage device attaches. The interface — not just free space — decides whether a device
     can sustain the heavy sequential + random writes of optimizer/parameter offload and checkpointing.
