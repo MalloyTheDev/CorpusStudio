@@ -26,6 +26,7 @@ export type AttentionImpl =
  * did silently (the failure mode the engine warns about). ``FAIL`` = will not run.
  */
 export type FitClass =
+  | "PLANNED_UNPROVEN"
   | "NATIVE_SAFE"
   | "NATIVE_TIGHT"
   | "NATIVE_UNPROVEN"
@@ -116,7 +117,11 @@ export type ParameterScopeKind =
   | "output_head"
   | "device_residency"
   | "custom";
-export type MemoryTier = ("gpu" | "pinned_ram" | "pageable_ram" | "nvme" | "sata" | "remote" | "unknown") | null;
+/**
+ * A physical state tier. A RunPlan names the intended tier; only runtime evidence may claim
+ * actual residency there.
+ */
+export type MemoryTier = "gpu" | "pinned_ram" | "pageable_ram" | "nvme" | "sata" | "remote" | "unknown";
 export type Algo = "sha256" | "sha256-ordered-exact-v1" | "blake3" | "none";
 export type Value = string | null;
 export type Id = string;
@@ -303,7 +308,7 @@ export interface ParameterScope {
   device_id?: DeviceId;
   expert_ids?: ExpertIds;
   kind: ParameterScopeKind;
-  memory_tier?: MemoryTier;
+  memory_tier?: MemoryTier | null;
   model_ref: Ref;
   scope_id: ScopeId;
 }

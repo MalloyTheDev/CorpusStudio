@@ -45,6 +45,84 @@ class DeviceKind(str, Enum):
     cpu = "cpu"
 
 
+class MemoryTier(str, Enum):
+    """A physical state tier. A RunPlan names the intended tier; only runtime evidence may claim
+    actual residency there."""
+
+    gpu = "gpu"
+    pinned_ram = "pinned_ram"
+    pageable_ram = "pageable_ram"
+    nvme = "nvme"
+    sata = "sata"
+    remote = "remote"
+    unknown = "unknown"
+
+
+class PhysicalStateKind(str, Enum):
+    parameters = "parameters"
+    gradients = "gradients"
+    optimizer_state = "optimizer_state"
+    activations = "activations"
+
+
+class PlacementRole(str, Enum):
+    authoritative = "authoritative"
+    shard = "shard"
+    replica = "replica"
+    cache = "cache"
+
+
+class PlacementMode(str, Enum):
+    single_resource = "single_resource"
+    identity_scoped = "identity_scoped"
+    replicated = "replicated"
+    sharded = "sharded"
+    tiered = "tiered"
+    expert_scoped = "expert_scoped"
+
+
+class OffloadMechanism(str, Enum):
+    cpu_copy = "cpu_copy"
+    cuda_unified_memory = "cuda_unified_memory"
+    nvme_io = "nvme_io"
+    backend_native = "backend_native"
+
+
+class OffloadTrigger(str, Enum):
+    static = "static"
+    memory_pressure = "memory_pressure"
+    ahead_of_use = "ahead_of_use"
+    after_use = "after_use"
+
+
+class RouteMissAction(str, Enum):
+    """What the physical scheduler does when requested state is not ready. Semantic fallback is
+    never implicit: it requires a separately pinned learned-policy reference."""
+
+    wait = "wait"
+    defer = "defer"
+    fail = "fail"
+    semantic_fallback = "semantic_fallback"
+
+
+class ParallelismKind(str, Enum):
+    data = "data"
+    tensor = "tensor"
+    pipeline = "pipeline"
+    expert = "expert"
+    sequence = "sequence"
+    context = "context"
+
+
+class CommunicationBackend(str, Enum):
+    none = "none"
+    nccl = "nccl"
+    gloo = "gloo"
+    mpi = "mpi"
+    ucc = "ucc"
+    backend_native = "backend_native"
+
+
 class TaskType(str, Enum):
     sft = "sft"
     pretraining = "pretraining"
@@ -731,6 +809,7 @@ class FitClass(str, Enum):
     offload (acceptable, slower). ``ACCIDENTAL_*`` / ``THRASHING`` = an unplanned spill the platform
     did silently (the failure mode the engine warns about). ``FAIL`` = will not run."""
 
+    PLANNED_UNPROVEN = "PLANNED_UNPROVEN"
     NATIVE_SAFE = "NATIVE_SAFE"
     NATIVE_TIGHT = "NATIVE_TIGHT"
     NATIVE_UNPROVEN = "NATIVE_UNPROVEN"

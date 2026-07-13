@@ -501,7 +501,16 @@ def platform_run(
 
             plan = demo_training_plan(plan_id=f"demo-{runner_name}")
     elif plan_path is not None:
-        plan = RunPlan.model_validate_json(plan_path.read_text(encoding="utf-8"))
+        from corpus_studio.platform.planner import verify_run_plan_hash
+
+        try:
+            plan = RunPlan.model_validate_json(plan_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, ValidationError) as exc:
+            typer.echo(f"Invalid RunPlan: {exc}", err=True)
+            raise typer.Exit(2) from exc
+        if not verify_run_plan_hash(plan):
+            typer.echo("Invalid RunPlan: plan_hash does not match the canonical plan body.", err=True)
+            raise typer.Exit(2)
     else:
         typer.echo("Provide a RunPlan path argument, or pass --demo.", err=True)
         raise typer.Exit(2)
@@ -605,6 +614,31 @@ def platform_plan(
     manager_root: Optional[Path] = typer.Option(
         None, "--manager-root", help="Environment Manager state root for --environment."
     ),
+    physical_spec_path: Optional[Path] = typer.Option(
+        None,
+        "--physical-spec",
+        help="PhysicalExecutionSpec JSON. Non-trivial plans require declared and proven backend support.",
+    ),
+    parameter_accounting_path: Optional[Path] = typer.Option(
+        None,
+        "--parameter-accounting-report",
+        help="Hash-sealed ParameterAccountingReport JSON to pin and use for stable scope IDs.",
+    ),
+    storage_profile_path: Optional[Path] = typer.Option(
+        None,
+        "--storage-profile",
+        help="Exact StorageProfile JSON referenced by a storage-backed physical spec.",
+    ),
+    allow_marginal_storage: bool = typer.Option(
+        False,
+        "--allow-marginal-storage",
+        help="Explicitly accept a marginal storage assessment already recorded in the physical spec.",
+    ),
+    allow_unknown_storage: bool = typer.Option(
+        False,
+        "--allow-unknown-storage",
+        help="Explicitly accept an unknown storage assessment already recorded in the physical spec.",
+    ),
     out_dir: Optional[Path] = typer.Option(None, "--out", help="Write the sealed RunPlan.json to this directory."),
     json_out: bool = typer.Option(
         False, "--json", help="Emit {run_plan, fit_classification} as one JSON bundle to stdout."
@@ -616,7 +650,17 @@ def platform_plan(
     nf4 only when bitsandbytes passed, and math attention on Blackwell (sm_120). An unready host is a
     clean PlannerError, never a silent downgrade."""
     from corpus_studio.platform.common import Ref
-    from corpus_studio.platform.planner import PlannerConstraints, PlannerError, build_run_plan
+    from corpus_studio.platform.contracts import (
+        ParameterAccountingReport,
+        PhysicalExecutionSpec,
+        StorageProfile,
+    )
+    from corpus_studio.platform.planner import (
+        PlannerConstraints,
+        PlannerError,
+        build_run_plan,
+        storage_profile_ref_for,
+    )
     # --memory-efficient is a shortcut; explicit --optim / --use-liger win.
     resolved_optim = optim or ("paged_adamw_8bit" if memory_efficient else "adamw_torch")
     constraints = PlannerConstraints(
@@ -631,6 +675,30 @@ def platform_plan(
         use_liger=use_liger or memory_efficient,
         allow_cpu_toy=allow_cpu_toy,
     )
+    parameter_accounting = None
+    storage_profile = None
+    physical_execution = None
+    try:
+        if parameter_accounting_path is not None:
+            parameter_accounting = ParameterAccountingReport.model_validate_json(
+                parameter_accounting_path.read_text(encoding="utf-8")
+            )
+        if storage_profile_path is not None:
+            storage_profile = StorageProfile.model_validate_json(
+                storage_profile_path.read_text(encoding="utf-8")
+            )
+        if physical_spec_path is not None:
+            physical_payload = json.loads(physical_spec_path.read_text(encoding="utf-8"))
+            if not isinstance(physical_payload, dict):
+                raise ValueError("physical spec root must be a JSON object")
+            if storage_profile is not None and "storage_profile_ref" not in physical_payload:
+                physical_payload["storage_profile_ref"] = storage_profile_ref_for(
+                    storage_profile
+                ).model_dump(mode="json")
+            physical_execution = PhysicalExecutionSpec.model_validate(physical_payload)
+    except (OSError, ValueError, ValidationError) as exc:
+        typer.echo(f"invalid planning evidence: {exc}", err=True)
+        raise typer.Exit(2) from exc
     managed_environment_ref = None
     if environment_id is not None:
         from corpus_studio.platform.environment_manager import (
@@ -669,6 +737,11 @@ def platform_plan(
             constraints=constraints,
             plan_id=f"plan-{profile.environment_signature[:8]}",
             environment_ref=managed_environment_ref,
+            parameter_accounting=parameter_accounting,
+            physical_execution=physical_execution,
+            storage_profile=storage_profile,
+            allow_marginal_storage=allow_marginal_storage,
+            allow_unknown_storage=allow_unknown_storage,
         )
     except PlannerError as exc:
         typer.echo(str(exc), err=True)
@@ -681,6 +754,14 @@ def platform_plan(
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / "RunPlan.json").write_text(plan.model_dump_json(indent=2), encoding="utf-8")
         (out_dir / "FitClassification.json").write_text(fit.model_dump_json(indent=2), encoding="utf-8")
+        if parameter_accounting is not None:
+            (out_dir / "ParameterAccountingReport.json").write_text(
+                parameter_accounting.model_dump_json(indent=2), encoding="utf-8"
+            )
+        if storage_profile is not None:
+            (out_dir / "StorageProfile.json").write_text(
+                storage_profile.model_dump_json(indent=2), encoding="utf-8"
+            )
     if json_out:
         # One bundle for a client (the Tauri shell / apps/web live flow): the sealed plan + the
         # predicted, not-measured fit. stdout stays pure JSON; the human line is stderr-only above.

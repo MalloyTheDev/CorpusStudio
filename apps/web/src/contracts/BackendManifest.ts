@@ -21,6 +21,8 @@ export type Contains = (
 )[];
 export type ReloadVerifiable = boolean;
 export type Resumable = boolean;
+export type CommunicationBackend = "none" | "nccl" | "gloo" | "mpi" | "ucc" | "backend_native";
+export type CommunicationBackends = CommunicationBackend[];
 export type CompileMode = "none" | "eager" | "reduce_overhead" | "max_autotune" | "aot_inductor";
 export type CompileModes = CompileMode[];
 export type ContractVersion = "1.0.0";
@@ -96,6 +98,17 @@ export type Optimizer =
   | "lion"
   | "sgd";
 export type Optimizers = Optimizer[];
+export type ParallelismKind = "data" | "tensor" | "pipeline" | "expert" | "sequence" | "context";
+export type ParallelismKinds = ParallelismKind[];
+export type PlacementMode =
+  "single_resource" | "identity_scoped" | "replicated" | "sharded" | "tiered" | "expert_scoped";
+export type PlacementModes = PlacementMode[];
+/**
+ * A physical state tier. A RunPlan names the intended tier; only runtime evidence may claim
+ * actual residency there.
+ */
+export type MemoryTier = "gpu" | "pinned_ram" | "pageable_ram" | "nvme" | "sata" | "remote" | "unknown";
+export type PlacementTiers = MemoryTier[];
 export type PrecisionMode = "fp32" | "tf32" | "fp16" | "bf16" | "fp8" | "mixed_bf16" | "mixed_fp16";
 export type PrecisionModes = PrecisionMode[];
 export type QuantizationMode = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
@@ -169,6 +182,7 @@ export interface BackendManifest {
   capability_probes?: CapabilityProbes;
   checkpoint_impls?: CheckpointImpls;
   checkpoint_semantics?: CheckpointSemantics | null;
+  communication_backends?: CommunicationBackends;
   compile_modes?: CompileModes;
   contract_version?: ContractVersion;
   dependency_conflicts?: DependencyConflicts;
@@ -183,6 +197,9 @@ export interface BackendManifest {
   objective_capabilities?: ObjectiveCapabilities;
   offload_strategies?: OffloadStrategies;
   optimizers?: Optimizers;
+  parallelism_kinds?: ParallelismKinds;
+  placement_modes?: PlacementModes;
+  placement_tiers?: PlacementTiers;
   precision_modes?: PrecisionModes;
   quantization_modes?: QuantizationModes;
   required_compute_capability?: RequiredComputeCapability;

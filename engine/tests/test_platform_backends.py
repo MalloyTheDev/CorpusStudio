@@ -3,12 +3,15 @@ declares its surface honestly, and selection resolves a plan's requirements agai
 bearing honesty case: Unsloth (flash/sdpa only) is filtered OUT of a Blackwell math plan."""
 
 import corpus_studio.platform as P
+from corpus_studio.platform.contracts import EffectiveCapabilities
 from corpus_studio.platform.backends import (
     builtin_backends,
     compatible_backends,
     get_backend,
+    unmet_physical_requirements,
     unmet_requirements,
 )
+from corpus_studio.platform.enums import OffloadStrategy
 
 _BLACKWELL = dict(
     os="linux", device="cuda", task_type="sft", precision="bf16", quantization="nf4",
@@ -22,6 +25,10 @@ def test_builtin_backends_roundtrip():
     assert ids == ["corpus_studio", "unsloth"]
     for backend in builtin_backends():
         assert P.BackendManifest.model_validate_json(backend.model_dump_json()) == backend
+        assert [item.value for item in backend.placement_modes] == ["single_resource"]
+        assert [item.value for item in backend.placement_tiers] == ["gpu"]
+        assert backend.offload_strategies == []
+        assert backend.parallelism_kinds == []
 
 
 def test_get_backend():
@@ -67,3 +74,110 @@ def test_compatible_backends_for_an_sdpa_plan_includes_unsloth():
 def test_no_backend_fits_an_impossible_configuration():
     impossible = {**_AMPERE, "adapter_method": "full_finetune"}
     assert compatible_backends(**impossible) == []
+
+
+def test_physical_capabilities_require_static_declaration_and_functional_proof():
+    spec = P.PhysicalExecutionSpec(
+        resources=[
+            P.PhysicalResource(
+                resource_id="compute-0", tier="gpu", device_kind="cuda", device_id="cuda:0"
+            )
+        ],
+        placements=[
+            P.StatePlacement(
+                placement_id="parameters-authoritative",
+                state="parameters",
+                selector={"whole_model": True},
+                resource_id="compute-0",
+                role="authoritative",
+            )
+        ],
+        parallelism=P.ParallelismSpec(
+            world_size=1,
+            ranks=[P.RankBinding(rank=0, resource_id="compute-0")],
+        ),
+    )
+    backend = get_backend("corpus_studio")
+    unverified = unmet_physical_requirements(
+        backend,
+        EffectiveCapabilities(),
+        spec,
+        offload_strategy=OffloadStrategy.none,
+    )
+    assert "placement tier 'gpu' is not functionally verified" in unverified
+    assert "placement mode 'single_resource' is not functionally verified" in unverified
+
+    proven = EffectiveCapabilities(
+        placement_tiers=["gpu"], placement_modes=["single_resource"]
+    )
+    assert unmet_physical_requirements(
+        backend, proven, spec, offload_strategy=OffloadStrategy.none
+    ) == []
+
+
+def test_physical_capability_gate_detects_replication_sharding_and_expert_scope():
+    spec = P.PhysicalExecutionSpec(
+        resources=[
+            P.PhysicalResource(
+                resource_id=f"gpu-{index}",
+                tier="gpu",
+                device_kind="cuda",
+                device_id=f"cuda:{index}",
+            )
+            for index in range(2)
+        ],
+        placements=[
+            P.StatePlacement(
+                placement_id="expert-optimizer",
+                state="optimizer_state",
+                selector={"expert_ids": ["expert.0"]},
+                resource_id="gpu-0",
+                role="authoritative",
+            ),
+            *[
+                P.StatePlacement(
+                    placement_id=f"gradient-shard-{index}",
+                    state="gradients",
+                    selector={"whole_model": True},
+                    resource_id=f"gpu-{index}",
+                    role="shard",
+                    shard_group_id="gradient-shards",
+                    shard_index=index,
+                    shard_count=2,
+                )
+                for index in range(2)
+            ],
+            P.StatePlacement(
+                placement_id="parameters-authoritative",
+                state="parameters",
+                selector={"whole_model": True},
+                resource_id="gpu-0",
+                role="authoritative",
+            ),
+            P.StatePlacement(
+                placement_id="parameters-replica",
+                state="parameters",
+                selector={"whole_model": True},
+                resource_id="gpu-1",
+                role="replica",
+                source_placement_id="parameters-authoritative",
+            ),
+        ],
+        parallelism=P.ParallelismSpec(
+            world_size=2,
+            ranks=[
+                P.RankBinding(rank=index, resource_id=f"gpu-{index}", local_rank=index)
+                for index in range(2)
+            ],
+        ),
+    )
+    reasons = unmet_physical_requirements(
+        get_backend("corpus_studio"),
+        EffectiveCapabilities(placement_tiers=["gpu"]),
+        spec,
+        offload_strategy=OffloadStrategy.none,
+    )
+    assert any("placement mode 'identity_scoped'" in reason for reason in reasons)
+    assert any("placement mode 'replicated'" in reason for reason in reasons)
+    assert any("placement mode 'sharded'" in reason for reason in reasons)
+    assert any("placement mode 'expert_scoped'" in reason for reason in reasons)

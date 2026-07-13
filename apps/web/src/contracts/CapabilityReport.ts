@@ -15,7 +15,34 @@ export type AdapterMethods = AdapterMethod[];
 export type AttentionImpl =
   "math" | "eager" | "sdpa" | "flash_attention_2" | "flash_attention_3" | "mem_efficient" | "xformers";
 export type AttentionImpls = AttentionImpl[];
+export type CommunicationBackend = "none" | "nccl" | "gloo" | "mpi" | "ucc" | "backend_native";
+export type CommunicationBackends = CommunicationBackend[];
 export type ObjectiveCapabilities = string[];
+/**
+ * The ``controlled_*`` values are the deliberate, planned counterparts of the accidental spills
+ * in :class:`FitClass`.
+ */
+export type OffloadStrategy =
+  | "none"
+  | "controlled_activation_offload"
+  | "controlled_optimizer_offload"
+  | "controlled_parameter_offload"
+  | "cpu_offload"
+  | "disk_offload"
+  | "deepspeed_zero2"
+  | "deepspeed_zero3";
+export type OffloadStrategies = OffloadStrategy[];
+export type ParallelismKind = "data" | "tensor" | "pipeline" | "expert" | "sequence" | "context";
+export type ParallelismKinds = ParallelismKind[];
+export type PlacementMode =
+  "single_resource" | "identity_scoped" | "replicated" | "sharded" | "tiered" | "expert_scoped";
+export type PlacementModes = PlacementMode[];
+/**
+ * A physical state tier. A RunPlan names the intended tier; only runtime evidence may claim
+ * actual residency there.
+ */
+export type MemoryTier = "gpu" | "pinned_ram" | "pageable_ram" | "nvme" | "sata" | "remote" | "unknown";
+export type PlacementTiers = MemoryTier[];
 export type PrecisionMode = "fp32" | "tf32" | "fp16" | "bf16" | "fp8" | "mixed_bf16" | "mixed_fp16";
 export type PrecisionModes = PrecisionMode[];
 export type QuantizationMode = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
@@ -84,7 +111,12 @@ export interface CapabilityReport {
 export interface EffectiveCapabilities {
   adapter_methods?: AdapterMethods;
   attention_impls?: AttentionImpls;
+  communication_backends?: CommunicationBackends;
   objective_capabilities?: ObjectiveCapabilities;
+  offload_strategies?: OffloadStrategies;
+  parallelism_kinds?: ParallelismKinds;
+  placement_modes?: PlacementModes;
+  placement_tiers?: PlacementTiers;
   precision_modes?: PrecisionModes;
   quantization_modes?: QuantizationModes;
 }

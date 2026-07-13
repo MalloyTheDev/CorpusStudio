@@ -38,15 +38,15 @@ corpus-studio platform-schemas --out docs/contracts
 | `EnvironmentLock` | Immutable interpreter/package/source/hash and accelerator lock evidence. |
 | `EnvironmentDescriptor` | Managed environment identity, ownership, state, lock, and verification references. |
 | `EnvironmentHealthReport` | Independent import/dependency/functional/hardware/drift health axes. |
-| `BackendManifest` | A backend's **static** declaration of what it can do (OS/device/precision/quant/adapter/attn/loss/offload, deps + conflicts, known-failure modes, probes). |
+| `BackendManifest` | A backend's **static** declaration of what it can do (OS/device/precision/quant/adapter/attn/loss plus placement/offload/parallelism/communication axes, deps + conflicts, known-failure modes, probes). |
 | `CapabilityReport` | The **measured** counterpart — per-probe outcomes on a specific host (declared ∩ proven). |
-| `RunPlan` | The **immutable, fully-resolved** execution plan (`plan_hash`-sealed); accumulation target is in **supervised tokens**. |
+| `RunPlan` | The **immutable, fully-resolved** execution plan (`plan_hash`-sealed), including concrete physical resources, state placements, offload rules, and rank/group bindings; accumulation target is in **supervised tokens**. |
 | `RunManifest` | A durable run **instance** + state machine + reconciliation. |
 | `RunEvent` | The **streamed telemetry** envelope (stage markers + metrics incl. **dedicated vs shared** GPU memory). |
 | `ArtifactManifest` | A produced weight artifact (two-tier integrity, `reload_verified`). |
 | `EvaluationResult` | Eval outcome with an explicit **as-served vs raw** distinction + gate verdict. |
 | `FailureRecord` | Classified terminal outcome (`FailureTaxonomy`: OOM / KERNEL_STALL / ACCIDENTAL_SPILL / …). |
-| `FitClassification` | How a plan fits: `NATIVE_*` / `CONTROLLED_*` / `ACCIDENTAL_WDDM_SPILL` / `THRASHING` / `FAIL`. |
+| `FitClassification` | How a plan fits: `NATIVE_*` / `CONTROLLED_*` / `PLANNED_UNPROVEN` / `ACCIDENTAL_WDDM_SPILL` / `THRASHING` / `FAIL`. |
 | `WorkerMessage` | The versioned **core ↔ worker** protocol envelope (immutable RunPlan in → RunEvent stream out). |
 
 ## Design stance
@@ -60,6 +60,9 @@ corpus-studio platform-schemas --out docs/contracts
 - **One parameter count is not enough** — `ParameterAccountingReport` keeps coordinate universes and
   windows explicit; stored tensor elements and allocator bytes never silently become logical or
   resident coordinates.
+- **Semantic routing is not physical placement** — a `RunPlan` may name expert state locations and
+  transfer behavior, but residency cannot silently change the learned route. Planned placement is
+  labeled `planned_not_measured`; every requested capability needs both declaration and probe proof.
 - **Grounded, not invented** — field names/constraints are taken from the existing engine models
   (see each pydantic class docstring for the model it formalizes).
 - **Additive versioning** — a MAJOR `contract_version` bump is breaking; readers reject an unknown MAJOR.

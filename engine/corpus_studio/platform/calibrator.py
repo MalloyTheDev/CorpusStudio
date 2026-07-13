@@ -37,6 +37,17 @@ def classify_fit(plan: RunPlan, profile: EnvironmentProfile) -> FitClassificatio
     ``classification`` is at best ``NATIVE_UNPROVEN`` (predicted to fit, not measured), ``MARGINAL``
     (within the safety margin), or a predicted spill/OOM keyed to the residency model. Never
     ``NATIVE_SAFE`` — that requires a measured run."""
+    from corpus_studio.platform.planner import is_trivial_physical_execution  # noqa: PLC0415
+
+    if not is_trivial_physical_execution(plan.physical_execution):
+        return FitClassification(
+            classification=FitClass.PLANNED_UNPROVEN,
+            attention_path=plan.attention_backend,
+            rationale=(
+                "placement, offload, or parallelism is explicit, but the current calibrator has no "
+                "physical-plan estimator; no native residency or controlled-fit claim was made."
+            ),
+        )
     from corpus_studio.training.estimators import build_vram_estimate  # noqa: PLC0415 - torch-free
 
     # A cpu-toy plan runs on CPU — GPU VRAM fit is not applicable.

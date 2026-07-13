@@ -14,13 +14,27 @@ from corpus_studio.platform.contracts import (
     EnvironmentProfile,
     EnvHost,
     GpuDevice,
+    ParameterAccountingReport,
+    ParameterEvidenceGap,
+    ParameterScope,
+    ParameterWindow,
+    PhysicalExecutionSpec,
+    StorageProfile,
+    StorageRoleAssessment,
 )
 from corpus_studio.platform.planner import (
     PlannerConstraints,
     PlannerError,
+    _offload_summary,
+    _validate_parameter_accounting,
     build_run_plan,
     compute_plan_hash,
+    is_trivial_physical_execution,
+    run_plan_hash_payload,
+    storage_profile_ref_for,
+    verify_run_plan_hash,
 )
+from corpus_studio.platform.parameter_accounting import parameter_accounting_hash_for
 from corpus_studio.training.trainer import TrainRunConfig
 
 _SIG = "a" * 64
@@ -39,12 +53,22 @@ def _profile(*, cc_major=None, os="linux"):
     return EnvironmentProfile(environment_signature=_SIG, host=EnvHost(os=os), gpus=gpus)
 
 
-def _report(*, readiness="ready", bnb=True, precisions=("bf16",), attn=("sdpa",), missing=()):
+def _report(
+    *,
+    readiness="ready",
+    bnb=True,
+    precisions=("bf16",),
+    attn=("sdpa",),
+    missing=(),
+    physical=False,
+):
     eff = EffectiveCapabilities(
         precision_modes=list(precisions),
         quantization_modes=["nf4"] if bnb else [],
         attention_impls=list(attn),
         adapter_methods=["qlora"],
+        placement_tiers=["gpu"] if physical else [],
+        placement_modes=["single_resource"] if physical else [],
     )
     return CapabilityReport(
         backend_id="corpus_studio", environment_ref=Ref(id=_SIG), readiness=readiness,
@@ -52,13 +76,189 @@ def _report(*, readiness="ready", bnb=True, precisions=("bf16",), attn=("sdpa",)
     )
 
 
-def _plan(profile, report, *, now=_NOW, **kw):
+def _plan(
+    profile,
+    report,
+    *,
+    now=_NOW,
+    parameter_accounting=None,
+    physical_execution=None,
+    storage_profile=None,
+    allow_marginal_storage=False,
+    allow_unknown_storage=False,
+    **kw,
+):
     kw.setdefault("base_model", "Qwen/Qwen2.5-7B-Instruct")
     kw.setdefault("dataset_path", "data/examples.jsonl")
     constraints = PlannerConstraints(**kw)
     return build_run_plan(
         profile=profile, capabilities=report, dataset_ref=Ref(id="ds-1"),
         constraints=constraints, plan_id="p1", now=now,
+        parameter_accounting=parameter_accounting,
+        physical_execution=physical_execution,
+        storage_profile=storage_profile,
+        allow_marginal_storage=allow_marginal_storage,
+        allow_unknown_storage=allow_unknown_storage,
+    )
+
+
+def _accounting_report(*, scope_id="model"):
+    model_ref = Ref(id="model", hash=P.HashRef(value="c" * 64))
+    scope = ParameterScope(
+        scope_id=scope_id,
+        kind="model",
+        model_ref=model_ref,
+        coordinate_universe_id="model-coordinates",
+        coordinate_universe_sha256="c" * 64,
+        definition="Exact model coordinate universe.",
+    )
+    gap = ParameterEvidenceGap(
+        gap_id="logical-gap",
+        kind="logical",
+        scope=scope,
+        window=ParameterWindow(
+            window_id="static-model",
+            kind="static_snapshot",
+            definition="One static model snapshot.",
+        ),
+        reason="missing_observation",
+        explanation="Logical evidence is deliberately absent in this planner fixture.",
+        resolution="Supply a measured logical observation.",
+    )
+    draft = ParameterAccountingReport(
+        report_id="parameter-report",
+        report_hash="0" * 64,
+        generated_at=_NOW,
+        profile="model_static",
+        status="incomplete",
+        model_ref=model_ref,
+        gaps=[gap],
+    )
+    return draft.model_copy(update={"report_hash": parameter_accounting_hash_for(draft)})
+
+
+def _scoped_physical(scope_id="model"):
+    return PhysicalExecutionSpec.model_validate(
+        {
+            "resources": [
+                {
+                    "resource_id": "compute-0",
+                    "tier": "gpu",
+                    "device_kind": "cuda",
+                    "device_id": "cuda:0",
+                }
+            ],
+            "placements": [
+                {
+                    "placement_id": "parameters-authoritative",
+                    "state": "parameters",
+                    "selector": {"parameter_scope_ids": [scope_id]},
+                    "resource_id": "compute-0",
+                    "role": "authoritative",
+                }
+            ],
+            "parallelism": {
+                "world_size": 1,
+                "ranks": [{"rank": 0, "resource_id": "compute-0"}],
+            },
+        }
+    )
+
+
+def _offload_physical(*states):
+    return PhysicalExecutionSpec.model_validate(
+        {
+            "resources": [
+                {
+                    "resource_id": "compute-0",
+                    "tier": "gpu",
+                    "device_kind": "cuda",
+                    "device_id": "cuda:0",
+                },
+                {
+                    "resource_id": "host-ram",
+                    "tier": "pageable_ram",
+                    "device_kind": "cpu",
+                    "device_id": "cpu:0",
+                },
+            ],
+            "placements": [
+                {
+                    "placement_id": f"{state}-authoritative",
+                    "state": state,
+                    "selector": {"whole_model": True},
+                    "resource_id": "compute-0",
+                    "role": "authoritative",
+                }
+                for state in states
+            ],
+            "offload_rules": [
+                {
+                    "rule_id": f"{state}-offload",
+                    "state": state,
+                    "selector": {"whole_model": True},
+                    "source_resource_id": "compute-0",
+                    "target_resource_id": "host-ram",
+                    "mechanism": "cpu_copy",
+                    "trigger": "memory_pressure",
+                }
+                for state in states
+            ],
+            "parallelism": {
+                "world_size": 1,
+                "ranks": [{"rank": 0, "resource_id": "compute-0"}],
+            },
+        }
+    )
+
+
+def _storage_physical(assessment, storage):
+    return PhysicalExecutionSpec.model_validate(
+        {
+            "storage_profile_ref": storage_profile_ref_for(storage).model_dump(mode="json"),
+            "resources": [
+                {
+                    "resource_id": "compute-0",
+                    "tier": "gpu",
+                    "device_kind": "cuda",
+                    "device_id": "cuda:0",
+                },
+                {
+                    "resource_id": "nvme-offload",
+                    "tier": "nvme",
+                    "storage": {
+                        "role": "parameter_offload",
+                        "path": "C:/offload",
+                        "assessment": assessment.model_dump(mode="json"),
+                        "accepted_suitability": assessment.suitability.value,
+                    },
+                },
+            ],
+            "placements": [
+                {
+                    "placement_id": "parameters-authoritative",
+                    "state": "parameters",
+                    "selector": {"whole_model": True},
+                    "resource_id": "compute-0",
+                    "role": "authoritative",
+                }
+            ],
+            "offload_rules": [
+                {
+                    "rule_id": "parameter-offload",
+                    "state": "parameters",
+                    "selector": {"whole_model": True},
+                    "source_resource_id": "compute-0",
+                    "target_resource_id": "nvme-offload",
+                    "mechanism": "nvme_io",
+                    "trigger": "after_use",
+                }
+            ],
+            "parallelism": {
+                "world_size": 1,
+                "ranks": [{"rank": 0, "resource_id": "compute-0"}],
+            },
+        }
     )
 
 
@@ -90,6 +290,169 @@ def test_managed_environment_lock_reference_is_sealed_into_plan():
         now=_NOW,
     )
     assert plan.environment_ref == environment_ref
+
+
+def test_new_plans_seal_an_explicit_single_rank_physical_execution():
+    plan = _plan(_profile(cc_major=8), _report())
+    assert plan.physical_execution is not None
+    assert is_trivial_physical_execution(plan.physical_execution)
+    assert plan.physical_execution.evidence_status == "planned_not_measured"
+    assert plan.physical_execution.resources[0].device_id == "cuda:0"
+    assert plan.physical_execution.parallelism.world_size == 1
+    assert verify_run_plan_hash(plan)
+
+
+def test_cpu_toy_plan_resolves_an_explicit_cpu_resource():
+    plan = _plan(
+        _profile(),
+        _report(readiness="cpu_toy_only", bnb=False),
+        allow_cpu_toy=True,
+    )
+    assert plan.physical_execution is not None
+    resource = plan.physical_execution.resources[0]
+    assert resource.tier.value == "pageable_ram"
+    assert resource.device_id == "cpu:0"
+
+
+def test_scoped_physical_plan_consumes_a_verified_parameter_report_by_hash():
+    report = _accounting_report()
+    pinned = _validate_parameter_accounting(report, _scoped_physical())
+    assert pinned.id == report.report_id
+    assert pinned.hash.value == report.report_hash
+    with pytest.raises(PlannerError, match="identity_scoped"):
+        _plan(
+            _profile(cc_major=8),
+            _report(physical=True),
+            physical_execution=_scoped_physical(),
+            parameter_accounting=report,
+        )
+
+
+def test_scoped_physical_plan_refuses_missing_or_tampered_accounting_evidence():
+    with pytest.raises(PlannerError, match="parameter-accounting"):
+        _plan(
+            _profile(cc_major=8),
+            _report(physical=True),
+            physical_execution=_scoped_physical(),
+        )
+    report = _accounting_report()
+    with pytest.raises(PlannerError, match="absent from the sealed report"):
+        _plan(
+            _profile(cc_major=8),
+            _report(physical=True),
+            physical_execution=_scoped_physical("missing-scope"),
+            parameter_accounting=report,
+        )
+    with pytest.raises(PlannerError, match="hash mismatch"):
+        _plan(
+            _profile(cc_major=8),
+            _report(physical=True),
+            physical_execution=_scoped_physical(),
+            parameter_accounting=report.model_copy(update={"report_hash": "0" * 64}),
+        )
+
+
+@pytest.mark.parametrize(
+    ("states", "expected"),
+    [
+        (("activations",), "controlled_activation_offload"),
+        (("optimizer_state",), "controlled_optimizer_offload"),
+        (("parameters",), "controlled_parameter_offload"),
+        (("activations", "optimizer_state"), "cpu_offload"),
+    ],
+)
+def test_offload_summary_preserves_the_planned_state_kind(states, expected):
+    assert _offload_summary(_offload_physical(*states)).value == expected
+
+
+def test_storage_and_accelerator_evidence_must_match_the_physical_spec():
+    empty_storage = StorageProfile(captured_at=_NOW)
+    with pytest.raises(PlannerError, match="uses no storage"):
+        _plan(_profile(cc_major=8), _report(), storage_profile=empty_storage)
+
+    marginal = StorageRoleAssessment(
+        role="parameter_offload",
+        path="C:/offload",
+        suitability="marginal",
+        interface="hdd",
+        reasons=["rotational storage can bottleneck offload"],
+    )
+    marginal_profile = StorageProfile(captured_at=_NOW, assessments=[marginal])
+    with pytest.raises(PlannerError, match="requires the exact StorageProfile"):
+        _plan(
+            _profile(cc_major=8),
+            _report(),
+            physical_execution=_storage_physical(marginal, marginal_profile),
+        )
+
+    with pytest.raises(PlannerError, match="assessment absent"):
+        _plan(
+            _profile(cc_major=8),
+            _report(),
+            physical_execution=_storage_physical(marginal, empty_storage),
+            storage_profile=empty_storage,
+        )
+
+    unknown = StorageRoleAssessment.model_validate(
+        {
+            **marginal.model_dump(mode="json"),
+            "suitability": "unknown",
+            "interface": "unknown",
+        }
+    )
+    unknown_profile = StorageProfile(captured_at=_NOW, assessments=[unknown])
+    with pytest.raises(PlannerError, match="allow_unknown_storage"):
+        _plan(
+            _profile(cc_major=8),
+            _report(),
+            physical_execution=_storage_physical(unknown, unknown_profile),
+            storage_profile=unknown_profile,
+        )
+
+    wrong_gpu_body = _scoped_physical().model_dump(mode="json")
+    wrong_gpu_body["resources"][0]["device_id"] = "cuda:1"
+    with pytest.raises(PlannerError, match="accelerator absent"):
+        _plan(
+            _profile(cc_major=8),
+            _report(physical=True),
+            physical_execution=PhysicalExecutionSpec.model_validate(wrong_gpu_body),
+        )
+
+
+def test_storage_backed_plan_requires_profile_match_and_explicit_marginal_acceptance():
+    assessment = StorageRoleAssessment(
+        role="parameter_offload",
+        path="C:/offload",
+        suitability="marginal",
+        interface="hdd",
+        reasons=["rotational storage can bottleneck offload"],
+    )
+    storage = StorageProfile(captured_at=_NOW, assessments=[assessment])
+    physical = _storage_physical(assessment, storage)
+    with pytest.raises(PlannerError, match="allow_marginal_storage"):
+        _plan(
+            _profile(cc_major=8),
+            _report(),
+            physical_execution=physical,
+            storage_profile=storage,
+        )
+    with pytest.raises(PlannerError, match="can't run the physical plan"):
+        _plan(
+            _profile(cc_major=8),
+            _report(),
+            physical_execution=physical,
+            storage_profile=storage,
+            allow_marginal_storage=True,
+        )
+    changed = storage.model_copy(update={"captured_at": "2026-07-12T00:00:00Z"})
+    with pytest.raises(PlannerError, match="does not match"):
+        _plan(
+            _profile(cc_major=8),
+            _report(),
+            physical_execution=physical,
+            storage_profile=changed,
+            allow_marginal_storage=True,
+        )
 
 
 def test_wsl_blackwell_host_keeps_sdpa_not_math():
@@ -306,6 +669,29 @@ def test_plan_hash_changes_when_a_planned_field_changes():
     base = _plan(_profile(cc_major=12), _report())
     other = _plan(_profile(cc_major=12), _report(), learning_rate=1e-5)
     assert base.plan_hash != other.plan_hash
+
+
+def test_plan_hash_seals_physical_execution_and_detects_tampering():
+    plan = _plan(_profile(cc_major=8), _report())
+    assert plan.physical_execution is not None
+    changed_physical = plan.physical_execution.model_copy(
+        update={"evidence_status": "planned_not_measured"}
+    )
+    # A semantic no-op copy stays valid; changing a real physical field does not.
+    assert changed_physical == plan.physical_execution
+    tampered_body = plan.model_dump(mode="json")
+    tampered_body["physical_execution"]["resources"][0]["device_id"] = "cuda:9"
+    tampered = P.RunPlan.model_validate(tampered_body)
+    assert not verify_run_plan_hash(tampered)
+
+
+def test_legacy_hash_payload_omits_absent_physical_execution():
+    from corpus_studio.platform.supervisor import demo_run_plan
+
+    legacy = demo_run_plan()
+    assert legacy.physical_execution is None
+    assert "physical_execution" not in run_plan_hash_payload(legacy)
+    assert verify_run_plan_hash(legacy)
 
 
 def test_compute_plan_hash_is_order_independent():

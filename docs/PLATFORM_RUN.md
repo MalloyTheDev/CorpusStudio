@@ -55,6 +55,10 @@ against what PROVED to work on this host:
 - **adapter** → `qlora` when quantized, else `lora` (the trainer is LoRA-only; other methods are
   refused rather than silently downgraded).
 - `sequence_len` flows from your flag — never a hardcoded calibration value.
+- **physical execution** → one concrete CPU or CUDA resource, one whole-model authoritative
+  placement, and rank 0 by default. Advanced callers may provide `--physical-spec`, a sealed
+  `--parameter-accounting-report`, and an exact `--storage-profile`; see
+  [`RUN_PLAN_PHYSICAL_EXECUTION.md`](RUN_PLAN_PHYSICAL_EXECUTION.md).
 
 **Pick your framework.** `corpus-studio platform-backends` lists the registered training backends
 (`corpus_studio`, `unsloth`, …); pass `--backend <id>` to `platform-plan` to resolve the plan on that
@@ -73,6 +77,11 @@ predicted fit: NATIVE_UNPROVEN — estimated peak ~10.8 GB fits within 12.0 GB w
 the verdict distinguishes a Windows/WDDM **silent spill** (`ACCIDENTAL_WDDM_SPILL`, 10-25× slowdown)
 from a hard OOM (`FAIL`) by the host's residency model.
 
+A non-trivial physical specification is classified `PLANNED_UNPROVEN`, with no peak-memory or native
+residency claim, until an estimator and measured backend exist for that topology. Unsuitable storage
+is refused; marginal or unknown storage requires both a matching recorded assessment and the explicit
+`--allow-marginal-storage` or `--allow-unknown-storage` flag.
+
 If the host isn't ready, `platform-plan` exits non-zero with a clear reason (the ahead-of-time twin of
 a training error) — it does **not** silently downgrade a real-training request to a CPU toy.
 
@@ -84,6 +93,10 @@ corpus-studio platform-run ./plan/RunPlan.json --runner training --out ./run
 
 - Runs the plan through the headless **run supervisor** + the **TrainingRunner** (which drives the
   first-party trainer, reading the plan's `training_config_snapshot`).
+- Revalidates the contract and recomputes `plan_hash` before dispatch; the worker verifies it again.
+  Editing a device, placement, rank, selector, or offload rule after planning is refused.
+- Refuses non-trivial physical execution before importing or invoking a trainer. The current built-in
+  runner proves the singleton path only; a representable offload/distributed plan is not support proof.
 - Streams **RunEvent** envelopes to **stderr** (ordered `seq`, `stage` / `metric` with per-step loss /
   `artifact_produced` / `terminal`).
 - Writes the terminal **RunManifest** to stdout (and `./run/RunManifest.json`), classifying the

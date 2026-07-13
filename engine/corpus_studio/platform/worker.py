@@ -80,6 +80,10 @@ def run_worker(
         envelope = json.loads(dispatch_line)
         body = envelope["body"]
         plan = RunPlan.model_validate(body["plan"])
+        from corpus_studio.platform.planner import verify_run_plan_hash  # noqa: PLC0415
+
+        if not verify_run_plan_hash(plan):
+            raise ValueError("plan_hash does not match the canonical plan body")
         run_id = body["run_id"]
     except (ValueError, KeyError, TypeError) as exc:
         _send("run_rejected", {"run_id": "unknown", "taxonomy": "ENVIRONMENT_FAILURE",

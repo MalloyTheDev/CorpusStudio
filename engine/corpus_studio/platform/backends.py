@@ -16,7 +16,12 @@ Dependency-light: pure contracts + stdlib, no torch.
 
 from __future__ import annotations
 
-from corpus_studio.platform.contracts import BackendManifest
+from corpus_studio.platform.contracts import (
+    BackendManifest,
+    EffectiveCapabilities,
+    PhysicalExecutionSpec,
+)
+from corpus_studio.platform.enums import OffloadStrategy, PlacementMode, PlacementRole
 
 # ------------------------------------------------------------------------------------------------
 # Built-in backend manifests. Constructed via model_validate so the enum-list fields coerce from
@@ -41,6 +46,8 @@ _CORPUS_STUDIO = {
     "objective_capabilities": ["adapter_lora", "adapter_qlora", "causal_lm_sft"],
     "checkpoint_impls": ["adapter_only", "safetensors"],
     "optimizers": ["adamw_torch", "adamw_8bit", "paged_adamw_8bit", "adamw_bnb_8bit"],
+    "placement_modes": ["single_resource"],
+    "placement_tiers": ["gpu"],
     "export_formats": ["adapter_peft"],
     "dependency_requirements": [
         {"name": "torch"},
@@ -84,6 +91,8 @@ _UNSLOTH = {
     "objective_capabilities": ["adapter_lora", "adapter_qlora", "causal_lm_sft"],
     "checkpoint_impls": ["adapter_only", "safetensors"],
     "optimizers": ["adamw_8bit", "paged_adamw_8bit"],
+    "placement_modes": ["single_resource"],
+    "placement_tiers": ["gpu"],
     "export_formats": ["adapter_peft", "merged_safetensors", "merged_fp16", "gguf"],
     "dependency_requirements": [
         {"name": "unsloth"},
@@ -177,3 +186,82 @@ def compatible_backends(
             attention=attention,
         )
     ]
+
+
+def unmet_physical_requirements(
+    manifest: BackendManifest,
+    effective: EffectiveCapabilities | None,
+    spec: PhysicalExecutionSpec,
+    *,
+    offload_strategy: OffloadStrategy,
+) -> list[str]:
+    """Return every declared/proven capability missing for a non-trivial physical plan.
+
+    The ordinary singleton plan is checked by :func:`unmet_requirements`; callers should invoke this
+    only for a custom/offloaded/distributed spec. Static declaration and functional proof are both
+    required, so an installed framework never becomes "supported" merely by naming a feature.
+    """
+
+    requested_tiers = {item.tier for item in spec.resources}
+    requested_modes: set[PlacementMode] = set()
+    if len(spec.resources) == 1:
+        requested_modes.add(PlacementMode.single_resource)
+    if len({item.tier for item in spec.resources}) > 1:
+        requested_modes.add(PlacementMode.tiered)
+    if spec.requires_parameter_accounting():
+        requested_modes.add(PlacementMode.identity_scoped)
+    if any(item.role == PlacementRole.replica for item in spec.placements):
+        requested_modes.add(PlacementMode.replicated)
+    if any(item.role == PlacementRole.shard for item in spec.placements):
+        requested_modes.add(PlacementMode.sharded)
+    if any(item.selector.expert_ids for item in spec.placements) or any(
+        item.selector.expert_ids for item in spec.offload_rules
+    ):
+        requested_modes.add(PlacementMode.expert_scoped)
+    requested_parallelism = {item.kind for item in spec.parallelism.groups}
+    requested_communication = {
+        item.communication_backend for item in spec.parallelism.groups
+    }
+    requested_offload = (
+        {offload_strategy} if offload_strategy != OffloadStrategy.none else set()
+    )
+
+    declared: dict[str, set[str]] = {
+        "placement tier": {item.value for item in manifest.placement_tiers},
+        "placement mode": {item.value for item in manifest.placement_modes},
+        "parallelism kind": {item.value for item in manifest.parallelism_kinds},
+        "communication backend": {item.value for item in manifest.communication_backends},
+        "offload strategy": {item.value for item in manifest.offload_strategies},
+    }
+    proven: dict[str, set[str]] = {
+        "placement tier": {item.value for item in effective.placement_tiers}
+        if effective
+        else set(),
+        "placement mode": {item.value for item in effective.placement_modes}
+        if effective
+        else set(),
+        "parallelism kind": {item.value for item in effective.parallelism_kinds}
+        if effective
+        else set(),
+        "communication backend": {item.value for item in effective.communication_backends}
+        if effective
+        else set(),
+        "offload strategy": {item.value for item in effective.offload_strategies}
+        if effective
+        else set(),
+    }
+    requested: dict[str, set[str]] = {
+        "placement tier": {item.value for item in requested_tiers},
+        "placement mode": {item.value for item in requested_modes},
+        "parallelism kind": {item.value for item in requested_parallelism},
+        "communication backend": {item.value for item in requested_communication},
+        "offload strategy": {item.value for item in requested_offload},
+    }
+    reasons: list[str] = []
+    for label, tokens in requested.items():
+        for token in sorted(tokens):
+            if token not in declared[label]:
+                reasons.append(f"{label} '{token}' is not declared by the backend")
+            elif token not in proven[label]:
+                reasons.append(f"{label} '{token}' is not functionally verified")
+    return reasons

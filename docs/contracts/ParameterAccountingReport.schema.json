@@ -43,6 +43,20 @@
       "title": "HashRef",
       "type": "object"
     },
+    "MemoryTier": {
+      "description": "A physical state tier. A RunPlan names the intended tier; only runtime evidence may claim\nactual residency there.",
+      "enum": [
+        "gpu",
+        "pinned_ram",
+        "pageable_ram",
+        "nvme",
+        "sata",
+        "remote",
+        "unknown"
+      ],
+      "title": "MemoryTier",
+      "type": "string"
+    },
     "ParameterAccountingProfile": {
       "description": "The evidence set a report is trying to complete.",
       "enum": [
@@ -473,23 +487,13 @@
         "memory_tier": {
           "anyOf": [
             {
-              "enum": [
-                "gpu",
-                "pinned_ram",
-                "pageable_ram",
-                "nvme",
-                "sata",
-                "remote",
-                "unknown"
-              ],
-              "type": "string"
+              "$ref": "#/$defs/MemoryTier"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "title": "Memory Tier"
+          "default": null
         },
         "model_ref": {
           "$ref": "#/$defs/Ref"

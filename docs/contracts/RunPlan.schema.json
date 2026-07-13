@@ -209,6 +209,18 @@
       "title": "CheckpointPolicy",
       "type": "object"
     },
+    "CommunicationBackend": {
+      "enum": [
+        "none",
+        "nccl",
+        "gloo",
+        "mpi",
+        "ucc",
+        "backend_native"
+      ],
+      "title": "CommunicationBackend",
+      "type": "string"
+    },
     "CompileMode": {
       "enum": [
         "none",
@@ -218,6 +230,17 @@
         "aot_inductor"
       ],
       "title": "CompileMode",
+      "type": "string"
+    },
+    "DeviceKind": {
+      "enum": [
+        "cuda",
+        "rocm",
+        "mps",
+        "xpu",
+        "cpu"
+      ],
+      "title": "DeviceKind",
       "type": "string"
     },
     "EvalSchedule": {
@@ -339,6 +362,101 @@
       "title": "LossImpl",
       "type": "string"
     },
+    "MemoryTier": {
+      "description": "A physical state tier. A RunPlan names the intended tier; only runtime evidence may claim\nactual residency there.",
+      "enum": [
+        "gpu",
+        "pinned_ram",
+        "pageable_ram",
+        "nvme",
+        "sata",
+        "remote",
+        "unknown"
+      ],
+      "title": "MemoryTier",
+      "type": "string"
+    },
+    "OffloadMechanism": {
+      "enum": [
+        "cpu_copy",
+        "cuda_unified_memory",
+        "nvme_io",
+        "backend_native"
+      ],
+      "title": "OffloadMechanism",
+      "type": "string"
+    },
+    "OffloadRule": {
+      "additionalProperties": false,
+      "properties": {
+        "eviction_policy": {
+          "default": "none",
+          "enum": [
+            "none",
+            "lru",
+            "lfu",
+            "layer_window",
+            "heat_based"
+          ],
+          "title": "Eviction Policy",
+          "type": "string"
+        },
+        "mechanism": {
+          "$ref": "#/$defs/OffloadMechanism"
+        },
+        "prefetch_policy": {
+          "default": "none",
+          "enum": [
+            "none",
+            "static",
+            "layer_window",
+            "route_prediction",
+            "heat_based"
+          ],
+          "title": "Prefetch Policy",
+          "type": "string"
+        },
+        "route_miss_action": {
+          "$ref": "#/$defs/RouteMissAction",
+          "default": "fail"
+        },
+        "rule_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "selector": {
+          "$ref": "#/$defs/PhysicalScopeSelector"
+        },
+        "source_resource_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Source Resource Id",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/PhysicalStateKind"
+        },
+        "target_resource_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Target Resource Id",
+          "type": "string"
+        },
+        "trigger": {
+          "$ref": "#/$defs/OffloadTrigger"
+        }
+      },
+      "required": [
+        "rule_id",
+        "state",
+        "selector",
+        "source_resource_id",
+        "target_resource_id",
+        "mechanism",
+        "trigger"
+      ],
+      "title": "OffloadRule",
+      "type": "object"
+    },
     "OffloadStrategy": {
       "description": "The ``controlled_*`` values are the deliberate, planned counterparts of the accidental spills\nin :class:`FitClass`.",
       "enum": [
@@ -352,6 +470,16 @@
         "deepspeed_zero3"
       ],
       "title": "OffloadStrategy",
+      "type": "string"
+    },
+    "OffloadTrigger": {
+      "enum": [
+        "static",
+        "memory_pressure",
+        "ahead_of_use",
+        "after_use"
+      ],
+      "title": "OffloadTrigger",
       "type": "string"
     },
     "Optimizer": {
@@ -427,6 +555,305 @@
       "title": "OptimizerSpec",
       "type": "object"
     },
+    "ParallelGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "communication_backend": {
+          "$ref": "#/$defs/CommunicationBackend"
+        },
+        "group_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Group Id",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ParallelismKind"
+        },
+        "parameter_scope_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "type": "string"
+          },
+          "title": "Parameter Scope Ids",
+          "type": "array"
+        },
+        "ranks": {
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 2,
+          "title": "Ranks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "group_id",
+        "kind",
+        "ranks",
+        "communication_backend"
+      ],
+      "title": "ParallelGroup",
+      "type": "object"
+    },
+    "ParallelismKind": {
+      "enum": [
+        "data",
+        "tensor",
+        "pipeline",
+        "expert",
+        "sequence",
+        "context"
+      ],
+      "title": "ParallelismKind",
+      "type": "string"
+    },
+    "ParallelismSpec": {
+      "additionalProperties": false,
+      "description": "Explicit rank/group topology. Groups may overlap across axes, so the contract never assumes\nthat data x tensor x pipeline x expert degrees form one universal product.",
+      "properties": {
+        "groups": {
+          "items": {
+            "$ref": "#/$defs/ParallelGroup"
+          },
+          "title": "Groups",
+          "type": "array"
+        },
+        "ranks": {
+          "items": {
+            "$ref": "#/$defs/RankBinding"
+          },
+          "minItems": 1,
+          "title": "Ranks",
+          "type": "array"
+        },
+        "world_size": {
+          "default": 1,
+          "minimum": 1,
+          "title": "World Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ranks"
+      ],
+      "title": "ParallelismSpec",
+      "type": "object"
+    },
+    "PhysicalExecutionSpec": {
+      "additionalProperties": false,
+      "description": "The physical scheduler input, kept separate from learned semantic routing. Every field is\nplanned intent sealed by RunPlan; it is not runtime residency or fit evidence.",
+      "properties": {
+        "evidence_status": {
+          "const": "planned_not_measured",
+          "default": "planned_not_measured",
+          "title": "Evidence Status",
+          "type": "string"
+        },
+        "offload_rules": {
+          "items": {
+            "$ref": "#/$defs/OffloadRule"
+          },
+          "title": "Offload Rules",
+          "type": "array"
+        },
+        "parallelism": {
+          "$ref": "#/$defs/ParallelismSpec"
+        },
+        "placements": {
+          "items": {
+            "$ref": "#/$defs/StatePlacement"
+          },
+          "minItems": 1,
+          "title": "Placements",
+          "type": "array"
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/PhysicalResource"
+          },
+          "minItems": 1,
+          "title": "Resources",
+          "type": "array"
+        },
+        "route_fidelity": {
+          "default": "preserve_or_fail",
+          "enum": [
+            "preserve_or_fail",
+            "declared_semantic_fallback"
+          ],
+          "title": "Route Fidelity",
+          "type": "string"
+        },
+        "semantic_fallback_policy_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "storage_profile_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "resources",
+        "placements",
+        "parallelism"
+      ],
+      "title": "PhysicalExecutionSpec",
+      "type": "object"
+    },
+    "PhysicalResource": {
+      "additionalProperties": false,
+      "description": "One planned physical tier/device. This is scheduling intent, never measured residency.",
+      "properties": {
+        "device_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Id"
+        },
+        "device_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeviceKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "resource_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "storage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlannedStorageBinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tier": {
+          "$ref": "#/$defs/MemoryTier"
+        }
+      },
+      "required": [
+        "resource_id",
+        "tier"
+      ],
+      "title": "PhysicalResource",
+      "type": "object"
+    },
+    "PhysicalScopeSelector": {
+      "additionalProperties": false,
+      "description": "Select planned state by stable logical identity. Empty identity lists mean nothing, never an\ninferred dense model. ``whole_model`` is the explicit dense-safe fallback for unknown topology.",
+      "properties": {
+        "component_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "type": "string"
+          },
+          "title": "Component Ids",
+          "type": "array"
+        },
+        "expert_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "type": "string"
+          },
+          "title": "Expert Ids",
+          "type": "array"
+        },
+        "parameter_scope_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "type": "string"
+          },
+          "title": "Parameter Scope Ids",
+          "type": "array"
+        },
+        "whole_model": {
+          "default": false,
+          "title": "Whole Model",
+          "type": "boolean"
+        }
+      },
+      "title": "PhysicalScopeSelector",
+      "type": "object"
+    },
+    "PhysicalStateKind": {
+      "enum": [
+        "parameters",
+        "gradients",
+        "optimizer_state",
+        "activations"
+      ],
+      "title": "PhysicalStateKind",
+      "type": "string"
+    },
+    "PlacementRole": {
+      "enum": [
+        "authoritative",
+        "shard",
+        "replica",
+        "cache"
+      ],
+      "title": "PlacementRole",
+      "type": "string"
+    },
+    "PlannedStorageBinding": {
+      "additionalProperties": false,
+      "description": "The exact StorageProfile assessment accepted by a plan. ``marginal``/``unknown`` are usable\nonly when that same verdict is explicitly recorded in ``accepted_suitability``; ``unsuitable`` is\nalways refused.",
+      "properties": {
+        "accepted_suitability": {
+          "$ref": "#/$defs/StorageSuitability",
+          "default": "suitable"
+        },
+        "assessment": {
+          "$ref": "#/$defs/StorageRoleAssessment"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/StorageRole"
+        }
+      },
+      "required": [
+        "role",
+        "path",
+        "assessment"
+      ],
+      "title": "PlannedStorageBinding",
+      "type": "object"
+    },
     "PrecisionMode": {
       "enum": [
         "fp32",
@@ -454,6 +881,39 @@
       "title": "QuantizationMode",
       "type": "string"
     },
+    "RankBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "local_rank": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Local Rank",
+          "type": "integer"
+        },
+        "node_id": {
+          "default": "local",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "rank": {
+          "minimum": 0,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "resource_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Resource Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rank",
+        "resource_id"
+      ],
+      "title": "RankBinding",
+      "type": "object"
+    },
     "Ref": {
       "additionalProperties": false,
       "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
@@ -480,6 +940,17 @@
       ],
       "title": "Ref",
       "type": "object"
+    },
+    "RouteMissAction": {
+      "description": "What the physical scheduler does when requested state is not ready. Semantic fallback is\nnever implicit: it requires a separately pinned learned-policy reference.",
+      "enum": [
+        "wait",
+        "defer",
+        "fail",
+        "semantic_fallback"
+      ],
+      "title": "RouteMissAction",
+      "type": "string"
     },
     "SequenceSpec": {
       "additionalProperties": false,
@@ -511,6 +982,207 @@
       },
       "title": "SequenceSpec",
       "type": "object"
+    },
+    "StatePlacement": {
+      "additionalProperties": false,
+      "properties": {
+        "placement_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Placement Id",
+          "type": "string"
+        },
+        "resource_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/PlacementRole"
+        },
+        "selector": {
+          "$ref": "#/$defs/PhysicalScopeSelector"
+        },
+        "shard_count": {
+          "anyOf": [
+            {
+              "minimum": 2,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shard Count"
+        },
+        "shard_group_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shard Group Id"
+        },
+        "shard_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shard Index"
+        },
+        "source_placement_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Placement Id"
+        },
+        "state": {
+          "$ref": "#/$defs/PhysicalStateKind"
+        }
+      },
+      "required": [
+        "placement_id",
+        "state",
+        "selector",
+        "resource_id",
+        "role"
+      ],
+      "title": "StatePlacement",
+      "type": "object"
+    },
+    "StorageInterface": {
+      "description": "How a storage device attaches. The interface \u2014 not just free space \u2014 decides whether a device\ncan sustain the heavy sequential + random writes of optimizer/parameter offload and checkpointing.\nA USB bridge or a network mount will thrash under sustained offload even with terabytes free.",
+      "enum": [
+        "nvme_pcie",
+        "sata_ssd",
+        "hdd",
+        "usb",
+        "network",
+        "virtual",
+        "unknown"
+      ],
+      "title": "StorageInterface",
+      "type": "string"
+    },
+    "StorageRole": {
+      "description": "The role a path plays in a run. Roles differ in access pattern: ``optimizer_offload`` /\n``parameter_offload`` / ``scratch`` / ``checkpoints`` are WRITE-heavy; ``model_cache`` /\n``dataset_cache`` are read-LATENCY-sensitive during load; ``source_repo`` / ``python_env`` are\nthousands of SMALL files touched on every process start (an import over a USB bridge or a WSL\n``/mnt`` mount stalls); ``archive`` just wants capacity. A path's suitability is judged PER ROLE (a\nUSB SSD is fine for ``archive``, poor for ``model_cache``, unfit for ``optimizer_offload``).",
+      "enum": [
+        "os",
+        "source_repo",
+        "python_env",
+        "model_cache",
+        "dataset_cache",
+        "checkpoints",
+        "scratch",
+        "optimizer_offload",
+        "parameter_offload",
+        "artifacts",
+        "archive",
+        "logs"
+      ],
+      "title": "StorageRole",
+      "type": "string"
+    },
+    "StorageRoleAssessment": {
+      "additionalProperties": false,
+      "description": "The PER-ROLE verdict for a candidate path: can it play this role, and if not, WHY. The reasons\nare the safe-spill guardrail's human-readable justification (USB bridge / synced folder / free-space\nmargin / inside the source repo / rotational disk).",
+      "properties": {
+        "device_mount_point": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Mount Point"
+        },
+        "free_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Free Bytes"
+        },
+        "interface": {
+          "$ref": "#/$defs/StorageInterface",
+          "default": "unknown"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "reasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "required_free_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Required Free Bytes"
+        },
+        "role": {
+          "$ref": "#/$defs/StorageRole"
+        },
+        "suitability": {
+          "$ref": "#/$defs/StorageSuitability"
+        }
+      },
+      "required": [
+        "role",
+        "path",
+        "suitability"
+      ],
+      "title": "StorageRoleAssessment",
+      "type": "object"
+    },
+    "StorageSuitability": {
+      "description": "The per-role verdict for a candidate path. ``unsuitable`` is a hard no (data-loss or\nthrash-to-a-halt risk); ``marginal`` will work but degrade (e.g. an HDD for offload); ``unknown``\nwhen detection couldn't characterize the device (honest, never a false ``suitable``).",
+      "enum": [
+        "suitable",
+        "marginal",
+        "unsuitable",
+        "unknown"
+      ],
+      "title": "StorageSuitability",
+      "type": "string"
     },
     "TaskType": {
       "enum": [
@@ -609,6 +1281,17 @@
       "anyOf": [
         {
           "$ref": "#/$defs/Ref"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "physical_execution": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PhysicalExecutionSpec"
         },
         {
           "type": "null"

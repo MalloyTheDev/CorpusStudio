@@ -10,7 +10,7 @@ language-neutral JSON Schemas the Rust core / Avalonia / Tauri consume are gener
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
@@ -31,6 +31,7 @@ from .enums import (
     AllocatorPolicy,
     AttentionImpl,
     CheckpointImpl,
+    CommunicationBackend,
     CompatibilityStatus,
     CompileMode,
     CountHandling,
@@ -43,13 +44,16 @@ from .enums import (
     FailureTaxonomy,
     FitClass,
     LossImpl,
+    MemoryTier,
     MemoryResidencyModel,
     ModelAttentionType,
     ModelExecutionKind,
     ModelFormat,
     ModelSourceKind,
     ModelTaskClass,
+    OffloadMechanism,
     OffloadStrategy,
+    OffloadTrigger,
     OperatingSystem,
     Optimizer,
     ObjectiveArtifactKind,
@@ -76,10 +80,15 @@ from .enums import (
     ParameterScopeKind,
     ParameterValueRelation,
     ParameterWindowKind,
+    ParallelismKind,
+    PhysicalStateKind,
+    PlacementMode,
+    PlacementRole,
     PositionalEncoding,
     PrecisionMode,
     QuantizationMode,
     RecipeVerification,
+    RouteMissAction,
     StageMarker,
     StorageInterface,
     StorageRole,
@@ -455,15 +464,7 @@ class ParameterScope(ContractModel):
     component_ids: list[ParameterId] = Field(default_factory=list)
     expert_ids: list[ParameterId] = Field(default_factory=list)
     device_id: str | None = None
-    memory_tier: Literal[
-        "gpu",
-        "pinned_ram",
-        "pageable_ram",
-        "nvme",
-        "sata",
-        "remote",
-        "unknown",
-    ] | None = None
+    memory_tier: MemoryTier | None = None
     definition: str = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -1047,7 +1048,7 @@ class ModelTopology(ContractModel):
     execution_kind: ModelExecutionKind = ModelExecutionKind.unknown
     semantic_routing: SemanticRouting | None = None
     expert_groups: list[ExpertGroup] = Field(default_factory=list)
-    # Placement/prefetch/residency decisions belong to the future RunPlan physical scheduler.
+    # Placement/prefetch/residency decisions belong to the RunPlan physical-execution layer.
     physical_scheduler_owner: Literal["run_plan"] = "run_plan"
 
     @model_validator(mode="after")
@@ -1484,7 +1485,7 @@ class ObjectiveUpdatePolicy(ContractModel):
     """What may change, separate from where those components are physically resident.
 
     This is the MoE-safe semantic update policy. Placement, prefetch, and device scheduling remain
-    future RunPlan responsibilities.
+    separate RunPlan physical-execution responsibilities.
     """
 
     scopes: list[ObjectiveUpdateScope] = Field(min_length=1)
@@ -2020,6 +2021,10 @@ class BackendManifest(ContractModel):
     checkpoint_impls: list[CheckpointImpl] = Field(default_factory=list)
     optimizers: list[Optimizer] = Field(default_factory=list)
     offload_strategies: list[OffloadStrategy] = Field(default_factory=list)
+    placement_tiers: list[MemoryTier] = Field(default_factory=list)
+    placement_modes: list[PlacementMode] = Field(default_factory=list)
+    parallelism_kinds: list[ParallelismKind] = Field(default_factory=list)
+    communication_backends: list[CommunicationBackend] = Field(default_factory=list)
     compile_modes: list[CompileMode] = Field(default_factory=list)
     export_formats: list[ExportFormat] = Field(default_factory=list)
     dependency_requirements: list[DependencyRequirement] = Field(default_factory=list)
@@ -2036,6 +2041,19 @@ class BackendManifest(ContractModel):
     def _sorted_objective_capabilities(cls, values: list[str]) -> list[str]:
         if values != sorted(set(values)):
             raise ValueError("objective_capabilities must be sorted and unique")
+        return values
+
+    @field_validator(
+        "offload_strategies",
+        "placement_tiers",
+        "placement_modes",
+        "parallelism_kinds",
+        "communication_backends",
+    )
+    @classmethod
+    def _sorted_physical_capabilities(cls, values: list[Any]) -> list[Any]:
+        if values != sorted(set(values), key=lambda item: item.value):
+            raise ValueError("physical capability lists must be sorted and unique")
         return values
 
 
@@ -2055,12 +2073,30 @@ class EffectiveCapabilities(ContractModel):
     attention_impls: list[AttentionImpl] = Field(default_factory=list)
     adapter_methods: list[AdapterMethod] = Field(default_factory=list)
     objective_capabilities: list[ObjectiveCapability] = Field(default_factory=list)
+    offload_strategies: list[OffloadStrategy] = Field(default_factory=list)
+    placement_tiers: list[MemoryTier] = Field(default_factory=list)
+    placement_modes: list[PlacementMode] = Field(default_factory=list)
+    parallelism_kinds: list[ParallelismKind] = Field(default_factory=list)
+    communication_backends: list[CommunicationBackend] = Field(default_factory=list)
 
     @field_validator("objective_capabilities")
     @classmethod
     def _sorted_effective_objective_capabilities(cls, values: list[str]) -> list[str]:
         if values != sorted(set(values)):
             raise ValueError("effective objective_capabilities must be sorted and unique")
+        return values
+
+    @field_validator(
+        "offload_strategies",
+        "placement_tiers",
+        "placement_modes",
+        "parallelism_kinds",
+        "communication_backends",
+    )
+    @classmethod
+    def _sorted_effective_physical_capabilities(cls, values: list[Any]) -> list[Any]:
+        if values != sorted(set(values), key=lambda item: item.value):
+            raise ValueError("effective physical capability lists must be sorted and unique")
         return values
 
 
@@ -2368,6 +2404,361 @@ class ExportSpec(ContractModel):
     output_dir: str = "output"
 
 
+class PlannedStorageBinding(ContractModel):
+    """The exact StorageProfile assessment accepted by a plan. ``marginal``/``unknown`` are usable
+    only when that same verdict is explicitly recorded in ``accepted_suitability``; ``unsuitable`` is
+    always refused."""
+
+    role: StorageRole
+    path: str = Field(min_length=1)
+    assessment: StorageRoleAssessment
+    accepted_suitability: StorageSuitability = StorageSuitability.suitable
+
+    @model_validator(mode="after")
+    def _validate_binding(self) -> PlannedStorageBinding:
+        if self.assessment.role != self.role or self.assessment.path != self.path:
+            raise ValueError("storage binding role/path must match its embedded assessment")
+        if self.assessment.suitability == StorageSuitability.unsuitable:
+            raise ValueError("unsuitable storage cannot be sealed into a RunPlan")
+        if self.accepted_suitability != self.assessment.suitability:
+            raise ValueError(
+                "accepted_suitability must explicitly match the embedded storage verdict"
+            )
+        return self
+
+
+class PhysicalResource(ContractModel):
+    """One planned physical tier/device. This is scheduling intent, never measured residency."""
+
+    resource_id: ParameterId
+    tier: MemoryTier
+    device_kind: DeviceKind | None = None
+    device_id: str | None = None
+    storage: PlannedStorageBinding | None = None
+
+    @model_validator(mode="after")
+    def _validate_resource(self) -> PhysicalResource:
+        storage_tiers = {MemoryTier.nvme, MemoryTier.sata, MemoryTier.remote}
+        if self.tier == MemoryTier.unknown:
+            raise ValueError("a resolved physical resource cannot use the unknown memory tier")
+        if self.tier == MemoryTier.gpu:
+            if self.device_kind not in {
+                DeviceKind.cuda,
+                DeviceKind.rocm,
+                DeviceKind.mps,
+                DeviceKind.xpu,
+            } or not self.device_id:
+                raise ValueError("GPU resources require an accelerator kind and stable device_id")
+            if self.storage is not None:
+                raise ValueError("GPU resources cannot carry a storage binding")
+        elif self.tier in {MemoryTier.pinned_ram, MemoryTier.pageable_ram}:
+            if self.device_kind != DeviceKind.cpu or not self.device_id:
+                raise ValueError("RAM resources require device_kind=cpu and a stable device_id")
+            if self.storage is not None:
+                raise ValueError("RAM resources cannot carry a storage binding")
+        elif self.tier in storage_tiers:
+            if self.storage is None:
+                raise ValueError("storage-tier resources require a bound StorageProfile assessment")
+            if self.device_kind is not None or self.device_id is not None:
+                raise ValueError("storage-tier resources use their storage binding, not a device_id")
+        return self
+
+
+class PhysicalScopeSelector(ContractModel):
+    """Select planned state by stable logical identity. Empty identity lists mean nothing, never an
+    inferred dense model. ``whole_model`` is the explicit dense-safe fallback for unknown topology."""
+
+    whole_model: bool = False
+    parameter_scope_ids: list[ParameterId] = Field(default_factory=list)
+    component_ids: list[ParameterId] = Field(default_factory=list)
+    expert_ids: list[ParameterId] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_selector(self) -> PhysicalScopeSelector:
+        for label, values in (
+            ("parameter_scope_ids", self.parameter_scope_ids),
+            ("component_ids", self.component_ids),
+            ("expert_ids", self.expert_ids),
+        ):
+            if values != sorted(set(values)):
+                raise ValueError(f"{label} must be sorted and unique")
+        has_scoped_identity = bool(
+            self.parameter_scope_ids or self.component_ids or self.expert_ids
+        )
+        if self.whole_model == has_scoped_identity:
+            raise ValueError(
+                "physical selectors require either whole_model or stable scoped identities"
+            )
+        return self
+
+    def identity_key(self) -> tuple[object, ...]:
+        return (
+            self.whole_model,
+            tuple(self.parameter_scope_ids),
+            tuple(self.component_ids),
+            tuple(self.expert_ids),
+        )
+
+
+class StatePlacement(ContractModel):
+    placement_id: ParameterId
+    state: PhysicalStateKind
+    selector: PhysicalScopeSelector
+    resource_id: ParameterId
+    role: PlacementRole
+    source_placement_id: ParameterId | None = None
+    shard_group_id: ParameterId | None = None
+    shard_index: int | None = Field(default=None, ge=0)
+    shard_count: int | None = Field(default=None, ge=2)
+
+    @model_validator(mode="after")
+    def _validate_placement(self) -> StatePlacement:
+        if self.role in {PlacementRole.replica, PlacementRole.cache}:
+            if self.source_placement_id is None:
+                raise ValueError("replica/cache placements require source_placement_id")
+        elif self.source_placement_id is not None:
+            raise ValueError("authoritative/shard placements cannot name source_placement_id")
+        shard_fields = (self.shard_group_id, self.shard_index, self.shard_count)
+        if self.role == PlacementRole.shard:
+            if any(value is None for value in shard_fields):
+                raise ValueError("shard placements require group, index, and count")
+            if self.shard_index is not None and self.shard_count is not None:
+                if self.shard_index >= self.shard_count:
+                    raise ValueError("shard_index must be less than shard_count")
+        elif any(value is not None for value in shard_fields):
+            raise ValueError("only shard placements may carry shard metadata")
+        return self
+
+
+class OffloadRule(ContractModel):
+    rule_id: ParameterId
+    state: PhysicalStateKind
+    selector: PhysicalScopeSelector
+    source_resource_id: ParameterId
+    target_resource_id: ParameterId
+    mechanism: OffloadMechanism
+    trigger: OffloadTrigger
+    prefetch_policy: Literal["none", "static", "layer_window", "route_prediction", "heat_based"] = (
+        "none"
+    )
+    eviction_policy: Literal["none", "lru", "lfu", "layer_window", "heat_based"] = "none"
+    route_miss_action: RouteMissAction = RouteMissAction.fail
+
+    @model_validator(mode="after")
+    def _validate_rule(self) -> OffloadRule:
+        if self.source_resource_id == self.target_resource_id:
+            raise ValueError("offload source and target resources must differ")
+        return self
+
+
+class RankBinding(ContractModel):
+    rank: int = Field(ge=0)
+    resource_id: ParameterId
+    node_id: ParameterId = "local"
+    local_rank: int = Field(default=0, ge=0)
+
+
+class ParallelGroup(ContractModel):
+    group_id: ParameterId
+    kind: ParallelismKind
+    ranks: list[int] = Field(min_length=2)
+    communication_backend: CommunicationBackend
+    parameter_scope_ids: list[ParameterId] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_group(self) -> ParallelGroup:
+        if self.ranks != sorted(set(self.ranks)):
+            raise ValueError("parallel group ranks must be sorted and unique")
+        if self.communication_backend == CommunicationBackend.none:
+            raise ValueError("multi-rank groups require an explicit communication backend")
+        if self.parameter_scope_ids != sorted(set(self.parameter_scope_ids)):
+            raise ValueError("parallel group parameter_scope_ids must be sorted and unique")
+        if self.kind == ParallelismKind.expert and not self.parameter_scope_ids:
+            raise ValueError("expert-parallel groups require stable parameter scope IDs")
+        return self
+
+
+class ParallelismSpec(ContractModel):
+    """Explicit rank/group topology. Groups may overlap across axes, so the contract never assumes
+    that data x tensor x pipeline x expert degrees form one universal product."""
+
+    world_size: int = Field(default=1, ge=1)
+    ranks: list[RankBinding] = Field(min_length=1)
+    groups: list[ParallelGroup] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_parallelism(self) -> ParallelismSpec:
+        rank_ids = [item.rank for item in self.ranks]
+        if rank_ids != list(range(self.world_size)):
+            raise ValueError("rank bindings must be ordered and cover exactly 0..world_size-1")
+        local_keys = [(item.node_id, item.local_rank) for item in self.ranks]
+        if len(local_keys) != len(set(local_keys)):
+            raise ValueError("local ranks must be unique within each node")
+        group_ids = [item.group_id for item in self.groups]
+        if group_ids != sorted(set(group_ids)):
+            raise ValueError("parallel groups must be sorted by unique group_id")
+        valid_ranks = set(rank_ids)
+        if any(not set(group.ranks).issubset(valid_ranks) for group in self.groups):
+            raise ValueError("parallel group ranks must reference bound ranks")
+        if self.world_size == 1 and self.groups:
+            raise ValueError("a single-rank plan cannot declare parallel groups")
+        groups_by_kind: dict[ParallelismKind, list[ParallelGroup]] = {}
+        for group in self.groups:
+            groups_by_kind.setdefault(group.kind, []).append(group)
+        for kind, groups in groups_by_kind.items():
+            members = [rank for group in groups for rank in group.ranks]
+            if len(members) != len(set(members)) or set(members) != valid_ranks:
+                raise ValueError(
+                    f"{kind.value} groups must partition all ranks without overlap"
+                )
+        return self
+
+
+class PhysicalExecutionSpec(ContractModel):
+    """The physical scheduler input, kept separate from learned semantic routing. Every field is
+    planned intent sealed by RunPlan; it is not runtime residency or fit evidence."""
+
+    evidence_status: Literal["planned_not_measured"] = "planned_not_measured"
+    route_fidelity: Literal["preserve_or_fail", "declared_semantic_fallback"] = (
+        "preserve_or_fail"
+    )
+    semantic_fallback_policy_ref: Ref | None = None
+    storage_profile_ref: Ref | None = None
+    resources: list[PhysicalResource] = Field(min_length=1)
+    placements: list[StatePlacement] = Field(min_length=1)
+    offload_rules: list[OffloadRule] = Field(default_factory=list)
+    parallelism: ParallelismSpec
+
+    def requires_parameter_accounting(self) -> bool:
+        """Whether stable parameter/component/expert identities must be resolved from evidence."""
+
+        return any(
+            not selector.whole_model
+            for selector in [
+                *(item.selector for item in self.placements),
+                *(item.selector for item in self.offload_rules),
+            ]
+        ) or any(group.parameter_scope_ids for group in self.parallelism.groups)
+
+    @model_validator(mode="after")
+    def _validate_physical_execution(self) -> PhysicalExecutionSpec:
+        resource_ids = [item.resource_id for item in self.resources]
+        if resource_ids != sorted(set(resource_ids)):
+            raise ValueError("physical resources must be sorted by unique resource_id")
+        resources = {item.resource_id: item for item in self.resources}
+        placement_ids = [item.placement_id for item in self.placements]
+        if placement_ids != sorted(set(placement_ids)):
+            raise ValueError("state placements must be sorted by unique placement_id")
+        rule_ids = [item.rule_id for item in self.offload_rules]
+        if rule_ids != sorted(set(rule_ids)):
+            raise ValueError("offload rules must be sorted by unique rule_id")
+        for placement in self.placements:
+            if placement.resource_id not in resources:
+                raise ValueError("state placement references an unknown physical resource")
+        for rank in self.parallelism.ranks:
+            resource = resources.get(rank.resource_id)
+            if resource is None:
+                raise ValueError("rank binding references an unknown physical resource")
+            if resource.tier not in {
+                MemoryTier.gpu,
+                MemoryTier.pinned_ram,
+                MemoryTier.pageable_ram,
+            }:
+                raise ValueError("rank bindings require a compute resource, not storage")
+
+        placements_by_id = {item.placement_id: item for item in self.placements}
+        grouped: dict[tuple[object, ...], list[StatePlacement]] = {}
+        for placement in self.placements:
+            key = (placement.state, *placement.selector.identity_key())
+            grouped.setdefault(key, []).append(placement)
+            if placement.source_placement_id is not None:
+                source_placement = placements_by_id.get(placement.source_placement_id)
+                if source_placement is None or source_placement.role not in {
+                    PlacementRole.authoritative,
+                    PlacementRole.shard,
+                }:
+                    raise ValueError("replica/cache source must be an authoritative placement or shard")
+                if (
+                    source_placement.state != placement.state
+                    or source_placement.selector != placement.selector
+                ):
+                    raise ValueError("replica/cache source must cover the same state and selector")
+        for placements in grouped.values():
+            authoritative = [
+                item for item in placements if item.role == PlacementRole.authoritative
+            ]
+            shards = [item for item in placements if item.role == PlacementRole.shard]
+            if shards:
+                if authoritative:
+                    raise ValueError("state scope cannot be both authoritative and sharded")
+                groups = {item.shard_group_id for item in shards}
+                counts = {item.shard_count for item in shards}
+                indices = {item.shard_index for item in shards}
+                if len(groups) != 1 or len(counts) != 1:
+                    raise ValueError("authoritative shards require one coherent shard group")
+                shard_count = next(iter(counts))
+                if shard_count is None or indices != set(range(shard_count)):
+                    raise ValueError("authoritative shard placements must cover every shard index")
+            elif len(authoritative) != 1:
+                raise ValueError("every planned state scope requires exactly one authoritative placement")
+
+        for rule in self.offload_rules:
+            source_resource = resources.get(rule.source_resource_id)
+            target = resources.get(rule.target_resource_id)
+            if source_resource is None or target is None:
+                raise ValueError("offload rules must reference known resources")
+            if source_resource.tier == target.tier or target.tier == MemoryTier.gpu:
+                raise ValueError("offload rules must move state to a different non-GPU tier")
+            source_placements = [
+                item
+                for item in self.placements
+                if item.state == rule.state
+                and item.selector == rule.selector
+                and item.resource_id == rule.source_resource_id
+                and item.role in {PlacementRole.authoritative, PlacementRole.shard}
+            ]
+            if not source_placements:
+                raise ValueError("offload source must match an authoritative placement or shard")
+            if rule.mechanism == OffloadMechanism.cpu_copy and target.tier not in {
+                MemoryTier.pinned_ram,
+                MemoryTier.pageable_ram,
+            }:
+                raise ValueError("cpu_copy offload requires a RAM target")
+            if rule.mechanism == OffloadMechanism.cuda_unified_memory and target.tier not in {
+                MemoryTier.pinned_ram,
+                MemoryTier.pageable_ram,
+            }:
+                raise ValueError("cuda_unified_memory offload requires a RAM target")
+            if rule.mechanism == OffloadMechanism.nvme_io and target.tier not in {
+                MemoryTier.nvme,
+                MemoryTier.sata,
+            }:
+                raise ValueError("nvme_io offload requires an NVMe or SATA target")
+
+        storage_resources = [item for item in self.resources if item.storage is not None]
+        if storage_resources:
+            if self.storage_profile_ref is None or not _is_pinned_ref(self.storage_profile_ref):
+                raise ValueError("storage-backed physical plans require a hash-pinned StorageProfile ref")
+        elif self.storage_profile_ref is not None:
+            raise ValueError("storage_profile_ref requires a storage-backed physical resource")
+
+        semantic_fallback = any(
+            rule.route_miss_action == RouteMissAction.semantic_fallback
+            for rule in self.offload_rules
+        )
+        if semantic_fallback:
+            if self.route_fidelity != "declared_semantic_fallback" or (
+                self.semantic_fallback_policy_ref is None
+                or not _is_pinned_ref(self.semantic_fallback_policy_ref)
+            ):
+                raise ValueError(
+                    "semantic route fallback requires a declared, hash-pinned model-policy ref"
+                )
+        elif self.route_fidelity != "preserve_or_fail" or self.semantic_fallback_policy_ref is not None:
+            raise ValueError("physical scheduling cannot alter semantic routing without an explicit rule")
+        return self
+
+
 class RunPlan(ContractModel):
     """The IMMUTABLE, fully-resolved execution plan the core dispatches to a worker: no ambiguity is
     left for the worker to decide. Formalizes + hardens config_templates.TrainingConfigTemplate. Key
@@ -2394,6 +2785,8 @@ class RunPlan(ContractModel):
     sequence: SequenceSpec
     batching: BatchingSpec
     checkpoint_policy: CheckpointPolicy
+    # Deprecated compatibility summary. New plans carry the exact resources/rules below; ZeRO values
+    # are not treated as physical evidence or as a substitute for explicit parallel groups.
     offload_strategy: OffloadStrategy = OffloadStrategy.none
     allocator_policy: AllocatorPolicy = AllocatorPolicy.default
     compile_mode: CompileMode = CompileMode.none
@@ -2405,6 +2798,30 @@ class RunPlan(ContractModel):
     training_config_snapshot: JsonObject = Field(default_factory=dict)
     # Pins the parameter evidence the planner consumed; it does not manufacture missing counts.
     parameter_accounting_ref: Ref | None = None
+    # ``None`` identifies a legacy plan. The planner always emits a fully resolved spec for new plans.
+    physical_execution: PhysicalExecutionSpec | None = None
+
+    @model_validator(mode="after")
+    def _validate_physical_plan(self) -> RunPlan:
+        if self.parameter_accounting_ref is not None and not _is_pinned_ref(
+            self.parameter_accounting_ref
+        ):
+            raise ValueError("parameter_accounting_ref must pin the sealed report hash")
+        if self.physical_execution is None:
+            return self
+        if (
+            self.physical_execution.requires_parameter_accounting()
+            and self.parameter_accounting_ref is None
+        ):
+            raise ValueError(
+                "scope-specific physical planning requires a hash-pinned parameter-accounting report"
+            )
+        has_rules = bool(self.physical_execution.offload_rules)
+        if has_rules != (self.offload_strategy != OffloadStrategy.none):
+            raise ValueError(
+                "offload_strategy must agree with the explicit physical offload rules"
+            )
+        return self
 
 
 # --------------------------------------------------------------------------------------------------

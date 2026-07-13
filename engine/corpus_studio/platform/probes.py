@@ -29,7 +29,12 @@ from .contracts import CapabilityReport, EffectiveCapabilities, EnvironmentProfi
 from .enums import (
     AdapterMethod,
     AttentionImpl,
+    CommunicationBackend,
     FailureTaxonomy,
+    MemoryTier,
+    OffloadStrategy,
+    ParallelismKind,
+    PlacementMode,
     PrecisionMode,
     QuantizationMode,
 )
@@ -228,10 +233,28 @@ def _resolve_readiness(
 
 def _effective(proven: dict[str, set[str]]) -> EffectiveCapabilities:
     return EffectiveCapabilities(
-        precision_modes=[PrecisionMode(v) for v in sorted(proven["precision"])],
-        quantization_modes=[QuantizationMode(v) for v in sorted(proven["quantization"])],
-        attention_impls=[AttentionImpl(v) for v in sorted(proven["attention"])],
-        adapter_methods=[AdapterMethod(v) for v in sorted(proven["adapter"])],
+        precision_modes=[PrecisionMode(v) for v in sorted(proven.get("precision", set()))],
+        quantization_modes=[
+            QuantizationMode(v) for v in sorted(proven.get("quantization", set()))
+        ],
+        attention_impls=[AttentionImpl(v) for v in sorted(proven.get("attention", set()))],
+        adapter_methods=[AdapterMethod(v) for v in sorted(proven.get("adapter", set()))],
+        offload_strategies=[
+            OffloadStrategy(v) for v in sorted(proven.get("offload", set()))
+        ],
+        placement_tiers=[
+            MemoryTier(v) for v in sorted(proven.get("placement_tier", set()))
+        ],
+        placement_modes=[
+            PlacementMode(v) for v in sorted(proven.get("placement_mode", set()))
+        ],
+        parallelism_kinds=[
+            ParallelismKind(v) for v in sorted(proven.get("parallelism", set()))
+        ],
+        communication_backends=[
+            CommunicationBackend(v)
+            for v in sorted(proven.get("communication_backend", set()))
+        ],
     )
 
 
@@ -260,6 +283,11 @@ def run_capability_probes(
         "quantization": set(),
         "attention": set(),
         "adapter": set(),
+        "offload": set(),
+        "placement_tier": set(),
+        "placement_mode": set(),
+        "parallelism": set(),
+        "communication_backend": set(),
     }
     for name in names:
         fn = reg.get(name)

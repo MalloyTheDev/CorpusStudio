@@ -62,7 +62,11 @@ export type ParameterScopeKind =
   | "output_head"
   | "device_residency"
   | "custom";
-export type MemoryTier = ("gpu" | "pinned_ram" | "pageable_ram" | "nvme" | "sata" | "remote" | "unknown") | null;
+/**
+ * A physical state tier. A RunPlan names the intended tier; only runtime evidence may claim
+ * actual residency there.
+ */
+export type MemoryTier = "gpu" | "pinned_ram" | "pageable_ram" | "nvme" | "sata" | "remote" | "unknown";
 export type ScopeId = string;
 export type CapturedAt = string | null;
 export type Definition1 = string;
@@ -201,7 +205,7 @@ export interface ParameterScope {
   device_id?: DeviceId;
   expert_ids?: ExpertIds;
   kind: ParameterScopeKind;
-  memory_tier?: MemoryTier;
+  memory_tier?: MemoryTier | null;
   model_ref: Ref;
   scope_id: ScopeId;
 }

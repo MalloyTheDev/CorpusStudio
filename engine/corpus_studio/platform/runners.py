@@ -127,6 +127,33 @@ class TrainingRunner:
         self.name = "cpu_toy" if cpu_toy else "training"
 
     def run(self, ctx: RunContext) -> Sequence[ProducedArtifact]:
+        from corpus_studio.platform.planner import is_trivial_physical_execution  # noqa: PLC0415
+
+        physical = ctx.plan.physical_execution
+        supported_resource = True
+        if physical is not None:
+            resource = physical.resources[0]
+            supported_resource = (
+                resource.tier.value in {"pinned_ram", "pageable_ram"}
+                and resource.device_kind is not None
+                and resource.device_kind.value == "cpu"
+                and resource.device_id == "cpu:0"
+                if self.cpu_toy
+                else resource.tier.value == "gpu"
+                and resource.device_kind is not None
+                and resource.device_kind.value == "cuda"
+                and resource.device_id == "cuda:0"
+            )
+        if not is_trivial_physical_execution(physical) or not supported_resource:
+            raise RunnerFailure(
+                "the selected training runner cannot consume this physical execution spec",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+                remediation=(
+                    "choose a backend whose isolated worker implements and functionally verifies the "
+                    "plan's placement, offload, and parallel groups"
+                ),
+            )
         trainer_fn, backend_label = self._resolve_trainer(ctx.plan)
         # The manifest target reflects the backend that actually ran ("cpu_toy" for the smoke path).
         self.name = backend_label
@@ -308,4 +335,7 @@ def demo_training_plan(plan_id: str = "demo-cpu-toy") -> RunPlan:
         "lora_alpha": 8,
         "max_steps": 2,
     }
-    return RunPlan.model_validate(body)
+    draft = RunPlan.model_validate(body)
+    from corpus_studio.platform.planner import compute_plan_hash, run_plan_hash_payload  # noqa: PLC0415
+
+    return draft.model_copy(update={"plan_hash": compute_plan_hash(run_plan_hash_payload(draft))})

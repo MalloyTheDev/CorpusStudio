@@ -41,22 +41,37 @@ from corpus_studio.platform.backends import (
     builtin_backends,
     compatible_backends,
     get_backend,
+    unmet_physical_requirements,
     unmet_requirements,
 )
 from corpus_studio.platform.contracts import (
     CapabilityReport,
     EnvironmentProfile,
+    ParameterAccountingReport,
+    PhysicalExecutionSpec,
+    PhysicalResource,
+    PhysicalScopeSelector,
+    ParallelismSpec,
+    RankBinding,
     RunPlan,
+    StatePlacement,
+    StorageProfile,
 )
-from corpus_studio.platform.common import Ref
+from corpus_studio.platform.common import HashRef, Ref
 from corpus_studio.platform.enums import (
     AdapterMethod,
     AttentionImpl,
+    DeviceKind,
     ExportFormat,
+    MemoryTier,
+    OffloadStrategy,
     OperatingSystem,
+    PhysicalStateKind,
+    PlacementRole,
     TaskType,
 )
 from corpus_studio.platform.host_platform import flash_sdpa_deadlocks
+from corpus_studio.platform.parameter_accounting import verify_parameter_accounting_hash
 
 # attn_implementation strings the trainer passes to from_pretrained. math / sdpa / mem_efficient /
 # xformers are NOT from_pretrained values (they are SDPA backends toggled inside the trainer), so we
@@ -160,6 +175,218 @@ def compute_plan_hash(plan_body: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def run_plan_hash_payload(plan: RunPlan) -> dict[str, Any]:
+    """Return the canonical seal payload. A missing ``physical_execution`` is omitted so legacy
+    plans retain their historical hash payload; every new planner-produced plan includes the spec."""
+
+    payload = plan.model_dump(mode="json", exclude={"plan_hash", "created_at"})
+    if plan.physical_execution is None:
+        payload.pop("physical_execution", None)
+    return payload
+
+
+def verify_run_plan_hash(plan: RunPlan) -> bool:
+    return compute_plan_hash(run_plan_hash_payload(plan)) == plan.plan_hash
+
+
+def storage_profile_hash_for(profile: StorageProfile) -> str:
+    """Content identity for the exact StorageProfile snapshot consumed by a physical plan."""
+
+    return compute_plan_hash(profile.model_dump(mode="json"))
+
+
+def storage_profile_ref_for(profile: StorageProfile) -> Ref:
+    digest = storage_profile_hash_for(profile)
+    return Ref(id=f"storage-profile-{digest[:12]}", hash=HashRef(value=digest))
+
+
+def default_physical_execution(
+    profile: EnvironmentProfile,
+    *,
+    cpu_toy: bool,
+) -> PhysicalExecutionSpec:
+    """Resolve today's supported physical path: one explicit compute resource and rank, no offload.
+
+    Whole-model placement is scheduling intent only; it does not become N_resident evidence.
+    """
+
+    if cpu_toy or not profile.gpus:
+        tier = MemoryTier.pageable_ram
+        device_kind = DeviceKind.cpu
+        device_id = "cpu:0"
+    else:
+        gpu = min(profile.gpus, key=lambda item: item.index)
+        tier = MemoryTier.gpu
+        device_kind = gpu.kind
+        device_id = f"{gpu.kind.value}:{gpu.index}"
+    return PhysicalExecutionSpec(
+        resources=[
+            PhysicalResource(
+                resource_id="compute-0",
+                tier=tier,
+                device_kind=device_kind,
+                device_id=device_id,
+            )
+        ],
+        placements=[
+            StatePlacement(
+                placement_id="parameters-authoritative",
+                state=PhysicalStateKind.parameters,
+                selector=PhysicalScopeSelector(whole_model=True),
+                resource_id="compute-0",
+                role=PlacementRole.authoritative,
+            )
+        ],
+        parallelism=ParallelismSpec(
+            world_size=1,
+            ranks=[RankBinding(rank=0, resource_id="compute-0")],
+        ),
+    )
+
+
+def is_trivial_physical_execution(spec: PhysicalExecutionSpec | None) -> bool:
+    """Whether current runners/calibration can safely consume the physical spec without ignoring it."""
+
+    if spec is None:
+        return True
+    return (
+        spec.route_fidelity == "preserve_or_fail"
+        and spec.semantic_fallback_policy_ref is None
+        and spec.storage_profile_ref is None
+        and len(spec.resources) == 1
+        and len(spec.placements) == 1
+        and spec.placements[0].state == PhysicalStateKind.parameters
+        and spec.placements[0].selector.whole_model
+        and spec.placements[0].role == PlacementRole.authoritative
+        and spec.placements[0].resource_id == spec.resources[0].resource_id
+        and not spec.offload_rules
+        and spec.parallelism.world_size == 1
+        and len(spec.parallelism.ranks) == 1
+        and spec.parallelism.ranks[0].resource_id == spec.resources[0].resource_id
+        and not spec.parallelism.groups
+    )
+
+
+def _offload_summary(spec: PhysicalExecutionSpec) -> OffloadStrategy:
+    if not spec.offload_rules:
+        return OffloadStrategy.none
+    resources = {item.resource_id: item for item in spec.resources}
+    targets = {resources[item.target_resource_id].tier for item in spec.offload_rules}
+    states = {item.state for item in spec.offload_rules}
+    if targets.issubset({MemoryTier.nvme, MemoryTier.sata, MemoryTier.remote}):
+        return OffloadStrategy.disk_offload
+    if states == {PhysicalStateKind.activations}:
+        return OffloadStrategy.controlled_activation_offload
+    if states == {PhysicalStateKind.optimizer_state}:
+        return OffloadStrategy.controlled_optimizer_offload
+    if states.issubset({PhysicalStateKind.parameters, PhysicalStateKind.gradients}):
+        return OffloadStrategy.controlled_parameter_offload
+    return OffloadStrategy.cpu_offload
+
+
+def _validate_parameter_accounting(
+    report: ParameterAccountingReport,
+    spec: PhysicalExecutionSpec,
+) -> Ref:
+    try:
+        report = ParameterAccountingReport.model_validate(report.model_dump(mode="json"))
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise PlannerError(f"parameter-accounting report is structurally invalid: {exc}") from exc
+    if not verify_parameter_accounting_hash(report):
+        raise PlannerError("parameter-accounting report hash mismatch")
+    scopes = {item.scope.scope_id for item in report.observations} | {
+        item.scope.scope_id for item in report.gaps
+    }
+    components = {
+        component
+        for item in report.observations
+        for component in item.scope.component_ids
+    } | {
+        component for item in report.gaps for component in item.scope.component_ids
+    }
+    experts = {
+        expert for item in report.observations for expert in item.scope.expert_ids
+    } | {expert for item in report.gaps for expert in item.scope.expert_ids}
+    selectors = [
+        *(item.selector for item in spec.placements),
+        *(item.selector for item in spec.offload_rules),
+    ]
+    requested_scopes = {
+        scope for selector in selectors for scope in selector.parameter_scope_ids
+    } | {
+        scope
+        for group in spec.parallelism.groups
+        for scope in group.parameter_scope_ids
+    }
+    requested_components = {
+        component for selector in selectors for component in selector.component_ids
+    }
+    requested_experts = {expert for selector in selectors for expert in selector.expert_ids}
+    for label, requested, available in (
+        ("parameter scope", requested_scopes, scopes),
+        ("component", requested_components, components),
+        ("expert", requested_experts, experts),
+    ):
+        missing = sorted(requested - available)
+        if missing:
+            raise PlannerError(
+                f"physical plan references {label} IDs absent from the sealed report: "
+                + ", ".join(missing)
+            )
+    return Ref(id=report.report_id, hash=HashRef(value=report.report_hash))
+
+
+def _validate_storage_profile(
+    spec: PhysicalExecutionSpec,
+    profile: StorageProfile | None,
+    *,
+    allow_marginal: bool,
+    allow_unknown: bool,
+) -> None:
+    bindings = [item.storage for item in spec.resources if item.storage is not None]
+    if not bindings:
+        if profile is not None:
+            raise PlannerError("a StorageProfile was supplied but the physical plan uses no storage")
+        return
+    if profile is None:
+        raise PlannerError("storage-backed physical planning requires the exact StorageProfile")
+    try:
+        profile = StorageProfile.model_validate(profile.model_dump(mode="json"))
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise PlannerError(f"StorageProfile is structurally invalid: {exc}") from exc
+    expected_ref = storage_profile_ref_for(profile)
+    if spec.storage_profile_ref != expected_ref:
+        raise PlannerError("physical plan StorageProfile ref does not match the supplied profile")
+    for binding in bindings:
+        if binding is None:  # narrowed above; keeps mypy explicit.
+            continue
+        if binding.assessment not in profile.assessments:
+            raise PlannerError("physical plan embeds a storage assessment absent from the profile")
+        verdict = binding.assessment.suitability.value
+        if verdict == "marginal" and not allow_marginal:
+            raise PlannerError("marginal storage requires explicit allow_marginal_storage")
+        if verdict == "unknown" and not allow_unknown:
+            raise PlannerError("unknown storage requires explicit allow_unknown_storage")
+
+
+def _validate_environment_resources(
+    spec: PhysicalExecutionSpec,
+    profile: EnvironmentProfile,
+) -> None:
+    known_accelerators = {
+        (item.kind, f"{item.kind.value}:{item.index}") for item in profile.gpus
+    }
+    for resource in spec.resources:
+        if resource.tier != MemoryTier.gpu:
+            continue
+        identity = (resource.device_kind, resource.device_id)
+        if identity not in known_accelerators:
+            raise PlannerError(
+                f"physical resource '{resource.resource_id}' references an accelerator absent from "
+                "the EnvironmentProfile"
+            )
+
+
 def build_run_plan(
     *,
     profile: EnvironmentProfile,
@@ -168,6 +395,11 @@ def build_run_plan(
     constraints: PlannerConstraints,
     plan_id: str,
     environment_ref: Ref | None = None,
+    parameter_accounting: ParameterAccountingReport | None = None,
+    physical_execution: PhysicalExecutionSpec | None = None,
+    storage_profile: StorageProfile | None = None,
+    allow_marginal_storage: bool = False,
+    allow_unknown_storage: bool = False,
     now: str | None = None,
 ) -> RunPlan:
     """Resolve one immutable, hash-sealed :class:`RunPlan` from the host profile + proven
@@ -253,6 +485,43 @@ def build_run_plan(
         )
         raise PlannerError(f"backend '{backend.backend_id}' can't run this plan: {'; '.join(unmet)}.{hint}")
 
+    resolved_physical = physical_execution or default_physical_execution(profile, cpu_toy=cpu_toy)
+    try:
+        resolved_physical = PhysicalExecutionSpec.model_validate(
+            resolved_physical.model_dump(mode="json")
+        )
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise PlannerError(f"physical execution spec is structurally invalid: {exc}") from exc
+    _validate_environment_resources(resolved_physical, profile)
+    _validate_storage_profile(
+        resolved_physical,
+        storage_profile,
+        allow_marginal=allow_marginal_storage,
+        allow_unknown=allow_unknown_storage,
+    )
+    if resolved_physical.requires_parameter_accounting() and parameter_accounting is None:
+        raise PlannerError(
+            "scope-specific physical planning requires a hash-pinned parameter-accounting report"
+        )
+    parameter_accounting_ref = (
+        _validate_parameter_accounting(parameter_accounting, resolved_physical)
+        if parameter_accounting is not None
+        else None
+    )
+    offload_strategy = _offload_summary(resolved_physical)
+    if not is_trivial_physical_execution(resolved_physical):
+        physical_unmet = unmet_physical_requirements(
+            backend,
+            effective,
+            resolved_physical,
+            offload_strategy=offload_strategy,
+        )
+        if physical_unmet:
+            raise PlannerError(
+                f"backend '{backend.backend_id}' can't run the physical plan: "
+                + "; ".join(physical_unmet)
+            )
+
     token_target = constraints.supervised_token_accumulation_target or max(
         1, constraints.sequence_len * constraints.micro_batch_size * constraints.gradient_accumulation_steps
     )
@@ -308,10 +577,17 @@ def build_run_plan(
             "fallback_grad_accumulation_steps": constraints.gradient_accumulation_steps,
         },
         "checkpoint_policy": {"impl": "adapter_only"},
+        "offload_strategy": offload_strategy.value,
         "gradient_checkpointing": True,
         "export": {"format": constraints.export_format, "output_dir": constraints.output_dir},
         "seed": constraints.seed,
         "training_config_snapshot": snapshot,
+        "parameter_accounting_ref": (
+            parameter_accounting_ref.model_dump(mode="json")
+            if parameter_accounting_ref is not None
+            else None
+        ),
+        "physical_execution": resolved_physical.model_dump(mode="json"),
     }
 
     try:
@@ -320,5 +596,5 @@ def build_run_plan(
         raise PlannerError(f"the resolved plan is invalid: {exc}") from exc
 
     # Seal over the FULLY-DEFAULTED canonical plan, excluding the seal itself + the volatile stamp.
-    plan_hash = compute_plan_hash(draft.model_dump(mode="json", exclude={"plan_hash", "created_at"}))
+    plan_hash = compute_plan_hash(run_plan_hash_payload(draft))
     return draft.model_copy(update={"plan_hash": plan_hash, "created_at": now or _now_iso()})

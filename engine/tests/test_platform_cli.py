@@ -15,7 +15,12 @@ from corpus_studio.platform.contracts import (
     EnvironmentProfile,
     EnvHost,
     GpuDevice,
+    ParameterAccountingReport,
+    ParameterEvidenceGap,
+    ParameterScope,
+    ParameterWindow,
 )
+from corpus_studio.platform.parameter_accounting import parameter_accounting_hash_for
 
 runner = CliRunner()
 _SIG = "b" * 64
@@ -57,6 +62,42 @@ def _ready_host(monkeypatch, *, cc_major: int = 8, attn: str = "sdpa", os_name: 
     )
 
 
+def _accounting_report():
+    model_ref = Ref(id="model", hash={"value": "c" * 64})
+    scope = ParameterScope(
+        scope_id="model",
+        kind="model",
+        model_ref=model_ref,
+        coordinate_universe_id="model-coordinates",
+        coordinate_universe_sha256="c" * 64,
+        definition="One model coordinate universe.",
+    )
+    draft = ParameterAccountingReport(
+        report_id="parameter-report",
+        report_hash="0" * 64,
+        generated_at="2026-07-13T00:00:00Z",
+        profile="model_static",
+        status="incomplete",
+        model_ref=model_ref,
+        gaps=[
+            ParameterEvidenceGap(
+                gap_id="logical-gap",
+                kind="logical",
+                scope=scope,
+                window=ParameterWindow(
+                    window_id="static-model",
+                    kind="static_snapshot",
+                    definition="One static snapshot.",
+                ),
+                reason="missing_observation",
+                explanation="Logical evidence is absent.",
+                resolution="Supply measured evidence.",
+            )
+        ],
+    )
+    return draft.model_copy(update={"report_hash": parameter_accounting_hash_for(draft)})
+
+
 # ---- platform-backends -------------------------------------------------------
 
 
@@ -92,6 +133,10 @@ def test_platform_plan_json_bundles_plan_and_fit(monkeypatch):
     bundle = json.loads(result.stdout)
     assert len(bundle["run_plan"]["plan_hash"]) == 64
     assert bundle["run_plan"]["backend_ref"]["id"] == "corpus_studio"
+    physical = bundle["run_plan"]["physical_execution"]
+    assert physical["evidence_status"] == "planned_not_measured"
+    assert physical["parallelism"]["world_size"] == 1
+    assert physical["offload_rules"] == []
     # a predicted fit rides along — and it is never the measured-only NATIVE_SAFE
     assert bundle["fit_classification"]["classification"] != "NATIVE_SAFE"
 
@@ -195,3 +240,125 @@ def test_platform_plan_json_survives_stdout_noise_from_a_probe(monkeypatch):
     bundle = json.loads(result.stdout)  # pure JSON despite the banner
     assert len(bundle["run_plan"]["plan_hash"]) == 64
     assert "bitsandbytes" in result.stderr  # the banner was redirected off stdout, onto stderr
+
+
+def test_platform_plan_loads_and_copies_a_hash_sealed_parameter_report(monkeypatch, tmp_path):
+    _ready_host(monkeypatch)
+    report = _accounting_report()
+    report_path = tmp_path / "ParameterAccountingReport.json"
+    report_path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    out = tmp_path / "plan"
+    result = runner.invoke(
+        app,
+        [
+            "platform-plan",
+            "--base-model",
+            "m",
+            "--dataset",
+            "d.jsonl",
+            "--parameter-accounting-report",
+            str(report_path),
+            "--out",
+            str(out),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    bundle = json.loads(result.stdout)
+    pinned = bundle["run_plan"]["parameter_accounting_ref"]
+    assert pinned["id"] == report.report_id
+    assert pinned["hash"]["value"] == report.report_hash
+    assert (out / "ParameterAccountingReport.json").exists()
+
+
+def test_platform_plan_refuses_a_tampered_parameter_report(monkeypatch, tmp_path):
+    _ready_host(monkeypatch)
+    report = _accounting_report().model_copy(update={"report_hash": "0" * 64})
+    path = tmp_path / "tampered.json"
+    path.write_text(report.model_dump_json(), encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "platform-plan",
+            "--base-model",
+            "m",
+            "--dataset",
+            "d.jsonl",
+            "--parameter-accounting-report",
+            str(path),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "hash mismatch" in result.output
+
+
+def test_platform_plan_refuses_unverified_nontrivial_physical_spec(monkeypatch, tmp_path):
+    _ready_host(monkeypatch)
+    spec = {
+        "resources": [
+            {
+                "resource_id": "compute-0",
+                "tier": "gpu",
+                "device_kind": "cuda",
+                "device_id": "cuda:0",
+            },
+            {
+                "resource_id": "host-ram",
+                "tier": "pageable_ram",
+                "device_kind": "cpu",
+                "device_id": "cpu:0",
+            },
+        ],
+        "placements": [
+            {
+                "placement_id": "parameters-authoritative",
+                "state": "parameters",
+                "selector": {"whole_model": True},
+                "resource_id": "compute-0",
+                "role": "authoritative",
+            }
+        ],
+        "offload_rules": [
+            {
+                "rule_id": "parameter-offload",
+                "state": "parameters",
+                "selector": {"whole_model": True},
+                "source_resource_id": "compute-0",
+                "target_resource_id": "host-ram",
+                "mechanism": "cpu_copy",
+                "trigger": "after_use",
+            }
+        ],
+        "parallelism": {
+            "world_size": 1,
+            "ranks": [{"rank": 0, "resource_id": "compute-0"}],
+        },
+    }
+    path = tmp_path / "physical.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "platform-plan",
+            "--base-model",
+            "m",
+            "--dataset",
+            "d.jsonl",
+            "--physical-spec",
+            str(path),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "can't run the physical plan" in result.output
+
+
+def test_platform_run_refuses_a_tampered_plan_hash(tmp_path):
+    from corpus_studio.platform.supervisor import demo_run_plan
+
+    body = demo_run_plan().model_dump(mode="json")
+    body["seed"] += 1
+    path = tmp_path / "RunPlan.json"
+    path.write_text(json.dumps(body), encoding="utf-8")
+    result = runner.invoke(app, ["platform-run", str(path)])
+    assert result.exit_code == 2
+    assert "plan_hash does not match" in result.output

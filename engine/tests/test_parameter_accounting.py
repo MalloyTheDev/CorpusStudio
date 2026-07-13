@@ -27,6 +27,7 @@ from corpus_studio.platform.contracts import (
 from corpus_studio.platform.enums import (
     CountHandling,
     EvidenceKind,
+    MemoryTier,
     ParameterAccountingProfile,
     ParameterAccountingStatus,
     ParameterCountKind,
@@ -208,7 +209,7 @@ def _observation(
                 "scope_id": "model-cuda-0-residency",
                 "kind": ParameterScopeKind.device_residency,
                 "device_id": "cuda:0",
-                "memory_tier": "gpu",
+                "memory_tier": MemoryTier.gpu,
                 "definition": "Model coordinates resident on CUDA device zero.",
             }
         )

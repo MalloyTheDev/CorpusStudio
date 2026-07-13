@@ -162,6 +162,32 @@ def test_effective_capabilities_ignore_non_pass_proves():
     assert report.effective_capabilities.precision_modes == []
 
 
+def test_effective_capabilities_carry_only_probed_physical_tokens():
+    def physical_probe(_p):
+        return ProbeOutcome(
+            FailureTaxonomy.PASS,
+            "physical path exercised",
+            proves={
+                "offload": ["controlled_parameter_offload"],
+                "placement_tier": ["gpu", "nvme"],
+                "placement_mode": ["tiered"],
+                "parallelism": ["expert"],
+                "communication_backend": ["nccl"],
+            },
+        )
+
+    report = run_capability_probes(_profile(), registry={"physical": physical_probe})
+    effective = report.effective_capabilities
+    assert effective is not None
+    assert [item.value for item in effective.offload_strategies] == [
+        "controlled_parameter_offload"
+    ]
+    assert [item.value for item in effective.placement_tiers] == ["gpu", "nvme"]
+    assert [item.value for item in effective.placement_modes] == ["tiered"]
+    assert [item.value for item in effective.parallelism_kinds] == ["expert"]
+    assert [item.value for item in effective.communication_backends] == ["nccl"]
+
+
 def test_unknown_probe_name_is_unsupported():
     report = run_capability_probes(_profile(), probes=["does_not_exist"], registry={})
     assert report.probe_results[0].outcome == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
