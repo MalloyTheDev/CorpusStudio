@@ -178,10 +178,22 @@ per-item error isolation, and off-thread document opens.
   of the host's storage topology (mount / capacity / interface — NVMe / SATA / USB / network / virtual;
   no benchmark, no SMART read) plus a **per-role suitability** verdict that refuses an offload /
   checkpoint / scratch path on a USB bridge, a cloud-sync folder, a nearly-full disk, or inside the
-  source repository — the prerequisite for honest offload planning. The full 3-layer dependency model
-  and the MoE-safe foundational-contract requirement are captured as the forward plan (see
-  [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) and [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md)).
-  See [`HARDWARE_STORAGE_PROFILE.md`](HARDWARE_STORAGE_PROFILE.md).
+  source repository — and flags the *runtime* risks a USB SSD or a WSL `/mnt` host drive creates for
+  the model cache, dataset, repo, and venv (small-file / load-latency stalls). `--diagnose "<error>"`
+  triages a training failure as storage-implicated (I/O error, dropped drive, full disk) vs a
+  VRAM/kernel failure the disk can't explain; `--recommend` prints the per-role storage tier. The
+  prerequisite for honest offload planning. See [`HARDWARE_STORAGE_PROFILE.md`](HARDWARE_STORAGE_PROFILE.md).
+- **Environment Manager substrate** (`env-recipes` / `env-plan`): the 3-layer dependency model in
+  code — a lightweight always-installable **control plane**, opt-in **capability profiles**, and
+  **isolated per-backend worker environments** (heavy frameworks pin conflicting torch/CUDA/xformers
+  and can't coexist). A registry of declarative `EnvironmentRecipe`s (grounded in the real extras —
+  `backend-corpus-studio` = the `[train]` extra, `backend-unsloth`, the capability profiles) and a
+  **pure install-preview** resolver: `env-plan` renders the exact argv install steps (never a shell
+  string), picks the CUDA-aware wheel index (a Blackwell host → `cu128`), and reports disk/network
+  cost — for confirmation *before* anything is installed. `EnvironmentState` encodes "installed ≠
+  supported". Env *creation* is the next slice. See [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md);
+  the full 3-layer + MoE-safe forward plan is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) +
+  [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md).
 - **Multi-backend "pick your framework"**: a BackendManifest registry (`corpus_studio`, `unsloth`);
   the planner validates the chosen backend and **honestly refuses Unsloth on Blackwell/sm_120** (which
   needs the math attention path Unsloth doesn't provide).
