@@ -2032,6 +2032,57 @@ def train_check(
         typer.echo(render_training_runtime_text(report))
 
 
+@app.command("dataset-tokens")
+def dataset_tokens(
+    dataset_path: Path,
+    base_model: str = typer.Option(..., "--base-model", help="Tokenizer to measure with (the model you'll train)."),
+    dataset_format: str = typer.Option("chat", "--dataset-format", help="Row format: instruction | chat."),
+    seq_len: int = typer.Option(4096, "--seq-len", help="The sequence_len to check truncation against."),
+    sample: int = typer.Option(0, "--sample", help="Tokenize only the first N rows (0 = all)."),
+    json_out: bool = typer.Option(False, "--json", help="Emit the TruncationReport as JSON."),
+):
+    """Measure a dataset's token-length distribution and how many examples a given sequence_len would
+    TRUNCATE — the guardrail to run BEFORE training so you never silently train on cut-off outputs
+    (the failure that taught the WBG model to emit incomplete JSON). Exit 3 when it truncates."""
+    from corpus_studio.importers.jsonl_importer import read_jsonl
+    from corpus_studio.training.trainer import (
+        analyze_truncation,
+        format_example_text,
+        truncation_warning,
+    )
+
+    try:
+        from transformers import AutoTokenizer  # noqa: PLC0415 - the [train] extra (heavy).
+    except ImportError:
+        typer.echo("dataset-tokens needs the [train] extra (transformers) — install it first.", err=True)
+        raise typer.Exit(code=2) from None
+
+    tokenizer = AutoTokenizer.from_pretrained(base_model)
+    rows = list(read_jsonl(dataset_path))
+    if sample > 0:
+        rows = rows[:sample]
+    lengths: list[int] = []
+    for row in rows:
+        text = format_example_text(row, dataset_format, tokenizer)
+        if text:
+            lengths.append(len(tokenizer(text)["input_ids"]))
+    report = analyze_truncation(lengths, seq_len)
+    if json_out:
+        typer.echo(report.model_dump_json(indent=2))
+    else:
+        typer.echo(
+            f"{report.n_examples} examples | median {report.median_tokens} | max {report.max_tokens} tokens"
+        )
+        warning = truncation_warning(report)
+        typer.echo(
+            warning
+            if warning
+            else f"OK: sequence_len={seq_len} keeps every example whole (max {report.max_tokens} tokens)."
+        )
+    if report.truncates:
+        raise typer.Exit(code=3)
+
+
 @app.command("train-run")
 def train_run(
     config_path: Path,

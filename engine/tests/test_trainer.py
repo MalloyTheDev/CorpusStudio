@@ -16,12 +16,14 @@ from corpus_studio.training.trainer import (
     TINY_TOY_MODEL,
     TrainerError,
     TrainRunConfig,
+    analyze_truncation,
     build_lora_kwargs,
     build_training_kwargs,
     format_example_text,
     load_run_config_from_file,
     resolve_attention_implementation,
     resolve_run_plan,
+    truncation_warning,
     _list_checkpoints,
 )
 
@@ -142,6 +144,39 @@ def test_cpu_toy_forces_plain_optimizer_and_no_liger():
     assert kwargs["optim"] == "adamw_torch"
     assert "use_liger_kernel" not in kwargs
     assert kwargs["use_cpu"] is True
+
+
+# ---- truncation guardrail ----------------------------------------------------
+
+
+def test_analyze_truncation_flags_cut_examples():
+    # 3 of 5 exceed seq_len 1000 → 60% truncated; zero-truncation needs seq_len >= max (1500).
+    report = analyze_truncation([500, 800, 1200, 1400, 1500], 1000)
+    assert report.n_examples == 5 and report.n_truncated == 3
+    assert report.pct_truncated == 60.0
+    assert report.max_tokens == 1500 and report.seq_len_for_zero_truncation == 1500
+    assert report.truncates is True
+    assert "TRUNCATION" in (truncation_warning(report) or "")
+
+
+def test_analyze_truncation_no_cut_when_seq_len_covers_all():
+    report = analyze_truncation([500, 800, 1200], 2048)
+    assert report.n_truncated == 0 and report.truncates is False
+    assert truncation_warning(report) is None
+
+
+def test_analyze_truncation_empty_dataset_is_safe():
+    report = analyze_truncation([], 4096)
+    assert report.n_examples == 0 and report.n_truncated == 0 and report.truncates is False
+
+
+def test_analyze_truncation_the_wbg_bug():
+    # The real bug this guardrail exists for: every example (min 1802) exceeds seq_len 1536 →
+    # 100% truncated, and only seq_len >= 3445 keeps them whole.
+    report = analyze_truncation([1802, 2100, 2240, 3445], 1536)
+    assert report.pct_truncated == 100.0
+    assert report.seq_len_for_zero_truncation == 3445
+    assert "1536" in (truncation_warning(report) or "") and "3445" in (truncation_warning(report) or "")
 
 
 def test_load_config_reads_optim_and_liger(tmp_path):
