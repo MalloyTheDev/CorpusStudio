@@ -233,17 +233,6 @@ public interface IEngineService
     /// path — is possible. Reads only the engine's Python environment (no project needed).</summary>
     Task<TrainingRuntimeReport> CheckTrainingRuntimeAsync();
 
-    /// <summary>Build the argv that runs the first-party trainer (<c>train-run</c>) using the ENGINE'S
-    /// OWN interpreter — the same environment <see cref="CheckTrainingRuntimeAsync"/> probed — so the
-    /// launched run and the preflight always agree. The desktop spawns this via <see cref="IProcessRunner"/>
-    /// (streaming <c>[step/total]</c>), with the working directory set to <see cref="EngineWorkingDirectory"/>.
-    /// <paramref name="cpuToy"/> runs the tiny CPU smoke path; <paramref name="maxSteps"/> caps steps.</summary>
-    IReadOnlyList<string> BuildFirstPartyTrainArgv(string configPath, string? outputDir, bool cpuToy, int? maxSteps);
-
-    /// <summary>The working directory a first-party <c>train-run</c> must be spawned from so
-    /// <c>-m corpus_studio.cli</c> resolves (the engine tree). Empty when the engine is unavailable.</summary>
-    string EngineWorkingDirectory { get; }
-
     /// <summary>Merge a trained LoRA adapter into its base (<c>train-merge</c>), with the small-VRAM
     /// fallback: <paramref name="strategy"/> <c>auto</c> walks gpu → cpu → adapter-only, so it always
     /// resolves. Runs in the engine's interpreter; returns the parsed result.</summary>

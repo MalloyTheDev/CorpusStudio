@@ -19,7 +19,7 @@ It combines:
 - a split/export manager
 - an Evaluation Lab (local models, optional LLM judge) + Model Arena
 - a review-first AI Assist Lab
-- a Training Lab (config export + in-app local launcher)
+- a Training Lab (external config/launcher + sealed first-party platform client)
 - dataset version history + a model-artifact registry
 
 The app exists to make training-data creation less fragile, less manual, and less scattered.
@@ -64,8 +64,8 @@ create dataset
 
 ## Current Non-Goals
 
-- bundling CUDA/PyTorch or a training framework into the dependency-light core
-  (training is **opt-in**: the `[train]` extra's first-party QLoRA trainer, or your
+- bundling CUDA/PyTorch or a training framework into the dependency-light control plane
+  (training is **opt-in**: a sealed plan dispatched to the `[train]` worker, or your
   own installed external trainer)
 - cloud collaboration
 - automatic scraping
@@ -103,7 +103,8 @@ Create project
 ```
 
 The full shipped loop extends this through split/quality/debt, Evaluation Lab and Model
-Arena, review-first AI Assist, training-config export and in-app launch, and dataset
+Arena, review-first AI Assist, external training-config launch and sealed first-party platform
+dispatch, and dataset
 version history — see [`CURRENT_STATE.md`](CURRENT_STATE.md) for the step-by-step feature
 list and [`WORKFLOWS.md`](WORKFLOWS.md) for the end-to-end walkthrough.
 
@@ -117,9 +118,9 @@ list and [`WORKFLOWS.md`](WORKFLOWS.md) for the end-to-end walkthrough.
 6. Cleaning should be reversible or auditable.
 7. Export formats must be deterministic.
 8. Evaluation datasets are as important as training datasets.
-9. Training stays downstream of dataset validation and evaluation; it runs via the opt-in
-   `[train]` extra's first-party QLoRA trainer or orchestrates your installed tools — the
-   dependency-light core never bundles a training framework.
+9. Training stays downstream of dataset validation and evaluation; first-party work runs only from a
+   sealed plan through the opt-in `[train]` worker, while external tools use separately reviewed argv.
+   The dependency-light control plane never bundles a training framework.
 
 ## Current state & roadmap
 

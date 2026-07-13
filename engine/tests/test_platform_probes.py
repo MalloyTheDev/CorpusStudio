@@ -12,10 +12,17 @@ from __future__ import annotations
 import platform as _pf
 import sys
 
+import pytest
+
 import corpus_studio.platform as P
 from corpus_studio.platform import profiler
 from corpus_studio.platform.common import PackageLock
-from corpus_studio.platform.contracts import EnvHost, EnvironmentProfile, GpuDevice
+from corpus_studio.platform.contracts import (
+    EnvHost,
+    EnvironmentProfile,
+    ExecutionCapabilityCombination,
+    GpuDevice,
+)
 from corpus_studio.platform.enums import (
     DeviceKind,
     FailureTaxonomy,
@@ -130,6 +137,26 @@ def _blackwell_gpu() -> GpuDevice:
     )
 
 
+def _execution_combo(*, training: bool) -> ExecutionCapabilityCombination:
+    return ExecutionCapabilityCombination.model_validate(
+        {
+            "runtime_mode": "training" if training else "cpu_toy",
+            "device": "cuda" if training else "cpu",
+            "precision": "bf16" if training else "fp32",
+            "quantization": "nf4" if training else "none",
+            "adapter_method": "qlora" if training else "lora",
+            "attention_impl": "math" if training else "eager",
+            "attention_kernel": "torch_sdpa_math" if training else "eager",
+            "optimizer": "adamw_torch",
+            "loss_impl": "cross_entropy",
+            "checkpoint_impl": "adapter_only",
+            "export_format": "adapter_peft",
+            "execution_contract_version": "1.0.0",
+            "probe": "exact_execution",
+        }
+    )
+
+
 def test_run_probes_with_injected_fakes():
     def pass_bf16(_p):
         return ProbeOutcome(FailureTaxonomy.PASS, "ok", proves={"precision": ["bf16"]})
@@ -160,6 +187,49 @@ def test_effective_capabilities_ignore_non_pass_proves():
     report = run_capability_probes(_profile(), registry={"x": fail_but_claims})
     assert report.effective_capabilities is not None
     assert report.effective_capabilities.precision_modes == []
+
+
+def test_capability_report_rejects_effective_claims_not_in_passing_results():
+    from pydantic import ValidationError
+
+    from corpus_studio.platform.contracts import CapabilityReport, EffectiveCapabilities, ProbeResult
+    from corpus_studio.platform.common import Ref
+
+    with pytest.raises(ValidationError, match="precision_modes"):
+        CapabilityReport(
+            backend_id="corpus_studio",
+            environment_ref=Ref(id="environment"),
+            readiness="not_ready",
+            probe_results=[
+                ProbeResult(
+                    probe="precision",
+                    outcome=FailureTaxonomy.PASS,
+                    proves={"precision": ["fp32"]},
+                )
+            ],
+            effective_capabilities=EffectiveCapabilities(precision_modes=["bf16"]),
+        )
+
+
+def test_execution_contract_evidence_requires_trainer_surface_and_exact_tuple():
+    def passing(_p):
+        return ProbeOutcome(FailureTaxonomy.PASS)
+    combo = _execution_combo(training=False)
+    registry = {
+        "trainer_contract": passing,
+        "exact_execution": lambda _p: ProbeOutcome(
+            FailureTaxonomy.PASS,
+            execution_combinations=[combo],
+        ),
+    }
+    report = run_capability_probes(_profile(), registry=registry)
+    assert report.effective_capabilities is not None
+    assert report.effective_capabilities.execution_contract_versions == ["1.0.0"]
+
+    registry["exact_execution"] = lambda _p: ProbeOutcome(FailureTaxonomy.NUMERICAL_FAILURE)
+    failed = run_capability_probes(_profile(), registry=registry)
+    assert failed.effective_capabilities is not None
+    assert failed.effective_capabilities.execution_contract_versions == []
 
 
 def test_effective_capabilities_carry_only_probed_physical_tokens():
@@ -193,10 +263,15 @@ def test_unknown_probe_name_is_unsupported():
     assert report.probe_results[0].outcome == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
 
 
-def test_readiness_ready_when_cuda_and_bnb_pass():
+def test_readiness_ready_only_when_a_complete_cuda_tuple_passes():
+    combo = _execution_combo(training=True)
     reg = {
         "cuda_available": lambda _p: ProbeOutcome(FailureTaxonomy.PASS),
         "bnb_4bit_load": lambda _p: ProbeOutcome(FailureTaxonomy.PASS),
+        "exact_execution": lambda _p: ProbeOutcome(
+            FailureTaxonomy.PASS,
+            execution_combinations=[combo],
+        ),
     }
     report = run_capability_probes(
         _profile(packages=[PackageLock(name="torch", version="2.7.0")]), registry=reg
@@ -205,8 +280,15 @@ def test_readiness_ready_when_cuda_and_bnb_pass():
     assert report.bitsandbytes_ok is True
 
 
-def test_readiness_cpu_toy_when_torch_installed_but_no_gpu():
-    reg = {"cuda_available": lambda _p: ProbeOutcome(FailureTaxonomy.FAIL, "cpu build")}
+def test_readiness_cpu_toy_only_when_a_complete_cpu_tuple_passes():
+    combo = _execution_combo(training=False)
+    reg = {
+        "cuda_available": lambda _p: ProbeOutcome(FailureTaxonomy.FAIL, "cpu build"),
+        "exact_execution": lambda _p: ProbeOutcome(
+            FailureTaxonomy.PASS,
+            execution_combinations=[combo],
+        ),
+    }
     report = run_capability_probes(
         _profile(packages=[PackageLock(name="torch", version="2.7.0+cpu")]), registry=reg
     )
@@ -278,7 +360,13 @@ def test_builtin_probes_degrade_cleanly_without_torch():
     profile = P.build_environment_profile()
     report = run_capability_probes(profile)
     assert report.readiness == "not_ready"
-    torch_probes = {"cuda_available", "bf16_matmul", "bnb_4bit_load", "checkpoint_reload"}
+    torch_probes = {
+        "cuda_available",
+        "bf16_matmul",
+        "bnb_4bit_load",
+        "checkpoint_reload",
+        "dense_optimizer_step",
+    }
     outcomes = {r.probe: r.outcome for r in report.probe_results}
     for name in torch_probes:
         assert outcomes[name] == FailureTaxonomy.ENVIRONMENT_FAILURE

@@ -189,8 +189,9 @@ backend workflow.
 The current estimates say seq-4096 7B QLoRA will not fit in 12 GB unaided. Candidate experiments,
 cheapest first, are:
 
-1. **Fused-CE loss** — CorpusStudio's `--memory-efficient` / `--use-liger`; measure its effect on this
-   host rather than carrying forward the Windows/WSL estimate.
+1. **Fused-CE loss** — first add and pass a complete tuple probe for the Liger + selected optimizer
+   combination, then measure its effect on this host. A standalone Liger field/package result is not
+   execution support.
 2. **Activation offload to CPU RAM** — a planned long-sequence lever that needs a real isolated backend
    and measurement on the final host.
 3. **DeepSpeed ZeRO offload → NVMe** — planned only. CorpusStudio does not yet ship or verify this
@@ -204,10 +205,15 @@ The existing singleton baseline can be planned and supervised with the platform,
 does not implement or prove CPU/NVMe offload:
 
 ```bash
-corpus-studio platform-plan --base-model Qwen/Qwen2.5-7B-Instruct --dataset train.jsonl \
-    --dataset-format chat --sequence-len 1024 --memory-efficient --out /tmp/plan
-corpus-studio platform-run /tmp/plan/RunPlan.json --runner training --subprocess --out ./run
+corpus-studio platform-plan --base-model Qwen/Qwen2.5-7B-Instruct \
+    --model-revision a09a35458c702b33eeacc393d103063234e8bc28 --dataset train.jsonl \
+    --dataset-format chat --chat-template-sha256 "$CHAT_TEMPLATE_SHA256" \
+    --sequence-len 1024 --out /tmp/plan
+corpus-studio platform-run /tmp/plan/RunPlan.json --subprocess --out ./run
 ```
+
+For a chat dataset, also supply the exact `--chat-template-sha256`; omission is a blocking preflight
+error rather than a formatting fallback.
 
 **Expectations, honestly:** no completion or fit claim exists yet. Establish the sequence-1024 native
 baseline first, increase sequence length gradually, then test CPU offload, and attempt NVMe offload

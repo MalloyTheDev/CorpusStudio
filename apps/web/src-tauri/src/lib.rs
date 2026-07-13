@@ -38,6 +38,7 @@ fn platform_backends() -> Result<Value, String> {
 #[tauri::command]
 fn platform_plan(
     base_model: String,
+    model_revision: Option<String>,
     dataset: String,
     sequence_len: u32,
     backend: Option<String>,
@@ -53,6 +54,11 @@ fn platform_plan(
         &seq,
         "--json",
     ];
+    let revision = model_revision.unwrap_or_default();
+    if !revision.trim().is_empty() {
+        args.push("--model-revision");
+        args.push(&revision);
+    }
     let backend_id = backend.unwrap_or_default();
     if !backend_id.is_empty() {
         args.push("--backend");

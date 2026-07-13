@@ -165,18 +165,39 @@ def compute_content_hash(path: str) -> str | None:
             return None
         if not files:
             return None
-        digest = hashlib.sha256()
-        for file in files:
-            digest.update(_rel_key(file, target).encode("utf-8"))
-            digest.update(b"\0")
-            with file.open("rb") as handle:
-                while True:
-                    chunk = handle.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    digest.update(chunk)
-            digest.update(b"\0")
-        return digest.hexdigest()
+        return _content_hash_files(target, files)
+    except OSError:
+        return None
+
+
+def _content_hash_files(base: Path, files: list[Path]) -> str:
+    digest = hashlib.sha256()
+    for file in files:
+        digest.update(_rel_key(file, base).encode("utf-8"))
+        digest.update(b"\0")
+        with file.open("rb") as handle:
+            while chunk := handle.read(1024 * 1024):
+                digest.update(chunk)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def compute_weight_content_hash(path: str) -> str | None:
+    """Hash actual recognized weight bytes only; never fall back to a descriptor.
+
+    Training-success gates use this stricter helper. The general artifact registry keeps
+    :func:`compute_content_hash`'s descriptor fallback for legacy/non-weight artifacts.
+    """
+
+    target = Path(path)
+    try:
+        if target.is_file():
+            files = [target] if target.suffix.lower() in _WEIGHT_SUFFIXES else []
+        elif target.is_dir():
+            files = _weight_files(target)
+        else:
+            return None
+        return _content_hash_files(target, files) if files else None
     except OSError:
         return None
 

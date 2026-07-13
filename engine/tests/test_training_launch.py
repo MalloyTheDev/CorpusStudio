@@ -61,15 +61,26 @@ def test_llama_factory_command():
     assert plan.command == 'llamafactory-cli train "out/config.yaml"'
 
 
-def test_corpus_studio_first_party_command():
+def test_corpus_studio_requires_the_sealed_platform_path():
     plan = build_launch_plan("corpus_studio", "out/config.json")
-    assert plan.command == 'corpus-studio train-run "out/config.json"'
-    assert plan.argv == ["corpus-studio", "train-run", "out/config.json"]
+    assert plan.command == ""
+    assert plan.argv == []
+    assert plan.resume_command == ""
+    assert plan.resume_argv == []
     assert plan.dependencies == ["corpus-studio-engine[train]"]
-    # First-party review note (not the "review before running an external trainer" one) + no resume flag.
     assert plan.resume_supported is False
-    assert any("first-party" in note.lower() for note in plan.notes)
-    assert not any("does not launch training" in note.lower() for note in plan.notes)
+    assert any("platform-plan" in note for note in plan.notes)
+    assert any("platform-run" in note for note in plan.notes)
+
+
+def test_direct_train_run_refuses_without_explicit_unsealed_acknowledgement(tmp_path: Path):
+    result = runner.invoke(app, ["train-run", str(tmp_path / "config.json")])
+
+    assert result.exit_code == 2
+    assert "UNSEALED_DIRECT_EXECUTION" in result.output
+    assert "NON_REPRODUCIBLE" in result.output
+    assert "NO_PLATFORM_LINEAGE" in result.output
+    assert "platform-plan" in result.output
 
 
 def test_unknown_target_raises():

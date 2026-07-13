@@ -18,6 +18,7 @@ export type { ObjectiveCompatibilityReport } from "./ObjectiveCompatibilityRepor
 export type { ParameterAccountingReport } from "./ParameterAccountingReport";
 export type { ProjectManifest } from "./ProjectManifest";
 export type { PythonRuntime } from "./PythonRuntime";
+export type { ResolvedExecutionConfiguration } from "./ResolvedExecutionConfiguration";
 export type { RunEvent } from "./RunEvent";
 export type { RunManifest } from "./RunManifest";
 export type { RunPlan } from "./RunPlan";

@@ -21,17 +21,27 @@ from corpus_studio.training.traces import Trace
 from corpus_studio.training.environment import TrainingRuntimeReport
 from corpus_studio.training.trainer import (
     TINY_TOY_MODEL,
+    ExecutionPlacementDeviation,
     TrainerError,
     TrainRunConfig,
     analyze_truncation,
+    apply_attention_execution_policy,
     build_lora_kwargs,
+    build_model_load_kwargs,
     build_training_kwargs,
+    enforce_trainable_precision,
     format_example_text,
     load_run_config_from_file,
     resolve_attention_implementation,
     resolve_run_plan,
     run_training,
+    train_config_from_resolved,
     truncation_warning,
+    verify_sealed_runtime,
+    verify_loaded_model_execution,
+    verify_local_inputs_after_load,
+    verify_model_state_execution,
+    verify_optimizer_state_precision,
     _list_checkpoints,
 )
 
@@ -321,6 +331,16 @@ def test_format_chat_without_tokenizer_joins_roles():
     assert "user: hi" in text and "assistant: hello" in text
 
 
+def test_format_chat_template_failure_is_blocking():
+    class BrokenTokenizer:
+        def apply_chat_template(self, messages, *, tokenize):
+            raise RuntimeError("template is invalid")
+
+    row = {"messages": [{"role": "user", "content": "hi"}]}
+    with pytest.raises(TrainerError, match="chat template failed"):
+        format_example_text(row, "chat", BrokenTokenizer())
+
+
 def test_format_empty_row_is_dropped():
     assert format_example_text({"instruction": "", "output": ""}, "instruction") == ""
     assert format_example_text({"messages": []}, "chat") == ""
@@ -334,6 +354,243 @@ def test_lora_kwargs_use_all_linear():
     assert kw["r"] == 16 and kw["lora_alpha"] == 32
     assert kw["target_modules"] == "all-linear"
     assert kw["task_type"] == "CAUSAL_LM"
+
+
+def test_lora_kwargs_are_fully_config_driven():
+    kw = build_lora_kwargs(
+        _cfg(
+            lora_dropout=0.125,
+            lora_bias="lora_only",
+            lora_target_modules=["q_proj", "v_proj"],
+        )
+    )
+    assert kw["lora_dropout"] == 0.125
+    assert kw["bias"] == "lora_only"
+    assert kw["target_modules"] == ["q_proj", "v_proj"]
+
+
+class _FakeSdpBackend:
+    def __init__(self, *, ignore_math: bool = False):
+        self.flash = True
+        self.mem_efficient = True
+        self.math = True
+        self.ignore_math = ignore_math
+
+    def enable_flash_sdp(self, value):
+        self.flash = value
+
+    def enable_mem_efficient_sdp(self, value):
+        self.mem_efficient = value
+
+    def enable_math_sdp(self, value):
+        if not self.ignore_math:
+            self.math = value
+
+    def flash_sdp_enabled(self):
+        return self.flash
+
+    def mem_efficient_sdp_enabled(self):
+        return self.mem_efficient
+
+    def math_sdp_enabled(self):
+        return self.math
+
+
+class _FakeTorch:
+    float32 = object()
+    float16 = object()
+    bfloat16 = object()
+    int8 = object()
+    uint8 = object()
+
+    def __init__(self, cuda_backend=None):
+        self.backends = type("Backends", (), {"cuda": cuda_backend or _FakeSdpBackend()})()
+
+
+def _sealed_config(**overrides):
+    base = {
+        "base_model": "model",
+        "dataset_path": "dataset.jsonl",
+        "execution_configuration_hash": "a" * 64,
+        "model_revision": "b" * 40,
+        "attn_implementation": "sdpa",
+        "attention_kernel": "torch_sdpa_math",
+        "flash_sdp_enabled": False,
+        "mem_efficient_sdp_enabled": False,
+        "math_sdp_enabled": True,
+        "device_map": {"": "cuda:0"},
+    }
+    base.update(overrides)
+    return TrainRunConfig(**base)
+
+
+def test_attention_policy_applies_and_observes_all_three_sdp_toggles():
+    torch = _FakeTorch()
+    effective = apply_attention_execution_policy(torch, _sealed_config())
+    assert effective == "torch_sdpa_math"
+    assert torch.backends.cuda.flash_sdp_enabled() is False
+    assert torch.backends.cuda.mem_efficient_sdp_enabled() is False
+    assert torch.backends.cuda.math_sdp_enabled() is True
+
+
+def test_attention_policy_refuses_an_observed_toggle_deviation():
+    torch = _FakeTorch(_FakeSdpBackend(ignore_math=True))
+    cfg = _sealed_config(math_sdp_enabled=False)
+    with pytest.raises(TrainerError, match="attention policy deviation"):
+        apply_attention_execution_policy(torch, cfg)
+
+
+def test_model_load_kwargs_pin_quantization_dtype_revision_and_device_map():
+    class FakeBitsAndBytesConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    torch = _FakeTorch()
+    cfg = _sealed_config(dequantization_dtype="fp16", quantization_mode="nf4")
+    kwargs = build_model_load_kwargs(
+        cfg,
+        torch,
+        quantize=True,
+        bitsandbytes_config_cls=FakeBitsAndBytesConfig,
+    )
+    assert kwargs["device_map"] == {"": "cuda:0"}
+    assert kwargs["revision"] == "b" * 40
+    assert kwargs["use_safetensors"] is True
+    assert kwargs["attn_implementation"] == "sdpa"
+    assert kwargs["quantization_config"].kwargs["bnb_4bit_compute_dtype"] is torch.float16
+
+
+def test_model_load_kwargs_refuse_implicit_auto_placement():
+    cfg = _sealed_config(device_map={"": "auto"})
+    with pytest.raises(TrainerError, match="explicit non-auto device map"):
+        build_model_load_kwargs(cfg, _FakeTorch(), quantize=False)
+
+
+def test_loaded_model_execution_observes_attention_and_exact_device_map():
+    class Parameter:
+        device = "cuda:0"
+
+    model = type(
+        "Model",
+        (),
+        {
+            "config": type("Config", (), {"_attn_implementation": "sdpa"})(),
+            "hf_device_map": {"": 0},
+            "parameters": lambda self: iter([Parameter()]),
+        },
+    )()
+    verify_loaded_model_execution(model, _sealed_config())
+
+
+def test_loaded_model_execution_emits_a_typed_placement_deviation():
+    model = type(
+        "Model",
+        (),
+        {
+            "config": type("Config", (), {"_attn_implementation": "sdpa"})(),
+            "hf_device_map": {"": "cpu"},
+            "parameters": lambda self: iter(()),
+        },
+    )()
+    with pytest.raises(ExecutionPlacementDeviation, match="PLACEMENT_DEVIATION"):
+        verify_loaded_model_execution(model, _sealed_config())
+
+
+def test_post_adapter_state_verifies_placement_and_unquantized_storage_dtype():
+    torch = _FakeTorch()
+
+    class Parameter:
+        def __init__(self, *, trainable, device="cuda:0", dtype=None):
+            self.requires_grad = trainable
+            self.device = device
+            self.dtype = dtype or torch.float32
+
+        def is_floating_point(self):
+            return True
+
+    parameters = [Parameter(trainable=False), Parameter(trainable=True)]
+    model = type(
+        "Model",
+        (),
+        {
+            "named_parameters": lambda self: iter(
+                [("base.weight", parameters[0]), ("adapter.weight", parameters[1])]
+            ),
+            "parameters": lambda self: iter(parameters),
+            "modules": lambda self: iter(()),
+        },
+    )()
+    cfg = _sealed_config(
+        quantization_mode="none",
+        weight_storage_dtype="fp32",
+        master_weight_dtype="fp32",
+    )
+    verify_model_state_execution(model, torch, cfg, quantize=False)
+
+    parameters[1].device = "cpu"
+    with pytest.raises(ExecutionPlacementDeviation, match="post-adapter"):
+        verify_model_state_execution(model, torch, cfg, quantize=False)
+
+
+def test_post_adapter_state_observes_nf4_and_dequantization_dtype():
+    torch = _FakeTorch()
+
+    class Parameter:
+        requires_grad = True
+        device = "cuda:0"
+        dtype = torch.float32
+
+        def is_floating_point(self):
+            return True
+
+    weight = type(
+        "Weight",
+        (),
+        {"quant_state": type("QuantState", (), {"quant_type": "nf4"})()},
+    )()
+    linear = type("Linear4bit", (), {"weight": weight, "compute_dtype": torch.bfloat16})()
+    parameter = Parameter()
+    model = type(
+        "Model",
+        (),
+        {
+            "named_parameters": lambda self: iter([("adapter.weight", parameter)]),
+            "parameters": lambda self: iter([parameter]),
+            "modules": lambda self: iter([linear]),
+        },
+    )()
+    cfg = _sealed_config(
+        quantization_mode="nf4",
+        dequantization_dtype="bf16",
+        master_weight_dtype="fp32",
+    )
+    verify_model_state_execution(model, torch, cfg, quantize=True)
+    weight.quant_state.quant_type = "fp4"
+    with pytest.raises(TrainerError, match="quantized storage deviation"):
+        verify_model_state_execution(model, torch, cfg, quantize=True)
+
+
+def test_optimizer_state_precision_accepts_sealed_primary_and_auxiliary_dtypes():
+    torch = _FakeTorch()
+
+    def tensor(dtype):
+        return type("Tensor", (), {"dtype": dtype})()
+
+    optimizer = type(
+        "Optimizer",
+        (),
+        {"state": {"parameter": {"state1": tensor(torch.uint8), "scale": tensor(torch.float32)}}},
+    )()
+    cfg = _sealed_config(optimizer_state_dtype="int8", optimizer_auxiliary_dtype="fp32")
+    verify_optimizer_state_precision(optimizer, torch, cfg)
+
+
+def test_optimizer_state_precision_refuses_runtime_drift():
+    torch = _FakeTorch()
+    bad = type("Tensor", (), {"dtype": torch.float16})()
+    optimizer = type("Optimizer", (), {"state": {"parameter": {"exp_avg": bad}}})()
+    with pytest.raises(TrainerError, match="optimizer-state dtype deviation"):
+        verify_optimizer_state_precision(optimizer, torch, _sealed_config())
 
 
 def test_training_kwargs_capped_steps_vs_epochs(tmp_path):
@@ -372,6 +629,188 @@ def test_real_plan_requires_full_ready():
     assert plan == {"device": "cuda", "quantize": True}
     with pytest.raises(TrainerError):
         resolve_run_plan(cfg, _report(ready=False, cpu_toy_ready=True))
+
+
+def test_resolved_execution_maps_without_reintroducing_trainer_defaults():
+    from corpus_studio.platform.runners import demo_training_plan
+
+    execution = demo_training_plan().resolved_execution
+    assert execution is not None
+    cfg = train_config_from_resolved(execution)
+    assert cfg.execution_configuration_hash == execution.configuration_hash
+    assert cfg.max_steps == 2
+    assert cfg.device_map == {"": "cpu"}
+    assert cfg.lora_dropout == execution.adapter.lora_dropout
+    assert cfg.lora_bias == execution.adapter.bias
+    assert cfg.package_versions["transformers"]
+
+
+def test_sealed_runtime_refuses_dataset_byte_drift(tmp_path):
+    from corpus_studio.platform.execution_config import stable_file_sha256
+
+    dataset = tmp_path / "train.jsonl"
+    dataset.write_text('{"instruction":"a","output":"b"}\n', encoding="utf-8")
+    cfg = _sealed_config(
+        dataset_path=str(dataset),
+        dataset_sha256=stable_file_sha256(dataset),
+        package_versions={},
+    )
+    verify_sealed_runtime(cfg)
+    dataset.write_text('{"instruction":"changed","output":"b"}\n', encoding="utf-8")
+    with pytest.raises(TrainerError, match="dataset bytes changed"):
+        verify_sealed_runtime(cfg)
+
+
+def test_sealed_runtime_refuses_package_drift(tmp_path, monkeypatch):
+    from corpus_studio.platform.execution_config import stable_file_sha256
+
+    dataset = tmp_path / "train.jsonl"
+    dataset.write_text('{"instruction":"a","output":"b"}\n', encoding="utf-8")
+    cfg = _sealed_config(
+        dataset_path=str(dataset),
+        dataset_sha256=stable_file_sha256(dataset),
+        package_versions={"transformers": "1.2.3"},
+    )
+    monkeypatch.setattr(trainer_module.importlib.metadata, "version", lambda _name: "9.9.9")
+    with pytest.raises(TrainerError, match="sealed package drift"):
+        verify_sealed_runtime(cfg)
+
+
+def test_local_model_and_tokenizer_are_rehashed_after_loading(tmp_path):
+    from corpus_studio.platform.execution_config import stable_directory_sha256
+
+    model = tmp_path / "model"
+    model.mkdir()
+    config_file = model / "config.json"
+    config_file.write_text("{}", encoding="utf-8")
+    digest = stable_directory_sha256(model)
+    cfg = _sealed_config(
+        base_model=str(model),
+        model_source="local_directory",
+        model_content_sha256=digest,
+        tokenizer_source="local_directory",
+        tokenizer_location=str(model),
+        tokenizer_content_sha256=digest,
+    )
+    verify_local_inputs_after_load(cfg)
+
+    config_file.write_text('{"changed":true}', encoding="utf-8")
+    with pytest.raises(TrainerError, match="bytes changed while loading"):
+        verify_local_inputs_after_load(cfg)
+
+
+def test_local_input_recheck_rejects_unsupported_conflicting_and_missing_bindings(tmp_path):
+    model = tmp_path / "model"
+    model.mkdir()
+    (model / "config.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(TrainerError, match="unsupported local binding"):
+        verify_local_inputs_after_load(
+            _sealed_config(
+                base_model=str(model),
+                model_source="local_file",
+                model_content_sha256="a" * 64,
+            )
+        )
+    with pytest.raises(TrainerError, match="bindings disagree"):
+        verify_local_inputs_after_load(
+            _sealed_config(
+                base_model=str(model),
+                model_source="local_directory",
+                model_content_sha256="a" * 64,
+                tokenizer_source="local_directory",
+                tokenizer_location=str(model),
+                tokenizer_content_sha256="b" * 64,
+            )
+        )
+    with pytest.raises(TrainerError, match="directory does not exist"):
+        verify_local_inputs_after_load(
+            _sealed_config(
+                base_model=str(tmp_path / "missing"),
+                model_source="local_directory",
+                model_content_sha256="a" * 64,
+                tokenizer_source="huggingface",
+            )
+        )
+    verify_local_inputs_after_load(TrainRunConfig(base_model="m", dataset_path="d"))
+
+
+def test_trainable_precision_enforces_master_weights_and_gradient_contract():
+    torch = _FakeTorch()
+
+    class Data:
+        def __init__(self, owner):
+            self.owner = owner
+
+        def to(self, *, dtype):
+            self.owner.dtype = dtype
+            return self
+
+    class Parameter:
+        def __init__(self, *, trainable):
+            self.requires_grad = trainable
+            self.dtype = torch.float16
+            self.device = "cuda:0"
+            self.data = Data(self)
+            self.hook = None
+
+        def register_hook(self, hook):
+            self.hook = hook
+
+    frozen = Parameter(trainable=False)
+    adapter = Parameter(trainable=True)
+    model = type(
+        "Model",
+        (),
+        {"named_parameters": lambda self: iter([("base", frozen), ("adapter", adapter)])},
+    )()
+    cfg = _sealed_config(master_weight_dtype="fp32", gradient_dtype="fp32")
+    enforce_trainable_precision(model, torch, cfg)
+    assert adapter.dtype is torch.float32 and adapter.hook is not None
+
+    good = type("Gradient", (), {"dtype": torch.float32, "device": "cuda:0"})()
+    assert adapter.hook(good) is good
+    bad_dtype = type("Gradient", (), {"dtype": torch.float16, "device": "cuda:0"})()
+    with pytest.raises(TrainerError, match="gradient dtype deviation"):
+        adapter.hook(bad_dtype)
+    bad_device = type("Gradient", (), {"dtype": torch.float32, "device": "cpu"})()
+    with pytest.raises(ExecutionPlacementDeviation, match="gradient adapter"):
+        adapter.hook(bad_device)
+
+
+def test_trainable_precision_refuses_missing_or_empty_adapter_state():
+    torch = _FakeTorch()
+    empty = type("Model", (), {"named_parameters": lambda self: iter(())})()
+    with pytest.raises(TrainerError, match="master-weight dtype"):
+        enforce_trainable_precision(empty, torch, _sealed_config(master_weight_dtype=None))
+    with pytest.raises(TrainerError, match="no trainable parameters"):
+        enforce_trainable_precision(empty, torch, _sealed_config(master_weight_dtype="fp32"))
+
+
+def test_formatter_identity_hashes_the_renderer_implementation(monkeypatch):
+    import corpus_studio.platform.execution_config as execution_module
+
+    formatter_id, original_hash = execution_module.formatter_identity("instruction")
+    real_getsource = execution_module.inspect.getsource
+    monkeypatch.setattr(
+        execution_module.inspect,
+        "getsource",
+        lambda value: real_getsource(value) + "\n# synthetic implementation change\n",
+    )
+    changed_id, changed_hash = execution_module.formatter_identity("instruction")
+    assert changed_id == formatter_id
+    assert changed_hash != original_hash
+
+
+def test_stabilized_dataset_bytes_are_the_bytes_that_get_parsed(tmp_path):
+    from corpus_studio.importers.jsonl_importer import read_jsonl_bytes
+    from corpus_studio.platform.execution_config import stable_file_bytes
+
+    dataset = tmp_path / "dataset.jsonl"
+    dataset.write_text('{"instruction":"old","output":"a"}\n', encoding="utf-8")
+    content, digest = stable_file_bytes(dataset)
+    dataset.write_text('{"instruction":"new","output":"b"}\n', encoding="utf-8")
+    assert list(read_jsonl_bytes(content))[0]["instruction"] == "old"
+    assert digest != stable_file_bytes(dataset)[1]
 
 
 def test_list_checkpoints(tmp_path):

@@ -25,8 +25,8 @@ run control plane covering the dataset-to-model workflow: create datasets, valid
 clean and measure them, grade their outstanding debt, run pass/warn/block gates,
 generate or rewrite candidates only with policy-approved providers under human
 review, test and compare models, export them, version/diff/restore the dataset,
-generate training configs, run the QLoRA yourself (the opt-in first-party trainer)
-or launch your own installed trainer with live logs and checkpoints, plan against measured hardware,
+generate training configs, execute first-party QLoRA only from a hash-sealed RunPlan through the
+supervised worker path, or launch your own installed trainer with live logs and checkpoints, plan against measured hardware,
 isolate the reference training backend in a lock-pinned managed environment, track every run and the
 model artifacts it produces, and measure the before/after improvement.
 
@@ -37,7 +37,8 @@ The single source of truth for what is implemented today is
 
 Corpus Studio covers the full local loop from authoring, through governed
 cleaning and gating, evaluation and model comparison, to launching and tracking
-a training run — its own opt-in first-party trainer, or your installed trainer:
+a training run — its own opt-in first-party backend through the sealed Platform lifecycle, or your
+installed external trainer:
 
 **Author & validate**
 - create projects from built-in schema templates with pre-filled examples
@@ -124,22 +125,27 @@ a training run — its own opt-in first-party trainer, or your installed trainer
   before generation
 
 **Train & track**
-- training config export for the first-party `corpus_studio` trainer or axolotl /
+- training config export for the first-party `corpus_studio` backend or axolotl /
   TRL / Unsloth / Hugging Face / LLaMA-Factory, with compatibility warnings, a real
   token budget (tokens-per-epoch after truncation, over-length counts), a rough VRAM
-  planning estimate, a LoRA rank/alpha suggestion, and the exact launch command
-- an **opt-in first-party QLoRA trainer** (the `[train]` extra): `train-check`
-  preflights the runtime, `train-run` runs a 4-bit QLoRA in-process and writes the
-  adapter + a model card, `train-merge` merges it back (with a small-VRAM fallback),
-  and `model-fetch` reliably downloads a permissive base model with its license
+  planning estimate, and a LoRA rank/alpha suggestion. External targets include the exact launch
+  command; the first-party target deliberately requires a sealed Platform plan instead
+- an **opt-in first-party QLoRA backend** (the `[train]` extra): `platform-plan` binds immutable
+  model/tokenizer/dataset/objective/environment/capability evidence, and `platform-run` supervises
+  the exact worker configuration. Every execution receives a fresh UUIDv7 run ID and writes under
+  `<output-root>/runs/<run-id>/`; its adapter ID includes the run, role, and weight-content hash.
+  `train-check`, `train-merge`, and `model-fetch` remain supporting tools. The low-level `train-run`
+  entry point is development-only: it refuses unless explicitly acknowledged and labels its result
+  `UNSEALED_DIRECT_EXECUTION`, `NON_REPRODUCIBLE`, and `NO_PLATFORM_LINEAGE`
 - versioned `TraceRecord` artifacts preserve source rows, role context, reasoning/tool/final-answer
   boundaries, producer-policy evidence, validation, and separate human review. Generated candidates
-  are pending by default; `trace-review` writes immutable successors and `train-run` refuses
+  are pending by default; `trace-review` writes immutable successors and first-party trainer admission refuses
   pending/rejected/tampered records before model loading (see
   [`docs/TRACE_RECORDS.md`](docs/TRACE_RECORDS.md))
-- in-app launch of the first-party trainer or your installed trainer (explicit
-  confirmation showing the exact command, no shell), live log streaming, and a Stop
-  that kills the process tree
+- in-app Platform plan/run integration in the Tauri/React client, plus external-trainer launch in the
+  WPF/Avalonia Training Lab (explicit command review, no shell), live log streaming, and a Stop that
+  kills the process tree. The shipping WPF/Avalonia desktop intentionally refuses the old mutable-
+  config first-party launch instead of bypassing Platform lineage
 - checkpoint tracking during and after runs, resume-from-latest for targets
   with a CLI resume flag, and before/after evaluation comparison against the
   baseline captured at launch

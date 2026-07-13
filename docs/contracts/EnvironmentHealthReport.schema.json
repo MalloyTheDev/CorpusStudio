@@ -1,5 +1,19 @@
 {
   "$defs": {
+    "AdapterMethod": {
+      "enum": [
+        "none",
+        "lora",
+        "qlora",
+        "dora",
+        "ia3",
+        "full_finetune",
+        "prompt_tuning",
+        "prefix_tuning"
+      ],
+      "title": "AdapterMethod",
+      "type": "string"
+    },
     "AttentionImpl": {
       "description": "``math``/``eager`` is forced on native-Windows/WDDM Blackwell sm_120 because the fused flash\nkernel deadlocks there. Other platforms require their own functional capability result; WSL\nevidence is not bare-Linux proof.",
       "enum": [
@@ -12,6 +26,42 @@
         "xformers"
       ],
       "title": "AttentionImpl",
+      "type": "string"
+    },
+    "AttentionKernel": {
+      "description": "The exact attention implementation an execution policy permits at runtime.",
+      "enum": [
+        "eager",
+        "torch_sdpa_math",
+        "torch_sdpa_flash",
+        "torch_sdpa_mem_efficient",
+        "flash_attention_2",
+        "flash_attention_3",
+        "xformers"
+      ],
+      "title": "AttentionKernel",
+      "type": "string"
+    },
+    "CheckpointImpl": {
+      "enum": [
+        "full_state",
+        "adapter_only",
+        "sharded",
+        "distcp",
+        "safetensors"
+      ],
+      "title": "CheckpointImpl",
+      "type": "string"
+    },
+    "DeviceKind": {
+      "enum": [
+        "cuda",
+        "rocm",
+        "mps",
+        "xpu",
+        "cpu"
+      ],
+      "title": "DeviceKind",
       "type": "string"
     },
     "EnvironmentState": {
@@ -30,6 +80,91 @@
         "BROKEN"
       ],
       "title": "EnvironmentState",
+      "type": "string"
+    },
+    "ExecutionCapabilityCombination": {
+      "additionalProperties": false,
+      "description": "One execution tuple demonstrated together by a bounded functional probe.\n\nIndependent successes on precision, quantization, adapter, optimizer, loss, attention, and\ncheckpoint axes are diagnostic only. The planner may seal a run only from one of these complete\ntuples, preventing a union of unrelated probes from becoming a fictional capability.",
+      "properties": {
+        "adapter_method": {
+          "$ref": "#/$defs/AdapterMethod"
+        },
+        "attention_impl": {
+          "$ref": "#/$defs/AttentionImpl"
+        },
+        "attention_kernel": {
+          "$ref": "#/$defs/AttentionKernel"
+        },
+        "checkpoint_impl": {
+          "$ref": "#/$defs/CheckpointImpl"
+        },
+        "device": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "execution_contract_version": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Execution Contract Version",
+          "type": "string"
+        },
+        "export_format": {
+          "$ref": "#/$defs/ExportFormat"
+        },
+        "loss_impl": {
+          "$ref": "#/$defs/LossImpl"
+        },
+        "optimizer": {
+          "$ref": "#/$defs/Optimizer"
+        },
+        "precision": {
+          "$ref": "#/$defs/PrecisionMode"
+        },
+        "probe": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Probe",
+          "type": "string"
+        },
+        "quantization": {
+          "$ref": "#/$defs/QuantizationMode"
+        },
+        "runtime_mode": {
+          "enum": [
+            "training",
+            "cpu_toy"
+          ],
+          "title": "Runtime Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtime_mode",
+        "device",
+        "precision",
+        "quantization",
+        "adapter_method",
+        "attention_impl",
+        "attention_kernel",
+        "optimizer",
+        "loss_impl",
+        "checkpoint_impl",
+        "export_format",
+        "execution_contract_version",
+        "probe"
+      ],
+      "title": "ExecutionCapabilityCombination",
+      "type": "object"
+    },
+    "ExportFormat": {
+      "enum": [
+        "adapter_peft",
+        "merged_safetensors",
+        "merged_fp16",
+        "gguf",
+        "onnx",
+        "awq",
+        "gptq",
+        "mlx"
+      ],
+      "title": "ExportFormat",
       "type": "string"
     },
     "FailureRecord": {
@@ -321,6 +456,20 @@
       "title": "HashRef",
       "type": "object"
     },
+    "LossImpl": {
+      "enum": [
+        "cross_entropy",
+        "liger_fused_ce",
+        "chunked_ce",
+        "dpo",
+        "orpo",
+        "kto",
+        "ipo",
+        "reward_bt"
+      ],
+      "title": "LossImpl",
+      "type": "string"
+    },
     "MemoryMetrics": {
       "additionalProperties": false,
       "description": "The full memory-signature block sampled during a run. Distinguishes PyTorch's allocator view,\nraw CUDA device memory, and OS-level residency (``dedicated`` vs ``shared`` GPU memory) so a\nWindows/WDDM spill to shared memory is VISIBLE rather than hidden inside 'used VRAM'. Grounded in\ngpu_probe.GpuMemory + the estimators note that torch.max_memory_allocated counts the WDDM spill.",
@@ -459,6 +608,21 @@
       "title": "MemoryMetrics",
       "type": "object"
     },
+    "Optimizer": {
+      "enum": [
+        "adamw_torch",
+        "adamw_torch_fused",
+        "adamw_8bit",
+        "adamw_bnb_8bit",
+        "paged_adamw_8bit",
+        "paged_adamw_32bit",
+        "adafactor",
+        "lion",
+        "sgd"
+      ],
+      "title": "Optimizer",
+      "type": "string"
+    },
     "PackageLock": {
       "additionalProperties": false,
       "description": "A resolved dependency and its install provenance.\n\n``hash`` seals the installed distribution's RECORD metadata when that evidence is available; it\nis not mislabelled as the original wheel hash. ``direct_url`` and ``artifact`` preserve the\nstronger source identity pip exposes for direct/VCS/local installs. ``dependencies`` is the\ninstalled metadata dependency graph, not a second resolver.",
@@ -567,6 +731,19 @@
       "title": "PackageLock",
       "type": "object"
     },
+    "PrecisionMode": {
+      "enum": [
+        "fp32",
+        "tf32",
+        "fp16",
+        "bf16",
+        "fp8",
+        "mixed_bf16",
+        "mixed_fp16"
+      ],
+      "title": "PrecisionMode",
+      "type": "string"
+    },
     "ProbeResult": {
       "additionalProperties": false,
       "properties": {
@@ -582,6 +759,13 @@
           "default": null,
           "title": "Detail"
         },
+        "execution_combinations": {
+          "items": {
+            "$ref": "#/$defs/ExecutionCapabilityCombination"
+          },
+          "title": "Execution Combinations",
+          "type": "array"
+        },
         "measured": {
           "additionalProperties": true,
           "title": "Measured",
@@ -593,6 +777,16 @@
         "probe": {
           "title": "Probe",
           "type": "string"
+        },
+        "proves": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Proves",
+          "type": "object"
         }
       },
       "required": [
@@ -601,6 +795,20 @@
       ],
       "title": "ProbeResult",
       "type": "object"
+    },
+    "QuantizationMode": {
+      "enum": [
+        "none",
+        "int8",
+        "int4",
+        "nf4",
+        "fp4",
+        "gptq",
+        "awq",
+        "hqq"
+      ],
+      "title": "QuantizationMode",
+      "type": "string"
     },
     "Ref": {
       "additionalProperties": false,
@@ -635,6 +843,10 @@
         "process_start",
         "env_loaded",
         "cuda_init",
+        "execution_config_verified",
+        "attention_policy_applied",
+        "placement_verified",
+        "placement_deviation",
         "model_loaded",
         "quantized",
         "adapter_attached",

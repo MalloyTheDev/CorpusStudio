@@ -1,9 +1,9 @@
 # Release Checklist
 
 A pre-release gate for public-repo hygiene, reproducible evidence, and honest
-scope. Corpus Studio is local-first: it can run its own opt-in first-party trainer
-or launch a user's installed trainer (with explicit confirmation of the exact
-command), but the dependency-light core / distributable bundles no CUDA/PyTorch
+scope. Corpus Studio is local-first: it can dispatch a sealed plan to its opt-in
+first-party worker or launch a user's installed external trainer (with explicit
+confirmation of the exact command), but the dependency-light control plane / distributable bundles no CUDA/PyTorch
 and calls no hosted services on its own, so "release" here means a clean,
 inspectable, buildable snapshot — not a deployment.
 

@@ -40,6 +40,7 @@ from corpus_studio.platform.contracts import (
 from corpus_studio.platform.backends import backend_manifest_digest
 from corpus_studio.platform.enums import FailureTaxonomy
 from corpus_studio.platform.artifacts import write_artifact_manifest
+from corpus_studio.platform.common import new_uuid7_id
 from corpus_studio.platform.process_control import (
     process_group_creation_flags,
     start_new_process_session,
@@ -50,6 +51,7 @@ from corpus_studio.platform.supervisor import (
     SupervisedRun,
     _now_iso,
     _sanitize_id,
+    run_record_directory,
     write_run_manifest,
 )
 from corpus_studio.platform.worker_protocol import (
@@ -74,10 +76,8 @@ def worker_identity_argv(plan: RunPlan) -> list[str]:
     return argv
 
 
-def _default_worker_argv(
-    plan: RunPlan, runner_name: str, max_steps: int | None
-) -> list[str]:
-    argv = [
+def _default_worker_argv(plan: RunPlan, runner_name: str) -> list[str]:
+    return [
         sys.executable,
         "-m",
         "corpus_studio.platform.worker",
@@ -85,9 +85,6 @@ def _default_worker_argv(
         runner_name,
         *worker_identity_argv(plan),
     ]
-    if max_steps is not None:
-        argv += ["--max-steps", str(max_steps)]
-    return argv
 
 
 def _dispatch_line(plan: RunPlan, run_id: str, heartbeat_interval_s: int) -> str:
@@ -119,8 +116,8 @@ def _failed_manifest(
     exit_code: int | None = None,
 ) -> RunManifest:
     """A parent-built terminal manifest for the cases where the child's own ``terminal_result`` is
-    unusable — a killed (hung) worker, a crash, a rejection, or a malformed terminal. ``target`` mirrors
-    the success convention (the runner name), not a synthetic ``worker:<id>``."""
+    unusable — a killed (hung) worker, a crash, a rejection, or a malformed terminal. The manifest
+    target is always the backend identity pinned by the RunPlan, never an independently selected lane."""
     from corpus_studio.platform.common import HashRef, Ref  # noqa: PLC0415
 
     failure = FailureRecord(
@@ -142,8 +139,8 @@ def _failed_manifest(
         finished_at=finished,
         state="failed",
         base_model=plan.base_model,
-        target=target,
-        output_dir=out_dir if out_dir is not None else plan.export.output_dir,
+        target=plan.backend_ref.id,
+        output_dir=plan.export.output_dir,
         failure=failure,
     )
 
@@ -152,7 +149,7 @@ def execute_run_subprocess(
     plan: RunPlan,
     *,
     run_id: str | None = None,
-    runner_name: str = "echo",
+    runner_name: str = "auto",
     max_steps: int | None = None,
     sink: RunEventSink | None = None,
     silence_timeout_s: float = 600.0,
@@ -178,8 +175,9 @@ def execute_run_subprocess(
     than the timeout is honestly indistinguishable from a hang here — and a bare liveness heartbeat is
     NOT the fix (it keeps ticking on its own thread while the TRAINING thread is hung, defeating the
     kill)."""
-    rid = _sanitize_id(run_id or plan.plan_id)
+    rid = _sanitize_id(run_id or new_uuid7_id("run"))
     out_dir_str = str(out_dir) if out_dir is not None else None
+    record_dir = run_record_directory(out_dir_str, rid) if out_dir_str is not None else None
     started = clock()
 
     # Refuse a broken seal at the public parent boundary, before a worker sees identities or input.
@@ -197,11 +195,77 @@ def execute_run_subprocess(
             out_dir=out_dir_str,
             remediation="regenerate the RunPlan from immutable inputs; do not mutate it after sealing",
         )
-        if out_dir_str is not None:
-            write_run_manifest(manifest, out_dir_str)
+        if record_dir is not None:
+            write_run_manifest(manifest, record_dir)
         return SupervisedRun(manifest=manifest, events=[], artifacts=[])
 
-    argv = worker_argv or _default_worker_argv(plan, runner_name, max_steps)
+    if plan.resolved_execution is not None:
+        from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+            verify_execution_configuration_hash,
+        )
+
+        if not verify_execution_configuration_hash(plan.resolved_execution):
+            manifest = _failed_manifest(
+                plan,
+                rid,
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                message="resolved execution configuration hash verification failed",
+                target=runner_name,
+                started=started,
+                finished=clock(),
+                out_dir=out_dir_str,
+                remediation="regenerate the RunPlan; do not mutate resolved execution fields",
+            )
+            if record_dir is not None:
+                write_run_manifest(manifest, record_dir)
+            return SupervisedRun(manifest=manifest, events=[], artifacts=[])
+        if (
+            max_steps is not None
+            and max_steps != plan.resolved_execution.schedule.max_steps
+        ):
+            manifest = _failed_manifest(
+                plan,
+                rid,
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                message="max_steps cannot override the sealed execution schedule",
+                target=runner_name,
+                started=started,
+                finished=clock(),
+                out_dir=out_dir_str,
+                remediation="create a derived RunPlan with a new execution hash",
+            )
+            if record_dir is not None:
+                write_run_manifest(manifest, record_dir)
+            return SupervisedRun(manifest=manifest, events=[], artifacts=[])
+
+    from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+        ExecutionConfigurationError,
+        verify_runner_lane,
+    )
+
+    try:
+        if runner_name == "auto":
+            from corpus_studio.platform.execution_config import required_runner_lane  # noqa: PLC0415
+
+            runner_name = required_runner_lane(plan)
+        verify_runner_lane(plan, runner_name)
+    except ExecutionConfigurationError as exc:
+        manifest = _failed_manifest(
+            plan,
+            rid,
+            taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+            message=str(exc),
+            target=runner_name,
+            started=started,
+            finished=clock(),
+            out_dir=out_dir_str,
+            remediation="dispatch the plan through its sealed runner lane",
+        )
+        if record_dir is not None:
+            write_run_manifest(manifest, record_dir)
+        return SupervisedRun(manifest=manifest, events=[], artifacts=[])
+
+    argv = worker_argv or _default_worker_argv(plan, runner_name)
 
     events: list[RunEvent] = []
     artifacts: list[ArtifactManifest] = []
@@ -300,6 +364,15 @@ def execute_run_subprocess(
                     if not isinstance(body, RunAcceptedBody):  # pragma: no cover - canonical map
                         raise WorkerProtocolError("run_accepted selected the wrong body contract")
                     _require_run_id(body.run_id, rid, "run_accepted")
+                    expected_execution_hash = (
+                        plan.resolved_execution.configuration_hash
+                        if plan.resolved_execution is not None
+                        else None
+                    )
+                    if body.execution_configuration_hash != expected_execution_hash:
+                        raise WorkerProtocolError(
+                            "run_accepted execution configuration hash does not match the dispatch"
+                        )
                     accepted = True
                     _reset_progress_deadline()
                 elif message.type == "event":
@@ -329,7 +402,7 @@ def execute_run_subprocess(
                         raise WorkerProtocolError(
                             "terminal_result selected the wrong body contract"
                         )
-                    terminal_manifest = _parse_terminal(body, plan, rid, artifacts)
+                    terminal_manifest = _parse_terminal(body, plan, rid, events, artifacts)
                     break  # terminal_result is the last legal message
                 elif message.type in {"run_rejected", "failure"}:
                     if message.type == "run_rejected" and accepted:
@@ -358,12 +431,12 @@ def execute_run_subprocess(
         plan, rid, runner_name, terminal_manifest, terminal_seen, rejection, killed_reason,
         protocol_failure, proc.returncode, started, finished, out_dir_str,
     )
-    if out_dir_str is not None:
-        write_run_manifest(manifest, out_dir_str)
+    if record_dir is not None:
+        write_run_manifest(manifest, record_dir)
         # Persist the child's integrity-checked ArtifactManifests too (the child ran execute_run
         # WITHOUT out_dir, so it built them but didn't write them). Same machine → the paths are valid.
         for artifact_manifest in artifacts:
-            write_artifact_manifest(artifact_manifest, out_dir_str)
+            write_artifact_manifest(artifact_manifest, record_dir)
     return SupervisedRun(manifest=manifest, events=events, artifacts=artifacts)
 
 
@@ -437,6 +510,7 @@ def _parse_terminal(
     body: TerminalResultBody,
     plan: RunPlan,
     rid: str,
+    events: list[RunEvent],
     artifacts: list[ArtifactManifest],
 ) -> RunManifest:
     """Validate terminal identity/linkage before accepting any child-produced artifacts."""
@@ -459,6 +533,10 @@ def _parse_terminal(
         raise WorkerProtocolError(
             "terminal run_manifest dataset_ref does not match the dispatched RunPlan"
         )
+    if manifest.target != plan.backend_ref.id:
+        raise WorkerProtocolError(
+            "terminal run_manifest target does not match the dispatched backend"
+        )
     if body.failure != manifest.failure:
         raise WorkerProtocolError(
             "terminal_result failure does not match run_manifest.failure"
@@ -475,6 +553,56 @@ def _parse_terminal(
         raise WorkerProtocolError(
             "terminal artifact list does not match run_manifest.artifact_ids"
         )
+    if plan.resolved_execution is not None and manifest.state == "succeeded":
+        if not any(
+            event.event_type == "metric"
+            and event.optimizer_step is not None
+            and event.optimizer_step > 0
+            for event in events
+        ):
+            raise WorkerProtocolError(
+                "successful training terminal has no optimizer-step evidence"
+            )
+        adapters = [artifact for artifact in parsed_artifacts if artifact.kind == "adapter"]
+        if not adapters:
+            raise WorkerProtocolError(
+                "successful training terminal has no required adapter artifact"
+            )
+        from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+            run_scoped_training_output,
+        )
+
+        execution = plan.resolved_execution
+        assert execution is not None
+        expected_output = run_scoped_training_output(execution, rid).resolve(strict=False)
+        if Path(manifest.output_dir).resolve(strict=False) != expected_output or any(
+            Path(artifact.path).resolve(strict=False) != expected_output
+            for artifact in adapters
+        ):
+            raise WorkerProtocolError(
+                "successful training terminal deviated from the sealed run-scoped output"
+            )
+        if any(
+            artifact.integrity is None
+            or artifact.integrity.current_integrity != "ok"
+            or artifact.integrity.content_hash is None
+            for artifact in adapters
+        ):
+            raise WorkerProtocolError(
+                "successful training terminal has no integrity-checked adapter bytes"
+            )
+        from corpus_studio.training.artifact_registry import (  # noqa: PLC0415
+            compute_weight_content_hash,
+        )
+
+        if any(
+            compute_weight_content_hash(artifact.path) != artifact.integrity.content_hash
+            for artifact in adapters
+            if artifact.integrity is not None
+        ):
+            raise WorkerProtocolError(
+                "successful training terminal adapter weight bytes do not match its integrity hash"
+            )
     artifacts.extend(parsed_artifacts)
     return manifest
 
@@ -502,10 +630,6 @@ def _finalize(
             "sequence_len, pre-fetch the model, or raise --timeout if the load/step is just slow.",
         )
     if terminal_manifest is not None:
-        # The child's own authoritative manifest (success OR its classified failure). Align output_dir
-        # with the parent's out_dir (where the manifest is written), matching in-process execute_run.
-        if out_dir is not None and terminal_manifest.output_dir != out_dir:
-            return terminal_manifest.model_copy(update={"output_dir": out_dir})
         return terminal_manifest
     if protocol_failure is not None:
         return _failed_manifest(

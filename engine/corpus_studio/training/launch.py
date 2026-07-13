@@ -2,10 +2,10 @@
 
 For an *external* target (axolotl / TRL / Unsloth / Hugging Face / LLaMA-Factory) this emits the exact
 command the user would run with their own installed trainer, the resume variant, and the dependencies
-to install — Corpus Studio does not run those. For the **first-party** ``corpus_studio`` target it emits
-the ``corpus-studio train-run`` command, which Corpus Studio *does* run itself in-process via the opt-in
-``[train]`` extra. It also lists checkpoints found in an output directory so a resume command can point
-at the latest one. Everything here is pure string/path work — no ML frameworks are imported.
+to install — Corpus Studio does not run those. The **first-party** ``corpus_studio`` target deliberately
+emits no direct launch argv: shipping clients must plan and dispatch through the sealed Platform worker
+path. It also lists checkpoints found in an output directory so a resume command can point at the latest
+one. Everything here is pure string/path work — no ML frameworks are imported.
 """
 
 from __future__ import annotations
@@ -38,16 +38,17 @@ _REVIEW_NOTE = (
 # the default "review before running" note for a target when present.
 _TARGET_LAUNCH: dict[str, dict] = {
     "corpus_studio": {
-        # First-party: Corpus Studio runs this itself (the opt-in [train] extra), no external trainer.
-        "template": 'corpus-studio train-run "{config}"',
-        "argv_prefix": ["corpus-studio", "train-run"],
+        # A mutable config is not an executable training authority. Planning requires immutable model,
+        # tokenizer, dataset, objective, environment, capability, and backend evidence first.
+        "template": "",
+        "argv_prefix": [],
         "resume_flag": None,
         "resume_argv_flag": None,
         "dependencies": ["corpus-studio-engine[train]"],
         "review_note": (
-            "This runs Corpus Studio's own first-party QLoRA trainer in-process (the opt-in [train] "
-            "extra) — no external trainer needed. Preflight with `train-check`; after training, merge "
-            "the adapter into the base with `train-merge`."
+            "Direct first-party config launch is disabled. Create a hash-sealed RunPlan with "
+            "`platform-plan`, then dispatch it with `platform-run`; the low-level `train-run` command "
+            "is an explicitly unsealed development escape hatch only."
         ),
     },
     "axolotl_yaml": {
@@ -101,6 +102,18 @@ def build_launch_plan(
     if meta is None:
         supported = ", ".join(sorted(_TARGET_LAUNCH))
         raise ValueError(f"Unknown training target '{target}'. Use one of: {supported}.")
+
+    if target == "corpus_studio":
+        return LaunchPlan(
+            target=target,
+            command="",
+            resume_command="",
+            resume_supported=False,
+            argv=[],
+            resume_argv=[],
+            dependencies=list(meta["dependencies"]),
+            notes=[meta["review_note"], f"Requires: {', '.join(meta['dependencies'])}."],
+        )
 
     command = meta["template"].format(config=config_path)
     argv = [*meta["argv_prefix"], config_path]

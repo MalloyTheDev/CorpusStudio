@@ -93,14 +93,15 @@ experiments, dataset versions, artifact tracking, and richer comparison views.
 
 ### Training backends
 
-Shipped first-party run backends (selectable via `platform-plan --backend`, "pick your framework"):
+Registered training-backend manifests (selectable for admission via `platform-plan --backend`):
 
 - **`corpus_studio`** — the first-party HF + TRL + PEFT QLoRA trainer (LoRA/QLoRA; math/eager/sdpa/
-  flash attention). The Blackwell-safe default.
-- **`unsloth`** — the accelerated 4-bit QLoRA path (flash/sdpa kernels; **honestly refused on
-  native-Windows Blackwell/sm_120**, which is forced onto the math path Unsloth doesn't provide.
-  Outside native Windows it is selectable only when that exact environment proves the required
-  SDPA capability. WSL evidence does not verify bare Linux).
+  flash attention). New plans require its exact Phase 9B execution-contract declaration and matching
+  functional proof.
+- **`unsloth`** — a registered accelerated 4-bit QLoRA manifest, not currently executable through new
+  Phase 9B plans. It does not yet declare/prove the complete effective execution contract, so it is
+  refused on every host. Native-Windows Blackwell/sm_120 also requires a math path Unsloth does not
+  provide. WSL evidence does not verify bare Linux.
 
 Planned additional config targets (external-launcher / config-generation): Axolotl, Hugging Face
 Trainer, LLaMA-Factory, llama.cpp fine-tuning where applicable. Corpus Studio generates tool-specific
@@ -123,19 +124,21 @@ The engine **core** stays dependency-light: dataset creation, schema templates,
 editors, validation, JSONL export, train/validation/test splitting, evaluation,
 review-first AI assistance, and inspectable training config export need **no**
 CUDA, PyTorch, or Transformers, so the core installs and runs everywhere.
-First-party training is **opt-in**: installing the `[train]` extra adds a real
-QLoRA trainer, adapter merge, and model download (see "First-party training"
-below). Without the extra, none of those heavy deps are pulled.
+First-party training is **opt-in**: an isolated worker environment with the
+`[train]` runtime adds the real QLoRA trainer, adapter merge, and model download
+(see "First-party training" below). The dependency-light control plane still
+imports no training framework. Without that runtime, none of those heavy deps
+are pulled.
 
 
 ---
 
 ## Training Prep
 
-Corpus Studio prepares datasets and inspectable config files for training, **and**
-— with the opt-in `[train]` extra — can run the QLoRA itself first-party
-(`train-run` / `train-merge`, see "First-party training" below). The external
-config-export path stays as an escape hatch for bring-your-own trainers.
+Corpus Studio prepares datasets and inspectable config files for training. A
+first-party QLoRA run goes through `platform-plan` -> sealed `RunPlan` ->
+`platform-run` -> the opt-in `[train]` worker. The external config-export and
+reviewed-launch path remains available for bring-your-own trainers.
 
 ### Later training integrations
 
@@ -158,10 +161,11 @@ Possible future targets:
 - quality report
 - training config draft
 
-Two training paths exist. **(1) External (default core):** export a config and
-launch the user's own installed trainer (live logs, checkpoints, run history,
-resume, regression gate) — the core never pulls CUDA/PyTorch. **(2) First-party
-(opt-in `[train]` extra):** CorpusStudio runs the QLoRA itself — see below.
+Two training paths exist. **(1) External:** export a config and launch the user's
+own installed trainer after reviewing its argv (live logs, checkpoints, run
+history, resume, regression gate); the core never pulls CUDA/PyTorch. **(2)
+First-party:** generate a hash-sealed plan and dispatch it to the isolated
+`corpus_studio` backend worker. These paths do not share execution authority.
 
 ## First-party training (opt-in `[train]` extra)
 
@@ -174,13 +178,17 @@ train. All heavy imports are lazy — importing the engine never pulls torch.
 |---|---|
 | `train-check [--json]` | Preflight: which deps are present, the CUDA GPU + VRAM, and whether a real 4-bit QLoRA run — or only the CPU toy path — is possible. |
 | `model-fetch <repo> [--local-dir …]` | Resumably download a base model from the HF Hub and report its **license** (read from the downloaded card). Prefer MIT/Apache/permissive models. |
-| `train-run <config> [--cpu-toy --max-steps N …]` | Run the QLoRA in-process (TRL `SFTTrainer` + peft LoRA, 4-bit on GPU); saves the adapter + tokenizer + checkpoints, and writes a `MODEL_CARD.md` next to the adapter. `--cpu-toy` is a tiny-model CPU smoke test, not a real train. Checkpoint retention is configurable — `--save-steps N` (default 50) + `--save-total-limit N` (default 3; `0` keeps all) so a long run can't fill the disk. |
+| `platform-plan … --out <plan-dir>` | Resolve immutable inputs, capability/backend/environment evidence, trainer semantics, placement, and output policy into a hash-sealed `RunPlan`. |
+| `platform-run <RunPlan.json> --subprocess --out <record-root>` | Dispatch the one runner authorized by the pinned backend. Each execution gets a fresh run ID and isolated adapter/checkpoint path. |
+| `train-run <config> --allow-unsealed-direct-execution …` | **Development-only compatibility escape hatch.** It refuses by default and labels an explicitly allowed result `UNSEALED_DIRECT_EXECUTION`, `NON_REPRODUCIBLE`, and `NO_PLATFORM_LINEAGE`. Shipping clients never invoke it. |
 | `train-merge <adapter> [--strategy auto\|gpu\|cpu\|adapter-only]` | Merge the adapter into the base. A 7B fp16 merge (~14 GB) won't fit 12 GB, so `auto` walks GPU → CPU-offload → adapter-only. |
-| `model-card <adapter> [--base-model … --config … --output …]` | (Re)render the adapter's Markdown model card — base model + the reminder that ITS license governs the result, the LoRA hyper-parameters (from `adapter_config.json`), the training settings, and honesty notes. `train-run` already writes it; this regenerates it. |
+| `model-card <adapter> [--base-model … --config … --output …]` | (Re)render the adapter's Markdown model card - base model, the reminder that its license governs the result, LoRA hyperparameters, training settings, and honesty notes. |
 
-**End-to-end (the config comes from the Training tab's `training-config`, target
-`corpus_studio`):** `model-fetch Qwen/Qwen2.5-7B` → `train-check` → `train-run
-<config>` → `train-merge <adapter>` → the adapter's `MODEL_CARD.md` documents the run.
+**Authoritative first-party path:** `model-fetch Qwen/Qwen2.5-7B` -> create or
+select immutable dataset/model/tokenizer/objective evidence -> `platform-plan` ->
+review `RunPlan.json` -> `platform-run --subprocess` -> `train-merge <adapter>`.
+The generated `RunManifest` and content-bound `ArtifactManifest` carry the run
+lineage. See [`PLATFORM_RUN.md`](PLATFORM_RUN.md).
 
 ### Reasoning trace approval gate
 
@@ -190,11 +198,11 @@ versioned `TraceRecord` rows. Generated records are pending candidates, not read
 1. generate or explicitly migrate to a separate pending JSONL artifact;
 2. inspect and write an approved successor with `trace-review`;
 3. run `trace-validate --require-approved`;
-4. point `train-run` at the approved artifact.
+4. bind the approved artifact and its content hash into a new `RunPlan`.
 
-`train-run` verifies record structure, canonical hash, recomputed engine validation evidence, review
-decision, current project-local provider-policy authority/frontier restrictions, and current segment
-supervision support **before**
+The first-party trainer admission path verifies record structure, canonical hash, recomputed engine
+validation evidence, review decision, current project-local provider-policy authority/frontier
+restrictions, and current segment supervision support **before**
 runtime probing or model loading. It refuses pending, rejected, tampered, foreign-validator,
 generated legacy-compatibility, tool-use, agent, verifier, and process-supervision records because
 the first-party trainer currently implements only assistant-authored inline reasoning + final-answer
@@ -204,13 +212,13 @@ versioned review provenance. See
 
 ### From the desktop
 
-The **Training tab** runs all of this for you when the target is `corpus_studio`:
-**Check runtime** (train-check) reports whether a real GPU QLoRA — or only the CPU
-toy path — can run; **Launch** preflights and streams `[step/total]` progress into
-the live log (a real GPU run needs `ready`; tick **CPU toy** for the smoke path);
-**Merge adapter** runs `train-merge` with the small-VRAM fallback. The launcher runs
-the trainer with the engine's own interpreter, so the run always matches what
-train-check probed.
+The WPF/Avalonia Training tab still exports and launches reviewed argv for
+installed **external** trainers. For the `corpus_studio` target it deliberately
+refuses the former mutable-config launch and directs the user to create and run a
+sealed platform plan. Supporting actions such as runtime inspection and adapter
+merge remain available, but they do not confer first-party execution authority.
+The Tauri/React Platform surface is the current UI client for `platform-plan` and
+`platform-run`.
 
 ### GPU notes: attention backend on Blackwell (RTX 50-series / sm_120)
 
@@ -224,10 +232,12 @@ fallback. Bare-Linux FlashAttention has not yet been verified on the final machi
 must not be reported as a native-Linux result.
 
 CorpusStudio treats **WSL as its own platform** (`OperatingSystem.wsl`): it has separately measured
-flash evidence but `wddm` memory-residency like Windows (it still spills — see below). `train-run`
-disables flash automatically only for the known native-Windows + Blackwell hazard. On another host,
-leaving flash enabled is not proof: the capability probe must run the backward operation and PASS
-before `platform-plan` can seal `sdpa`. Bare-Linux RTX 5070 behavior remains unverified.
+flash evidence but `wddm` memory-residency like Windows (it still spills - see below). A new platform
+plan binds an exact attention API, effective kernel, and all three PyTorch SDPA toggles. The known
+native-Windows + Blackwell hazard resolves to the math path; another host still needs a passing exact
+execution-combination probe before that policy can be sealed. These measurements predate the Phase 9B
+effective execution contract; that enforcement path still needs a fresh eligible-hardware run.
+Bare-Linux RTX 5070 behavior remains unverified.
 
 The real ceiling (measured, and it is **not** an attention-kernel problem): on a **12 GB** card
 the 7B 4-bit QLoRA training peak is ~10.8 GB @ `sequence_len` 1024 → 13.8 GB @ 2048, so above
@@ -245,8 +255,9 @@ kernel barely moves the peak. To fit **full-length rows on 12 GB**, reduce the m
 actually dominates: keep `sequence_len` ≤ ~1280, shorten a long training system prompt (~700 →
 ~80 tokens — also the correct fine-tuning design; the student internalises the rules and doesn't
 need the teacher preamble), or use a **smaller base** (Qwen2.5-3B fits full-length comfortably).
-Override the backend explicitly with `train-run --attn-implementation
-eager|sdpa|flash_attention_2` (or `attn_implementation` in the config).
+Attention is not a post-seal runtime override. Re-plan against capability evidence
+for the desired backend; if the exact kernel policy was not proven, planning
+refuses it.
 
 Security: model loading uses `trust_remote_code=False` (a fetched repo can't execute
 code), and `model-fetch` warns when a model ships only pickle (`.bin`) weights
@@ -455,7 +466,7 @@ should not start training processes.
 
 ---
 
-## Training Launcher Design (v0.5)
+## External Training Launcher Design (v0.5)
 
 Scope and architecture for the Local Training Launcher. This is the biggest
 shift in the app's life: from *generating inspectable training configs* to
@@ -468,20 +479,21 @@ hardening that is now done.
 - **Never hide the trainer command.** The user always sees exactly what runs.
 - **No forced ML dependencies in the engine core.** The core is torch-free at import. The
   external-launcher path orchestrates the user's *installed* trainer (axolotl / TRL / Unsloth / HF /
-  LLaMA-Factory) and never imports torch/CUDA. The **first-party `[train]` trainer** (`train-run`)
-  *does* import torch/transformers/peft/trl — but only when the opt-in extra is installed and a
-  training command is invoked (a lazy import inside the function, never at module load). If neither is
-  available, the app shows the command / install hint rather than failing silently.
+  LLaMA-Factory) and never imports torch/CUDA. First-party training instead crosses the platform
+  worker boundary; the worker imports torch/transformers/peft/trl only after plan and protocol
+  validation. If the selected runtime is unavailable, the app shows an install/planning hint rather
+  than silently changing lanes.
 - **Launching is a big, machine-consuming action.** It requires explicit
   confirmation showing the exact command before every launch.
 
 ### The one architectural decision
 
-Orchestrate the user's installed trainer CLI. The **engine** produces the exact
-command (and resume variant) per target and discovers checkpoints — pure
-string/path work, fully testable. The **desktop** spawns and manages the
-process. This keeps the engine dependency-free and puts OS process management
-where it belongs.
+For external tools, orchestrate the user's installed trainer CLI. The **engine**
+produces the exact command (and resume variant) per target and discovers
+checkpoints - pure string/path work, fully testable. The **desktop** spawns and
+manages that external process. First-party execution is deliberately different:
+the platform supervisor owns its isolated worker process, protocol, run ID,
+lineage, and termination.
 
 ### The hard part: live log streaming
 

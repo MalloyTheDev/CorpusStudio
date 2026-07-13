@@ -28,6 +28,20 @@
       "title": "AttentionImpl",
       "type": "string"
     },
+    "AttentionKernel": {
+      "description": "The exact attention implementation an execution policy permits at runtime.",
+      "enum": [
+        "eager",
+        "torch_sdpa_math",
+        "torch_sdpa_flash",
+        "torch_sdpa_mem_efficient",
+        "flash_attention_2",
+        "flash_attention_3",
+        "xformers"
+      ],
+      "title": "AttentionKernel",
+      "type": "string"
+    },
     "CheckpointImpl": {
       "enum": [
         "full_state",
@@ -452,6 +466,10 @@
         "process_start",
         "env_loaded",
         "cuda_init",
+        "execution_config_verified",
+        "attention_policy_applied",
+        "placement_verified",
+        "placement_deviation",
         "model_loaded",
         "quantized",
         "adapter_attached",
@@ -534,6 +552,13 @@
         "$ref": "#/$defs/AttentionImpl"
       },
       "title": "Attention Impls",
+      "type": "array"
+    },
+    "attention_kernels": {
+      "items": {
+        "$ref": "#/$defs/AttentionKernel"
+      },
+      "title": "Attention Kernels",
       "type": "array"
     },
     "backend_id": {
@@ -619,6 +644,13 @@
         }
       ],
       "default": null
+    },
+    "execution_contract_versions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Execution Contract Versions",
+      "type": "array"
     },
     "export_compatibility": {
       "items": {
@@ -753,6 +785,20 @@
         "$ref": "#/$defs/TelemetryHook"
       },
       "title": "Telemetry Hooks",
+      "type": "array"
+    },
+    "trainer_fields": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Trainer Fields",
+      "type": "array"
+    },
+    "trainer_init_fields": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Trainer Init Fields",
       "type": "array"
     },
     "trainer_target": {

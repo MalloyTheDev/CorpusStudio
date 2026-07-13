@@ -25,9 +25,10 @@ corpus-studio platform-probe --cache
 
 - Builds an **EnvironmentProfile** (OS, memory-residency model, GPUs incl. `compute_capability_major`,
   package locks, a deterministic `environment_signature`).
-- Runs the **functional capability probes** — *readiness = a kernel actually ran*, not "the package
-  imports". Emits a **CapabilityReport** with a per-probe `PASS / KERNEL_STALL / …` and the
-  `ready / cpu_toy_only / not_ready` verdict.
+- Runs the **functional capability probes**. `ready` now requires a complete bounded execution tuple
+  (precision + quantization + adapter + attention + optimizer + loss + checkpoint together), not a
+  package import or a union of unrelated passing probes. Emits a **CapabilityReport** with embedded
+  per-probe evidence and the `ready / cpu_toy_only / not_ready` verdict.
 - `--cache` stores the report keyed by the signature, so an **unchanged host reuses it** and skips the
   (expensive, torch-loading) probes next time. `platform-profiles` lists what's cached.
 
@@ -41,6 +42,7 @@ WSL evidence is not bare-Linux evidence.
 ```bash
 corpus-studio platform-plan \
   --base-model Qwen/Qwen2.5-7B-Instruct \
+  --model-revision a09a35458c702b33eeacc393d103063234e8bc28 \
   --dataset ./my-dataset/examples.jsonl \
   --sequence-len 4096 \
   --out ./plan
@@ -49,10 +51,9 @@ corpus-studio platform-plan \
 Resolves an **immutable, hash-sealed RunPlan** — every ambiguous field is decided *ahead of time*
 against what PROVED to work on this host:
 
-- **attention** → `math` on native-Windows/WDDM Blackwell; an explicit fused/flash override there
-  is refused. Elsewhere `sdpa` is sealable only when that exact environment's probe proved it.
-- **precision** → `bf16` only if proven, else `fp32`.
-- **quantization** → `nf4` only if bitsandbytes passed, else `none`.
+- **attention / precision / quantization / adapter / optimizer / loss / checkpoint** are selected only
+  from one complete passing execution combination. Native-Windows/WDDM Blackwell still requires its
+  math path; a standalone flash or bitsandbytes probe cannot upgrade a different tuple.
 - **adapter** → `qlora` when quantized, else `lora` (the trainer is LoRA-only; other methods are
   refused rather than silently downgraded).
 - `sequence_len` flows from your flag — never a hardcoded calibration value.
@@ -60,14 +61,19 @@ against what PROVED to work on this host:
   placement, and rank 0 by default. Advanced callers may provide `--physical-spec`, a sealed
   `--parameter-accounting-report`, and an exact `--storage-profile`; see
   [`RUN_PLAN_PHYSICAL_EXECUTION.md`](RUN_PLAN_PHYSICAL_EXECUTION.md).
+- **effective execution** → a separately hash-sealed configuration pins the dataset bytes, immutable
+  model/tokenizer revisions (or local-directory hashes), objective/environment/capability/backend
+  identities, per-state precision, exact attention API/kernel/toggles, explicit device map, all
+  semantic LoRA/trainer/checkpoint/data defaults, and the exact installed trainer interface. See
+  [`EFFECTIVE_EXECUTION_CONFIGURATION.md`](EFFECTIVE_EXECUTION_CONFIGURATION.md).
 
-**Pick your framework.** `corpus-studio platform-backends` lists the registered training backends
-(`corpus_studio`, `unsloth`, …); pass `--backend <id>` to `platform-plan` to resolve the plan on that
-framework. The planner validates the chosen backend against the *resolved* plan — so on Blackwell,
-where `math` attention is mandatory, `--backend unsloth` is **honestly refused** (Unsloth's fused
-kernels declare no `math` path) with the backends that *do* fit named. On another platform it remains
-unavailable until the required SDPA probe passes. A backend is never "supported" merely because its
-packages import or its manifest declares a feature.
+**Pick your framework.** `corpus-studio platform-backends` lists registered backend manifests; pass
+`--backend <id>` to resolve against one. A backend is executable only when it declares the complete
+execution-contract surface and the selected environment proves the matching functional capabilities.
+The current first-party `corpus_studio` backend does so. The Unsloth manifest does not yet declare the
+Phase 9B execution contract, so new plans refuse it on every host. Native-Windows Blackwell also has
+the independent math-attention incompatibility. An import or static feature declaration is never
+support proof.
 
 It also prints the **predicted fit** to stderr and writes `FitClassification.json`, e.g.:
 
@@ -90,13 +96,15 @@ a training error) — it does **not** silently downgrade a real-training request
 ## 3. Execute the plan through the supervisor
 
 ```bash
-corpus-studio platform-run ./plan/RunPlan.json --runner training --out ./run
+corpus-studio platform-run ./plan/RunPlan.json --subprocess --out ./run
 ```
 
-- Runs the plan through the headless **run supervisor** + the **TrainingRunner** (which drives the
-  first-party trainer, reading the plan's `training_config_snapshot`).
-- Revalidates the contract and recomputes `plan_hash` before dispatch; the worker verifies it again.
-  Editing a device, placement, rank, selector, or offload rule after planning is refused.
+- Runs the plan through the headless **run supervisor** + the **TrainingRunner**. New plans are mapped
+  only from `resolved_execution`; the legacy `training_config_snapshot` is not an execution source.
+- Revalidates the contract and recomputes both `plan_hash` and the nested execution-configuration hash
+  before dispatch; the worker verifies them again and echoes the effective hash before model loading.
+  Editing an input, dtype, attention toggle, trainer field, device/placement, rank, selector, or
+  offload rule after planning is refused.
 - Newly planned runs hash-pin the exact static `BackendManifest`. Subprocess protocol 2.0 waits for a
   worker-first `hello`, validates backend and environment/lock identity, and only then dispatches.
   Correlation/run IDs, message order, event sequence, terminal lineage, and artifacts are fail-closed.
@@ -106,14 +114,24 @@ corpus-studio platform-run ./plan/RunPlan.json --runner training --out ./run
   See [`BACKEND_WORKER_PROTOCOL.md`](BACKEND_WORKER_PROTOCOL.md).
 - Refuses non-trivial physical execution before importing or invoking a trainer. The current built-in
   runner proves the singleton path only; a representable offload/distributed plan is not support proof.
+- Re-hashes local inputs and verifies pinned package versions, applies exactly one attention-kernel
+  policy and explicit device map, then observes the model attention API and actual loaded placement.
+  Any mismatch refuses the run; `device_map="auto"` and silent semantic trainer-field removal are
+  invalid. Chat-template failure blocks, and truncation analysis covers the complete pinned dataset
+  unless an explicit allow policy was sealed.
 - Streams **RunEvent** envelopes to **stderr** (ordered `seq`, `stage` / `metric` with per-step loss /
   `artifact_produced` / `terminal`).
-- Writes the terminal **RunManifest** to stdout (and `./run/RunManifest.json`), classifying the
+- Mints a fresh UUIDv7 `run_id` for every execution. A resolved run derives its trainer directory from
+  the sealed output-root policy as `<output-root>/runs/<run-id>/artifacts/adapter`, so rerunning one
+  plan cannot mix adapters or checkpoints.
+- Writes the terminal **RunManifest** to stdout (and `./run/runs/<run-id>/RunManifest.json`), classifying the
   terminal state — `succeeded / failed / cancelled` — with a **FailureRecord taxonomy** on abnormal
   termination (`OOM`, `NUMERICAL_FAILURE`, `ENVIRONMENT_FAILURE`, …).
-- For each produced weight artifact, writes an integrity-checked **ArtifactManifest** to
-  `./run/artifacts/<id>.json` (a cheap size+mtime fingerprint + a byte-exact sha256 content hash — the
-  promote gate). The platform never moves your weights; it only references + re-checks them.
+- A training success requires at least one optimizer-step metric and an integrity-checked adapter with
+  readable weight bytes. The adapter ID is `<run-id>-adapter-<content-hash-prefix>`. Its
+  **ArtifactManifest** is written to `./run/runs/<run-id>/artifacts/<id>.json` (a cheap size+mtime
+  fingerprint + a byte-exact weight sha256 content hash — the current promote gate). The platform
+  never moves your weights; it only references + re-checks them.
 
 ### Smoke-test the pipeline without a GPU
 
@@ -127,10 +145,12 @@ cleanly (not a crash) — the honest "this host can't run it" signal.
 
 ---
 
-## Verified on a real RTX 5070 (Blackwell / sm_120), 2026-07-12
+## Historical pre-Phase-9B RTX 5070 evidence (2026-07-12)
 
-The full lifecycle was executed on an actual RTX 5070 (12 GB, driver 610.74, `cc 12.0`, Windows/WDDM)
-with `torch 2.11.0+cu128` + the `[train]` extra — the exact hardware this runbook targets.
+The pre-Phase-9B lifecycle was executed on an actual RTX 5070 (12 GB, driver 610.74, `cc 12.0`,
+Windows/WDDM) with `torch 2.11.0+cu128` + the `[train]` extra. This evidence remains useful for the old
+native-Windows path, but it predates `ResolvedExecutionConfiguration` and does not verify the new
+attention/precision/placement/input enforcement. The Phase 9B path must be rerun on the final machine.
 
 **Profile + probe** (`platform-probe`) — `READINESS: ready`, kernels actually ran:
 
@@ -155,17 +175,17 @@ WBG-7B target (Qwen2.5-7B, seq 4096) the fit was honestly **`ACCIDENTAL_WDDM_SPI
 saved LoRA adapter (17.6 MB) got an integrity-checked ArtifactManifest — a real 64-char sha256
 `content_hash`, and a live re-hash of the on-disk weights re-verified as `ok`.
 
-So every row of the table below is not just designed but **exercised on the real target hardware**;
-the only thing still unmeasured is a full-length 7B run's *actual* peak memory (the fit above stays
-`predicted` until then). This paragraph is limited to the native-Windows lifecycle case above; it is
-not native-Linux, offload, NVMe-throughput, FSDP/DeepSpeed, or MoE-runtime evidence.
+That run exercised the pre-Phase-9B native-Windows lifecycle. It did not exercise the new nested
+execution seal, immutable-input checks, exact trainer-interface admission, or runtime placement
+observation. It is also not native-Linux, offload, NVMe-throughput, full-sequence 7B, FSDP/DeepSpeed,
+or MoE-runtime evidence.
 
 ## What's proven vs. what still needs a measured run
 
 | Step | Guarantee |
 |------|-----------|
 | profile / probe | **measured** — a kernel ran (or was safely refused) |
-| plan | **resolved** — valid + sealed against proven capabilities |
+| plan | **resolved** — valid + sealed against proven capabilities and immutable inputs |
 | fit | **predicted** — an estimate, explicitly *not* a proven fit |
 | run | **measured** — the terminal state + artifact are real |
 

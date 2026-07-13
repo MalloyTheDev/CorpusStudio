@@ -8,22 +8,42 @@ import json
 from typer.testing import CliRunner
 
 from corpus_studio.cli import app
-from corpus_studio.platform.common import Ref
+from corpus_studio.platform.common import PackageLock, Ref
 from corpus_studio.platform.contracts import (
     CapabilityReport,
     EffectiveCapabilities,
     EnvironmentProfile,
     EnvHost,
+    ExecutionCapabilityCombination,
     GpuDevice,
     ParameterAccountingReport,
     ParameterEvidenceGap,
     ParameterScope,
     ParameterWindow,
+    ProbeResult,
 )
 from corpus_studio.platform.parameter_accounting import parameter_accounting_hash_for
 
 runner = CliRunner()
 _SIG = "b" * 64
+_MODEL_REVISION = "1" * 40
+
+
+def _platform_plan_args(tmp_path, *, base_model: str = "m") -> list[str]:
+    dataset = tmp_path / "dataset.jsonl"
+    dataset.write_text(
+        json.dumps({"instruction": "Say hello.", "output": "Hello."}) + "\n",
+        encoding="utf-8",
+    )
+    return [
+        "platform-plan",
+        "--base-model",
+        base_model,
+        "--model-revision",
+        _MODEL_REVISION,
+        "--dataset",
+        str(dataset),
+    ]
 
 
 def _ready_profile(cc_major: int = 8, os_name: str = "linux") -> EnvironmentProfile:
@@ -39,18 +59,109 @@ def _ready_profile(cc_major: int = 8, os_name: str = "linux") -> EnvironmentProf
     )
 
 
-def _ready_report(attn: str = "sdpa") -> CapabilityReport:
+def _ready_report(attn: str = "sdpa", *, backend_id: str = "corpus_studio") -> CapabilityReport:
+    from corpus_studio.platform.backends import get_backend
+
+    first_party = get_backend("corpus_studio")
+    assert first_party is not None
+    kernel = {
+        "eager": "eager",
+        "math": "torch_sdpa_math",
+        "sdpa": "torch_sdpa_flash",
+    }[attn]
+    selected_backend = get_backend(backend_id)
+    combination = ExecutionCapabilityCombination.model_validate(
+        {
+            "runtime_mode": "training",
+            "device": "cuda",
+            "precision": "bf16",
+            "quantization": "nf4",
+            "adapter_method": "qlora",
+            "attention_impl": attn,
+            "attention_kernel": kernel,
+            "optimizer": "adamw_torch",
+            "loss_impl": "cross_entropy",
+            "checkpoint_impl": "adapter_only",
+            "export_format": "adapter_peft",
+            "execution_contract_version": "1.0.0",
+            "probe": "synthetic_execution",
+        }
+    )
+    probe_results = [
+        ProbeResult(
+            probe="synthetic_axes",
+            outcome="PASS",
+            proves={
+                "adapter": ["qlora"],
+                "attention": [attn],
+                "attention_kernel": [kernel],
+                "checkpoint": ["adapter_only"],
+                "loss": ["cross_entropy", "liger_fused_ce"],
+                "optimizer": ["adamw_torch", "paged_adamw_8bit"],
+                "precision": ["bf16"],
+            },
+        ),
+        ProbeResult(
+            probe="bnb_4bit_load",
+            outcome="PASS",
+            proves={"quantization": ["nf4"]},
+        ),
+        ProbeResult(
+            probe="trainer_contract",
+            outcome="PASS",
+            proves={
+                "trainer_field": first_party.trainer_fields,
+                "trainer_init_field": first_party.trainer_init_fields,
+            },
+        ),
+        ProbeResult(
+            probe="synthetic_execution",
+            outcome="PASS",
+            execution_combinations=[combination],
+        ),
+    ]
     return CapabilityReport(
-        backend_id="corpus_studio", environment_ref=Ref(id=_SIG), readiness="ready",
+        backend_id=backend_id,
+        backend_version=selected_backend.backend_version if selected_backend is not None else None,
+        environment_ref=Ref(id=_SIG), readiness="ready",
         bitsandbytes_ok=True,
+        probe_results=probe_results,
+        installed_packages=[
+            PackageLock(name=name, version="1.0")
+            for name in [
+                "accelerate",
+                "bitsandbytes",
+                "datasets",
+                "liger-kernel",
+                "peft",
+                "torch",
+                "transformers",
+                "trl",
+            ]
+        ],
         effective_capabilities=EffectiveCapabilities(
             precision_modes=["bf16"], quantization_modes=["nf4"], attention_impls=[attn],
+            attention_kernels=[kernel],
             adapter_methods=["qlora"],
+            optimizers=["adamw_torch", "paged_adamw_8bit"],
+            loss_impls=["cross_entropy", "liger_fused_ce"],
+            checkpoint_impls=["adapter_only"],
+            execution_contract_versions=["1.0.0"],
+            execution_combinations=[combination],
+            trainer_fields=first_party.trainer_fields,
+            trainer_init_fields=first_party.trainer_init_fields,
         ),
     )
 
 
-def _ready_host(monkeypatch, *, cc_major: int = 8, attn: str = "sdpa", os_name: str = "linux") -> None:
+def _ready_host(
+    monkeypatch,
+    *,
+    cc_major: int = 8,
+    attn: str = "sdpa",
+    os_name: str = "linux",
+    backend_id: str = "corpus_studio",
+) -> None:
     """Inject a synthetic ready host so the planner produces a plan without torch/a GPU present.
     ``os_name`` matters on Blackwell: only native Windows forces the math mandate (WSL/Linux keep sdpa)."""
     monkeypatch.setattr(
@@ -58,7 +169,8 @@ def _ready_host(monkeypatch, *, cc_major: int = 8, attn: str = "sdpa", os_name: 
         lambda: _ready_profile(cc_major, os_name),
     )
     monkeypatch.setattr(
-        "corpus_studio.platform.probes.run_capability_probes", lambda _profile: _ready_report(attn)
+        "corpus_studio.platform.probes.run_capability_probes",
+        lambda _profile: _ready_report(attn, backend_id=backend_id),
     )
 
 
@@ -123,16 +235,21 @@ def test_platform_probe_json_bundles_profile_and_report():
 # ---- platform-plan --json (the live-flow bundle) -----------------------------
 
 
-def test_platform_plan_json_bundles_plan_and_fit(monkeypatch):
+def test_platform_plan_json_bundles_plan_and_fit(monkeypatch, tmp_path):
     _ready_host(monkeypatch)
     result = runner.invoke(
         app,
-        ["platform-plan", "--base-model", "Qwen/Qwen2.5-7B", "--dataset", "d.jsonl", "--json"],
+        [*_platform_plan_args(tmp_path, base_model="Qwen/Qwen2.5-7B"), "--json"],
     )
     assert result.exit_code == 0
     bundle = json.loads(result.stdout)
     assert len(bundle["run_plan"]["plan_hash"]) == 64
     assert bundle["run_plan"]["backend_ref"]["id"] == "corpus_studio"
+    resolved = bundle["run_plan"]["resolved_execution"]
+    assert len(resolved["configuration_hash"]) == 64
+    assert resolved["inputs"]["model"]["resolved_revision"] == _MODEL_REVISION
+    assert resolved["inputs"]["dataset"]["location"].endswith("dataset.jsonl")
+    assert bundle["run_plan"]["training_config_snapshot"] == {}
     physical = bundle["run_plan"]["physical_execution"]
     assert physical["evidence_status"] == "planned_not_measured"
     assert physical["parallelism"]["world_size"] == 1
@@ -141,88 +258,121 @@ def test_platform_plan_json_bundles_plan_and_fit(monkeypatch):
     assert bundle["fit_classification"]["classification"] != "NATIVE_SAFE"
 
 
-def test_platform_plan_dataset_format_flows_through_the_cli(monkeypatch):
-    # A chat dataset (messages) must not be planned as instruction (Alpaca) — the snapshot's
-    # dataset_format is what the trainer uses to format rows.
+def test_platform_plan_dataset_format_flows_through_the_cli(monkeypatch, tmp_path):
+    # A chat dataset (messages) must not be planned as instruction (Alpaca). The resolved execution
+    # data policy is the exact formatter contract consumed by the worker.
     _ready_host(monkeypatch)
     result = runner.invoke(
         app,
-        ["platform-plan", "--base-model", "m", "--dataset", "d.jsonl", "--dataset-format", "chat",
-         "--json"],
+        [
+            *_platform_plan_args(tmp_path),
+            "--dataset-format",
+            "chat",
+            "--chat-template-sha256",
+            "c" * 64,
+            "--json",
+        ],
     )
     assert result.exit_code == 0
-    snap = json.loads(result.stdout)["run_plan"]["training_config_snapshot"]
-    assert snap["dataset_format"] == "chat"
-    assert "format" not in snap  # the trainer key is dataset_format, never a silently-dropped "format"
+    data = json.loads(result.stdout)["run_plan"]["resolved_execution"]["data"]
+    assert data["dataset_format"] == "chat"
+    assert data["chat_template_sha256"] == "c" * 64
+    assert "format" not in data
 
 
-def test_platform_plan_output_dir_flows_into_the_snapshot(monkeypatch):
+def test_platform_plan_output_dir_flows_into_resolved_execution(monkeypatch, tmp_path):
     # --output-dir controls where the trainer saves the adapter (so a run can target a project dir,
-    # not the CWD). It must reach the training snapshot verbatim.
+    # not the CWD). It must reach the sealed worker configuration verbatim.
     _ready_host(monkeypatch)
     result = runner.invoke(
         app,
-        ["platform-plan", "--base-model", "m", "--dataset", "d.jsonl", "--output-dir",
-         "/some/project/adapters/wbg", "--json"],
+        [
+            *_platform_plan_args(tmp_path),
+            "--output-dir",
+            "/some/project/adapters/wbg",
+            "--json",
+        ],
     )
     assert result.exit_code == 0
-    snap = json.loads(result.stdout)["run_plan"]["training_config_snapshot"]
-    assert snap["output_dir"] == "/some/project/adapters/wbg"
+    resolved = json.loads(result.stdout)["run_plan"]["resolved_execution"]
+    assert resolved["output_dir"] == "/some/project/adapters/wbg"
 
 
-def test_platform_plan_memory_efficient_sets_the_levers(monkeypatch):
-    # --memory-efficient (a tight-GPU shortcut) must seal the paged optimizer + fused Liger loss into
-    # the snapshot the trainer replays, so the platform path — not just train-run — gets them.
+def test_platform_plan_memory_efficient_requires_an_exact_combination_probe(monkeypatch, tmp_path):
+    # Independent paged-optimizer and Liger evidence cannot be combined into an executable claim.
     _ready_host(monkeypatch)
     result = runner.invoke(
         app,
-        ["platform-plan", "--base-model", "m", "--dataset", "d.jsonl", "--memory-efficient", "--json"],
+        [*_platform_plan_args(tmp_path), "--memory-efficient", "--json"],
     )
-    assert result.exit_code == 0
-    snap = json.loads(result.stdout)["run_plan"]["training_config_snapshot"]
-    assert snap["optim"] == "paged_adamw_8bit"
-    assert snap["use_liger"] is True
+    assert result.exit_code == 2
+    assert "complete requested execution tuple" in result.output
 
 
-def test_platform_plan_backend_flows_through_the_cli(monkeypatch):
-    # A proven-sdpa host: Unsloth declares sdpa, so it can run this plan → backend_ref reflects it.
-    _ready_host(monkeypatch, cc_major=8, attn="sdpa")
+def test_platform_plan_refuses_unsloth_without_execution_contract(monkeypatch, tmp_path):
+    # Host capability evidence cannot upgrade a backend whose manifest does not implement the sealed
+    # execution contract. Unsloth remains unavailable until its worker consumes contract 1.0.0.
+    _ready_host(monkeypatch, cc_major=8, attn="sdpa", backend_id="unsloth")
     result = runner.invoke(
         app,
-        ["platform-plan", "--base-model", "m", "--dataset", "d.jsonl", "--backend", "unsloth", "--json"],
+        [
+            *_platform_plan_args(tmp_path),
+            "--backend",
+            "unsloth",
+            "--json",
+        ],
     )
-    assert result.exit_code == 0
-    assert json.loads(result.stdout)["run_plan"]["backend_ref"]["id"] == "unsloth"
+    assert result.exit_code == 2
+    assert "resolved execution contract '1.0.0' not supported" in result.output
 
 
-def test_platform_plan_rejects_unsloth_on_a_native_windows_blackwell_math_plan(monkeypatch):
-    # NATIVE WINDOWS + Blackwell forces math (WDDM flash deadlock); Unsloth declares no math → the
-    # planner refuses through the CLI (exit 2).
-    _ready_host(monkeypatch, cc_major=12, attn="sdpa", os_name="windows")
+def test_platform_plan_rejects_unsloth_on_a_native_windows_blackwell_math_plan(
+    monkeypatch, tmp_path
+):
+    # NATIVE WINDOWS + Blackwell forces math (WDDM flash deadlock); Unsloth declares no math, and it
+    # also lacks the resolved execution contract, so the planner refuses through the CLI.
+    _ready_host(
+        monkeypatch,
+        cc_major=12,
+        attn="math",
+        os_name="windows",
+        backend_id="unsloth",
+    )
     result = runner.invoke(
         app,
-        ["platform-plan", "--base-model", "m", "--dataset", "d.jsonl", "--backend", "unsloth"],
+        [
+                *_platform_plan_args(tmp_path),
+                "--backend",
+                "unsloth",
+            ],
     )
     assert result.exit_code == 2
     assert "can't run this plan" in result.stderr or "can't run this plan" in result.output
+    assert "attention 'math' not supported" in result.output
+    assert "resolved execution contract '1.0.0' not supported" in result.output
 
 
-def test_platform_plan_allows_unsloth_on_wsl_blackwell(monkeypatch):
-    # WSL is its own platform: the flash deadlock is Windows-WDDM-only, so a WSL Blackwell host does
-    # NOT force math — it seals sdpa, which Unsloth declares, so the plan is accepted (exit 0). This is
-    # the whole reason to train under WSL (verified on a real 5070: flash SDPA runs on WSL2 Blackwell).
-    _ready_host(monkeypatch, cc_major=12, attn="sdpa", os_name="wsl")
+def test_platform_plan_refuses_unsloth_on_wsl_without_execution_contract(monkeypatch, tmp_path):
+    # The WDDM-only math mandate does not apply to a WSL profile, so attention resolves to proven SDPA.
+    # The plan is still refused because Unsloth does not implement the resolved execution contract.
+    _ready_host(
+        monkeypatch, cc_major=12, attn="sdpa", os_name="wsl", backend_id="unsloth"
+    )
     result = runner.invoke(
         app,
-        ["platform-plan", "--base-model", "m", "--dataset", "d.jsonl", "--backend", "unsloth", "--json"],
+        [
+                *_platform_plan_args(tmp_path),
+                "--backend",
+                "unsloth",
+                "--json",
+        ],
     )
-    assert result.exit_code == 0
-    bundle = json.loads(result.stdout)
-    assert bundle["run_plan"]["backend_ref"]["id"] == "unsloth"
-    assert bundle["run_plan"]["attention_backend"] == "sdpa"  # sdpa sealed, NOT math (Windows-only)
+    assert result.exit_code == 2
+    assert "resolved execution contract '1.0.0' not supported" in result.output
+    assert "attention 'sdpa' not supported" not in result.output
 
 
-def test_platform_plan_json_survives_stdout_noise_from_a_probe(monkeypatch):
+def test_platform_plan_json_survives_stdout_noise_from_a_probe(monkeypatch, tmp_path):
     # A probe/import that prints a banner to STDOUT (historically older bitsandbytes) must not corrupt
     # the JSON bundle the Tauri shell parses — the CLI redirects probe-time stdout to stderr.
     def _noisy_profile() -> EnvironmentProfile:
@@ -234,7 +384,7 @@ def test_platform_plan_json_survives_stdout_noise_from_a_probe(monkeypatch):
         "corpus_studio.platform.probes.run_capability_probes", lambda _p: _ready_report()
     )
     result = runner.invoke(
-        app, ["platform-plan", "--base-model", "m", "--dataset", "d.jsonl", "--json"]
+        app, [*_platform_plan_args(tmp_path), "--json"]
     )
     assert result.exit_code == 0
     bundle = json.loads(result.stdout)  # pure JSON despite the banner
@@ -244,6 +394,7 @@ def test_platform_plan_json_survives_stdout_noise_from_a_probe(monkeypatch):
 
 def test_platform_plan_loads_and_copies_a_hash_sealed_parameter_report(monkeypatch, tmp_path):
     _ready_host(monkeypatch)
+    plan_args = _platform_plan_args(tmp_path)
     report = _accounting_report()
     report_path = tmp_path / "ParameterAccountingReport.json"
     report_path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
@@ -251,11 +402,7 @@ def test_platform_plan_loads_and_copies_a_hash_sealed_parameter_report(monkeypat
     result = runner.invoke(
         app,
         [
-            "platform-plan",
-            "--base-model",
-            "m",
-            "--dataset",
-            "d.jsonl",
+            *plan_args,
             "--parameter-accounting-report",
             str(report_path),
             "--out",
@@ -273,17 +420,14 @@ def test_platform_plan_loads_and_copies_a_hash_sealed_parameter_report(monkeypat
 
 def test_platform_plan_refuses_a_tampered_parameter_report(monkeypatch, tmp_path):
     _ready_host(monkeypatch)
+    plan_args = _platform_plan_args(tmp_path)
     report = _accounting_report().model_copy(update={"report_hash": "0" * 64})
     path = tmp_path / "tampered.json"
     path.write_text(report.model_dump_json(), encoding="utf-8")
     result = runner.invoke(
         app,
         [
-            "platform-plan",
-            "--base-model",
-            "m",
-            "--dataset",
-            "d.jsonl",
+            *plan_args,
             "--parameter-accounting-report",
             str(path),
         ],
@@ -294,6 +438,7 @@ def test_platform_plan_refuses_a_tampered_parameter_report(monkeypatch, tmp_path
 
 def test_platform_plan_refuses_unverified_nontrivial_physical_spec(monkeypatch, tmp_path):
     _ready_host(monkeypatch)
+    plan_args = _platform_plan_args(tmp_path)
     spec = {
         "resources": [
             {
@@ -339,11 +484,7 @@ def test_platform_plan_refuses_unverified_nontrivial_physical_spec(monkeypatch, 
     result = runner.invoke(
         app,
         [
-            "platform-plan",
-            "--base-model",
-            "m",
-            "--dataset",
-            "d.jsonl",
+            *plan_args,
             "--physical-spec",
             str(path),
         ],

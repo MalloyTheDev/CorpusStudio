@@ -24,6 +24,7 @@ export interface PlatformSnapshot {
 /** Inputs the host can't decide — the "goal + data" the user supplies to resolve a plan. */
 export interface PlanInputs {
   baseModel: string;
+  modelRevision: string;
   dataset: string;
   sequenceLen: number;
   backend: string;
@@ -34,9 +35,9 @@ export function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-/** The committed demo snapshot — a REAL engine-generated 5070/Blackwell bundle (produced by the
- *  actual planner + calibrator + supervisor). The browser build always renders this; inside Tauri it
- *  is the initial view until you probe the live host. */
+/** The committed demo snapshot is a pre-Phase-9B engine-generated 5070/Blackwell bundle. It is kept
+ *  as explicit migration evidence; the view labels its missing resolved execution contract as legacy.
+ *  The browser build renders it, while Tauri replaces it after a live immutable-revision plan. */
 export async function loadSnapshot(): Promise<PlatformSnapshot> {
   return sample as unknown as PlatformSnapshot;
 }
@@ -67,6 +68,7 @@ export async function resolvePlan(inputs: PlanInputs): Promise<{
     "platform_plan",
     {
       baseModel: inputs.baseModel,
+      modelRevision: inputs.modelRevision,
       dataset: inputs.dataset,
       sequenceLen: inputs.sequenceLen,
       backend: inputs.backend,

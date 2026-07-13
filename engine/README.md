@@ -16,9 +16,11 @@ Responsibilities:
 - check configured model backend health
 - list configured backend models
 - generate Training Lab config exports
-- run the opt-in first-party QLoRA trainer (`[train]` extra): `train-check` (runtime
-  preflight), `train-run` (4-bit QLoRA in-process → adapter + model card), `train-merge`,
-  `model-fetch` (permissive base model + license), `model-card` — or launch your own trainer
+- run the opt-in first-party QLoRA backend (`[train]` extra) through `platform-plan` →
+  `platform-run`, with immutable inputs, exact backend/capability/environment binding, supervised
+  worker execution, unique run directories, and content-bound adapter identity. `train-check`,
+  `train-merge`, `model-fetch`, and `model-card` are supporting tools; `train-run` is an explicitly
+  unsealed development-only escape hatch — or export configs for your own trainer
 
 ## Development
 

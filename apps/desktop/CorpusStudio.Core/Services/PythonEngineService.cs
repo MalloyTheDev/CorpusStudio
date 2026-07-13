@@ -2825,45 +2825,11 @@ public sealed class PythonEngineService : IEngineService
 
     // --- First-party trainer (opt-in [train] extra; runs in the engine's own interpreter) -----------
 
-    /// <summary>The engine tree — the working directory a first-party train-run is spawned from so
-    /// <c>-m corpus_studio.cli</c> resolves (matches how every other engine call runs).</summary>
-    public string EngineWorkingDirectory => IsEngineAvailable ? _engineDirectory : string.Empty;
-
     public async Task<TrainingRuntimeReport> CheckTrainingRuntimeAsync()
     {
         var output = await RunEngineCommandAsync("train-check", "--json");
         return JsonSerializer.Deserialize<TrainingRuntimeReport>(output, JsonOptions)
             ?? throw new InvalidOperationException("The Python engine returned an invalid train-check report.");
-    }
-
-    /// <summary>The train-run argv, invoked exactly like every other engine call
-    /// (<c>&lt;engine-python&gt; -m corpus_studio.cli train-run …</c>) so it hits the SAME environment
-    /// train-check probed. Paths are passed through verbatim; the caller supplies absolute paths.</summary>
-    public IReadOnlyList<string> BuildFirstPartyTrainArgv(string configPath, string? outputDir, bool cpuToy, int? maxSteps)
-    {
-        if (!IsEngineAvailable)
-        {
-            throw new InvalidOperationException(
-                "The Python engine is not available. " + (EngineUnavailableReason ?? "Locate the engine folder to continue."));
-        }
-
-        var argv = new List<string> { _pythonExecutable, "-m", "corpus_studio.cli", "train-run", configPath };
-        if (!string.IsNullOrWhiteSpace(outputDir))
-        {
-            argv.Add("--output-dir");
-            argv.Add(outputDir);
-        }
-        if (cpuToy)
-        {
-            argv.Add("--cpu-toy");
-        }
-        if (maxSteps is { } steps && steps > 0)
-        {
-            argv.Add("--max-steps");
-            argv.Add(steps.ToString(CultureInfo.InvariantCulture));
-        }
-
-        return argv;
     }
 
     public async Task<MergeResult> MergeAdapterAsync(string adapterPath, string strategy)

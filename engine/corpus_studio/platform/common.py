@@ -10,6 +10,9 @@ versions (training/environment). Pure — no heavy imports.
 
 from __future__ import annotations
 
+import secrets
+import time
+import uuid
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -132,3 +135,22 @@ class TokenStats(ContractModel):
 # A free-form, JSON-serializable mapping used where a contract folds in an opaque snapshot/params
 # block (e.g. RunPlan.training_config_snapshot, RunEvent.payload).
 JsonObject = dict[str, Any]
+
+
+def new_uuid7_id(prefix: str, *, timestamp_ms: int | None = None) -> str:
+    """Return a time-sortable, collision-resistant runtime identity.
+
+    Python 3.11/3.12 do not expose :func:`uuid.uuid7`, so construct the RFC 9562 bit layout directly:
+    a 48-bit Unix-millisecond timestamp, version 7, the RFC variant, and 74 cryptographic random bits.
+    The optional timestamp exists only for deterministic format tests; randomness is never injectable.
+    """
+
+    if not prefix or not prefix.replace("_", "-").replace("-", "").isalnum():
+        raise ValueError("runtime identity prefix must contain only letters, digits, '-' or '_'")
+    millis = int(time.time() * 1000) if timestamp_ms is None else timestamp_ms
+    if not 0 <= millis < 1 << 48:
+        raise ValueError("UUIDv7 timestamp must fit in 48 bits")
+    rand_a = secrets.randbits(12)
+    rand_b = secrets.randbits(62)
+    value = (millis << 80) | (0x7 << 76) | (rand_a << 64) | (0b10 << 62) | rand_b
+    return f"{prefix}-{uuid.UUID(int=value)}"

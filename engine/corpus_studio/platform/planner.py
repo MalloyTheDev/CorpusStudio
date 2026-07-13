@@ -46,38 +46,56 @@ from corpus_studio.platform.backends import (
     unmet_requirements,
 )
 from corpus_studio.platform.contracts import (
+    AttentionExecutionPolicy,
     CapabilityReport,
+    DeviceMapEntry,
     EnvironmentProfile,
+    ExecutionInputBinding,
+    ExecutionInputs,
     ParameterAccountingReport,
     PhysicalExecutionSpec,
     PhysicalResource,
     PhysicalScopeSelector,
     ParallelismSpec,
     RankBinding,
+    ResolvedExecutionConfiguration,
     RunPlan,
     StatePlacement,
     StorageProfile,
+    TrainerInterfacePolicy,
+    TrainingDataPolicy,
+    TrainingSchedule,
 )
-from corpus_studio.platform.common import HashRef, Ref
+from corpus_studio.platform.common import HashRef, PackageLock, Ref
 from corpus_studio.platform.enums import (
     AdapterMethod,
     AttentionImpl,
+    AttentionKernel,
     DeviceKind,
+    ExecutionVerificationRequirement,
     ExportFormat,
+    FailureTaxonomy,
     MemoryTier,
     OffloadStrategy,
     OperatingSystem,
+    Optimizer,
     PhysicalStateKind,
     PlacementRole,
     TaskType,
 )
+from corpus_studio.platform.execution_config import (
+    capability_report_ref_for,
+    execution_configuration_hash_for,
+    formatter_identity,
+    huggingface_input_ref,
+)
 from corpus_studio.platform.host_platform import flash_sdpa_deadlocks
 from corpus_studio.platform.parameter_accounting import verify_parameter_accounting_hash
+from corpus_studio.platform.objectives import get_objective
 
 # attn_implementation strings the trainer passes to from_pretrained. math / sdpa / mem_efficient /
 # xformers are NOT from_pretrained values (they are SDPA backends toggled inside the trainer), so we
 # leave attn_implementation unset for those and let the trainer's own proven Blackwell path fire.
-_EXPLICIT_ATTN = frozenset({"eager", "flash_attention_2", "flash_attention_3"})
 _LORA_FAMILY = frozenset({"lora", "qlora", "dora"})
 # The attention backends NOT guaranteed safe on Blackwell (sm_120): the fused/flash family deadlocks
 # outright, and plain `sdpa` can DISPATCH to the deadlocking flash kernel (its safety would depend on
@@ -87,6 +105,7 @@ _FUSED_ATTN_UNSAFE_ON_BLACKWELL = frozenset(
     {"flash_attention_2", "flash_attention_3", "mem_efficient", "xformers", "sdpa"}
 )
 _BLACKWELL_MAJOR = 12
+_EXECUTION_CONTRACT_VERSION = "1.0.0"
 
 
 class PlannerError(Exception):
@@ -106,25 +125,48 @@ class PlannerConstraints:
 
     base_model: str
     dataset_path: str
+    model_revision: str | None = None
+    tokenizer_revision: str | None = None
+    model_content_sha256: str | None = None
+    tokenizer_content_sha256: str | None = None
+    dataset_content_sha256: str | None = None
     task_type: str = "sft"
     dataset_format: str = "instruction"
     adapter_method: str | None = None  # None → auto: qlora when quantized, else lora
     lora_r: int = 16
     lora_alpha: int = 32
+    lora_dropout: float = 0.05
+    lora_bias: str = "none"
+    lora_target_modules: tuple[str, ...] = ("all-linear",)
     sequence_len: int = 4096
     micro_batch_size: int = 1
     gradient_accumulation_steps: int = 8
     learning_rate: float = 2e-4
+    weight_decay: float = 0.0
+    adam_beta1: float = 0.9
+    adam_beta2: float = 0.999
+    adam_epsilon: float = 1e-8
+    max_grad_norm: float = 1.0
+    lr_scheduler: str = "linear"
+    warmup_ratio: float = 0.0
     seed: int = 42
+    data_seed: int | None = None
     output_dir: str = "output"
     supervised_token_accumulation_target: int | None = None
     attention_backend: str | None = None  # explicit override; else resolved from the host
+    verification_requirement: str = "require_verified"
     export_format: str = "adapter_peft"
     backend: str = "corpus_studio"  # the training framework to run on (see platform.backends)
     # Memory / spill-avoidance levers (opt-in), validated against the backend's declared surface: a
     # paged optimizer (spill optimizer state to RAM) + a fused-CE loss (drop the long-seq logits spike).
     optim: str = "adamw_torch"
     use_liger: bool = False
+    max_steps: int | None = None
+    num_train_epochs: float = 1.0
+    checkpoint_steps: int = 50
+    checkpoint_keep_last: int = 3
+    truncation_allowed: bool = False
+    chat_template_sha256: str | None = None
     allow_cpu_toy: bool = False
 
 
@@ -141,30 +183,157 @@ def _max_cc_major(profile: EnvironmentProfile) -> int | None:
     return max(majors) if majors else None
 
 
+def _attention_policy(
+    *,
+    kernel: AttentionKernel,
+    kernel_probe_ref: Ref,
+    evidence_kind: str,
+    safety_mandate: str | None = None,
+    flash_attention_package: PackageLock | None = None,
+) -> AttentionExecutionPolicy:
+    model_api = {
+        AttentionKernel.eager: "eager",
+        AttentionKernel.torch_sdpa_math: "sdpa",
+        AttentionKernel.torch_sdpa_flash: "sdpa",
+        AttentionKernel.torch_sdpa_mem_efficient: "sdpa",
+        AttentionKernel.flash_attention_2: "flash_attention_2",
+        AttentionKernel.flash_attention_3: "flash_attention_3",
+        AttentionKernel.xformers: "xformers",
+    }[kernel]
+    return AttentionExecutionPolicy.model_validate(
+        {
+            "model_attention_api": model_api,
+            "effective_backend_required": kernel.value,
+            "flash_sdp_enabled": kernel == AttentionKernel.torch_sdpa_flash,
+            "mem_efficient_sdp_enabled": kernel
+            == AttentionKernel.torch_sdpa_mem_efficient,
+            "math_sdp_enabled": kernel not in {
+                AttentionKernel.torch_sdpa_flash,
+                AttentionKernel.torch_sdpa_mem_efficient,
+            },
+            "flash_attention_package": (
+                flash_attention_package.model_dump(mode="json")
+                if flash_attention_package is not None
+                else None
+            ),
+            "kernel_probe_ref": kernel_probe_ref.model_dump(mode="json"),
+            "evidence_kind": evidence_kind,
+            "safety_mandate": safety_mandate,
+            "verification_requirement": "require_verified",
+            "fallback_policy": "refuse",
+        }
+    )
+
+
 def _resolve_attention(
-    explicit: str | None, cc_major: int | None, proven_attn: set[str], *, os_value: OperatingSystem
-) -> str:
-    # The known fused-flash deadlock guard is native-Windows/WDDM-only. Other platforms are not
-    # automatically safe: a plan may seal sdpa only when that exact environment's probe proved it.
-    # WSL has separately labeled evidence; bare-Linux RTX 5070 behavior remains unverified.
+    explicit: str | None,
+    cc_major: int | None,
+    proven_attn: set[str],
+    proven_kernels: set[str],
+    *,
+    os_value: OperatingSystem,
+    evidence_ref: Ref,
+    flash_attention_package: PackageLock | None,
+) -> tuple[str, AttentionExecutionPolicy]:
+    """Resolve an API request to one exact, enforceable kernel."""
+
     wddm_blackwell = flash_sdpa_deadlocks(os_value, cc_major)
     if explicit is not None:
         _require_enum(explicit, AttentionImpl, "attention_backend")
-        # The WDDM-Blackwell mandate outranks an explicit override: refuse to seal a plan that would
-        # hang rather than honor a request the safety layer exists to prevent.
         if wddm_blackwell and explicit in _FUSED_ATTN_UNSAFE_ON_BLACKWELL:
             raise PlannerError(
                 f"attention_backend '{explicit}' is not guaranteed safe on native Windows + Blackwell "
                 f"(sm_120, cc_major>={_BLACKWELL_MAJOR}) - it can hit the deadlocking flash kernel under "
                 "the Windows WDDM driver; use math/eager, or use a non-WDDM host only after its "
-                "flash capability probe passes."
+                "exact attention-kernel probe passes."
             )
-        return explicit
+    candidates: dict[str, list[AttentionKernel]] = {
+        "math": [AttentionKernel.torch_sdpa_math],
+        "eager": [AttentionKernel.eager],
+        "sdpa": [
+            AttentionKernel.torch_sdpa_flash,
+            AttentionKernel.torch_sdpa_mem_efficient,
+            AttentionKernel.torch_sdpa_math,
+        ],
+        "mem_efficient": [AttentionKernel.torch_sdpa_mem_efficient],
+        "flash_attention_2": [AttentionKernel.flash_attention_2],
+        "flash_attention_3": [AttentionKernel.flash_attention_3],
+        "xformers": [AttentionKernel.xformers],
+    }
     if wddm_blackwell:
-        return AttentionImpl.math.value  # native-Windows Blackwell mandate — asserted, not probe-derived
-    if AttentionImpl.sdpa.value in proven_attn:
-        return AttentionImpl.sdpa.value
-    return AttentionImpl.eager.value  # universal safe fallback
+        wddm_requested = explicit or AttentionImpl.math.value
+        wddm_kernel = candidates[wddm_requested][0]
+        if wddm_requested not in proven_attn or wddm_kernel.value not in proven_kernels:
+            raise PlannerError(
+                f"native Windows + Blackwell requires proven {wddm_requested} attention, but its exact "
+                "kernel has no passing functional probe in this capability report"
+            )
+        return wddm_requested, _attention_policy(
+            kernel=wddm_kernel,
+            kernel_probe_ref=evidence_ref,
+            evidence_kind="functional_probe",
+            safety_mandate="native_windows_blackwell_math_or_eager_only",
+        )
+
+    requested = explicit
+    if requested is None:
+        if (
+            AttentionImpl.math.value in proven_attn
+            and AttentionKernel.torch_sdpa_math.value in proven_kernels
+        ):
+            # Until a complete flash/memory-efficient training tuple passes, prefer the full math
+            # tuple over a faster kernel demonstrated only by an isolated attention probe.
+            requested = AttentionImpl.math.value
+        elif (
+            AttentionImpl.sdpa.value in proven_attn
+            and AttentionKernel.torch_sdpa_flash.value in proven_kernels
+        ):
+            requested = AttentionImpl.sdpa.value
+        elif (
+            AttentionImpl.sdpa.value in proven_attn
+            and AttentionKernel.torch_sdpa_mem_efficient.value in proven_kernels
+        ):
+            requested = AttentionImpl.sdpa.value
+        elif AttentionImpl.eager.value in proven_attn:
+            requested = AttentionImpl.eager.value
+        else:
+            raise PlannerError(
+                "no exact attention backend has functional evidence in this capability report"
+            )
+    if requested not in proven_attn:
+        raise PlannerError(
+            f"attention_backend '{requested}' was requested explicitly but is not functionally proven"
+        )
+    chosen_kernel = next(
+        (item for item in candidates[requested] if item.value in proven_kernels),
+        None,
+    )
+    if chosen_kernel is None:
+        raise PlannerError(
+            f"attention_backend '{requested}' has no exact proven runtime kernel"
+        )
+    kernel = chosen_kernel
+    if kernel in {AttentionKernel.flash_attention_2, AttentionKernel.flash_attention_3} and (
+        flash_attention_package is None or flash_attention_package.version is None
+    ):
+        raise PlannerError(
+            "external FlashAttention requires an exact installed flash-attn package version"
+        )
+    summary = (
+        AttentionImpl.sdpa
+        if kernel
+        in {
+            AttentionKernel.torch_sdpa_flash,
+            AttentionKernel.torch_sdpa_mem_efficient,
+        }
+        else AttentionImpl(requested)
+    )
+    return summary.value, _attention_policy(
+        kernel=kernel,
+        kernel_probe_ref=evidence_ref,
+        evidence_kind="functional_probe",
+        flash_attention_package=flash_attention_package,
+    )
 
 
 def compute_plan_hash(plan_body: Mapping[str, Any]) -> str:
@@ -388,6 +557,185 @@ def _validate_environment_resources(
             )
 
 
+def _resolved_execution_inputs(
+    constraints: PlannerConstraints,
+    dataset_ref: Ref,
+) -> ExecutionInputs:
+    if dataset_ref.hash is None or dataset_ref.hash.value is None:
+        raise PlannerError("dataset_ref must be hash-pinned before execution planning")
+    dataset_digest = constraints.dataset_content_sha256 or dataset_ref.hash.value
+    dataset = ExecutionInputBinding.model_validate(
+        {
+            "kind": "dataset",
+            "ref": dataset_ref.model_dump(mode="json"),
+            "source": "local_file",
+            "location": constraints.dataset_path,
+            "content_sha256": dataset_digest,
+        }
+    )
+
+    if constraints.model_content_sha256 is not None:
+        model_ref = Ref(
+            id=f"model-{constraints.model_content_sha256[:12]}",
+            hash=HashRef(value=constraints.model_content_sha256),
+        )
+        model = ExecutionInputBinding(
+            kind="model",
+            ref=model_ref,
+            source="local_directory",
+            location=constraints.base_model,
+            content_sha256=constraints.model_content_sha256,
+        )
+        tokenizer_digest = constraints.tokenizer_content_sha256 or constraints.model_content_sha256
+        tokenizer = ExecutionInputBinding(
+            kind="tokenizer",
+            ref=Ref(
+                id=f"tokenizer-{tokenizer_digest[:12]}",
+                hash=HashRef(value=tokenizer_digest),
+            ),
+            source="local_directory",
+            location=constraints.base_model,
+            content_sha256=tokenizer_digest,
+        )
+    else:
+        revision = constraints.model_revision
+        if revision is None:
+            raise PlannerError(
+                "base_model must be pinned with model_revision (immutable Hub commit) or a local "
+                "model_content_sha256"
+            )
+        tokenizer_revision = constraints.tokenizer_revision or revision
+        model = ExecutionInputBinding(
+            kind="model",
+            ref=huggingface_input_ref("model", constraints.base_model, revision),
+            source="huggingface",
+            location=constraints.base_model,
+            resolved_revision=revision,
+        )
+        tokenizer = ExecutionInputBinding(
+            kind="tokenizer",
+            ref=huggingface_input_ref("tokenizer", constraints.base_model, tokenizer_revision),
+            source="huggingface",
+            location=constraints.base_model,
+            resolved_revision=tokenizer_revision,
+        )
+    return ExecutionInputs(dataset=dataset, model=model, tokenizer=tokenizer)
+
+
+def _trainer_interface(
+    capabilities: CapabilityReport,
+    *,
+    cpu_toy: bool,
+    quantized: bool,
+    use_liger: bool,
+    use_max_steps: bool,
+    external_attention_package: PackageLock | None,
+) -> TrainerInterfacePolicy:
+    effective = capabilities.effective_capabilities
+    fields = set(effective.trainer_fields) if effective else set()
+    init_fields = set(effective.trainer_init_fields) if effective else set()
+    sequence_field = (
+        "max_length"
+        if "max_length" in fields
+        else "max_seq_length"
+        if "max_seq_length" in fields
+        else None
+    )
+    tokenizer_parameter = (
+        "processing_class"
+        if "processing_class" in init_fields
+        else "tokenizer"
+        if "tokenizer" in init_fields
+        else None
+    )
+    if sequence_field is None or tokenizer_parameter is None:
+        raise PlannerError(
+            "the capability report does not prove the exact SFTConfig/SFTTrainer field surface"
+        )
+    required = {
+        "adam_beta1",
+        "adam_beta2",
+        "adam_epsilon",
+        "bf16",
+        "data_seed",
+        "dataset_text_field",
+        "disable_tqdm",
+        "fp16",
+        "gradient_accumulation_steps",
+        "gradient_checkpointing",
+        "learning_rate",
+        "logging_steps",
+        "lr_scheduler_type",
+        "optim",
+        "output_dir",
+        "packing",
+        "per_device_train_batch_size",
+        "report_to",
+        "save_steps",
+        "save_strategy",
+        "save_total_limit",
+        "seed",
+        "warmup_ratio",
+        "weight_decay",
+        sequence_field,
+        "max_steps" if use_max_steps else "num_train_epochs",
+        "max_grad_norm",
+    }
+    if cpu_toy:
+        required.add("use_cpu")
+    if use_liger:
+        required.add("use_liger_kernel")
+    missing_fields = sorted(required - fields)
+    if missing_fields:
+        raise PlannerError(
+            "the installed trainer cannot accept required semantic fields: "
+            + ", ".join(missing_fields)
+        )
+
+    required_packages = {"accelerate", "datasets", "peft", "torch", "transformers", "trl"}
+    if quantized:
+        required_packages.add("bitsandbytes")
+    if use_liger:
+        required_packages.add("liger-kernel")
+    if external_attention_package is not None:
+        required_packages.add(external_attention_package.name.lower())
+    installed = {
+        item.name.lower(): item
+        for item in capabilities.installed_packages
+        if item.version is not None
+    }
+    missing_packages = sorted(required_packages - set(installed))
+    if missing_packages:
+        raise PlannerError(
+            "the capability report lacks exact trainer package versions: "
+            + ", ".join(missing_packages)
+        )
+    return TrainerInterfacePolicy.model_validate(
+        {
+            "package_versions": [
+                installed[name].model_dump(mode="json") for name in sorted(required_packages)
+            ],
+            "required_sft_config_fields": sorted(required),
+            "sequence_length_field": sequence_field,
+            "tokenizer_parameter": tokenizer_parameter,
+        }
+    )
+
+
+def _precision_policy(precision: str, quantization: str, optimizer: str) -> dict[str, Any]:
+    quantized = quantization != "none"
+    return {
+        "weight_storage_dtype": None if quantized else precision,
+        "quantized_storage_format": quantization,
+        "dequantization_dtype": precision,
+        "forward_compute_dtype": precision,
+        "gradient_dtype": "fp32",
+        "optimizer_state_dtype": "int8" if "8bit" in optimizer else "fp32",
+        "optimizer_auxiliary_dtype": "fp32",
+        "master_weight_dtype": "fp32",
+    }
+
+
 def build_run_plan(
     *,
     profile: EnvironmentProfile,
@@ -408,10 +756,39 @@ def build_run_plan(
     the request (not ready; cpu-toy-only without ``allow_cpu_toy``; an unsupported constraint)."""
     _require_enum(constraints.task_type, TaskType, "task_type")
     _require_enum(constraints.export_format, ExportFormat, "export_format")
+    _require_enum(constraints.optim, Optimizer, "optimizer")
+    _require_enum(
+        constraints.verification_requirement,
+        ExecutionVerificationRequirement,
+        "verification_requirement",
+    )
+    if constraints.verification_requirement != "require_verified":
+        raise PlannerError(
+            "the first-party executor currently requires verified capability evidence; "
+            "allow_unverified is represented for future research workers but is not executable"
+        )
 
     effective = capabilities.effective_capabilities
+    if capabilities.environment_ref.id != profile.environment_signature:
+        raise PlannerError(
+            "capability report environment does not match the profiled execution environment"
+        )
     proven_precisions = {p.value for p in effective.precision_modes} if effective else set()
     proven_attn = {a.value for a in effective.attention_impls} if effective else set()
+    proven_kernels = {item.value for item in effective.attention_kernels} if effective else set()
+    proven_quantization = (
+        {item.value for item in effective.quantization_modes} if effective else set()
+    )
+    proven_adapters = {item.value for item in effective.adapter_methods} if effective else set()
+    proven_optimizers = {item.value for item in effective.optimizers} if effective else set()
+    proven_losses = {item.value for item in effective.loss_impls} if effective else set()
+    proven_checkpoints = (
+        {item.value for item in effective.checkpoint_impls} if effective else set()
+    )
+    proven_execution_contracts = (
+        set(effective.execution_contract_versions) if effective else set()
+    )
+    capability_ref = capability_report_ref_for(capabilities)
     cc_major = _max_cc_major(profile)
 
     # --- run mode (honest, readiness-driven) ---
@@ -433,18 +810,110 @@ def build_run_plan(
 
     # --- resolve the ambiguous fields against PROVEN capabilities ---
     if cpu_toy:
+        if "fp32" not in proven_precisions:
+            raise PlannerError("the CPU-toy path lacks a passing FP32 training-step probe")
         precision = "fp32"
         quantization = "none"
         attention_backend = AttentionImpl.eager.value
+        attention_policy = _attention_policy(
+            kernel=AttentionKernel.eager,
+            kernel_probe_ref=capability_ref,
+            evidence_kind="cpu_reference",
+        )
     else:
-        precision = "bf16" if "bf16" in proven_precisions else "fp32"
-        quantization = "nf4" if capabilities.bitsandbytes_ok else "none"
-        attention_backend = _resolve_attention(
-            constraints.attention_backend, cc_major, proven_attn, os_value=profile.host.os
+        if "bf16" in proven_precisions:
+            precision = "bf16"
+        elif "fp32" in proven_precisions:
+            precision = "fp32"
+        else:
+            raise PlannerError("no functionally proven training precision is available")
+        quantization = (
+            "nf4"
+            if capabilities.bitsandbytes_ok and "nf4" in proven_quantization
+            else "none"
+        )
+        attention_backend, attention_policy = _resolve_attention(
+            constraints.attention_backend,
+            cc_major,
+            proven_attn,
+            proven_kernels,
+            os_value=profile.host.os,
+            evidence_ref=capability_ref,
+            flash_attention_package=next(
+                (
+                    item
+                    for item in capabilities.installed_packages
+                    if item.name == "flash-attn" and item.version is not None
+                ),
+                None,
+            ),
         )
 
     adapter_method = constraints.adapter_method or ("qlora" if quantization == "nf4" else "lora")
     _require_enum(adapter_method, AdapterMethod, "adapter_method")
+    if adapter_method not in proven_adapters and not cpu_toy:
+        raise PlannerError(f"adapter '{adapter_method}' is not functionally proven")
+
+    loss_impl = "liger_fused_ce" if constraints.use_liger else "cross_entropy"
+    checkpoint_impl = "adapter_only"
+    for label, value, proven in (
+        ("optimizer", constraints.optim, proven_optimizers),
+        ("loss", loss_impl, proven_losses),
+        ("checkpoint", checkpoint_impl, proven_checkpoints),
+    ):
+        if value not in proven:
+            raise PlannerError(f"{label} '{value}' is not functionally proven")
+    expected_combination = {
+        "runtime_mode": "cpu_toy" if cpu_toy else "training",
+        "device": "cpu" if cpu_toy else "cuda",
+        "precision": precision,
+        "quantization": quantization,
+        "adapter_method": adapter_method,
+        "attention_impl": attention_backend,
+        "attention_kernel": attention_policy.effective_backend_required.value,
+        "optimizer": constraints.optim,
+        "loss_impl": loss_impl,
+        "checkpoint_impl": checkpoint_impl,
+        "export_format": constraints.export_format,
+        "execution_contract_version": _EXECUTION_CONTRACT_VERSION,
+    }
+    exact_combination = next(
+        (
+            item
+            for item in (effective.execution_combinations if effective else [])
+            if all(
+                item.model_dump(mode="json")[field] == expected
+                for field, expected in expected_combination.items()
+            )
+        ),
+        None,
+    )
+    if exact_combination is None:
+        rendered = ", ".join(
+            f"{key}={value}" for key, value in expected_combination.items()
+        )
+        raise PlannerError(
+            "no bounded functional probe demonstrated the complete requested execution tuple "
+            f"({rendered})"
+        )
+    exact_probe_result = next(
+        (
+            result
+            for result in capabilities.probe_results
+            if result.probe == exact_combination.probe
+            and result.outcome == FailureTaxonomy.PASS
+            and exact_combination in result.execution_combinations
+        ),
+        None,
+    )
+    if exact_probe_result is None:
+        raise PlannerError(
+            "the selected execution combination is not embedded in its named passing probe result"
+        )
+    if _EXECUTION_CONTRACT_VERSION not in proven_execution_contracts:
+        raise PlannerError(
+            "the capability report does not prove resolved execution contract 1.0.0"
+        )
 
     # Validate the chosen training backend can actually run the RESOLVED plan (declared support), so a
     # plan is never sealed for a framework that would silently downgrade or refuse it. This is where
@@ -454,6 +923,16 @@ def build_run_plan(
     if backend is None:
         known = ", ".join(b.backend_id for b in builtin_backends())
         raise PlannerError(f"unknown backend '{constraints.backend}'; available: {known}.")
+    if capabilities.backend_id != backend.backend_id:
+        raise PlannerError(
+            f"capability report belongs to backend '{capabilities.backend_id}', not "
+            f"'{backend.backend_id}'"
+        )
+    if capabilities.backend_version != backend.backend_version:
+        raise PlannerError(
+            "capability report backend version does not match the selected manifest "
+            f"(report={capabilities.backend_version!r}, manifest={backend.backend_version!r})"
+        )
     device = "cpu" if cpu_toy else ("cuda" if profile.gpus else "cpu")
     host_os = profile.host.os.value
     unmet = unmet_requirements(
@@ -465,6 +944,12 @@ def build_run_plan(
         quantization=quantization,
         adapter_method=adapter_method,
         attention=attention_backend,
+        attention_kernel=attention_policy.effective_backend_required.value,
+        optimizer=constraints.optim,
+        loss=loss_impl,
+        checkpoint=checkpoint_impl,
+        export_format=constraints.export_format,
+        execution_contract_version=_EXECUTION_CONTRACT_VERSION,
     )
     if unmet:
         alternatives = [
@@ -477,6 +962,12 @@ def build_run_plan(
                 quantization=quantization,
                 adapter_method=adapter_method,
                 attention=attention_backend,
+                attention_kernel=attention_policy.effective_backend_required.value,
+                optimizer=constraints.optim,
+                loss=loss_impl,
+                checkpoint=checkpoint_impl,
+                export_format=constraints.export_format,
+                execution_contract_version=_EXECUTION_CONTRACT_VERSION,
             )
         ]
         hint = (
@@ -527,62 +1018,171 @@ def build_run_plan(
         1, constraints.sequence_len * constraints.micro_batch_size * constraints.gradient_accumulation_steps
     )
 
-    # attn_implementation string only for real from_pretrained backends; math/sdpa → unset so the
-    # trainer's native-Windows/WDDM Blackwell-safe path stays in control.
-    snapshot: dict[str, Any] = {
-        "base_model": constraints.base_model,
-        "dataset_path": constraints.dataset_path,
-        "output_dir": constraints.output_dir,
-        "dataset_format": constraints.dataset_format,  # trainer field name (NOT "format")
-        "sequence_len": constraints.sequence_len,
-        "lora_r": constraints.lora_r,
-        "lora_alpha": constraints.lora_alpha,
-        "micro_batch_size": constraints.micro_batch_size,
-        "gradient_accumulation_steps": constraints.gradient_accumulation_steps,
-        "learning_rate": constraints.learning_rate,
-        "seed": constraints.seed,
-        "optim": constraints.optim,  # the trainer reads this → SFTConfig optim (paged optimizer = safe-spill)
-    }
-    if attention_backend in _EXPLICIT_ATTN:
-        snapshot["attn_implementation"] = attention_backend
-    if constraints.use_liger:
-        snapshot["use_liger"] = True  # fused CE — the trainer drops the long-seq logits spike
-    if cpu_toy:
-        snapshot["cpu_toy"] = True
+    resolved_environment_ref = environment_ref or Ref(
+        id=profile.environment_signature,
+        hash=HashRef(value=profile.environment_signature),
+    )
+    if (
+        resolved_environment_ref.hash is None
+        or resolved_environment_ref.hash.value is None
+    ):
+        raise PlannerError("the execution environment must be hash-pinned")
+    execution_inputs = _resolved_execution_inputs(constraints, dataset_ref)
 
     adapter: dict[str, Any] = {"method": adapter_method}
     if adapter_method in _LORA_FAMILY:
         adapter["lora_r"] = constraints.lora_r
         adapter["lora_alpha"] = constraints.lora_alpha
+        adapter["lora_dropout"] = constraints.lora_dropout
+        adapter["target_modules"] = sorted(set(constraints.lora_target_modules))
+        adapter["bias"] = constraints.lora_bias
+
+    optimizer = {
+        "impl": constraints.optim,
+        "learning_rate": constraints.learning_rate,
+        "weight_decay": constraints.weight_decay,
+        "adam_beta1": constraints.adam_beta1,
+        "adam_beta2": constraints.adam_beta2,
+        "adam_epsilon": constraints.adam_epsilon,
+        "max_grad_norm": constraints.max_grad_norm,
+        "lr_scheduler": constraints.lr_scheduler,
+        "warmup_ratio": constraints.warmup_ratio,
+    }
+    sequence = {
+        "max_sequence_len": constraints.sequence_len,
+        "packing": False,
+        "truncation_allowed": constraints.truncation_allowed,
+    }
+    batching = {
+        "micro_batch_size": constraints.micro_batch_size,
+        "supervised_token_accumulation_target": token_target,
+        "fallback_grad_accumulation_steps": constraints.gradient_accumulation_steps,
+    }
+    checkpoint_policy = {
+        "impl": checkpoint_impl,
+        "cadence_optimizer_steps": constraints.checkpoint_steps,
+        "keep_last": constraints.checkpoint_keep_last,
+        "reload_verify": False,
+    }
+    schedule = TrainingSchedule(
+        max_steps=(constraints.max_steps or 3) if cpu_toy else constraints.max_steps,
+        num_train_epochs=(
+            None
+            if cpu_toy or constraints.max_steps is not None
+            else constraints.num_train_epochs
+        ),
+    )
+    trainer_interface = _trainer_interface(
+        capabilities,
+        cpu_toy=cpu_toy,
+        quantized=quantization != "none",
+        use_liger=constraints.use_liger,
+        use_max_steps=schedule.max_steps is not None,
+        external_attention_package=attention_policy.flash_attention_package,
+    )
+    missing_manifest_fields = sorted(
+        set(trainer_interface.required_sft_config_fields) - set(backend.trainer_fields)
+    )
+    if missing_manifest_fields:
+        raise PlannerError(
+            "the backend manifest does not declare required trainer fields: "
+            + ", ".join(missing_manifest_fields)
+        )
+    if trainer_interface.tokenizer_parameter not in backend.trainer_init_fields:
+        raise PlannerError(
+            "the backend manifest does not declare the required trainer initializer field "
+            f"{trainer_interface.tokenizer_parameter!r}"
+        )
+    formatter_id, formatter_hash = formatter_identity(constraints.dataset_format)
+    data_policy = TrainingDataPolicy.model_validate(
+        {
+            "dataset_format": constraints.dataset_format,
+            "formatter_id": formatter_id,
+            "formatter_sha256": formatter_hash,
+            "chat_template_sha256": constraints.chat_template_sha256,
+            "truncation_policy": "allow" if constraints.truncation_allowed else "refuse",
+            "packing": False,
+        }
+    )
+    objective = get_objective("qlora" if adapter_method == "qlora" else "lora")
+    if objective is None:  # pragma: no cover - sealed built-in catalog invariant
+        raise PlannerError("the selected training objective is absent from the sealed registry")
+    objective_ref = Ref(id=objective.objective_id, hash=HashRef(value=objective.objective_hash))
+
+    root_device = resolved_physical.resources[0].device_id
+    if root_device is None:
+        raise PlannerError("the current dense trainer requires one explicit compute device")
+    device_map = [
+        DeviceMapEntry(module="", device="cpu" if root_device == "cpu:0" else root_device)
+    ]
+    try:
+        execution_draft = ResolvedExecutionConfiguration.model_validate(
+            {
+            "configuration_id": f"{plan_id}-execution",
+            "configuration_hash": "0" * 64,
+            "backend_ref": backend_manifest_ref(backend).model_dump(mode="json"),
+            "environment_ref": resolved_environment_ref.model_dump(mode="json"),
+            "environment_binding": (
+                "managed_lock" if environment_ref is not None else "profile_snapshot"
+            ),
+            "capability_report_ref": capability_ref.model_dump(mode="json"),
+            "inputs": execution_inputs.model_dump(mode="json"),
+            "objective_ref": objective_ref.model_dump(mode="json"),
+            "runtime_mode": "cpu_toy" if cpu_toy else "training",
+            "precision": _precision_policy(precision, quantization, constraints.optim),
+            "attention": attention_policy.model_dump(mode="json"),
+            "device_map": [item.model_dump(mode="json") for item in device_map],
+            "adapter": adapter,
+            "optimizer": optimizer,
+            "loss_impl": loss_impl,
+            "sequence": sequence,
+            "batching": batching,
+            "checkpoint_policy": checkpoint_policy,
+            "schedule": schedule.model_dump(mode="json"),
+            "data": data_policy.model_dump(mode="json"),
+            "trainer_interface": trainer_interface.model_dump(mode="json"),
+            "export_format": constraints.export_format,
+            "trust_remote_code": False,
+            "use_safetensors": True,
+            "bnb_4bit_use_double_quant": quantization != "none",
+            "adapter_task_type": "CAUSAL_LM",
+            "save_strategy": "steps",
+            "gradient_checkpointing": True,
+            "output_dir": constraints.output_dir,
+            "output_layout": "run_scoped_v1",
+            "seed": constraints.seed,
+            "data_seed": constraints.data_seed if constraints.data_seed is not None else constraints.seed,
+            }
+        )
+    except ValidationError as exc:
+        raise PlannerError(f"the resolved execution configuration is invalid: {exc}") from exc
+    execution = execution_draft.model_copy(
+        update={"configuration_hash": execution_configuration_hash_for(execution_draft)}
+    )
 
     body: dict[str, Any] = {
         "plan_id": plan_id,
         "plan_hash": "0" * 64,  # placeholder — replaced by the real seal below
         "backend_ref": backend_manifest_ref(backend).model_dump(mode="json"),
-        "environment_ref": (environment_ref or Ref(id=profile.environment_signature)).model_dump(
-            mode="json"
-        ),
+        "environment_ref": resolved_environment_ref.model_dump(mode="json"),
         "dataset_ref": dataset_ref.model_dump(mode="json"),
         "task_type": constraints.task_type,
         "base_model": constraints.base_model,
         "precision": precision,
         "quantization": quantization,
         "adapter": adapter,
-        "optimizer": {"impl": constraints.optim, "learning_rate": constraints.learning_rate},
-        "loss_impl": "liger_fused_ce" if constraints.use_liger else "cross_entropy",
+        "optimizer": optimizer,
+        "loss_impl": loss_impl,
         "attention_backend": attention_backend,
-        "sequence": {"max_sequence_len": constraints.sequence_len},
-        "batching": {
-            "micro_batch_size": constraints.micro_batch_size,
-            "supervised_token_accumulation_target": token_target,
-            "fallback_grad_accumulation_steps": constraints.gradient_accumulation_steps,
-        },
-        "checkpoint_policy": {"impl": "adapter_only"},
+        "sequence": sequence,
+        "batching": batching,
+        "checkpoint_policy": checkpoint_policy,
         "offload_strategy": offload_strategy.value,
         "gradient_checkpointing": True,
         "export": {"format": constraints.export_format, "output_dir": constraints.output_dir},
         "seed": constraints.seed,
-        "training_config_snapshot": snapshot,
+        "training_config_snapshot": {},
+        "resolved_execution": execution.model_dump(mode="json"),
         "parameter_accounting_ref": (
             parameter_accounting_ref.model_dump(mode="json")
             if parameter_accounting_ref is not None

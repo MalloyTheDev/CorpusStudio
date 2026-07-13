@@ -161,9 +161,10 @@ Useful screen elements:
 ## Guardrails
 
 - Keep evaluation examples separate from training examples.
-- Training is available from the app: run the opt-in first-party QLoRA trainer (the
-  `[train]` extra) or launch your installed external trainer — always after an explicit
-  confirmation showing the exact command.
+- Training is available through two explicit authorities: the app can launch a reviewed argv for an
+  installed external trainer, while first-party QLoRA requires a hash-sealed `RunPlan` dispatched by
+  the platform supervisor. The desktop does not route a mutable config directly into the first-party
+  trainer.
 - Do not require cloud APIs for local evaluation.
 - Do not accept AI-generated examples without review.
 - Do not treat a model score as proof that a dataset is correct.

@@ -25,7 +25,9 @@ Three surfaces:
   backend-independent TrainingObjective registry and compatibility evidence checker + the versioned,
   provenance/review-safe TraceRecord workflow + hash-pinned, allowlisted static MoE topology evidence
   (never runtime capability proof) + the identity-bound worker protocol 2.0 and fake-worker
-  conformance/process-tree boundary (not a real new backend).
+  conformance/process-tree boundary (not a real new backend) + the hash-sealed
+  `ResolvedExecutionConfiguration` consumed directly by the first-party worker (no post-seal semantic
+  overrides, implicit placement, or silent trainer-field filtering).
 - **UI** — WPF + Avalonia (`apps/desktop`, C#) and Tauri 2 + React (`apps/web`, TS). UI is a client
   over the engine CLI; it never owns training behavior.
 
@@ -55,6 +57,9 @@ CI runs on **Linux / Python 3.11** with `pytest --cov=corpus_studio --cov-fail-u
 - **ASCII in CLI-facing strings** (Windows console UTF-8 — no `—`, use `-`).
 - **Contracts are the boundary**: change `platform/contracts.py` (pydantic) → regenerate
   `docs/contracts/*.schema.json` → the TS types in `apps/web/src/contracts/` derive from those.
+- **One training authority**: shipping clients use `platform-plan` → `platform-run`; they never invoke
+  the development-only `train-run` compatibility command. Every execution gets a fresh run ID and a
+  run-scoped output directory; runner identity derives from the pinned backend manifest.
 - **Hardware claims stay evidence-bound**: until the Linux NVMe is installed in the final RTX 5070
   machine, do not claim native-Linux training, DeepSpeed/FSDP/NVMe offload, bare-Linux
   FlashAttention, PCIe/NVMe throughput or endurance, full-sequence 7B success, real offload fit, or

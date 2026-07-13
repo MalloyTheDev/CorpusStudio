@@ -12,8 +12,9 @@ setup see [DEVELOPMENT_SETUP.md](DEVELOPMENT_SETUP.md); for every engine command
   for all dataset logic: schemas, validation, quality/debt, gates, splits, evaluation,
   training-config, artifacts, versions, import/export. No UI, no desktop knowledge. It also holds the
   **platform run-lifecycle substrate** (`corpus_studio/platform/`: language-neutral contracts +
-  planner + calibrator + run supervisor + subprocess worker + the first-party/Unsloth trainers) — the
-  engine now runs training in-process via the opt-in `[train]` extra (still torch-free at import).
+  planner + calibrator + run supervisor + subprocess worker + backend manifests). The dependency-light
+  control plane stays torch-free at import; a validated worker lazily enters the opt-in `[train]`
+  runtime only after sealed-plan dispatch. Unsloth is declared but not Phase-9B executable.
 - **`apps/web/`** — a Tauri 2 + React contract-first client (early-stage): TypeScript types generated
   from the engine's JSON-Schema contracts; the Rust shell shells out to the `corpus-studio platform-*`
   CLI. A *client* of the engine, like the desktop.
@@ -63,8 +64,8 @@ params, or `PythonEngineService` won't satisfy the interface).
   - `IFilePickerService` — file/folder pickers.
   - `IHuggingFaceImportDialog` — the HF import modal (returns a staging path).
   - `IDispatcherTimerFactory` / `IDispatcherTimer` — UI-thread periodic timers.
-  - `IProcessRunner` — spawns + streams the trainer process (the desktop owns it, not the
-    engine).
+  - `IProcessRunner` - spawns + streams reviewed **external** trainer processes. First-party worker
+    ownership belongs to the platform supervisor, not the desktop.
 
 The pattern: **every user action is a bindable command on a VM, driven through seams**, so
 it runs identically on both heads and is unit-testable with fakes. The code-behind

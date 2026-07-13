@@ -97,3 +97,24 @@ def read_jsonl(path: Path) -> Iterator[dict[str, Any]]:
                 f"got {type(parsed.value).__name__}."
             )
         yield parsed.value
+
+
+def read_jsonl_bytes(content: bytes) -> Iterator[dict[str, Any]]:
+    """Strictly parse already-stabilized JSONL bytes without reopening a mutable path."""
+
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"dataset is not valid UTF-8: {exc}") from exc
+    for line_number, line in enumerate(text.splitlines(keepends=True), start=1):
+        if not line.strip():
+            continue
+        try:
+            value = _loads(line)
+        except ValueError as exc:
+            raise ValueError(f"line {line_number}: Invalid JSON: {exc}") from exc
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"line {line_number}: expected a JSON object, got {type(value).__name__}."
+            )
+        yield value

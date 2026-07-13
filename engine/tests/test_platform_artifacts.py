@@ -10,8 +10,14 @@ from corpus_studio.platform.artifacts import (
     recheck_artifact_integrity,
     write_artifact_manifest,
 )
-from corpus_studio.platform.runners import demo_training_plan
-from corpus_studio.platform.supervisor import ProducedArtifact, RunContext, execute_run
+from corpus_studio.platform.supervisor import (
+    EchoRunner,
+    ProducedArtifact,
+    RunContext,
+    demo_run_plan,
+    execute_run,
+)
+from corpus_studio.training.artifact_registry import compute_weight_content_hash
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _CLOCK = lambda: "2026-07-11T00:00:00+00:00"  # noqa: E731
@@ -54,6 +60,16 @@ def test_build_manifest_for_a_missing_path_is_missing(tmp_path):
     assert manifest.integrity is not None
     assert manifest.integrity.current_integrity == "missing"
     assert manifest.integrity.content_hash is None
+
+
+def test_required_weight_hash_never_falls_back_to_adapter_config(tmp_path):
+    descriptor_only = tmp_path / "descriptor-only"
+    descriptor_only.mkdir()
+    (descriptor_only / "adapter_config.json").write_text('{"r": 4}', encoding="utf-8")
+
+    assert compute_weight_content_hash(str(descriptor_only)) is None
+    adapter = _make_adapter(tmp_path / "adapter-with-weights")
+    assert _SHA256.match(compute_weight_content_hash(str(adapter)) or "")
 
 
 def test_unknown_kind_is_recorded_as_other(tmp_path):
@@ -153,8 +169,8 @@ def test_write_artifact_manifest_atomically(tmp_path):
 def test_execute_run_surfaces_and_writes_artifact_manifests(tmp_path):
     adapter = _make_adapter(tmp_path / "adapter")
 
-    class _AdapterRunner:
-        name = "training"
+    class _AdapterRunner(EchoRunner):
+        name = "echo"
 
         def run(self, ctx: RunContext):
             art = ProducedArtifact(
@@ -164,9 +180,8 @@ def test_execute_run_surfaces_and_writes_artifact_manifests(tmp_path):
             return [art]
 
     out = tmp_path / "out"
-    result = execute_run(
-        demo_training_plan(), _AdapterRunner(), run_id="run-9", out_dir=out, clock=_CLOCK
-    )
+    plan = demo_run_plan()
+    result = execute_run(plan, _AdapterRunner(), run_id="run-9", out_dir=out, clock=_CLOCK)
 
     assert result.manifest.state == "succeeded"
     assert len(result.artifacts) == 1
@@ -174,9 +189,9 @@ def test_execute_run_surfaces_and_writes_artifact_manifests(tmp_path):
     assert art_manifest.artifact_id == "run-9-adapter"
     assert art_manifest.integrity is not None
     assert art_manifest.integrity.current_integrity == "ok"
-    assert art_manifest.base_model == demo_training_plan().base_model
+    assert art_manifest.base_model == plan.base_model
     # It was persisted next to the RunManifest.
-    on_disk = out / "artifacts" / "run-9-adapter.json"
+    on_disk = out / "runs" / "run-9" / "artifacts" / "run-9-adapter.json"
     assert on_disk.is_file()
     assert P.ArtifactManifest.model_validate_json(on_disk.read_text(encoding="utf-8")) == art_manifest
 

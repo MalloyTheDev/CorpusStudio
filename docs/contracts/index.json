@@ -78,6 +78,10 @@
       "file": "CapabilityReport.schema.json"
     },
     {
+      "contract": "ResolvedExecutionConfiguration",
+      "file": "ResolvedExecutionConfiguration.schema.json"
+    },
+    {
       "contract": "RunPlan",
       "file": "RunPlan.schema.json"
     },

@@ -11,6 +11,18 @@ export type AdapterMethods = AdapterMethod[];
 export type AttentionImpl =
   "math" | "eager" | "sdpa" | "flash_attention_2" | "flash_attention_3" | "mem_efficient" | "xformers";
 export type AttentionImpls = AttentionImpl[];
+/**
+ * The exact attention implementation an execution policy permits at runtime.
+ */
+export type AttentionKernel =
+  | "eager"
+  | "torch_sdpa_math"
+  | "torch_sdpa_flash"
+  | "torch_sdpa_mem_efficient"
+  | "flash_attention_2"
+  | "flash_attention_3"
+  | "xformers";
+export type AttentionKernels = AttentionKernel[];
 export type BackendId = string;
 export type BackendVersion = string;
 export type CapabilityProbes = string[];
@@ -42,6 +54,7 @@ export type DisplayName = string;
 export type Algo = "sha256" | "sha256-ordered-exact-v1" | "blake3" | "none";
 export type Value = string | null;
 export type Id = string;
+export type ExecutionContractVersions = string[];
 export type ExportFormat =
   "adapter_peft" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
 export type ServesIn = string[];
@@ -148,6 +161,10 @@ export type StageMarker =
   | "process_start"
   | "env_loaded"
   | "cuda_init"
+  | "execution_config_verified"
+  | "attention_policy_applied"
+  | "placement_verified"
+  | "placement_deviation"
   | "model_loaded"
   | "quantized"
   | "adapter_attached"
@@ -162,6 +179,8 @@ export type StageMarker =
   | "evaluation"
   | "export";
 export type TelemetryHooks = TelemetryHook[];
+export type TrainerFields = string[];
+export type TrainerInitFields = string[];
 /**
  * Verbatim from config_templates.TrainingConfigTarget.
  */
@@ -177,6 +196,7 @@ export type TrainerTarget =
 export interface BackendManifest {
   adapter_methods?: AdapterMethods;
   attention_impls?: AttentionImpls;
+  attention_kernels?: AttentionKernels;
   backend_id: BackendId;
   backend_version: BackendVersion;
   capability_probes?: CapabilityProbes;
@@ -189,6 +209,7 @@ export interface BackendManifest {
   dependency_requirements?: DependencyRequirements;
   display_name?: DisplayName;
   environment_lock_ref?: Ref | null;
+  execution_contract_versions?: ExecutionContractVersions;
   export_compatibility?: ExportCompatibility;
   export_formats?: ExportFormats;
   known_failure_modes?: KnownFailureModes;
@@ -207,6 +228,8 @@ export interface BackendManifest {
   supported_os: SupportedOs;
   task_types: TaskTypes;
   telemetry_hooks?: TelemetryHooks;
+  trainer_fields?: TrainerFields;
+  trainer_init_fields?: TrainerInitFields;
   trainer_target?: TrainerTarget | null;
 }
 export interface CheckpointSemantics {

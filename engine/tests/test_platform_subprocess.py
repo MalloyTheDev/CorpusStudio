@@ -135,15 +135,79 @@ def test_worker_events_survive_a_trainer_stdout_redirect(monkeypatch):
     assert types[-1] == "terminal_result"
 
 
+def test_training_worker_echoes_the_sealed_execution_hash(monkeypatch):
+    from corpus_studio.platform.runners import demo_training_plan
+    from corpus_studio.training.trainer import TrainResult
+
+    monkeypatch.setattr(
+        "corpus_studio.training.trainer.run_training",
+        lambda config, **_kwargs: TrainResult(
+            output_dir="o",
+            adapter_path="o",
+            base_model=config.base_model,
+            cpu_toy=True,
+        ),
+    )
+    plan = demo_training_plan()
+    assert plan.resolved_execution is not None
+    out = io.StringIO()
+    rc = run_worker(
+        _dispatch_line(plan, "sealed-run", 30),
+        runner_name="cpu_toy",
+        backend_id=plan.backend_ref.id,
+        environment_ref=plan.environment_ref,
+        out=out,
+    )
+    messages = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+    assert rc == 0
+    accepted = next(item for item in messages if item["type"] == "run_accepted")
+    assert (
+        accepted["body"]["execution_configuration_hash"]
+        == plan.resolved_execution.configuration_hash
+    )
+
+
+def test_worker_rejects_training_plan_on_echo_lane_before_acceptance():
+    from corpus_studio.platform.runners import demo_training_plan
+
+    plan = demo_training_plan()
+    out = io.StringIO()
+    rc = run_worker(
+        _dispatch_line(plan, "wrong-lane", 30),
+        runner_name="echo",
+        backend_id=plan.backend_ref.id,
+        environment_ref=plan.environment_ref,
+        out=out,
+    )
+    messages = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+    assert rc == 2
+    assert [item["type"] for item in messages] == ["run_rejected"]
+    assert "sealed lane" in messages[0]["body"]["message"]
+
+
+def test_parent_refuses_wrong_runner_lane_before_spawning_worker():
+    from corpus_studio.platform.runners import demo_training_plan
+
+    result = execute_run_subprocess(
+        demo_training_plan(),
+        runner_name="echo",
+        worker_argv=[sys.executable, "-c", "raise SystemExit(99)"],
+    )
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy.value == "UNSUPPORTED_CONFIGURATION"
+    assert "sealed lane" in result.manifest.failure.message
+
+
 def test_build_runner_selects_the_runner():
     from corpus_studio.platform.runners import TrainingRunner
     from corpus_studio.platform.supervisor import EchoRunner
     from corpus_studio.platform.worker import _build_runner
 
-    assert isinstance(_build_runner("echo", None), EchoRunner)
-    trainer = _build_runner("cpu_toy", 5)
+    assert isinstance(_build_runner("echo"), EchoRunner)
+    trainer = _build_runner("cpu_toy")
     assert isinstance(trainer, TrainingRunner)
-    assert trainer.cpu_toy is True and trainer.max_steps == 5
+    assert trainer.cpu_toy is True and trainer.max_steps is None
 
 
 def test_worker_main_runs_from_stdin(monkeypatch, capsys):
@@ -208,6 +272,31 @@ def _fake_worker(
     return [sys.executable, "-c", script]
 
 
+def test_parent_rejects_wrong_execution_hash_before_training_events():
+    from corpus_studio.platform.runners import demo_training_plan
+
+    plan = demo_training_plan()
+    argv = _fake_worker(
+        [
+            (
+                "run_accepted",
+                {
+                    "run_id": plan.plan_id,
+                    "pid": 1,
+                    "execution_configuration_hash": "f" * 64,
+                },
+            )
+        ],
+        hello_body=_hello_body(plan),
+    )
+    result = execute_run_subprocess(
+        plan, run_id=plan.plan_id, worker_argv=argv, silence_timeout_s=10
+    )
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy.value == "ENVIRONMENT_FAILURE"
+    assert "execution configuration hash" in result.manifest.failure.message
+
+
 def test_malformed_terminal_result_is_a_protocol_failure_not_a_fake_crash():
     # A terminal_result arrived but its run_manifest doesn't validate → an honest protocol failure, NOT
     # "crashed (code 0)" and NEVER a fake success.
@@ -215,7 +304,9 @@ def test_malformed_terminal_result_is_a_protocol_failure_not_a_fake_crash():
         ("run_accepted", {"run_id": _PLAN.plan_id, "pid": 1}),
         ("terminal_result", {"run_id": _PLAN.plan_id, "outcome": "PASS", "run_manifest": {"bogus": 1}}),
     ])
-    result = execute_run_subprocess(_PLAN, worker_argv=argv, silence_timeout_s=10)
+    result = execute_run_subprocess(
+        _PLAN, run_id=_PLAN.plan_id, worker_argv=argv, silence_timeout_s=10
+    )
     assert result.manifest.state == "failed"
     assert result.manifest.failure.taxonomy.value == "ENVIRONMENT_FAILURE"
     assert "protocol violation" in result.manifest.failure.message
@@ -228,7 +319,9 @@ def test_run_rejected_is_classified_with_the_workers_reason():
     argv = _fake_worker([
         ("run_rejected", {"run_id": _PLAN.plan_id, "taxonomy": "UNSUPPORTED_CONFIGURATION", "message": "nope"}),
     ])
-    result = execute_run_subprocess(_PLAN, worker_argv=argv, silence_timeout_s=10)
+    result = execute_run_subprocess(
+        _PLAN, run_id=_PLAN.plan_id, worker_argv=argv, silence_timeout_s=10
+    )
     assert result.manifest.state == "failed"
     assert result.manifest.failure.taxonomy.value == "UNSUPPORTED_CONFIGURATION"
     assert result.manifest.failure.message == "nope"
@@ -245,7 +338,10 @@ def test_run_rejected_is_classified_with_the_workers_reason():
 def test_parent_rejects_protocol_direction_and_correlation_drift(kwargs, expected):
     messages = [("run_accepted", {"run_id": _PLAN.plan_id, "pid": 1})]
     result = execute_run_subprocess(
-        _PLAN, worker_argv=_fake_worker(messages, **kwargs), silence_timeout_s=10
+        _PLAN,
+        run_id=_PLAN.plan_id,
+        worker_argv=_fake_worker(messages, **kwargs),
+        silence_timeout_s=10,
     )
     assert result.manifest.state == "failed"
     assert result.manifest.failure.taxonomy.value == "ENVIRONMENT_FAILURE"
@@ -282,6 +378,7 @@ def test_parent_rejects_duplicate_message_ids():
     ]
     result = execute_run_subprocess(
         _PLAN,
+        run_id=_PLAN.plan_id,
         worker_argv=_fake_worker(messages, duplicate_post_ids=True),
         silence_timeout_s=10,
     )
@@ -297,6 +394,7 @@ def test_parent_rejects_event_before_acceptance_and_nonmonotonic_sequences():
 
     before = execute_run_subprocess(
         _PLAN,
+        run_id=_PLAN.plan_id,
         worker_argv=_fake_worker([("event", event)]),
         silence_timeout_s=10,
     )
@@ -304,6 +402,7 @@ def test_parent_rejects_event_before_acceptance_and_nonmonotonic_sequences():
 
     repeated = execute_run_subprocess(
         _PLAN,
+        run_id=_PLAN.plan_id,
         worker_argv=_fake_worker(
             [
                 ("run_accepted", {"run_id": _PLAN.plan_id, "pid": 1}),
@@ -332,6 +431,7 @@ def test_parent_rejects_terminal_manifest_linkage_mismatch():
     )
     result = execute_run_subprocess(
         _PLAN,
+        run_id=_PLAN.plan_id,
         worker_argv=_fake_worker(
             [
                 ("run_accepted", {"run_id": _PLAN.plan_id, "pid": 1}),
@@ -350,6 +450,113 @@ def test_parent_rejects_terminal_manifest_linkage_mismatch():
         silence_timeout_s=10,
     )
     assert "does not link to the dispatched RunPlan" in result.manifest.failure.message
+
+
+@pytest.mark.parametrize(
+    ("artifact_case", "expected_error"),
+    [
+        ("rogue_path", "run-scoped output"),
+        ("descriptor_only", "weight bytes do not match"),
+    ],
+)
+def test_parent_rejects_false_training_artifact_success(
+    tmp_path, artifact_case, expected_error
+):
+    from corpus_studio.platform.artifacts import build_artifact_manifest
+    from corpus_studio.platform.common import HashRef
+    from corpus_studio.platform.contracts import RunEvent, RunManifest
+    from corpus_studio.platform.execution_config import (
+        execution_configuration_hash_for,
+        run_scoped_training_output,
+    )
+    from corpus_studio.platform.planner import compute_plan_hash, run_plan_hash_payload
+    from corpus_studio.platform.runners import demo_training_plan
+
+    plan = demo_training_plan()
+    execution = plan.resolved_execution
+    assert execution is not None
+    changed = execution.model_copy(update={"output_dir": str(tmp_path / "output-root")})
+    changed = changed.model_copy(
+        update={"configuration_hash": execution_configuration_hash_for(changed)}
+    )
+    draft = plan.model_copy(
+        update={
+            "resolved_execution": changed,
+            "export": plan.export.model_copy(update={"output_dir": changed.output_dir}),
+        }
+    )
+    plan = draft.model_copy(
+        update={"plan_hash": compute_plan_hash(run_plan_hash_payload(draft))}
+    )
+    rid = "run-false-artifact"
+    expected_output = run_scoped_training_output(changed, rid)
+    artifact_path = (
+        tmp_path / "rogue-adapter"
+        if artifact_case == "rogue_path"
+        else expected_output
+    )
+    artifact_path.mkdir(parents=True)
+    if artifact_case == "rogue_path":
+        (artifact_path / "adapter_model.safetensors").write_bytes(b"weights")
+    else:
+        (artifact_path / "adapter_config.json").write_text('{"r": 4}', encoding="utf-8")
+    artifact = build_artifact_manifest(
+        artifact_id="run-false-artifact-adapter-deadbeef",
+        path=str(artifact_path),
+        run_id=rid,
+        now="2026-07-13T00:00:00+00:00",
+    )
+    manifest = RunManifest(
+        run_id=rid,
+        plan_ref={"id": plan.plan_id, "hash": HashRef(value=plan.plan_hash)},
+        environment_ref=plan.environment_ref,
+        dataset_ref=plan.dataset_ref,
+        created_at="2026-07-13T00:00:00+00:00",
+        updated_at="2026-07-13T00:00:00+00:00",
+        state="succeeded",
+        base_model=plan.base_model,
+        target=plan.backend_ref.id,
+        output_dir=str(artifact_path),
+        artifact_ids=[artifact.artifact_id],
+    )
+    event = RunEvent(
+        event_type="metric",
+        run_id=rid,
+        seq=0,
+        emitted_at="2026-07-13T00:00:00+00:00",
+        optimizer_step=1,
+    )
+    messages = [
+        (
+            "run_accepted",
+            {
+                "run_id": rid,
+                "pid": 1,
+                "execution_configuration_hash": changed.configuration_hash,
+            },
+        ),
+        ("event", event.model_dump(mode="json")),
+        (
+            "terminal_result",
+            {
+                "run_id": rid,
+                "outcome": "PASS",
+                "run_manifest": manifest.model_dump(mode="json"),
+                "artifacts": [artifact.model_dump(mode="json")],
+                "failure": None,
+            },
+        ),
+    ]
+    result = execute_run_subprocess(
+        plan,
+        run_id=rid,
+        worker_argv=_fake_worker(messages, hello_body=_hello_body(plan)),
+        silence_timeout_s=10,
+    )
+
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert expected_error in result.manifest.failure.message
 
 
 def test_worker_rejects_backend_identity_before_building_runner(monkeypatch):
@@ -590,13 +797,15 @@ def test_subprocess_persists_the_childs_artifact_manifests(tmp_path):
     )
     assert result.manifest.state == "succeeded"
     assert len(result.artifacts) == 1
-    assert (out / "artifacts" / "run-x-adapter.json").exists()  # actually persisted, not just reported
+    assert (
+        out / "runs" / "run-x" / "artifacts" / "run-x-adapter.json"
+    ).exists()  # actually persisted, not just reported
 
 
 def test_subprocess_writes_the_manifest_when_out_dir_given(tmp_path):
     result = execute_run_subprocess(
         _PLAN, runner_name="echo", out_dir=str(tmp_path), silence_timeout_s=30
     )
-    written = tmp_path / "RunManifest.json"
+    written = tmp_path / "runs" / result.manifest.run_id / "RunManifest.json"
     assert written.exists()
     assert json.loads(written.read_text(encoding="utf-8"))["state"] == result.manifest.state

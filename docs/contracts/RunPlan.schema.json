@@ -17,6 +17,23 @@
     "AdapterSpec": {
       "additionalProperties": false,
       "properties": {
+        "bias": {
+          "anyOf": [
+            {
+              "enum": [
+                "none",
+                "all",
+                "lora_only"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bias"
+        },
         "lora_alpha": {
           "anyOf": [
             {
@@ -92,6 +109,85 @@
       "title": "AllocatorPolicy",
       "type": "string"
     },
+    "AttentionExecutionPolicy": {
+      "additionalProperties": false,
+      "description": "Exact model attention API plus the one runtime kernel that is permitted.",
+      "properties": {
+        "effective_backend_required": {
+          "$ref": "#/$defs/AttentionKernel"
+        },
+        "evidence_kind": {
+          "enum": [
+            "functional_probe",
+            "cpu_reference"
+          ],
+          "title": "Evidence Kind",
+          "type": "string"
+        },
+        "fallback_policy": {
+          "const": "refuse",
+          "default": "refuse",
+          "title": "Fallback Policy",
+          "type": "string"
+        },
+        "flash_attention_package": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PackageLock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "flash_sdp_enabled": {
+          "title": "Flash Sdp Enabled",
+          "type": "boolean"
+        },
+        "kernel_probe_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "math_sdp_enabled": {
+          "title": "Math Sdp Enabled",
+          "type": "boolean"
+        },
+        "mem_efficient_sdp_enabled": {
+          "title": "Mem Efficient Sdp Enabled",
+          "type": "boolean"
+        },
+        "model_attention_api": {
+          "$ref": "#/$defs/ModelAttentionApi"
+        },
+        "safety_mandate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Safety Mandate"
+        },
+        "verification_requirement": {
+          "$ref": "#/$defs/ExecutionVerificationRequirement",
+          "default": "require_verified"
+        }
+      },
+      "required": [
+        "model_attention_api",
+        "effective_backend_required",
+        "flash_sdp_enabled",
+        "mem_efficient_sdp_enabled",
+        "math_sdp_enabled",
+        "kernel_probe_ref",
+        "evidence_kind"
+      ],
+      "title": "AttentionExecutionPolicy",
+      "type": "object"
+    },
     "AttentionImpl": {
       "description": "``math``/``eager`` is forced on native-Windows/WDDM Blackwell sm_120 because the fused flash\nkernel deadlocks there. Other platforms require their own functional capability result; WSL\nevidence is not bare-Linux proof.",
       "enum": [
@@ -104,6 +200,20 @@
         "xformers"
       ],
       "title": "AttentionImpl",
+      "type": "string"
+    },
+    "AttentionKernel": {
+      "description": "The exact attention implementation an execution policy permits at runtime.",
+      "enum": [
+        "eager",
+        "torch_sdpa_math",
+        "torch_sdpa_flash",
+        "torch_sdpa_mem_efficient",
+        "flash_attention_2",
+        "flash_attention_3",
+        "xformers"
+      ],
+      "title": "AttentionKernel",
       "type": "string"
     },
     "BatchingSpec": {
@@ -243,6 +353,26 @@
       "title": "DeviceKind",
       "type": "string"
     },
+    "DeviceMapEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "device": {
+          "minLength": 1,
+          "title": "Device",
+          "type": "string"
+        },
+        "module": {
+          "title": "Module",
+          "type": "string"
+        }
+      },
+      "required": [
+        "module",
+        "device"
+      ],
+      "title": "DeviceMapEntry",
+      "type": "object"
+    },
     "EvalSchedule": {
       "additionalProperties": false,
       "properties": {
@@ -284,6 +414,102 @@
       },
       "title": "EvalSchedule",
       "type": "object"
+    },
+    "ExecutionInputBinding": {
+      "additionalProperties": false,
+      "description": "One immutable input consumed by the worker.\n\nLocal inputs pin the exact bytes (a stable file or directory digest). Hugging Face inputs pin an\nimmutable repository commit; a branch or tag is never sufficient execution identity.",
+      "properties": {
+        "content_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Sha256"
+        },
+        "kind": {
+          "enum": [
+            "dataset",
+            "model",
+            "tokenizer"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "location": {
+          "minLength": 1,
+          "title": "Location",
+          "type": "string"
+        },
+        "ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "resolved_revision": {
+          "anyOf": [
+            {
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Revision"
+        },
+        "source": {
+          "enum": [
+            "local_file",
+            "local_directory",
+            "huggingface"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "ref",
+        "source",
+        "location"
+      ],
+      "title": "ExecutionInputBinding",
+      "type": "object"
+    },
+    "ExecutionInputs": {
+      "additionalProperties": false,
+      "properties": {
+        "dataset": {
+          "$ref": "#/$defs/ExecutionInputBinding"
+        },
+        "model": {
+          "$ref": "#/$defs/ExecutionInputBinding"
+        },
+        "tokenizer": {
+          "$ref": "#/$defs/ExecutionInputBinding"
+        }
+      },
+      "required": [
+        "dataset",
+        "model",
+        "tokenizer"
+      ],
+      "title": "ExecutionInputs",
+      "type": "object"
+    },
+    "ExecutionVerificationRequirement": {
+      "description": "Whether the planner may seal a capability that lacks functional evidence.",
+      "enum": [
+        "require_verified",
+        "allow_unverified"
+      ],
+      "title": "ExecutionVerificationRequirement",
+      "type": "string"
     },
     "ExportFormat": {
       "enum": [
@@ -374,6 +600,18 @@
         "unknown"
       ],
       "title": "MemoryTier",
+      "type": "string"
+    },
+    "ModelAttentionApi": {
+      "description": "The model-loader API selected before execution.\n\nThis is deliberately separate from :class:`AttentionKernel`: ``sdpa`` is an API that can\ndispatch to several materially different PyTorch kernels.",
+      "enum": [
+        "eager",
+        "sdpa",
+        "flash_attention_2",
+        "flash_attention_3",
+        "xformers"
+      ],
+      "title": "ModelAttentionApi",
       "type": "string"
     },
     "OffloadMechanism": {
@@ -500,6 +738,26 @@
     "OptimizerSpec": {
       "additionalProperties": false,
       "properties": {
+        "adam_beta1": {
+          "default": 0.9,
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Adam Beta1",
+          "type": "number"
+        },
+        "adam_beta2": {
+          "default": 0.999,
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Adam Beta2",
+          "type": "number"
+        },
+        "adam_epsilon": {
+          "default": 1e-08,
+          "exclusiveMinimum": 0,
+          "title": "Adam Epsilon",
+          "type": "number"
+        },
         "impl": {
           "$ref": "#/$defs/Optimizer"
         },
@@ -519,6 +777,12 @@
           ],
           "default": null,
           "title": "Lr Scheduler"
+        },
+        "max_grad_norm": {
+          "default": 1.0,
+          "minimum": 0,
+          "title": "Max Grad Norm",
+          "type": "number"
         },
         "warmup_ratio": {
           "anyOf": [
@@ -553,6 +817,114 @@
         "learning_rate"
       ],
       "title": "OptimizerSpec",
+      "type": "object"
+    },
+    "PackageLock": {
+      "additionalProperties": false,
+      "description": "A resolved dependency and its install provenance.\n\n``hash`` seals the installed distribution's RECORD metadata when that evidence is available; it\nis not mislabelled as the original wheel hash. ``direct_url`` and ``artifact`` preserve the\nstronger source identity pip exposes for direct/VCS/local installs. ``dependencies`` is the\ninstalled metadata dependency graph, not a second resolver.",
+      "properties": {
+        "artifact": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact"
+        },
+        "dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "direct_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direct Url"
+        },
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "installer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installer"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "requested": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested"
+        },
+        "source": {
+          "default": "unknown",
+          "enum": [
+            "pypi",
+            "wheel",
+            "sdist",
+            "conda",
+            "vcs",
+            "local",
+            "unknown"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "PackageLock",
       "type": "object"
     },
     "ParallelGroup": {
@@ -854,6 +1226,70 @@
       "title": "PlannedStorageBinding",
       "type": "object"
     },
+    "PrecisionExecutionPolicy": {
+      "additionalProperties": false,
+      "description": "The numerical representation of each material training state.\n\n``weight_storage_dtype`` describes an unquantized frozen base; quantized bases use\n``quantized_storage_format`` instead. ``master_weight_dtype`` describes the trainable adapter\nparameters. An 8-bit optimizer may use quantized primary state plus FP32 auxiliary tensors.",
+      "properties": {
+        "dequantization_dtype": {
+          "$ref": "#/$defs/PrecisionMode"
+        },
+        "forward_compute_dtype": {
+          "$ref": "#/$defs/PrecisionMode"
+        },
+        "gradient_dtype": {
+          "$ref": "#/$defs/PrecisionMode"
+        },
+        "master_weight_dtype": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PrecisionMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "optimizer_auxiliary_dtype": {
+          "$ref": "#/$defs/PrecisionMode",
+          "default": "fp32"
+        },
+        "optimizer_state_dtype": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PrecisionMode"
+            },
+            {
+              "$ref": "#/$defs/QuantizationMode"
+            }
+          ],
+          "title": "Optimizer State Dtype"
+        },
+        "quantized_storage_format": {
+          "$ref": "#/$defs/QuantizationMode",
+          "default": "none"
+        },
+        "weight_storage_dtype": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PrecisionMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "dequantization_dtype",
+        "forward_compute_dtype",
+        "gradient_dtype",
+        "optimizer_state_dtype"
+      ],
+      "title": "PrecisionExecutionPolicy",
+      "type": "object"
+    },
     "PrecisionMode": {
       "enum": [
         "fp32",
@@ -939,6 +1375,187 @@
         "id"
       ],
       "title": "Ref",
+      "type": "object"
+    },
+    "ResolvedExecutionConfiguration": {
+      "additionalProperties": false,
+      "description": "The hash-sealed configuration consumed directly by an isolated training worker.\n\nIt contains every execution-affecting default. Workers may refuse it, but may not fill in,\nfilter, reinterpret, or override semantic fields after this configuration is sealed.",
+      "properties": {
+        "adapter": {
+          "$ref": "#/$defs/AdapterSpec"
+        },
+        "adapter_task_type": {
+          "const": "CAUSAL_LM",
+          "default": "CAUSAL_LM",
+          "title": "Adapter Task Type",
+          "type": "string"
+        },
+        "attention": {
+          "$ref": "#/$defs/AttentionExecutionPolicy"
+        },
+        "backend_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "batching": {
+          "$ref": "#/$defs/BatchingSpec"
+        },
+        "bnb_4bit_use_double_quant": {
+          "title": "Bnb 4Bit Use Double Quant",
+          "type": "boolean"
+        },
+        "capability_report_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "checkpoint_policy": {
+          "$ref": "#/$defs/CheckpointPolicy"
+        },
+        "configuration_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Configuration Hash",
+          "type": "string"
+        },
+        "configuration_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Configuration Id",
+          "type": "string"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/TrainingDataPolicy"
+        },
+        "data_seed": {
+          "default": 42,
+          "minimum": 0,
+          "title": "Data Seed",
+          "type": "integer"
+        },
+        "device_map": {
+          "items": {
+            "$ref": "#/$defs/DeviceMapEntry"
+          },
+          "minItems": 1,
+          "title": "Device Map",
+          "type": "array"
+        },
+        "environment_binding": {
+          "enum": [
+            "profile_snapshot",
+            "managed_lock"
+          ],
+          "title": "Environment Binding",
+          "type": "string"
+        },
+        "environment_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "export_format": {
+          "$ref": "#/$defs/ExportFormat"
+        },
+        "gradient_checkpointing": {
+          "default": true,
+          "title": "Gradient Checkpointing",
+          "type": "boolean"
+        },
+        "inputs": {
+          "$ref": "#/$defs/ExecutionInputs"
+        },
+        "loss_impl": {
+          "$ref": "#/$defs/LossImpl"
+        },
+        "objective_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "optimizer": {
+          "$ref": "#/$defs/OptimizerSpec"
+        },
+        "output_dir": {
+          "minLength": 1,
+          "title": "Output Dir",
+          "type": "string"
+        },
+        "output_layout": {
+          "const": "run_scoped_v1",
+          "default": "run_scoped_v1",
+          "title": "Output Layout",
+          "type": "string"
+        },
+        "precision": {
+          "$ref": "#/$defs/PrecisionExecutionPolicy"
+        },
+        "runtime_mode": {
+          "enum": [
+            "training",
+            "cpu_toy"
+          ],
+          "title": "Runtime Mode",
+          "type": "string"
+        },
+        "save_strategy": {
+          "const": "steps",
+          "default": "steps",
+          "title": "Save Strategy",
+          "type": "string"
+        },
+        "schedule": {
+          "$ref": "#/$defs/TrainingSchedule"
+        },
+        "seed": {
+          "default": 42,
+          "minimum": 0,
+          "title": "Seed",
+          "type": "integer"
+        },
+        "sequence": {
+          "$ref": "#/$defs/SequenceSpec"
+        },
+        "trainer_interface": {
+          "$ref": "#/$defs/TrainerInterfacePolicy"
+        },
+        "trust_remote_code": {
+          "const": false,
+          "default": false,
+          "title": "Trust Remote Code",
+          "type": "boolean"
+        },
+        "use_safetensors": {
+          "const": true,
+          "default": true,
+          "title": "Use Safetensors",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "configuration_id",
+        "configuration_hash",
+        "backend_ref",
+        "environment_ref",
+        "environment_binding",
+        "capability_report_ref",
+        "inputs",
+        "objective_ref",
+        "runtime_mode",
+        "precision",
+        "attention",
+        "device_map",
+        "adapter",
+        "optimizer",
+        "loss_impl",
+        "sequence",
+        "batching",
+        "checkpoint_policy",
+        "schedule",
+        "data",
+        "trainer_interface",
+        "export_format",
+        "bnb_4bit_use_double_quant",
+        "output_dir"
+      ],
+      "title": "ResolvedExecutionConfiguration",
       "type": "object"
     },
     "RouteMissAction": {
@@ -1199,6 +1816,172 @@
       ],
       "title": "TaskType",
       "type": "string"
+    },
+    "TrainerInterfacePolicy": {
+      "additionalProperties": false,
+      "description": "Version- and field-exact adapter to the installed TRL/Transformers surface.",
+      "properties": {
+        "disable_tqdm": {
+          "default": true,
+          "title": "Disable Tqdm",
+          "type": "boolean"
+        },
+        "logging_steps": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Logging Steps",
+          "type": "integer"
+        },
+        "package_versions": {
+          "items": {
+            "$ref": "#/$defs/PackageLock"
+          },
+          "minItems": 1,
+          "title": "Package Versions",
+          "type": "array"
+        },
+        "report_to": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Report To",
+          "type": "array"
+        },
+        "required_sft_config_fields": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Required Sft Config Fields",
+          "type": "array"
+        },
+        "sequence_length_field": {
+          "enum": [
+            "max_seq_length",
+            "max_length"
+          ],
+          "title": "Sequence Length Field",
+          "type": "string"
+        },
+        "tokenizer_parameter": {
+          "enum": [
+            "tokenizer",
+            "processing_class"
+          ],
+          "title": "Tokenizer Parameter",
+          "type": "string"
+        }
+      },
+      "required": [
+        "package_versions",
+        "required_sft_config_fields",
+        "sequence_length_field",
+        "tokenizer_parameter"
+      ],
+      "title": "TrainerInterfacePolicy",
+      "type": "object"
+    },
+    "TrainingDataPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "chat_template_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chat Template Sha256"
+        },
+        "dataset_format": {
+          "enum": [
+            "instruction",
+            "chat",
+            "trace"
+          ],
+          "title": "Dataset Format",
+          "type": "string"
+        },
+        "dataset_text_field": {
+          "default": "text",
+          "title": "Dataset Text Field",
+          "type": "string"
+        },
+        "formatter_id": {
+          "minLength": 1,
+          "title": "Formatter Id",
+          "type": "string"
+        },
+        "formatter_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Formatter Sha256",
+          "type": "string"
+        },
+        "packing": {
+          "default": false,
+          "title": "Packing",
+          "type": "boolean"
+        },
+        "truncation_analysis": {
+          "const": "full_pinned_dataset",
+          "default": "full_pinned_dataset",
+          "title": "Truncation Analysis",
+          "type": "string"
+        },
+        "truncation_policy": {
+          "default": "refuse",
+          "enum": [
+            "refuse",
+            "allow"
+          ],
+          "title": "Truncation Policy",
+          "type": "string"
+        }
+      },
+      "required": [
+        "dataset_format",
+        "formatter_id",
+        "formatter_sha256"
+      ],
+      "title": "TrainingDataPolicy",
+      "type": "object"
+    },
+    "TrainingSchedule": {
+      "additionalProperties": false,
+      "properties": {
+        "max_steps": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Steps"
+        },
+        "num_train_epochs": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Num Train Epochs"
+        }
+      },
+      "title": "TrainingSchedule",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -1314,6 +2097,17 @@
     },
     "quantization": {
       "$ref": "#/$defs/QuantizationMode"
+    },
+    "resolved_execution": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ResolvedExecutionConfiguration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "seed": {
       "default": 42,

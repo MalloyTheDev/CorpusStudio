@@ -166,7 +166,7 @@ plane does not need the training stack installed merely to plan for its isolated
 
 ```powershell
 corpus-studio platform-plan ... --environment backend-corpus-studio
-corpus-studio platform-run RunPlan.json --runner training --subprocess
+corpus-studio platform-run RunPlan.json --subprocess
 ```
 
 Before dispatch or resume, `platform-run` performs live health/drift checks and verifies the plan's

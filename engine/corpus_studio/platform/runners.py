@@ -21,6 +21,7 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
@@ -33,7 +34,6 @@ from corpus_studio.platform.supervisor import (
     RunCancelled,
     RunContext,
     RunnerFailure,
-    demo_run_plan,
 )
 from corpus_studio.platform.watchdog import MemorySampler, RunWatchdog, sample_gpu_memory
 
@@ -100,9 +100,9 @@ def classify_training_error(exc: BaseException) -> tuple[FailureTaxonomy, str | 
 class TrainingRunner:
     """Executes a real training run through ``training.trainer.run_training`` under the supervisor.
 
-    ``cpu_toy=True`` forces the tiny CPU smoke path; ``max_steps`` caps optimizer steps. A missing
-    training runtime surfaces as an ``ENVIRONMENT_FAILURE`` FailureRecord; a plan with no / an invalid
-    ``training_config_snapshot`` surfaces as ``UNSUPPORTED_CONFIGURATION``."""
+    ``cpu_toy`` selects the matching worker lane but never mutates the plan. ``max_steps`` is retained
+    as a compatibility assertion only: it must equal the sealed schedule. A missing training runtime
+    surfaces as an ``ENVIRONMENT_FAILURE``; absent/stale resolved execution is unsupported."""
 
     def __init__(
         self,
@@ -157,9 +157,12 @@ class TrainingRunner:
         trainer_fn, backend_label = self._resolve_trainer(ctx.plan)
         # The manifest target reflects the backend that actually ran ("cpu_toy" for the smoke path).
         self.name = backend_label
-        from corpus_studio.training.trainer import TrainerError  # noqa: PLC0415
+        from corpus_studio.training.trainer import (  # noqa: PLC0415
+            ExecutionPlacementDeviation,
+            TrainerError,
+        )
 
-        config = self._resolve_config(ctx.plan)
+        config = self._resolve_config(ctx.plan, ctx.run_id)
         ctx.emit_stage(
             StageMarker.process_start, f"training run [{backend_label}]: {config.base_model}"
         )
@@ -212,6 +215,13 @@ class TrainingRunner:
             succeeded = True
         except _CancelTraining:
             raise RunCancelled from None
+        except ExecutionPlacementDeviation as exc:
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.placement_deviation,
+                remediation="regenerate the RunPlan or use a backend that enforces its device map",
+            ) from exc
         except TrainerError as exc:
             # A clean "can't run this request" (runtime/deps/GPU missing, bad config) — not a crash.
             raise RunnerFailure(
@@ -248,9 +258,32 @@ class TrainingRunner:
 
         for checkpoint in result.checkpoints:
             ctx.emit_log(f"checkpoint: {checkpoint}")
+        expected_output = Path(config.output_dir).resolve(strict=False)
+        observed_output = Path(result.output_dir).resolve(strict=False)
+        observed_adapter = Path(result.adapter_path).resolve(strict=False)
+        if observed_output != expected_output or observed_adapter != expected_output:
+            raise RunnerFailure(
+                "trainer output deviated from the sealed run-scoped adapter directory",
+                taxonomy=FailureTaxonomy.CHECKPOINT_FAILURE,
+                stage=StageMarker.export,
+                remediation="use the exact backend adapter for this execution contract",
+            )
+
+        from corpus_studio.training.artifact_registry import (  # noqa: PLC0415
+            compute_weight_content_hash,
+        )
+
+        content_hash = compute_weight_content_hash(result.adapter_path)
+        if content_hash is None:
+            raise RunnerFailure(
+                "training returned without readable adapter weight bytes",
+                taxonomy=FailureTaxonomy.CHECKPOINT_FAILURE,
+                stage=StageMarker.export,
+                remediation="inspect the trainer output and rerun from a new derived plan",
+            )
         ctx.emit_stage(StageMarker.export, f"adapter saved: {result.adapter_path}")
         artifact = ProducedArtifact(
-            artifact_id=f"{ctx.run_id}-adapter",
+            artifact_id=f"{ctx.run_id}-adapter-{content_hash[:12]}",
             kind="adapter",
             path=result.adapter_path,
         )
@@ -258,24 +291,49 @@ class TrainingRunner:
         return [artifact]
 
     def _resolve_trainer(self, plan: RunPlan) -> tuple[TrainerFn, str]:
-        """The ``(trainer fn, manifest label)`` for this plan. ``cpu_toy`` always uses the first-party
-        CPU smoke path; otherwise dispatch by the plan's ``backend_ref`` so the plan the planner sealed
-        (which the backend registry already validated) executes on the framework the user picked. An
-        unregistered backend is a clean ``UNSUPPORTED_CONFIGURATION``, not a crash."""
+        """Resolve only a current backend manifest with an exact execution adapter."""
+        from corpus_studio.platform.backends import (  # noqa: PLC0415
+            backend_manifest_ref,
+            get_backend,
+        )
+
+        backend_id = plan.backend_ref.id
+        backend = get_backend(backend_id)
+        if backend is None:
+            raise RunnerFailure(
+                f"no training runner is registered for backend '{backend_id}'",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+            )
+        if plan.backend_ref != backend_manifest_ref(backend):
+            raise RunnerFailure(
+                "the current backend manifest differs from the one sealed into the RunPlan",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+                remediation="regenerate the RunPlan against the current backend implementation",
+            )
+        execution = plan.resolved_execution
+        if (
+            execution is None
+            or execution.contract_version not in backend.execution_contract_versions
+        ):
+            raise RunnerFailure(
+                f"backend '{backend_id}' does not implement the sealed execution contract",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+            )
+        if backend_id != "corpus_studio":
+            raise RunnerFailure(
+                f"backend '{backend_id}' has no exact resolved-execution adapter",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+            )
         try:
             from corpus_studio.training.trainer import run_training  # noqa: PLC0415
 
             if self.cpu_toy:
                 return run_training, "cpu_toy"
-            backend_id = plan.backend_ref.id
-            if backend_id == "corpus_studio":
-                return run_training, "corpus_studio"
-            if backend_id == "unsloth":
-                from corpus_studio.training.unsloth_trainer import (  # noqa: PLC0415
-                    run_unsloth_training,
-                )
-
-                return run_unsloth_training, "unsloth"
+            return run_training, "corpus_studio"
         except ImportError as exc:  # pragma: no cover - defensive; the trainer modules import cleanly
             raise RunnerFailure(
                 f"the training runtime module could not be imported: {exc}",
@@ -283,63 +341,172 @@ class TrainingRunner:
                 stage=StageMarker.env_loaded,
                 remediation="install the training extra: pip install '.[train]'",
             ) from exc
-        raise RunnerFailure(
-            f"no training runner is registered for backend '{plan.backend_ref.id}'",
-            taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
-            stage=StageMarker.env_loaded,
-            remediation="choose a registered backend (corpus_studio, unsloth) — see 'platform-backends'",
+    def _resolve_config(self, plan: RunPlan, run_id: str) -> TrainRunConfig:
+        """Consume the sealed policy and derive only its declared run-scoped output path."""
+        from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+            ExecutionConfigurationError,
+            run_scoped_training_output,
+            verify_execution_configuration_hash,
+            verify_execution_inputs,
+            verify_execution_objective,
         )
+        from corpus_studio.training.trainer import train_config_from_resolved  # noqa: PLC0415
 
-    def _resolve_config(self, plan: RunPlan) -> TrainRunConfig:
-        """Build the trainer config from the plan's rendered snapshot, applying the runner's
-        cpu_toy / max_steps overrides. An empty or invalid snapshot is a clean, classified failure."""
-        from corpus_studio.training.trainer import TrainRunConfig  # noqa: PLC0415
-
-        snapshot = dict(plan.training_config_snapshot)
-        if not snapshot:
+        execution = plan.resolved_execution
+        if execution is None:
             raise RunnerFailure(
-                "the RunPlan carries no training_config_snapshot to execute",
+                "the RunPlan carries no ResolvedExecutionConfiguration to execute",
                 taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                 stage=StageMarker.env_loaded,
             )
-        if self.cpu_toy:
-            snapshot["cpu_toy"] = True
-        if self.max_steps is not None:
-            snapshot["max_steps"] = self.max_steps
-        try:
-            return TrainRunConfig.model_validate(snapshot)
-        except ValidationError as exc:
+        if not verify_execution_configuration_hash(execution):
             raise RunnerFailure(
-                f"the training_config_snapshot is not a valid trainer config: {exc}",
+                "the resolved execution configuration hash does not match its body",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+            )
+        sealed_cpu_toy = execution.runtime_mode == "cpu_toy"
+        if self.cpu_toy != sealed_cpu_toy:
+            raise RunnerFailure(
+                "the selected runner lane does not match the sealed runtime_mode",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+            )
+        if self.max_steps is not None and self.max_steps != execution.schedule.max_steps:
+            raise RunnerFailure(
+                "max_steps is execution-affecting and cannot override the sealed schedule",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+                remediation="create a derived RunPlan with a new execution hash",
+            )
+        try:
+            verify_execution_inputs(execution)
+            verify_execution_objective(execution, task_type=plan.task_type.value)
+            config = train_config_from_resolved(execution)
+            return config.model_copy(
+                update={"output_dir": str(run_scoped_training_output(execution, run_id))}
+            )
+        except (ExecutionConfigurationError, ValidationError) as exc:
+            raise RunnerFailure(
+                f"the resolved execution configuration is not executable: {exc}",
                 taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                 stage=StageMarker.env_loaded,
             ) from exc
 
 
 def demo_training_plan(plan_id: str = "demo-cpu-toy") -> RunPlan:
-    """A minimal, valid :class:`RunPlan` carrying a tiny cpu-toy trainer config in
-    ``training_config_snapshot`` — so ``platform-run --demo --runner cpu_toy`` and the tests exercise
-    the :class:`TrainingRunner`. Actually training it needs the ``[train]`` extra (a tiny random-weight
-    model, a few CPU steps); without it the run cleanly classifies ``ENVIRONMENT_FAILURE``. Rebuilt
-    via ``model_validate`` (not ``model_copy``) so the string fields coerce back to their enums."""
-    body = demo_run_plan(plan_id).model_dump(mode="json")
-    body["task_type"] = "sft"
-    body["base_model"] = "hf-internal-testing/tiny-random-gpt2"
-    from corpus_studio.platform.backends import backend_manifest_ref, get_backend  # noqa: PLC0415
+    """A fully sealed CPU-toy plan. Missing train packages fail at execution, not plan parsing."""
+
+    import importlib.metadata  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    from corpus_studio.platform.backends import get_backend  # noqa: PLC0415
+    from corpus_studio.platform.common import HashRef, PackageLock, Ref  # noqa: PLC0415
+    from corpus_studio.platform.contracts import (  # noqa: PLC0415
+        CapabilityReport,
+        EffectiveCapabilities,
+        EnvironmentProfile,
+        ExecutionCapabilityCombination,
+        ProbeResult,
+    )
+    from corpus_studio.platform.execution_config import stable_file_sha256  # noqa: PLC0415
+    from corpus_studio.platform.planner import PlannerConstraints, build_run_plan  # noqa: PLC0415
 
     backend = get_backend("corpus_studio")
-    assert backend is not None  # built-in training backend
-    body["backend_ref"] = backend_manifest_ref(backend).model_dump(mode="json")
-    body["training_config_snapshot"] = {
-        "base_model": "hf-internal-testing/tiny-random-gpt2",
-        "dataset_path": "examples/datasets/instruction/train.jsonl",
-        "dataset_format": "instruction",
-        "sequence_len": 64,
-        "lora_r": 4,
-        "lora_alpha": 8,
-        "max_steps": 2,
-    }
-    draft = RunPlan.model_validate(body)
-    from corpus_studio.platform.planner import compute_plan_hash, run_plan_hash_payload  # noqa: PLC0415
-
-    return draft.model_copy(update={"plan_hash": compute_plan_hash(run_plan_hash_payload(draft))})
+    assert backend is not None
+    dataset = Path(__file__).resolve().parents[3] / "examples/datasets/instruction/train.jsonl"
+    dataset_digest = stable_file_sha256(dataset)
+    package_names = ["accelerate", "datasets", "peft", "torch", "transformers", "trl"]
+    packages: list[PackageLock] = []
+    for name in package_names:
+        try:
+            version = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            version = "not-installed"
+        packages.append(PackageLock(name=name, version=version))
+    signature = "d" * 64
+    profile = EnvironmentProfile.model_validate(
+        {
+            "environment_signature": signature,
+            "host": {"os": "windows" if sys.platform == "win32" else "linux"},
+        }
+    )
+    combination = ExecutionCapabilityCombination.model_validate(
+        {
+            "runtime_mode": "cpu_toy",
+            "device": "cpu",
+            "precision": "fp32",
+            "quantization": "none",
+            "adapter_method": "lora",
+            "attention_impl": "eager",
+            "attention_kernel": "eager",
+            "optimizer": "adamw_torch",
+            "loss_impl": "cross_entropy",
+            "checkpoint_impl": "adapter_only",
+            "export_format": "adapter_peft",
+            "execution_contract_version": "1.0.0",
+            "probe": "cpu_lora_execution",
+        }
+    )
+    trainer_proof = ProbeResult(
+        probe="trainer_contract",
+        outcome=FailureTaxonomy.PASS,
+        proves={
+            "trainer_field": backend.trainer_fields,
+            "trainer_init_field": backend.trainer_init_fields,
+        },
+    )
+    execution_proof = ProbeResult(
+        probe="cpu_lora_execution",
+        outcome=FailureTaxonomy.PASS,
+        proves={
+            "adapter": ["lora"],
+            "attention": ["eager"],
+            "attention_kernel": ["eager"],
+            "checkpoint": ["adapter_only"],
+            "loss": ["cross_entropy"],
+            "optimizer": ["adamw_torch"],
+            "precision": ["fp32"],
+        },
+        execution_combinations=[combination],
+    )
+    report = CapabilityReport(
+        backend_id="corpus_studio",
+        backend_version=backend.backend_version,
+        environment_ref=Ref(id=signature),
+        readiness="cpu_toy_only",
+        installed_packages=packages,
+        probe_results=[execution_proof, trainer_proof],
+        effective_capabilities=EffectiveCapabilities.model_validate(
+            {
+                "adapter_methods": ["lora"],
+                "precision_modes": ["fp32"],
+                "attention_impls": ["eager"],
+                "attention_kernels": ["eager"],
+                "checkpoint_impls": ["adapter_only"],
+                "execution_contract_versions": ["1.0.0"],
+                "execution_combinations": [combination.model_dump(mode="json")],
+                "loss_impls": ["cross_entropy"],
+                "optimizers": ["adamw_torch"],
+                "trainer_fields": backend.trainer_fields,
+                "trainer_init_fields": backend.trainer_init_fields,
+            }
+        ),
+    )
+    return build_run_plan(
+        profile=profile,
+        capabilities=report,
+        dataset_ref=Ref(id="demo-dataset", hash=HashRef(value=dataset_digest)),
+        constraints=PlannerConstraints(
+            base_model="hf-internal-testing/tiny-random-LlamaForCausalLM",
+            model_revision="9fb191250dd56d0ba7ec9785a025ed29c03d5998",
+            dataset_path=str(dataset),
+            dataset_content_sha256=dataset_digest,
+            sequence_len=64,
+            lora_r=4,
+            lora_alpha=8,
+            max_steps=2,
+            allow_cpu_toy=True,
+        ),
+        plan_id=plan_id,
+    )

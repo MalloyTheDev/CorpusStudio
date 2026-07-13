@@ -8,15 +8,17 @@ the source of truth. Nothing here is claimed as implemented unless it links to a
 
 ## 1. Grounded architecture audit (2026-07-13)
 
-The **run lifecycle is largely built and hardware-verified.** The `engine/corpus_studio/platform/`
-package is a real, torch-free contract substrate + lifecycle, not a plan on paper:
+The **run lifecycle is largely built.** The `engine/corpus_studio/platform/` package is a real,
+torch-free contract substrate + lifecycle, not a plan on paper. Hardware evidence remains scoped to
+the exact historical path that produced it:
 
-- **27 root versioned contracts** (`platform/contracts.py`) → deterministic language-neutral JSON
+- **28 root versioned contracts** (`platform/contracts.py`) → deterministic language-neutral JSON
   Schema (`docs/contracts/`) → generated TypeScript client types.
 - **profile → plan (hash-sealed) → predict-fit → run → measure-fit → account-for-artifacts**, with a
-  multi-backend registry (`corpus_studio`, `unsloth`), a watchdog (measured fit + spill/stall), and a
-  supervised subprocess worker that can **kill a hung run**. Verified end-to-end on a real RTX 5070
-  under native Windows/WDDM only; native Linux and real offload remain unverified.
+  backend-manifest registry (`corpus_studio`, `unsloth`), a watchdog (measured fit + spill/stall), and
+  a supervised subprocess worker that can **kill a hung run**. The pre-Phase-9B lifecycle ran on a real
+  RTX 5070 under native Windows/WDDM; the new effective-execution path, native Linux, and real offload
+  remain unverified.
 
 Against the full-platform vision, the frontier is the **input side**. Ranked gaps:
 
@@ -146,7 +148,7 @@ contracts as they are built** (see §5 and [`MOE_ARCHITECTURE.md`](MOE_ARCHITECT
 | **7** | ✅ Generalized **`TraceRecord`** + Trace Studio engine/authoring foundation | versioned contract, generated clients, legacy adapter, fail-closed generation, explicit review, trainer gate, and desktop-selectable trace draft schema shipped; dedicated graphical surface remains future work ([`TRACE_RECORDS.md`](TRACE_RECORDS.md)) |
 | **8** | ✅ **Static MoE model inspection** (parse allowlisted existing-MoE configs; report structural expert-instance counts) | static metadata only; runtime capability remains unverified ([`MOE_MODEL_INSPECTION.md`](MOE_MODEL_INSPECTION.md)) |
 | **9A** | ✅ **Identity-bound worker protocol + fake-worker conformance** | protocol 2.0 handshake/state machine, backend and environment/lock binding, managed recipe-target checks, process-tree termination, execution-entry seal checks, legacy-plan migration boundary; no new runtime capability ([`BACKEND_WORKER_PROTOCOL.md`](BACKEND_WORKER_PROTOCOL.md)) |
-| **9B** | **Effective execution truth** for the first-party dense trainer | one hash-sealed resolved configuration consumed directly by the worker; immutable input refs; explicit precision/attention/device placement/trainer defaults; no post-seal semantic overrides or silent field filtering; worker echoes the effective hash before model load |
+| **9B** | ✅ **Effective execution truth** for the first-party dense trainer | separately hash-sealed resolved configuration; immutable inputs; explicit precision/attention/device placement/trainer defaults; exact capability/interface admission; no post-seal semantic overrides or silent field filtering; worker hash echo + runtime deviation refusal ([`EFFECTIVE_EXECUTION_CONFIGURATION.md`](EFFECTIVE_EXECUTION_CONFIGURATION.md)) |
 | 9C | Additional **dense** training backends (one isolated env at a time: TRL → DeepSpeed → FSDP → Unsloth → Axolotl) | begin only after 9B closes intent-to-runtime drift; each backend requires its own managed recipe, functional probes, and eligible-host measurements |
 | 10 | **Existing-model MoE fine-tuning** (router and/or selected experts, verified backend) | one backend + family first |
 | 11 | **Full MoE training + expert parallelism** (exposure clocks, starvation/collapse gates, all-to-all, distributed ckpt) | |
@@ -158,27 +160,35 @@ those need isolated, capability-probed environments to be added honestly; (b) `M
 **must be MoE-safe when written**, because retrofitting sparse semantics into dense-assuming contracts
 later would force a disruptive redesign of the model, optimizer, checkpoint, telemetry, and artifact
 systems all at once. Static topology inspection is now shipped; MoE execution (10–12) still comes
-later, and the inspection result is never promoted into runtime proof. Phase 9B is a gate before adding
-another backend: a more precise plan is not useful unless the current worker can prove that it applied
-the sealed attention, precision, placement, trainer, and immutable-input policy.
+later, and the inspection result is never promoted into runtime proof. Phase 9B closed the first-party
+intent-to-worker gap at the contract boundary. Another backend must independently declare, prove, and
+enforce the same semantic axes; inheriting the first-party proof is forbidden.
 
-### Phase 9B confirmed execution-truth debt
+### Phase 9B execution-truth closure
 
-A 2026-07-13 source audit was reconciled against the post-Phase-8 tree. The following are confirmed in
-the current first-party trainer and define the next slice, not verified runtime behavior:
+A 2026-07-13 source audit identified drift between the sealed plan and the first-party trainer. Phase
+9B closes that drift for newly generated first-party plans:
 
-- explicit attention requests can bypass proven-attention evidence, while `math`/`sdpa` are not carried
-  as enforceable kernel toggles;
-- QLoRA hardcodes BF16 dequantization compute and `device_map="auto"` independently of the sealed
-  precision and physical placement;
-- backend admission omits optimizer/loss capability checks and semantic SFT fields may be silently
-  filtered by installed-library version;
-- runner `cpu_toy`/`max_steps` overrides and trainer/LoRA/checkpoint defaults can change execution
-  outside the plan's resolved semantic identity;
-- dataset/model/tokenizer bytes are not all revalidated at dispatch, chat-template failure silently
-  changes formatting, and truncation inspection is a swallowed first-256 warning.
+- the plan carries one independently sealed `ResolvedExecutionConfiguration` with immutable input and
+  objective/environment/backend/capability refs;
+- attention is an exact model API + kernel + three-SDPA-toggle policy, and QLoRA precision is
+  represented per material state;
+- readiness requires one passing complete execution tuple (runtime/device + precision +
+  quantization + adapter + attention + optimizer + loss + checkpoint + export), so unrelated probe
+  successes cannot be unioned into a support claim;
+- the model device map is explicit (`auto` is invalid), every semantic trainer/LoRA/checkpoint/data
+  default is sealed, and exact optimizer/loss/trainer-interface capabilities are admitted fail-closed;
+- the runner cannot mutate semantics or switch to echo after sealing; the worker echoes the effective
+  hash before model loading and refuses package, input, attention, precision, or placement drift;
+- chat-template failure blocks and truncation analysis covers the complete pinned dataset unless an
+  explicit allow policy was sealed;
+- backend identity fixes the runner lane, every execution receives a fresh UUIDv7 run ID, output is
+  isolated beneath a run-scoped directory, and success requires optimizer-step plus real adapter
+  weight evidence. The shipping desktop no longer exposes the unsealed direct-trainer path.
 
-Phase 9B must resolve these at the contract-to-worker boundary before DeepSpeed, FSDP, or MoE execution.
+This is control-plane and fake/unit-test evidence, not new GPU-backend proof. The historical RTX 5070
+run predates this contract and must be repeated on the final machine before the new enforcement path is
+called hardware-verified. DeepSpeed, FSDP, CPU/NVMe offload, and MoE execution remain unimplemented.
 
 ## 4. Invariants preserved throughout
 
