@@ -38,7 +38,7 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
 
 ## 2. Current git / PR state
 
-`main` is the source of truth; everything through **#415 is merged**:
+`main` is the source of truth; everything through **#416 is merged**:
 - **#404** configurable checkpoint retention · **#405** StorageProfile + the dependency-architecture
   correction · **#406** Environment Manager substrate (Phase 2 slice 1) · **#407** storage USB/WSL
   runtime-role risks + storage-vs-not failure diagnostic · **#408** HANDOFF/AGENTS · **#409**
@@ -54,14 +54,19 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   `platform/` contract change,
   regenerate the committed schemas (see §4), update the count in
   `tests/test_platform_contracts.py`, and regenerate the TypeScript types.
-- **#416 contains the Phase 7 generalized `TraceRecord` foundation**: one `TraceRecord` root,
+- **#416 merged the Phase 7 generalized `TraceRecord` foundation** as
+  `f3cb18eeb2a52acf7ba7a34ae5c342da65065e2a`: one `TraceRecord` root,
   hash/policy/source/review evidence, legacy migration, explicit reviewed successors, external
-  provider-authority and trainer gates, generated clients, and a desktop-selectable trace draft
-  schema. Verify its live merge/CI state rather than inferring it from this snapshot. Its local gate
-  was Ruff clean, MyPy clean (121 files), 1,412 Python tests passed / 6 skipped / 88.50% Windows
-  coverage, deterministic 27-root schema/TypeScript generation, web production build, 815 desktop
-  tests, and clean WPF/Avalonia Release builds (the existing Avalonia Watermark deprecation warnings
-  remain). See `docs/TRACE_RECORDS.md`.
+  provider-authority and trainer gates, generated clients, and a desktop-selectable trace draft schema.
+  See `docs/TRACE_RECORDS.md`.
+- **#417 is the Phase 8 static MoE model-inspection PR**: bounded, hash-pinned parsing for exact
+  Mixtral, Qwen2-MoE, DeepSeek V2, and DeepSeek V3 config mappings; component-scoped routed/shared
+  expert groups; derived expert-instance counts; pre-Phase-8 descriptor migration; generated clients;
+  and explicit static-only/non-runtime evidence. Verify its live CI/merge state rather than inferring it
+  from this snapshot. Its local gate was Ruff clean, MyPy clean (122 files), 1,434 Python tests passed /
+  6 skipped / 88.47% Windows coverage, deterministic 27-root schema/TypeScript generation, web
+  production build, 815 desktop tests, and zero-warning WPF/Avalonia Release builds. See
+  `docs/MOE_MODEL_INSPECTION.md`.
 
 ## 3. The architecture North Star + binding directives
 
@@ -95,8 +100,8 @@ The big epic (memory `platform-architecture-epic`). Non-negotiables the user has
   checkpoints **from day one** — retrofitting sparse later is a disruptive redesign.
 - **Revised foundational order** (do these in order): 1 StorageProfile ✅ → 2 Env Manager reference
   lifecycle ✅ → 3 `ModelDescriptor` + `TokenizerDescriptor` foundation ✅ → 4 `TrainingObjective`
-  registry ✅ → 5 parameter accounting ✅ → 6 `RunPlan` expansion ✅ → 7 `TraceRecord` ✅ → 8 MoE
-  inspection → 9 dense backends → 10 existing-model MoE FT → 11 full MoE → 12 resource-elastic
+  registry ✅ → 5 parameter accounting ✅ → 6 `RunPlan` expansion ✅ → 7 `TraceRecord` ✅ → 8 static
+  MoE inspection ✅ (PR #417) → 9 dense backends → 10 existing-model MoE FT → 11 full MoE → 12 resource-elastic
   expert runtime.
 
 ## 4. How to build + verify (the gate)
@@ -155,15 +160,14 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 7. Immediate next actions (ranked)
 
-1. **Verify the live state of #416.** If it has not landed, finish its CI/review/merge; once it lands,
-   continue with Phase 8. Do not call the built-in draft schema a dedicated graphical Trace Studio.
-2. **Phase 8 — MoE model inspection.** Detect and report existing MoE topology/count evidence without
-   claiming execution support; keep semantic routing separate from physical placement.
-3. **Continue hardware-independent foundations while the PCIe/NVMe adapter is pending:** MoE-safe
-   inspection, backend contracts/fake-worker tests, Environment Manager lock/drift tests, and
-   desktop/web contract integration. Keep non-trivial placement/offload execution unimplemented until
-   an isolated backend proves it.
-4. **Phase 9+** down the revised order (§3): dense backends → existing-model MoE FT
+1. **Verify the live state of #417.** Finish its CI/review/merge before the next coherent slice; do not
+   call static topology evidence MoE execution or runtime capability.
+2. **Phase 9 — isolated backend contracts + fake-worker tests.** Make the next dense backend boundary
+   explicit without installing or exercising the NVIDIA/CUDA stack on the temporary machine.
+3. **Continue hardware-independent hardening while the PCIe/NVMe adapter is pending:** Environment
+   Manager lock/drift tests and desktop/web contract integration. Keep non-trivial placement/offload
+   execution unimplemented until an isolated backend proves it.
+4. **Then continue down the revised order (§3):** dense backends → existing-model MoE FT
    → full MoE → resource-elastic expert runtime.
 5. **Only after the Linux NVMe is installed in the RTX 5070 desktop:** install the NVIDIA/CUDA stack,
    build/probe `backend-corpus-studio`, run a tiny GPU smoke, benchmark the NVMe non-destructively,
@@ -217,6 +221,11 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   pending → reviewed workflow. Stored provider-policy snapshots are evidence only: review/training
   re-resolve the external project override and block unknown/frontier/drifted authority. See
   `docs/TRACE_RECORDS.md`.
+- **Static MoE inspection** (Phase 8): `platform/moe_inspector.py` + the `ModelTopology` evidence
+  surface in `contracts.py`. `model-inspect` recognizes only exact allowlisted family mappings, pins
+  the verified config digest/paths, reports expert-instance structure, and leaves all runtime,
+  backend, placement, residency, fit, and hardware claims unverified. See
+  `docs/MOE_MODEL_INSPECTION.md`.
 - **Storage**: `platform/storage_profiler.py` (topology + per-role safe-spill guardrail + failure
   diagnostic).
 - **Trainer**: `training/trainer.py` (+ `unsloth_trainer.py`). CLI: `engine/corpus_studio/cli.py`
