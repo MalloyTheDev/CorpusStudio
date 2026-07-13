@@ -15,6 +15,7 @@ from corpus_studio.training.environment import TrainingRuntimeReport
 from corpus_studio.training.trainer import (
     TINY_TOY_MODEL,
     TrainerError,
+    TrainRunConfig,
     build_lora_kwargs,
     build_training_kwargs,
     format_example_text,
@@ -113,6 +114,46 @@ def test_load_config_reads_attn_implementation(tmp_path):
     override = load_run_config_from_file(_config(tmp_path), attn_implementation="sdpa")
     assert override.attn_implementation == "sdpa"
     assert load_run_config_from_file(_config(tmp_path)).attn_implementation is None
+
+
+# ---- memory / spill-avoidance levers -----------------------------------------
+
+
+def test_build_kwargs_sets_optim_and_liger():
+    cfg = TrainRunConfig(base_model="m", dataset_path="d", optim="paged_adamw_8bit", use_liger=True)
+    kwargs = build_training_kwargs(cfg)
+    assert kwargs["optim"] == "paged_adamw_8bit"
+    assert kwargs["use_liger_kernel"] is True
+
+
+def test_build_kwargs_default_optim_and_no_liger():
+    kwargs = build_training_kwargs(TrainRunConfig(base_model="m", dataset_path="d"))
+    assert kwargs["optim"] == "adamw_torch"
+    assert "use_liger_kernel" not in kwargs  # off by default — never requested unless opted in
+
+
+def test_cpu_toy_forces_plain_optimizer_and_no_liger():
+    # The paged optimizer (bitsandbytes) and Liger (Triton) are CUDA-only; the CPU toy must never
+    # request them or it would crash on a GPU-less machine, defeating the smoke test.
+    cfg = TrainRunConfig(
+        base_model="m", dataset_path="d", cpu_toy=True, optim="paged_adamw_8bit", use_liger=True
+    )
+    kwargs = build_training_kwargs(cfg)
+    assert kwargs["optim"] == "adamw_torch"
+    assert "use_liger_kernel" not in kwargs
+    assert kwargs["use_cpu"] is True
+
+
+def test_load_config_reads_optim_and_liger(tmp_path):
+    cfg = load_run_config_from_file(_config(tmp_path, optim="paged_adamw_8bit", use_liger=True))
+    assert cfg.optim == "paged_adamw_8bit"
+    assert cfg.use_liger is True
+    # An explicit override wins over the config file.
+    override = load_run_config_from_file(_config(tmp_path), optim="adamw_8bit", use_liger=True)
+    assert override.optim == "adamw_8bit" and override.use_liger is True
+    # Defaults when absent — the levers are opt-in.
+    base = load_run_config_from_file(_config(tmp_path))
+    assert base.optim == "adamw_torch" and base.use_liger is False
 
 
 def test_resolve_attention_native_windows_blackwell_disables_flash_sdpa():

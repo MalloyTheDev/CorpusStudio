@@ -65,6 +65,18 @@ class TrainRunConfig(BaseModel):
     # None = auto: honor transformers' default, but on Blackwell (sm_120) the fused flash/mem-efficient
     # SDPA kernels deadlock on the first backward, so the trainer forces the math SDPA path there.
     attn_implementation: str | None = None
+    # --- memory / spill-avoidance levers (opt-in) ---
+    # The optimizer TRL/transformers uses. "paged_adamw_8bit" (bitsandbytes) pages optimizer state to
+    # host RAM under pressure via CUDA managed memory — a spike-safe SAFE-SPILL for the optimizer
+    # (verified on a real 5070 under WSL2). For QLoRA the optimizer is small (LoRA params only), so this
+    # is more crash-safety than a big saving; the base 4-bit model dominates VRAM.
+    optim: str = "adamw_torch"
+    # Fuse the cross-entropy loss (Liger) so the full-vocab logits are never materialized — removes the
+    # ~2.5 GB fp32 logits spike at long sequence_len + large vocab (the real long-seq memory lever).
+    # Requires the `liger-kernel` package; ignored gracefully by the SFTConfig-field filter if the
+    # installed TRL/transformers predates `use_liger_kernel`. NOTE: Liger uses Triton kernels — its
+    # support on Blackwell/sm_120 is not yet verified here.
+    use_liger: bool = False
 
 
 class TrainResult(BaseModel):
@@ -110,6 +122,8 @@ def load_run_config_from_file(
     cpu_toy: bool = False,
     max_steps: int | None = None,
     attn_implementation: str | None = None,
+    optim: str | None = None,
+    use_liger: bool | None = None,
 ) -> TrainRunConfig:
     """Build a :class:`TrainRunConfig` from a CorpusStudio training config (the ``training-config``
     output: base_model / dataset_path / format / sequence_len / lora_* / seed …), applying overrides.
@@ -149,6 +163,8 @@ def load_run_config_from_file(
         cpu_toy=cpu_toy,
         max_steps=steps,
         attn_implementation=attn_implementation or data.get("attn_implementation"),
+        optim=optim or str(data.get("optim", "adamw_torch")),
+        use_liger=use_liger if use_liger is not None else bool(data.get("use_liger", False)),
     )
 
 
@@ -215,10 +231,19 @@ def build_training_kwargs(config: TrainRunConfig) -> dict[str, Any]:
     else:
         kwargs["num_train_epochs"] = 1
     if config.cpu_toy:
-        # Force CPU + no half precision so the toy runs on a machine with no GPU.
+        # Force CPU + no half precision so the toy runs on a machine with no GPU. The paged optimizer
+        # (bitsandbytes) and Liger (Triton) are CUDA-only, so the toy path never uses them — it would
+        # crash on a GPU-less machine, defeating the point of the smoke test.
         kwargs["use_cpu"] = True
         kwargs["bf16"] = False
         kwargs["fp16"] = False
+        kwargs["optim"] = "adamw_torch"
+    else:
+        kwargs["optim"] = config.optim
+        if config.use_liger:
+            # Filtered out by valid_fields below if the installed TRL/transformers predates it — so a
+            # request for Liger on an older stack degrades to the normal (unfused) loss, never a crash.
+            kwargs["use_liger_kernel"] = True
     return kwargs
 
 
