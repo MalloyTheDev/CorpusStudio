@@ -6,6 +6,7 @@ from corpus_studio.training.traces import (
     _split_think,
     format_trace,
     trace_from_row,
+    trace_quality,
     validate_trace,
 )
 from corpus_studio.training.trainer import format_example_text
@@ -72,3 +73,40 @@ def test_validate_trace_thinking_equals_answer_is_not_reasoning():
 def test_format_example_text_dispatches_the_trace_format():
     out = format_example_text({"instruction": "Q", "reasoning": "r", "output": "A"}, "trace")
     assert "<think>" in out and "r" in out and "A" in out
+
+
+# ---- reasoning quality gate --------------------------------------------------
+
+
+def test_trace_quality_passes_a_real_derivation():
+    trace = Trace(prompt="What is 17*23?", thinking="17*23 = 17*20 + 17*3 = 340 + 51 = 391", answer="391")
+    gate = trace_quality(trace)
+    assert gate.status == "pass" and not gate.issues
+
+
+def test_trace_quality_fails_answer_leaked_in_prompt():
+    answer = "The Ostervaal Registry decides what counts as a legitimate self."
+    trace = Trace(
+        prompt=f"Explain this: {answer}",
+        thinking="the registry gatekeeps personhood through accreditation, review, and registered materials",
+        answer=answer,
+    )
+    gate = trace_quality(trace)
+    assert gate.status == "fail" and any("leakage" in i for i in gate.issues)
+
+
+def test_trace_quality_fails_stray_think_tags_in_answer():
+    trace = Trace(prompt="Q", thinking="reason about it carefully, step by step", answer="ans <think>oops</think>")
+    gate = trace_quality(trace)
+    assert gate.status == "fail" and any("stray" in i for i in gate.issues)
+
+
+def test_trace_quality_warns_on_token_thin_reasoning():
+    trace = Trace(prompt="Q", thinking="yes", answer="A long, detailed answer far longer than the reasoning.")
+    gate = trace_quality(trace)
+    assert gate.status == "warn" and any("short" in i for i in gate.issues)
+
+
+def test_trace_quality_no_think_baseline_is_not_a_failure():
+    # A no-think example (answer only) is legitimate — the quality gate must not fail it.
+    assert trace_quality(Trace(prompt="Q", answer="A")).status == "pass"

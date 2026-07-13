@@ -141,3 +141,69 @@ def validate_trace(trace: Trace) -> TraceValidation:
         thinking_chars=len(trace.thinking),
         answer_chars=len(trace.answer),
     )
+
+
+# --- reasoning-quality gate (beyond structure) ---------------------------------------------------
+
+_STATUS_RANK = {"pass": 0, "warn": 1, "fail": 2}
+
+
+def _worse(a: str, b: str) -> str:
+    return a if _STATUS_RANK[a] >= _STATUS_RANK[b] else b
+
+
+class TraceQualityReport(BaseModel):
+    """A trace's REASONING-quality verdict — the checks that a structurally-valid trace can still
+    fail: a leaked answer, malformed tags, or a token-thin "reasoning" that teaches nothing.
+    ``status`` is pass / warn / fail; a reasoning corpus should gate on ``fail``."""
+
+    status: str
+    issues: list[str]
+    thinking_chars: int
+    answer_chars: int
+    thinking_to_answer_ratio: float
+
+
+def trace_quality(
+    trace: Trace, *, min_thinking_chars: int = 24, min_ratio: float = 0.15, leak_min_chars: int = 40
+) -> TraceQualityReport:
+    """PURE + unit-tested. Reasoning-quality checks that structural validation (``validate_trace``)
+    doesn't cover:
+
+    * **answer leaked in the prompt** — a substantial answer appearing verbatim in the prompt means the
+      task already contains its answer (data leakage) → ``fail``;
+    * **stray ``<think>`` tags in the answer** — malformed/unsplit reasoning markers → ``fail``;
+    * **token-thin reasoning** — a thinking trace far shorter than the answer (or trivially short) is
+      not real reasoning → ``warn``.
+    """
+    issues: list[str] = []
+    status = "pass"
+
+    prompt_text = trace.prompt or " ".join(
+        str(m.get("content", "")) for m in (trace.messages or []) if isinstance(m, dict)
+    )
+    answer = trace.answer.strip()
+    thinking = trace.thinking.strip()
+
+    if answer and len(answer) >= leak_min_chars and answer in prompt_text:
+        issues.append("answer appears verbatim in the prompt (leakage)")
+        status = _worse(status, "fail")
+    if DEFAULT_THINK_OPEN in trace.answer or DEFAULT_THINK_CLOSE in trace.answer:
+        issues.append("stray <think> tags remain in the answer (malformed/unsplit)")
+        status = _worse(status, "fail")
+
+    ratio = (len(thinking) / len(answer)) if answer else 0.0
+    if thinking and len(thinking) < min_thinking_chars:
+        issues.append(f"reasoning is trivially short ({len(thinking)} chars) — not real reasoning")
+        status = _worse(status, "warn")
+    elif thinking and answer and ratio < min_ratio:
+        issues.append(f"reasoning is very short vs the answer (ratio {ratio:.2f})")
+        status = _worse(status, "warn")
+
+    return TraceQualityReport(
+        status=status,
+        issues=issues,
+        thinking_chars=len(thinking),
+        answer_chars=len(answer),
+        thinking_to_answer_ratio=round(ratio, 3),
+    )
