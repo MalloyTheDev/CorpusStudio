@@ -173,7 +173,12 @@ def format_example_text(row: dict, dataset_format: str, tokenizer: Any | None = 
 
     ``chat`` uses the model's chat template when a tokenizer is supplied (the correct format for a
     chat model), else a simple ``role: content`` join. ``instruction`` uses an Alpaca-style template.
-    Returns "" for an empty/unusable row (the caller drops it)."""
+    ``trace`` renders a reasoning trace (prompt + ``<think>reasoning</think>`` + answer — see
+    ``training.traces``). Returns "" for an empty/unusable row (the caller drops it)."""
+    if dataset_format == "trace":
+        from corpus_studio.training.traces import format_trace, trace_from_row  # noqa: PLC0415
+
+        return format_trace(trace_from_row(row), tokenizer=tokenizer)
     if dataset_format == "chat":
         messages = row.get("messages")
         if not isinstance(messages, list) or not messages:

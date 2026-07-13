@@ -2083,6 +2083,51 @@ def dataset_tokens(
         raise typer.Exit(code=3)
 
 
+@app.command("trace-validate")
+def trace_validate(
+    dataset_path: Path,
+    json_out: bool = typer.Option(False, "--json", help="Emit the validation summary as JSON."),
+    show: int = typer.Option(5, "--show", help="Show up to N invalid rows."),
+):
+    """Validate a reasoning-TRACE corpus: each row must parse to a Trace (prompt/context + thinking +
+    answer) and pass the structural checks (answer present, reasoning not a verbatim copy of the
+    answer). Reports how many rows carry a real thinking trace. Exit 3 if any row is invalid — a
+    guardrail to run before training a reasoning model."""
+    from corpus_studio.importers.jsonl_importer import read_jsonl
+    from corpus_studio.training.traces import trace_from_row, validate_trace
+
+    rows = list(read_jsonl(dataset_path))
+    total = len(rows)
+    with_thinking = 0
+    invalid: list[tuple[int, list[str]]] = []
+    for index, row in enumerate(rows):
+        verdict = validate_trace(trace_from_row(row))
+        with_thinking += int(verdict.has_thinking)
+        if not verdict.valid:
+            invalid.append((index, verdict.errors))
+    pct_think = round(100 * with_thinking / total) if total else 0
+    if json_out:
+        typer.echo(
+            json.dumps(
+                {
+                    "total": total,
+                    "with_thinking": with_thinking,
+                    "invalid": len(invalid),
+                    "errors": [{"row": i, "errors": e} for i, e in invalid[:50]],
+                },
+                indent=2,
+            )
+        )
+    else:
+        typer.echo(
+            f"{total} traces | {with_thinking} have a thinking trace ({pct_think}%) | {len(invalid)} invalid"
+        )
+        for index, errors in invalid[:show]:
+            typer.echo(f"  row {index}: {', '.join(errors)}")
+    if invalid:
+        raise typer.Exit(code=3)
+
+
 @app.command("train-run")
 def train_run(
     config_path: Path,
