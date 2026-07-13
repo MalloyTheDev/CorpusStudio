@@ -1,0 +1,4 @@
+# Shell scripts MUST stay LF — a CRLF `.sh` fails on Linux ("bad interpreter" / stray \r). This keeps
+# scripts/setup_linux_training.sh (and any future shell script) runnable on the native-Linux target
+# regardless of a contributor's core.autocrlf setting on Windows.
+*.sh text eol=lf
