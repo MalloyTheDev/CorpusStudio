@@ -247,6 +247,57 @@ def build_training_kwargs(config: TrainRunConfig) -> dict[str, Any]:
     return kwargs
 
 
+class TruncationReport(BaseModel):
+    """How badly a ``sequence_len`` truncates a dataset — the guardrail against silently training on
+    cut-off examples (a real WBG bug: seq_len 1536 truncated 100% of ~2.2k-token examples, cutting the
+    end of every assistant/output and teaching the model to emit incomplete JSON)."""
+
+    n_examples: int
+    n_truncated: int
+    pct_truncated: float
+    seq_len: int
+    max_tokens: int
+    median_tokens: int
+    # the smallest sequence_len that would truncate NOTHING (== the longest example)
+    seq_len_for_zero_truncation: int
+
+    @property
+    def truncates(self) -> bool:
+        return self.n_truncated > 0
+
+
+def analyze_truncation(token_lengths: list[int], seq_len: int) -> TruncationReport:
+    """PURE + unit-tested. Given tokenized example lengths + the training ``seq_len``, report how many
+    are truncated (their tails — including the model's output — cut off) and the seq_len that keeps
+    them whole."""
+    lengths = sorted(token_lengths)
+    n = len(lengths)
+    n_trunc = sum(1 for x in lengths if x > seq_len)
+    return TruncationReport(
+        n_examples=n,
+        n_truncated=n_trunc,
+        pct_truncated=(100.0 * n_trunc / n) if n else 0.0,
+        seq_len=seq_len,
+        max_tokens=lengths[-1] if lengths else 0,
+        median_tokens=lengths[n // 2] if lengths else 0,
+        seq_len_for_zero_truncation=lengths[-1] if lengths else seq_len,
+    )
+
+
+def truncation_warning(report: TruncationReport) -> str | None:
+    """The operator-facing warning for a truncating ``seq_len`` — or None when nothing is cut."""
+    if not report.truncates:
+        return None
+    return (
+        f"[WARNING] TRUNCATION: {report.n_truncated}/{report.n_examples} examples "
+        f"({report.pct_truncated:.0f}%) exceed sequence_len={report.seq_len} and will be CUT — the end "
+        f"of each (including the assistant/output) is lost, so the model learns incomplete outputs. "
+        f"Longest example is {report.max_tokens} tokens; raise sequence_len to "
+        f">= {report.seq_len_for_zero_truncation} to keep every example whole (costs more VRAM), or "
+        "shorten/split the data."
+    )
+
+
 def resolve_run_plan(config: TrainRunConfig, report: Any) -> dict[str, Any]:
     """Decide device + quantization from the runtime report, or raise a clean :class:`TrainerError`.
 
@@ -417,6 +468,19 @@ def run_training(
     dataset = Dataset.from_list([{"text": text} for text in texts if text])
     if len(dataset) == 0:
         raise TrainerError("The dataset produced no usable training rows.")
+
+    # TRUNCATION GUARDRAIL: tokenize a sample and WARN if sequence_len would cut examples. Silent
+    # truncation trains the model on incomplete outputs (the WBG bug: seq_len 1536 truncated 100% of
+    # ~2.2k-token examples → the model learned to emit unterminated JSON). A warning only — never fails
+    # the run — and it's a cheap sample so it doesn't slow a large dataset.
+    try:
+        sample = [t for t in texts if t][:256]
+        lengths = [len(tokenizer(t)["input_ids"]) for t in sample]
+        warning = truncation_warning(analyze_truncation(lengths, config.sequence_len))
+        if warning:
+            print(warning, file=sys.stderr)
+    except Exception:  # noqa: BLE001 - a guardrail must never break a run it was meant to protect.
+        pass
 
     # Adapt to the installed TRL's SFTConfig: `max_seq_length` was renamed to `max_length`, so map it
     # to whichever the class actually has and drop any field it doesn't accept (robust across versions).
