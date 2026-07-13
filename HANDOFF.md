@@ -37,7 +37,7 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
 
 ## 2. Current git / PR state
 
-`main` is the source of truth; at least everything through **#412 is merged**:
+`main` is the source of truth; everything through **#412 was merged when the Phase 4 branch began**:
 - **#404** configurable checkpoint retention · **#405** StorageProfile + the dependency-architecture
   correction · **#406** Environment Manager substrate (Phase 2 slice 1) · **#407** storage USB/WSL
   runtime-role risks + storage-vs-not failure diagnostic · **#408** HANDOFF/AGENTS · **#409**
@@ -45,7 +45,9 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   managed `backend-corpus-studio` environment creation/lock/probe/drift/recreate lifecycle; **#412**
   adds the Phase 3 model/tokenizer descriptor and static inspection foundation. GitHub was checked
   live before the Phase 4 branch began: no open PRs; only unrelated UI-theme issues #187 and #201
-  were open. After any `platform/` contract change,
+  were open. **#413 delivers the Phase 4 TrainingObjective registry and compatibility checker in this
+  changeset; verify its live state rather than inferring merge status from this snapshot.** After any
+  `platform/` contract change,
   regenerate the committed schemas (see §4), update the count in
   `tests/test_platform_contracts.py`, and regenerate the TypeScript types.
 
