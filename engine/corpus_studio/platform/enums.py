@@ -149,6 +149,50 @@ class OffloadStrategy(str, Enum):
     deepspeed_zero3 = "deepspeed_zero3"
 
 
+class StorageInterface(str, Enum):
+    """How a storage device attaches. The interface — not just free space — decides whether a device
+    can sustain the heavy sequential + random writes of optimizer/parameter offload and checkpointing.
+    A USB bridge or a network mount will thrash under sustained offload even with terabytes free."""
+
+    nvme_pcie = "nvme_pcie"  # internal PCIe NVMe — the only interface fit for sustained offload
+    sata_ssd = "sata_ssd"
+    hdd = "hdd"  # rotational — random I/O is far too slow for offload
+    usb = "usb"  # removable/USB bridge — unfit for sustained offload
+    network = "network"  # SMB/NFS/network mount — latency + reliability unfit for offload
+    virtual = "virtual"  # ramdisk / overlay / container layer
+    unknown = "unknown"
+
+
+class StorageRole(str, Enum):
+    """The role a path plays in a run. Roles differ in write intensity + durability needs: ``os`` and
+    ``source_repo`` want reliability; ``optimizer_offload`` / ``parameter_offload`` / ``scratch`` want
+    sustained high-throughput internal storage; ``archive`` just wants capacity. A path's suitability
+    is judged PER ROLE (a USB drive is fine for ``archive``, unfit for ``optimizer_offload``)."""
+
+    os = "os"
+    source_repo = "source_repo"
+    model_cache = "model_cache"
+    dataset_cache = "dataset_cache"
+    checkpoints = "checkpoints"
+    scratch = "scratch"
+    optimizer_offload = "optimizer_offload"
+    parameter_offload = "parameter_offload"
+    artifacts = "artifacts"
+    archive = "archive"
+    logs = "logs"
+
+
+class StorageSuitability(str, Enum):
+    """The per-role verdict for a candidate path. ``unsuitable`` is a hard no (data-loss or
+    thrash-to-a-halt risk); ``marginal`` will work but degrade (e.g. an HDD for offload); ``unknown``
+    when detection couldn't characterize the device (honest, never a false ``suitable``)."""
+
+    suitable = "suitable"
+    marginal = "marginal"
+    unsuitable = "unsuitable"
+    unknown = "unknown"
+
+
 class AllocatorPolicy(str, Enum):
     default = "default"
     expandable_segments = "expandable_segments"

@@ -252,6 +252,8 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/EVALUATION_LAB.md`
 - `docs/EVALUATION_SUITES.md`
 - `docs/GATES.md`
+- `docs/HARDWARE_STORAGE_PROFILE.md`
+- `docs/IMPLEMENTATION_PLAN.md`
 - `docs/IMPORT_EXPORT.md`
 - `docs/LOCAL_FIRST.md`
 - `docs/MODEL_BACKENDS.md`
@@ -365,6 +367,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `engine/corpus_studio/platform/profile_store.py`
 - `engine/corpus_studio/platform/backends.py`
 - `engine/corpus_studio/platform/planner.py`
+- `engine/corpus_studio/platform/storage_profiler.py`
 - `engine/corpus_studio/platform/calibrator.py`
 - `engine/corpus_studio/platform/supervisor.py`
 - `engine/corpus_studio/platform/runners.py`

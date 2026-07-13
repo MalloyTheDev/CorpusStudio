@@ -26,6 +26,7 @@ from .contracts import (
     RunEvent,
     RunManifest,
     RunPlan,
+    StorageProfile,
     WorkerMessage,
 )
 
@@ -34,6 +35,7 @@ ROOT_CONTRACTS: dict[str, type[ContractModel]] = {
     "ProjectManifest": ProjectManifest,
     "DatasetManifest": DatasetManifest,
     "EnvironmentProfile": EnvironmentProfile,
+    "StorageProfile": StorageProfile,
     "BackendManifest": BackendManifest,
     "CapabilityReport": CapabilityReport,
     "RunPlan": RunPlan,

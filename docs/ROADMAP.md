@@ -100,6 +100,22 @@ resulting features in full.
 
 ## Next
 
+**Platform frontier** (the full local-first AI lifecycle — see [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)).
+The run lifecycle (profile→plan→fit→run→artifact) is built and hardware-verified; the frontier is the
+input side. Ordered:
+
+- ✅ **StorageProfile** — dependency-light storage topology + per-role safe-spill suitability (offload
+  onto USB / cloud-sync / near-full / in-repo / rotational is refused). See
+  [`HARDWARE_STORAGE_PROFILE.md`](HARDWARE_STORAGE_PROFILE.md).
+- ⏭️ **Environment Manager + 3-layer dependency profiles** — the next foundational phase, and the gate
+  before DeepSpeed/FSDP/multimodal/new objectives. "Dependency-light" describes the **control plane**,
+  not the whole product: a lightweight, always-installable core (layer 1) + installable capability
+  profiles (layer 2) + **isolated per-backend worker environments** (layer 3), each capability-probed
+  so "installed" never means "supported". The current `[train]` extra becomes the reference
+  `backend-corpus-studio` env; other frameworks get isolated envs, never one `[everything]`.
+- Then: Model/Tokenizer Lab, `TrainingObjective` registry, offload planning (uses StorageProfile +
+  Env Manager), additional backend workers, full `TraceRecord`, dataset mixtures.
+
 - **Surface the LLM judge in the Evaluation tab** — the `--judge-model` scorer ships in
   the engine and in suites, but the desktop Evaluation tab still has no judge-model field.
 - **A real tokenizer** (transformers/tokenizers) so token-budget / VRAM numbers are
