@@ -111,6 +111,7 @@ export interface RunPlan {
   loss_impl: LossImpl;
   offload_strategy?: OffloadStrategy;
   optimizer: OptimizerSpec;
+  parameter_accounting_ref?: Ref | null;
   plan_hash: PlanHash;
   plan_id: PlanId;
   precision: PrecisionMode;

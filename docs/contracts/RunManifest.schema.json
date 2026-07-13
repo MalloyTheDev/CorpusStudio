@@ -749,6 +749,13 @@
       "title": "Output Dir",
       "type": "string"
     },
+    "parameter_accounting_refs": {
+      "items": {
+        "$ref": "#/$defs/Ref"
+      },
+      "title": "Parameter Accounting Refs",
+      "type": "array"
+    },
     "plan_ref": {
       "$ref": "#/$defs/Ref"
     },

@@ -16,7 +16,7 @@ from pathlib import Path
 import tempfile
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .common import ContractModel, License, Ref
 from .contracts import (
@@ -29,6 +29,7 @@ from .contracts import (
     ModelDescriptor,
     ModelTokenizerCompatibility,
     ModelTopology,
+    ParameterAccountingReport,
     ParameterComponent,
     ParameterCount,
     ParameterCountHandling,
@@ -85,7 +86,36 @@ class ModelInspectionBundle(ContractModel):
     model: ModelDescriptor
     tokenizer: TokenizerDescriptor | None = None
     compatibility: ModelTokenizerCompatibility | None = None
+    parameter_accounting: ParameterAccountingReport | None = None
     warnings: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_parameter_accounting_model(self) -> ModelInspectionBundle:
+        if self.parameter_accounting is None:
+            return self
+        from .parameter_accounting import verify_parameter_accounting_hash
+
+        if not verify_parameter_accounting_hash(self.parameter_accounting):
+            raise ValueError("parameter-accounting report hash mismatch")
+        model_ref = self.parameter_accounting.model_ref
+        expected_hash = self.model.source.snapshot_sha256 or self.model.inventory_sha256
+        expected_algo = (
+            "sha256"
+            if self.model.source.snapshot_sha256 is not None
+            else "sha256-ordered-exact-v1"
+            if self.model.inventory_sha256 is not None
+            else None
+        )
+        if model_ref.id != self.model.model_id or (
+            expected_hash is not None
+            and (
+                model_ref.hash is None
+                or model_ref.hash.algo != expected_algo
+                or model_ref.hash.value != expected_hash
+            )
+        ):
+            raise ValueError("parameter accounting must reference the bundled model revision")
+        return self
 
 
 def _utcnow() -> datetime:
@@ -1164,6 +1194,7 @@ def inspect_model_bundle(
     tokenizer_requested_revision: str | None = None,
     tokenizer_resolved_commit: str | None = None,
     hash_weights: bool = False,
+    parameter_accounting: bool = False,
     now: Callable[[], datetime] = _utcnow,
 ) -> ModelInspectionBundle:
     """Inspect a model and optional tokenizer and return one composable JSON bundle."""
@@ -1189,8 +1220,21 @@ def inspect_model_bundle(
         hash_weights=hash_weights,
         now=now,
     )
+    accounting = None
+    if parameter_accounting:
+        from .parameter_accounting import build_model_parameter_accounting
+
+        accounting = build_model_parameter_accounting(
+            model,
+            snapshot_root=model_path,
+            now=now,
+        )
     if tokenizer_path is None or tokenizer_id is None:
-        return ModelInspectionBundle(model=model, warnings=model.notes)
+        return ModelInspectionBundle(
+            model=model,
+            parameter_accounting=accounting,
+            warnings=model.notes,
+        )
     same_snapshot = _safe_root(model_path) == _safe_root(tokenizer_path)
     tokenizer_source_explicit = any(
         value is not None
@@ -1221,6 +1265,7 @@ def inspect_model_bundle(
         model=model,
         tokenizer=tokenizer,
         compatibility=compatibility,
+        parameter_accounting=accounting,
         warnings=sorted(set(model.notes + tokenizer.notes + compatibility.warnings)),
     )
 
@@ -1276,4 +1321,16 @@ def write_inspection_bundle(
             compatibility_path, bundle.compatibility.model_dump(mode="json")
         )
         outputs.append(compatibility_path)
+    if bundle.parameter_accounting is not None:
+        from .parameter_accounting import (
+            ParameterAccountingError,
+            write_parameter_accounting_report,
+        )
+
+        accounting_path = root / f"{bundle.model.model_id}.parameter-accounting.json"
+        try:
+            write_parameter_accounting_report(bundle.parameter_accounting, accounting_path)
+        except ParameterAccountingError as exc:
+            raise ModelInspectionError(str(exc)) from exc
+        outputs.append(accounting_path)
     return outputs

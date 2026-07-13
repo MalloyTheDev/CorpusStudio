@@ -765,6 +765,11 @@ def model_inspect(
         "--hash-weights",
         help="Stream-hash large weight files. Metadata and code files are always hashed.",
     ),
+    parameter_accounting: bool = typer.Option(
+        False,
+        "--parameter-accounting",
+        help="Also produce a hash-sealed static parameter-evidence report.",
+    ),
     out_dir: Optional[Path] = typer.Option(
         None, "--out", help="Atomically write descriptor JSON files to this directory."
     ),
@@ -798,6 +803,7 @@ def model_inspect(
             tokenizer_requested_revision=tokenizer_requested_revision,
             tokenizer_resolved_commit=tokenizer_resolved_commit,
             hash_weights=hash_weights,
+            parameter_accounting=parameter_accounting,
         )
         written = write_inspection_bundle(bundle, out_dir) if out_dir is not None else []
     except (ModelInspectionError, ValidationError, OSError) as exc:
@@ -827,10 +833,173 @@ def model_inspect(
         typer.echo(f"Tokenizer format: {bundle.tokenizer.format.value}")
     if bundle.compatibility is not None:
         typer.echo(f"Compatibility: {bundle.compatibility.status.value}")
+    if bundle.parameter_accounting is not None:
+        accounting = bundle.parameter_accounting
+        typer.echo(f"Parameter accounting: {accounting.status.value}")
+        typer.echo(
+            "Parameter evidence: "
+            f"{len(accounting.observations)} observations, "
+            f"{len(accounting.gaps)} gaps, {len(accounting.conflicts)} conflicts"
+        )
     for warning in bundle.warnings:
         typer.echo(f"Warning: {warning}")
     for item in written:
         typer.echo(f"Wrote: {item}")
+
+
+@app.command("parameter-account")
+def parameter_account(
+    input_path: Path = typer.Argument(
+        ...,
+        help="ModelDescriptor or ParameterAccountingReport JSON file.",
+    ),
+    snapshot: Optional[Path] = typer.Option(
+        None,
+        "--snapshot",
+        help="Optional local model snapshot for bounded safetensors-header evidence.",
+    ),
+    events: Optional[Path] = typer.Option(
+        None,
+        "--events",
+        help="Optional JSONL RunEvent stream containing typed parameter observations.",
+    ),
+    profile: Optional[str] = typer.Option(
+        None,
+        "--profile",
+        help=(
+            "Reconciliation profile when --events is supplied: training_runtime, "
+            "inference_runtime, checkpoint, or evaluation."
+        ),
+    ),
+    report_id: Optional[str] = typer.Option(
+        None,
+        "--report-id",
+        help="Stable id for a newly produced report.",
+    ),
+    artifact_ref: Optional[list[str]] = typer.Option(
+        None,
+        "--artifact-ref",
+        help="Checkpoint artifact reference as ID or ID@SHA256 (repeatable).",
+    ),
+    evaluation_ref: Optional[list[str]] = typer.Option(
+        None,
+        "--evaluation-ref",
+        help="Evaluation reference as ID or ID@SHA256 (repeatable).",
+    ),
+    out: Optional[Path] = typer.Option(
+        None,
+        "--out",
+        help="Atomically write the resulting report JSON to this file.",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit the complete ParameterAccountingReport as JSON.",
+    ),
+):
+    """Produce or reconcile parameter-count evidence without loading model weights."""
+    from corpus_studio.platform.common import HashRef, Ref
+    from corpus_studio.platform.contracts import ModelDescriptor, ParameterAccountingReport
+    from corpus_studio.platform.enums import ParameterAccountingProfile
+    from corpus_studio.platform.parameter_accounting import (
+        ParameterAccountingError,
+        build_model_parameter_accounting,
+        load_parameter_events,
+        reconcile_parameter_accounting_events,
+        verify_parameter_accounting_hash,
+        write_parameter_accounting_report,
+    )
+
+    def parse_ref(value: str) -> Ref:
+        if "@" not in value:
+            return Ref(id=value)
+        ref_id, digest = value.rsplit("@", 1)
+        if (
+            not ref_id
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise ParameterAccountingError(
+                f"invalid pinned reference '{value}'; expected ID@64-char-lowercase-sha256"
+            )
+        return Ref(id=ref_id, hash=HashRef(algo="sha256", value=digest))
+
+    try:
+        payload = json.loads(input_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ParameterAccountingError("input JSON must be an object")
+        if "model_id" in payload:
+            model = ModelDescriptor.model_validate(payload)
+            base_report = build_model_parameter_accounting(
+                model,
+                snapshot_root=snapshot,
+                report_id=None if events is not None else report_id,
+            )
+        elif "report_id" in payload:
+            if snapshot is not None:
+                raise ParameterAccountingError(
+                    "--snapshot is only valid when the input is a ModelDescriptor"
+                )
+            if report_id is not None and events is None:
+                raise ParameterAccountingError(
+                    "--report-id requires new static evidence or --events reconciliation"
+                )
+            base_report = ParameterAccountingReport.model_validate(payload)
+            if not verify_parameter_accounting_hash(base_report):
+                raise ParameterAccountingError("input parameter-accounting report hash mismatch")
+        else:
+            raise ParameterAccountingError(
+                "input is neither a ModelDescriptor nor a ParameterAccountingReport"
+            )
+
+        result = base_report
+        artifact_refs = [parse_ref(value) for value in artifact_ref or []]
+        evaluation_refs = [parse_ref(value) for value in evaluation_ref or []]
+        if events is not None:
+            resolved_profile = ParameterAccountingProfile(
+                profile or ParameterAccountingProfile.training_runtime.value
+            )
+            result = reconcile_parameter_accounting_events(
+                base_report,
+                load_parameter_events(events),
+                profile=resolved_profile,
+                report_id=report_id,
+                artifact_refs=artifact_refs,
+                evaluation_refs=evaluation_refs,
+            )
+        elif profile is not None:
+            raise ParameterAccountingError("--profile requires --events")
+        elif artifact_refs or evaluation_refs:
+            raise ParameterAccountingError(
+                "--artifact-ref and --evaluation-ref require --events"
+            )
+
+        written = write_parameter_accounting_report(result, out) if out is not None else None
+    except (
+        ParameterAccountingError,
+        ValidationError,
+        OSError,
+        json.JSONDecodeError,
+        ValueError,
+    ) as exc:
+        typer.echo(
+            json.dumps({"error": "PARAMETER_ACCOUNTING_FAILED", "message": str(exc)}, indent=2),
+            err=True,
+        )
+        raise typer.Exit(2)
+
+    if json_out:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+    typer.echo(f"Parameter accounting: {result.report_id}")
+    typer.echo(f"Profile: {result.profile.value}")
+    typer.echo(f"Status: {result.status.value}")
+    typer.echo(
+        f"Evidence: {len(result.observations)} observations, "
+        f"{len(result.gaps)} gaps, {len(result.conflicts)} conflicts"
+    )
+    if written is not None:
+        typer.echo(f"Wrote: {written}")
 
 
 @app.command("training-objectives")

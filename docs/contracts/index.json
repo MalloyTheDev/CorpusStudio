@@ -14,6 +14,10 @@
       "file": "ModelDescriptor.schema.json"
     },
     {
+      "contract": "ParameterAccountingReport",
+      "file": "ParameterAccountingReport.schema.json"
+    },
+    {
       "contract": "TokenizerDescriptor",
       "file": "TokenizerDescriptor.schema.json"
     },

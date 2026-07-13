@@ -171,6 +171,17 @@
       "title": "Notes",
       "type": "string"
     },
+    "parameter_accounting_ref": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ref"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "path": {
       "title": "Path",
       "type": "string"
