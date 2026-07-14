@@ -38,6 +38,12 @@ Each `TrainingObjective` explicitly defines:
 
 The `TaskType` enum remains only a coarse bridge. It is not the objective identity.
 
+A loss component's `default_weight` is optional by design. A numeric value is the objective's
+declared default coefficient; `None` means the objective intentionally leaves that coefficient
+unspecified. Omitted and explicit `None` values therefore deserialize identically and cannot silently
+become `1.0` across an `exclude_none` protocol round trip. Built-in objectives that require unit
+weight record `1.0` explicitly.
+
 ## MoE-safe update semantics
 
 The objective contract does not assume every parameter is active, resident, exposed, or updated.
