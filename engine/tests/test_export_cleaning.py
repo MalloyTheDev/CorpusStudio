@@ -47,6 +47,20 @@ def test_clean_rows_no_flags_keeps_everything():
     assert result.removed_rows == 0
 
 
+def test_cli_export_refuses_to_write_examples_jsonl(tmp_path: Path):
+    # Single-writer invariant: the engine must never write the dataset's source of truth
+    # (examples.jsonl) -- only the desktop does. Guard the arbitrary --output like every other
+    # engine write path, case-insensitively so `Examples.jsonl` can't slip past.
+    input_path = tmp_path / "staging.jsonl"
+    _write(input_path, [{"instruction": "a", "output": "b"}])
+    for name in ("examples.jsonl", "Examples.JSONL"):
+        output_path = tmp_path / name
+        result = runner.invoke(app, ["export", str(input_path), str(output_path), "instruction"])
+        assert result.exit_code == 2, result.output
+        assert "examples.jsonl" in result.output.lower()
+        assert not output_path.exists()  # refused before any write
+
+
 def test_cli_export_without_cleaning_warns_about_duplicates(tmp_path: Path):
     input_path = tmp_path / "rows.jsonl"
     row = {"instruction": "Explain variables.", "output": "A variable stores a value."}
