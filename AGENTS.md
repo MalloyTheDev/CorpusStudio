@@ -4,8 +4,12 @@ Instructions for AI coding agents (Codex, Claude, etc.) working in this repo.
 **Full session state + roadmap: read [`HANDOFF.md`](HANDOFF.md) first.**
 
 ## Where you are
-- Work from **`C:\CorpusStudio`** (migrated off the F: USB drive on 2026-07-13; F: is a stale fallback).
-- Engine venv: `C:\CorpusStudio\engine\.venv` (Python 3.12.10).
+- Work from **`/mnt/training-nvme/repos/CorpusStudio`** - the native-Linux RTX 5070 host (Ubuntu 24.04).
+  Verified host facts (paths, GPU, managed environment): [`docs/HOST_STATE.md`](docs/HOST_STATE.md).
+- Engine venv: `/mnt/training-nvme/repos/CorpusStudio/engine/.venv` (CPython 3.12.3, torch-free core + `[dev]`).
+- History (mounted, do not work from): this repo previously lived on Windows `F:` (USB) then `C:`
+  (migrated 2026-07-13). Those drives are now read-through mounts at `/mnt/windows-f` and `/mnt/windows-c`
+  (e.g. old `C:\CorpusStudio` -> `/mnt/windows-c/CorpusStudio`); they are stale fallbacks that will drift.
 
 ## What this is
 A **local-first, hardware-aware AI engineering platform** covering the whole lifecycle — sources →
@@ -34,13 +38,13 @@ Three surfaces:
 ## Build & verify (the gate)
 From `engine/` with the venv:
 ```
-.\.venv\Scripts\python.exe -m ruff check corpus_studio tests
-.\.venv\Scripts\python.exe -m mypy corpus_studio
-.\.venv\Scripts\python.exe -m pytest -q --no-header --basetemp=.pytest_tmp
+.venv/bin/python -m ruff check corpus_studio tests
+.venv/bin/python -m mypy corpus_studio
+.venv/bin/python -m pytest -q --no-header --basetemp=.pytest_tmp
 ```
 CI runs on **Linux / Python 3.11** with `pytest --cov=corpus_studio --cov-fail-under=88` + C#/web jobs.
-- **Coverage gotcha**: a Windows run under-measures the Linux-only storage detection ~0.3%; target
-  ≥ 88.2% locally.
+- **Coverage**: this host is native Linux, so `storage_profiler`'s Linux-only detection now runs
+  locally - the old ~0.3% Windows-run under-measurement no longer applies; the CI floor is 88%.
 - **After editing any `platform/` contract**, regenerate schemas:
   `python -c "from corpus_studio.platform.schema_export import export_json_schemas; export_json_schemas('../docs/contracts')"`
   and update the two counts in `tests/test_platform_contracts.py`.
@@ -52,18 +56,22 @@ CI runs on **Linux / Python 3.11** with `pytest --cov=corpus_studio --cov-fail-u
 - **Honesty invariants**: license fail-closed; provenance gate; "a completed step ≠ proven fit";
   "installed ≠ supported"; no silent target truncation; predicted fit is never `NATIVE_SAFE` (only a
   measured run is); single-writer `examples.jsonl`.
-- **Blackwell / sm_120**: force the **math** attention path (fused flash-SDPA deadlocks on native
-  Windows WDDM). Unsloth is refused there.
+- **Blackwell / sm_120**: the **math** attention path is the verified-safe default (fused flash-SDPA
+  deadlocks on native Windows WDDM; on this native-Linux host the env hardware probe verified the math
+  path, and bare-Linux flash-for-the-workload is not yet claimed). Unsloth is refused on Windows/WDDM.
 - **ASCII in CLI-facing strings** (Windows console UTF-8 — no `—`, use `-`).
 - **Contracts are the boundary**: change `platform/contracts.py` (pydantic) → regenerate
   `docs/contracts/*.schema.json` → the TS types in `apps/web/src/contracts/` derive from those.
 - **One training authority**: shipping clients use `platform-plan` → `platform-run`; they never invoke
   the development-only `train-run` compatibility command. Every execution gets a fresh run ID and a
   run-scoped output directory; runner identity derives from the pinned backend manifest.
-- **Hardware claims stay evidence-bound**: until the Linux NVMe is installed in the final RTX 5070
-  machine, do not claim native-Linux training, DeepSpeed/FSDP/NVMe offload, bare-Linux
-  FlashAttention, PCIe/NVMe throughput or endurance, full-sequence 7B success, real offload fit, or
-  MoE runtime capability. Contracts, fake workers, and CI are not hardware verification.
+- **Hardware claims stay evidence-bound**: the native-Linux RTX 5070 host is now assembled and the
+  managed `backend-corpus-studio` environment is `HARDWARE_VERIFIED` (env-manager CUDA alloc + 4-bit
+  construction + minimal GPU fwd/bwd + math SDPA - see [`docs/HOST_STATE.md`](docs/HOST_STATE.md)). That
+  environment-probe level is NOT a workload result: still do not claim full-sequence 7B success,
+  DeepSpeed/FSDP/CPU/NVMe offload, real offload fit, PCIe/NVMe throughput or endurance, bare-Linux
+  FlashAttention for the real workload, or MoE runtime capability. Contracts, fake workers, CI, and a
+  passing env hardware probe are not proof the 7B workload trains.
 
 ## Process
 - Branch first (`git checkout -b feat/<slice>`), one coherent CI-green PR per slice.
