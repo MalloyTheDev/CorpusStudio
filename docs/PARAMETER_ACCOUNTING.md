@@ -117,27 +117,27 @@ detection does not change that requirement.
 
 Produce static evidence during inspection:
 
-```powershell
-cd C:\CorpusStudio\engine
-.\.venv\Scripts\python.exe -m corpus_studio.cli model-inspect C:\models\tiny `
-  --hash-weights --parameter-accounting --out C:\model-records
+```bash
+cd /mnt/training-nvme/repos/CorpusStudio
+engine/.venv/bin/python -m corpus_studio.cli model-inspect /mnt/training-nvme/models/tiny \
+  --hash-weights --parameter-accounting --out /mnt/training-nvme/model-records
 ```
 
 Produce a report from a saved `ModelDescriptor`:
 
-```powershell
-.\.venv\Scripts\python.exe -m corpus_studio.cli parameter-account `
-  C:\model-records\tiny.model.json --snapshot C:\models\tiny `
-  --out C:\model-records\tiny.parameter-accounting.json --json
+```bash
+engine/.venv/bin/python -m corpus_studio.cli parameter-account \
+  /mnt/training-nvme/model-records/tiny.model.json --snapshot /mnt/training-nvme/models/tiny \
+  --out /mnt/training-nvme/model-records/tiny.parameter-accounting.json --json
 ```
 
 Reconcile typed worker events against a sealed parent report:
 
-```powershell
-.\.venv\Scripts\python.exe -m corpus_studio.cli parameter-account `
-  C:\model-records\tiny.parameter-accounting.json `
-  --events C:\runs\run-1\events.jsonl --profile training_runtime `
-  --out C:\runs\run-1\parameter-accounting.json
+```bash
+engine/.venv/bin/python -m corpus_studio.cli parameter-account \
+  /mnt/training-nvme/model-records/tiny.parameter-accounting.json \
+  --events /mnt/training-nvme/runs/run-1/events.jsonl --profile training_runtime \
+  --out /mnt/training-nvme/runs/run-1/parameter-accounting.json
 ```
 
 Checkpoint and evaluation profiles additionally require hash-pinned `--artifact-ref ID@SHA256` or
@@ -148,9 +148,9 @@ Checkpoint and evaluation profiles additionally require hash-pinned `--artifact-
 `ParameterAccountingReport` is a root JSON Schema with a generated TypeScript module. Contract edits
 must regenerate both layers:
 
-```powershell
-cd C:\CorpusStudio\engine
-.\.venv\Scripts\python.exe -c "from corpus_studio.platform.schema_export import export_json_schemas; export_json_schemas('../docs/contracts')"
-cd C:\CorpusStudio\apps\web
+```bash
+cd /mnt/training-nvme/repos/CorpusStudio/engine
+.venv/bin/python -c "from corpus_studio.platform.schema_export import export_json_schemas; export_json_schemas('../docs/contracts')"
+cd /mnt/training-nvme/repos/CorpusStudio/apps/web
 npm run gen:contracts
 ```

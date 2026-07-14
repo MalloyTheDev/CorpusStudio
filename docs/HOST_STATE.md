@@ -23,12 +23,13 @@ it is not deleted or restated as Linux.
 | Engine control-plane venv | `/mnt/training-nvme/repos/CorpusStudio/engine/.venv` — CPython 3.12.3 (dependency-light core + `[dev]`, torch-free) |
 | CLI entrypoint | `engine/.venv/bin/corpus-studio` (equivalently `.venv/bin/python -m corpus_studio.cli`) |
 | Linux training filesystem | `/mnt/training-nvme` |
-| Windows `C:` drive (mount) | `/mnt/windows-c` — e.g. former `C:\CorpusStudio` → `/mnt/windows-c/CorpusStudio` |
-| Windows Projects / `F:` drive (mount) | `/mnt/windows-f` — e.g. former `F:\CorpusStudio` → `/mnt/windows-f/CorpusStudio` |
+| Windows `C:` drive (mount) | `/mnt/windows-c` — read-write filesystem mount; history-only project policy; e.g. former `C:\CorpusStudio` → `/mnt/windows-c/CorpusStudio` |
+| Windows Projects / `F:` drive (mount) | `/mnt/windows-f` — read-write filesystem mount; history-only project policy; e.g. former `F:\CorpusStudio` → `/mnt/windows-f/CorpusStudio` |
 
 The active runtime is the native-Linux NVMe checkout under `/mnt/training-nvme/...`. The old
-Windows `C:` and `F:` copies are still visible as `/mnt/windows-c` and `/mnt/windows-f`
-mounts — stale fallbacks that will drift; **do not work from them.**
+Windows `C:` and `F:` copies are still visible as read-write `/mnt/windows-c` and `/mnt/windows-f`
+filesystem mounts. Read-write is an OS mount fact, not permission to use them as development roots:
+they are stale fallbacks that will drift, so **do not work from or write to them.**
 
 ## GPU
 

@@ -8,8 +8,9 @@ Instructions for AI coding agents (Codex, Claude, etc.) working in this repo.
   Verified host facts (paths, GPU, managed environment): [`docs/HOST_STATE.md`](docs/HOST_STATE.md).
 - Engine venv: `/mnt/training-nvme/repos/CorpusStudio/engine/.venv` (CPython 3.12.3, torch-free core + `[dev]`).
 - History (mounted, do not work from): this repo previously lived on Windows `F:` (USB) then `C:`
-  (migrated 2026-07-13). Those drives are now read-through mounts at `/mnt/windows-f` and `/mnt/windows-c`
-  (e.g. old `C:\CorpusStudio` -> `/mnt/windows-c/CorpusStudio`); they are stale fallbacks that will drift.
+  (migrated 2026-07-13). The filesystems are mounted read-write at `/mnt/windows-f` and
+  `/mnt/windows-c` (e.g. old `C:\CorpusStudio` -> `/mnt/windows-c/CorpusStudio`), but project policy is
+  history-only: do not develop from or write to those stale fallbacks because they will drift.
 
 ## What this is
 A **local-first, hardware-aware AI engineering platform** covering the whole lifecycle — sources →

@@ -81,10 +81,11 @@ hash-pinned producer supplies coordinate evidence.
 
 ## CLI
 
-From `C:\CorpusStudio\engine`:
+From the active repository:
 
-```powershell
-.\.venv\Scripts\python.exe -m corpus_studio.cli model-inspect C:\models\mixtral --json
+```bash
+cd /mnt/training-nvme/repos/CorpusStudio
+engine/.venv/bin/python -m corpus_studio.cli model-inspect /mnt/training-nvme/models/mixtral --json
 ```
 
 The human view reports the classification, family, expert-instance counts, and the explicit statements
@@ -103,4 +104,4 @@ This slice does not verify:
 - native-Linux RTX 5070 or any other hardware behavior.
 
 Those require isolated backend contracts, functional probes, typed runtime telemetry, and—where
-hardware is involved—measurements on the final machine.
+hardware is involved—measurements on the current native-Linux host.

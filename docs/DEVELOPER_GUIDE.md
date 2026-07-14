@@ -89,7 +89,7 @@ WPF adapters (`MessageBoxDialogService`, `Win32FilePickerService`, `WpfDispatche
 ## Recipe: add a feature (or convert a handler)
 
 1. **Engine first.** If it's new dataset logic, add it to the Python engine + tests
-   (`engine/.venv/Scripts/python.exe -m pytest -q`); expose a CLI command. Keep it
+   (`engine/.venv/bin/python -m pytest -q` on the current Linux host); expose a CLI command. Keep it
    dependency-light and honest (report what a number measures; never overclaim).
 2. **Seam.** Add the method to `IEngineService` (+ the `FakeEngine` stub) if a VM needs it.
    A new C# model in `Core/Models` mirrors the engine JSON (snake-case `JsonPropertyName`).
@@ -122,14 +122,17 @@ WPF adapters (`MessageBoxDialogService`, `Win32FilePickerService`, `WpfDispatche
 
 ## Running the gates
 
-- **Engine** (the CI gate): `cd engine` then
-  `./.venv/Scripts/python.exe -m ruff check .` · `… -m mypy corpus_studio` ·
-  `… -m pytest -q --basetemp=.pytest_tmp` (with `--cov=corpus_studio` a coverage floor
-  applies). Optional accuracy extras: `[tokenizer]`, `[model-tokenizer]`, `[parquet]`, and
-  `[train]` (the first-party QLoRA trainer — heavy/GPU: torch/transformers/peft/trl, plus
-  bitsandbytes which is CUDA-only, so skipped on macOS; the gate itself needs none of these).
-- **Desktop**: `dotnet build apps/desktop/CorpusStudio.Desktop.sln` (builds **both** heads)
-  and `dotnet test apps/desktop/CorpusStudio.Desktop.sln`.
+- **Engine** (current Linux host): `cd engine` then
+  `.venv/bin/python -m ruff check corpus_studio tests` · `.venv/bin/python -m mypy corpus_studio` ·
+  `.venv/bin/python -m pytest -q --no-header --basetemp=.pytest_tmp` (with
+  `--cov=corpus_studio` a coverage floor applies). Optional accuracy extras: `[tokenizer]`,
+  `[model-tokenizer]`, `[parquet]`, and `[train]` (the first-party QLoRA trainer — heavy/GPU:
+  torch/transformers/peft/trl, plus bitsandbytes which is CUDA-only, so skipped on macOS; the gate
+  itself needs none of these).
+- **Avalonia on Linux**: `dotnet build apps/desktop/CorpusStudio.Avalonia/CorpusStudio.Avalonia.csproj`.
+- **WPF on Windows only**: `dotnet build apps/desktop/CorpusStudio.Desktop.sln` and
+  `dotnet test apps/desktop/CorpusStudio.Desktop.Tests/CorpusStudio.Desktop.Tests.csproj`.
+- **Web/Tauri client on Linux**: `cd apps/web`, then `npm ci` and `npm run build`.
 - **CI** runs the engine gate, desktop build+tests, and CodeQL (Python + C#) on every PR.
 
 ## Honesty invariants (don't weaken these)

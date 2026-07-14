@@ -8,8 +8,10 @@ interpreter or each other's dependency graph.
 > **Implemented status:** the complete create-to-remove lifecycle is implemented for the
 > `backend-corpus-studio` reference backend. Other recipes can still be inspected, but their presence
 > does not make their creation or hardware path supported. The lifecycle is covered in default CI by
-> fake installers and CPU-only probes. Building the new managed CUDA environment on a real GPU remains
-> an explicit, network-using verification operation; it is not run automatically.
+> fake installers and CPU-only probes. On the current native-Linux host, the existing managed
+> `backend-corpus-studio` environment is `HARDWARE_VERIFIED` for its exact minimal CUDA-allocation,
+> 4-bit-construction, GPU forward/backward, and math-SDPA probe tuple. Rebuilding it remains an explicit
+> network-using operation. This environment result does not verify a real 7B workload or offload.
 
 ## Dependency layers
 
@@ -36,7 +38,8 @@ DEPENDENCY_PROBE_PASSED -> FUNCTIONAL_PROBE_PASSED -> HARDWARE_VERIFIED
 `FUNCTIONAL_PROBE_PASSED`; they do not earn GPU support. `HARDWARE_VERIFIED` requires the managed
 interpreter to prove CUDA allocation, 4-bit layer construction, a minimal GPU forward/backward, and
 the safe math-attention path. On native-Windows Blackwell, the probe never executes the known
-deadlocking fused SDPA path.
+deadlocking fused SDPA path. `HARDWARE_VERIFIED` is evidence for that exact environment-level tuple,
+not backend-wide, workload, 7B, offload, FlashAttention, distributed, or MoE support.
 
 ## Runtime discovery and plan review
 
@@ -58,24 +61,25 @@ Pip runs with `--isolated`, `--no-input`, an explicit `PIP_CONFIG_FILE` null dev
 indexes. Host pip configuration cannot add a source, and the manager never silently retries from a
 different source.
 
-Example review flow (PowerShell):
+Example review flow on the current native-Linux host:
 
-```powershell
-corpus-studio env-runtimes --recipe backend-corpus-studio
-corpus-studio env-plan backend-corpus-studio `
-  --env-id backend-corpus-studio `
-  --runtime C:\CorpusStudio\engine\.venv\Scripts\python.exe `
+```bash
+cd /mnt/training-nvme/repos/CorpusStudio
+engine/.venv/bin/corpus-studio env-runtimes --recipe backend-corpus-studio
+engine/.venv/bin/corpus-studio env-plan backend-corpus-studio \
+  --env-id backend-corpus-studio \
+  --runtime /usr/bin/python3 \
   --accelerator cu128
 ```
 
 The plan prints its exact `resolution hash`. Creation requires that same value and the same planning
 options:
 
-```powershell
-corpus-studio env-create backend-corpus-studio `
-  --env-id backend-corpus-studio `
-  --runtime C:\CorpusStudio\engine\.venv\Scripts\python.exe `
-  --accelerator cu128 `
+```bash
+engine/.venv/bin/corpus-studio env-create backend-corpus-studio \
+  --env-id backend-corpus-studio \
+  --runtime /usr/bin/python3 \
+  --accelerator cu128 \
   --confirm <resolution-hash>
 ```
 
@@ -130,10 +134,11 @@ Probe categories remain separate:
 addition/removal/version/hash changes, source changes, recipe drift, lock tampering, broken imports,
 functional failures, and CUDA/compute-capability changes.
 
-```powershell
-corpus-studio env-status [<env-id>] [--refresh] [--json]
-corpus-studio env-probe <env-id> [--json]
-corpus-studio env-lock <env-id>
+```bash
+cd /mnt/training-nvme/repos/CorpusStudio
+engine/.venv/bin/corpus-studio env-status [<env-id>] [--refresh] [--json]
+engine/.venv/bin/corpus-studio env-probe <env-id> [--json]
+engine/.venv/bin/corpus-studio env-lock <env-id>
 ```
 
 ## Safe removal and recreation
@@ -142,15 +147,18 @@ Removal requires both path containment under the manager's `environments` direct
 ownership marker. It also requires the exact environment ID as confirmation. Registry evidence is
 retained.
 
-```powershell
-corpus-studio env-remove backend-corpus-studio --confirm backend-corpus-studio
+```bash
+cd /mnt/training-nvme/repos/CorpusStudio
+engine/.venv/bin/corpus-studio env-remove backend-corpus-studio \
+  --confirm backend-corpus-studio
 ```
 
 Recreation is intentionally two confirmations: the new plan hash and the exact old environment ID.
 
-```powershell
-corpus-studio env-recreate backend-corpus-studio `
-  --confirm <new-resolution-hash> `
+```bash
+cd /mnt/training-nvme/repos/CorpusStudio
+engine/.venv/bin/corpus-studio env-recreate backend-corpus-studio \
+  --confirm <new-resolution-hash> \
   --confirm-remove backend-corpus-studio
 ```
 
@@ -164,9 +172,10 @@ depends on the mutable venv path. When `--environment` is selected, `platform-pl
 EnvironmentProfile and CapabilityReport inside that managed interpreter, so a lightweight control
 plane does not need the training stack installed merely to plan for its isolated worker.
 
-```powershell
-corpus-studio platform-plan ... --environment backend-corpus-studio
-corpus-studio platform-run RunPlan.json --subprocess
+```bash
+cd /mnt/training-nvme/repos/CorpusStudio
+engine/.venv/bin/corpus-studio platform-plan ... --environment backend-corpus-studio
+engine/.venv/bin/corpus-studio platform-run RunPlan.json --subprocess
 ```
 
 Before dispatch or resume, `platform-run` performs live health/drift checks and verifies the plan's
@@ -187,10 +196,13 @@ Default CI proves command construction, confirmation seals, path containment, ow
 records, timeout/cancellation, failure recovery, lock generation, CPU probes, drift, safe
 remove/recreate, RunPlan pinning, and managed-interpreter dispatch using fakes and temp directories.
 
-Not claimed by this slice:
+Current-host evidence is limited to the existing `backend-corpus-studio` environment's exact minimal
+hardware-probe tuple. It does not claim a complete 7B training run, long-sequence stability, sustained
+throughput, production checkpoint behavior, DeepSpeed/FSDP, CPU/NVMe parameter or optimizer offload,
+bare-Linux FlashAttention for the real workload, MoE execution, or resource-elastic expert paging.
 
-- a newly downloaded real CUDA environment or real-GPU result from this branch (network confirmation
-  was not supplied);
+Also not claimed by this slice:
+
 - in-place package repair (recreate is the safe supported recovery path);
 - side-effectful creation for capability packs or any backend other than `backend-corpus-studio`;
 - container, conda, `uv`, or remote environment providers.

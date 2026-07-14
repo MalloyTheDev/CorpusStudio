@@ -29,8 +29,9 @@ concrete, phased, slice-by-slice plan grounded in the current decomposition stat
   Explorer, docked Problems/Output panels, the Studio hero + Quality panel), plus a `StringToBrush`
   converter for the VMs' hex-string status colours. Compiled bindings validate every path at build time,
   so the green build is the proof. Not shipped; WPF stays the product head.
-- **`ICommand` conversion (#184) — done.** Converted the WPF code-behind `_Click` engine
-  handlers into shared `AsyncRelayCommand`/`RelayCommand`s on the view-models, behind the `IEngineService`
+- **`ICommand` conversion (#184) — partially complete / in progress.** Converted the eligible WPF
+  code-behind `_Click` engine handlers into shared `AsyncRelayCommand`/`RelayCommand`s on the view-models,
+  behind the `IEngineService`
   seam so run-orchestration is head-agnostic and unit-testable with a fake engine. The mechanical,
   dialog (`IDialogService`), file-picker (`IFilePickerService`), and named-control input-binding tiers are
   **done** (code-behind `_Click` handlers **108 → 59**, `ICommand` count **0 → ~55**). Remaining handlers
@@ -43,7 +44,6 @@ the colour-coded Debt grade badge, the Projects sidebar, all 14 Studio tabs, the
 rendered over the *unchanged* `CorpusStudio.Core` view-models (same VMs, same DI, cross-platform toolkit).
 What began as a two-tab spike now binds the whole app; compiled bindings validate every path at build time.
 
-![The Avalonia head rendering the full Corpus Studio shell (activity bar, Studio hero + Debt badge, all 14 tabs, and the Quality panel) over the shared CorpusStudio.Core view-models.](screenshots/avalonia-spike.png)
 
 Ground-truth measured 2026-07-08 (Phases 0–3 done; `ICommand` conversion in progress):
 

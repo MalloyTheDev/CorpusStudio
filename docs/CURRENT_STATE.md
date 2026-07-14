@@ -3,10 +3,14 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-07-13 (through **v1.3** — Evaluation Suites & Chat Gates — plus the **platform
+Last reconciled: 2026-07-14 (through **v1.3** — Evaluation Suites & Chat Gates — plus the **platform
 run lifecycle** re-scope: profile → plan → predict-fit → run → measure-fit → artifacts, a multi-backend
-registry, and subprocess reliability, verified on a real RTX 5070 under native Windows/WDDM; plus the post-v1.3 additions
-reconciled below — the **reasoning-traces** data loop, a dataset **truncation guardrail** +
+registry, and subprocess reliability. The pre-Phase-9B real GPU workload evidence remains historical
+native Windows/WDDM evidence. PR #421 adds a separate native-Linux result: the managed
+`backend-corpus-studio` environment is `HARDWARE_VERIFIED` for its minimal CUDA/4-bit/forward-backward/
+math-SDPA probe tuple. That environment-level result is not a Phase-9B or 7B workload/offload result.
+The post-v1.3 additions reconciled below include the **reasoning-traces** data loop, a dataset
+**truncation guardrail** +
 configurable **checkpoint retention**, and a dependency-light **storage safe-spill** profiler —
 plus the sealed **Environment Manager** reference lifecycle, the static MoE-safe
 **ModelDescriptor / TokenizerDescriptor** foundation with allowlisted **MoE topology inspection**,
@@ -207,8 +211,10 @@ per-item error isolation, and off-thread document opens.
   import/dependency/CPU-functional/GPU-hardware probes, detects drift, and safely removes or recreates
   only contained paths with matching ownership markers. `RunPlan.environment_ref` pins the immutable
   lock hash and `platform-run --subprocess` dispatches with that managed interpreter after a live
-  health check. Tests use fake installers and CPU probes; a newly downloaded CUDA environment is not
-  claimed as verified by this slice. See [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md); the full
+  health check. Tests use fake installers and CPU probes. Separately, the current native-Linux host's
+  managed `backend-corpus-studio` environment passed the exact minimal hardware-probe tuple documented
+  in [`HOST_STATE.md`](HOST_STATE.md); that environment result is not workload or offload proof. See
+  [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md); the full
   3-layer + MoE-safe forward plan is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) +
   [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md).
 - **Static Model/Tokenizer foundation** (`model-inspect`): two versioned root contracts,

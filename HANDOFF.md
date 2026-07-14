@@ -20,9 +20,10 @@ forward plan see [`docs/ROADMAP.md`](docs/ROADMAP.md) + [`docs/IMPLEMENTATION_PL
   standalone `cs-train-venv`. See [`docs/HOST_STATE.md`](docs/HOST_STATE.md) and
   [`docs/ENVIRONMENT_MANAGER.md`](docs/ENVIRONMENT_MANAGER.md).
 - **History (mounted, do not work from):** this repo previously lived on Windows `F:` (USB) then `C:`
-  (migrated 2026-07-13). Those Windows drives are now read-through mounts — `C:\…` → `/mnt/windows-c`,
-  `F:\…` → `/mnt/windows-f` (e.g. old `C:\CorpusStudio` → `/mnt/windows-c/CorpusStudio`). They are stale
-  fallbacks that will drift; the active runtime is the `/mnt/training-nvme` checkout.
+  (migrated 2026-07-13). Those filesystems are mounted read-write — `C:\…` → `/mnt/windows-c`,
+  `F:\…` → `/mnt/windows-f` (e.g. old `C:\CorpusStudio` → `/mnt/windows-c/CorpusStudio`) — but project
+  policy is history-only: do not develop from or write to them. They are stale fallbacks that will
+  drift; the active runtime is the `/mnt/training-nvme` checkout.
 - WorldBibleGenerator (the "WBG" reference project) still lives on the Windows mounts:
   `/mnt/windows-c/WorldBibleGenerator` (source + datasets + trained adapters) and the large merged/GGUF
   models + pretrain data on `/mnt/windows-f/WorldBibleGenerator` (reproducible from adapters). WBG is a
@@ -205,7 +206,7 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
    across artifacts/checkpoints/environment inputs; verify installed bytes against `RECORD`; build and
    hash the exact worker wheel before approval; add manager/per-environment inter-process locks; make
    recreation blue/green. Keep this one coherent slice.
-2. **Continue hardware-independent work while the PCIe/NVMe adapter is pending:** bounded event
+2. **Continue hardware-independent work alongside the measured workload bring-up:** bounded event
    journaling, prepared-dataset/transactional row-store groundwork, TraceRecord identity/governance,
    and remaining desktop/web contracts. Keep non-trivial placement/offload execution unimplemented
    until an isolated backend proves it.

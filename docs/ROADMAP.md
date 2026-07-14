@@ -28,8 +28,10 @@ digest and environment/lock ref before dispatch, then fail-closes message order 
 It is exercised by a **Tauri 2 + React** contract-first client (`apps/web`) alongside the WPF
 (shipping) and Avalonia (interim) heads. A pre-Phase-9B lifecycle ran end to end on a real RTX 5070
 (Blackwell/sm_120) under native Windows/WDDM, including a real GPU QLoRA run. That historical run does
-not verify the new effective-execution contract. Native-Linux training and real CPU/NVMe offload are
-still unverified.
+not verify the new effective-execution contract. On the current native-Linux host, the managed
+`backend-corpus-studio` environment separately passed its minimal CUDA-allocation, 4-bit-construction,
+forward/backward, and math-SDPA probe. That environment result is not a native-Linux real workload,
+full-sequence 7B, real-workload FlashAttention, or offload result; those remain unverified.
 
 On top of that loop, v1.2.1–v1.2.15 added an **IDE-like workspace shell** (Start
 Center, Universal Explorer, Problems + Output panels, one New Project wizard) and
@@ -107,7 +109,8 @@ resulting features in full.
 ## Next
 
 **Platform frontier** (the full local-first AI lifecycle — see [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)).
-The run lifecycle (profile→plan→fit→run→artifact) is built and hardware-verified; the frontier is the
+The run lifecycle (profile→plan→fit→run→artifact) is built. The exact minimal managed-environment
+hardware probe is verified on the current host; the Phase-9B real workload is not. The frontier is the
 input side. Ordered:
 
 - ✅ **StorageProfile** — dependency-light storage topology + per-role safe-spill suitability (offload
