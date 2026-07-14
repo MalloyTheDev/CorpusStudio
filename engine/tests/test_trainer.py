@@ -19,6 +19,7 @@ from corpus_studio.platform.trace_records import (
 )
 from corpus_studio.training.traces import Trace
 from corpus_studio.training.environment import TrainingRuntimeReport
+from corpus_studio.training.quantization import find_linear4bit_modules
 from corpus_studio.training.trainer import (
     TINY_TOY_MODEL,
     ExecutionPlacementDeviation,
@@ -548,7 +549,15 @@ def test_post_adapter_state_observes_nf4_and_dequantization_dtype():
         (),
         {"quant_state": type("QuantState", (), {"quant_type": "nf4"})()},
     )()
-    linear = type("Linear4bit", (), {"weight": weight, "compute_dtype": torch.bfloat16})()
+    BnbLinear4bit = type("Linear4bit", (), {})
+    linear = BnbLinear4bit()
+    linear.weight = weight
+    linear.compute_dtype = torch.bfloat16
+    peft_wrapper = type(
+        "Linear4bit",
+        (),
+        {"weight": None, "compute_dtype": None},
+    )()
     parameter = Parameter()
     model = type(
         "Model",
@@ -556,7 +565,7 @@ def test_post_adapter_state_observes_nf4_and_dequantization_dtype():
         {
             "named_parameters": lambda self: iter([("adapter.weight", parameter)]),
             "parameters": lambda self: iter([parameter]),
-            "modules": lambda self: iter([linear]),
+            "modules": lambda self: iter([peft_wrapper, linear]),
         },
     )()
     cfg = _sealed_config(
@@ -564,10 +573,23 @@ def test_post_adapter_state_observes_nf4_and_dequantization_dtype():
         dequantization_dtype="bf16",
         master_weight_dtype="fp32",
     )
-    verify_model_state_execution(model, torch, cfg, quantize=True)
+    assert find_linear4bit_modules(model, BnbLinear4bit) == [linear]
+    verify_model_state_execution(
+        model,
+        torch,
+        cfg,
+        quantize=True,
+        linear4bit_type=BnbLinear4bit,
+    )
     weight.quant_state.quant_type = "fp4"
     with pytest.raises(TrainerError, match="quantized storage deviation"):
-        verify_model_state_execution(model, torch, cfg, quantize=True)
+        verify_model_state_execution(
+            model,
+            torch,
+            cfg,
+            quantize=True,
+            linear4bit_type=BnbLinear4bit,
+        )
 
 
 def test_optimizer_state_precision_accepts_sealed_primary_and_auxiliary_dtypes():

@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
 
+from corpus_studio.training.quantization import find_linear4bit_modules
+
 from .common import PackageLock, Ref
 from .contracts import (
     CapabilityReport,
@@ -499,6 +501,7 @@ def _probe_cuda_qlora_math_execution(
         import tempfile  # noqa: PLC0415
 
         import torch  # noqa: PLC0415
+        from bitsandbytes.nn import Linear4bit as BnbLinear4bit  # noqa: PLC0415
         from peft import (  # noqa: PLC0415
             LoraConfig,
             PeftModel,
@@ -572,15 +575,13 @@ def _probe_cuda_qlora_math_execution(
                     _TX.UNSUPPORTED_CONFIGURATION,
                     "QLoRA adapter placement or FP32 master-weight policy was not enforced",
                 )
+            linear4bit_modules = find_linear4bit_modules(model, BnbLinear4bit)
             quant_types = {
                 getattr(getattr(module.weight, "quant_state", None), "quant_type", None)
-                for module in model.modules()
-                if module.__class__.__name__ == "Linear4bit" and hasattr(module, "weight")
+                for module in linear4bit_modules
             }
             compute_dtypes = {
-                getattr(module, "compute_dtype", None)
-                for module in model.modules()
-                if module.__class__.__name__ == "Linear4bit"
+                getattr(module, "compute_dtype", None) for module in linear4bit_modules
             }
             if quant_types != {"nf4"} or compute_dtypes != {torch.bfloat16}:
                 return ProbeOutcome(
