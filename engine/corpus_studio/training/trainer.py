@@ -534,6 +534,16 @@ def build_model_load_kwargs(
 def _normalized_device(value: Any) -> str:
     if isinstance(value, int):
         return f"cuda:{value}"
+    # torch.device("cuda") / torch.device("cuda", 0) style objects
+    device_type = getattr(value, "type", None)
+    if isinstance(device_type, str):
+        if device_type == "cuda":
+            index = getattr(value, "index", None)
+            return f"cuda:{0 if index is None else index}"
+        if device_type == "cpu":
+            return "cpu"
+        if device_type == "meta":
+            return "meta"
     rendered = str(value)
     if rendered == "cuda":
         return "cuda:0"
@@ -542,8 +552,112 @@ def _normalized_device(value: Any) -> str:
     return rendered
 
 
+def _is_singleton_root_map(device_map: dict[str, str] | None) -> bool:
+    """True when the sealed plan places the whole model on one root device via {\"\": device}."""
+
+    return (
+        isinstance(device_map, dict)
+        and set(device_map.keys()) == {""}
+        and bool(device_map[""])
+        and device_map[""] != "auto"
+    )
+
+
+def _raw_hf_device_map(model: Any) -> dict[str, str] | None:
+    raw = getattr(model, "hf_device_map", None)
+    if not isinstance(raw, dict):
+        return None
+    return {str(module): _normalized_device(device) for module, device in raw.items()}
+
+
+def _parameter_devices(model: Any) -> dict[str, str]:
+    return {
+        name: _normalized_device(parameter.device)
+        for name, parameter in model.named_parameters()
+    }
+
+
+def _relevant_buffer_devices(model: Any) -> dict[str, str]:
+    """Persistent floating-point buffers that participate in execution placement."""
+
+    devices: dict[str, str] = {}
+    for name, buffer in model.named_buffers():
+        is_floating = bool(getattr(buffer, "is_floating_point", lambda: False)())
+        if is_floating:
+            devices[name] = _normalized_device(buffer.device)
+    return devices
+
+
+def _verify_singleton_root_placement(
+    model: Any,
+    *,
+    expected_device: str,
+    expected_map: dict[str, str],
+) -> None:
+    """Accept root, expanded, or missing hf_device_map only when placement is fully on expected_device.
+
+    Preserves fail-closed behavior for CPU/disk/meta/other-GPU map entries and any parameter or
+    execution-relevant floating buffer off the sealed singleton device. Does not rewrite the sealed
+    requested map and never treats "CUDA is available" as proof.
+    """
+
+    normalized_map = _raw_hf_device_map(model)
+    parameter_devices = _parameter_devices(model)
+    buffer_devices = _relevant_buffer_devices(model)
+
+    if not parameter_devices:
+        raise ExecutionPlacementDeviation(
+            "PLACEMENT_DEVIATION: sealed singleton placement cannot be verified - "
+            "the loaded model exposes no parameters"
+        )
+
+    if normalized_map is not None:
+        bad_map = {
+            module: device
+            for module, device in normalized_map.items()
+            if device != expected_device
+        }
+        if bad_map:
+            preview = ", ".join(f"{module}={device}" for module, device in list(bad_map.items())[:5])
+            raise ExecutionPlacementDeviation(
+                f"PLACEMENT_DEVIATION: requested device map {expected_map}, "
+                f"observed hf_device_map entries outside {expected_device}: {preview}"
+            )
+
+    bad_parameters = {
+        name: device for name, device in parameter_devices.items() if device != expected_device
+    }
+    if bad_parameters:
+        preview = ", ".join(
+            f"{name}={device}" for name, device in list(bad_parameters.items())[:5]
+        )
+        raise ExecutionPlacementDeviation(
+            f"PLACEMENT_DEVIATION: parameters outside {expected_device}: {preview}"
+        )
+
+    bad_buffers = {
+        name: device for name, device in buffer_devices.items() if device != expected_device
+    }
+    if bad_buffers:
+        preview = ", ".join(f"{name}={device}" for name, device in list(bad_buffers.items())[:5])
+        raise ExecutionPlacementDeviation(
+            f"PLACEMENT_DEVIATION: execution-relevant buffers outside {expected_device}: {preview}"
+        )
+    # Success: sealed singleton root is realized. hf_device_map may be None, a root map, or an
+    # expanded all-expected_device map; parameter+buffer inventory is the fail-closed authority.
+
+
+
 def verify_loaded_model_execution(model: Any, config: TrainRunConfig) -> None:
-    """Observe the model API and placement chosen by Transformers/Accelerate, then fail closed."""
+    """Observe the model API and placement chosen by Transformers/Accelerate, then fail closed.
+
+    For a sealed singleton root map ``{\"\": \"cuda:0\"}`` (the production GPU plan shape), placement
+    is verified semantically: every parameter and every execution-relevant floating buffer must
+    resolve to the sealed device, and any ``hf_device_map`` entry must also resolve there. Expanded
+    all-cuda maps and missing ``hf_device_map`` attributes (common with some bitsandbytes loads) are
+    accepted only when that inventory is fully on the sealed device. Multi-key non-singleton sealed
+    maps still require exact structural equality after device normalization.
+    """
 
     if config.execution_configuration_hash is None:
         return
@@ -560,16 +674,34 @@ def verify_loaded_model_execution(model: Any, config: TrainRunConfig) -> None:
     if config.cpu_toy:
         devices = {_normalized_device(parameter.device) for parameter in model.parameters()}
         observed = {"": next(iter(devices))} if len(devices) == 1 else None
-    else:
-        raw = getattr(model, "hf_device_map", None)
-        observed = (
-            {str(module): _normalized_device(device) for module, device in raw.items()}
-            if isinstance(raw, dict)
-            else None
+        if observed != expected:
+            raise ExecutionPlacementDeviation(
+                f"PLACEMENT_DEVIATION: requested device map {expected}, observed {observed}"
+            )
+        return
+
+    normalized_expected = {
+        str(module): _normalized_device(device) for module, device in expected.items()
+    }
+    if _is_singleton_root_map(normalized_expected):
+        expected_device = normalized_expected[""]
+        _verify_singleton_root_placement(
+            model,
+            expected_device=expected_device,
+            expected_map=normalized_expected,
         )
-    if observed != expected:
+        return
+
+    # Non-singleton sealed maps remain exact after normalization (no silent expansion).
+    raw = getattr(model, "hf_device_map", None)
+    observed = (
+        {str(module): _normalized_device(device) for module, device in raw.items()}
+        if isinstance(raw, dict)
+        else None
+    )
+    if observed != normalized_expected:
         raise ExecutionPlacementDeviation(
-            f"PLACEMENT_DEVIATION: requested device map {expected}, observed {observed}"
+            f"PLACEMENT_DEVIATION: requested device map {normalized_expected}, observed {observed}"
         )
 
 
