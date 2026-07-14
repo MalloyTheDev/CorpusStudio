@@ -88,6 +88,59 @@ probed on this host.
 
 (84 distributions are locked in total; the table lists the training-relevant ones.)
 
+### Readiness-v2 math baseline (preserve)
+
+`backend-corpus-studio-readiness-v2` is a separate exact-pinned managed environment that does not
+replace or reinterpret the legacy environment above. It is `HARDWARE_VERIFIED` for one complete
+BF16 + NF4 + double-quant + QLoRA + **math-only SDPA** + AdamW + adapter round-trip tuple. Treat it as
+the flash-work safety baseline and rollback path; do not modify, recreate, reseal, or delete it while
+developing flash readiness.
+
+Recorded identities for recovery:
+
+| Item | Value |
+|---|---|
+| Lock hash | `21dd38cbadd11fbf42f8f4de9f87a5c29642b139baefc13008dffe26d0751c13` |
+| Recipe digest | `4c0cb365b596cfe2b1371afd5f95130a40e41c7e5b27df833b0c914bd492289c` |
+| Probe evidence hash | `5f23457b3ac737b6dbe514c0325f5445b9accac9cc3f642d7137c19ddf868886` |
+| Worker wheel SHA-256 | `de747839c300bc4f7bc3288963d6814b204a95402efba3f1787fa6e6462e135f` |
+| Baseline record | `/mnt/training-nvme/artifacts/corpusstudio-worker/readiness-math-baseline/math-baseline-record.json` |
+
+### Readiness flash-v1 status
+
+`backend-corpus-studio-readiness-flash-v1` is a separate exact-pinned recipe for a complete forced
+`torch_sdpa_flash` QLoRA tuple (`cuda_qlora_sdpa_flash_execution`). It is independent of the math
+baseline and must not reuse or mutate readiness-v2. **Linux-only** recipe (native Windows/WDDM fused
+flash SDPA is refused on the Windows path; do not claim flash from a Windows math environment).
+
+**Sealed on this host (2026-07-14):** after the bf16-autocast probe fix, the environment was
+recreated from commit `f15f1bfeec0b54c4c863b78f03f2b1c3032bd768` and is **`HARDWARE_VERIFIED`**.
+`env-status --refresh` and `env-probe` both report `HARDWARE_VERIFIED` with `drift_detected=false`.
+Math readiness-v2 was not mutated.
+
+| Item | Value |
+|---|---|
+| State | `HARDWARE_VERIFIED` |
+| Environment path | `/mnt/training-nvme/corpusstudio/xdg-data/corpusstudio/environment-manager/environments/backend-corpus-studio-readiness-flash-v1` |
+| Lock ID | `lock-8a988a716c68beacfa8c` |
+| Lock digest | `8a988a716c68beacfa8c8fb46925987ea7c9aca198537340471e1fd08f9c75fe` |
+| Recipe digest | `52016adedd5011328efb05e089d54c8edd5c9308e0a38409897cd0f554240fb7` |
+| Resolution hash | `941da281bda775a9ca097801900356a99d8b16917a5172b452da1a4d8013b57a` |
+| Probe evidence hash | `ad9b5e0c07b4d8d437905d6f0bf888afa2151531f097270b4d40cdb39c7830b8` |
+| Capability-report hash | `bb00d68fc76dfdd4bb7b8014e9dadd06ac138b5c114f44a3cecedaa161866215` |
+| Worker source commit | `f15f1bfeec0b54c4c863b78f03f2b1c3032bd768` |
+| Worker wheel | `.../readiness-flash-v1/f15f1bfeec0b54c4c863b78f03f2b1c3032bd768/corpus_studio_engine-1.3.0-py3-none-any.whl` |
+| Worker-wheel SHA-256 | `cb5c05b7d4d8e640d06a4d845ae638930b9e9f3769f937c87365f0e7e445d5f5` |
+| Complete probe | `cuda_qlora_sdpa_flash_execution` **PASS** (`torch_sdpa_flash`, forced `FLASH_ATTENTION`, math/mem-efficient off, `forward_autocast=bf16`) |
+| Evidence pack | `/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-readiness-flash-v1/` (`env-recreate-f15f1bf.json`, status/probe) |
+
+**History:** an earlier authorized create at `082cb15` failed seal (`INCOMPATIBLE`) because float32
+Q/K/V under forced flash without bf16 autocast. That failure is superseded by the sealed recreate
+above; it is not a positive flash claim for the old wheel.
+
+This sealed flash result is still **environment-probe** evidence only — not full-sequence 7B training,
+not Transformers `flash_attention_2`, not external `flash-attn`, and not MoE runtime capability.
+
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 
 `HARDWARE_VERIFIED` is the **Environment Manager** evidence level, not a training-run result.
@@ -109,10 +162,10 @@ must not be claimed from this state alone:
   `backend-corpus-studio` reference exists.
 - **Real offload fit, PCIe/NVMe throughput, sustained-write endurance** — the NVMe has not been
   benchmarked (`platform-storage` is non-destructive and reads no SMART data).
-- **Bare-Linux FlashAttention for the real workload** — the probe verified the *math* path; the
-  fused/flash path is not claimed here. The native-Windows/WDDM deadlock reason for forcing math
-  does not apply on this Linux host, but that is the *absence of a blocker*, not a positive
-  flash-attention result.
+- **Bare-Linux FlashAttention for the real workload** — readiness-v2 verified the *math* path only.
+  A separate forced `torch_sdpa_flash` readiness environment is the positive path for SDPA flash
+  evidence; it is not the same identity as Transformers `flash_attention_2` or an external
+  flash-attn package, and it is not full-sequence 7B proof.
 - **MoE runtime capability** — static inspection only (Phase 8); no MoE execution.
 
 "Installed ≠ supported" and "a completed step ≠ proven fit" both still hold: a passing

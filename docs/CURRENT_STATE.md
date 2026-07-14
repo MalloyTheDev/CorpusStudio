@@ -205,13 +205,24 @@ per-item error isolation, and off-thread document opens.
   `env-status` / `env-probe` / `env-lock` / `env-remove` / `env-recreate`): the 3-layer dependency
   model in code — a lightweight always-installable **control plane**, opt-in **capability profiles**,
   and **isolated per-backend worker environments**. The side-effectful path is deliberately limited
-  to the `backend-corpus-studio` reference backend: it discovers Python runtimes, renders concrete
-  no-shell argv + explicit indexes, requires the exact plan hash before mutation, creates one owned
-  venv, journals bounded commands, seals installed package/source/metadata hashes, runs separate
-  import/dependency/CPU-functional/GPU-hardware probes, detects drift, and safely removes or recreates
-  only contained paths with matching ownership markers. `RunPlan.environment_ref` pins the immutable
+  to the legacy `backend-corpus-studio` rollback recipe, the exact-pinned math
+  `backend-corpus-studio-readiness-v2` recipe, and the exact-pinned flash
+  `backend-corpus-studio-readiness-flash-v1` recipe. It discovers Python runtimes, renders concrete
+  no-shell argv + explicit indexes, binds a byte-exact worker wheel for readiness recipes, and
+  requires the exact plan hash before mutation. Installation captures sanitized pip source/artifact
+  evidence and verifies installed `RECORD` bytes; a final lock is sealed only after the required
+  probes and a stable post-probe inventory. Readiness-v2 requires one complete BF16/NF4/double-quant
+  QLoRA math-SDPA forward/loss/backward/optimizer/adapter-reload tuple. Flash readiness-v1 requires
+  the same complete QLoRA evidence under forced `SDPBackend.FLASH_ATTENTION` (no math/mem-efficient
+  fallback), with CUDA bf16 autocast on the forced forward/backward so attention dtypes match real
+  TRL/PEFT QLoRA training, plus scoped GPU allocator, `nvidia-smi` process-memory, host-RSS, phase
+  timing, and optional temperature/power evidence. Flash readiness is Linux-only; independent probes
+  cannot be unioned across either complete tuple. The math readiness-v2 environment is the preserved
+  safety/rollback baseline and must not be mutated by flash work. The manager detects worker/dependency drift and safely removes or recreates
+  only contained owned paths.
+  `RunPlan.environment_ref` pins the immutable
   lock hash and `platform-run --subprocess` dispatches with that managed interpreter after a live
-  health check. Tests use fake installers and CPU probes. Separately, the current native-Linux host's
+  health check. Tests use fake installers and bounded synthetic probe evidence. Separately, the current native-Linux host's
   managed `backend-corpus-studio` environment passed the exact minimal hardware-probe tuple documented
   in [`HOST_STATE.md`](HOST_STATE.md); that environment result is not workload or offload proof. See
   [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md); the full

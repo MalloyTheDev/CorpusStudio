@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 
 from corpus_studio.importers.jsonl_importer import read_jsonl, read_jsonl_bytes
 from corpus_studio.training.environment import INSTALL_HINT, probe_training_runtime
+from corpus_studio.training.quantization import find_linear4bit_modules
 
 # Tiny Llama-architecture model for the CPU toy path. The CPU toy builds the model FROM CONFIG
 # (random weights — no weights download, so it works offline/behind a firewall), and only the small
@@ -616,6 +617,7 @@ def verify_model_state_execution(
     config: TrainRunConfig,
     *,
     quantize: bool,
+    linear4bit_type: type[Any] | None = None,
 ) -> None:
     """Observe post-PEFT placement plus frozen/trainable storage and dequantization formats."""
 
@@ -645,9 +647,11 @@ def verify_model_state_execution(
             f"expected {master_dtype}"
         )
     if quantize:
-        linear4bit = [
-            module for module in model.modules() if module.__class__.__name__ == "Linear4bit"
-        ]
+        if linear4bit_type is None:
+            from bitsandbytes.nn import Linear4bit as BnbLinear4bit  # noqa: PLC0415
+
+            linear4bit_type = BnbLinear4bit
+        linear4bit = find_linear4bit_modules(model, linear4bit_type)
         if not linear4bit:
             raise TrainerError("sealed NF4 execution loaded no Linear4bit modules")
         quant_types = {

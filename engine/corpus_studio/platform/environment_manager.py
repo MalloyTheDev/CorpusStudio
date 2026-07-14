@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.parser import Parser
 import hashlib
 import json
 import os
@@ -23,9 +24,10 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import Literal, Protocol
-from urllib.parse import unquote, urlparse
+from typing import cast, Literal, Protocol
+from urllib.parse import unquote, urlparse, urlsplit, urlunsplit
 import uuid
+import zipfile
 
 from .backends import backend_manifest_digest, get_worker_backend
 from .common import HashRef, PackageLock, PackageSource, Ref
@@ -37,17 +39,25 @@ from .contracts import (
     EnvironmentHealthReport,
     EnvironmentInstallation,
     EnvironmentLock,
+    EnvironmentProbeEvidence,
     EnvironmentProfile,
     EnvironmentRecipe,
     FailureRecord,
+    InstalledEnvironmentEvidence,
     InstallStep,
+    PackageInstallEvidence,
+    ProbeMemoryEvidence,
     ProbeResult,
     PythonRuntime,
+    QloraExecutionProbeSpec,
     RunPlan,
+    WorkerArtifactIdentity,
 )
 from .enums import DependencyLayer, EnvironmentState, FailureTaxonomy, OperatingSystem
 from .environments import (
     get_recipe,
+    READINESS_FLASH_V1_RECIPE_ID,
+    READINESS_V2_RECIPE_ID,
     recipe_digest,
     resolution_digest,
     resolve_dependencies,
@@ -58,9 +68,11 @@ from .process_control import (
     terminate_process_tree,
 )
 
-MANAGER_VERSION = "1.0.0"
+MANAGER_VERSION = "1.1.0"
 REFERENCE_RECIPE_ID = "backend-corpus-studio"
-SUPPORTED_CREATION_RECIPES = frozenset({REFERENCE_RECIPE_ID})
+SUPPORTED_CREATION_RECIPES = frozenset(
+    {REFERENCE_RECIPE_ID, READINESS_V2_RECIPE_ID, READINESS_FLASH_V1_RECIPE_ID}
+)
 
 _OWNER_FILENAME = ".corpusstudio-owner.json"
 _OWNER_KIND = "corpus-studio-managed-environment-v1"
@@ -97,10 +109,12 @@ EnvironmentCommandPhase = Literal[
     "install",
     "verify",
     "lock",
+    "inventory",
     "import_probe",
     "dependency_probe",
     "functional_probe",
     "hardware_probe",
+    "capability_probe",
     "health_probe",
 ]
 
@@ -116,6 +130,70 @@ def _timestamp(now: Callable[[], datetime]) -> str:
 def _canonical_sha256(value: object) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _normalized_package_name(value: str) -> str:
+    return re.sub(r"[-_.]+", "-", value).lower()
+
+
+def _sanitize_url(value: str | None) -> str | None:
+    """Remove credentials, query parameters, and fragments from persisted source evidence."""
+    if not value:
+        return None
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    if not parsed.scheme:
+        return value
+    hostname = parsed.hostname or ""
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    port = f":{parsed.port}" if parsed.port is not None else ""
+    return urlunsplit((parsed.scheme, f"{hostname}{port}", parsed.path, "", ""))
+
+
+def _hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _worker_artifact_identity(path: str | Path) -> WorkerArtifactIdentity:
+    wheel = Path(path).expanduser().resolve(strict=True)
+    if not wheel.is_file() or wheel.suffix.casefold() != ".whl":
+        raise EnvironmentManagerError("the readiness worker artifact must be a concrete wheel")
+    try:
+        with zipfile.ZipFile(wheel) as archive:
+            metadata_names = sorted(
+                name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+            )
+            if len(metadata_names) != 1:
+                raise EnvironmentManagerError(
+                    "the worker wheel must contain exactly one dist-info/METADATA file"
+                )
+            metadata_bytes = archive.read(metadata_names[0])
+    except (OSError, zipfile.BadZipFile, KeyError) as exc:
+        raise EnvironmentManagerError(f"the worker wheel is unreadable: {exc}") from exc
+    metadata = Parser().parsestr(metadata_bytes.decode("utf-8", errors="strict"))
+    name = str(metadata.get("Name") or "")
+    version = str(metadata.get("Version") or "")
+    if not name or not version or _normalized_package_name(name) != "corpus-studio-engine":
+        raise EnvironmentManagerError(
+            "the worker wheel METADATA must identify the corpus-studio-engine distribution"
+        )
+    return WorkerArtifactIdentity(
+        distribution_name=name,
+        normalized_name=_normalized_package_name(name),
+        version=version,
+        filename=wheel.name,
+        path=str(wheel),
+        size_bytes=wheel.stat().st_size,
+        content_hash=HashRef(value=_hash_file(wheel)),
+        metadata_hash=HashRef(value=hashlib.sha256(metadata_bytes).hexdigest()),
+    )
 
 
 def _command_environment(extra: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -430,7 +508,9 @@ class EnvironmentManagerError(RuntimeError):
 @dataclass(frozen=True)
 class EnvironmentCreationResult:
     descriptor: EnvironmentDescriptor
-    lock: EnvironmentLock
+    # Probe failures deliberately return an unsealed result. A lock exists only after required
+    # evidence passes and the post-probe inventory is stable.
+    lock: EnvironmentLock | None
     health: EnvironmentHealthReport
     installation: EnvironmentInstallation
 
@@ -476,7 +556,7 @@ def _native_build_evidence(stderr: str, stdout: str) -> bool:
 
 
 _LOCK_PROBE = r"""
-import hashlib, importlib.metadata as metadata, json, os, platform, struct, sys
+import base64, csv, hashlib, importlib.metadata as metadata, io, json, os, platform, re, struct, sys
 packages = []
 for dist in metadata.distributions():
     name = dist.metadata.get("Name") or getattr(dist, "name", "")
@@ -486,10 +566,44 @@ for dist in metadata.distributions():
     except Exception: direct = None
     record = dist.read_text("RECORD")
     installer = dist.read_text("INSTALLER")
+    record_entries = 0
+    verified_entries = 0
+    failed_entries = []
+    if record:
+        for row in csv.reader(io.StringIO(record)):
+            if not row: continue
+            record_entries += 1
+            relative = row[0]
+            hash_spec = row[1] if len(row) > 1 else ""
+            if not hash_spec: continue
+            try:
+                algorithm, expected = hash_spec.split("=", 1)
+                path = dist.locate_file(relative)
+                digest = hashlib.new(algorithm, path.read_bytes()).digest()
+                actual = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+                if actual == expected:
+                    verified_entries += 1
+                else:
+                    failed_entries.append(relative)
+            except Exception:
+                failed_entries.append(relative)
+    if not record:
+        record_integrity = "missing"
+    elif failed_entries:
+        record_integrity = "failed"
+    elif verified_entries:
+        record_integrity = "verified"
+    else:
+        record_integrity = "unknown"
     packages.append({
       "name": name,
+      "normalized_name": re.sub(r"[-_.]+", "-", name).lower(),
       "version": dist.version,
       "record_sha256": hashlib.sha256(record.encode("utf-8")).hexdigest() if record else None,
+      "record_integrity": record_integrity,
+      "record_entries": record_entries,
+      "record_verified_entries": verified_entries,
+      "record_failed_entries": sorted(failed_entries),
       "direct_url": direct,
       "installer": installer.strip() if installer else None,
       "requested": dist.read_text("REQUESTED") is not None,
@@ -620,13 +734,13 @@ print(json.dumps(result, sort_keys=True))
 """.strip()
 
 
-_CAPABILITY_SNAPSHOT = r"""
+_CAPABILITY_SNAPSHOT_TEMPLATE = r"""
 import contextlib, json, sys
 from corpus_studio.platform.profiler import build_environment_profile
 from corpus_studio.platform.probes import run_capability_probes
 with contextlib.redirect_stdout(sys.stderr):
     profile = build_environment_profile()
-    report = run_capability_probes(profile)
+    report = run_capability_probes(profile, probes=__PROBES__)
 print(json.dumps({
   "profile": profile.model_dump(mode="json"),
   "capability_report": report.model_dump(mode="json"),
@@ -634,12 +748,19 @@ print(json.dumps({
 """.strip()
 
 
+def _capability_snapshot_script(probes: Sequence[str] | None) -> str:
+    return _CAPABILITY_SNAPSHOT_TEMPLATE.replace(
+        "__PROBES__", json.dumps(list(probes) if probes is not None else None, ensure_ascii=True)
+    )
+
+
 def _package_source(direct: object) -> tuple[PackageSource, str | None, str | None]:
     if not isinstance(direct, dict):
         # INSTALLER=pip does not prove which configured index supplied the artifact. Keep the source
         # unknown unless PEP 610 gives us direct evidence; the lock separately records reviewed URLs.
         return ("unknown", None, None)
-    url = str(direct.get("url") or "") or None
+    raw_url = str(direct.get("url") or "") or None
+    url = _sanitize_url(raw_url)
     source: PackageSource = "unknown"
     if "vcs_info" in direct:
         source = "vcs"
@@ -651,6 +772,117 @@ def _package_source(direct: object) -> tuple[PackageSource, str | None, str | No
     if url:
         artifact = Path(unquote(urlparse(url).path)).name or None
     return source, url, artifact
+
+
+def _direct_metadata(direct: object) -> tuple[bool | None, bool | None, str | None, str | None]:
+    if not isinstance(direct, dict):
+        return None, None, None, None
+    dir_info = direct.get("dir_info")
+    editable = bool(dir_info.get("editable")) if isinstance(dir_info, dict) else False
+    vcs_info = direct.get("vcs_info")
+    repository: str | None = None
+    commit: str | None = None
+    if isinstance(vcs_info, dict):
+        repository = _sanitize_url(str(direct.get("url") or ""))
+        commit = str(vcs_info.get("commit_id") or "") or None
+    return True, editable, repository, commit
+
+
+def _install_evidence_from_report(
+    report_path: Path,
+    *,
+    step: InstallStep,
+    command_id: str,
+) -> list[PackageInstallEvidence]:
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise EnvironmentManagerError(f"pip install evidence is missing or malformed: {exc}") from exc
+    raw_installs = payload.get("install") if isinstance(payload, dict) else None
+    if not isinstance(raw_installs, list):
+        raise EnvironmentManagerError("pip install evidence has no install list")
+    configured_indexes = [
+        sanitized
+        for value in step.configured_index_urls
+        if (sanitized := _sanitize_url(value)) is not None
+    ]
+    evidence: list[PackageInstallEvidence] = []
+    for raw in raw_installs:
+        if not isinstance(raw, dict):
+            continue
+        metadata = raw.get("metadata")
+        download = raw.get("download_info")
+        if not isinstance(metadata, dict) or not isinstance(download, dict):
+            continue
+        name = str(metadata.get("name") or "")
+        version = str(metadata.get("version") or "")
+        if not name or not version:
+            continue
+        raw_url = str(download.get("url") or "") or None
+        sanitized_url = _sanitize_url(raw_url)
+        is_direct = bool(raw.get("is_direct"))
+        archive_info = download.get("archive_info")
+        dir_info = download.get("dir_info")
+        vcs_info = download.get("vcs_info")
+        hashes = archive_info.get("hashes") if isinstance(archive_info, dict) else None
+        sha256 = str(hashes.get("sha256") or "") if isinstance(hashes, dict) else ""
+        artifact = (
+            Path(unquote(urlparse(sanitized_url).path)).name
+            if sanitized_url
+            else None
+        ) or None
+        if isinstance(vcs_info, dict):
+            source: PackageSource = "vcs"
+        elif is_direct and isinstance(dir_info, dict):
+            source = "local"
+        elif is_direct and isinstance(archive_info, dict):
+            source = "wheel" if artifact and artifact.casefold().endswith(".whl") else "sdist"
+        elif configured_indexes:
+            # Host identity only - avoid substring checks on full URLs (CodeQL).
+            if any(
+                (urlparse(item).hostname or "").casefold() in {"pypi.org", "www.pypi.org"}
+                for item in configured_indexes
+            ):
+                source = "pypi"
+            elif artifact and artifact.casefold().endswith(".whl"):
+                source = "wheel"
+            else:
+                source = "unknown"
+        else:
+            source = "unknown"
+        reason = None
+        if source == "unknown":
+            reason = (
+                "pip report did not prove an index or direct source"
+                if not configured_indexes
+                else "configured index is recorded but its source class is not recognized"
+            )
+        evidence.append(
+            PackageInstallEvidence(
+                normalized_name=_normalized_package_name(name),
+                version=version,
+                source=source,
+                source_index_url=configured_indexes[0]
+                if not is_direct and len(configured_indexes) == 1
+                else None,
+                direct_url=sanitized_url if is_direct else None,
+                artifact_filename=artifact,
+                artifact_hash=HashRef(value=sha256) if sha256 else None,
+                requested=bool(raw.get("requested")),
+                direct=is_direct,
+                editable=bool(dir_info.get("editable"))
+                if isinstance(dir_info, dict)
+                else False,
+                vcs_repository=sanitized_url if isinstance(vcs_info, dict) else None,
+                vcs_commit=str(vcs_info.get("commit_id") or "") or None
+                if isinstance(vcs_info, dict)
+                else None,
+                installer_command_id=command_id,
+                configured_index_urls=configured_indexes,
+                source_evidence_reason=reason,
+            )
+        )
+    return sorted(evidence, key=lambda item: (item.normalized_name, item.version))
 
 
 class EnvironmentManager:
@@ -692,6 +924,7 @@ class EnvironmentManager:
         env_id: str,
         runtime_executable: str | Path,
         accelerator_tag: str = "cpu",
+        worker_wheel: str | Path | None = None,
     ) -> DependencyResolution:
         recipe = get_recipe(recipe_id)
         if recipe is None:
@@ -707,7 +940,66 @@ class EnvironmentManager:
             environment_root=str(self.environment_root(env_id)),
             manager_version=MANAGER_VERSION,
         )
-        if recipe_id == REFERENCE_RECIPE_ID and recipe.layer == DependencyLayer.backend_worker:
+        if recipe.requires_worker_wheel and recipe.layer == DependencyLayer.backend_worker:
+            worker_artifact: WorkerArtifactIdentity | None = None
+            blocking = list(resolution.blocking_reasons)
+            if worker_wheel is None:
+                blocking.append(
+                    "readiness recipes require --worker-wheel pointing to a reviewed CorpusStudio wheel"
+                )
+            else:
+                try:
+                    worker_artifact = _worker_artifact_identity(worker_wheel)
+                except EnvironmentManagerError as exc:
+                    blocking.append(str(exc))
+            if worker_artifact is not None:
+                evidence_path = str(
+                    self.environment_root(env_id)
+                    / ".corpusstudio-install-evidence"
+                    / "install-worker.json"
+                )
+                environment_python = self._environment_python(
+                    self.environment_root(env_id), runtime.os
+                )
+                worker_step = InstallStep(
+                    phase="install",
+                    description="Install the exact hash-bound CorpusStudio worker wheel",
+                    argv=[
+                        environment_python,
+                        "-m",
+                        "pip",
+                        "--isolated",
+                        "install",
+                        "--disable-pip-version-check",
+                        "--no-input",
+                        "--no-index",
+                        "--no-deps",
+                        "--report",
+                        evidence_path,
+                        worker_artifact.path,
+                    ],
+                    working_directory=str(self.environment_root(env_id)),
+                    environment={"PIP_NO_INPUT": "1", "PYTHONUTF8": "1"},
+                    timeout_seconds=900,
+                    network_required=False,
+                    evidence_path=evidence_path,
+                )
+                resolution = resolution.model_copy(
+                    update={
+                        "install_steps": resolution.install_steps + [worker_step],
+                        "worker_artifact": worker_artifact,
+                        "resolution_hash": None,
+                    }
+                )
+            if blocking:
+                resolution = resolution.model_copy(
+                    update={
+                        "resolvable": False,
+                        "blocking_reasons": blocking,
+                        "resolution_hash": None,
+                    }
+                )
+        elif recipe_id == REFERENCE_RECIPE_ID and recipe.layer == DependencyLayer.backend_worker:
             environment_python = self._environment_python(
                 self.environment_root(env_id), runtime.os
             )
@@ -725,12 +1017,24 @@ class EnvironmentManager:
                     "--index-url",
                     "https://pypi.org/simple",
                     "--no-deps",
+                    "--report",
+                    str(
+                        self.environment_root(env_id)
+                        / ".corpusstudio-install-evidence"
+                        / "install-worker-source.json"
+                    ),
                     str(self.engine_source.resolve(strict=False)),
                 ],
                 working_directory=str(self.environment_root(env_id)),
                 environment={"PIP_NO_INPUT": "1", "PYTHONUTF8": "1"},
                 timeout_seconds=900,
                 network_required=True,
+                evidence_path=str(
+                    self.environment_root(env_id)
+                    / ".corpusstudio-install-evidence"
+                    / "install-worker-source.json"
+                ),
+                configured_index_urls=["https://pypi.org/simple"],
             )
             resolution = resolution.model_copy(
                 update={
@@ -839,22 +1143,134 @@ class EnvironmentManager:
             self._write_owner(env_root, env_id, created_at)
             for step in resolution.install_steps:
                 installation = self._execute_step(
-                    env_id, installation, step, cancel=cancel
+                    env_id,
+                    installation,
+                    step,
+                    cancel=cancel,
+                    require_evidence=recipe.requires_worker_wheel,
                 )
+            installation = installation.model_copy(
+                update={"worker_artifact": resolution.worker_artifact}
+            )
+            self._write_installation(env_id, installation)
             descriptor = self._update_descriptor(
                 descriptor, state=EnvironmentState.installed_unchecked
             )
 
-            lock, installation = self._capture_lock(
+            pre_probe, installation = self._capture_inventory(
                 descriptor, resolution, installation, cancel=cancel
             )
+            installation = installation.model_copy(
+                update={"pre_probe_inventory": pre_probe}
+            )
+            self._write_installation(env_id, installation)
+            probe_results, final_state, installation, probe_evidence = self._run_creation_probes(
+                descriptor,
+                installation,
+                recipe=recipe,
+                cancel=cancel,
+            )
+            installation = installation.model_copy(
+                update={
+                    "probe_results": probe_results,
+                    "probe_evidence": probe_evidence,
+                }
+            )
+            self._write_installation(env_id, installation)
+
+            required_probe_passed = (
+                recipe.required_execution_probe is None
+                or (
+                    final_state == EnvironmentState.hardware_verified
+                    and probe_evidence is not None
+                )
+            )
+            legacy_probe_passed = final_state in {
+                EnvironmentState.functional_probe_passed,
+                EnvironmentState.hardware_verified,
+            }
+            if not required_probe_passed or not legacy_probe_passed:
+                descriptor = self._update_descriptor(descriptor, state=final_state)
+                finished = _timestamp(self.now)
+                installation = installation.model_copy(
+                    update={"state": final_state, "finished_at": finished}
+                )
+                self._write_installation(env_id, installation)
+                health = EnvironmentHealthReport(
+                    environment_ref=Ref(id=env_id),
+                    recipe_ref=descriptor.recipe_ref,
+                    state=final_state,
+                    python_version=pre_probe.python_version,
+                    checked_at=finished,
+                    installed_packages=pre_probe.packages,
+                    probe_results=probe_results,
+                    probe_evidence=probe_evidence,
+                    remediation=self._probe_remediation(final_state),
+                )
+                self._write_health(env_id, health)
+                return EnvironmentCreationResult(descriptor, None, health, installation)
+
+            post_probe, installation = self._capture_inventory(
+                descriptor, resolution, installation, cancel=cancel
+            )
+            installation = installation.model_copy(
+                update={"post_probe_inventory": post_probe}
+            )
+            self._write_installation(env_id, installation)
+            inventory_drift, inventory_sources = self._package_drift(
+                pre_probe.packages, post_probe.packages
+            )
+            if inventory_drift or inventory_sources:
+                final_state = EnvironmentState.drifted
+                descriptor = self._update_descriptor(descriptor, state=final_state)
+                finished = _timestamp(self.now)
+                installation = installation.model_copy(
+                    update={"state": final_state, "finished_at": finished}
+                )
+                self._write_installation(env_id, installation)
+                health = EnvironmentHealthReport(
+                    environment_ref=Ref(id=env_id),
+                    recipe_ref=descriptor.recipe_ref,
+                    state=final_state,
+                    python_version=post_probe.python_version,
+                    checked_at=finished,
+                    installed_packages=post_probe.packages,
+                    drifted_packages=inventory_drift,
+                    changed_package_sources=inventory_sources,
+                    drift_detected=True,
+                    probe_results=probe_results,
+                    probe_evidence=probe_evidence,
+                    remediation="Recreate from a newly reviewed plan; probing changed the environment.",
+                )
+                self._write_health(env_id, health)
+                return EnvironmentCreationResult(descriptor, None, health, installation)
+
+            lock = self._finalize_lock(
+                post_probe,
+                resolution=resolution,
+                recipe=recipe,
+                installation=installation,
+                probe_evidence=probe_evidence,
+            )
+            self._write_lock(descriptor.env_id, lock)
             descriptor = self._update_descriptor(
                 descriptor,
                 lock_ref=Ref(id=lock.lock_id, hash=HashRef(value=lock.lock_hash)),
             )
-            probe_results, final_state, installation = self._run_creation_probes(
-                descriptor, installation, cancel=cancel
+
+            # A final live inventory is compared with the just-sealed state. This is the first point
+            # at which health/drift is evaluated against a final lock.
+            live_inventory = self._inspect_live_inventory(
+                descriptor, lock.recipe_ref, lock.index_urls, cancel
             )
+            drifted, changed_sources = self._package_drift(
+                lock.packages, live_inventory.packages
+            )
+            worker_drift = self._worker_artifact_drift(lock.worker_artifact)
+            if worker_drift:
+                drifted.append(worker_drift)
+            if drifted or changed_sources:
+                final_state = EnvironmentState.drifted
             descriptor = self._update_descriptor(descriptor, state=final_state)
             finished = _timestamp(self.now)
             installation = installation.model_copy(
@@ -869,7 +1285,11 @@ class EnvironmentManager:
                 python_version=lock.python_version,
                 checked_at=finished,
                 installed_packages=lock.packages,
+                drifted_packages=drifted,
+                changed_package_sources=changed_sources,
+                drift_detected=bool(drifted or changed_sources),
                 probe_results=probe_results,
+                probe_evidence=probe_evidence,
                 remediation=self._probe_remediation(final_state),
             )
             self._write_health(env_id, health)
@@ -988,7 +1408,7 @@ class EnvironmentManager:
             self._update_descriptor(descriptor, state=EnvironmentState.broken)
             return report
         try:
-            live_lock = self._inspect_live_lock(
+            live_inventory = self._inspect_live_inventory(
                 descriptor, lock.recipe_ref, lock.index_urls, cancel
             )
         except EnvironmentManagerError as exc:
@@ -1004,7 +1424,12 @@ class EnvironmentManager:
             self._write_health(env_id, report)
             self._update_descriptor(descriptor, state=EnvironmentState.broken)
             return report
-        drifted, changed_sources = self._package_drift(lock.packages, live_lock.packages)
+        drifted, changed_sources = self._package_drift(
+            lock.packages, live_inventory.packages
+        )
+        worker_drift = self._worker_artifact_drift(lock.worker_artifact)
+        if worker_drift:
+            drifted.append(worker_drift)
         recipe = get_recipe(descriptor.recipe_ref.id)
         recipe_drift = (
             recipe is None
@@ -1020,10 +1445,12 @@ class EnvironmentManager:
             lock.lock_hash != self._lock_digest(lock)
             or descriptor_lock_hash != lock.lock_hash
         )
-        cuda_mismatch = lock.cuda_runtime_version != live_lock.cuda_runtime_version
-        hardware_mismatch = lock.compute_capability != live_lock.compute_capability
+        cuda_mismatch = lock.cuda_runtime_version != live_inventory.cuda_runtime_version
+        hardware_mismatch = lock.compute_capability != live_inventory.compute_capability
 
-        probe_results, probe_state = self._health_probes(descriptor, cancel=cancel)
+        probe_results, probe_state, probe_evidence = self._health_probes(
+            descriptor, cancel=cancel
+        )
         drift = bool(
             drifted
             or changed_sources
@@ -1038,9 +1465,9 @@ class EnvironmentManager:
             recipe_ref=descriptor.recipe_ref,
             lock_ref=descriptor.lock_ref,
             state=state,
-            python_version=live_lock.python_version,
+            python_version=live_inventory.python_version,
             checked_at=checked_at,
-            installed_packages=live_lock.packages,
+            installed_packages=live_inventory.packages,
             drifted_packages=drifted,
             changed_package_sources=changed_sources,
             drift_detected=drift,
@@ -1049,6 +1476,7 @@ class EnvironmentManager:
             hardware_mismatch=hardware_mismatch,
             cuda_mismatch=cuda_mismatch,
             probe_results=probe_results,
+            probe_evidence=probe_evidence,
             remediation="Recreate from a newly reviewed plan; the live environment no longer matches its lock."
             if drift
             else self._probe_remediation(probe_state),
@@ -1084,10 +1512,16 @@ class EnvironmentManager:
                 f"managed environment '{env_id}' is {health.state.value}, not functionally verified"
             )
         descriptor = self.load_descriptor(env_id)
+        recipe = get_recipe(descriptor.recipe_ref.id)
+        probes = (
+            recipe.capability_probes
+            if recipe is not None and recipe.required_execution_probe is not None
+            else None
+        )
         payload = self._run_unjournaled_json_probe(
             descriptor,
             "capabilities",
-            _CAPABILITY_SNAPSHOT,
+            _capability_snapshot_script(probes),
             600,
             cancel,
         )
@@ -1225,7 +1659,7 @@ class EnvironmentManager:
         recipe = get_recipe(resolution.recipe_ref.id)
         if recipe is None or recipe.recipe_id not in SUPPORTED_CREATION_RECIPES:
             raise EnvironmentManagerError(
-                "creation is currently supported only for backend-corpus-studio"
+                "creation is currently supported only for CorpusStudio managed-worker recipes"
             )
         expected_recipe_hash = recipe_digest(recipe)
         if (
@@ -1243,11 +1677,22 @@ class EnvironmentManager:
         env_root = self.environment_root(env_id)
         if Path(resolution.environment_root).resolve(strict=False) != env_root:
             raise EnvironmentManagerError("the planned environment root is outside manager ownership")
+        if recipe.requires_worker_wheel:
+            if resolution.worker_artifact is None:
+                raise EnvironmentManagerError("the plan does not bind a CorpusStudio worker wheel")
+            current_worker = _worker_artifact_identity(resolution.worker_artifact.path)
+            if current_worker != resolution.worker_artifact:
+                raise EnvironmentManagerError(
+                    "the CorpusStudio worker wheel changed after this plan was reviewed"
+                )
         expected = self.preview(
             recipe.recipe_id,
             env_id=env_id,
             runtime_executable=resolution.runtime.executable,
             accelerator_tag=resolution.accelerator_tag,
+            worker_wheel=resolution.worker_artifact.path
+            if resolution.worker_artifact is not None
+            else None,
         )
         if expected != resolution:
             raise EnvironmentManagerError(
@@ -1270,8 +1715,12 @@ class EnvironmentManager:
         step: InstallStep,
         *,
         cancel: CancellationToken | None,
+        require_evidence: bool = False,
     ) -> EnvironmentInstallation:
-        return self._execute_recorded(
+        evidence_path = Path(step.evidence_path) if step.evidence_path else None
+        if evidence_path is not None:
+            evidence_path.parent.mkdir(parents=True, exist_ok=True)
+        installation = self._execute_recorded(
             env_id,
             installation,
             phase=step.phase,
@@ -1282,6 +1731,43 @@ class EnvironmentManager:
             expected_outputs=step.expected_outputs,
             cancel=cancel,
         )
+        if evidence_path is None:
+            return installation
+        if not evidence_path.is_file():
+            if not require_evidence:
+                return installation
+            failure = FailureRecord(
+                taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
+                message="pip did not produce required dependency-source evidence",
+                detail=str(evidence_path),
+            )
+            installation = self._mark_last_command_failure(env_id, installation, failure)
+            raise EnvironmentManagerError(failure.message, failure, installation)
+        try:
+            captured = _install_evidence_from_report(
+                evidence_path,
+                step=step,
+                command_id=installation.commands[-1].command_id,
+            )
+        except EnvironmentManagerError as exc:
+            installation = self._mark_last_command_failure(env_id, installation, exc.failure)
+            exc.installation = installation
+            raise
+        finally:
+            evidence_path.unlink(missing_ok=True)
+        by_name = {
+            item.normalized_name: item for item in installation.package_install_evidence
+        }
+        by_name.update({item.normalized_name: item for item in captured})
+        installation = installation.model_copy(
+            update={
+                "package_install_evidence": sorted(
+                    by_name.values(), key=lambda item: item.normalized_name
+                )
+            }
+        )
+        self._write_installation(env_id, installation)
+        return installation
 
     def _execute_recorded(
         self,
@@ -1398,18 +1884,18 @@ class EnvironmentManager:
             raise EnvironmentManagerError(failure.message, failure, installation)
         return installation
 
-    def _capture_lock(
+    def _capture_inventory(
         self,
         descriptor: EnvironmentDescriptor,
         resolution: DependencyResolution,
         installation: EnvironmentInstallation,
         *,
         cancel: CancellationToken | None,
-    ) -> tuple[EnvironmentLock, EnvironmentInstallation]:
+    ) -> tuple[InstalledEnvironmentEvidence, EnvironmentInstallation]:
         installation = self._execute_recorded(
             descriptor.env_id,
             installation,
-            phase="lock",
+            phase="inventory",
             argv=[descriptor.python_executable, "-c", _LOCK_PROBE],
             cwd=Path(descriptor.root_path),
             environment=_command_environment(),
@@ -1419,11 +1905,13 @@ class EnvironmentManager:
         output = Path(installation.commands[-1].stdout_path or "")
         try:
             payload = _last_json_object(_read_tail(output, _LOCK_OUTPUT_LIMIT))
-            lock = self._lock_from_payload(
+            inventory = self._inventory_from_payload(
                 descriptor,
                 resolution.recipe_ref,
                 resolution.resolved_index_urls,
                 payload,
+                package_install_evidence=installation.package_install_evidence,
+                worker_artifact=resolution.worker_artifact,
             )
         except EnvironmentManagerError as exc:
             installation = self._mark_last_command_failure(
@@ -1434,32 +1922,31 @@ class EnvironmentManager:
         except (ValueError, json.JSONDecodeError) as exc:
             failure = FailureRecord(
                 taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
-                message="the environment lock probe returned malformed data",
+                message="the environment inventory probe returned malformed data",
                 detail=str(exc),
             )
             installation = self._mark_last_command_failure(
                 descriptor.env_id, installation, failure
             )
             raise EnvironmentManagerError(
-                "the environment lock probe returned malformed data",
+                "the environment inventory probe returned malformed data",
                 failure,
                 installation,
             ) from exc
-        self._write_lock(descriptor.env_id, lock)
-        return lock, installation
+        return inventory, installation
 
-    def _inspect_live_lock(
+    def _inspect_live_inventory(
         self,
         descriptor: EnvironmentDescriptor,
         recipe_ref: Ref,
         index_urls: Sequence[str],
         cancel: CancellationToken | None,
-    ) -> EnvironmentLock:
+    ) -> InstalledEnvironmentEvidence:
         registry = self._registry_dir(descriptor.env_id)
         log_dir = registry / "logs" / "health"
         stamp = uuid.uuid4().hex[:12]
-        stdout_path = log_dir / f"{stamp}-lock.stdout.log"
-        stderr_path = log_dir / f"{stamp}-lock.stderr.log"
+        stdout_path = log_dir / f"{stamp}-inventory.stdout.log"
+        stderr_path = log_dir / f"{stamp}-inventory.stderr.log"
         try:
             outcome = self.runner(
                 [descriptor.python_executable, "-c", _LOCK_PROBE],
@@ -1472,10 +1959,10 @@ class EnvironmentManager:
             )
         except Exception as exc:
             raise EnvironmentManagerError(
-                "failed to start live environment lock inspection",
+                "failed to start live environment inventory inspection",
                 FailureRecord(
                     taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
-                    message="failed to start live environment lock inspection",
+                    message="failed to start live environment inventory inspection",
                     detail=str(exc),
                     exception_type=type(exc).__name__,
                 ),
@@ -1494,57 +1981,113 @@ class EnvironmentManager:
             )
         try:
             payload = _last_json_object(_read_tail(stdout_path, _LOCK_OUTPUT_LIMIT))
-            return self._lock_from_payload(descriptor, recipe_ref, index_urls, payload)
+            return self._inventory_from_payload(descriptor, recipe_ref, index_urls, payload)
         except (ValueError, json.JSONDecodeError) as exc:
             raise EnvironmentManagerError(
-                "the live environment lock probe returned malformed data",
+                "the live environment inventory probe returned malformed data",
                 FailureRecord(
                     taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
-                    message="the live environment lock probe returned malformed data",
+                    message="the live environment inventory probe returned malformed data",
                     detail=str(exc),
                 ),
             ) from exc
 
-    def _lock_from_payload(
+    def _inventory_from_payload(
         self,
         descriptor: EnvironmentDescriptor,
         recipe_ref: Ref,
         index_urls: Sequence[str],
         payload: Mapping[str, object],
-    ) -> EnvironmentLock:
+        *,
+        package_install_evidence: Sequence[PackageInstallEvidence] = (),
+        worker_artifact: WorkerArtifactIdentity | None = None,
+    ) -> InstalledEnvironmentEvidence:
         raw_runtime = payload.get("runtime")
         raw_packages = payload.get("packages")
         raw_torch = payload.get("torch")
         if not isinstance(raw_runtime, dict) or not isinstance(raw_packages, list):
-            raise EnvironmentManagerError("the environment lock probe returned malformed data")
+            raise EnvironmentManagerError("the environment inventory probe returned malformed data")
         runtime = _runtime_from_payload(raw_runtime, ">=3.11")
+        evidence_by_name = {
+            item.normalized_name: item for item in package_install_evidence
+        }
         packages: list[PackageLock] = []
         for raw in raw_packages:
             if not isinstance(raw, dict):
                 continue
             installer = str(raw.get("installer") or "") or None
             source, direct_url, artifact = _package_source(raw.get("direct_url"))
+            direct, editable, vcs_repository, vcs_commit = _direct_metadata(
+                raw.get("direct_url")
+            )
             record_hash = str(raw.get("record_sha256") or "") or None
+            name = str(raw.get("name") or "")
+            normalized_name = str(raw.get("normalized_name") or "") or _normalized_package_name(
+                name
+            )
+            install_evidence = evidence_by_name.get(normalized_name)
+            if install_evidence is not None:
+                source = install_evidence.source
+                direct_url = install_evidence.direct_url
+                artifact = install_evidence.artifact_filename
+                direct = install_evidence.direct
+                editable = install_evidence.editable
+                vcs_repository = install_evidence.vcs_repository
+                vcs_commit = install_evidence.vcs_commit
+            artifact_hash = (
+                install_evidence.artifact_hash if install_evidence is not None else None
+            )
+            if worker_artifact is not None and normalized_name == worker_artifact.normalized_name:
+                artifact = worker_artifact.filename
+                artifact_hash = worker_artifact.content_hash
+            raw_integrity = str(raw.get("record_integrity") or "unknown")
+            record_integrity = cast(
+                Literal["verified", "failed", "missing", "unknown"],
+                raw_integrity
+                if raw_integrity in {"verified", "failed", "missing", "unknown"}
+                else "unknown",
+            )
             packages.append(
                 PackageLock(
-                    name=str(raw.get("name") or ""),
+                    name=name,
+                    normalized_name=normalized_name,
                     version=str(raw.get("version") or "") or None,
                     hash=HashRef(value=record_hash) if record_hash else None,
                     source=source,
+                    source_index_url=install_evidence.source_index_url
+                    if install_evidence is not None
+                    else None,
                     direct_url=direct_url,
                     artifact=artifact,
+                    artifact_hash=artifact_hash,
                     installer=installer,
                     requested=bool(raw.get("requested")),
+                    direct=direct,
+                    editable=editable,
+                    vcs_repository=vcs_repository,
+                    vcs_commit=vcs_commit,
+                    source_evidence_reason=install_evidence.source_evidence_reason
+                    if install_evidence is not None
+                    else (
+                        None
+                        if source != "unknown"
+                        else "installed metadata and pip reports did not prove the source"
+                    ),
+                    record_integrity=record_integrity,
+                    record_entries=int(raw.get("record_entries") or 0),
+                    record_verified_entries=int(raw.get("record_verified_entries") or 0),
+                    record_failed_entries=sorted(
+                        str(item) for item in raw.get("record_failed_entries") or []
+                    ),
                     dependencies=sorted(str(item) for item in raw.get("dependencies") or []),
                 )
             )
         packages.sort(key=lambda package: package.name.casefold())
         torch_data = raw_torch if isinstance(raw_torch, dict) else {}
-        draft = EnvironmentLock(
-            lock_id="lock-pending",
+        draft = InstalledEnvironmentEvidence(
+            evidence_id="inventory-pending",
             recipe_ref=recipe_ref,
-            created_at=_timestamp(self.now),
-            manager_version=MANAGER_VERSION,
+            captured_at=_timestamp(self.now),
             runtime=runtime,
             python_version=runtime.version,
             platform_tag=runtime.platform,
@@ -1554,29 +2097,240 @@ class EnvironmentManager:
             torch_build=str(torch_data.get("build") or "") or None,
             cuda_runtime_version=str(torch_data.get("cuda") or "") or None,
             compute_capability=str(torch_data.get("compute_capability") or "") or None,
-            index_urls=list(index_urls),
+            index_urls=[item for value in index_urls if (item := _sanitize_url(value))],
             packages=packages,
+            package_install_evidence=list(package_install_evidence),
+            worker_artifact=worker_artifact,
+            evidence_hash="0" * 64,
+        )
+        digest = _canonical_sha256(
+            draft.model_dump(
+                mode="json", exclude={"evidence_id", "captured_at", "evidence_hash"}
+            )
+        )
+        return draft.model_copy(
+            update={
+                "evidence_id": f"inventory-{digest[:20]}",
+                "evidence_hash": digest,
+            }
+        )
+
+    def _lock_digest(self, lock: EnvironmentLock) -> str:
+        body = lock.model_dump(
+            mode="json",
+            exclude={"lock_id", "created_at", "lock_hash"},
+        )
+        legacy_packages = all(
+            not item.normalized_name
+            and item.source_index_url is None
+            and item.artifact_hash is None
+            and item.direct is None
+            and item.editable is None
+            and item.vcs_repository is None
+            and item.vcs_commit is None
+            and item.source_evidence_reason is None
+            and item.record_integrity == "unknown"
+            and item.record_entries is None
+            and item.record_verified_entries is None
+            and not item.record_failed_entries
+            for item in lock.packages
+        )
+        if (
+            lock.resolution_ref is None
+            and not lock.package_install_evidence
+            and lock.worker_artifact is None
+            and lock.probe_evidence is None
+            and legacy_packages
+        ):
+            body.pop("resolution_ref", None)
+            body.pop("package_install_evidence", None)
+            body.pop("worker_artifact", None)
+            body.pop("probe_evidence", None)
+            package_fields = {
+                "normalized_name",
+                "source_index_url",
+                "artifact_hash",
+                "direct",
+                "editable",
+                "vcs_repository",
+                "vcs_commit",
+                "source_evidence_reason",
+                "record_integrity",
+                "record_entries",
+                "record_verified_entries",
+                "record_failed_entries",
+            }
+            for package in body.get("packages", []):
+                for field_name in package_fields:
+                    package.pop(field_name, None)
+        return _canonical_sha256(body)
+
+    def _finalize_lock(
+        self,
+        inventory: InstalledEnvironmentEvidence,
+        *,
+        resolution: DependencyResolution,
+        recipe: EnvironmentRecipe,
+        installation: EnvironmentInstallation,
+        probe_evidence: EnvironmentProbeEvidence | None,
+    ) -> EnvironmentLock:
+        """Seal a lock only after every recipe-required post-install fact is present."""
+        if recipe.required_execution_probe is not None:
+            if probe_evidence is None:
+                raise EnvironmentManagerError(
+                    "the environment lock cannot be finalized before the complete QLoRA probe passes"
+                )
+            if probe_evidence.required_spec != recipe.required_execution_probe:
+                raise EnvironmentManagerError("probe evidence does not match the reviewed recipe tuple")
+            tuple_result = probe_evidence.tuple_result
+            if (
+                tuple_result.outcome != FailureTaxonomy.PASS
+                or recipe.required_execution_probe.execution_combination
+                not in tuple_result.execution_combinations
+            ):
+                raise EnvironmentManagerError(
+                    "independent probe results cannot replace the required complete QLoRA tuple"
+                )
+            if probe_evidence.evidence_hash != self._probe_evidence_digest(probe_evidence):
+                raise EnvironmentManagerError("the complete QLoRA probe evidence hash is invalid")
+            bad_records = [
+                item.name
+                for item in inventory.packages
+                if item.record_integrity != "verified"
+            ]
+            if bad_records:
+                raise EnvironmentManagerError(
+                    "the environment lock cannot be finalized without verified installed RECORDs: "
+                    + ", ".join(sorted(bad_records, key=str.casefold))
+                )
+            installed_versions = {
+                item.normalized_name or _normalized_package_name(item.name): item.version
+                for item in inventory.packages
+            }
+            version_mismatches: list[str] = []
+            for requirement in recipe.dependency_requirements:
+                specifier = requirement.specifier or ""
+                exact = specifier.split(";", 1)[0].strip()
+                if not exact.startswith("=="):
+                    continue
+                expected_version = exact[2:]
+                observed_version = installed_versions.get(
+                    _normalized_package_name(requirement.name)
+                )
+                if observed_version != expected_version:
+                    version_mismatches.append(
+                        f"{requirement.name}: expected {expected_version}, observed {observed_version}"
+                    )
+            if (
+                recipe.bootstrap_pip_version is not None
+                and installed_versions.get("pip") != recipe.bootstrap_pip_version
+            ):
+                version_mismatches.append(
+                    "pip: expected "
+                    f"{recipe.bootstrap_pip_version}, observed {installed_versions.get('pip')}"
+                )
+            if version_mismatches:
+                raise EnvironmentManagerError(
+                    "installed dependencies do not match the exact recipe: "
+                    + "; ".join(version_mismatches)
+                )
+            if resolution.worker_artifact is None:
+                raise EnvironmentManagerError("the environment lock has no worker artifact identity")
+            worker_install = next(
+                (
+                    item
+                    for item in installation.package_install_evidence
+                    if item.normalized_name == resolution.worker_artifact.normalized_name
+                ),
+                None,
+            )
+            expected_worker_url = _sanitize_url(
+                Path(resolution.worker_artifact.path).resolve(strict=True).as_uri()
+            )
+            if (
+                worker_install is None
+                or worker_install.source != "wheel"
+                or worker_install.direct is not True
+                or worker_install.direct_url != expected_worker_url
+                or worker_install.artifact_filename != resolution.worker_artifact.filename
+                or worker_install.artifact_hash != resolution.worker_artifact.content_hash
+            ):
+                raise EnvironmentManagerError(
+                    "pip evidence does not prove installation of the reviewed worker wheel"
+                )
+            worker_package = next(
+                (
+                    item
+                    for item in inventory.packages
+                    if item.normalized_name == resolution.worker_artifact.normalized_name
+                ),
+                None,
+            )
+            if (
+                worker_package is None
+                or worker_package.version != resolution.worker_artifact.version
+                or worker_package.artifact_hash != resolution.worker_artifact.content_hash
+            ):
+                raise EnvironmentManagerError(
+                    "the installed CorpusStudio worker does not match the reviewed wheel identity"
+                )
+        draft = EnvironmentLock(
+            lock_id="lock-pending",
+            recipe_ref=inventory.recipe_ref,
+            resolution_ref=installation.resolution_ref,
+            created_at=_timestamp(self.now),
+            manager_version=MANAGER_VERSION,
+            runtime=inventory.runtime,
+            python_version=inventory.python_version,
+            platform_tag=inventory.platform_tag,
+            architecture=inventory.architecture,
+            implementation=inventory.implementation,
+            torch_version=inventory.torch_version,
+            torch_build=inventory.torch_build,
+            cuda_runtime_version=inventory.cuda_runtime_version,
+            compute_capability=inventory.compute_capability,
+            index_urls=inventory.index_urls,
+            packages=inventory.packages,
+            package_install_evidence=installation.package_install_evidence,
+            worker_artifact=resolution.worker_artifact,
+            probe_evidence=probe_evidence,
         )
         digest = self._lock_digest(draft)
         return draft.model_copy(
             update={"lock_id": f"lock-{digest[:20]}", "lock_hash": digest}
         )
 
-    def _lock_digest(self, lock: EnvironmentLock) -> str:
+    def _probe_evidence_digest(self, evidence: EnvironmentProbeEvidence) -> str:
         return _canonical_sha256(
-            lock.model_dump(
-                mode="json",
-                exclude={"lock_id", "created_at", "lock_hash"},
-            )
+            evidence.model_dump(mode="json", exclude={"evidence_id", "evidence_hash"})
         )
+
+    def _worker_artifact_drift(
+        self, artifact: WorkerArtifactIdentity | None
+    ) -> str | None:
+        if artifact is None:
+            return None
+        try:
+            current = _worker_artifact_identity(artifact.path)
+        except (EnvironmentManagerError, OSError) as exc:
+            return f"{artifact.distribution_name}: worker artifact unavailable ({exc})"
+        if current != artifact:
+            return f"{artifact.distribution_name}: worker artifact identity changed"
+        return None
 
     def _run_creation_probes(
         self,
         descriptor: EnvironmentDescriptor,
         installation: EnvironmentInstallation,
         *,
+        recipe: EnvironmentRecipe,
         cancel: CancellationToken | None,
-    ) -> tuple[list[ProbeResult], EnvironmentState, EnvironmentInstallation]:
+    ) -> tuple[
+        list[ProbeResult],
+        EnvironmentState,
+        EnvironmentInstallation,
+        EnvironmentProbeEvidence | None,
+    ]:
         results: list[ProbeResult] = []
         installation, import_result = self._json_probe(
             descriptor,
@@ -1600,7 +2354,7 @@ class EnvironmentManager:
             )
         )
         if not imports_ok:
-            return results, EnvironmentState.degraded, installation
+            return results, EnvironmentState.degraded, installation, None
 
         descriptor = self._update_descriptor(descriptor, state=EnvironmentState.importable)
         installation = self._execute_recorded(
@@ -1627,7 +2381,7 @@ class EnvironmentManager:
             )
         )
         if dependency_failure is not None:
-            return results, EnvironmentState.degraded, installation
+            return results, EnvironmentState.degraded, installation, None
         descriptor = self._update_descriptor(
             descriptor, state=EnvironmentState.dependency_probe_passed
         )
@@ -1652,7 +2406,7 @@ class EnvironmentManager:
             )
         )
         if not functional_ok:
-            return results, EnvironmentState.degraded, installation
+            return results, EnvironmentState.degraded, installation, None
         descriptor = self._update_descriptor(
             descriptor, state=EnvironmentState.functional_probe_passed
         )
@@ -1687,14 +2441,117 @@ class EnvironmentManager:
                 measured=hardware,
             )
         )
-        return results, state, installation
+        if recipe.required_execution_probe is None:
+            return results, state, installation, None
+        if state != EnvironmentState.hardware_verified:
+            return results, EnvironmentState.incompatible, installation, None
+
+        installation, capability_payload = self._json_probe(
+            descriptor,
+            installation,
+            phase="capability_probe",
+            script=_capability_snapshot_script(recipe.capability_probes),
+            timeout_seconds=900,
+            cancel=cancel,
+        )
+        try:
+            capability_results, evidence = self._complete_probe_evidence(
+                capability_payload, recipe.required_execution_probe
+            )
+        except EnvironmentManagerError as exc:
+            results.append(
+                ProbeResult(
+                    probe=recipe.required_execution_probe.probe,
+                    outcome=FailureTaxonomy.FAIL,
+                    detail=str(exc),
+                )
+            )
+            return results, EnvironmentState.incompatible, installation, None
+        results.extend(capability_results)
+        return results, EnvironmentState.hardware_verified, installation, evidence
+
+    def _complete_probe_evidence(
+        self,
+        payload: Mapping[str, object],
+        required: QloraExecutionProbeSpec,
+    ) -> tuple[list[ProbeResult], EnvironmentProbeEvidence]:
+        raw_profile = payload.get("profile")
+        raw_report = payload.get("capability_report")
+        if not isinstance(raw_profile, dict) or not isinstance(raw_report, dict):
+            raise EnvironmentManagerError(
+                "the complete QLoRA probe did not emit a profile and capability report"
+            )
+        try:
+            profile = EnvironmentProfile.model_validate(raw_profile)
+            report = CapabilityReport.model_validate(raw_report)
+        except ValueError as exc:
+            raise EnvironmentManagerError(
+                f"the complete QLoRA probe emitted invalid contracts: {exc}"
+            ) from exc
+        if (
+            report.backend_id != "corpus_studio"
+            or report.environment_ref.id != profile.environment_signature
+        ):
+            raise EnvironmentManagerError(
+                "the complete QLoRA capability report does not match its environment profile"
+            )
+        tuple_results = [item for item in report.probe_results if item.probe == required.probe]
+        if len(tuple_results) != 1:
+            raise EnvironmentManagerError(
+                "the capability report must contain exactly one complete QLoRA tuple result"
+            )
+        tuple_result = tuple_results[0]
+        if (
+            tuple_result.outcome != FailureTaxonomy.PASS
+            or required.execution_combination not in tuple_result.execution_combinations
+        ):
+            raise EnvironmentManagerError(
+                "the required complete QLoRA tuple did not pass as one probe"
+            )
+        runtime = tuple_result.measured.get("runtime")
+        package_versions = runtime.get("packages") if isinstance(runtime, dict) else None
+        if not isinstance(package_versions, dict):
+            raise EnvironmentManagerError(
+                "the complete QLoRA tuple did not record dependency runtime versions"
+            )
+        observed_names = {_normalized_package_name(str(name)) for name in package_versions}
+        missing = sorted(set(required.required_distributions) - observed_names)
+        if missing:
+            raise EnvironmentManagerError(
+                "the complete QLoRA tuple omitted runtime versions for: " + ", ".join(missing)
+            )
+        raw_memory = tuple_result.measured.get("memory")
+        try:
+            memory = ProbeMemoryEvidence.model_validate(raw_memory)
+        except ValueError as exc:
+            raise EnvironmentManagerError(
+                f"the complete QLoRA tuple emitted invalid memory evidence: {exc}"
+            ) from exc
+        report_hash = _canonical_sha256(report.model_dump(mode="json"))
+        draft = EnvironmentProbeEvidence(
+            evidence_id="probe-evidence-pending",
+            required_spec=required,
+            profile_signature=profile.environment_signature,
+            capability_report_hash=HashRef(value=report_hash),
+            tuple_result=tuple_result,
+            memory=memory,
+            evidence_hash="0" * 64,
+        )
+        evidence_hash = self._probe_evidence_digest(draft)
+        evidence = draft.model_copy(
+            update={
+                "evidence_id": f"probe-evidence-{evidence_hash[:20]}",
+                "evidence_hash": evidence_hash,
+            }
+        )
+        return report.probe_results, evidence
 
     def _health_probes(
         self,
         descriptor: EnvironmentDescriptor,
         *,
         cancel: CancellationToken | None,
-    ) -> tuple[list[ProbeResult], EnvironmentState]:
+    ) -> tuple[list[ProbeResult], EnvironmentState, EnvironmentProbeEvidence | None]:
         results: list[ProbeResult] = []
         imports = self._run_unjournaled_json_probe(
             descriptor, "import", _IMPORT_PROBE, 180, cancel
@@ -1712,7 +2569,7 @@ class EnvironmentManager:
             )
         )
         if not imports_ok:
-            return results, EnvironmentState.degraded
+            return results, EnvironmentState.degraded, None
         dependency_outcome, dependency_detail = self._run_unjournaled_command(
             descriptor,
             "dependency",
@@ -1737,7 +2594,7 @@ class EnvironmentManager:
             )
         )
         if not dependency_ok:
-            return results, EnvironmentState.degraded
+            return results, EnvironmentState.degraded, None
         functional = self._run_unjournaled_json_probe(
             descriptor, "functional", _FUNCTIONAL_PROBE, 180, cancel
         )
@@ -1750,7 +2607,7 @@ class EnvironmentManager:
             )
         )
         if not functional_ok:
-            return results, EnvironmentState.degraded
+            return results, EnvironmentState.degraded, None
         hardware = self._run_unjournaled_json_probe(
             descriptor, "hardware", _HARDWARE_PROBE, 240, cancel
         )
@@ -1770,14 +2627,44 @@ class EnvironmentManager:
                 measured=hardware,
             )
         )
-        return results, state
+        recipe = get_recipe(descriptor.recipe_ref.id)
+        required = recipe.required_execution_probe if recipe is not None else None
+        if required is None:
+            return results, state, None
+        assert recipe is not None
+        if state != EnvironmentState.hardware_verified:
+            return results, EnvironmentState.incompatible, None
+        capability_payload = self._run_unjournaled_json_probe(
+            descriptor,
+            "capability",
+            _capability_snapshot_script(recipe.capability_probes),
+            900,
+            cancel,
+        )
+        try:
+            capability_results, evidence = self._complete_probe_evidence(
+                capability_payload, required
+            )
+        except EnvironmentManagerError as exc:
+            results.append(
+                ProbeResult(
+                    probe=required.probe,
+                    outcome=FailureTaxonomy.FAIL,
+                    detail=str(exc),
+                )
+            )
+            return results, EnvironmentState.incompatible, None
+        results.extend(capability_results)
+        return results, EnvironmentState.hardware_verified, evidence
 
     def _json_probe(
         self,
         descriptor: EnvironmentDescriptor,
         installation: EnvironmentInstallation,
         *,
-        phase: Literal["import_probe", "functional_probe", "hardware_probe"],
+        phase: Literal[
+            "import_probe", "functional_probe", "hardware_probe", "capability_probe"
+        ],
         script: str,
         timeout_seconds: int,
         cancel: CancellationToken | None,
@@ -1884,8 +2771,14 @@ class EnvironmentManager:
     def _package_drift(
         self, expected: Sequence[PackageLock], actual: Sequence[PackageLock]
     ) -> tuple[list[str], list[str]]:
-        expected_by_name = {item.name.casefold(): item for item in expected}
-        actual_by_name = {item.name.casefold(): item for item in actual}
+        expected_by_name = {
+            item.normalized_name or _normalized_package_name(item.name): item
+            for item in expected
+        }
+        actual_by_name = {
+            item.normalized_name or _normalized_package_name(item.name): item
+            for item in actual
+        }
         drifted: list[str] = []
         sources: list[str] = []
         for name in sorted(expected_by_name.keys() | actual_by_name.keys()):
@@ -1904,7 +2797,25 @@ class EnvironmentManager:
             after_hash = after.hash.value if after.hash else None
             if before_hash != after_hash:
                 drifted.append(f"{before.name}: installed RECORD hash changed")
-            if before.source != after.source or before.direct_url != after.direct_url:
+            if after.record_integrity == "failed":
+                drifted.append(f"{before.name}: installed RECORD file integrity failed")
+            elif (
+                before.record_integrity not in {"unknown", "missing"}
+                and after.record_integrity != before.record_integrity
+            ):
+                drifted.append(
+                    f"{before.name}: RECORD integrity {before.record_integrity} -> "
+                    f"{after.record_integrity}"
+                )
+            if before.direct_url != after.direct_url and (
+                before.direct_url is not None or after.direct_url is not None
+            ):
+                sources.append(f"{before.name}: direct source changed")
+            elif (
+                before.source != "unknown"
+                and after.source != "unknown"
+                and before.source != after.source
+            ):
                 sources.append(f"{before.name}: {before.source} -> {after.source}")
         return drifted, sources
 

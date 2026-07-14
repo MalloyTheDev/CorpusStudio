@@ -1,5 +1,58 @@
 {
   "$defs": {
+    "AdapterMethod": {
+      "enum": [
+        "none",
+        "lora",
+        "qlora",
+        "dora",
+        "ia3",
+        "full_finetune",
+        "prompt_tuning",
+        "prefix_tuning"
+      ],
+      "title": "AdapterMethod",
+      "type": "string"
+    },
+    "AttentionImpl": {
+      "description": "``math``/``eager`` is forced on native-Windows/WDDM Blackwell sm_120 because the fused flash\nkernel deadlocks there. Other platforms require their own functional capability result; WSL\nevidence is not bare-Linux proof.",
+      "enum": [
+        "math",
+        "eager",
+        "sdpa",
+        "flash_attention_2",
+        "flash_attention_3",
+        "mem_efficient",
+        "xformers"
+      ],
+      "title": "AttentionImpl",
+      "type": "string"
+    },
+    "AttentionKernel": {
+      "description": "The exact attention implementation an execution policy permits at runtime.",
+      "enum": [
+        "eager",
+        "torch_sdpa_math",
+        "torch_sdpa_flash",
+        "torch_sdpa_mem_efficient",
+        "flash_attention_2",
+        "flash_attention_3",
+        "xformers"
+      ],
+      "title": "AttentionKernel",
+      "type": "string"
+    },
+    "CheckpointImpl": {
+      "enum": [
+        "full_state",
+        "adapter_only",
+        "sharded",
+        "distcp",
+        "safetensors"
+      ],
+      "title": "CheckpointImpl",
+      "type": "string"
+    },
     "DependencyConflict": {
       "additionalProperties": false,
       "properties": {
@@ -85,6 +138,116 @@
       "title": "DependencyRequirement",
       "type": "object"
     },
+    "DeviceKind": {
+      "enum": [
+        "cuda",
+        "rocm",
+        "mps",
+        "xpu",
+        "cpu"
+      ],
+      "title": "DeviceKind",
+      "type": "string"
+    },
+    "ExecutionCapabilityCombination": {
+      "additionalProperties": false,
+      "description": "One execution tuple demonstrated together by a bounded functional probe.\n\nIndependent successes on precision, quantization, adapter, optimizer, loss, attention, and\ncheckpoint axes are diagnostic only. The planner may seal a run only from one of these complete\ntuples, preventing a union of unrelated probes from becoming a fictional capability.",
+      "properties": {
+        "adapter_method": {
+          "$ref": "#/$defs/AdapterMethod"
+        },
+        "attention_impl": {
+          "$ref": "#/$defs/AttentionImpl"
+        },
+        "attention_kernel": {
+          "$ref": "#/$defs/AttentionKernel"
+        },
+        "checkpoint_impl": {
+          "$ref": "#/$defs/CheckpointImpl"
+        },
+        "device": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "execution_contract_version": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Execution Contract Version",
+          "type": "string"
+        },
+        "export_format": {
+          "$ref": "#/$defs/ExportFormat"
+        },
+        "loss_impl": {
+          "$ref": "#/$defs/LossImpl"
+        },
+        "optimizer": {
+          "$ref": "#/$defs/Optimizer"
+        },
+        "precision": {
+          "$ref": "#/$defs/PrecisionMode"
+        },
+        "probe": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Probe",
+          "type": "string"
+        },
+        "quantization": {
+          "$ref": "#/$defs/QuantizationMode"
+        },
+        "runtime_mode": {
+          "enum": [
+            "training",
+            "cpu_toy"
+          ],
+          "title": "Runtime Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtime_mode",
+        "device",
+        "precision",
+        "quantization",
+        "adapter_method",
+        "attention_impl",
+        "attention_kernel",
+        "optimizer",
+        "loss_impl",
+        "checkpoint_impl",
+        "export_format",
+        "execution_contract_version",
+        "probe"
+      ],
+      "title": "ExecutionCapabilityCombination",
+      "type": "object"
+    },
+    "ExportFormat": {
+      "enum": [
+        "adapter_peft",
+        "merged_safetensors",
+        "merged_fp16",
+        "gguf",
+        "onnx",
+        "awq",
+        "gptq",
+        "mlx"
+      ],
+      "title": "ExportFormat",
+      "type": "string"
+    },
+    "LossImpl": {
+      "enum": [
+        "cross_entropy",
+        "liger_fused_ce",
+        "chunked_ce",
+        "dpo",
+        "orpo",
+        "kto",
+        "ipo",
+        "reward_bt"
+      ],
+      "title": "LossImpl",
+      "type": "string"
+    },
     "OperatingSystem": {
       "enum": [
         "windows",
@@ -94,6 +257,148 @@
         "unknown"
       ],
       "title": "OperatingSystem",
+      "type": "string"
+    },
+    "Optimizer": {
+      "enum": [
+        "adamw_torch",
+        "adamw_torch_fused",
+        "adamw_8bit",
+        "adamw_bnb_8bit",
+        "paged_adamw_8bit",
+        "paged_adamw_32bit",
+        "adafactor",
+        "lion",
+        "sgd"
+      ],
+      "title": "Optimizer",
+      "type": "string"
+    },
+    "PrecisionMode": {
+      "enum": [
+        "fp32",
+        "tf32",
+        "fp16",
+        "bf16",
+        "fp8",
+        "mixed_bf16",
+        "mixed_fp16"
+      ],
+      "title": "PrecisionMode",
+      "type": "string"
+    },
+    "QloraExecutionProbeSpec": {
+      "additionalProperties": false,
+      "description": "The exact complete QLoRA tuple a readiness environment must prove as one operation.\n\nMath and flash tuples are independent identities. A math-only seal is never a flash claim, and\nindependent flash/bitsandbytes/optimizer probes cannot be unioned into a complete capability.",
+      "properties": {
+        "attention_api": {
+          "const": "sdpa",
+          "default": "sdpa",
+          "title": "Attention Api",
+          "type": "string"
+        },
+        "compute_dtype": {
+          "const": "bf16",
+          "default": "bf16",
+          "title": "Compute Dtype",
+          "type": "string"
+        },
+        "device": {
+          "const": "cuda:0",
+          "default": "cuda:0",
+          "title": "Device",
+          "type": "string"
+        },
+        "double_quantization": {
+          "const": true,
+          "default": true,
+          "title": "Double Quantization",
+          "type": "boolean"
+        },
+        "execution_combination": {
+          "$ref": "#/$defs/ExecutionCapabilityCombination"
+        },
+        "flash_sdp_enabled": {
+          "default": false,
+          "title": "Flash Sdp Enabled",
+          "type": "boolean"
+        },
+        "gradient_checkpointing": {
+          "const": true,
+          "default": true,
+          "title": "Gradient Checkpointing",
+          "type": "boolean"
+        },
+        "math_sdp_enabled": {
+          "default": true,
+          "title": "Math Sdp Enabled",
+          "type": "boolean"
+        },
+        "memory_efficient_sdp_enabled": {
+          "const": false,
+          "default": false,
+          "title": "Memory Efficient Sdp Enabled",
+          "type": "boolean"
+        },
+        "optimizer": {
+          "const": "adamw_torch",
+          "default": "adamw_torch",
+          "title": "Optimizer",
+          "type": "string"
+        },
+        "probe": {
+          "default": "cuda_qlora_math_execution",
+          "enum": [
+            "cuda_qlora_math_execution",
+            "cuda_qlora_sdpa_flash_execution"
+          ],
+          "title": "Probe",
+          "type": "string"
+        },
+        "quantization": {
+          "const": "nf4",
+          "default": "nf4",
+          "title": "Quantization",
+          "type": "string"
+        },
+        "require_adapter_round_trip": {
+          "const": true,
+          "default": true,
+          "title": "Require Adapter Round Trip",
+          "type": "boolean"
+        },
+        "required_distributions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Distributions",
+          "type": "array"
+        },
+        "target_modules": {
+          "const": "all-linear",
+          "default": "all-linear",
+          "title": "Target Modules",
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_combination"
+      ],
+      "title": "QloraExecutionProbeSpec",
+      "type": "object"
+    },
+    "QuantizationMode": {
+      "enum": [
+        "none",
+        "int8",
+        "int4",
+        "nf4",
+        "fp4",
+        "gptq",
+        "awq",
+        "hqq"
+      ],
+      "title": "QuantizationMode",
       "type": "string"
     },
     "RecipeVerification": {
@@ -111,6 +416,18 @@
   "additionalProperties": false,
   "description": "A declarative, platform/CUDA-aware recipe for building one isolated environment \u2014 the WHAT to\ninstall, not the act of installing. A recipe is only a declaration: ``verification`` says whether\nit has ever produced a working environment (declared \u2192 hardware_verified). Grounded in the engine's\nreal optional extras (pyproject ``[train]`` / ``[parquet]`` / ``[tokenizer]``).",
   "properties": {
+    "bootstrap_pip_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Bootstrap Pip Version"
+    },
     "capability_probes": {
       "items": {
         "type": "string"
@@ -206,6 +523,17 @@
       "title": "Recipe Id",
       "type": "string"
     },
+    "required_execution_probe": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/QloraExecutionProbeSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "requires_cuda": {
       "default": false,
       "title": "Requires Cuda",
@@ -214,6 +542,11 @@
     "requires_native_build": {
       "default": false,
       "title": "Requires Native Build",
+      "type": "boolean"
+    },
+    "requires_worker_wheel": {
+      "default": false,
+      "title": "Requires Worker Wheel",
       "type": "boolean"
     },
     "supported_os": {

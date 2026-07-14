@@ -449,12 +449,35 @@
           "default": null,
           "title": "Artifact"
         },
+        "artifact_hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "dependencies": {
           "items": {
             "type": "string"
           },
           "title": "Dependencies",
           "type": "array"
+        },
+        "direct": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direct"
         },
         "direct_url": {
           "anyOf": [
@@ -467,6 +490,18 @@
           ],
           "default": null,
           "title": "Direct Url"
+        },
+        "editable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Editable"
         },
         "hash": {
           "anyOf": [
@@ -496,6 +531,55 @@
           "title": "Name",
           "type": "string"
         },
+        "normalized_name": {
+          "default": "",
+          "title": "Normalized Name",
+          "type": "string"
+        },
+        "record_entries": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Record Entries"
+        },
+        "record_failed_entries": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Record Failed Entries",
+          "type": "array"
+        },
+        "record_integrity": {
+          "default": "unknown",
+          "enum": [
+            "verified",
+            "failed",
+            "missing",
+            "unknown"
+          ],
+          "title": "Record Integrity",
+          "type": "string"
+        },
+        "record_verified_entries": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Record Verified Entries"
+        },
         "requested": {
           "anyOf": [
             {
@@ -521,6 +605,54 @@
           ],
           "title": "Source",
           "type": "string"
+        },
+        "source_evidence_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Evidence Reason"
+        },
+        "source_index_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Index Url"
+        },
+        "vcs_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vcs Commit"
+        },
+        "vcs_repository": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vcs Repository"
         },
         "version": {
           "anyOf": [

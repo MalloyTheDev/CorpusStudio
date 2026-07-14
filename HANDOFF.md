@@ -249,7 +249,12 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   `platform/execution_config.py`.
 - **Environment Manager** (Phase 2): `platform/environments.py` (recipes + concrete resolver) and
   `platform/environment_manager.py` (runtime discovery, creation, journals, lock/probe/drift, owned
-  removal/recreation, and RunPlan compatibility).
+  removal/recreation, and RunPlan compatibility). Readiness recipes bind an exact worker wheel and a
+  complete QLoRA probe tuple in the plan (math `cuda_qlora_math_execution` or forced-flash
+  `cuda_qlora_sdpa_flash_execution`), capture sanitized pip/RECORD evidence, and seal the lock only
+  after required probes plus a stable post-probe inventory. Math readiness-v2 is the preserved
+  baseline/rollback; flash readiness-v1 remains plan-only until separately authorized. The legacy
+  `backend-corpus-studio` environment also remains available.
 - **Model/Tokenizer foundation** (Phase 3): `platform/model_inspector.py` + the `ModelDescriptor` /
   `TokenizerDescriptor` roots. `model-inspect` inventories local snapshots without network access,
   heavy imports, link traversal, or custom-code execution; see `docs/MODEL_TOKENIZER_CONTRACTS.md`.

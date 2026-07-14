@@ -27,8 +27,10 @@ from .contracts import (
     DependencyRequirement,
     DependencyResolution,
     EnvironmentRecipe,
+    ExecutionCapabilityCombination,
     InstallStep,
     PythonRuntime,
+    QloraExecutionProbeSpec,
 )
 from .enums import DependencyLayer, OperatingSystem, RecipeVerification
 
@@ -44,6 +46,8 @@ PYTORCH_INDEX_URLS: dict[str, str] = {
     "cpu": "https://download.pytorch.org/whl/cpu",
 }
 PYPI_INDEX_URL = "https://pypi.org/simple"
+READINESS_V2_RECIPE_ID = "backend-corpus-studio-readiness-v2"
+READINESS_FLASH_V1_RECIPE_ID = "backend-corpus-studio-readiness-flash-v1"
 
 # The distributions PyTorch ships from its own index (so they must NOT be requested from PyPI when a
 # CUDA build is wanted).
@@ -173,6 +177,175 @@ def builtin_recipes() -> list[EnvironmentRecipe]:
             ],
         ),
         EnvironmentRecipe(
+            recipe_id=READINESS_V2_RECIPE_ID,
+            display_name="Backend: CorpusStudio readiness v2 (exact QLoRA tuple)",
+            layer=DependencyLayer.backend_worker,
+            description="Exact-pinned native-Linux CorpusStudio worker environment whose lock is "
+            "sealed only after one complete BF16/NF4/double-quant QLoRA math-SDPA tuple passes.",
+            target="corpus_studio",
+            python_requires=">=3.12",
+            default_index_url=PYPI_INDEX_URL,
+            dependency_requirements=[
+                DependencyRequirement(name="pydantic", specifier="==2.13.4", reason="worker contracts"),
+                DependencyRequirement(name="typer", specifier="==0.26.8", reason="worker CLI"),
+                DependencyRequirement(name="orjson", specifier="==3.11.9", reason="engine runtime"),
+                DependencyRequirement(name="torch", specifier="==2.11.0+cu128"),
+                DependencyRequirement(name="transformers", specifier="==5.13.1"),
+                DependencyRequirement(name="peft", specifier="==0.19.1"),
+                DependencyRequirement(name="trl", specifier="==1.8.0"),
+                DependencyRequirement(name="accelerate", specifier="==1.14.0"),
+                DependencyRequirement(name="datasets", specifier="==5.0.0"),
+                DependencyRequirement(name="bitsandbytes", specifier="==0.49.2"),
+                DependencyRequirement(name="safetensors", specifier="==0.8.0"),
+                DependencyRequirement(name="tokenizers", specifier="==0.22.2"),
+            ],
+            cuda_index_urls={"cu128": PYTORCH_INDEX_URLS["cu128"]},
+            requires_cuda=True,
+            min_compute_capability="12.0",
+            supported_os=[OperatingSystem.linux],
+            capability_probes=[
+                "gpu_responsive",
+                "cuda_available",
+                "bf16_matmul",
+                "bnb_4bit_load",
+                "math_sdpa_backward",
+                "trainer_contract",
+                "cuda_qlora_math_execution",
+            ],
+            required_execution_probe=QloraExecutionProbeSpec(
+                execution_combination=ExecutionCapabilityCombination.model_validate(
+                    {
+                        "runtime_mode": "training",
+                        "device": "cuda",
+                        "precision": "bf16",
+                        "quantization": "nf4",
+                        "adapter_method": "qlora",
+                        "attention_impl": "math",
+                        "attention_kernel": "torch_sdpa_math",
+                        "optimizer": "adamw_torch",
+                        "loss_impl": "cross_entropy",
+                        "checkpoint_impl": "adapter_only",
+                        "export_format": "adapter_peft",
+                        "execution_contract_version": "1.0.0",
+                        "probe": "cuda_qlora_math_execution",
+                    }
+                ),
+                required_distributions=sorted(
+                    [
+                        "accelerate",
+                        "bitsandbytes",
+                        "datasets",
+                        "peft",
+                        "safetensors",
+                        "tokenizers",
+                        "torch",
+                        "transformers",
+                        "trl",
+                    ]
+                ),
+            ),
+            requires_worker_wheel=True,
+            bootstrap_pip_version="26.1.2",
+            verification=RecipeVerification.declared,
+            notes=[
+                "Plan-only until a separately authorized environment creation.",
+                "Every direct dependency is exact-pinned; transitive installs are sealed from pip "
+                "reports plus installed RECORD integrity evidence.",
+                "HARDWARE_VERIFIED requires the one complete cuda_qlora_math_execution tuple; "
+                "independent probe passes cannot be unioned.",
+            ],
+        ),
+        EnvironmentRecipe(
+            recipe_id=READINESS_FLASH_V1_RECIPE_ID,
+            display_name="Backend: CorpusStudio readiness flash v1 (exact QLoRA flash tuple)",
+            layer=DependencyLayer.backend_worker,
+            description="Exact-pinned native-Linux CorpusStudio worker environment whose lock is "
+            "sealed only after one complete BF16/NF4/double-quant QLoRA forced-flash-SDPA tuple "
+            "passes. Independent from the math readiness-v2 baseline.",
+            target="corpus_studio",
+            python_requires=">=3.12",
+            default_index_url=PYPI_INDEX_URL,
+            dependency_requirements=[
+                DependencyRequirement(name="pydantic", specifier="==2.13.4", reason="worker contracts"),
+                DependencyRequirement(name="typer", specifier="==0.26.8", reason="worker CLI"),
+                DependencyRequirement(name="orjson", specifier="==3.11.9", reason="engine runtime"),
+                DependencyRequirement(name="torch", specifier="==2.11.0+cu128"),
+                DependencyRequirement(name="transformers", specifier="==5.13.1"),
+                DependencyRequirement(name="peft", specifier="==0.19.1"),
+                DependencyRequirement(name="trl", specifier="==1.8.0"),
+                DependencyRequirement(name="accelerate", specifier="==1.14.0"),
+                DependencyRequirement(name="datasets", specifier="==5.0.0"),
+                DependencyRequirement(name="bitsandbytes", specifier="==0.49.2"),
+                DependencyRequirement(name="safetensors", specifier="==0.8.0"),
+                DependencyRequirement(name="tokenizers", specifier="==0.22.2"),
+            ],
+            cuda_index_urls={"cu128": PYTORCH_INDEX_URLS["cu128"]},
+            requires_cuda=True,
+            min_compute_capability="12.0",
+            supported_os=[OperatingSystem.linux],
+            capability_probes=[
+                "gpu_responsive",
+                "cuda_available",
+                "bf16_matmul",
+                "bnb_4bit_load",
+                "flash_attn_backward",
+                "trainer_contract",
+                "cuda_qlora_sdpa_flash_execution",
+            ],
+            required_execution_probe=QloraExecutionProbeSpec(
+                probe="cuda_qlora_sdpa_flash_execution",
+                execution_combination=ExecutionCapabilityCombination.model_validate(
+                    {
+                        "runtime_mode": "training",
+                        "device": "cuda",
+                        "precision": "bf16",
+                        "quantization": "nf4",
+                        "adapter_method": "qlora",
+                        "attention_impl": "sdpa",
+                        "attention_kernel": "torch_sdpa_flash",
+                        "optimizer": "adamw_torch",
+                        "loss_impl": "cross_entropy",
+                        "checkpoint_impl": "adapter_only",
+                        "export_format": "adapter_peft",
+                        "execution_contract_version": "1.0.0",
+                        "probe": "cuda_qlora_sdpa_flash_execution",
+                    }
+                ),
+                flash_sdp_enabled=True,
+                math_sdp_enabled=False,
+                required_distributions=sorted(
+                    [
+                        "accelerate",
+                        "bitsandbytes",
+                        "datasets",
+                        "peft",
+                        "safetensors",
+                        "tokenizers",
+                        "torch",
+                        "transformers",
+                        "trl",
+                    ]
+                ),
+            ),
+            requires_worker_wheel=True,
+            bootstrap_pip_version="26.1.2",
+            verification=RecipeVerification.declared,
+            notes=[
+                "Plan-only until a separately authorized environment creation.",
+                "Requires forced SDPBackend.FLASH_ATTENTION with math and mem-efficient disabled; "
+                "automatic SDPA dispatch is not accepted.",
+                "Complete tuple forward/backward uses CUDA bf16 autocast (trainer-aligned); "
+                "float32 residual after PEFT k-bit prep is not accepted as flash proof.",
+                "HARDWARE_VERIFIED requires the one complete cuda_qlora_sdpa_flash_execution tuple; "
+                "independent probe passes cannot be unioned.",
+                "Does not replace backend-corpus-studio-readiness-v2 (math baseline/rollback).",
+                "Linux-only recipe: native Windows/WDDM fused flash SDPA is refused elsewhere; "
+                "do not claim flash from a Windows math environment.",
+                "This is torch_sdpa_flash identity, not Transformers flash_attention_2 or an "
+                "external flash-attn package.",
+            ],
+        ),
+        EnvironmentRecipe(
             recipe_id="backend-unsloth",
             display_name="Backend: Unsloth (accelerated QLoRA)",
             layer=DependencyLayer.backend_worker,
@@ -264,8 +437,19 @@ def _estimate_download_mb(requirements: list[DependencyRequirement], accelerator
 
 def recipe_digest(recipe: EnvironmentRecipe) -> str:
     """Stable sha256 over a recipe declaration for recipe-drift detection."""
+    body = recipe.model_dump(mode="json")
+    # Preserve the digest of pre-readiness-v2 recipes so existing managed environments remain valid
+    # rollback targets after the additive contract migration.
+    if (
+        recipe.required_execution_probe is None
+        and not recipe.requires_worker_wheel
+        and recipe.bootstrap_pip_version is None
+    ):
+        body.pop("required_execution_probe", None)
+        body.pop("requires_worker_wheel", None)
+        body.pop("bootstrap_pip_version", None)
     payload = json.dumps(
-        recipe.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        body, sort_keys=True, separators=(",", ":"), ensure_ascii=True
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -306,6 +490,11 @@ def _materialize_steps(
                 update={
                     "argv": argv,
                     "working_directory": step.working_directory or environment_root,
+                    "evidence_path": step.evidence_path.replace(
+                        "<ENV_ROOT>", environment_root or "<ENV_ROOT>"
+                    )
+                    if step.evidence_path
+                    else None,
                     "expected_outputs": [
                         output.replace("<ENV_ROOT>", environment_root or "<ENV_ROOT>")
                         for output in step.expected_outputs
@@ -406,6 +595,7 @@ def resolve_dependencies(
         accelerator_tag=accelerator_tag,
         resolved_index_urls=resolved_indexes,
         install_steps=steps,
+        required_execution_probe=recipe.required_execution_probe,
         estimated_download_bytes=download_mb * _MB,
         estimated_disk_bytes=disk_mb * _MB,
         resolvable=not blocking,
@@ -431,6 +621,12 @@ def _build_install_steps(
 
     if recipe.layer == DependencyLayer.backend_worker:
         env_py = _env_python_path(os_value)
+        evidence_root = "<ENV_ROOT>/.corpusstudio-install-evidence"
+        pip_requirement = (
+            f"pip=={recipe.bootstrap_pip_version}"
+            if recipe.bootstrap_pip_version
+            else "pip"
+        )
         steps = [
             InstallStep(
                 phase="create_venv",
@@ -452,12 +648,16 @@ def _build_install_steps(
                     "--no-input",
                     "--index-url",
                     package_index,
+                    "--report",
+                    f"{evidence_root}/upgrade-pip.json",
                     "--upgrade",
-                    "pip",
+                    pip_requirement,
                 ],
                 environment={"PIP_NO_INPUT": "1", "PYTHONUTF8": "1"},
                 timeout_seconds=900,
                 network_required=True,
+                evidence_path=f"{evidence_root}/upgrade-pip.json",
+                configured_index_urls=[package_index],
             ),
         ]
         if torch_reqs and torch_index:
@@ -467,11 +667,14 @@ def _build_install_steps(
                     description="Install PyTorch from its accelerator-specific wheel index",
                     argv=[env_py, "-m", "pip", "--isolated", "install", "--index-url", torch_index]
                     + ["--disable-pip-version-check", "--no-input"]
+                    + ["--report", f"{evidence_root}/install-torch.json"]
                     + [_requirement_string(r) for r in torch_reqs],
                     environment={"PIP_NO_INPUT": "1", "PYTHONUTF8": "1"},
                     timeout_seconds=3600,
                     network_required=True,
                     native_build_expected=recipe.requires_native_build,
+                    evidence_path=f"{evidence_root}/install-torch.json",
+                    configured_index_urls=[torch_index],
                 )
             )
         if other_reqs:
@@ -489,12 +692,16 @@ def _build_install_steps(
                         "--no-input",
                         "--index-url",
                         package_index,
+                        "--report",
+                        f"{evidence_root}/install-dependencies.json",
                     ]
                     + [_requirement_string(r) for r in other_reqs],
                     environment={"PIP_NO_INPUT": "1", "PYTHONUTF8": "1"},
                     timeout_seconds=3600,
                     network_required=True,
                     native_build_expected=recipe.requires_native_build,
+                    evidence_path=f"{evidence_root}/install-dependencies.json",
+                    configured_index_urls=[package_index],
                 )
             )
         return steps
@@ -515,12 +722,16 @@ def _build_install_steps(
                 "--no-input",
                 "--index-url",
                 package_index,
+                "--report",
+                "<ENV_ROOT>/.corpusstudio-install-evidence/install-capability.json",
             ]
             + [_requirement_string(r) for r in all_reqs],
             environment={"PIP_NO_INPUT": "1", "PYTHONUTF8": "1"},
             timeout_seconds=3600,
             network_required=True,
             native_build_expected=recipe.requires_native_build,
+            evidence_path="<ENV_ROOT>/.corpusstudio-install-evidence/install-capability.json",
+            configured_index_urls=[package_index],
         )
     ]
 

@@ -280,6 +280,27 @@ def test_readiness_ready_only_when_a_complete_cuda_tuple_passes():
     assert report.bitsandbytes_ok is True
 
 
+def test_independent_axis_probes_cannot_be_unioned_into_complete_support():
+    registry = {
+        "precision": lambda _p: ProbeOutcome(
+            FailureTaxonomy.PASS, proves={"precision": ["bf16"]}
+        ),
+        "quantization": lambda _p: ProbeOutcome(
+            FailureTaxonomy.PASS, proves={"quantization": ["nf4"]}
+        ),
+        "adapter": lambda _p: ProbeOutcome(
+            FailureTaxonomy.PASS, proves={"adapter": ["qlora"]}
+        ),
+        "optimizer": lambda _p: ProbeOutcome(
+            FailureTaxonomy.PASS, proves={"optimizer": ["adamw_torch"]}
+        ),
+    }
+    report = run_capability_probes(_profile(), registry=registry)
+    assert report.readiness == "not_ready"
+    assert report.effective_capabilities is not None
+    assert report.effective_capabilities.execution_combinations == []
+
+
 def test_readiness_cpu_toy_only_when_a_complete_cpu_tuple_passes():
     combo = _execution_combo(training=False)
     reg = {

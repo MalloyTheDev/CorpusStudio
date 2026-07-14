@@ -127,6 +127,7 @@ _CORPUS_STUDIO = {
         "checkpoint_reload",
         "cpu_lora_execution",
         "cuda_qlora_math_execution",
+        "cuda_qlora_sdpa_flash_execution",
     ],
 }
 

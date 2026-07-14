@@ -26,6 +26,7 @@ from .common import (
     License,
     MemoryMetrics,
     PackageLock,
+    PackageSource,
     Ref,
     TokenStats,
 )
@@ -2895,6 +2896,171 @@ class PythonRuntime(ContractModel):
     incompatibility_reasons: list[str] = Field(default_factory=list)
 
 
+class WorkerArtifactIdentity(ContractModel):
+    """Immutable identity of the exact wheel executed by a managed backend worker.
+
+    A mutable checkout is not a worker identity. The plan binds a concrete wheel before mutation;
+    the post-install lock binds the same wheel and the installed distribution evidence.
+    """
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    distribution_name: str = Field(min_length=1)
+    normalized_name: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    filename: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    size_bytes: int = Field(ge=1)
+    content_hash: HashRef
+    metadata_hash: HashRef | None = None
+
+
+class QloraExecutionProbeSpec(ContractModel):
+    """The exact complete QLoRA tuple a readiness environment must prove as one operation.
+
+    Math and flash tuples are independent identities. A math-only seal is never a flash claim, and
+    independent flash/bitsandbytes/optimizer probes cannot be unioned into a complete capability.
+    """
+
+    probe: Literal["cuda_qlora_math_execution", "cuda_qlora_sdpa_flash_execution"] = (
+        "cuda_qlora_math_execution"
+    )
+    execution_combination: ExecutionCapabilityCombination
+    device: Literal["cuda:0"] = "cuda:0"
+    compute_dtype: Literal["bf16"] = "bf16"
+    quantization: Literal["nf4"] = "nf4"
+    double_quantization: Literal[True] = True
+    attention_api: Literal["sdpa"] = "sdpa"
+    flash_sdp_enabled: bool = False
+    memory_efficient_sdp_enabled: Literal[False] = False
+    math_sdp_enabled: bool = True
+    target_modules: Literal["all-linear"] = "all-linear"
+    gradient_checkpointing: Literal[True] = True
+    optimizer: Literal["adamw_torch"] = "adamw_torch"
+    require_adapter_round_trip: Literal[True] = True
+    required_distributions: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_complete_tuple(self) -> QloraExecutionProbeSpec:
+        if self.probe == "cuda_qlora_math_execution":
+            attention_impl = "math"
+            attention_kernel = "torch_sdpa_math"
+            if self.flash_sdp_enabled is not False or self.math_sdp_enabled is not True:
+                raise ValueError(
+                    "math QLoRA readiness requires flash_sdp_enabled=false and math_sdp_enabled=true"
+                )
+        else:
+            attention_impl = "sdpa"
+            attention_kernel = "torch_sdpa_flash"
+            if self.flash_sdp_enabled is not True or self.math_sdp_enabled is not False:
+                raise ValueError(
+                    "flash QLoRA readiness requires flash_sdp_enabled=true and math_sdp_enabled=false"
+                )
+        expected = (
+            "training",
+            "cuda",
+            "bf16",
+            "nf4",
+            "qlora",
+            attention_impl,
+            attention_kernel,
+            "adamw_torch",
+            "cross_entropy",
+            "adapter_only",
+            "adapter_peft",
+            "1.0.0",
+            self.probe,
+        )
+        if self.execution_combination.canonical_key() != expected:
+            raise ValueError("QLoRA readiness probe spec does not describe the required complete tuple")
+        if self.memory_efficient_sdp_enabled is not False:
+            raise ValueError("QLoRA readiness probes must disable memory-efficient SDPA")
+        normalized = sorted(set(self.required_distributions))
+        if self.required_distributions != normalized:
+            raise ValueError("required_distributions must be sorted and unique")
+        return self
+
+
+class ProbeMemoryEvidence(ContractModel):
+    """Measured resource evidence for one bounded probe, with scopes kept explicit."""
+
+    gpu_allocator_scope: Literal["pytorch_cuda_allocator_process"] = (
+        "pytorch_cuda_allocator_process"
+    )
+    gpu_device_scope: Literal["nvidia_smi_current_process", "unavailable"] = "unavailable"
+    host_memory_scope: Literal["current_process_rss"] = "current_process_rss"
+    baseline_gpu_allocated_bytes: int = Field(ge=0)
+    baseline_gpu_reserved_bytes: int = Field(ge=0)
+    peak_gpu_allocated_bytes: int = Field(ge=0)
+    peak_gpu_reserved_bytes: int = Field(ge=0)
+    baseline_nvidia_smi_process_bytes: int | None = Field(default=None, ge=0)
+    peak_nvidia_smi_process_bytes: int | None = Field(default=None, ge=0)
+    baseline_host_rss_bytes: int = Field(ge=0)
+    peak_host_rss_bytes: int = Field(ge=0)
+    duration_seconds: float = Field(ge=0)
+    # Optional phase timing / thermal fields (flash readiness records them; math may omit).
+    forward_duration_seconds: float | None = Field(default=None, ge=0)
+    backward_duration_seconds: float | None = Field(default=None, ge=0)
+    optimizer_step_duration_seconds: float | None = Field(default=None, ge=0)
+    gpu_temperature_celsius: float | None = None
+    gpu_power_watts: float | None = None
+
+
+class EnvironmentProbeEvidence(ContractModel):
+    """Hash-sealed evidence that a required complete execution tuple passed as a unit."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    evidence_id: str = Field(pattern=_ID)
+    required_spec: QloraExecutionProbeSpec
+    profile_signature: str = Field(pattern=SHA256_PATTERN)
+    capability_report_hash: HashRef
+    tuple_result: ProbeResult
+    memory: ProbeMemoryEvidence
+    evidence_hash: str = Field(pattern=SHA256_PATTERN)
+
+
+class PackageInstallEvidence(ContractModel):
+    """Sanitized pip-install provenance retained separately from installed-file inspection."""
+
+    normalized_name: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    source: PackageSource = "unknown"
+    source_index_url: str | None = None
+    direct_url: str | None = None
+    artifact_filename: str | None = None
+    artifact_hash: HashRef | None = None
+    requested: bool | None = None
+    direct: bool | None = None
+    editable: bool | None = None
+    vcs_repository: str | None = None
+    vcs_commit: str | None = None
+    installer_command_id: str | None = None
+    configured_index_urls: list[str] = Field(default_factory=list)
+    source_evidence_reason: str | None = None
+
+
+class InstalledEnvironmentEvidence(ContractModel):
+    """A pre- or post-probe installed-state inventory; explicitly not a final environment lock."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    evidence_id: str = Field(pattern=_ID)
+    recipe_ref: Ref
+    captured_at: str | None = None
+    runtime: PythonRuntime | None = None
+    python_version: str = ""
+    platform_tag: str = ""
+    architecture: str = ""
+    implementation: str = ""
+    torch_version: str | None = None
+    torch_build: str | None = None
+    cuda_runtime_version: str | None = None
+    compute_capability: str | None = None
+    index_urls: list[str] = Field(default_factory=list)
+    packages: list[PackageLock] = Field(default_factory=list)
+    package_install_evidence: list[PackageInstallEvidence] = Field(default_factory=list)
+    worker_artifact: WorkerArtifactIdentity | None = None
+    evidence_hash: str = Field(pattern=SHA256_PATTERN)
+
+
 class EnvironmentRecipe(ContractModel):
     """A declarative, platform/CUDA-aware recipe for building one isolated environment — the WHAT to
     install, not the act of installing. A recipe is only a declaration: ``verification`` says whether
@@ -2923,6 +3089,9 @@ class EnvironmentRecipe(ContractModel):
     supported_os: list[OperatingSystem] = Field(default_factory=list)
     known_conflicts: list[DependencyConflict] = Field(default_factory=list)
     capability_probes: list[str] = Field(default_factory=list)
+    required_execution_probe: QloraExecutionProbeSpec | None = None
+    requires_worker_wheel: bool = False
+    bootstrap_pip_version: str | None = None
     verification: RecipeVerification = RecipeVerification.declared
     notes: list[str] = Field(default_factory=list)
 
@@ -2941,6 +3110,10 @@ class InstallStep(ContractModel):
     expected_outputs: list[str] = Field(default_factory=list)
     network_required: bool = False
     native_build_expected: bool = False
+    # Pip writes its raw report here during installation. The manager immediately sanitizes and
+    # converts it into PackageInstallEvidence; credentials and signed query strings are never kept.
+    evidence_path: str | None = None
+    configured_index_urls: list[str] = Field(default_factory=list)
 
 
 class DependencyResolution(ContractModel):
@@ -2960,6 +3133,8 @@ class DependencyResolution(ContractModel):
     accelerator_tag: str = "cpu"
     resolved_index_urls: list[str] = Field(default_factory=list)
     install_steps: list[InstallStep] = Field(default_factory=list)
+    worker_artifact: WorkerArtifactIdentity | None = None
+    required_execution_probe: QloraExecutionProbeSpec | None = None
     # Rough, explicitly-heuristic size estimates (download + on-disk installed footprint).
     estimated_download_bytes: int | None = Field(default=None, ge=0)
     estimated_disk_bytes: int | None = Field(default=None, ge=0)
@@ -2979,7 +3154,8 @@ class EnvironmentCommandRecord(ContractModel):
     command_id: str = Field(pattern=_ID)
     phase: Literal[
         "create_venv", "upgrade_pip", "install", "lock", "import_probe",
-        "verify", "dependency_probe", "functional_probe", "hardware_probe", "health_probe",
+        "verify", "inventory", "dependency_probe", "functional_probe", "hardware_probe",
+        "capability_probe", "health_probe",
     ]
     argv: list[str] = Field(min_length=1)
     working_directory: str
@@ -3009,6 +3185,12 @@ class EnvironmentInstallation(ContractModel):
     started_at: str
     finished_at: str | None = None
     commands: list[EnvironmentCommandRecord] = Field(default_factory=list)
+    package_install_evidence: list[PackageInstallEvidence] = Field(default_factory=list)
+    worker_artifact: WorkerArtifactIdentity | None = None
+    pre_probe_inventory: InstalledEnvironmentEvidence | None = None
+    post_probe_inventory: InstalledEnvironmentEvidence | None = None
+    probe_results: list[ProbeResult] = Field(default_factory=list)
+    probe_evidence: EnvironmentProbeEvidence | None = None
     failure: FailureRecord | None = None
     retry_requires_recreate: bool = False
 
@@ -3021,6 +3203,7 @@ class EnvironmentLock(ContractModel):
     contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
     lock_id: str = Field(pattern=_ID)
     recipe_ref: Ref
+    resolution_ref: Ref | None = None
     created_at: str | None = None
     manager_version: str = ""
     runtime: PythonRuntime | None = None
@@ -3034,6 +3217,9 @@ class EnvironmentLock(ContractModel):
     compute_capability: str | None = None
     index_urls: list[str] = Field(default_factory=list)
     packages: list[PackageLock] = Field(default_factory=list)
+    package_install_evidence: list[PackageInstallEvidence] = Field(default_factory=list)
+    worker_artifact: WorkerArtifactIdentity | None = None
+    probe_evidence: EnvironmentProbeEvidence | None = None
     # sha256 over the canonical lock body (runtime, recipe, sources, metadata hashes, and packages).
     lock_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
 
@@ -3084,6 +3270,7 @@ class EnvironmentHealthReport(ContractModel):
     hardware_mismatch: bool = False
     cuda_mismatch: bool = False
     probe_results: list[ProbeResult] = Field(default_factory=list)
+    probe_evidence: EnvironmentProbeEvidence | None = None
     failure: FailureRecord | None = None
     remediation: str | None = None
 

@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
 
+from corpus_studio.training.quantization import find_linear4bit_modules
+
 from .common import PackageLock, Ref
 from .contracts import (
     CapabilityReport,
@@ -495,16 +497,92 @@ def _probe_cuda_qlora_math_execution(
 ) -> ProbeOutcome:  # pragma: no cover - requires a real CUDA worker environment
     """Run one bounded BF16/NF4/QLoRA tuple with only math SDPA enabled."""
 
-    try:
-        import tempfile  # noqa: PLC0415
+    return _probe_cuda_qlora_sdpa_execution_tuple(
+        profile,
+        probe_name="cuda_qlora_math_execution",
+        attention_impl="math",
+        attention_kernel="torch_sdpa_math",
+        sdp_backend_name="MATH",
+        enable_flash=False,
+        enable_math=True,
+        pass_detail=(
+            "BF16/NF4/QLoRA math-SDPA backward, AdamW update, and adapter reload passed"
+        ),
+        proves_attention=["math", "sdpa"],
+        record_phase_timing=False,
+    )
 
+
+def _probe_cuda_qlora_sdpa_flash_execution(
+    profile: EnvironmentProfile,
+) -> ProbeOutcome:  # pragma: no cover - requires a real CUDA worker environment
+    """Run one bounded BF16/NF4/QLoRA tuple forced onto torch_sdpa_flash only."""
+
+    return _probe_cuda_qlora_sdpa_execution_tuple(
+        profile,
+        probe_name="cuda_qlora_sdpa_flash_execution",
+        attention_impl="sdpa",
+        attention_kernel="torch_sdpa_flash",
+        sdp_backend_name="FLASH_ATTENTION",
+        enable_flash=True,
+        enable_math=False,
+        pass_detail=(
+            "BF16/NF4/QLoRA forced-flash-SDPA backward, AdamW update, and adapter reload passed"
+        ),
+        proves_attention=["sdpa"],
+        record_phase_timing=True,
+    )
+
+
+def _probe_cuda_qlora_sdpa_execution_tuple(
+    profile: EnvironmentProfile,
+    *,
+    probe_name: str,
+    attention_impl: str,
+    attention_kernel: str,
+    sdp_backend_name: str,
+    enable_flash: bool,
+    enable_math: bool,
+    pass_detail: str,
+    proves_attention: list[str],
+    record_phase_timing: bool,
+) -> ProbeOutcome:  # pragma: no cover - requires a real CUDA worker environment
+    """Shared complete QLoRA tuple used by independent math and flash readiness probes.
+
+    Uses the same tiny model, seed, batch, sequence length, LoRA rank, and optimizer so math and
+    flash measurements remain comparable. Never falls back to another SDPA backend.
+
+    Forward/backward run under CUDA bf16 autocast so attention Q/K/V match the first-party trainer
+    (TRL SFTConfig bf16) and forced flash SDPA (which rejects float32). PEFT k-bit prep still keeps
+    non-4bit master weights and LoRA grads in FP32; those policies are checked outside autocast.
+    """
+
+    del profile  # host refusal is decided by the managed environment recipe/OS, not this body
+    try:
+        import importlib.metadata as metadata  # noqa: PLC0415
+        import os  # noqa: PLC0415
+        import platform  # noqa: PLC0415
+        import subprocess  # noqa: PLC0415
+        import sys  # noqa: PLC0415
+        import tempfile  # noqa: PLC0415
+        import threading  # noqa: PLC0415
+        import time  # noqa: PLC0415
+        from pathlib import Path  # noqa: PLC0415
+
+        import accelerate  # noqa: F401,PLC0415
+        import datasets  # noqa: F401,PLC0415
+        import safetensors  # noqa: F401,PLC0415
+        import tokenizers  # noqa: F401,PLC0415
         import torch  # noqa: PLC0415
+        import trl  # noqa: F401,PLC0415
+        from bitsandbytes.nn import Linear4bit as BnbLinear4bit  # noqa: PLC0415
         from peft import (  # noqa: PLC0415
             LoraConfig,
             PeftModel,
             get_peft_model,
             prepare_model_for_kbit_training,
         )
+        from torch.nn.attention import SDPBackend, sdpa_kernel  # noqa: PLC0415
         from transformers import (  # noqa: PLC0415
             AutoModelForCausalLM,
             BitsAndBytesConfig,
@@ -514,19 +592,209 @@ def _probe_cuda_qlora_math_execution(
         return ProbeOutcome(_TX.ENVIRONMENT_FAILURE, f"CUDA QLoRA probe unavailable: {exc}")
     if not torch.cuda.is_available():
         return ProbeOutcome(_TX.UNSUPPORTED_CONFIGURATION, "no CUDA GPU for the QLoRA tuple probe")
+    try:
+        sdp_backend = getattr(SDPBackend, sdp_backend_name)
+    except AttributeError:
+        return ProbeOutcome(
+            _TX.UNSUPPORTED_CONFIGURATION,
+            f"PyTorch SDPBackend.{sdp_backend_name} is unavailable on this stack",
+        )
     previous = (
         bool(torch.backends.cuda.flash_sdp_enabled()),
         bool(torch.backends.cuda.mem_efficient_sdp_enabled()),
         bool(torch.backends.cuda.math_sdp_enabled()),
     )
-    try:
-        from pathlib import Path  # noqa: PLC0415
-        from torch.nn.attention import SDPBackend, sdpa_kernel  # noqa: PLC0415
+    previous_toggles = {
+        "flash_sdp_enabled": previous[0],
+        "memory_efficient_sdp_enabled": previous[1],
+        "math_sdp_enabled": previous[2],
+    }
+    sampler_stop = None
+    sampler_thread = None
+    samples: dict[str, Any] = {}
+    measured_started: float | None = None
+    phase_timings: dict[str, float] = {}
+    thermal: dict[str, float | None] = {
+        "gpu_temperature_celsius": None,
+        "gpu_power_watts": None,
+    }
+    baseline_gpu_allocated = 0
+    baseline_gpu_reserved = 0
+    baseline_host_rss = 0
+    baseline_nvidia: int | None = None
 
+    def _rss_bytes() -> int:
+        try:
+            import psutil  # noqa: PLC0415
+
+            return int(psutil.Process(os.getpid()).memory_info().rss)
+        except Exception:  # noqa: BLE001
+            try:
+                pages = int(Path("/proc/self/statm").read_text(encoding="utf-8").split()[1])
+                return pages * int(os.sysconf("SC_PAGE_SIZE"))
+            except Exception:  # noqa: BLE001
+                return 0
+
+    def _nvidia_process_bytes() -> int | None:
+        try:
+            completed = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-compute-apps=pid,used_gpu_memory",
+                    "--format=csv,noheader,nounits",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if completed.returncode != 0:
+            return None
+        total_mib = 0
+        found = False
+        for line in completed.stdout.splitlines():
+            fields = [field.strip() for field in line.split(",")]
+            if len(fields) != 2 or fields[0] != str(os.getpid()):
+                continue
+            try:
+                total_mib += int(fields[1])
+                found = True
+            except ValueError:
+                continue
+        return total_mib * 1024 * 1024 if found else None
+
+    def _nvidia_thermal() -> dict[str, float | None]:
+        try:
+            completed = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=temperature.gpu,power.draw",
+                    "--format=csv,noheader,nounits",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return {"gpu_temperature_celsius": None, "gpu_power_watts": None}
+        if completed.returncode != 0 or not completed.stdout.strip():
+            return {"gpu_temperature_celsius": None, "gpu_power_watts": None}
+        fields = [field.strip() for field in completed.stdout.splitlines()[0].split(",")]
+        temperature: float | None = None
+        power: float | None = None
+        if fields:
+            try:
+                temperature = float(fields[0])
+            except ValueError:
+                temperature = None
+        if len(fields) > 1:
+            try:
+                power = float(fields[1])
+            except ValueError:
+                power = None
+        return {"gpu_temperature_celsius": temperature, "gpu_power_watts": power}
+
+    def _memory_evidence() -> dict[str, Any] | None:
+        if measured_started is None:
+            return None
+        try:
+            torch.cuda.synchronize(0)
+        except Exception:  # noqa: BLE001
+            pass
+        if sampler_stop is not None:
+            sampler_stop.set()
+        if sampler_thread is not None:
+            sampler_thread.join(timeout=3)
+        samples["peak_host_rss"] = max(
+            int(samples.get("peak_host_rss") or 0), _rss_bytes()
+        )
+        final_nvidia = _nvidia_process_bytes()
+        if final_nvidia is not None:
+            prior_nvidia = samples.get("peak_nvidia")
+            samples["peak_nvidia"] = (
+                final_nvidia
+                if prior_nvidia is None
+                else max(int(prior_nvidia), final_nvidia)
+            )
+        memory: dict[str, Any] = {
+            "gpu_allocator_scope": "pytorch_cuda_allocator_process",
+            "gpu_device_scope": "nvidia_smi_current_process"
+            if baseline_nvidia is not None or samples.get("peak_nvidia") is not None
+            else "unavailable",
+            "host_memory_scope": "current_process_rss",
+            "baseline_gpu_allocated_bytes": baseline_gpu_allocated,
+            "baseline_gpu_reserved_bytes": baseline_gpu_reserved,
+            "peak_gpu_allocated_bytes": int(torch.cuda.max_memory_allocated(0)),
+            "peak_gpu_reserved_bytes": int(torch.cuda.max_memory_reserved(0)),
+            "baseline_nvidia_smi_process_bytes": baseline_nvidia,
+            "peak_nvidia_smi_process_bytes": samples.get("peak_nvidia"),
+            "baseline_host_rss_bytes": baseline_host_rss,
+            "peak_host_rss_bytes": int(samples["peak_host_rss"]),
+            "duration_seconds": time.perf_counter() - measured_started,
+        }
+        if record_phase_timing:
+            memory.update(phase_timings)
+            memory.update(thermal)
+        return memory
+
+    def _with_memory(outcome: ProbeOutcome) -> ProbeOutcome:
+        memory = _memory_evidence()
+        if memory is not None:
+            outcome.measured["memory"] = memory
+        return outcome
+
+    try:
         torch.manual_seed(0)
-        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_flash_sdp(enable_flash)
         torch.backends.cuda.enable_mem_efficient_sdp(False)
-        torch.backends.cuda.enable_math_sdp(True)
+        torch.backends.cuda.enable_math_sdp(enable_math)
+        attention_toggles = {
+            "flash_sdp_enabled": bool(torch.backends.cuda.flash_sdp_enabled()),
+            "memory_efficient_sdp_enabled": bool(
+                torch.backends.cuda.mem_efficient_sdp_enabled()
+            ),
+            "math_sdp_enabled": bool(torch.backends.cuda.math_sdp_enabled()),
+        }
+        expected_toggles = {
+            "flash_sdp_enabled": enable_flash,
+            "memory_efficient_sdp_enabled": False,
+            "math_sdp_enabled": enable_math,
+        }
+        if attention_toggles != expected_toggles:
+            return ProbeOutcome(
+                _TX.UNSUPPORTED_CONFIGURATION,
+                f"{attention_kernel} SDPA toggles were not enforced: {attention_toggles}",
+            )
+        torch.cuda.synchronize(0)
+        baseline_gpu_allocated = int(torch.cuda.memory_allocated(0))
+        baseline_gpu_reserved = int(torch.cuda.memory_reserved(0))
+        baseline_host_rss = _rss_bytes()
+        baseline_nvidia = _nvidia_process_bytes()
+        samples = {
+            "peak_host_rss": baseline_host_rss,
+            "peak_nvidia": baseline_nvidia,
+        }
+        sampler_stop = threading.Event()
+
+        def _sample_resources() -> None:
+            while sampler_stop is not None and not sampler_stop.wait(0.1):
+                samples["peak_host_rss"] = max(
+                    int(samples["peak_host_rss"]), _rss_bytes()
+                )
+                observed = _nvidia_process_bytes()
+                if observed is not None:
+                    prior = samples.get("peak_nvidia")
+                    samples["peak_nvidia"] = observed if prior is None else max(int(prior), observed)
+
+        # Reset immediately before the measured QLoRA section. Allocator peaks and nvidia-smi
+        # process residency remain separate evidence and are never converted into fit claims.
+        torch.cuda.reset_peak_memory_stats(0)
+        measured_started = time.perf_counter()
+        sampler_thread = threading.Thread(target=_sample_resources, daemon=True)
+        sampler_thread.start()
         with tempfile.TemporaryDirectory() as root:
             base_dir = Path(root) / "base"
             adapter_dir = Path(root) / "adapter"
@@ -568,77 +836,231 @@ def _probe_cuda_qlora_math_execution(
                 parameter.device.type != "cuda" or parameter.dtype != torch.float32
                 for parameter in trainable
             ):
-                return ProbeOutcome(
-                    _TX.UNSUPPORTED_CONFIGURATION,
-                    "QLoRA adapter placement or FP32 master-weight policy was not enforced",
+                return _with_memory(
+                    ProbeOutcome(
+                        _TX.UNSUPPORTED_CONFIGURATION,
+                        "QLoRA adapter placement or FP32 master-weight policy was not enforced",
+                    )
                 )
+            linear4bit_modules = find_linear4bit_modules(model, BnbLinear4bit)
             quant_types = {
                 getattr(getattr(module.weight, "quant_state", None), "quant_type", None)
-                for module in model.modules()
-                if module.__class__.__name__ == "Linear4bit" and hasattr(module, "weight")
+                for module in linear4bit_modules
             }
             compute_dtypes = {
-                getattr(module, "compute_dtype", None)
-                for module in model.modules()
-                if module.__class__.__name__ == "Linear4bit"
+                getattr(module, "compute_dtype", None) for module in linear4bit_modules
             }
-            if quant_types != {"nf4"} or compute_dtypes != {torch.bfloat16}:
-                return ProbeOutcome(
-                    _TX.UNSUPPORTED_CONFIGURATION,
-                    f"observed quantization={quant_types}, compute_dtypes={compute_dtypes}",
+            nested_states = {
+                bool(getattr(getattr(module.weight, "quant_state", None), "nested", False))
+                for module in linear4bit_modules
+            }
+            quantized_devices = {module.weight.device.type for module in linear4bit_modules}
+            if (
+                not linear4bit_modules
+                or quant_types != {"nf4"}
+                or compute_dtypes != {torch.bfloat16}
+                or nested_states != {True}
+                or quantized_devices != {"cuda"}
+            ):
+                return _with_memory(
+                    ProbeOutcome(
+                        _TX.UNSUPPORTED_CONFIGURATION,
+                        "observed "
+                        f"linear4bit={len(linear4bit_modules)}, "
+                        f"quantization={quant_types}, compute_dtypes={compute_dtypes}, "
+                        f"double_quant={nested_states}, devices={quantized_devices}",
+                    )
                 )
             optimizer = torch.optim.AdamW(trainable, lr=1e-3)
             before = trainable[0].detach().clone()
+            # Shared with math/flash readiness probes for comparable measurements.
             input_ids = torch.randint(3, 64, (1, 8), device="cuda", dtype=torch.long)
-            with sdpa_kernel([SDPBackend.MATH]):
-                output = model(input_ids=input_ids, labels=input_ids)
-                output.loss.backward()
+            operation_toggles = {
+                "flash_sdp_enabled": bool(torch.backends.cuda.flash_sdp_enabled()),
+                "memory_efficient_sdp_enabled": bool(
+                    torch.backends.cuda.mem_efficient_sdp_enabled()
+                ),
+                "math_sdp_enabled": bool(torch.backends.cuda.math_sdp_enabled()),
+            }
+            if operation_toggles != expected_toggles:
+                return _with_memory(
+                    ProbeOutcome(
+                        _TX.UNSUPPORTED_CONFIGURATION,
+                        f"SDPA toggles changed before forced {sdp_backend_name}: {operation_toggles}",
+                    )
+                )
+            try:
+                torch.cuda.synchronize(0)
+                forward_started = time.perf_counter()
+                # Autocast matches real QLoRA training compute dtype. Without it, PEFT k-bit prep
+                # leaves residual/attention tensors in float32; math SDPA accepts float32 but forced
+                # FLASH_ATTENTION aborts ("No available kernel"). Never enable math/mem-efficient
+                # as a silent fallback when the forced backend fails.
+                with (
+                    sdpa_kernel([sdp_backend]),
+                    torch.autocast(device_type="cuda", dtype=torch.bfloat16),
+                ):
+                    output = model(input_ids=input_ids, labels=input_ids)
+                    torch.cuda.synchronize(0)
+                    phase_timings["forward_duration_seconds"] = (
+                        time.perf_counter() - forward_started
+                    )
+                    if not bool(torch.isfinite(output.loss).item()):
+                        return _with_memory(
+                            ProbeOutcome(
+                                _TX.NUMERICAL_FAILURE,
+                                f"BF16/NF4/QLoRA {attention_kernel} forward loss was non-finite",
+                            )
+                        )
+                    backward_started = time.perf_counter()
+                    output.loss.backward()
+                    torch.cuda.synchronize(0)
+                    phase_timings["backward_duration_seconds"] = (
+                        time.perf_counter() - backward_started
+                    )
+            except Exception as exc:  # noqa: BLE001
+                # No fallback to math / mem-efficient / eager: forced kernel failure is a FAIL.
+                return _with_memory(
+                    ProbeOutcome(
+                        _TX.FAIL,
+                        f"forced SDPBackend.{sdp_backend_name} execution failed: {exc}",
+                    )
+                )
             gradients = [parameter.grad for parameter in trainable if parameter.grad is not None]
             if not gradients or any(gradient.dtype != torch.float32 for gradient in gradients):
-                return ProbeOutcome(_TX.NUMERICAL_FAILURE, "QLoRA gradients were not FP32")
+                return _with_memory(
+                    ProbeOutcome(_TX.NUMERICAL_FAILURE, "QLoRA gradients were not FP32")
+                )
+            torch.cuda.synchronize(0)
+            optimizer_started = time.perf_counter()
             optimizer.step()
+            torch.cuda.synchronize(0)
+            phase_timings["optimizer_step_duration_seconds"] = (
+                time.perf_counter() - optimizer_started
+            )
             if not bool(torch.isfinite(output.loss).item()) or torch.equal(before, trainable[0]):
-                return ProbeOutcome(
-                    _TX.NUMERICAL_FAILURE,
-                    "BF16/NF4/QLoRA math-SDPA AdamW step was invalid",
+                return _with_memory(
+                    ProbeOutcome(
+                        _TX.NUMERICAL_FAILURE,
+                        f"BF16/NF4/QLoRA {attention_kernel} AdamW step was invalid",
+                    )
                 )
             model.save_pretrained(adapter_dir, safe_serialization=True)
-            if not (adapter_dir / "adapter_model.safetensors").is_file():
-                return ProbeOutcome(_TX.CHECKPOINT_FAILURE, "adapter safetensors was not written")
+            adapter_path = adapter_dir / "adapter_model.safetensors"
+            if not adapter_path.is_file():
+                return _with_memory(
+                    ProbeOutcome(_TX.CHECKPOINT_FAILURE, "adapter safetensors was not written")
+                )
             reloaded = PeftModel.from_pretrained(_load_base(), adapter_dir)
-            with torch.no_grad(), sdpa_kernel([SDPBackend.MATH]):
-                reload_loss = reloaded(input_ids=input_ids, labels=input_ids).loss
+            try:
+                with (
+                    torch.no_grad(),
+                    sdpa_kernel([sdp_backend]),
+                    torch.autocast(device_type="cuda", dtype=torch.bfloat16),
+                ):
+                    reload_loss = reloaded(input_ids=input_ids, labels=input_ids).loss
+            except Exception as exc:  # noqa: BLE001
+                return _with_memory(
+                    ProbeOutcome(
+                        _TX.CHECKPOINT_FAILURE,
+                        f"forced SDPBackend.{sdp_backend_name} reload forward failed: {exc}",
+                    )
+                )
             if not bool(torch.isfinite(reload_loss).item()):
-                return ProbeOutcome(_TX.CHECKPOINT_FAILURE, "reloaded QLoRA adapter was non-finite")
+                return _with_memory(
+                    ProbeOutcome(_TX.CHECKPOINT_FAILURE, "reloaded QLoRA adapter was non-finite")
+                )
+            if record_phase_timing:
+                thermal.update(_nvidia_thermal())
+            adapter_bytes = adapter_path.stat().st_size
+            package_versions = {
+                name: metadata.version(name)
+                for name in (
+                    "accelerate",
+                    "bitsandbytes",
+                    "datasets",
+                    "peft",
+                    "safetensors",
+                    "tokenizers",
+                    "torch",
+                    "transformers",
+                    "trl",
+                )
+            }
+            runtime_evidence = {
+                "python_executable": sys.executable,
+                "python_version": platform.python_version(),
+                "torch_version": str(torch.__version__),
+                "torch_cuda_runtime": str(torch.version.cuda),
+                "gpu_name": str(torch.cuda.get_device_name(0)),
+                "compute_capability": ".".join(
+                    str(item) for item in torch.cuda.get_device_capability(0)
+                ),
+                "packages": package_versions,
+            }
         combination = _combination(
             runtime_mode="training",
             device="cuda",
             precision="bf16",
             quantization="nf4",
             adapter_method="qlora",
-            attention_impl="math",
-            attention_kernel="torch_sdpa_math",
-            probe="cuda_qlora_math_execution",
+            attention_impl=attention_impl,
+            attention_kernel=attention_kernel,
+            probe=probe_name,
         )
-        return ProbeOutcome(
-            _TX.PASS,
-            "BF16/NF4/QLoRA math-SDPA backward, AdamW update, and adapter reload passed",
-            measured={"loss": float(output.loss.detach().item())},
-            proves={
-                "precision": ["bf16"],
-                "quantization": ["nf4"],
-                "attention": ["math", "sdpa"],
-                "attention_kernel": ["torch_sdpa_math"],
-                "adapter": ["qlora"],
-                "loss": ["cross_entropy"],
-                "optimizer": ["adamw_torch"],
-                "checkpoint": ["adapter_only"],
-            },
-            execution_combinations=[combination],
+        return _with_memory(
+            ProbeOutcome(
+                _TX.PASS,
+                pass_detail,
+                measured={
+                    "loss": float(output.loss.detach().item()),
+                    "reload_loss": float(reload_loss.detach().item()),
+                    "adapter_weight_bytes": adapter_bytes,
+                    "runtime": runtime_evidence,
+                    "configuration": {
+                        "compute_dtype": "bf16",
+                        "forward_autocast": "bf16",
+                        "quantization": "nf4",
+                        "double_quantization": True,
+                        "attention_api": "sdpa",
+                        "attention_kernel": attention_kernel,
+                        "forced_sdp_backend": sdp_backend_name,
+                        "attention_toggles_before": previous_toggles,
+                        "attention_toggles": attention_toggles,
+                        "attention_toggles_during": operation_toggles,
+                        "device_map": {"": "cuda:0"},
+                        "target_modules": "all-linear",
+                        "gradient_checkpointing": True,
+                        "optimizer": "adamw_torch",
+                        "batch_size": 1,
+                        "sequence_length": 8,
+                        "lora_r": 2,
+                        "lora_alpha": 4,
+                        "seed": 0,
+                    },
+                },
+                proves={
+                    "precision": ["bf16"],
+                    "quantization": ["nf4"],
+                    "attention": proves_attention,
+                    "attention_kernel": [attention_kernel],
+                    "adapter": ["qlora"],
+                    "loss": ["cross_entropy"],
+                    "optimizer": ["adamw_torch"],
+                    "checkpoint": ["adapter_only"],
+                },
+                execution_combinations=[combination],
+            )
         )
     except Exception as exc:  # noqa: BLE001
-        return ProbeOutcome(_TX.FAIL, f"CUDA QLoRA execution tuple failed: {exc}")
+        return _with_memory(
+            ProbeOutcome(_TX.FAIL, f"CUDA QLoRA execution tuple failed: {exc}")
+        )
     finally:
+        if sampler_stop is not None:
+            sampler_stop.set()
+        if sampler_thread is not None:
+            sampler_thread.join(timeout=3)
         torch.backends.cuda.enable_flash_sdp(previous[0])
         torch.backends.cuda.enable_mem_efficient_sdp(previous[1])
         torch.backends.cuda.enable_math_sdp(previous[2])
@@ -672,6 +1094,7 @@ BUILTIN_PROBES: dict[str, ProbeFn] = {
     "checkpoint_reload": _probe_checkpoint_reload,
     "cpu_lora_execution": _probe_cpu_lora_execution,
     "cuda_qlora_math_execution": _probe_cuda_qlora_math_execution,
+    "cuda_qlora_sdpa_flash_execution": _probe_cuda_qlora_sdpa_flash_execution,
 }
 
 
