@@ -2926,7 +2926,13 @@ class QloraExecutionProbeSpec(ContractModel):
     )
     execution_combination: ExecutionCapabilityCombination
     device: Literal["cuda:0"] = "cuda:0"
-    compute_dtype: Literal["bf16"] = "bf16"
+    compute_dtype: Literal["bf16"] = Field(
+        default="bf16",
+        description=(
+            "Seals both 4-bit dequantization compute and forward activation autocast; complete "
+            "probe evidence must observe this value for compute_dtype and forward_autocast."
+        ),
+    )
     quantization: Literal["nf4"] = "nf4"
     double_quantization: Literal[True] = True
     attention_api: Literal["sdpa"] = "sdpa"

@@ -15,10 +15,12 @@ interpreter or each other's dependency graph.
 > Declaring the recipe or generating a sealed plan does not prove the environment. The lifecycle is
 > covered in default CI by fake installers and CPU-only probes. On the current native-Linux host,
 > the managed `backend-corpus-studio`, `backend-corpus-studio-readiness-v2`, and
-> `backend-corpus-studio-readiness-flash-v1` environments are `HARDWARE_VERIFIED` on the native-Linux
-> host for their respective exact probe tuples (legacy minimal hardware probe; readiness-v2 complete
-> math QLoRA tuple; readiness-flash-v1 complete forced-flash QLoRA tuple with bf16 autocast). Sealed
-> digests for flash-v1 are recorded in [`HOST_STATE.md`](HOST_STATE.md). Rebuilding remains an
+> `backend-corpus-studio-readiness-flash-v1` environments have preserved `HARDWARE_VERIFIED` evidence
+> for their respective exact probe tuples (legacy minimal hardware probe; readiness-v2 complete math
+> QLoRA tuple; readiness-flash-v1 complete forced-flash QLoRA tuple with bf16 autocast). Manager 1.2
+> preserves the math rollback identity but requires replacement of the manager-1.1 flash instance
+> before a new health claim. Sealed flash-v1 digests are recorded in [`HOST_STATE.md`](HOST_STATE.md).
+> Rebuilding remains an
 > explicit network-using operation. These environment results do not verify a real 7B workload,
 > offload, or full-sequence flash training.
 
@@ -30,8 +32,9 @@ interpreter or each other's dependency graph.
 | `capability` | optional stable in-process features such as exact tokenization or Parquet | control-plane interpreter |
 | `backend_worker` | torch/CUDA/framework stacks that can conflict | one owned venv per backend environment |
 
-Only the two CorpusStudio worker recipes have side-effectful creation implementations. DeepSpeed,
-FSDP, Axolotl, LLaMA-Factory, Unsloth, and MoE runtimes are not added here.
+Only the three CorpusStudio worker recipes (legacy, readiness-v2 math, and readiness-flash-v1) have
+side-effectful creation implementations. DeepSpeed, FSDP, Axolotl, LLaMA-Factory, Unsloth, and MoE
+runtimes are not added here.
 
 ## Evidence levels
 
@@ -141,10 +144,11 @@ environment-manager/
     logs/<attempt-id>/*.stdout.log|*.stderr.log
 ```
 
-Registry writes use temp-file plus atomic replacement. A failed, timed-out, or cancelled attempt keeps
-its descriptor, command journal, logs, structured `FailureRecord`, and partial owned environment. It
-is `BROKEN` and explicitly requires recreation; the manager does not hide the failure with a different
-source or an automatic destructive retry.
+Registry writes use temp-file plus atomic replacement. A failed, timed-out, or cancelled command keeps
+its descriptor, command journal, logs, structured `FailureRecord`, and partial owned environment as
+`BROKEN`. A completed command sequence whose required probe fails may instead be honestly `DEGRADED`
+or `INCOMPATIBLE`; it still has no lock and explicitly requires recreation. The manager does not hide
+either case with a different source or an automatic destructive retry.
 
 Each installation command record includes argv, cwd, explicit environment, timeout, expected outputs,
 timestamps, exit code, stdout/stderr paths, native-build evidence, and failure details.
@@ -163,23 +167,48 @@ The manager does not use a pre-install hash as a final environment lock. Its det
 8. recompute live package, worker-artifact, hardware, and lock drift against that sealed state.
 
 A failed complete probe leaves `lock_ref` absent. It may produce an honest `INCOMPATIBLE` or
-`DEGRADED` installation record, but never a final lock or `HARDWARE_VERIFIED` state.
+`DEGRADED` installation record, marked `retry_requires_recreate=true`, but never a final lock or
+`HARDWARE_VERIFIED` state.
 
 The sealed `EnvironmentLock` contains:
 
 - Python executable/version/implementation/platform/architecture;
 - normalized package names, exact versions, sanitized index/direct/VCS evidence, artifact filenames
   and hashes where pip can prove them, plus an explicit reason when the source remains unknown;
-- installed `RECORD` metadata hashes, verification of every hash-bearing installed file, and
-  dependency metadata;
+- installed `RECORD` metadata hashes, verification of every SHA-256-bearing installed file, a
+  manager-computed tree digest over every regular file named by `RECORD` (including generated,
+  unhashed bytecode), and dependency metadata. Every site-package file must be owned by one such
+  record; unrecorded files, duplicate normalized distributions, and symlinks fail closed. An entry
+  must resolve inside the managed environment and may not use an absolute or escaping path;
 - torch build, CUDA runtime, and compute capability;
 - recipe and resolution identities, selected indexes, exact worker wheel identity, complete-probe
   evidence, manager version, timestamp, and a canonical lock digest.
 
-Pip report URLs are sanitized before durable storage: credentials, query parameters, fragments,
-signed URLs, and private-index secrets are not retained. Allocator memory, `nvidia-smi`
+Pip report entries fail closed when malformed or when normalized distribution names collide. Artifact
+hosts are matched exactly to configured index hosts (with the explicit PyPI file-host mapping); URL
+substrings are never source evidence. URLs are sanitized before durable storage: credentials, query
+parameters, fragments, signed URLs, and private-index secrets are not retained. Allocator memory, `nvidia-smi`
 current-process memory, and host RSS are labeled as separate scopes. They are measurements of the
 bounded probe, not model-fit or parameter-residency claims.
+
+Readiness wheel inspection is bounded and fail-closed before mutation: the filename, root dist-info
+directory, unique METADATA identity, unique RECORD, archive members, per-member SHA-256/size, and
+expanded size must agree. Pip's observed artifact hash is compared with that reviewed identity before
+any newly installed interpreter process is started. Installed inventories run with `-I -S`, use
+bounded metadata reads and streaming file hashes without processing `.pth` files, reject unrecorded
+site-package files, and compare every immutable worker payload member with the reviewed wheel. Only
+after the parent validates that non-executable evidence does a second isolated process import torch.
+Health and capability probes are bracketed by fresh inventories; a probe-side package/file mutation
+cannot be returned as healthy.
+
+Manager 1.2 preserves the sealed 1.1 lock digests. In particular, the pre-autocast-field
+readiness-v2 math evidence remains a narrow, untouched rollback identity during health checks. New
+math or flash creations must emit the stronger measured configuration, including BF16 forward
+autocast, forced kernel/toggles, bounded probe shape, and an adapter-state equality check; the legacy
+exception is never accepted for flash or for a new creation.
+The current manager-1.1 flash lock predates the adapter-state equality observation. Its lock and
+probe-evidence digests remain valid historical evidence, but manager 1.2 intentionally does not treat
+it as a rollback exception; replacement is required before it can receive a manager-1.2 health claim.
 
 Probe categories remain separate:
 
@@ -189,9 +218,13 @@ Probe categories remain separate:
 - **hardware:** CUDA availability/allocation, compute capability, BF16 signal, bitsandbytes 4-bit
   construction, minimal GPU forward/backward, optional-kernel flags, and math SDPA execution.
 
-`env-probe` re-snapshots the live environment and detects missing roots/interpreters/locks, package
-addition/removal/version/hash changes, source changes, recipe drift, lock tampering, broken imports,
-functional failures, and CUDA/compute-capability changes.
+`env-probe` snapshots before imports and again after probes and detects missing roots/interpreters/locks,
+normalized name collisions, package addition/removal/version/installed-RECORD or installed-file-tree
+changes, observable direct/VCS/index source changes, worker-wheel changes, recipe drift, lock tampering,
+broken imports, functional failures, and CUDA/compute-capability changes. Index provenance is
+install-time evidence: reinstalling identical
+bytes from a different index without PEP 610 metadata cannot be reconstructed from installed files
+alone, so the health report does not invent that claim.
 
 ```bash
 cd /mnt/training-nvme/repos/CorpusStudio
@@ -256,16 +289,17 @@ Default CI proves command construction, confirmation seals, path containment, ow
 records, timeout/cancellation, failure recovery, lock generation, CPU probes, drift, safe
 remove/recreate, RunPlan pinning, and managed-interpreter dispatch using fakes and temp directories.
 
-Current-host evidence is limited to the existing `backend-corpus-studio` environment's exact minimal
-hardware-probe tuple. It does not claim a complete 7B training run, long-sequence stability, sustained
-throughput, production checkpoint behavior, DeepSpeed/FSDP, CPU/NVMe parameter or optimizer offload,
-bare-Linux FlashAttention for the real workload, MoE execution, or resource-elastic expert paging.
+Current-host evidence covers three distinct managed environments: the legacy minimal hardware tuple,
+the readiness-v2 complete math QLoRA tuple, and the readiness-flash-v1 tiny forced-flash QLoRA tuple.
+The first real 0.5B flash smoke failed placement verification before adapter insertion and completed
+zero optimizer steps; a separate placement-only diagnostic observed all loaded parameters and buffers
+on `cuda:0`. It does not claim a complete 7B training run, a real flash optimizer step, sequence-4096
+stability, sustained throughput, production checkpoint behavior, DeepSpeed/FSDP, CPU/NVMe parameter
+or optimizer offload, MoE execution, or resource-elastic expert paging.
 
 Also not claimed by this slice:
 
 - in-place package repair (recreate is the safe supported recovery path);
-- a created or verified `backend-corpus-studio-readiness-v2` environment (its replacement plan is
-  review evidence only until separately authorized);
-- side-effectful creation for capability packs or any backend other than the two CorpusStudio worker
+- side-effectful creation for capability packs or any backend other than the three CorpusStudio worker
   recipes;
 - container, conda, `uv`, or remote environment providers.

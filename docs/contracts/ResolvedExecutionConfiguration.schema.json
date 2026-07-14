@@ -662,6 +662,30 @@
           ],
           "default": null
         },
+        "installed_file_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installed File Count"
+        },
+        "installed_files_hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "installer": {
           "anyOf": [
             {

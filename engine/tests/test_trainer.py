@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
+from types import ModuleType
 
 import pytest
 
@@ -43,6 +45,7 @@ from corpus_studio.training.trainer import (
     verify_local_inputs_after_load,
     verify_model_state_execution,
     verify_optimizer_state_precision,
+    verify_completed_step_count,
     _list_checkpoints,
 )
 
@@ -488,6 +491,8 @@ def _placement_model(
     parameters=None,
     buffers=None,
     attn="sdpa",
+    attributes=None,
+    child_modules=None,
 ):
     param_items = (
         list(parameters)
@@ -495,8 +500,9 @@ def _placement_model(
         else [("layer.weight", _PlacementParameter())]
     )
     buffer_items = list(buffers) if buffers is not None else []
+    children = list(child_modules) if child_modules is not None else []
 
-    return type(
+    model = type(
         "Model",
         (),
         {
@@ -505,8 +511,16 @@ def _placement_model(
             "parameters": lambda self: iter(parameter for _, parameter in param_items),
             "named_parameters": lambda self: iter(param_items),
             "named_buffers": lambda self: iter(buffer_items),
+            "named_modules": lambda self: iter([("", self), *children]),
         },
     )()
+    for name, value in (attributes or {}).items():
+        setattr(model, name, value)
+    return model
+
+
+def _accelerate_hook(name="AlignDevicesHook", **attributes):
+    return type(name, (), {"__module__": "accelerate.hooks", **attributes})()
 
 
 def test_loaded_model_execution_accepts_root_cuda0_map():
@@ -545,8 +559,8 @@ def test_loaded_model_execution_accepts_missing_hf_device_map_when_tensors_are_c
     )
 
 
-def test_loaded_model_execution_accepts_torch_device_like_values():
-    class FakeDevice:
+def test_loaded_model_execution_accepts_exact_torch_device_values(monkeypatch):
+    class TorchDevice:
         def __init__(self, type_, index=None):
             self.type = type_
             self.index = index
@@ -556,14 +570,51 @@ def test_loaded_model_execution_accepts_torch_device_like_values():
                 return self.type
             return f"{self.type}:{self.index}"
 
+    TorchDevice.__name__ = "device"
+    TorchDevice.__module__ = "torch"
+    torch_module = ModuleType("torch")
+    torch_module.device = TorchDevice  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "torch", torch_module)
+
     verify_loaded_model_execution(
         _placement_model(
-            hf_device_map={"": FakeDevice("cuda", 0)},
-            parameters=[("w", _PlacementParameter(FakeDevice("cuda", None)))],
-            buffers=[("b", _PlacementBuffer(FakeDevice("cuda", 0)))],
+            hf_device_map={"": TorchDevice("cuda", 0)},
+            parameters=[("w", _PlacementParameter(TorchDevice("cuda", None)))],
+            buffers=[("b", _PlacementBuffer(TorchDevice("cuda", 0)))],
         ),
         _sealed_config(),
     )
+
+
+def test_loaded_model_execution_rejects_arbitrary_device_protocol_without_rendering_it():
+    class UntrustedDevice:
+        type = "cuda"
+        index = 0
+
+        def __str__(self):
+            raise AssertionError("untrusted device representation must not be rendered")
+
+    with pytest.raises(ExecutionPlacementDeviation, match="unknown device object type"):
+        verify_loaded_model_execution(
+            _placement_model(hf_device_map={"": UntrustedDevice()}),
+            _sealed_config(),
+        )
+
+
+def test_loaded_model_execution_rejects_boolean_torch_device_index(monkeypatch):
+    TorchDevice = type(
+        "device",
+        (),
+        {"__module__": "torch", "type": "cuda", "index": True},
+    )
+    torch_module = ModuleType("torch")
+    torch_module.device = TorchDevice  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "torch", torch_module)
+    with pytest.raises(ExecutionPlacementDeviation, match="malformed or unsupported"):
+        verify_loaded_model_execution(
+            _placement_model(hf_device_map={"": TorchDevice()}),
+            _sealed_config(),
+        )
 
 
 def test_loaded_model_execution_rejects_cpu_map_entry():
@@ -620,14 +671,202 @@ def test_loaded_model_execution_rejects_meta_parameter():
         )
 
 
-def test_loaded_model_execution_rejects_float_buffer_off_device():
+@pytest.mark.parametrize("floating", [True, False])
+def test_loaded_model_execution_rejects_every_buffer_off_device(floating):
     with pytest.raises(ExecutionPlacementDeviation, match="buffers outside"):
         verify_loaded_model_execution(
             _placement_model(
                 hf_device_map={"": "cuda:0"},
-                buffers=[("norm.weight", _PlacementBuffer("cpu", floating=True))],
+                buffers=[("quant.state", _PlacementBuffer("cpu", floating=floating))],
             ),
             _sealed_config(),
+        )
+
+
+@pytest.mark.parametrize(
+    "hook_attributes",
+    [
+        {"offload": True, "weights_map": None, "execution_device": "cuda:0"},
+        {"offload": False, "weights_map": {"layer.weight": object()}, "execution_device": "cuda:0"},
+        {"offload": False, "weights_map": None, "execution_device": "cpu"},
+    ],
+)
+def test_loaded_model_execution_rejects_accelerate_offload_hook_state(hook_attributes):
+    hook = _accelerate_hook(**hook_attributes)
+    with pytest.raises(ExecutionPlacementDeviation, match="hidden offload or hook state"):
+        verify_loaded_model_execution(
+            _placement_model(
+                hf_device_map=None,
+                attributes={"_hf_hook": hook},
+            ),
+            _sealed_config(),
+        )
+
+
+def test_loaded_model_execution_accepts_non_offloading_hook_on_sealed_device():
+    hook = _accelerate_hook(
+        offload=False,
+        weights_map=None,
+        execution_device="cuda:0",
+    )
+    verify_loaded_model_execution(
+        _placement_model(hf_device_map=None, attributes={"_hf_hook": hook}),
+        _sealed_config(),
+    )
+
+
+def test_loaded_model_execution_rejects_hook_name_masquerading_as_accelerate():
+    hook = type(
+        "AlignDevicesHook",
+        (),
+        {"offload": False, "weights_map": None, "execution_device": "cuda:0"},
+    )()
+    with pytest.raises(ExecutionPlacementDeviation, match="unsupported _hf_hook runtime"):
+        verify_loaded_model_execution(
+            _placement_model(hf_device_map=None, attributes={"_hf_hook": hook}),
+            _sealed_config(),
+        )
+
+
+def test_loaded_model_execution_rejects_module_hook_and_disk_offload_structures():
+    hook = _accelerate_hook(
+        offload=True,
+        weights_map=None,
+        execution_device="cuda:0",
+    )
+    child = type("Layer", (), {"_hf_hook": hook})()
+    with pytest.raises(ExecutionPlacementDeviation, match="model.layers.0"):
+        verify_loaded_model_execution(
+            _placement_model(
+                hf_device_map=None,
+                child_modules=[("model.layers.0", child)],
+            ),
+            _sealed_config(),
+        )
+    with pytest.raises(ExecutionPlacementDeviation, match="weights_map"):
+        verify_loaded_model_execution(
+            _placement_model(
+                hf_device_map=None,
+                attributes={"weights_map": {}},
+            ),
+            _sealed_config(),
+        )
+    with pytest.raises(ExecutionPlacementDeviation, match="disk_offload"):
+        verify_loaded_model_execution(
+            _placement_model(
+                hf_device_map=None,
+                attributes={"disk_offload": True},
+            ),
+            _sealed_config(),
+        )
+    with pytest.raises(ExecutionPlacementDeviation, match="offload_index"):
+        verify_loaded_model_execution(
+            _placement_model(
+                hf_device_map=None,
+                attributes={"offload_index": {"layer.weight": "weights.bin"}},
+            ),
+            _sealed_config(),
+        )
+
+
+def test_loaded_model_execution_checks_alias_inventory_without_deduplication():
+    cuda_parameter = _PlacementParameter("cuda:0")
+    cpu_alias = _PlacementParameter("cpu")
+
+    class Model:
+        config = type("Config", (), {"_attn_implementation": "sdpa"})()
+        hf_device_map = None
+
+        def named_parameters(self, *, remove_duplicate=True):
+            items = [("tied.weight", cuda_parameter)]
+            if not remove_duplicate:
+                items.append(("alias.weight", cpu_alias))
+            return iter(items)
+
+        def named_buffers(self, *, remove_duplicate=True):
+            return iter(())
+
+        def named_modules(self, *, remove_duplicate=True):
+            return iter([("", self)])
+
+    with pytest.raises(ExecutionPlacementDeviation, match="alias.weight=cpu"):
+        verify_loaded_model_execution(Model(), _sealed_config())
+
+
+def test_non_singleton_device_map_still_requires_exact_structure():
+    expected = {"model.layers.0": "cuda:0", "model.layers.1": "cuda:1"}
+    verify_loaded_model_execution(
+        _placement_model(
+            hf_device_map=expected,
+            parameters=[
+                ("model.layers.0.weight", _PlacementParameter("cuda:0")),
+                ("model.layers.1.weight", _PlacementParameter("cuda:1")),
+            ],
+            buffers=[("model.layers.1.counter", _PlacementBuffer("cuda:1", floating=False))],
+        ),
+        _sealed_config(device_map=expected),
+    )
+    with pytest.raises(ExecutionPlacementDeviation, match="requested device map"):
+        verify_loaded_model_execution(
+            _placement_model(hf_device_map=None),
+            _sealed_config(device_map=expected),
+        )
+    with pytest.raises(ExecutionPlacementDeviation, match="parameters disagree"):
+        verify_loaded_model_execution(
+            _placement_model(
+                hf_device_map=expected,
+                parameters=[
+                    ("model.layers.0.weight", _PlacementParameter("cuda:0")),
+                    ("model.layers.1.weight", _PlacementParameter("cpu")),
+                ],
+            ),
+            _sealed_config(device_map=expected),
+        )
+
+
+def test_non_singleton_device_map_checks_each_shared_hook_attachment():
+    expected = {"model.layers.0": "cuda:0", "model.layers.1": "cuda:1"}
+    shared_hook = _accelerate_hook(
+        offload=False,
+        weights_map=None,
+        execution_device="cuda:0",
+    )
+    children = [
+        ("model.layers.0", type("Layer0", (), {"_hf_hook": shared_hook})()),
+        ("model.layers.1", type("Layer1", (), {"_hf_hook": shared_hook})()),
+    ]
+    with pytest.raises(ExecutionPlacementDeviation, match="model.layers.1"):
+        verify_loaded_model_execution(
+            _placement_model(
+                hf_device_map=expected,
+                parameters=[
+                    ("model.layers.0.weight", _PlacementParameter("cuda:0")),
+                    ("model.layers.1.weight", _PlacementParameter("cuda:1")),
+                ],
+                child_modules=children,
+            ),
+            _sealed_config(device_map=expected),
+        )
+
+
+def test_cpu_toy_semantic_placement_checks_parameters_and_buffers():
+    cfg = _sealed_config(cpu_toy=True, device_map={"": "cpu"})
+    verify_loaded_model_execution(
+        _placement_model(
+            hf_device_map=None,
+            parameters=[("weight", _PlacementParameter("cpu"))],
+            buffers=[("counter", _PlacementBuffer("cpu", floating=False))],
+        ),
+        cfg,
+    )
+    with pytest.raises(ExecutionPlacementDeviation, match="buffers outside"):
+        verify_loaded_model_execution(
+            _placement_model(
+                hf_device_map=None,
+                parameters=[("weight", _PlacementParameter("cpu"))],
+                buffers=[("counter", _PlacementBuffer("meta", floating=False))],
+            ),
+            cfg,
         )
 
 
@@ -667,6 +906,7 @@ def test_post_adapter_state_verifies_placement_and_unquantized_storage_dtype():
             "named_parameters": lambda self: iter(
                 [("base.weight", parameters[0]), ("adapter.weight", parameters[1])]
             ),
+            "named_buffers": lambda self: iter(()),
             "parameters": lambda self: iter(parameters),
             "modules": lambda self: iter(()),
         },
@@ -714,6 +954,7 @@ def test_post_adapter_state_observes_nf4_and_dequantization_dtype():
         (),
         {
             "named_parameters": lambda self: iter([("adapter.weight", parameter)]),
+            "named_buffers": lambda self: iter(()),
             "parameters": lambda self: iter([parameter]),
             "modules": lambda self: iter([peft_wrapper, linear]),
         },
@@ -763,6 +1004,26 @@ def test_optimizer_state_precision_refuses_runtime_drift():
     optimizer = type("Optimizer", (), {"state": {"parameter": {"exp_avg": bad}}})()
     with pytest.raises(TrainerError, match="optimizer-state dtype deviation"):
         verify_optimizer_state_precision(optimizer, torch, _sealed_config())
+
+
+def test_optimizer_state_precision_recurses_into_nested_materialized_tensors():
+    torch = _FakeTorch()
+    bad = type("Tensor", (), {"dtype": torch.float16})()
+    optimizer = type(
+        "Optimizer",
+        (),
+        {"state": {"parameter": {"nested": [{"exp_avg": bad}]}}},
+    )()
+    with pytest.raises(TrainerError, match=r"optimizer_state\.nested\[0\]\.exp_avg"):
+        verify_optimizer_state_precision(optimizer, torch, _sealed_config())
+
+
+def test_sealed_max_steps_must_match_the_completed_global_step():
+    config = _sealed_config(max_steps=3)
+    verify_completed_step_count(config, 3)
+    with pytest.raises(TrainerError, match="expected 3, observed 4"):
+        verify_completed_step_count(config, 4)
+    verify_completed_step_count(config.model_copy(update={"execution_configuration_hash": None}), 4)
 
 
 def test_training_kwargs_capped_steps_vs_epochs(tmp_path):

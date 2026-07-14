@@ -18,10 +18,12 @@ verified via the CPU toy path.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 import contextlib
 import hashlib
 import importlib.metadata
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -532,24 +534,61 @@ def build_model_load_kwargs(
 
 
 def _normalized_device(value: Any) -> str:
+    if isinstance(value, bool):
+        raise ExecutionPlacementDeviation(
+            "PLACEMENT_DEVIATION: boolean values are not device identities"
+        )
     if isinstance(value, int):
+        if value < 0:
+            raise ExecutionPlacementDeviation(
+                "PLACEMENT_DEVIATION: a CUDA device index cannot be negative"
+            )
         return f"cuda:{value}"
-    # torch.device("cuda") / torch.device("cuda", 0) style objects
-    device_type = getattr(value, "type", None)
-    if isinstance(device_type, str):
-        if device_type == "cuda":
-            index = getattr(value, "index", None)
-            return f"cuda:{0 if index is None else index}"
-        if device_type == "cpu":
+    if isinstance(value, str):
+        if value == "cuda":
+            return "cuda:0"
+        if re.fullmatch(r"cuda:[0-9]+", value):
+            return value
+        if value in {"cpu", "cpu:0"}:
             return "cpu"
-        if device_type == "meta":
-            return "meta"
-    rendered = str(value)
-    if rendered == "cuda":
-        return "cuda:0"
-    if rendered == "cpu:0":
+        if value in {"meta", "disk"}:
+            return value
+        raise ExecutionPlacementDeviation(
+            "PLACEMENT_DEVIATION: device string is malformed or unsupported"
+        )
+
+    # Do not trust an arbitrary object's ``type``/``index`` attributes or a spoofed class name as
+    # device evidence. Import torch only on this runtime path (never at module import) and require
+    # exact identity with its extension type.
+    value_type = type(value)
+    try:
+        import torch as torch_module  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001 - missing torch cannot prove an opaque device object.
+        raise ExecutionPlacementDeviation(
+            "PLACEMENT_DEVIATION: unknown device object type "
+            f"{value_type.__module__}.{value_type.__qualname__}; "
+            "torch.device identity is unavailable"
+        ) from exc
+    if value_type is not torch_module.device:
+        raise ExecutionPlacementDeviation(
+            "PLACEMENT_DEVIATION: unknown device object type "
+            f"{value_type.__module__}.{value_type.__qualname__}"
+        )
+    device_type = getattr(value, "type", None)
+    index = getattr(value, "index", None)
+    if device_type == "cuda" and (index is None or type(index) is int):
+        if index is not None and index < 0:
+            raise ExecutionPlacementDeviation(
+                "PLACEMENT_DEVIATION: a CUDA device index cannot be negative"
+            )
+        return f"cuda:{0 if index is None else index}"
+    if device_type == "cpu" and index in {None, 0}:
         return "cpu"
-    return rendered
+    if device_type == "meta" and index is None:
+        return "meta"
+    raise ExecutionPlacementDeviation(
+        "PLACEMENT_DEVIATION: torch.device value is malformed or unsupported"
+    )
 
 
 def _is_singleton_root_map(device_map: dict[str, str] | None) -> bool:
@@ -565,27 +604,177 @@ def _is_singleton_root_map(device_map: dict[str, str] | None) -> bool:
 
 def _raw_hf_device_map(model: Any) -> dict[str, str] | None:
     raw = getattr(model, "hf_device_map", None)
-    if not isinstance(raw, dict):
+    if raw is None:
         return None
-    return {str(module): _normalized_device(device) for module, device in raw.items()}
+    if not isinstance(raw, dict) or not raw:
+        raise ExecutionPlacementDeviation(
+            "PLACEMENT_DEVIATION: hf_device_map is malformed"
+        )
+    if any(not isinstance(module, str) for module in raw):
+        raise ExecutionPlacementDeviation(
+            "PLACEMENT_DEVIATION: hf_device_map contains a non-string module name"
+        )
+    return {module: _normalized_device(device) for module, device in raw.items()}
 
 
-def _parameter_devices(model: Any) -> dict[str, str]:
-    return {
-        name: _normalized_device(parameter.device)
-        for name, parameter in model.named_parameters()
-    }
+def _named_tensor_items(model: Any, method_name: str) -> list[tuple[str, Any]]:
+    method = getattr(model, method_name, None)
+    if not callable(method):
+        raise ExecutionPlacementDeviation(
+            f"PLACEMENT_DEVIATION: loaded model exposes no {method_name} inventory"
+        )
+    try:
+        raw_items = method(remove_duplicate=False)
+    except TypeError:
+        # Older torch and dependency-light test doubles do not expose remove_duplicate. This fallback
+        # still checks every item they expose; current torch uses the alias-preserving call above.
+        raw_items = method()
+    items: list[tuple[str, Any]] = []
+    for item in raw_items:
+        if (
+            not isinstance(item, tuple)
+            or len(item) != 2
+            or not isinstance(item[0], str)
+            or not hasattr(item[1], "device")
+        ):
+            raise ExecutionPlacementDeviation(
+                f"PLACEMENT_DEVIATION: {method_name} returned malformed state"
+            )
+        items.append((item[0], item[1]))
+    return items
 
 
-def _relevant_buffer_devices(model: Any) -> dict[str, str]:
-    """Persistent floating-point buffers that participate in execution placement."""
+def _parameter_devices(model: Any) -> list[tuple[str, str]]:
+    return [
+        (name, _normalized_device(parameter.device))
+        for name, parameter in _named_tensor_items(model, "named_parameters")
+    ]
 
-    devices: dict[str, str] = {}
-    for name, buffer in model.named_buffers():
-        is_floating = bool(getattr(buffer, "is_floating_point", lambda: False)())
-        if is_floating:
-            devices[name] = _normalized_device(buffer.device)
-    return devices
+
+def _buffer_devices(model: Any) -> list[tuple[str, str]]:
+    """Every registered buffer, including integer quantization and execution state."""
+
+    return [
+        (name, _normalized_device(buffer.device))
+        for name, buffer in _named_tensor_items(model, "named_buffers")
+    ]
+
+
+def _named_modules(model: Any) -> list[tuple[str, Any]]:
+    method = getattr(model, "named_modules", None)
+    if not callable(method):
+        return [("", model)]
+    try:
+        raw_modules = method(remove_duplicate=False)
+    except TypeError:
+        raw_modules = method()
+    modules: list[tuple[str, Any]] = []
+    for item in raw_modules:
+        if not isinstance(item, tuple) or len(item) != 2 or not isinstance(item[0], str):
+            raise ExecutionPlacementDeviation(
+                "PLACEMENT_DEVIATION: named_modules returned malformed state"
+            )
+        modules.append((item[0], item[1]))
+    return modules or [("", model)]
+
+
+def _expected_device_for_state(name: str, device_map: dict[str, str]) -> str | None:
+    """Resolve a tensor/module name through the longest matching sealed device-map prefix."""
+
+    matches = [
+        (len(module_name), device)
+        for module_name, device in device_map.items()
+        if module_name == "" or name == module_name or name.startswith(f"{module_name}.")
+    ]
+    return max(matches, default=(0, None), key=lambda item: item[0])[1]
+
+
+def _offload_hook_deviations(model: Any, expected_map: dict[str, str]) -> list[str]:
+    """Return safe module labels for any hidden Accelerate/offload execution state."""
+
+    deviations: list[str] = []
+    seen_hooks: set[tuple[int, str]] = set()
+
+    def _inspect_hook(hook: Any, module_name: str) -> None:
+        hook_identity = (id(hook), module_name)
+        if hook is None or hook_identity in seen_hooks:
+            return
+        # One hook object can be attached to more than one module. Inspect it once per attachment so
+        # a shared execution_device cannot evade a different sealed-map prefix; the pair still
+        # prevents a malformed SequentialHook cycle from recursing forever.
+        seen_hooks.add(hook_identity)
+        hook_runtime_type = type(hook)
+        hook_type = hook_runtime_type.__name__
+        label = module_name or "<root>"
+        if hook_runtime_type.__module__ != "accelerate.hooks":
+            deviations.append(
+                f"{label}: unsupported _hf_hook runtime "
+                f"{hook_runtime_type.__module__}.{hook_runtime_type.__qualname__}"
+            )
+            return
+        if hook_type == "SequentialHook":
+            nested = getattr(hook, "hooks", None)
+            if not isinstance(nested, (list, tuple)) or not nested:
+                deviations.append(f"{label}: malformed SequentialHook")
+                return
+            for child in nested:
+                _inspect_hook(child, module_name)
+            return
+        if hook_type != "AlignDevicesHook":
+            deviations.append(f"{label}: unsupported _hf_hook type {hook_type}")
+            return
+        offload = getattr(hook, "offload", False)
+        if isinstance(offload, dict):
+            offload_enabled = any(value is not False for value in offload.values())
+        else:
+            offload_enabled = offload is not False and offload is not None
+        if offload_enabled:
+            deviations.append(f"{label}: Accelerate offload hook")
+        if getattr(hook, "weights_map", None) is not None:
+            deviations.append(f"{label}: Accelerate weights_map")
+        if getattr(hook, "offload_buffers", False) is not False:
+            deviations.append(f"{label}: Accelerate buffer offload")
+        for attribute in (
+            "original_devices",
+            "param_original_devices",
+            "buffer_original_devices",
+        ):
+            original = getattr(hook, attribute, None)
+            if original:
+                deviations.append(f"{label}: Accelerate {attribute}")
+        execution_device = getattr(hook, "execution_device", None)
+        if execution_device is not None:
+            if isinstance(execution_device, dict):
+                values = tuple(execution_device.values())
+                if not values:
+                    deviations.append(f"{label}: hook execution-device map is empty")
+                    return
+            else:
+                values = (execution_device,)
+            expected_device = _expected_device_for_state(module_name, expected_map)
+            if expected_device is None or any(
+                _normalized_device(device) != expected_device for device in values
+            ):
+                deviations.append(f"{label}: hook execution device differs")
+
+    for module_name, module in _named_modules(model):
+        _inspect_hook(getattr(module, "_hf_hook", None), module_name)
+        label = module_name or "<root>"
+        for attribute in (
+            "weights_map",
+            "_weights_map",
+            "offload_index",
+            "_offload_index",
+            "offload_dir",
+            "_offload_dir",
+        ):
+            if getattr(module, attribute, None) is not None:
+                deviations.append(f"{label}: {attribute} is populated")
+        for attribute in ("offload", "offload_buffers", "disk_offload"):
+            value = getattr(module, attribute, None)
+            if value is not None and value is not False and not callable(value):
+                deviations.append(f"{label}: {attribute} is enabled")
+    return sorted(set(deviations))
 
 
 def _verify_singleton_root_placement(
@@ -597,13 +786,14 @@ def _verify_singleton_root_placement(
     """Accept root, expanded, or missing hf_device_map only when placement is fully on expected_device.
 
     Preserves fail-closed behavior for CPU/disk/meta/other-GPU map entries and any parameter or
-    execution-relevant floating buffer off the sealed singleton device. Does not rewrite the sealed
-    requested map and never treats "CUDA is available" as proof.
+    registered buffer off the sealed singleton device. Hidden Accelerate CPU/disk offload state is
+    rejected even when the current parameter snapshot happens to be resident. Does not rewrite the
+    sealed requested map and never treats "CUDA is available" as proof.
     """
 
     normalized_map = _raw_hf_device_map(model)
     parameter_devices = _parameter_devices(model)
-    buffer_devices = _relevant_buffer_devices(model)
+    buffer_devices = _buffer_devices(model)
 
     if not parameter_devices:
         raise ExecutionPlacementDeviation(
@@ -624,22 +814,27 @@ def _verify_singleton_root_placement(
                 f"observed hf_device_map entries outside {expected_device}: {preview}"
             )
 
-    bad_parameters = {
-        name: device for name, device in parameter_devices.items() if device != expected_device
-    }
+    offload_deviations = _offload_hook_deviations(model, expected_map)
+    if offload_deviations:
+        raise ExecutionPlacementDeviation(
+            "PLACEMENT_DEVIATION: hidden offload or hook state: "
+            + ", ".join(offload_deviations[:5])
+        )
+
+    bad_parameters = [
+        (name, device) for name, device in parameter_devices if device != expected_device
+    ]
     if bad_parameters:
         preview = ", ".join(
-            f"{name}={device}" for name, device in list(bad_parameters.items())[:5]
+            f"{name}={device}" for name, device in bad_parameters[:5]
         )
         raise ExecutionPlacementDeviation(
             f"PLACEMENT_DEVIATION: parameters outside {expected_device}: {preview}"
         )
 
-    bad_buffers = {
-        name: device for name, device in buffer_devices.items() if device != expected_device
-    }
+    bad_buffers = [(name, device) for name, device in buffer_devices if device != expected_device]
     if bad_buffers:
-        preview = ", ".join(f"{name}={device}" for name, device in list(bad_buffers.items())[:5])
+        preview = ", ".join(f"{name}={device}" for name, device in bad_buffers[:5])
         raise ExecutionPlacementDeviation(
             f"PLACEMENT_DEVIATION: execution-relevant buffers outside {expected_device}: {preview}"
         )
@@ -647,12 +842,65 @@ def _verify_singleton_root_placement(
     # expanded all-expected_device map; parameter+buffer inventory is the fail-closed authority.
 
 
+def _verify_non_singleton_placement(
+    model: Any,
+    *,
+    expected_map: dict[str, str],
+) -> None:
+    """Verify exact multi-entry map structure and every real tensor against its mapped device."""
+
+    observed = _raw_hf_device_map(model)
+    if observed != expected_map:
+        raise ExecutionPlacementDeviation(
+            f"PLACEMENT_DEVIATION: requested device map {expected_map}, observed {observed}"
+        )
+    parameter_devices = _parameter_devices(model)
+    if not parameter_devices:
+        raise ExecutionPlacementDeviation(
+            "PLACEMENT_DEVIATION: sealed non-singleton placement cannot be verified - "
+            "the loaded model exposes no parameters"
+        )
+    offload_deviations = _offload_hook_deviations(model, expected_map)
+    if offload_deviations:
+        raise ExecutionPlacementDeviation(
+            "PLACEMENT_DEVIATION: hidden offload or hook state: "
+            + ", ".join(offload_deviations[:5])
+        )
+
+    def _bad_state(items: list[tuple[str, str]]) -> list[tuple[str, str, str | None]]:
+        return [
+            (name, actual, expected)
+            for name, actual in items
+            if (expected := _expected_device_for_state(name, expected_map)) is None
+            or actual != expected
+        ]
+
+    bad_parameters = _bad_state(parameter_devices)
+    if bad_parameters:
+        preview = ", ".join(
+            f"{name}={actual} (expected {expected or 'covered map entry'})"
+            for name, actual, expected in bad_parameters[:5]
+        )
+        raise ExecutionPlacementDeviation(
+            f"PLACEMENT_DEVIATION: parameters disagree with the sealed device map: {preview}"
+        )
+    bad_buffers = _bad_state(_buffer_devices(model))
+    if bad_buffers:
+        preview = ", ".join(
+            f"{name}={actual} (expected {expected or 'covered map entry'})"
+            for name, actual, expected in bad_buffers[:5]
+        )
+        raise ExecutionPlacementDeviation(
+            f"PLACEMENT_DEVIATION: buffers disagree with the sealed device map: {preview}"
+        )
+
+
 
 def verify_loaded_model_execution(model: Any, config: TrainRunConfig) -> None:
     """Observe the model API and placement chosen by Transformers/Accelerate, then fail closed.
 
     For a sealed singleton root map ``{\"\": \"cuda:0\"}`` (the production GPU plan shape), placement
-    is verified semantically: every parameter and every execution-relevant floating buffer must
+    is verified semantically: every parameter and every registered buffer must
     resolve to the sealed device, and any ``hf_device_map`` entry must also resolve there. Expanded
     all-cuda maps and missing ``hf_device_map`` attributes (common with some bitsandbytes loads) are
     accepted only when that inventory is fully on the sealed device. Multi-key non-singleton sealed
@@ -672,12 +920,18 @@ def verify_loaded_model_execution(model: Any, config: TrainRunConfig) -> None:
     if expected is None:
         raise ExecutionPlacementDeviation("PLACEMENT_DEVIATION: sealed device map is missing")
     if config.cpu_toy:
-        devices = {_normalized_device(parameter.device) for parameter in model.parameters()}
-        observed = {"": next(iter(devices))} if len(devices) == 1 else None
-        if observed != expected:
+        normalized_expected = {
+            str(module): _normalized_device(device) for module, device in expected.items()
+        }
+        if not _is_singleton_root_map(normalized_expected):
             raise ExecutionPlacementDeviation(
-                f"PLACEMENT_DEVIATION: requested device map {expected}, observed {observed}"
+                "PLACEMENT_DEVIATION: CPU toy execution requires one sealed root device"
             )
+        _verify_singleton_root_placement(
+            model,
+            expected_device=normalized_expected[""],
+            expected_map=normalized_expected,
+        )
         return
 
     normalized_expected = {
@@ -692,17 +946,9 @@ def verify_loaded_model_execution(model: Any, config: TrainRunConfig) -> None:
         )
         return
 
-    # Non-singleton sealed maps remain exact after normalization (no silent expansion).
-    raw = getattr(model, "hf_device_map", None)
-    observed = (
-        {str(module): _normalized_device(device) for module, device in raw.items()}
-        if isinstance(raw, dict)
-        else None
-    )
-    if observed != normalized_expected:
-        raise ExecutionPlacementDeviation(
-            f"PLACEMENT_DEVIATION: requested device map {normalized_expected}, observed {observed}"
-        )
+    # Non-singleton maps remain structurally exact, but the map is not accepted as a substitute for
+    # observing every real tensor. A matching all-CUDA map can still hide CPU/meta state otherwise.
+    _verify_non_singleton_placement(model, expected_map=normalized_expected)
 
 
 def enforce_trainable_precision(model: Any, torch_module: Any, config: TrainRunConfig) -> None:
@@ -757,6 +1003,12 @@ def verify_model_state_execution(
         return
     expected_map = config.device_map or {}
     expected_device = _normalized_device(expected_map.get("", ""))
+    offload_deviations = _offload_hook_deviations(model, {"": expected_device})
+    if offload_deviations:
+        raise ExecutionPlacementDeviation(
+            "PLACEMENT_DEVIATION: post-adapter hidden offload or hook state: "
+            + ", ".join(offload_deviations[:5])
+        )
     misplaced = [
         name
         for name, parameter in model.named_parameters()
@@ -766,6 +1018,14 @@ def verify_model_state_execution(
         preview = ", ".join(misplaced[:5])
         raise ExecutionPlacementDeviation(
             f"PLACEMENT_DEVIATION: post-adapter parameters are outside {expected_device}: {preview}"
+        )
+    misplaced_buffers = [
+        name for name, device in _buffer_devices(model) if device != expected_device
+    ]
+    if misplaced_buffers:
+        preview = ", ".join(misplaced_buffers[:5])
+        raise ExecutionPlacementDeviation(
+            f"PLACEMENT_DEVIATION: post-adapter buffers are outside {expected_device}: {preview}"
         )
     if config.master_weight_dtype is None:
         raise TrainerError("sealed execution omitted the trainable master-weight dtype")
@@ -841,8 +1101,58 @@ def verify_optimizer_state_precision(
     else:
         allowed = {_torch_dtype(torch_module, config.optimizer_state_dtype), auxiliary}
     expected_device = _normalized_device((config.device_map or {}).get("", ""))
+
+    def _safe_state_name(value: object) -> str:
+        return re.sub(r"[^A-Za-z0-9_.-]", "?", str(value))[:80] or "?"
+
+    def _materialized_values(
+        value: Any,
+        *,
+        path: str,
+        seen: set[int],
+    ) -> list[tuple[str, Any]]:
+        if hasattr(value, "dtype") or hasattr(value, "device"):
+            return [(path, value)]
+        if isinstance(value, Mapping):
+            identity = id(value)
+            if identity in seen:
+                return []
+            seen.add(identity)
+            found: list[tuple[str, Any]] = []
+            for key, nested in value.items():
+                found.extend(
+                    _materialized_values(
+                        nested,
+                        path=f"{path}.{_safe_state_name(key)}",
+                        seen=seen,
+                    )
+                )
+            return found
+        if isinstance(value, Sequence) and not isinstance(
+            value, (str, bytes, bytearray)
+        ):
+            identity = id(value)
+            if identity in seen:
+                return []
+            seen.add(identity)
+            found = []
+            for index, nested in enumerate(value):
+                found.extend(
+                    _materialized_values(
+                        nested,
+                        path=f"{path}[{index}]",
+                        seen=seen,
+                    )
+                )
+            return found
+        return []
+
     for parameter_state in optimizer.state.values():
-        for name, value in parameter_state.items():
+        for name, value in _materialized_values(
+            parameter_state,
+            path="optimizer_state",
+            seen=set(),
+        ):
             if hasattr(value, "dtype") and value.dtype not in allowed:
                 raise TrainerError(
                     f"optimizer-state dtype deviation for {name}: "
@@ -853,6 +1163,20 @@ def verify_optimizer_state_precision(
                     f"PLACEMENT_DEVIATION: optimizer state {name} is on {value.device}, "
                     f"expected {expected_device}"
                 )
+
+
+def verify_completed_step_count(config: TrainRunConfig, steps: int) -> None:
+    """Refuse a completed sealed artifact when the trainer exceeded or missed ``max_steps``."""
+
+    if (
+        config.execution_configuration_hash is not None
+        and config.max_steps is not None
+        and steps != config.max_steps
+    ):
+        raise TrainerError(
+            "sealed max_steps execution deviation: "
+            f"expected {config.max_steps}, observed {steps}"
+        )
 
 
 def format_example_text(row: dict, dataset_format: str, tokenizer: Any | None = None) -> str:
@@ -1378,12 +1702,14 @@ def run_training(  # pragma: no cover - optional training-stack integration
     with contextlib.redirect_stdout(sys.stderr):
         train_output = trainer.train()
 
+        steps = int(getattr(trainer.state, "global_step", 0) or 0)
+        verify_completed_step_count(config, steps)
+
         output_dir = Path(config.output_dir)
         trainer.save_model(str(output_dir))  # saves the LoRA adapter
         tokenizer.save_pretrained(str(output_dir))
 
         metrics = getattr(train_output, "metrics", {}) or {}
-        steps = int(getattr(trainer.state, "global_step", 0) or 0)
 
         # Self-documenting run: write a model card next to the adapter (recipe + honesty + base-model
         # license reminder). Best-effort — the card is a convenience and must NEVER fail a completed run.

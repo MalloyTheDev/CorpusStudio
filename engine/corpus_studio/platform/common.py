@@ -87,6 +87,10 @@ class PackageLock(ContractModel):
     record_entries: int | None = Field(default=None, ge=0)
     record_verified_entries: int | None = Field(default=None, ge=0)
     record_failed_entries: list[str] = Field(default_factory=list)
+    # Deterministic digest of every regular file named by RECORD, including generated unhashed pyc
+    # files. This complements (and does not replace) the distribution-provided RECORD digest above.
+    installed_files_hash: HashRef | None = None
+    installed_file_count: int | None = Field(default=None, ge=0)
     dependencies: list[str] = Field(default_factory=list)
 
 

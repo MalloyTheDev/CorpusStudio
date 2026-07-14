@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import time
 from typing import Any
 
 
@@ -52,28 +53,51 @@ def terminate_process_tree(
                 )
             except (OSError, subprocess.TimeoutExpired):
                 process.terminate()
-    else:
-        # The group can outlive its leader, so signal it even when the direct child just exited.
-        kill_process_group = getattr(os, "killpg")
         try:
-            kill_process_group(process.pid, signal.SIGTERM)
+            process.wait(timeout=wait_timeout_seconds)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            try:
+                process.wait(timeout=wait_timeout_seconds)
+            except subprocess.TimeoutExpired:  # pragma: no cover - OS failed to reap a killed process
+                pass
+        return
+
+    # A POSIX process group can outlive its leader. Waiting only for the direct child lets a
+    # SIGTERM-ignoring compiler/rank survive forever, so track the group independently and escalate.
+    kill_process_group = getattr(os, "killpg")
+    process_group_id = process.pid
+
+    def _group_exists() -> bool:
+        try:
+            kill_process_group(process_group_id, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:  # pragma: no cover - same-user child groups are normally signalable.
+            return True
+        return True
+
+    try:
+        kill_process_group(process_group_id, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    deadline = time.monotonic() + wait_timeout_seconds
+    while _group_exists() and time.monotonic() < deadline:
+        process.poll()  # reap the direct child as soon as it exits
+        time.sleep(0.05)
+    if _group_exists():
+        try:
+            kill_process_group(
+                process_group_id,
+                getattr(signal, "SIGKILL", signal.SIGTERM),
+            )
         except ProcessLookupError:
             pass
-
-    if process.poll() is not None:
-        return
-    try:
-        process.wait(timeout=wait_timeout_seconds)
-    except subprocess.TimeoutExpired:
-        if os.name == "nt":
-            process.kill()
-        else:
-            kill_process_group = getattr(os, "killpg")
-            kill_signal = getattr(signal, "SIGKILL", signal.SIGTERM)
-            try:
-                kill_process_group(process.pid, kill_signal)
-            except ProcessLookupError:
-                pass
+        kill_deadline = time.monotonic() + wait_timeout_seconds
+        while _group_exists() and time.monotonic() < kill_deadline:
+            process.poll()
+            time.sleep(0.05)
+    if process.poll() is None:
         try:
             process.wait(timeout=wait_timeout_seconds)
         except subprocess.TimeoutExpired:  # pragma: no cover - OS failed to reap a killed process

@@ -6,14 +6,18 @@ runner is tested only with tiny stdlib Python commands; default CI needs no netw
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass, field
 import hashlib
 import json
 import os
 from pathlib import Path
+import py_compile
 import shutil
+import subprocess
 import sys
 from threading import Event
+import time
 from typing import Any
 import zipfile
 
@@ -41,6 +45,7 @@ from corpus_studio.platform.environment_manager import (
     probe_python_runtime,
     verify_run_plan_environment,
 )
+from corpus_studio.platform.process_control import terminate_process_tree
 from corpus_studio.platform.enums import EnvironmentState, FailureTaxonomy, OperatingSystem
 from corpus_studio.platform.environments import get_recipe, resolution_digest
 
@@ -66,7 +71,11 @@ def _package(name: str, version: str = "1.0") -> dict[str, Any]:
         "record_entries": 2,
         "record_verified_entries": 1,
         "record_failed_entries": [],
+        "installed_files_sha256": _record_hash(f"{name}-files", version),
+        "installed_file_count": 2,
+        "metadata_sha256": None,
         "dependencies": ["packaging>=23"],
+        "direct_url_parse_error": False,
     }
 
 
@@ -145,6 +154,8 @@ class FakeEnvironmentRunner:
                 self.env_python = str(python_path)
         elif phase == "lock":
             stdout = json.dumps(self._lock_payload()) + "\n"
+        elif phase == "framework_inventory":
+            stdout = json.dumps(self._torch_payload()) + "\n"
         elif phase == "import_probe":
             modules = (
                 "corpus_studio.platform.worker",
@@ -237,6 +248,8 @@ class FakeEnvironmentRunner:
             url = (
                 Path(argv[-1]).resolve().as_uri()
                 if worker
+                else f"https://download.pytorch.org/whl/fake/{item['name']}-{item['version']}.whl"
+                if item["normalized_name"] == "torch"
                 else f"https://files.pythonhosted.org/{item['name']}-{item['version']}.whl"
             )
             installs.append(
@@ -355,8 +368,40 @@ class FakeEnvironmentRunner:
             "probe": self.complete_probe_name,
             "outcome": "PASS",
             "measured": {
+                "loss": 1.0,
+                "reload_loss": 1.0,
+                "adapter_weight_bytes": 128,
+                "adapter_round_trip_verified": True,
                 "runtime": {"packages": package_versions},
                 "memory": memory,
+                "configuration": {
+                    "compute_dtype": "bf16",
+                    "forward_autocast": "bf16",
+                    "quantization": "nf4",
+                    "double_quantization": True,
+                    "attention_api": "sdpa",
+                    "attention_kernel": attention_kernel,
+                    "forced_sdp_backend": "FLASH_ATTENTION" if flash else "MATH",
+                    "attention_toggles": {
+                        "flash_sdp_enabled": flash,
+                        "memory_efficient_sdp_enabled": False,
+                        "math_sdp_enabled": not flash,
+                    },
+                    "attention_toggles_during": {
+                        "flash_sdp_enabled": flash,
+                        "memory_efficient_sdp_enabled": False,
+                        "math_sdp_enabled": not flash,
+                    },
+                    "device_map": {"": "cuda:0"},
+                    "target_modules": "all-linear",
+                    "gradient_checkpointing": True,
+                    "optimizer": "adamw_torch",
+                    "batch_size": 1,
+                    "sequence_length": 8,
+                    "lora_r": 2,
+                    "lora_alpha": 4,
+                    "seed": 0,
+                },
             },
             "proves": {
                 "precision": ["bf16"],
@@ -411,9 +456,11 @@ class FakeEnvironmentRunner:
             return "upgrade_pip"
         if "-m pip" in joined and "install" in argv:
             return "install"
-        script = argv[-1] if len(argv) >= 3 and argv[-2] == "-c" else ""
+        script = argv[argv.index("-c") + 1] if "-c" in argv else ""
         if "metadata.distributions" in script:
             return "lock"
+        if "framework_file" in script:
+            return "framework_inventory"
         if "corpus_studio.platform.worker" in script and "bitsandbytes" in script:
             return "import_probe"
         if "checkpoint_reload" in script:
@@ -437,12 +484,20 @@ class FakeEnvironmentRunner:
                 "venv_available": True,
             },
             "packages": self.packages,
-            "torch": {
-                "version": "2.7.1+cu128",
-                "build": "fake-git-build",
-                "cuda": self.cuda_runtime if self.cuda else None,
-                "compute_capability": self.compute_capability if self.cuda else None,
-            },
+            "torch": {"version": None, "build": None, "cuda": None, "compute_capability": None},
+        }
+
+    def _torch_payload(self) -> dict[str, Any]:
+        torch_version = next(
+            item["version"]
+            for item in self.packages
+            if item["normalized_name"] == "torch"
+        )
+        return {
+            "version": torch_version,
+            "build": "fake-git-build",
+            "cuda": self.cuda_runtime if self.cuda else None,
+            "compute_capability": self.compute_capability if self.cuda else None,
         }
 
 
@@ -478,12 +533,21 @@ def _manager_and_resolution(tmp_path: Path, runner: FakeEnvironmentRunner, env_i
 def _worker_wheel(tmp_path: Path, *, marker: str = "worker-v1") -> Path:
     path = tmp_path / "corpus_studio_engine-1.3.0-py3-none-any.whl"
     path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_path = "corpus_studio_engine-1.3.0.dist-info/METADATA"
+    record_path = "corpus_studio_engine-1.3.0.dist-info/RECORD"
+    members = {
+        metadata_path: b"Metadata-Version: 2.1\nName: corpus-studio-engine\nVersion: 1.3.0\n",
+        "corpus_studio/readiness_marker.txt": marker.encode("utf-8"),
+    }
+    record_lines = []
+    for member_name, member_bytes in members.items():
+        digest = base64.urlsafe_b64encode(hashlib.sha256(member_bytes).digest()).decode().rstrip("=")
+        record_lines.append(f"{member_name},sha256={digest},{len(member_bytes)}")
+    record_lines.append(f"{record_path},,")
+    members[record_path] = ("\n".join(record_lines) + "\n").encode("utf-8")
     with zipfile.ZipFile(path, "w") as archive:
-        archive.writestr(
-            "corpus_studio_engine-1.3.0.dist-info/METADATA",
-            "Metadata-Version: 2.1\nName: corpus-studio-engine\nVersion: 1.3.0\n",
-        )
-        archive.writestr("corpus_studio/readiness_marker.txt", marker)
+        for member_name, member_bytes in members.items():
+            archive.writestr(member_name, member_bytes)
     return path
 
 
@@ -523,6 +587,15 @@ def _manager_and_readiness_resolution(
         "url": wheel.resolve().as_uri(),
         "archive_info": {"hashes": {"sha256": manager_module._hash_file(wheel)}},
     }
+    worker_identity = manager_module._worker_artifact_identity(wheel)
+    assert worker_identity.metadata_hash is not None
+    worker_package["metadata_sha256"] = worker_identity.metadata_hash.value
+    worker_package["installed_file_manifest"] = [
+        [path, digest]
+        for path, digest in sorted(
+            manager_module._worker_wheel_payload_manifest(worker_identity).items()
+        )
+    ]
     runner = FakeEnvironmentRunner(
         cuda=True,
         complete_probe_ok=complete_probe_ok,
@@ -611,7 +684,6 @@ def test_readiness_v2_plan_is_stable_hash_bound_and_plan_only(tmp_path):
     assert first.worker_artifact and first.worker_artifact.content_hash.value
     assert first.required_execution_probe is not None
     assert not manager.root.exists()
-
     original_hash = first.resolution_hash
     _worker_wheel(wheel.parent, marker="worker-v2")
     changed = manager.preview(
@@ -626,6 +698,37 @@ def test_readiness_v2_plan_is_stable_hash_bound_and_plan_only(tmp_path):
         manager.create(first, confirmed_resolution_hash=original_hash or "")
     assert not manager.root.exists()
 
+
+def test_readiness_worker_wheel_inside_replacement_target_is_blocked(tmp_path):
+    runner = FakeEnvironmentRunner(cuda=True, packages=_readiness_packages())
+    runtime = PythonRuntime(
+        runtime_id="python-readiness",
+        executable=str(tmp_path / "base-python"),
+        version="3.12.10",
+        implementation="CPython",
+        architecture="64-bit",
+        platform="test-platform",
+        os=OperatingSystem.linux,
+        venv_available=True,
+        compatible=True,
+    )
+    manager = EnvironmentManager(
+        tmp_path / "manager",
+        runner=runner,
+        runtime_probe=lambda executable, requirement: runtime,
+    )
+    wheel = _worker_wheel(
+        manager.environment_root("backend-corpus-studio-readiness-v2") / "authorization"
+    )
+    resolution = manager.preview(
+        "backend-corpus-studio-readiness-v2",
+        env_id="backend-corpus-studio-readiness-v2",
+        runtime_executable=runtime.executable,
+        accelerator_tag="cu128",
+        worker_wheel=wheel,
+    )
+    assert resolution.resolvable is False
+    assert any("cannot live inside" in reason for reason in resolution.blocking_reasons)
 
 def test_readiness_v2_seals_only_after_complete_tuple_and_records_memory(tmp_path):
     manager, resolution, runner, _ = _manager_and_readiness_resolution(tmp_path)
@@ -654,9 +757,25 @@ def test_readiness_v2_seals_only_after_complete_tuple_and_records_memory(tmp_pat
     inventory_indexes = [
         index for index, phase in enumerate(command_phases) if phase == "inventory"
     ]
-    assert inventory_indexes[0] < capability_index < inventory_indexes[1]
-    assert runner.calls[-1]["phase"] == "lock"
+    assert inventory_indexes[1] < capability_index < inventory_indexes[2]
+    assert runner.calls[-1]["phase"] == "framework_inventory"
     assert all(item.source_evidence_reason or item.source != "unknown" for item in result.lock.packages)
+    raw_lock = result.lock.model_dump(mode="json")
+    for field_name in (
+        "forward_duration_seconds",
+        "backward_duration_seconds",
+        "optimizer_step_duration_seconds",
+        "gpu_temperature_celsius",
+        "gpu_power_watts",
+    ):
+        raw_lock["probe_evidence"]["memory"].pop(field_name)
+    restored = EnvironmentLock.model_validate(raw_lock)
+    assert manager._lock_digest(restored) == result.lock.lock_hash
+    assert restored.probe_evidence is not None
+    assert (
+        manager._probe_evidence_digest(restored.probe_evidence)
+        == restored.probe_evidence.evidence_hash
+    )
 
 
 def test_failed_or_independently_unionable_probes_never_seal_readiness_v2(tmp_path):
@@ -671,6 +790,130 @@ def test_failed_or_independently_unionable_probes_never_seal_readiness_v2(tmp_pa
     assert result.descriptor.lock_ref is None
     assert not (manager.registry_root / result.descriptor.env_id / "locks").exists()
     assert result.health.probe_results[-1].probe == "cuda_qlora_math_execution"
+    assert result.installation.retry_requires_recreate is True
+
+
+def test_worker_pip_hash_mismatch_stops_before_any_installed_import(tmp_path):
+    manager, resolution, runner, _ = _manager_and_readiness_resolution(tmp_path)
+    write_report = runner._write_pip_report
+
+    def write_tampered_report(argv):
+        write_report(argv)
+        if "--report" not in argv:
+            return
+        report_path = Path(argv[argv.index("--report") + 1])
+        if "install-worker" not in report_path.name:
+            return
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        payload["install"][0]["download_info"]["archive_info"]["hashes"]["sha256"] = "f" * 64
+        report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    runner._write_pip_report = write_tampered_report  # type: ignore[method-assign]
+    with pytest.raises(EnvironmentManagerError, match="reviewed worker wheel"):
+        manager.create(
+            resolution,
+            confirmed_resolution_hash=resolution.resolution_hash or "",
+        )
+    assert all(call["phase"] != "import_probe" for call in runner.calls)
+
+
+def test_pip_report_cannot_replace_source_evidence_from_an_earlier_step(tmp_path):
+    manager, resolution, runner, _ = _manager_and_readiness_resolution(tmp_path)
+    write_report = runner._write_pip_report
+
+    def write_colliding_report(argv):
+        write_report(argv)
+        if "--report" not in argv:
+            return
+        report_path = Path(argv[argv.index("--report") + 1])
+        if "install-worker" not in report_path.name:
+            return
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        payload["install"].append(
+            {
+                "download_info": {
+                    "url": "https://files.pythonhosted.org/torch-forged.whl",
+                    "archive_info": {"hashes": {"sha256": "a" * 64}},
+                },
+                "is_direct": False,
+                "requested": False,
+                "metadata": {"name": "torch", "version": "2.11.0+cu128"},
+            }
+        )
+        report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    runner._write_pip_report = write_colliding_report  # type: ignore[method-assign]
+    with pytest.raises(EnvironmentManagerError, match="repeats a distribution"):
+        manager.create(
+            resolution,
+            confirmed_resolution_hash=resolution.resolution_hash or "",
+        )
+    assert all(call["phase"] != "import_probe" for call in runner.calls)
+
+
+def test_unverified_pre_probe_files_stop_before_any_installed_import(tmp_path):
+    manager, resolution, runner, _ = _manager_and_readiness_resolution(tmp_path)
+    torch_package = next(item for item in runner.packages if item["name"] == "torch")
+    torch_package["record_integrity"] = "failed"
+    torch_package["record_failed_entries"] = ["torch/library.py"]
+    torch_package["installed_files_sha256"] = None
+    with pytest.raises(EnvironmentManagerError, match="before readiness probes"):
+        manager.create(
+            resolution,
+            confirmed_resolution_hash=resolution.resolution_hash or "",
+        )
+    assert all(call["phase"] != "import_probe" for call in runner.calls)
+
+
+def test_installed_worker_payload_must_match_the_reviewed_wheel(tmp_path):
+    manager, resolution, runner, _ = _manager_and_readiness_resolution(tmp_path)
+    worker_package = next(
+        item
+        for item in runner.packages
+        if item["normalized_name"] == "corpus-studio-engine"
+    )
+    worker_package["installed_file_manifest"][0][1] = "0" * 64
+    with pytest.raises(EnvironmentManagerError, match="files differ from the reviewed wheel"):
+        manager.create(
+            resolution,
+            confirmed_resolution_hash=resolution.resolution_hash or "",
+        )
+    assert all(call["phase"] != "import_probe" for call in runner.calls)
+
+
+def test_installed_worker_cannot_claim_unreviewed_importable_files(tmp_path):
+    manager, resolution, runner, _ = _manager_and_readiness_resolution(tmp_path)
+    worker_package = next(
+        item
+        for item in runner.packages
+        if item["normalized_name"] == "corpus-studio-engine"
+    )
+    worker_package["installed_file_manifest"].append(["torch.py", "0" * 64])
+    with pytest.raises(EnvironmentManagerError, match="absent from the reviewed wheel"):
+        manager.create(
+            resolution,
+            confirmed_resolution_hash=resolution.resolution_hash or "",
+        )
+    assert all(call["phase"] != "framework_inventory" for call in runner.calls)
+    assert all(call["phase"] != "import_probe" for call in runner.calls)
+
+
+def test_installed_worker_cannot_claim_an_undeclared_generated_script(tmp_path):
+    manager, resolution, runner, _ = _manager_and_readiness_resolution(tmp_path)
+    worker_package = next(
+        item
+        for item in runner.packages
+        if item["normalized_name"] == "corpus-studio-engine"
+    )
+    worker_package["installed_file_manifest"].append(
+        ["../../../bin/not-declared-by-entry-points", "0" * 64]
+    )
+    with pytest.raises(EnvironmentManagerError, match="absent from the reviewed wheel"):
+        manager.create(
+            resolution,
+            confirmed_resolution_hash=resolution.resolution_hash or "",
+        )
+    assert all(call["phase"] != "import_probe" for call in runner.calls)
 
 
 def test_readiness_flash_v1_seals_only_after_forced_flash_tuple(tmp_path):
@@ -710,6 +953,104 @@ def test_failed_flash_tuple_never_seals_readiness_flash_v1(tmp_path):
     assert result.descriptor.state == EnvironmentState.incompatible
     assert result.lock is None
     assert result.health.probe_results[-1].probe == "cuda_qlora_sdpa_flash_execution"
+    assert result.installation.retry_requires_recreate is True
+
+
+def test_complete_probe_configuration_is_bound_to_the_required_tuple(tmp_path):
+    manager, resolution, runner, _ = _manager_and_readiness_resolution(
+        tmp_path,
+        recipe_id="backend-corpus-studio-readiness-flash-v1",
+        complete_probe_name="cuda_qlora_sdpa_flash_execution",
+    )
+    required = resolution.required_execution_probe
+    assert required is not None
+    payload = runner._capability_payload()
+    report = payload["capability_report"]
+    tuple_result = next(
+        item
+        for item in report["probe_results"]
+        if item["probe"] == "cuda_qlora_sdpa_flash_execution"
+    )
+    tuple_result["measured"]["configuration"]["forward_autocast"] = "fp32"
+    with pytest.raises(EnvironmentManagerError, match="forward_autocast"):
+        manager._complete_probe_evidence(payload, required)
+
+
+def test_legacy_math_probe_shape_remains_a_narrow_rollback_identity(tmp_path):
+    manager, resolution, runner, _ = _manager_and_readiness_resolution(tmp_path)
+    required = resolution.required_execution_probe
+    assert required is not None
+    payload = runner._capability_payload()
+    tuple_result = next(
+        item
+        for item in payload["capability_report"]["probe_results"]
+        if item["probe"] == "cuda_qlora_math_execution"
+    )
+    configuration = tuple_result["measured"]["configuration"]
+    for field_name in (
+        "forward_autocast",
+        "attention_kernel",
+        "forced_sdp_backend",
+        "attention_toggles_during",
+        "batch_size",
+        "sequence_length",
+        "lora_r",
+        "lora_alpha",
+        "seed",
+    ):
+        configuration.pop(field_name)
+    tuple_result["measured"].pop("adapter_round_trip_verified")
+    with pytest.raises(EnvironmentManagerError):
+        manager._complete_probe_evidence(payload, required)
+    _, evidence = manager._complete_probe_evidence(
+        payload,
+        required,
+        legacy_math_configuration=True,
+    )
+    assert evidence.required_spec.probe == "cuda_qlora_math_execution"
+    legacy_lock = EnvironmentLock(
+        lock_id="lock-legacy-math",
+        recipe_ref=resolution.recipe_ref,
+        manager_version="1.1.0",
+        probe_evidence=evidence,
+    )
+    assert manager._locked_probe_evidence_mismatch(legacy_lock, required) is False
+    assert (
+        manager._locked_probe_evidence_mismatch(
+            legacy_lock.model_copy(update={"manager_version": "1.2.0"}),
+            required,
+        )
+        is True
+    )
+
+
+def test_new_readiness_lock_requires_adapter_equality_evidence(tmp_path):
+    manager, resolution, runner, _ = _manager_and_readiness_resolution(tmp_path)
+    required = resolution.required_execution_probe
+    assert required is not None
+    _, evidence = manager._complete_probe_evidence(runner._capability_payload(), required)
+    lock = EnvironmentLock(
+        lock_id="lock-current-math",
+        recipe_ref=resolution.recipe_ref,
+        manager_version=manager_module.MANAGER_VERSION,
+        probe_evidence=evidence,
+    )
+    assert manager._locked_probe_evidence_mismatch(lock, required) is False
+    measured = dict(evidence.tuple_result.measured)
+    measured.pop("adapter_round_trip_verified")
+    weakened_result = evidence.tuple_result.model_copy(update={"measured": measured})
+    weakened = evidence.model_copy(
+        update={"tuple_result": weakened_result, "evidence_hash": "0" * 64}
+    )
+    weakened = weakened.model_copy(
+        update={"evidence_hash": manager._probe_evidence_digest(weakened)}
+    )
+    assert (
+        manager._locked_probe_evidence_mismatch(
+            lock.model_copy(update={"probe_evidence": weakened}), required
+        )
+        is True
+    )
 
 
 def test_lock_finalization_refuses_missing_complete_probe_evidence(tmp_path):
@@ -1186,6 +1527,7 @@ def test_install_source_evidence_sanitizes_credentials_and_preserves_unknown(tmp
     report.write_text(
         json.dumps(
             {
+                "version": "1",
                 "install": [
                     {
                         "download_info": {
@@ -1197,7 +1539,10 @@ def test_install_source_evidence_sanitizes_credentials_and_preserves_unknown(tmp
                         "metadata": {"name": "Known_Pkg", "version": "1.0"},
                     },
                     {
-                        "download_info": {"url": "https://cdn.invalid/unknown.whl"},
+                        "download_info": {
+                            "url": "https://cdn.invalid/unknown.whl",
+                            "archive_info": {"hashes": {"sha256": "b" * 64}},
+                        },
                         "is_direct": False,
                         "requested": False,
                         "metadata": {"name": "Unknown.Pkg", "version": "2.0"},
@@ -1221,6 +1566,398 @@ def test_install_source_evidence_sanitizes_credentials_and_preserves_unknown(tmp
     unknown = next(item for item in captured if item.normalized_name == "unknown-pkg")
     assert unknown.source == "unknown"
     assert unknown.source_evidence_reason
+
+
+def test_url_sanitizer_rejects_malformed_ports_and_strips_sensitive_parts():
+    assert manager_module._sanitize_url("https://example.invalid:bad/simple") is None
+    assert manager_module._sanitize_url("user:secret@example.invalid/path") is None
+    assert manager_module._sanitize_url("https://example.invalid/path\nsecret") is None
+    assert manager_module._sanitize_url("https://example.invalid/a path") is None
+    assert manager_module._sanitize_url(r"https://example.invalid\@evil.invalid/pkg") is None
+    assert manager_module._sanitize_url("https://example.invalid/%ZZ/pkg") is None
+    assert manager_module._sanitize_url("file:relative-wheel.whl") is None
+    assert (
+        manager_module._sanitize_url(
+            "https://user:secret@example.invalid:8443/simple?token=secret#fragment"
+        )
+        == "https://example.invalid:8443/simple"
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink inventory test")
+def test_lock_probe_rejects_symlinked_distribution_metadata(tmp_path):
+    environment_root = tmp_path / "managed-env"
+    site_root = (
+        environment_root
+        / "lib"
+        / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+    )
+    site_root.mkdir(parents=True)
+    external = tmp_path / "outside.dist-info"
+    external.mkdir()
+    (external / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: outside\nVersion: 1.0\n",
+        encoding="utf-8",
+    )
+    (external / "RECORD").write_text("outside.dist-info/RECORD,,\n", encoding="utf-8")
+    (site_root / "outside-1.0.dist-info").symlink_to(external, target_is_directory=True)
+
+    completed = subprocess.run(  # noqa: S603 - fixed interpreter and reviewed embedded probe.
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            "-c",
+            manager_module._LOCK_PROBE,
+            str(environment_root),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert completed.returncode != 0
+    assert "symbolic link" in completed.stderr
+
+
+def test_lock_probe_rejects_unrecorded_site_package_files(tmp_path):
+    environment_root = tmp_path / "managed-env"
+    site_root = (
+        environment_root
+        / ("Lib" if os.name == "nt" else "lib")
+        / ("site-packages" if os.name == "nt" else f"python{sys.version_info.major}.{sys.version_info.minor}/site-packages")
+    )
+    dist_info = site_root / "demo-1.0.dist-info"
+    dist_info.mkdir(parents=True)
+    metadata_bytes = b"Metadata-Version: 2.1\nName: demo\nVersion: 1.0\n"
+    (dist_info / "METADATA").write_bytes(metadata_bytes)
+    digest = base64.urlsafe_b64encode(hashlib.sha256(metadata_bytes).digest()).decode().rstrip("=")
+    (dist_info / "RECORD").write_text(
+        f"demo-1.0.dist-info/METADATA,sha256={digest},{len(metadata_bytes)}\n"
+        "demo-1.0.dist-info/RECORD,,\n",
+        encoding="utf-8",
+    )
+    (site_root / "unrecorded.py").write_text("raise RuntimeError('must not import')\n", encoding="utf-8")
+
+    completed = subprocess.run(  # noqa: S603 - fixed interpreter and reviewed embedded probe.
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            "-c",
+            manager_module._LOCK_PROBE,
+            str(environment_root),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert completed.returncode != 0
+    assert "unrecorded file" in completed.stderr
+
+
+def test_lock_probe_sanitizes_direct_url_before_writing_inventory_logs(tmp_path):
+    environment_root = tmp_path / "managed-env"
+    site_root = (
+        environment_root
+        / ("Lib" if os.name == "nt" else "lib")
+        / (
+            "site-packages"
+            if os.name == "nt"
+            else f"python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+        )
+    )
+    dist_info = site_root / "demo-1.0.dist-info"
+    dist_info.mkdir(parents=True)
+    files = {
+        "demo-1.0.dist-info/METADATA": (
+            b"Metadata-Version: 2.1\nName: demo\nVersion: 1.0\n"
+        ),
+        "demo-1.0.dist-info/direct_url.json": json.dumps(
+            {
+                "url": (
+                    "https://user:secret@example.invalid/demo.whl"
+                    "?token=secret#secret"
+                ),
+                "archive_info": {"hashes": {"sha256": "a" * 64}},
+                "private": "secret",
+            }
+        ).encode(),
+    }
+    record_lines = []
+    for relative, content in files.items():
+        target = site_root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        digest = base64.urlsafe_b64encode(hashlib.sha256(content).digest()).decode().rstrip("=")
+        record_lines.append(f"{relative},sha256={digest},{len(content)}")
+    record_lines.append("demo-1.0.dist-info/RECORD,,")
+    (dist_info / "RECORD").write_text("\n".join(record_lines) + "\n", encoding="utf-8")
+
+    completed = subprocess.run(  # noqa: S603 - fixed interpreter and reviewed embedded probe.
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            "-c",
+            manager_module._LOCK_PROBE,
+            str(environment_root),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "secret" not in (completed.stdout + completed.stderr).casefold()
+    payload = json.loads(completed.stdout.splitlines()[-1])
+    assert payload["packages"][0]["direct_url"] == {
+        "url": "https://example.invalid/demo.whl",
+        "archive_info": {},
+    }
+
+
+def test_lock_probe_proves_generated_worker_bytecode_matches_its_source(tmp_path):
+    environment_root = tmp_path / "managed-env"
+    site_root = (
+        environment_root
+        / ("Lib" if os.name == "nt" else "lib")
+        / (
+            "site-packages"
+            if os.name == "nt"
+            else f"python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+        )
+    )
+    package_root = site_root / "corpus_studio"
+    dist_info = site_root / "corpus_studio_engine-1.3.0.dist-info"
+    package_root.mkdir(parents=True)
+    dist_info.mkdir(parents=True)
+    source = package_root / "verified.py"
+    source.write_text("VALUE = 'reviewed'\n", encoding="utf-8")
+    pyc = package_root / "__pycache__" / f"verified.{sys.implementation.cache_tag}.pyc"
+    pyc.parent.mkdir()
+    py_compile.compile(str(source), cfile=str(pyc), doraise=True)
+    metadata = b"Metadata-Version: 2.1\nName: corpus-studio-engine\nVersion: 1.3.0\n"
+    (dist_info / "METADATA").write_bytes(metadata)
+
+    source_relative = source.relative_to(site_root).as_posix()
+    pyc_relative = pyc.relative_to(site_root).as_posix()
+    metadata_relative = (dist_info / "METADATA").relative_to(site_root).as_posix()
+    record_relative = (dist_info / "RECORD").relative_to(site_root).as_posix()
+    record_lines = []
+    for relative, content in (
+        (source_relative, source.read_bytes()),
+        (metadata_relative, metadata),
+    ):
+        digest = base64.urlsafe_b64encode(hashlib.sha256(content).digest()).decode().rstrip("=")
+        record_lines.append(f"{relative},sha256={digest},{len(content)}")
+    record_lines.extend([f"{pyc_relative},,", f"{record_relative},,"])
+    (dist_info / "RECORD").write_text("\n".join(record_lines) + "\n", encoding="utf-8")
+
+    def inspect() -> dict[str, Any]:
+        completed = subprocess.run(  # noqa: S603 - fixed interpreter and reviewed embedded probe.
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                "-c",
+                manager_module._LOCK_PROBE,
+                str(environment_root),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert completed.returncode == 0, completed.stderr
+        return json.loads(completed.stdout.splitlines()[-1])["packages"][0]
+
+    assert inspect()["record_integrity"] == "verified"
+
+    source.write_text("VALUE = 'unreviewed'\n", encoding="utf-8")
+    py_compile.compile(str(source), cfile=str(pyc), doraise=True)
+    source.write_text("VALUE = 'reviewed'\n", encoding="utf-8")
+    tampered = inspect()
+    assert tampered["record_integrity"] == "failed"
+    assert tampered["record_failed_entries"] == [pyc_relative]
+
+
+@pytest.mark.parametrize(
+    "install_entries",
+    [
+        ["not-an-object"],
+        [{"metadata": {"name": "pkg", "version": "1"}}],
+        [
+            {
+                "download_info": {
+                    "url": "https://example.invalid:bad/pkg.whl",
+                    "archive_info": {"hashes": {"sha256": "a" * 64}},
+                },
+                "is_direct": True,
+                "metadata": {"name": "pkg", "version": "1"},
+            }
+        ],
+        [
+            {
+                "download_info": {
+                    "url": "https://example.invalid/pkg.whl",
+                    "archive_info": {"hashes": {"sha256": "a" * 64}},
+                    "vcs_info": "not-an-object",
+                },
+                "is_direct": True,
+                "metadata": {"name": "pkg", "version": "1"},
+            }
+        ],
+        [
+            {
+                "download_info": {
+                    "url": "https://example.invalid/pkg.whl",
+                    "archive_info": {"hashes": {"sha256": "a" * 64}},
+                },
+                "is_direct": True,
+                "requested": "yes",
+                "metadata": {"name": "pkg", "version": "1"},
+            }
+        ],
+        [
+            {
+                "download_info": {
+                    "url": "file:///tmp/pkg",
+                    "archive_info": {"hashes": {"sha256": "a" * 64}},
+                    "dir_info": {},
+                },
+                "is_direct": True,
+                "metadata": {"name": "pkg", "version": "1"},
+            }
+        ],
+        [
+            {
+                "download_info": {
+                    "url": "https://example.invalid/pkg.whl",
+                    "archive_info": {"hashes": {"sha256": "short"}},
+                },
+                "is_direct": True,
+                "metadata": {"name": "pkg", "version": "1"},
+            }
+        ],
+        [
+            {
+                "download_info": {
+                    "url": "https://example.invalid/a.whl",
+                    "archive_info": {"hashes": {"sha256": "a" * 64}},
+                },
+                "is_direct": True,
+                "metadata": {"name": "Same_Pkg", "version": "1"},
+            },
+            {
+                "download_info": {
+                    "url": "https://example.invalid/b.whl",
+                    "archive_info": {"hashes": {"sha256": "b" * 64}},
+                },
+                "is_direct": True,
+                "metadata": {"name": "same.pkg", "version": "2"},
+            },
+        ],
+    ],
+)
+def test_malformed_or_colliding_pip_report_entries_fail_closed(tmp_path, install_entries):
+    report = tmp_path / "pip-report.json"
+    report.write_text(
+        json.dumps({"version": "1", "install": install_entries}), encoding="utf-8"
+    )
+    step = InstallStep(
+        phase="install",
+        argv=["python", "-m", "pip", "install"],
+        configured_index_urls=[],
+    )
+    with pytest.raises(EnvironmentManagerError, match="pip install evidence"):
+        manager_module._install_evidence_from_report(
+            report, step=step, command_id="command-001"
+        )
+
+
+def test_pip_report_schema_version_is_required(tmp_path):
+    report = tmp_path / "pip-report.json"
+    report.write_text(json.dumps({"version": "future", "install": []}), encoding="utf-8")
+    step = InstallStep(phase="install", argv=["python", "-m", "pip", "install"])
+    with pytest.raises(EnvironmentManagerError, match="install list"):
+        manager_module._install_evidence_from_report(
+            report, step=step, command_id="command-001"
+        )
+
+
+def test_index_source_classification_uses_exact_artifact_hostname(tmp_path):
+    report = tmp_path / "pip-report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "install": [
+                    {
+                        "download_info": {
+                            "url": "https://not-pypi.org/pkg.whl",
+                            "archive_info": {"hashes": {"sha256": "a" * 64}},
+                        },
+                        "is_direct": False,
+                        "metadata": {"name": "pkg", "version": "1"},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    step = InstallStep(
+        phase="install",
+        argv=["python", "-m", "pip", "install"],
+        configured_index_urls=["https://pypi.org/simple"],
+    )
+    evidence = manager_module._install_evidence_from_report(
+        report, step=step, command_id="command-001"
+    )
+    assert evidence[0].source == "unknown"
+    assert evidence[0].source_index_url is None
+
+
+def test_worker_wheel_archive_and_metadata_identities_fail_closed(tmp_path):
+    with pytest.raises(EnvironmentManagerError, match="unavailable"):
+        manager_module._worker_artifact_identity(tmp_path / "missing.whl")
+
+    traversal = tmp_path / "corpus_studio_engine-1.3.0-py3-none-any.whl"
+    with zipfile.ZipFile(traversal, "w") as archive:
+        archive.writestr(
+            "corpus_studio_engine-1.3.0.dist-info/METADATA",
+            "Name: corpus-studio-engine\nVersion: 1.3.0\n",
+        )
+        archive.writestr("../escape", "bad")
+    with pytest.raises(EnvironmentManagerError, match="unsafe archive member"):
+        manager_module._worker_artifact_identity(traversal)
+
+    valid = _worker_wheel(tmp_path / "valid-wheel")
+    mismatch = tmp_path / "corpus_studio_engine-9.9.9-py3-none-any.whl"
+    shutil.copy2(valid, mismatch)
+    with pytest.raises(EnvironmentManagerError, match="identit"):
+        manager_module._worker_artifact_identity(mismatch)
+
+    valid = _worker_wheel(tmp_path / "record-valid")
+    tampered = tmp_path / "record-tampered" / valid.name
+    tampered.parent.mkdir()
+    with zipfile.ZipFile(valid) as source:
+        members = {name: source.read(name) for name in source.namelist()}
+    members["corpus_studio/readiness_marker.txt"] = b"bytes-not-matching-record"
+    with zipfile.ZipFile(tampered, "w") as archive:
+        for member_name, member_bytes in members.items():
+            archive.writestr(member_name, member_bytes)
+    with pytest.raises(EnvironmentManagerError, match="RECORD does not verify"):
+        manager_module._worker_artifact_identity(tampered)
+
+
+def test_lock_probe_record_paths_are_contained_and_symlinks_fail_closed():
+    assert "RECORD path escapes the managed environment" in manager_module._LOCK_PROBE
+    assert "RECORD path crosses a symbolic link" in manager_module._LOCK_PROBE
+    assert 'algorithm != "sha256"' in manager_module._LOCK_PROBE
+    assert "installed_files_hash" in manager_module._LOCK_PROBE
 
 
 def test_legacy_environment_lock_digest_remains_compatible(tmp_path):
@@ -1260,6 +1997,8 @@ def test_legacy_environment_lock_digest_remains_compatible(tmp_path):
         "record_entries",
         "record_verified_entries",
         "record_failed_entries",
+        "installed_files_hash",
+        "installed_file_count",
     ):
         body["packages"][0].pop(field_name)
     expected = manager_module._canonical_sha256(body)
@@ -1305,6 +2044,41 @@ def test_real_subprocess_runner_success_timeout_and_cancellation(tmp_path):
         cancel=cancelled,
     )
     assert cancel_result.cancelled is True
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group escalation test")
+def test_process_tree_termination_escalates_after_leader_exits(tmp_path):
+    ready = tmp_path / "stubborn-child-ready"
+    survived = tmp_path / "stubborn-child-survived"
+    child_script = (
+        "import pathlib,signal,time;"
+        "signal.signal(signal.SIGTERM,signal.SIG_IGN);"
+        f"pathlib.Path({str(ready)!r}).write_text('ready');"
+        "time.sleep(0.8);"
+        f"pathlib.Path({str(survived)!r}).write_text('survived')"
+    )
+    parent_script = (
+        "import subprocess,sys,time;"
+        f"subprocess.Popen([sys.executable,'-c',{child_script!r}]);"
+        "time.sleep(120)"
+    )
+    process = subprocess.Popen(  # noqa: S603 - fixed test interpreter and literal script.
+        [sys.executable, "-c", parent_script],
+        start_new_session=True,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert ready.exists()
+        terminate_process_tree(process, wait_timeout_seconds=0.15)
+        time.sleep(0.85)
+        assert process.poll() is not None
+        assert not survived.exists(), (
+            "a SIGTERM-ignoring descendant survived process-group escalation"
+        )
+    finally:
+        terminate_process_tree(process, wait_timeout_seconds=0.15)
 
 
 def _run_plan(environment_ref: Ref) -> RunPlan:

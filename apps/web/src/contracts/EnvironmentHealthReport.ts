@@ -109,6 +109,7 @@ export type Dependencies = string[];
 export type Direct = boolean | null;
 export type DirectUrl = string | null;
 export type Editable = boolean | null;
+export type InstalledFileCount = number | null;
 export type Installer = string | null;
 export type Name = string;
 export type NormalizedName = string;
@@ -149,6 +150,9 @@ export type PeakHostRssBytes = number;
 export type PeakNvidiaSmiProcessBytes = number | null;
 export type ProfileSignature = string;
 export type AttentionApi = "sdpa";
+/**
+ * Seals both 4-bit dequantization compute and forward activation autocast; complete probe evidence must observe this value for compute_dtype and forward_autocast.
+ */
 export type ComputeDtype = "bf16";
 export type Device = "cuda:0";
 export type DoubleQuantization = true;
@@ -336,6 +340,8 @@ export interface PackageLock {
   direct_url?: DirectUrl;
   editable?: Editable;
   hash?: HashRef | null;
+  installed_file_count?: InstalledFileCount;
+  installed_files_hash?: HashRef | null;
   installer?: Installer;
   name: Name;
   normalized_name?: NormalizedName;

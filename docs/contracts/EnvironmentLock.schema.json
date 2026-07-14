@@ -543,6 +543,30 @@
           ],
           "default": null
         },
+        "installed_file_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installed File Count"
+        },
+        "installed_files_hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "installer": {
           "anyOf": [
             {
@@ -1016,6 +1040,7 @@
         "compute_dtype": {
           "const": "bf16",
           "default": "bf16",
+          "description": "Seals both 4-bit dequantization compute and forward activation autocast; complete probe evidence must observe this value for compute_dtype and forward_autocast.",
           "title": "Compute Dtype",
           "type": "string"
         },

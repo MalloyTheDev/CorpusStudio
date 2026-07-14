@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sys
 
+import pytest
 from typer.testing import CliRunner
 
 from corpus_studio.cli import app
@@ -173,6 +174,138 @@ def test_complete_qlora_tuple_uses_bf16_autocast_without_sdpa_fallback():
     math_src = inspect.getsource(probes_mod._probe_cuda_qlora_math_execution)
     assert "enable_flash=False" in math_src
     assert "enable_math=True" in math_src
+    assert "adapter_round_trip_verified" in source
+    assert "_placement_deviation" in source
+    assert "get_rng_state_all" in source
+
+
+def test_complete_qlora_probe_cleanup_restores_every_global_and_stops_sampler():
+    from corpus_studio.platform.probes import _restore_qlora_probe_process_state
+
+    calls = []
+
+    class Stop:
+        def set(self):
+            calls.append(("stop", True))
+
+    class Thread:
+        def join(self, *, timeout):
+            calls.append(("join", timeout))
+
+        def is_alive(self):
+            return False
+
+    class Cuda:
+        class Backend:
+            @staticmethod
+            def enable_flash_sdp(value):
+                calls.append(("flash", value))
+
+            @staticmethod
+            def enable_mem_efficient_sdp(value):
+                calls.append(("memory", value))
+
+            @staticmethod
+            def enable_math_sdp(value):
+                calls.append(("math", value))
+
+        def __init__(self):
+            self.set_rng_state_all = lambda value: calls.append(("cuda_rng", value))
+
+    cuda = Cuda()
+    cuda.enable_flash_sdp = cuda.Backend.enable_flash_sdp
+    cuda.enable_mem_efficient_sdp = cuda.Backend.enable_mem_efficient_sdp
+    cuda.enable_math_sdp = cuda.Backend.enable_math_sdp
+    torch = type(
+        "Torch",
+        (),
+        {
+            "backends": type("Backends", (), {"cuda": cuda})(),
+            "cuda": cuda,
+            "random": type(
+                "Random",
+                (),
+                {"set_rng_state": staticmethod(lambda value: calls.append(("cpu_rng", value)))},
+            )(),
+        },
+    )()
+    _restore_qlora_probe_process_state(
+        torch,
+        previous_toggles=(True, False, True),
+        cpu_rng_state="cpu-state",
+        cuda_rng_states="cuda-state",
+        sampler_stop=Stop(),
+        sampler_thread=Thread(),
+    )
+    assert calls == [
+        ("stop", True),
+        ("join", 3),
+        ("flash", True),
+        ("memory", False),
+        ("math", True),
+        ("cpu_rng", "cpu-state"),
+        ("cuda_rng", "cuda-state"),
+    ]
+
+
+def test_complete_qlora_probe_cleanup_attempts_all_restores_before_failing():
+    from corpus_studio.platform.probes import _restore_qlora_probe_process_state
+
+    calls = []
+
+    class Thread:
+        def join(self, *, timeout):
+            calls.append(("join", timeout))
+
+        def is_alive(self):
+            return True
+
+    def broken_flash(value):
+        calls.append(("flash", value))
+        raise RuntimeError("simulated")
+
+    cuda_backend = type(
+        "CudaBackend",
+        (),
+        {
+            "enable_flash_sdp": staticmethod(broken_flash),
+            "enable_mem_efficient_sdp": staticmethod(
+                lambda value: calls.append(("memory", value))
+            ),
+            "enable_math_sdp": staticmethod(lambda value: calls.append(("math", value))),
+        },
+    )()
+    cuda = type(
+        "Cuda",
+        (),
+        {"set_rng_state_all": staticmethod(lambda value: calls.append(("cuda_rng", value)))},
+    )()
+    torch = type(
+        "Torch",
+        (),
+        {
+            "backends": type("Backends", (), {"cuda": cuda_backend})(),
+            "cuda": cuda,
+            "random": type(
+                "Random",
+                (),
+                {"set_rng_state": staticmethod(lambda value: calls.append(("cpu_rng", value)))},
+            )(),
+        },
+    )()
+    with pytest.raises(RuntimeError, match="sampler did not terminate.*flash SDPA"):
+        _restore_qlora_probe_process_state(
+            torch,
+            previous_toggles=(True, False, True),
+            cpu_rng_state="cpu",
+            cuda_rng_states="cuda",
+            sampler_stop=None,
+            sampler_thread=Thread(),
+        )
+    assert ("memory", False) in calls
+    assert ("math", True) in calls
+    assert ("cpu_rng", "cpu") in calls
+    assert ("cuda_rng", "cuda") in calls
 
 
 def test_unsloth_recipe_is_declared_cuda_only_and_conflict_flagged():

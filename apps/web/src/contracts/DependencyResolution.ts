@@ -27,6 +27,9 @@ export type ManagerVersion = string;
 export type OperatingSystem = "windows" | "wsl" | "linux" | "macos" | "unknown";
 export type PythonVersion = string;
 export type AttentionApi = "sdpa";
+/**
+ * Seals both 4-bit dequantization compute and forward activation autocast; complete probe evidence must observe this value for compute_dtype and forward_autocast.
+ */
 export type ComputeDtype = "bf16";
 export type Device = "cuda:0";
 export type DoubleQuantization = true;

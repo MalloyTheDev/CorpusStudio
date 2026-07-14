@@ -300,6 +300,7 @@
         "compute_dtype": {
           "const": "bf16",
           "default": "bf16",
+          "description": "Seals both 4-bit dequantization compute and forward activation autocast; complete probe evidence must observe this value for compute_dtype and forward_autocast.",
           "title": "Compute Dtype",
           "type": "string"
         },
