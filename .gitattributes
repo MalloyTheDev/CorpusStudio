@@ -1,7 +1,29 @@
+# Normalize all text files to LF in the repository and on checkout. This is a native-Linux
+# server; without this a Windows/CRLF working tree shows every file as modified and breaks
+# shell scripts. Binary types listed below are excluded so git never rewrites their bytes.
+* text=auto eol=lf
+
 # Shell scripts MUST stay LF — a CRLF `.sh` fails on Linux ("bad interpreter" / stray \r). This keeps
 # scripts/setup_linux_training.sh (and any future shell script) runnable on the native-Linux target
 # regardless of a contributor's core.autocrlf setting on Windows.
 *.sh text eol=lf
 
-# Model weights are binary — never eol/diff them.
+# Binary files — never eol-normalize or diff them.
 *.safetensors binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.dll binary
+*.exe binary
+*.so binary
+*.dylib binary
