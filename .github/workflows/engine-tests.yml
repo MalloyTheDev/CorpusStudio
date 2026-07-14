@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+# Least privilege: this job only reads code and hands a separate CODECOV_TOKEN to codecov.
+permissions:
+  contents: read
+
 jobs:
   python-engine:
     runs-on: ubuntu-latest
@@ -13,7 +17,7 @@ jobs:
 
       - name: Reject unresolved merge markers
         run: |
-          if git grep -n -E '^(<<<<<<< |=======|>>>>>>> )'; then
+          if git grep -n -E '^(<<<<<<< |=======$|>>>>>>> )'; then
             echo "Unresolved merge markers found in tracked files."
             exit 1
           fi

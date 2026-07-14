@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "corpus-studio-engine"
 # Versioned together with the desktop app (apps/desktop/Directory.Build.props).
@@ -81,6 +85,12 @@ testpaths = ["tests"]
 markers = [
     "integration: opt-in tests that require a running local backend (e.g. Ollama). Enable with CORPUS_STUDIO_OLLAMA_INTEGRATION=1.",
 ]
+
+[tool.setuptools.packages.find]
+# Explicit discovery so the build never depends on flat-layout auto-detection (which would
+# also try to package `tests`). Only the engine package ships.
+where = ["."]
+include = ["corpus_studio*"]
 
 [tool.coverage.report]
 # Enforce a coverage floor when tests run under --cov (as CI does). Set a few points
