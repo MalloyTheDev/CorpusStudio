@@ -68,6 +68,13 @@ def _nonempty_file(path: Path) -> bool:
         return False
 
 
+def _native_windows() -> bool:
+    """True on native Windows (WDDM). Isolated as a helper so tests can force the Blackwell
+    math-attention branch below without monkeypatching ``sys.platform`` globally -- doing that
+    breaks ``shutil.which`` on Python 3.12 (its win32 path calls ``_winapi``, absent on Linux)."""
+    return sys.platform == "win32"
+
+
 def run_training_preflight(
     config_path: Path,
     launch_argv: list[str],
@@ -206,7 +213,7 @@ def run_training_preflight(
         # the efficient estimate, but it is not proof of a bare-Linux attention path or fit; Platform
         # capability probes and measured fit remain authoritative.
         is_blackwell = gpu_probe._capability_major(gpu.compute_capability) >= 12
-        native_windows = sys.platform == "win32"
+        native_windows = _native_windows()
         if is_blackwell and native_windows and vram_min_gb_math is not None:
             effective_min_gb = vram_min_gb_math
             path = " (math attention forced on this native-Windows Blackwell GPU)"

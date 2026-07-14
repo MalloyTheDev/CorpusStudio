@@ -93,8 +93,11 @@ def test_integrity_ok_missing_modified(tmp_path: Path):
     record = register_artifact(tmp_path, "20260702T180000-a", str(adapter), now="t1")
     assert artifact_integrity(record) == OK
 
-    # Modify the descriptor file -> modified.
-    (adapter / "adapter_config.json").write_text('{"r": 32}', encoding="utf-8")
+    # Modify the descriptor file -> modified. Change its SIZE (not just the value) so the cheap
+    # size+mtime fingerprint detects it deterministically: a same-size edit landing within the
+    # filesystem's mtime granularity would only be caught by the content hash (compute_content_hash),
+    # which made the original '{"r": 16}' -> '{"r": 32}' (both 9 bytes) edit an intermittent flake.
+    (adapter / "adapter_config.json").write_text('{"r": 32, "lora_alpha": 64}', encoding="utf-8")
     assert artifact_integrity(record) == MODIFIED
 
     # Remove the path -> missing.
