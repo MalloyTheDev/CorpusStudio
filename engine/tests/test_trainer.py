@@ -467,34 +467,184 @@ def test_model_load_kwargs_refuse_implicit_auto_placement():
         build_model_load_kwargs(cfg, _FakeTorch(), quantize=False)
 
 
-def test_loaded_model_execution_observes_attention_and_exact_device_map():
-    class Parameter:
-        device = "cuda:0"
+class _PlacementParameter:
+    def __init__(self, device="cuda:0", *, name="weight"):
+        self.device = device
+        self._name = name
 
-    model = type(
+
+class _PlacementBuffer:
+    def __init__(self, device="cuda:0", *, floating=True):
+        self.device = device
+        self._floating = floating
+
+    def is_floating_point(self):
+        return self._floating
+
+
+def _placement_model(
+    *,
+    hf_device_map,
+    parameters=None,
+    buffers=None,
+    attn="sdpa",
+):
+    param_items = (
+        list(parameters)
+        if parameters is not None
+        else [("layer.weight", _PlacementParameter())]
+    )
+    buffer_items = list(buffers) if buffers is not None else []
+
+    return type(
         "Model",
         (),
         {
-            "config": type("Config", (), {"_attn_implementation": "sdpa"})(),
-            "hf_device_map": {"": 0},
-            "parameters": lambda self: iter([Parameter()]),
+            "config": type("Config", (), {"_attn_implementation": attn})(),
+            "hf_device_map": hf_device_map,
+            "parameters": lambda self: iter(parameter for _, parameter in param_items),
+            "named_parameters": lambda self: iter(param_items),
+            "named_buffers": lambda self: iter(buffer_items),
         },
     )()
-    verify_loaded_model_execution(model, _sealed_config())
+
+
+def test_loaded_model_execution_accepts_root_cuda0_map():
+    verify_loaded_model_execution(
+        _placement_model(hf_device_map={"": "cuda:0"}),
+        _sealed_config(),
+    )
+
+
+def test_loaded_model_execution_accepts_integer_device_zero_in_map():
+    verify_loaded_model_execution(
+        _placement_model(hf_device_map={"": 0}),
+        _sealed_config(),
+    )
+
+
+def test_loaded_model_execution_accepts_expanded_all_cuda0_map():
+    verify_loaded_model_execution(
+        _placement_model(
+            hf_device_map={
+                "model.embed_tokens": "cuda:0",
+                "model.layers.0": "cuda:0",
+                "lm_head": "cuda:0",
+            }
+        ),
+        _sealed_config(),
+    )
+
+
+def test_loaded_model_execution_accepts_missing_hf_device_map_when_tensors_are_cuda0():
+    """bitsandbytes NF4 loads often leave hf_device_map as None despite full GPU residency."""
+
+    verify_loaded_model_execution(
+        _placement_model(hf_device_map=None),
+        _sealed_config(),
+    )
+
+
+def test_loaded_model_execution_accepts_torch_device_like_values():
+    class FakeDevice:
+        def __init__(self, type_, index=None):
+            self.type = type_
+            self.index = index
+
+        def __str__(self):
+            if self.index is None:
+                return self.type
+            return f"{self.type}:{self.index}"
+
+    verify_loaded_model_execution(
+        _placement_model(
+            hf_device_map={"": FakeDevice("cuda", 0)},
+            parameters=[("w", _PlacementParameter(FakeDevice("cuda", None)))],
+            buffers=[("b", _PlacementBuffer(FakeDevice("cuda", 0)))],
+        ),
+        _sealed_config(),
+    )
+
+
+def test_loaded_model_execution_rejects_cpu_map_entry():
+    with pytest.raises(ExecutionPlacementDeviation, match="hf_device_map entries outside"):
+        verify_loaded_model_execution(
+            _placement_model(hf_device_map={"": "cpu"}),
+            _sealed_config(),
+        )
+
+
+def test_loaded_model_execution_rejects_disk_map_entry():
+    with pytest.raises(ExecutionPlacementDeviation, match="hf_device_map entries outside"):
+        verify_loaded_model_execution(
+            _placement_model(
+                hf_device_map={"model.layers.0": "cuda:0", "model.layers.1": "disk"}
+            ),
+            _sealed_config(),
+        )
+
+
+def test_loaded_model_execution_rejects_other_gpu_map_entry():
+    with pytest.raises(ExecutionPlacementDeviation, match="hf_device_map entries outside"):
+        verify_loaded_model_execution(
+            _placement_model(hf_device_map={"model.layers.0": "cuda:1"}),
+            _sealed_config(),
+        )
+
+
+def test_loaded_model_execution_rejects_parameter_on_cpu_despite_all_gpu_map():
+    with pytest.raises(ExecutionPlacementDeviation, match="parameters outside"):
+        verify_loaded_model_execution(
+            _placement_model(
+                hf_device_map={
+                    "model.embed_tokens": "cuda:0",
+                    "lm_head": "cuda:0",
+                },
+                parameters=[
+                    ("model.embed_tokens.weight", _PlacementParameter("cuda:0")),
+                    ("lm_head.weight", _PlacementParameter("cpu")),
+                ],
+            ),
+            _sealed_config(),
+        )
+
+
+def test_loaded_model_execution_rejects_meta_parameter():
+    with pytest.raises(ExecutionPlacementDeviation, match="parameters outside"):
+        verify_loaded_model_execution(
+            _placement_model(
+                hf_device_map=None,
+                parameters=[("ghost.weight", _PlacementParameter("meta"))],
+            ),
+            _sealed_config(),
+        )
+
+
+def test_loaded_model_execution_rejects_float_buffer_off_device():
+    with pytest.raises(ExecutionPlacementDeviation, match="buffers outside"):
+        verify_loaded_model_execution(
+            _placement_model(
+                hf_device_map={"": "cuda:0"},
+                buffers=[("norm.weight", _PlacementBuffer("cpu", floating=True))],
+            ),
+            _sealed_config(),
+        )
+
+
+def test_loaded_model_execution_rejects_missing_map_without_parameters():
+    with pytest.raises(ExecutionPlacementDeviation, match="no parameters"):
+        verify_loaded_model_execution(
+            _placement_model(hf_device_map=None, parameters=[]),
+            _sealed_config(),
+        )
 
 
 def test_loaded_model_execution_emits_a_typed_placement_deviation():
-    model = type(
-        "Model",
-        (),
-        {
-            "config": type("Config", (), {"_attn_implementation": "sdpa"})(),
-            "hf_device_map": {"": "cpu"},
-            "parameters": lambda self: iter(()),
-        },
-    )()
     with pytest.raises(ExecutionPlacementDeviation, match="PLACEMENT_DEVIATION"):
-        verify_loaded_model_execution(model, _sealed_config())
+        verify_loaded_model_execution(
+            _placement_model(hf_device_map={"": "cpu"}),
+            _sealed_config(),
+        )
 
 
 def test_post_adapter_state_verifies_placement_and_unquantized_storage_dtype():
