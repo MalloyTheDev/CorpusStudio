@@ -530,7 +530,12 @@ def _manager_and_resolution(tmp_path: Path, runner: FakeEnvironmentRunner, env_i
     return manager, resolution
 
 
-def _worker_wheel(tmp_path: Path, *, marker: str = "worker-v1") -> Path:
+def _worker_wheel(
+    tmp_path: Path,
+    *,
+    marker: str = "worker-v1",
+    entry_points: str | None = None,
+) -> Path:
     path = tmp_path / "corpus_studio_engine-1.3.0-py3-none-any.whl"
     path.parent.mkdir(parents=True, exist_ok=True)
     metadata_path = "corpus_studio_engine-1.3.0.dist-info/METADATA"
@@ -539,6 +544,10 @@ def _worker_wheel(tmp_path: Path, *, marker: str = "worker-v1") -> Path:
         metadata_path: b"Metadata-Version: 2.1\nName: corpus-studio-engine\nVersion: 1.3.0\n",
         "corpus_studio/readiness_marker.txt": marker.encode("utf-8"),
     }
+    if entry_points is not None:
+        members["corpus_studio_engine-1.3.0.dist-info/entry_points.txt"] = (
+            entry_points.encode("utf-8")
+        )
     record_lines = []
     for member_name, member_bytes in members.items():
         digest = base64.urlsafe_b64encode(hashlib.sha256(member_bytes).digest()).decode().rstrip("=")
@@ -1568,7 +1577,82 @@ def test_install_source_evidence_sanitizes_credentials_and_preserves_unknown(tmp
     assert unknown.source_evidence_reason
 
 
+def test_install_source_evidence_classifies_proven_local_vcs_index_and_sdist_sources(
+    tmp_path,
+):
+    report = tmp_path / "pip-report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "install": [
+                    {
+                        "download_info": {
+                            "url": "https://files.pythonhosted.org/packages/indexed.whl",
+                            "archive_info": {"hashes": {"sha256": "a" * 64}},
+                        },
+                        "is_direct": False,
+                        "requested": True,
+                        "metadata": {"name": "indexed", "version": "1.0"},
+                    },
+                    {
+                        "download_info": {
+                            "url": "file:///tmp/local-package",
+                            "dir_info": {"editable": True},
+                        },
+                        "is_direct": True,
+                        "requested": False,
+                        "metadata": {"name": "local-package", "version": "2.0"},
+                    },
+                    {
+                        "download_info": {
+                            "url": "https://git.example.invalid/repository.git",
+                            "vcs_info": {
+                                "vcs": "git",
+                                "commit_id": "deadbeef",
+                                "requested_revision": "release-1",
+                            },
+                        },
+                        "is_direct": True,
+                        "metadata": {"name": "vcs-package", "version": "3.0"},
+                    },
+                    {
+                        "download_info": {
+                            "url": "https://example.invalid/source.tar.gz",
+                            "archive_info": {"hashes": {"sha256": "d" * 64}},
+                        },
+                        "is_direct": True,
+                        "metadata": {"name": "source-package", "version": "4.0"},
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    step = InstallStep(
+        phase="install",
+        argv=["python", "-m", "pip", "install"],
+        configured_index_urls=["https://pypi.org/simple"],
+    )
+
+    captured = {
+        item.normalized_name: item
+        for item in manager_module._install_evidence_from_report(
+            report, step=step, command_id="command-001"
+        )
+    }
+
+    assert captured["indexed"].source == "pypi"
+    assert captured["indexed"].source_index_url == "https://pypi.org/simple"
+    assert captured["local-package"].source == "local"
+    assert captured["local-package"].editable is True
+    assert captured["vcs-package"].source == "vcs"
+    assert captured["vcs-package"].vcs_commit == "deadbeef"
+    assert captured["source-package"].source == "sdist"
+
+
 def test_url_sanitizer_rejects_malformed_ports_and_strips_sensitive_parts():
+    assert manager_module._sanitize_url(None) is None
     assert manager_module._sanitize_url("https://example.invalid:bad/simple") is None
     assert manager_module._sanitize_url("user:secret@example.invalid/path") is None
     assert manager_module._sanitize_url("https://example.invalid/path\nsecret") is None
@@ -1576,12 +1660,80 @@ def test_url_sanitizer_rejects_malformed_ports_and_strips_sensitive_parts():
     assert manager_module._sanitize_url(r"https://example.invalid\@evil.invalid/pkg") is None
     assert manager_module._sanitize_url("https://example.invalid/%ZZ/pkg") is None
     assert manager_module._sanitize_url("file:relative-wheel.whl") is None
+    assert manager_module._sanitize_url("https://[::1]:8443/simple") == "https://[::1]:8443/simple"
     assert (
         manager_module._sanitize_url(
             "https://user:secret@example.invalid:8443/simple?token=secret#fragment"
         )
         == "https://example.invalid:8443/simple"
     )
+
+
+@pytest.mark.parametrize(
+    ("direct_url", "message"),
+    [
+        ("not-an-object", "malformed direct_url"),
+        ({"url": "relative.whl", "archive_info": {}}, "malformed direct artifact URL"),
+        (
+            {
+                "url": "https://example.invalid/pkg.whl",
+                "archive_info": {},
+                "dir_info": {},
+            },
+            "exactly one source kind",
+        ),
+        (
+            {
+                "url": "https://example.invalid/pkg.whl",
+                "archive_info": {},
+                "subdirectory": "unsafe\nvalue",
+            },
+            "malformed subdirectory",
+        ),
+        (
+            {
+                "url": "file:///tmp/pkg",
+                "dir_info": {"editable": "yes"},
+            },
+            "malformed editable flag",
+        ),
+        (
+            {
+                "url": "https://example.invalid/pkg.whl",
+                "archive_info": {"hashes": []},
+            },
+            "malformed archive hashes",
+        ),
+        (
+            {
+                "url": "https://example.invalid/pkg.whl",
+                "archive_info": {"hash": 7},
+            },
+            "malformed archive hash",
+        ),
+        (
+            {
+                "url": "https://example.invalid/repository.git",
+                "vcs_info": {"vcs": "git!", "commit_id": "deadbeef"},
+            },
+            "malformed VCS identity",
+        ),
+        (
+            {
+                "url": "https://example.invalid/repository.git",
+                "vcs_info": {
+                    "vcs": "git",
+                    "commit_id": "deadbeef",
+                    "requested_revision": "unsafe\nrevision",
+                },
+            },
+            "malformed VCS revision",
+        ),
+    ],
+)
+def test_installed_direct_url_metadata_fails_closed(direct_url, message):
+    with pytest.raises(EnvironmentManagerError, match=message):
+        manager_module._validate_installed_direct_url(direct_url)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlink inventory test")
@@ -1804,6 +1956,87 @@ def test_lock_probe_proves_generated_worker_bytecode_matches_its_source(tmp_path
                 "download_info": {
                     "url": "https://example.invalid/pkg.whl",
                     "archive_info": {"hashes": {"sha256": "a" * 64}},
+                },
+                "is_direct": "yes",
+                "metadata": {"name": "pkg", "version": "1"},
+            }
+        ],
+        [
+            {
+                "download_info": {"url": "https://example.invalid/pkg.whl"},
+                "is_direct": True,
+                "metadata": {"name": "pkg", "version": "1"},
+            }
+        ],
+        [
+            {
+                "download_info": {
+                    "url": "file:///tmp/pkg",
+                    "dir_info": {},
+                },
+                "is_direct": False,
+                "metadata": {"name": "pkg", "version": "1"},
+            }
+        ],
+        [
+            {
+                "download_info": {
+                    "url": "file:///tmp/pkg",
+                    "dir_info": {"editable": "yes"},
+                },
+                "is_direct": True,
+                "metadata": {"name": "pkg", "version": "1"},
+            }
+        ],
+        [
+            {
+                "download_info": {
+                    "url": "https://example.invalid/pkg",
+                    "dir_info": {},
+                },
+                "is_direct": True,
+                "metadata": {"name": "pkg", "version": "1"},
+            }
+        ],
+        [
+            {
+                "download_info": {
+                    "url": "https://example.invalid/repository.git",
+                    "vcs_info": {"vcs": "git!", "commit_id": "deadbeef"},
+                },
+                "is_direct": True,
+                "metadata": {"name": "pkg", "version": "1"},
+            }
+        ],
+        [
+            {
+                "download_info": {
+                    "url": "https://example.invalid/repository.git",
+                    "vcs_info": {
+                        "vcs": "git",
+                        "commit_id": "deadbeef",
+                        "requested_revision": "unsafe\nrevision",
+                    },
+                },
+                "is_direct": True,
+                "metadata": {"name": "pkg", "version": "1"},
+            }
+        ],
+        [
+            {
+                "download_info": {
+                    "url": "https://example.invalid/pkg%0A.whl",
+                    "archive_info": {"hashes": {"sha256": "a" * 64}},
+                },
+                "is_direct": True,
+                "metadata": {"name": "pkg", "version": "1"},
+            }
+        ],
+        [
+            {
+                "download_info": {
+                    "url": "https://example.invalid/pkg.whl",
+                    "archive_info": {"hashes": {"sha256": "a" * 64}},
                     "vcs_info": "not-an-object",
                 },
                 "is_direct": True,
@@ -1888,6 +2121,20 @@ def test_pip_report_schema_version_is_required(tmp_path):
         )
 
 
+def test_pip_report_rejects_malformed_configured_index(tmp_path):
+    report = tmp_path / "pip-report.json"
+    report.write_text(json.dumps({"version": "1", "install": []}), encoding="utf-8")
+    step = InstallStep(
+        phase="install",
+        argv=["python", "-m", "pip", "install"],
+        configured_index_urls=["https://example.invalid:bad/simple"],
+    )
+    with pytest.raises(EnvironmentManagerError, match="malformed index URL"):
+        manager_module._install_evidence_from_report(
+            report, step=step, command_id="command-001"
+        )
+
+
 def test_index_source_classification_uses_exact_artifact_hostname(tmp_path):
     report = tmp_path / "pip-report.json"
     report.write_text(
@@ -1951,6 +2198,221 @@ def test_worker_wheel_archive_and_metadata_identities_fail_closed(tmp_path):
             archive.writestr(member_name, member_bytes)
     with pytest.raises(EnvironmentManagerError, match="RECORD does not verify"):
         manager_module._worker_artifact_identity(tampered)
+
+
+def test_worker_wheel_structural_ambiguities_fail_closed(tmp_path, monkeypatch):
+    filename = "corpus_studio_engine-1.3.0-py3-none-any.whl"
+    metadata_path = "corpus_studio_engine-1.3.0.dist-info/METADATA"
+    record_path = "corpus_studio_engine-1.3.0.dist-info/RECORD"
+    valid_metadata = b"Name: corpus-studio-engine\nVersion: 1.3.0\n"
+
+    def record_for(members):
+        rows = []
+        for name, content in members.items():
+            digest = base64.urlsafe_b64encode(hashlib.sha256(content).digest()).decode().rstrip("=")
+            rows.append(f"{name},sha256={digest},{len(content)}")
+        rows.append(f"{record_path},,")
+        return ("\n".join(rows) + "\n").encode()
+
+    def write_wheel(name, members):
+        path = tmp_path / name / filename
+        path.parent.mkdir()
+        with zipfile.ZipFile(path, "w") as archive:
+            for member_name, member_bytes in members.items():
+                archive.writestr(member_name, member_bytes)
+        return path
+
+    not_a_wheel = tmp_path / "not-a-wheel.txt"
+    not_a_wheel.write_text("not a wheel", encoding="utf-8")
+    with pytest.raises(EnvironmentManagerError, match="concrete wheel"):
+        manager_module._worker_artifact_identity(not_a_wheel)
+
+    unreadable = tmp_path / "unreadable" / filename
+    unreadable.parent.mkdir()
+    unreadable.write_bytes(b"not a zip archive")
+    with pytest.raises(EnvironmentManagerError, match="worker wheel is unreadable"):
+        manager_module._worker_artifact_identity(unreadable)
+
+    bounded = _worker_wheel(tmp_path / "expanded-limit")
+    with monkeypatch.context() as patch:
+        patch.setattr(manager_module, "_MAX_WORKER_WHEEL_EXPANDED_BYTES", 1)
+        with pytest.raises(EnvironmentManagerError, match="bounded expanded size"):
+            manager_module._worker_artifact_identity(bounded)
+
+    duplicate = tmp_path / "duplicate" / filename
+    duplicate.parent.mkdir()
+    with zipfile.ZipFile(duplicate, "w") as archive:
+        archive.writestr(metadata_path, valid_metadata)
+        with pytest.warns(UserWarning, match="Duplicate name"):
+            archive.writestr(metadata_path, valid_metadata)
+    with pytest.raises(EnvironmentManagerError, match="duplicate archive members"):
+        manager_module._worker_artifact_identity(duplicate)
+
+    missing_metadata = write_wheel("missing-metadata", {record_path: b""})
+    with pytest.raises(EnvironmentManagerError, match="exactly one.*METADATA"):
+        manager_module._worker_artifact_identity(missing_metadata)
+
+    nested_metadata = write_wheel(
+        "nested-metadata",
+        {"nested/corpus_studio_engine-1.3.0.dist-info/METADATA": valid_metadata},
+    )
+    with pytest.raises(EnvironmentManagerError, match="METADATA is not at wheel root"):
+        manager_module._worker_artifact_identity(nested_metadata)
+
+    identity_members = {metadata_path: valid_metadata, "other-1.0.dist-info/WHEEL": b"Wheel-Version: 1.0\n"}
+    identity_members[record_path] = record_for(identity_members)
+    extra_identity = write_wheel("extra-identity", identity_members)
+    with pytest.raises(EnvironmentManagerError, match="more than one dist-info identity"):
+        manager_module._worker_artifact_identity(extra_identity)
+
+    missing_record = write_wheel("missing-record", {metadata_path: valid_metadata})
+    with pytest.raises(EnvironmentManagerError, match="exactly one.*RECORD"):
+        manager_module._worker_artifact_identity(missing_record)
+
+    nested_record_path = "nested/corpus_studio_engine-1.3.0.dist-info/RECORD"
+    nested_record = write_wheel(
+        "nested-record",
+        {metadata_path: valid_metadata, nested_record_path: b""},
+    )
+    with pytest.raises(EnvironmentManagerError, match="RECORD does not match"):
+        manager_module._worker_artifact_identity(nested_record)
+
+    invalid_record_encoding = write_wheel(
+        "invalid-record-encoding",
+        {metadata_path: valid_metadata, record_path: b"\xff"},
+    )
+    with pytest.raises(EnvironmentManagerError, match="RECORD is malformed"):
+        manager_module._worker_artifact_identity(invalid_record_encoding)
+
+    metadata_digest = base64.urlsafe_b64encode(hashlib.sha256(valid_metadata).digest()).decode().rstrip("=")
+    self_hashed_record = (
+        f"{metadata_path},sha256={metadata_digest},{len(valid_metadata)}\n"
+        f"{record_path},sha256={'a' * 43},1\n"
+    ).encode()
+    self_hashed = write_wheel(
+        "self-hashed",
+        {metadata_path: valid_metadata, record_path: self_hashed_record},
+    )
+    with pytest.raises(EnvironmentManagerError, match="self-entry must be unhashed"):
+        manager_module._worker_artifact_identity(self_hashed)
+
+    missing_member_record = (
+        f"{metadata_path},sha256={metadata_digest},{len(valid_metadata)}\n"
+        "ghost.py,sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,1\n"
+        f"{record_path},,\n"
+    ).encode()
+    missing_member = write_wheel(
+        "missing-member",
+        {metadata_path: valid_metadata, record_path: missing_member_record},
+    )
+    with pytest.raises(EnvironmentManagerError, match="names a missing archive member"):
+        manager_module._worker_artifact_identity(missing_member)
+
+    malformed_digest_record = (
+        f"{metadata_path},sha256=short,not-a-size\n"
+        f"{record_path},,\n"
+    ).encode()
+    malformed_digest = write_wheel(
+        "malformed-digest",
+        {metadata_path: valid_metadata, record_path: malformed_digest_record},
+    )
+    with pytest.raises(EnvironmentManagerError, match="malformed digest or size"):
+        manager_module._worker_artifact_identity(malformed_digest)
+
+    malformed_record = write_wheel(
+        "malformed-record",
+        {metadata_path: valid_metadata, record_path: b"malformed,row\n"},
+    )
+    with pytest.raises(EnvironmentManagerError, match="RECORD contains malformed rows"):
+        manager_module._worker_artifact_identity(malformed_record)
+
+    unrecorded_members = {metadata_path: valid_metadata, "unrecorded.py": b"VALUE = 1\n"}
+    unrecorded_members[record_path] = record_for({metadata_path: valid_metadata})
+    unrecorded = write_wheel("unrecorded", unrecorded_members)
+    with pytest.raises(EnvironmentManagerError, match="does not inventory every archive file"):
+        manager_module._worker_artifact_identity(unrecorded)
+
+    duplicate_name_metadata = (
+        b"Name: corpus-studio-engine\nName: corpus-studio-engine\nVersion: 1.3.0\n"
+    )
+    duplicate_name_members = {metadata_path: duplicate_name_metadata}
+    duplicate_name_members[record_path] = record_for(duplicate_name_members)
+    duplicate_name = write_wheel("duplicate-name", duplicate_name_members)
+    with pytest.raises(EnvironmentManagerError, match="exactly one Name and Version"):
+        manager_module._worker_artifact_identity(duplicate_name)
+
+    invalid_utf8_metadata = b"Name: corpus-studio-engine\nVersion: 1.3.0\n\xff"
+    invalid_utf8_members = {metadata_path: invalid_utf8_metadata}
+    invalid_utf8_members[record_path] = record_for(invalid_utf8_members)
+    invalid_utf8 = write_wheel("invalid-metadata-encoding", invalid_utf8_members)
+    with pytest.raises(EnvironmentManagerError, match="METADATA is invalid UTF-8"):
+        manager_module._worker_artifact_identity(invalid_utf8)
+
+    wrong_identity_metadata = b"Name: unrelated-package\nVersion: 1.3.0\n"
+    wrong_identity_members = {metadata_path: wrong_identity_metadata}
+    wrong_identity_members[record_path] = record_for(wrong_identity_members)
+    wrong_identity = write_wheel("wrong-identity", wrong_identity_members)
+    with pytest.raises(EnvironmentManagerError, match="corpus-studio-engine distribution"):
+        manager_module._worker_artifact_identity(wrong_identity)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="worker artifact symlink test")
+def test_worker_wheel_artifact_symlink_fails_closed(tmp_path):
+    wheel = _worker_wheel(tmp_path / "artifact")
+    link = tmp_path / wheel.name
+    link.symlink_to(wheel)
+
+    with pytest.raises(EnvironmentManagerError, match="cannot be a symbolic link"):
+        manager_module._worker_artifact_identity(link)
+
+
+@pytest.mark.parametrize("name", [None, "bad name", "bad\nname"])
+def test_distribution_evidence_names_fail_closed(name):
+    with pytest.raises(EnvironmentManagerError, match="invalid distribution name"):
+        manager_module._validated_package_name(name)
+
+
+def test_worker_wheel_declared_entry_points_are_the_only_generated_script_allowlist(
+    tmp_path,
+):
+    wheel = _worker_wheel(
+        tmp_path,
+        entry_points=(
+            "# reviewed entry points\n"
+            "[console_scripts]\n"
+            "corpus-studio = corpus_studio.cli:app\n"
+            "\n"
+            "[unrelated.group]\n"
+            "ignored = corpus_studio.cli:ignored\n"
+            "[gui_scripts]\n"
+            "corpus-studio-gui = corpus_studio.desktop:main\n"
+        ),
+    )
+    artifact = manager_module._worker_artifact_identity(wheel)
+
+    console, gui = manager_module._worker_wheel_entry_point_scripts(artifact)
+
+    assert console == {"corpus-studio"}
+    assert gui == {"corpus-studio-gui"}
+
+
+@pytest.mark.parametrize(
+    "entry_points",
+    [
+        "[console_scripts]\nmissing-equals\n",
+        "[console_scripts]\n!unsafe = corpus_studio.cli:app\n",
+        (
+            "[console_scripts]\nduplicate = corpus_studio.cli:app\n"
+            "[gui_scripts]\nduplicate = corpus_studio.desktop:main\n"
+        ),
+    ],
+)
+def test_worker_wheel_malformed_entry_points_fail_closed(tmp_path, entry_points):
+    wheel = _worker_wheel(tmp_path, entry_points=entry_points)
+    artifact = manager_module._worker_artifact_identity(wheel)
+
+    with pytest.raises(EnvironmentManagerError, match="entry_points.txt"):
+        manager_module._worker_wheel_entry_point_scripts(artifact)
 
 
 def test_lock_probe_record_paths_are_contained_and_symlinks_fail_closed():
