@@ -156,10 +156,12 @@ integration are covered by CPU/unit/integration tests. Those tests verify enforc
 final hardware stack.
 
 The historical native-Windows RTX 5070 run predates this contract and is not proof that the Phase 9B
-path works on that hardware. The following remain explicitly unverified until the final machine is
-available: native-Linux RTX 5070 training, DeepSpeed NVMe offload, Linux FSDP, bare-Linux
-FlashAttention, PCIe 4.0 NVMe throughput, sustained NVMe writes, real offload fit, full-sequence 7B
-success, and MoE runtime capability.
+path works on that hardware. The current native-Linux host's managed `backend-corpus-studio`
+environment passed its exact minimal hardware-probe tuple, but that is a separate prerequisite rather
+than Phase-9B workload proof. Native-Linux real-workload execution, full-sequence 7B behavior,
+DeepSpeed NVMe offload, Linux FSDP, CPU/NVMe offload, bare-Linux FlashAttention for the real workload,
+PCIe 4.0 NVMe throughput, sustained NVMe writes, real offload fit, and MoE runtime capability remain
+explicitly unverified.
 
 The next integrity slice should harden artifact/checkpoint inventories and managed environments:
 shared stable file inventories, installed-file verification against `RECORD`, a content-hashed worker

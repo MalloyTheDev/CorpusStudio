@@ -4,8 +4,29 @@
 
 - Python 3.11+
 - .NET 8 SDK
-- Visual Studio 2022 or JetBrains Rider for desktop development
+- Visual Studio 2022 (Windows WPF) or JetBrains Rider / the .NET SDK (cross-platform Avalonia)
+- Node.js/npm and Rust/Tauri prerequisites for `apps/web`
 - GitHub CLI, if creating the upstream GitHub repository from this checkout
+
+## Current native-Linux host quick start
+
+Work from the active checkout, not the historical Windows mounts:
+
+```bash
+cd /mnt/training-nvme/repos/CorpusStudio
+cp .env.example .env
+cd engine
+.venv/bin/python -m pip install -e ".[dev]"
+.venv/bin/python -m pytest -q --no-header --basetemp=.pytest_tmp
+cd ..
+dotnet build apps/desktop/CorpusStudio.Avalonia/CorpusStudio.Avalonia.csproj
+cd apps/web
+npm ci
+npm run build
+```
+
+`CorpusStudio.Desktop` is the WPF head and is Windows-only. On Linux, build or run the Avalonia head;
+the Tauri/React client lives under `apps/web`.
 
 ## GitHub setup
 
@@ -28,7 +49,7 @@ If `origin` is already configured, verify it with:
 git remote -v
 ```
 
-## Local environment file
+## Local environment file (Windows PowerShell)
 
 Copy the example environment file for local defaults:
 
@@ -38,7 +59,7 @@ Copy-Item .env.example .env
 
 Do not put secrets or private dataset paths in committed files.
 
-## Python engine setup
+## Python engine setup (Windows PowerShell)
 
 From the repository root:
 
@@ -49,7 +70,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pytest -q --basetemp .pytest-tmp
 ```
 
-## Desktop setup
+## Desktop setup (Windows WPF only)
 
 From the repository root:
 
@@ -73,7 +94,7 @@ CORPUS_STUDIO_EXPORT_DIR=exports
 CORPUS_STUDIO_ENGINE_DIR=engine
 ```
 
-## v0.1 desktop smoke test
+## v0.1 desktop smoke test (Windows WPF only)
 
 Use this checklist after a build:
 
@@ -90,7 +111,7 @@ Use this checklist after a build:
 11. Click **Export JSONL** and confirm an export appears under `exports/<project_id>/export.jsonl`.
 12. Open **Settings** and confirm the repository, engine, Python, project, and export paths point to this checkout.
 
-Or run the automated Windows desktop smoke test:
+Or run the automated Windows-only WPF desktop smoke test:
 
 ```powershell
 .\scripts\smoke_desktop_examples.ps1
@@ -103,14 +124,14 @@ Assist queue behavior, persistent AI Assist rewrite batch resume, Evaluation
 tag/failure/score-band summaries, failed Evaluation row edit handoff to Writing
 Studio, Training Lab config export, and saved lab backend settings.
 
-## Validate example datasets
+## Validate example datasets (Windows PowerShell examples)
 
 ```powershell
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli validate examples\datasets\instruction\train.jsonl instruction
 .\engine\.venv\Scripts\python.exe scripts\validate_examples.py
 ```
 
-## Useful engine commands
+## Useful engine commands (Windows PowerShell examples)
 
 ```powershell
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli schemas
@@ -127,7 +148,7 @@ Studio, Training Lab config export, and saved lab backend settings.
 on first use, can be rebuilt from disk at any time, and never replaces the
 inspectable `project.json`/`examples.jsonl` files.
 
-## Local model-backed commands
+## Local model-backed commands (Windows PowerShell examples)
 
 These commands require Ollama, LM Studio, or another compatible local backend to
 already be running. They do not pull models or install ML packages. (First-party
@@ -145,7 +166,7 @@ use `platform-plan` / `platform-run`; `train-check`, `train-merge`, and
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli training-config examples\datasets\instruction\train.jsonl instruction --output-path exports\instruction_axolotl.yaml --base-model Qwen/Qwen2.5-Coder-7B-Instruct --target axolotl_yaml
 ```
 
-## Opt-in local integration tests
+## Opt-in local integration tests (Windows PowerShell example)
 
 The default `pytest` run stays offline: the Ollama integration tests
 (`engine/tests/test_ollama_integration.py`) are skipped unless explicitly

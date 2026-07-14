@@ -228,8 +228,9 @@ native-Windows WDDM driver** — the training step hangs at 100% GPU util but ~5
 pulls 150–250 W). Verified on a real RTX 5070: bitsandbytes 4-bit, the *mem-efficient* SDPA
 kernel, and the *math* path all work — **only the fused flash kernel hangs, and only on native
 Windows**. WSL2 testing on the 5070 showed the same flash kernel running ~1000× faster than the math
-fallback. Bare-Linux FlashAttention has not yet been verified on the final machine, so WSL evidence
-must not be reported as a native-Linux result.
+fallback. Bare-Linux FlashAttention has not yet been verified for the real workload on the current
+native-Linux host; its managed-environment probe verified the math path only. WSL evidence must not be
+reported as a native-Linux result.
 
 CorpusStudio treats **WSL as its own platform** (`OperatingSystem.wsl`): it has separately measured
 flash evidence but `wddm` memory-residency like Windows (it still spills - see below). A new platform
@@ -237,7 +238,7 @@ plan binds an exact attention API, effective kernel, and all three PyTorch SDPA 
 native-Windows + Blackwell hazard resolves to the math path; another host still needs a passing exact
 execution-combination probe before that policy can be sealed. These measurements predate the Phase 9B
 effective execution contract; that enforcement path still needs a fresh eligible-hardware run.
-Bare-Linux RTX 5070 behavior remains unverified.
+Bare-Linux RTX 5070 real-workload behavior remains unverified; only the managed-environment math-path probe is verified.
 
 The real ceiling (measured, and it is **not** an attention-kernel problem): on a **12 GB** card
 the 7B 4-bit QLoRA training peak is ~10.8 GB @ `sequence_len` 1024 → 13.8 GB @ 2048, so above

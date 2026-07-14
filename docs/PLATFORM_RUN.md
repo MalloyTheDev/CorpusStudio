@@ -150,7 +150,8 @@ cleanly (not a crash) — the honest "this host can't run it" signal.
 The pre-Phase-9B lifecycle was executed on an actual RTX 5070 (12 GB, driver 610.74, `cc 12.0`,
 Windows/WDDM) with `torch 2.11.0+cu128` + the `[train]` extra. This evidence remains useful for the old
 native-Windows path, but it predates `ResolvedExecutionConfiguration` and does not verify the new
-attention/precision/placement/input enforcement. The Phase 9B path must be rerun on the final machine.
+attention/precision/placement/input enforcement. The Phase 9B workload must be rerun on the current
+native-Linux host; the managed-environment hardware probe does not satisfy that workload requirement.
 
 **Profile + probe** (`platform-probe`) — `READINESS: ready`, kernels actually ran:
 

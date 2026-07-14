@@ -1,28 +1,30 @@
 # Running CorpusStudio training on native Linux (and reaching seq-4096)
 
-This is the planned verification runbook for long-sequence 7B QLoRA on a 12 GB card. It is not a
-record of a completed native-Linux or offload run.
+This is the current verification runbook for long-sequence 7B QLoRA on a 12 GB card. The native-Linux
+host is assembled, and its managed `backend-corpus-studio` environment passed the exact minimal
+hardware-probe tuple. It is not a record of a completed native-Linux real workload or offload run.
 
-> **Current evidence boundary:** native Windows/WDDM and WSL2 results are labeled where measured.
-> Native-Linux RTX 5070 training, bare-Linux FlashAttention, DeepSpeed/FSDP, CPU/NVMe offload fit,
-> PCIe/NVMe throughput and sustained writes, full-sequence 7B success, and MoE runtime capability are
-> all unverified until the Linux NVMe is installed in the final desktop and those tests are run.
+> **Current evidence boundary:** native Windows/WDDM and WSL2 workload results remain labeled where
+> measured. On native Linux, only the managed-environment CUDA-allocation, 4-bit-construction, minimal
+> forward/backward, and math-SDPA probe is verified. Native-Linux real-workload training,
+> bare-Linux FlashAttention for that workload, DeepSpeed/FSDP, CPU/NVMe offload fit, PCIe/NVMe
+> throughput and sustained writes, full-sequence 7B success, and MoE runtime capability are unverified.
 
 ## Why native Linux (not WSL) for long sequences
 
-CorpusStudio treats WSL and native Linux as distinct platforms. Only the Windows and WSL columns have
-project measurements today:
+CorpusStudio treats WSL and native Linux as distinct platforms. Windows and WSL have historical
+workload measurements; native Linux currently has only the separate managed-environment probe:
 
 | | native Windows | WSL2 | **native Linux** |
 |---|---|---|---|
-| flash attention (Blackwell) | deadlocks (measured WDDM) | works (measured) | **unverified** |
+| flash attention (Blackwell) | deadlocks (measured WDDM) | works (measured) | math-SDPA env probe passes; real-workload flash unverified |
 | over-VRAM behaviour | spills to shared RAM (measured) | spills, then wedges at scale (measured) | **unverified** |
 | true seq-4096 7B QLoRA | impractical spill | fails (`device not ready`) | **unverified** |
-| GPU access | WDDM | GPU-PV (paravirtualised) | direct access expected; verify after install |
+| GPU access | WDDM | GPU-PV (paravirtualised) | direct PCIe; minimal managed-environment probe verified |
 
 At true seq-4096 a 7B QLoRA is expected to exceed the 12 GB card. WSL2 measurements wedge when it
-spills that hard. Native Linux is the planned direct-GPU test bed for explicit offload, but its OOM
-behavior and offload fit must be measured rather than inferred.
+spills that hard. Native Linux is now the direct-GPU test bed for explicit offload, but its OOM
+behavior and offload fit must be measured rather than inferred from the environment probe.
 
 **Measured on a real RTX 5070 under WSL2** (true full-length sequences — QLoRA r16, grad checkpointing):
 
@@ -36,11 +38,13 @@ behavior and offload fit must be measured rather than inferred.
 So WSL "works" only up to seq-3072 and only by spilling at **5–11 minutes per step** — unusable for
 real training. (Short *effective* sequences — the WBG corpus is ~1.2 k tokens — stay under 12 GB and
 train fast at NATIVE_SAFE regardless of the `sequence_len` config.) True long-context needs the
-native-Linux/offload experiment below, or more VRAM; the former is not yet proven.
+native-Linux/offload experiment below, or more VRAM; the former is not yet proven at workload level.
 
-## Before the adapter arrives: portable NVMe preparation only
+## Historical NVMe preparation (completed 2026-07-13)
 
-On the temporary Linux computer, update the OS and install host diagnostics/build prerequisites:
+The following preparation commands are retained only as a rebuild reference. The current host and
+`/mnt/training-nvme` layout already satisfy this step; do not rerun it as routine setup. On a replacement
+host, update the OS and install host diagnostics/build prerequisites:
 
 ```bash
 sudo apt update
@@ -63,7 +67,7 @@ sudo update-initramfs -u -k all
 sudo update-grub
 ```
 
-Prepare the future training mount without installing NVIDIA/CUDA yet:
+For a replacement-host rebuild, prepare the training mount before installing NVIDIA/CUDA:
 
 ```bash
 sudo mkdir -p \
@@ -85,10 +89,10 @@ chmod 700 /mnt/training-nvme/offload
 chmod 1777 /mnt/training-nvme/tmp
 ```
 
-Do not install the NVIDIA driver, CUDA userspace stack, or managed training environment until this
-NVMe is installed in the RTX 5070 desktop through the PCIe adapter.
+That sequencing is complete on the current RTX 5070 host. Do not repeat these preparation or install
+steps unless performing a reviewed host rebuild.
 
-## 1. Dedicate an NVMe + install Ubuntu
+## 1. Historical rebuild reference: dedicate an NVMe + install Ubuntu
 
 Dedicate one NVMe to Linux (better than an external drive: full PCIe speed, native ext4 I/O). To
 protect the Windows bootloader, **temporarily disconnect/disable the other drives in BIOS during the
@@ -112,8 +116,9 @@ Ubuntu Desktop if you specifically want a GUI on the Linux box (accept the VRAM 
 
 ## 2. NVIDIA driver (the one gotcha for Blackwell / sm_120)
 
-Run this section only after the prepared NVMe is installed in the RTX 5070 desktop and its PCIe link,
-mount, and health have been inspected.
+The current host already satisfies this prerequisite and its verified driver/GPU facts are recorded in
+[`HOST_STATE.md`](HOST_STATE.md). Run this section only during a reviewed replacement-host rebuild,
+after the NVMe PCIe link, mount, and health have been inspected.
 
 The RTX 50-series needs a recent driver (**570+**) and a recent kernel:
 
@@ -129,59 +134,40 @@ a system CUDA toolkit.
 
 ## 3. Get CorpusStudio + your data onto Linux
 
-**The code: `git clone` it — no zip.** CorpusStudio lives on GitHub, so pull it straight down (and
-`git pull` later for updates, which a zip can't do):
+The active checkout is already on the Linux training filesystem:
 
 ```bash
-sudo apt install -y git                                   # + `gh` if the repo is private
-git clone https://github.com/MalloyTheDev/CorpusStudio.git
-cd CorpusStudio
+cd /mnt/training-nvme/repos/CorpusStudio
+git status --short --branch
 ```
 
-For a private repo, authenticate first: `sudo apt install -y gh && gh auth login`, then clone.
+Clone from the reviewed upstream only when rebuilding a new host. Never use the old `C:` or `F:`
+checkouts under `/mnt/windows-c` or `/mnt/windows-f` as active development roots.
 
 Two things are **not** in the repo:
 
-- **Your datasets** (e.g. the World Bible Generator JSONL splits). If you **dual-boot** on the same
-  machine, the cleanest route is to **mount the Windows NVMe from Linux and read them directly** — no
-  copy:
-  ```bash
-  lsblk -f                                  # find the Windows NTFS partition, e.g. /dev/nvme0n1p3
-  sudo mkdir -p /mnt/win && sudo mount -t ntfs3 /dev/nvme0n1p3 /mnt/win
-  # datasets now at /mnt/win/WorldBibleGenerator/…  — point --dataset straight at them
-  ```
-  Otherwise copy the dataset folder over (USB / the mounted drive).
-- **The base model weights** (~15 GB Qwen). They **re-download automatically** the first time
-  (`corpus-studio model-fetch …`, or on the first run). To skip the download, copy the HF cache:
-  `C:\Users\<you>\.cache\huggingface` → `~/.cache/huggingface`.
+- **Your datasets** (e.g. the World Bible Generator JSONL splits). Historical source material remains
+  readable under `/mnt/windows-c` and `/mnt/windows-f`, but those mounts are history-only project
+  inputs. Copy approved mutable training inputs to `/mnt/training-nvme/datasets/` and never develop
+  from or write through the old Windows repository checkouts.
+- **The base model weights** (~15 GB Qwen). The current host sets `HF_HOME` to
+  `/mnt/training-nvme/cache/huggingface`; inspect snapshot completeness and license evidence before
+  any `model-fetch`. Keep model downloads on `/mnt/training-nvme`, not the root filesystem or Windows
+  mounts.
 
-## 4. Build the managed training environment (no sudo)
+## 4. Verify the existing managed training environment
 
 ```bash
-python3 -m venv /mnt/training-nvme/environments/control-plane
-/mnt/training-nvme/environments/control-plane/bin/pip install -e ./engine
-source /mnt/training-nvme/environments/control-plane/bin/activate
-
-corpus-studio env-runtimes --recipe backend-corpus-studio
-corpus-studio env-plan backend-corpus-studio \
-  --env-id backend-corpus-studio \
-  --runtime /usr/bin/python3 \
-  --accelerator cu128 \
-  --manager-root /mnt/training-nvme/environments/manager
-# Review the exact argv, indexes, target, and size, then repeat with:
-corpus-studio env-create backend-corpus-studio \
-  --env-id backend-corpus-studio \
-  --runtime /usr/bin/python3 \
-  --accelerator cu128 \
-  --manager-root /mnt/training-nvme/environments/manager \
-  --confirm <resolution-hash>
-corpus-studio env-probe backend-corpus-studio \
-  --manager-root /mnt/training-nvme/environments/manager --json
+cd /mnt/training-nvme/repos/CorpusStudio
+engine/.venv/bin/corpus-studio env-status backend-corpus-studio --refresh
+engine/.venv/bin/corpus-studio env-probe backend-corpus-studio
 ```
 
-This step happens only on the final machine after `nvidia-smi` succeeds. The managed environment must
-be built and probed there; package installation alone is not backend or hardware support. The
-`scripts/setup_linux_training.sh` path is a manual diagnostic fallback, not the managed or offload
+On this host, the managed environment lives beneath the XDG data root documented in
+[`HOST_STATE.md`](HOST_STATE.md) and is `HARDWARE_VERIFIED` for its exact minimal probe tuple. Use
+`env-plan` and `env-create` only for an explicitly reviewed recreation; creation performs network
+package installation. Package installation or an environment probe alone is not workload support.
+The `scripts/setup_linux_training.sh` path is a manual diagnostic fallback, not the managed or offload
 backend workflow.
 
 ## 5. Reaching seq-4096 — the honest playbook
@@ -193,7 +179,7 @@ cheapest first, are:
    combination, then measure its effect on this host. A standalone Liger field/package result is not
    execution support.
 2. **Activation offload to CPU RAM** — a planned long-sequence lever that needs a real isolated backend
-   and measurement on the final host.
+   and measurement on the current native-Linux host.
 3. **DeepSpeed ZeRO offload → NVMe** — planned only. CorpusStudio does not yet ship or verify this
    backend, and NVMe offload must not be inferred from the physical `RunPlan` contract.
 4. **Multiple GPUs** — a future FSDP/DeepSpeed path, not a verified current capability. Heterogeneous
@@ -205,11 +191,12 @@ The existing singleton baseline can be planned and supervised with the platform,
 does not implement or prove CPU/NVMe offload:
 
 ```bash
-corpus-studio platform-plan --base-model Qwen/Qwen2.5-7B-Instruct \
+cd /mnt/training-nvme/repos/CorpusStudio
+engine/.venv/bin/corpus-studio platform-plan --base-model Qwen/Qwen2.5-7B-Instruct \
     --model-revision a09a35458c702b33eeacc393d103063234e8bc28 --dataset train.jsonl \
     --dataset-format chat --chat-template-sha256 "$CHAT_TEMPLATE_SHA256" \
     --sequence-len 1024 --out /tmp/plan
-corpus-studio platform-run /tmp/plan/RunPlan.json --subprocess --out ./run
+engine/.venv/bin/corpus-studio platform-run /tmp/plan/RunPlan.json --subprocess --out ./run
 ```
 
 For a chat dataset, also supply the exact `--chat-template-sha256`; omission is a blocking preflight
@@ -219,6 +206,6 @@ error rather than a formatting fallback.
 baseline first, increase sequence length gradually, then test CPU offload, and attempt NVMe offload
 only after baseline GPU and non-destructive storage measurements exist.
 
-> **Status:** this stack is verified only where explicitly labeled on WSL2; the native-Linux and
-> offload paths remain unverified. After the adapter/final-machine installation, follow the ordered
-> baseline-to-offload measurements above.
+> **Status:** historical WSL2 workload measurements and the current native-Linux managed-environment
+> probe are verified only within their separately labeled boundaries. Native-Linux real-workload and
+> offload paths remain unverified; continue the ordered baseline-to-offload measurements above.

@@ -6,19 +6,20 @@ complete local-first AI engineering platform described in the product vision. It
 a record of shipped work — for what actually works today, [`CURRENT_STATE.md`](CURRENT_STATE.md) is
 the source of truth. Nothing here is claimed as implemented unless it links to a shipped feature.
 
-## 1. Grounded architecture audit (2026-07-13)
+## 1. Grounded architecture audit (2026-07-14)
 
 The **run lifecycle is largely built.** The `engine/corpus_studio/platform/` package is a real,
-torch-free contract substrate + lifecycle, not a plan on paper. Hardware evidence remains scoped to
-the exact historical path that produced it:
+torch-free contract substrate + lifecycle, not a plan on paper. Hardware evidence has two distinct,
+non-interchangeable levels:
 
 - **28 root versioned contracts** (`platform/contracts.py`) → deterministic language-neutral JSON
   Schema (`docs/contracts/`) → generated TypeScript client types.
 - **profile → plan (hash-sealed) → predict-fit → run → measure-fit → account-for-artifacts**, with a
   backend-manifest registry (`corpus_studio`, `unsloth`), a watchdog (measured fit + spill/stall), and
   a supervised subprocess worker that can **kill a hung run**. The pre-Phase-9B lifecycle ran on a real
-  RTX 5070 under native Windows/WDDM; the new effective-execution path, native Linux, and real offload
-  remain unverified.
+  RTX 5070 under native Windows/WDDM. Separately, the current native-Linux host's managed
+  `backend-corpus-studio` environment passed its minimal hardware probe. The new effective-execution
+  path on a real workload, full-sequence 7B behavior, and every real offload path remain unverified.
 
 Against the full-platform vision, the frontier is the **input side**. Ranked gaps:
 
@@ -115,8 +116,9 @@ DEPENDENCY_PROBE_PASSED → FUNCTIONAL_PROBE_PASSED → HARDWARE_VERIFIED
 ```
 
 This is the storage/capability honesty discipline applied to environments: a package importing is not
-proof a kernel runs, which is not proof the hardware supports it. Only `HARDWARE_VERIFIED` earns
-"supported."
+proof a kernel runs, which is not proof a real workload is supported. `HARDWARE_VERIFIED` supports
+only the exact environment-level probe tuple that passed; it does not promote the backend, a 7B run,
+offload, FlashAttention, FSDP/DeepSpeed, or MoE execution to supported.
 
 ### 2.3 Versioning strategy — no frozen versions without compatibility testing
 
@@ -186,9 +188,11 @@ A 2026-07-13 source audit identified drift between the sealed plan and the first
   isolated beneath a run-scoped directory, and success requires optimizer-step plus real adapter
   weight evidence. The shipping desktop no longer exposes the unsealed direct-trainer path.
 
-This is control-plane and fake/unit-test evidence, not new GPU-backend proof. The historical RTX 5070
-run predates this contract and must be repeated on the final machine before the new enforcement path is
-called hardware-verified. DeepSpeed, FSDP, CPU/NVMe offload, and MoE execution remain unimplemented.
+This is control-plane and fake/unit-test evidence, not new GPU-workload proof. The current native-Linux
+host now supplies the separate prerequisite environment result: `backend-corpus-studio` passed its
+minimal hardware-probe tuple. The Phase-9B workload must still run through the sealed enforcement path
+before that path is called workload-verified. DeepSpeed, FSDP, CPU/NVMe offload, and MoE execution
+remain unimplemented.
 
 ## 4. Invariants preserved throughout
 

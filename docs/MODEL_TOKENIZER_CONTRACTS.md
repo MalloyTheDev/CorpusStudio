@@ -29,21 +29,22 @@ snapshot, predict hardware fit, execute MoE topology, or prove any MoE runtime c
 
 ## Static inspection
 
-From `C:\CorpusStudio\engine`:
+From the active repository:
 
-```powershell
-.\.venv\Scripts\python.exe -m corpus_studio.cli model-inspect C:\models\tiny `
-  --model-id tiny-model `
-  --tokenizer C:\models\tiny-tokenizer `
-  --tokenizer-id tiny-tokenizer `
-  --repository owner/repository `
-  --requested-revision main `
-  --resolved-commit 0123456789abcdef `
-  --tokenizer-repository owner/tokenizer-repository `
-  --tokenizer-requested-revision main `
-  --tokenizer-resolved-commit fedcba9876543210 `
-  --hash-weights `
-  --out C:\models\descriptors `
+```bash
+cd /mnt/training-nvme/repos/CorpusStudio
+engine/.venv/bin/python -m corpus_studio.cli model-inspect /mnt/training-nvme/models/tiny \
+  --model-id tiny-model \
+  --tokenizer /mnt/training-nvme/models/tiny-tokenizer \
+  --tokenizer-id tiny-tokenizer \
+  --repository owner/repository \
+  --requested-revision main \
+  --resolved-commit 0123456789abcdef \
+  --tokenizer-repository owner/tokenizer-repository \
+  --tokenizer-requested-revision main \
+  --tokenizer-resolved-commit fedcba9876543210 \
+  --hash-weights \
+  --out /mnt/training-nvme/models/descriptors \
   --json
 ```
 
@@ -153,10 +154,10 @@ backend support, hardware fit, trainability, or evaluation quality.
 
 After a contract change:
 
-```powershell
-cd C:\CorpusStudio\engine
-.\.venv\Scripts\python.exe -c "from corpus_studio.platform.schema_export import export_json_schemas; export_json_schemas('../docs/contracts')"
-cd C:\CorpusStudio\apps\web
+```bash
+cd /mnt/training-nvme/repos/CorpusStudio/engine
+.venv/bin/python -c "from corpus_studio.platform.schema_export import export_json_schemas; export_json_schemas('../docs/contracts')"
+cd /mnt/training-nvme/repos/CorpusStudio/apps/web
 npm run gen:contracts
 ```
 
