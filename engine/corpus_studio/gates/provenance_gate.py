@@ -70,6 +70,10 @@ _VENDOR_ALIASES: dict[str, str] = {
     "azure-openai": "openai",
     "google": "google",
     "gemini": "google",
+    "palm": "google",
+    "vertex": "google",
+    "vertex-ai": "google",
+    "vertexai": "google",
     "openrouter": "openrouter",
     "ollama": "ollama",
 }

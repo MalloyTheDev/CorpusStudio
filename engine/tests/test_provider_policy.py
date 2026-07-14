@@ -28,8 +28,21 @@ def test_anthropic_is_evaluator_only_by_default():
         authorize_action(policy, "draft-example")
 
 
+def test_google_is_evaluator_only_and_cannot_be_overridden_into_generation():
+    policy = resolve_policy(
+        "google",
+        overrides={"google": {"outputs_trainable": True, "user_approved_generation": True}},
+    )
+    assert policy.default_policy_source == "user_override"
+    assert policy.can_evaluate() is True
+    assert policy.can_generate_trainable() is False
+    assert ProviderRole.TRAINABLE_OUTPUT_GENERATOR in policy.blocked_roles
+    with pytest.raises(ProviderPolicyError):
+        authorize_action(policy, "generate-trace")
+
+
 def test_evaluator_actions_allowed_for_evaluator_only_providers():
-    for provider in ("openai", "anthropic"):
+    for provider in ("openai", "anthropic", "google"):
         policy = resolve_policy(provider)
         # None of these should raise.
         authorize_action(policy, "review")
@@ -97,6 +110,22 @@ def test_openrouter_anthropic_route_is_blocked():
     assert policy.route_parent == "anthropic"
     with pytest.raises(ProviderPolicyError):
         authorize_action(policy, "draft-example")
+
+
+def test_openrouter_google_route_is_blocked_and_cannot_be_overridden():
+    policy = resolve_policy(
+        "openrouter",
+        route_id="google/gemini-2.5-pro",
+        overrides={
+            "openrouter/route:google/gemini-2.5-pro": {
+                "outputs_trainable": True,
+                "user_approved_generation": True,
+            }
+        },
+    )
+    assert policy.route_parent == "google"
+    assert policy.can_generate_trainable() is False
+    assert ProviderRole.TRAINABLE_OUTPUT_GENERATOR in policy.blocked_roles
 
 
 def test_openrouter_frontier_route_cannot_be_overridden():
@@ -220,7 +249,9 @@ def test_frontier_classifier_is_public_and_non_overridable():
 
     assert is_frontier_generation_source("openai")
     assert is_frontier_generation_source("anthropic")
+    assert is_frontier_generation_source("google")
     assert is_frontier_generation_source("openrouter", "openai/gpt-4o")
+    assert is_frontier_generation_source("openrouter", "google/gemini-2.5-pro")
     assert is_frontier_generation_source("openrouter", "bare-model-slug")
     assert not is_frontier_generation_source(
         "openrouter", "meta-llama/llama-3-70b-instruct"
