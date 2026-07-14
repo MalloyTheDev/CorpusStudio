@@ -64,6 +64,56 @@
       "title": "DeviceKind",
       "type": "string"
     },
+    "EnvironmentProbeEvidence": {
+      "additionalProperties": false,
+      "description": "Hash-sealed evidence that a required complete execution tuple passed as a unit.",
+      "properties": {
+        "capability_report_hash": {
+          "$ref": "#/$defs/HashRef"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "evidence_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Evidence Hash",
+          "type": "string"
+        },
+        "evidence_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "memory": {
+          "$ref": "#/$defs/ProbeMemoryEvidence"
+        },
+        "profile_signature": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Profile Signature",
+          "type": "string"
+        },
+        "required_spec": {
+          "$ref": "#/$defs/QloraExecutionProbeSpec"
+        },
+        "tuple_result": {
+          "$ref": "#/$defs/ProbeResult"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "required_spec",
+        "profile_signature",
+        "capability_report_hash",
+        "tuple_result",
+        "memory",
+        "evidence_hash"
+      ],
+      "title": "EnvironmentProbeEvidence",
+      "type": "object"
+    },
     "EnvironmentState": {
       "description": "The lifecycle state of a managed environment. The escalation is deliberate \u2014 \"installed\" is\nNEVER \"supported\": a package importing (IMPORTABLE) is not proof a kernel runs\n(FUNCTIONAL_PROBE_PASSED), which is not proof the hardware supports it (HARDWARE_VERIFIED). Only\nHARDWARE_VERIFIED earns \"supported\". The terminal-degraded states record WHY an env is unusable.",
       "enum": [
@@ -639,12 +689,35 @@
           "default": null,
           "title": "Artifact"
         },
+        "artifact_hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "dependencies": {
           "items": {
             "type": "string"
           },
           "title": "Dependencies",
           "type": "array"
+        },
+        "direct": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direct"
         },
         "direct_url": {
           "anyOf": [
@@ -657,6 +730,18 @@
           ],
           "default": null,
           "title": "Direct Url"
+        },
+        "editable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Editable"
         },
         "hash": {
           "anyOf": [
@@ -686,6 +771,55 @@
           "title": "Name",
           "type": "string"
         },
+        "normalized_name": {
+          "default": "",
+          "title": "Normalized Name",
+          "type": "string"
+        },
+        "record_entries": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Record Entries"
+        },
+        "record_failed_entries": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Record Failed Entries",
+          "type": "array"
+        },
+        "record_integrity": {
+          "default": "unknown",
+          "enum": [
+            "verified",
+            "failed",
+            "missing",
+            "unknown"
+          ],
+          "title": "Record Integrity",
+          "type": "string"
+        },
+        "record_verified_entries": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Record Verified Entries"
+        },
         "requested": {
           "anyOf": [
             {
@@ -711,6 +845,54 @@
           ],
           "title": "Source",
           "type": "string"
+        },
+        "source_evidence_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Evidence Reason"
+        },
+        "source_index_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Index Url"
+        },
+        "vcs_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vcs Commit"
+        },
+        "vcs_repository": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vcs Repository"
         },
         "version": {
           "anyOf": [
@@ -743,6 +925,105 @@
       ],
       "title": "PrecisionMode",
       "type": "string"
+    },
+    "ProbeMemoryEvidence": {
+      "additionalProperties": false,
+      "description": "Measured resource evidence for one bounded probe, with scopes kept explicit.",
+      "properties": {
+        "baseline_gpu_allocated_bytes": {
+          "minimum": 0,
+          "title": "Baseline Gpu Allocated Bytes",
+          "type": "integer"
+        },
+        "baseline_gpu_reserved_bytes": {
+          "minimum": 0,
+          "title": "Baseline Gpu Reserved Bytes",
+          "type": "integer"
+        },
+        "baseline_host_rss_bytes": {
+          "minimum": 0,
+          "title": "Baseline Host Rss Bytes",
+          "type": "integer"
+        },
+        "baseline_nvidia_smi_process_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Baseline Nvidia Smi Process Bytes"
+        },
+        "duration_seconds": {
+          "minimum": 0,
+          "title": "Duration Seconds",
+          "type": "number"
+        },
+        "gpu_allocator_scope": {
+          "const": "pytorch_cuda_allocator_process",
+          "default": "pytorch_cuda_allocator_process",
+          "title": "Gpu Allocator Scope",
+          "type": "string"
+        },
+        "gpu_device_scope": {
+          "default": "unavailable",
+          "enum": [
+            "nvidia_smi_current_process",
+            "unavailable"
+          ],
+          "title": "Gpu Device Scope",
+          "type": "string"
+        },
+        "host_memory_scope": {
+          "const": "current_process_rss",
+          "default": "current_process_rss",
+          "title": "Host Memory Scope",
+          "type": "string"
+        },
+        "peak_gpu_allocated_bytes": {
+          "minimum": 0,
+          "title": "Peak Gpu Allocated Bytes",
+          "type": "integer"
+        },
+        "peak_gpu_reserved_bytes": {
+          "minimum": 0,
+          "title": "Peak Gpu Reserved Bytes",
+          "type": "integer"
+        },
+        "peak_host_rss_bytes": {
+          "minimum": 0,
+          "title": "Peak Host Rss Bytes",
+          "type": "integer"
+        },
+        "peak_nvidia_smi_process_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Peak Nvidia Smi Process Bytes"
+        }
+      },
+      "required": [
+        "baseline_gpu_allocated_bytes",
+        "baseline_gpu_reserved_bytes",
+        "peak_gpu_allocated_bytes",
+        "peak_gpu_reserved_bytes",
+        "baseline_host_rss_bytes",
+        "peak_host_rss_bytes",
+        "duration_seconds"
+      ],
+      "title": "ProbeMemoryEvidence",
+      "type": "object"
     },
     "ProbeResult": {
       "additionalProperties": false,
@@ -794,6 +1075,105 @@
         "outcome"
       ],
       "title": "ProbeResult",
+      "type": "object"
+    },
+    "QloraExecutionProbeSpec": {
+      "additionalProperties": false,
+      "description": "The exact complete QLoRA tuple a readiness environment must prove as one operation.",
+      "properties": {
+        "attention_api": {
+          "const": "sdpa",
+          "default": "sdpa",
+          "title": "Attention Api",
+          "type": "string"
+        },
+        "compute_dtype": {
+          "const": "bf16",
+          "default": "bf16",
+          "title": "Compute Dtype",
+          "type": "string"
+        },
+        "device": {
+          "const": "cuda:0",
+          "default": "cuda:0",
+          "title": "Device",
+          "type": "string"
+        },
+        "double_quantization": {
+          "const": true,
+          "default": true,
+          "title": "Double Quantization",
+          "type": "boolean"
+        },
+        "execution_combination": {
+          "$ref": "#/$defs/ExecutionCapabilityCombination"
+        },
+        "flash_sdp_enabled": {
+          "const": false,
+          "default": false,
+          "title": "Flash Sdp Enabled",
+          "type": "boolean"
+        },
+        "gradient_checkpointing": {
+          "const": true,
+          "default": true,
+          "title": "Gradient Checkpointing",
+          "type": "boolean"
+        },
+        "math_sdp_enabled": {
+          "const": true,
+          "default": true,
+          "title": "Math Sdp Enabled",
+          "type": "boolean"
+        },
+        "memory_efficient_sdp_enabled": {
+          "const": false,
+          "default": false,
+          "title": "Memory Efficient Sdp Enabled",
+          "type": "boolean"
+        },
+        "optimizer": {
+          "const": "adamw_torch",
+          "default": "adamw_torch",
+          "title": "Optimizer",
+          "type": "string"
+        },
+        "probe": {
+          "const": "cuda_qlora_math_execution",
+          "default": "cuda_qlora_math_execution",
+          "title": "Probe",
+          "type": "string"
+        },
+        "quantization": {
+          "const": "nf4",
+          "default": "nf4",
+          "title": "Quantization",
+          "type": "string"
+        },
+        "require_adapter_round_trip": {
+          "const": true,
+          "default": true,
+          "title": "Require Adapter Round Trip",
+          "type": "boolean"
+        },
+        "required_distributions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Distributions",
+          "type": "array"
+        },
+        "target_modules": {
+          "const": "all-linear",
+          "default": "all-linear",
+          "title": "Target Modules",
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_combination"
+      ],
+      "title": "QloraExecutionProbeSpec",
       "type": "object"
     },
     "QuantizationMode": {
@@ -968,6 +1348,17 @@
       },
       "title": "Missing Requirements",
       "type": "array"
+    },
+    "probe_evidence": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EnvironmentProbeEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "probe_results": {
       "items": {

@@ -90,11 +90,22 @@ export type Id = string;
 export type GeneratedAt = string | null;
 export type Artifact = string | null;
 export type Dependencies = string[];
+export type Direct = boolean | null;
 export type DirectUrl = string | null;
+export type Editable = boolean | null;
 export type Installer = string | null;
 export type Name = string;
+export type NormalizedName = string;
+export type RecordEntries = number | null;
+export type RecordFailedEntries = string[];
+export type RecordIntegrity = "verified" | "failed" | "missing" | "unknown";
+export type RecordVerifiedEntries = number | null;
 export type Requested = boolean | null;
 export type Source = "pypi" | "wheel" | "sdist" | "conda" | "vcs" | "local" | "unknown";
+export type SourceEvidenceReason = string | null;
+export type SourceIndexUrl = string | null;
+export type VcsCommit = string | null;
+export type VcsRepository = string | null;
 export type Version = string | null;
 export type InstalledPackages = PackageLock[];
 export type MissingPackages = string[];
@@ -214,13 +225,25 @@ export interface HashRef {
  */
 export interface PackageLock {
   artifact?: Artifact;
+  artifact_hash?: HashRef | null;
   dependencies?: Dependencies;
+  direct?: Direct;
   direct_url?: DirectUrl;
+  editable?: Editable;
   hash?: HashRef | null;
   installer?: Installer;
   name: Name;
+  normalized_name?: NormalizedName;
+  record_entries?: RecordEntries;
+  record_failed_entries?: RecordFailedEntries;
+  record_integrity?: RecordIntegrity;
+  record_verified_entries?: RecordVerifiedEntries;
   requested?: Requested;
   source?: Source;
+  source_evidence_reason?: SourceEvidenceReason;
+  source_index_url?: SourceIndexUrl;
+  vcs_commit?: VcsCommit;
+  vcs_repository?: VcsRepository;
   version?: Version;
 }
 export interface ProbeResult {

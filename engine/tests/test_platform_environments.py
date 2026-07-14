@@ -72,6 +72,41 @@ def test_corpus_studio_backend_recipe_matches_the_train_extra():
     assert recipe.verification == RecipeVerification.hardware_verified  # ran on a real 5070
 
 
+def test_readiness_v2_recipe_is_exact_and_probe_changes_reseal_the_plan():
+    recipe = get_recipe("backend-corpus-studio-readiness-v2")
+    assert recipe is not None and recipe.required_execution_probe is not None
+    assert recipe.requires_worker_wheel is True
+    assert recipe.verification == RecipeVerification.declared
+    assert all(
+        requirement.specifier and requirement.specifier.startswith("==")
+        for requirement in recipe.dependency_requirements
+    )
+    first = resolve_dependencies(
+        recipe,
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+    )
+    changed_probe = recipe.required_execution_probe.model_copy(
+        update={
+            "required_distributions": sorted(
+                recipe.required_execution_probe.required_distributions + ["x-runtime"]
+            )
+        }
+    )
+    changed_recipe = recipe.model_copy(
+        update={"required_execution_probe": changed_probe}
+    )
+    second = resolve_dependencies(
+        changed_recipe,
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+    )
+    assert first.recipe_ref.hash != second.recipe_ref.hash
+    assert first.resolution_hash != second.resolution_hash
+
+
 def test_unsloth_recipe_is_declared_cuda_only_and_conflict_flagged():
     recipe = get_recipe("backend-unsloth")
     assert recipe is not None

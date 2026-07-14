@@ -5,10 +5,12 @@ The Environment Manager implements the three-layer dependency architecture descr
 packs, and isolated backend-worker environments. Heavy frameworks do not share the control-plane
 interpreter or each other's dependency graph.
 
-> **Implemented status:** the complete create-to-remove lifecycle is implemented for the
-> `backend-corpus-studio` reference backend. Other recipes can still be inspected, but their presence
-> does not make their creation or hardware path supported. The lifecycle is covered in default CI by
-> fake installers and CPU-only probes. On the current native-Linux host, the existing managed
+> **Implemented status:** the create-to-remove lifecycle supports the legacy
+> `backend-corpus-studio` rollback recipe and the exact-pinned
+> `backend-corpus-studio-readiness-v2` recipe. Readiness-v2 remains plan-only until a separately
+> authorized creation: declaring the recipe and generating its sealed plan do not prove the
+> environment. The lifecycle is covered in default CI by fake installers and CPU-only probes. On the
+> current native-Linux host, the existing managed
 > `backend-corpus-studio` environment is `HARDWARE_VERIFIED` for its exact minimal CUDA-allocation,
 > 4-bit-construction, GPU forward/backward, and math-SDPA probe tuple. Rebuilding it remains an explicit
 > network-using operation. This environment result does not verify a real 7B workload or offload.
@@ -21,8 +23,8 @@ interpreter or each other's dependency graph.
 | `capability` | optional stable in-process features such as exact tokenization or Parquet | control-plane interpreter |
 | `backend_worker` | torch/CUDA/framework stacks that can conflict | one owned venv per backend environment |
 
-Only `backend-corpus-studio` has a side-effectful creation implementation in this slice. DeepSpeed,
-FSDP, Axolotl, LLaMA-Factory, and MoE runtimes are not added here.
+Only the two CorpusStudio worker recipes have side-effectful creation implementations. DeepSpeed,
+FSDP, Axolotl, LLaMA-Factory, Unsloth, and MoE runtimes are not added here.
 
 ## Evidence levels
 
@@ -35,9 +37,12 @@ DEPENDENCY_PROBE_PASSED -> FUNCTIONAL_PROBE_PASSED -> HARDWARE_VERIFIED
 ```
 
 `INSTALLED_UNCHECKED` is not a support claim. CPU forward/backward and checkpoint reload earn
-`FUNCTIONAL_PROBE_PASSED`; they do not earn GPU support. `HARDWARE_VERIFIED` requires the managed
-interpreter to prove CUDA allocation, 4-bit layer construction, a minimal GPU forward/backward, and
-the safe math-attention path. On native-Windows Blackwell, the probe never executes the known
+`FUNCTIONAL_PROBE_PASSED`; they do not earn GPU support. The legacy recipe retains its existing
+minimal hardware-probe meaning. Readiness-v2 additionally requires one complete probe to prove BF16,
+NF4 with double quantization, math-only SDPA toggles, exact CUDA placement, QLoRA adapter insertion,
+finite forward loss, backward, AdamW update, and adapter safetensors reload as one tuple. Independent
+passing probes cannot be unioned into this support claim. On native-Windows Blackwell, the probe never
+executes the known
 deadlocking fused SDPA path. `HARDWARE_VERIFIED` is evidence for that exact environment-level tuple,
 not backend-wide, workload, 7B, offload, FlashAttention, distributed, or MoE support.
 
@@ -53,7 +58,8 @@ stdlib `venv` module is available, and compatibility reasons.
 - exact argv arrays, working directories, a small explicit non-secret environment, timeouts, expected
   outputs, and whether each step uses the network;
 - explicit PyPI and accelerator-specific PyTorch indexes (`cu128` for the Blackwell reference host);
-- a non-editable install of the reviewed local CorpusStudio worker source into the isolated venv;
+- for the legacy recipe, the reviewed local CorpusStudio worker source; for readiness-v2, a concrete
+  `corpus-studio-engine` wheel whose size, METADATA digest, and byte hash are part of the plan;
 - estimated download and installed sizes;
 - a recipe digest and `resolution_hash` over the concrete plan.
 
@@ -70,6 +76,19 @@ engine/.venv/bin/corpus-studio env-plan backend-corpus-studio \
   --env-id backend-corpus-studio \
   --runtime /usr/bin/python3 \
   --accelerator cu128
+```
+
+Readiness-v2 requires an already-built local wheel and can write the canonical plan without creating
+an environment:
+
+```bash
+engine/.venv/bin/corpus-studio env-plan backend-corpus-studio-readiness-v2 \
+  --env-id backend-corpus-studio-readiness-v2 \
+  --runtime /usr/bin/python3 \
+  --accelerator cu128 \
+  --worker-wheel /mnt/training-nvme/artifacts/corpusstudio-worker/<commit>/<wheel>.whl \
+  --manager-root /mnt/training-nvme/corpusstudio/xdg-data/corpusstudio/environment-manager \
+  --out /mnt/training-nvme/artifacts/corpusstudio-worker/<commit>/DependencyResolution.json
 ```
 
 The plan prints its exact `resolution hash`. Creation requires that same value and the same planning
@@ -111,16 +130,37 @@ source or an automatic destructive retry.
 Each installation command record includes argv, cwd, explicit environment, timeout, expected outputs,
 timestamps, exit code, stdout/stderr paths, native-build evidence, and failure details.
 
-## Lock, probes, and drift
+## Lock ordering, probes, and drift
 
-After installation, the managed interpreter emits an `EnvironmentLock` containing:
+The manager does not use a pre-install hash as a final environment lock. Its deterministic order is:
+
+1. resolve the immutable recipe and canonical plan;
+2. verify the echoed plan hash before environment mutation;
+3. create the owned environment and execute the reviewed argv;
+4. capture sanitized pip reports and a pre-probe installed-file inventory;
+5. run import, dependency, CPU, GPU, and recipe-required complete-tuple probes;
+6. capture a post-probe inventory and refuse sealing if the environment changed;
+7. seal the `EnvironmentLock` only after all required evidence passes;
+8. recompute live package, worker-artifact, hardware, and lock drift against that sealed state.
+
+A failed complete probe leaves `lock_ref` absent. It may produce an honest `INCOMPATIBLE` or
+`DEGRADED` installation record, but never a final lock or `HARDWARE_VERIFIED` state.
+
+The sealed `EnvironmentLock` contains:
 
 - Python executable/version/implementation/platform/architecture;
-- exact installed distribution versions;
-- pip installer, direct URL and wheel/source identity where available;
-- installed `RECORD` metadata hashes and dependency metadata;
+- normalized package names, exact versions, sanitized index/direct/VCS evidence, artifact filenames
+  and hashes where pip can prove them, plus an explicit reason when the source remains unknown;
+- installed `RECORD` metadata hashes, verification of every hash-bearing installed file, and
+  dependency metadata;
 - torch build, CUDA runtime, and compute capability;
-- recipe digest, selected indexes, manager version, timestamp, and a canonical lock digest.
+- recipe and resolution identities, selected indexes, exact worker wheel identity, complete-probe
+  evidence, manager version, timestamp, and a canonical lock digest.
+
+Pip report URLs are sanitized before durable storage: credentials, query parameters, fragments,
+signed URLs, and private-index secrets are not retained. Allocator memory, `nvidia-smi`
+current-process memory, and host RSS are labeled as separate scopes. They are measurements of the
+bounded probe, not model-fit or parameter-residency claims.
 
 Probe categories remain separate:
 
@@ -186,7 +226,8 @@ launched with the managed interpreter so training cannot silently fall back into
 
 The lifecycle uses the root contracts `PythonRuntime`, `EnvironmentRecipe`, `DependencyResolution`,
 `EnvironmentInstallation`, `EnvironmentLock`, `EnvironmentDescriptor`, and
-`EnvironmentHealthReport`. Pydantic remains the source of truth; deterministic JSON Schemas under
+`EnvironmentHealthReport`, with explicit nested `InstalledEnvironmentEvidence` records for pre- and
+post-probe inventories. Pydantic remains the source of truth; deterministic JSON Schemas under
 [`contracts/`](contracts/) and committed TypeScript types under `apps/web/src/contracts/` are generated
 from it. CI regenerates and diffs both layers.
 
@@ -204,5 +245,8 @@ bare-Linux FlashAttention for the real workload, MoE execution, or resource-elas
 Also not claimed by this slice:
 
 - in-place package repair (recreate is the safe supported recovery path);
-- side-effectful creation for capability packs or any backend other than `backend-corpus-studio`;
+- a created or verified `backend-corpus-studio-readiness-v2` environment (its replacement plan is
+  review evidence only until separately authorized);
+- side-effectful creation for capability packs or any backend other than the two CorpusStudio worker
+  recipes;
 - container, conda, `uv`, or remote environment providers.

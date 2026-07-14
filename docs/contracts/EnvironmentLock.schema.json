@@ -1,5 +1,222 @@
 {
   "$defs": {
+    "AdapterMethod": {
+      "enum": [
+        "none",
+        "lora",
+        "qlora",
+        "dora",
+        "ia3",
+        "full_finetune",
+        "prompt_tuning",
+        "prefix_tuning"
+      ],
+      "title": "AdapterMethod",
+      "type": "string"
+    },
+    "AttentionImpl": {
+      "description": "``math``/``eager`` is forced on native-Windows/WDDM Blackwell sm_120 because the fused flash\nkernel deadlocks there. Other platforms require their own functional capability result; WSL\nevidence is not bare-Linux proof.",
+      "enum": [
+        "math",
+        "eager",
+        "sdpa",
+        "flash_attention_2",
+        "flash_attention_3",
+        "mem_efficient",
+        "xformers"
+      ],
+      "title": "AttentionImpl",
+      "type": "string"
+    },
+    "AttentionKernel": {
+      "description": "The exact attention implementation an execution policy permits at runtime.",
+      "enum": [
+        "eager",
+        "torch_sdpa_math",
+        "torch_sdpa_flash",
+        "torch_sdpa_mem_efficient",
+        "flash_attention_2",
+        "flash_attention_3",
+        "xformers"
+      ],
+      "title": "AttentionKernel",
+      "type": "string"
+    },
+    "CheckpointImpl": {
+      "enum": [
+        "full_state",
+        "adapter_only",
+        "sharded",
+        "distcp",
+        "safetensors"
+      ],
+      "title": "CheckpointImpl",
+      "type": "string"
+    },
+    "DeviceKind": {
+      "enum": [
+        "cuda",
+        "rocm",
+        "mps",
+        "xpu",
+        "cpu"
+      ],
+      "title": "DeviceKind",
+      "type": "string"
+    },
+    "EnvironmentProbeEvidence": {
+      "additionalProperties": false,
+      "description": "Hash-sealed evidence that a required complete execution tuple passed as a unit.",
+      "properties": {
+        "capability_report_hash": {
+          "$ref": "#/$defs/HashRef"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "evidence_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Evidence Hash",
+          "type": "string"
+        },
+        "evidence_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "memory": {
+          "$ref": "#/$defs/ProbeMemoryEvidence"
+        },
+        "profile_signature": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Profile Signature",
+          "type": "string"
+        },
+        "required_spec": {
+          "$ref": "#/$defs/QloraExecutionProbeSpec"
+        },
+        "tuple_result": {
+          "$ref": "#/$defs/ProbeResult"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "required_spec",
+        "profile_signature",
+        "capability_report_hash",
+        "tuple_result",
+        "memory",
+        "evidence_hash"
+      ],
+      "title": "EnvironmentProbeEvidence",
+      "type": "object"
+    },
+    "ExecutionCapabilityCombination": {
+      "additionalProperties": false,
+      "description": "One execution tuple demonstrated together by a bounded functional probe.\n\nIndependent successes on precision, quantization, adapter, optimizer, loss, attention, and\ncheckpoint axes are diagnostic only. The planner may seal a run only from one of these complete\ntuples, preventing a union of unrelated probes from becoming a fictional capability.",
+      "properties": {
+        "adapter_method": {
+          "$ref": "#/$defs/AdapterMethod"
+        },
+        "attention_impl": {
+          "$ref": "#/$defs/AttentionImpl"
+        },
+        "attention_kernel": {
+          "$ref": "#/$defs/AttentionKernel"
+        },
+        "checkpoint_impl": {
+          "$ref": "#/$defs/CheckpointImpl"
+        },
+        "device": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "execution_contract_version": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Execution Contract Version",
+          "type": "string"
+        },
+        "export_format": {
+          "$ref": "#/$defs/ExportFormat"
+        },
+        "loss_impl": {
+          "$ref": "#/$defs/LossImpl"
+        },
+        "optimizer": {
+          "$ref": "#/$defs/Optimizer"
+        },
+        "precision": {
+          "$ref": "#/$defs/PrecisionMode"
+        },
+        "probe": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Probe",
+          "type": "string"
+        },
+        "quantization": {
+          "$ref": "#/$defs/QuantizationMode"
+        },
+        "runtime_mode": {
+          "enum": [
+            "training",
+            "cpu_toy"
+          ],
+          "title": "Runtime Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtime_mode",
+        "device",
+        "precision",
+        "quantization",
+        "adapter_method",
+        "attention_impl",
+        "attention_kernel",
+        "optimizer",
+        "loss_impl",
+        "checkpoint_impl",
+        "export_format",
+        "execution_contract_version",
+        "probe"
+      ],
+      "title": "ExecutionCapabilityCombination",
+      "type": "object"
+    },
+    "ExportFormat": {
+      "enum": [
+        "adapter_peft",
+        "merged_safetensors",
+        "merged_fp16",
+        "gguf",
+        "onnx",
+        "awq",
+        "gptq",
+        "mlx"
+      ],
+      "title": "ExportFormat",
+      "type": "string"
+    },
+    "FailureTaxonomy": {
+      "description": "Terminal outcome category. ``PASS`` is included so the same enum classifies a completed\nprobe/run, not only failures. Grounded in the exact hazards the engine documents: the sm_120\nfused-attention deadlock (KERNEL_STALL), the WDDM silent spill (ACCIDENTAL_SPILL vs a clean\nOOM), and env/dependency mismatches (ENVIRONMENT_FAILURE).",
+      "enum": [
+        "PASS",
+        "FAIL",
+        "OOM",
+        "TIMEOUT",
+        "KERNEL_STALL",
+        "NUMERICAL_FAILURE",
+        "CHECKPOINT_FAILURE",
+        "ENVIRONMENT_FAILURE",
+        "UNSUPPORTED_CONFIGURATION",
+        "ACCIDENTAL_SPILL",
+        "CONTROLLED_OFFLOAD"
+      ],
+      "title": "FailureTaxonomy",
+      "type": "string"
+    },
     "HashRef": {
       "additionalProperties": false,
       "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
@@ -31,6 +248,20 @@
       "title": "HashRef",
       "type": "object"
     },
+    "LossImpl": {
+      "enum": [
+        "cross_entropy",
+        "liger_fused_ce",
+        "chunked_ce",
+        "dpo",
+        "orpo",
+        "kto",
+        "ipo",
+        "reward_bt"
+      ],
+      "title": "LossImpl",
+      "type": "string"
+    },
     "OperatingSystem": {
       "enum": [
         "windows",
@@ -41,6 +272,195 @@
       ],
       "title": "OperatingSystem",
       "type": "string"
+    },
+    "Optimizer": {
+      "enum": [
+        "adamw_torch",
+        "adamw_torch_fused",
+        "adamw_8bit",
+        "adamw_bnb_8bit",
+        "paged_adamw_8bit",
+        "paged_adamw_32bit",
+        "adafactor",
+        "lion",
+        "sgd"
+      ],
+      "title": "Optimizer",
+      "type": "string"
+    },
+    "PackageInstallEvidence": {
+      "additionalProperties": false,
+      "description": "Sanitized pip-install provenance retained separately from installed-file inspection.",
+      "properties": {
+        "artifact_filename": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Filename"
+        },
+        "artifact_hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "configured_index_urls": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Configured Index Urls",
+          "type": "array"
+        },
+        "direct": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direct"
+        },
+        "direct_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direct Url"
+        },
+        "editable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Editable"
+        },
+        "installer_command_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installer Command Id"
+        },
+        "normalized_name": {
+          "minLength": 1,
+          "title": "Normalized Name",
+          "type": "string"
+        },
+        "requested": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested"
+        },
+        "source": {
+          "default": "unknown",
+          "enum": [
+            "pypi",
+            "wheel",
+            "sdist",
+            "conda",
+            "vcs",
+            "local",
+            "unknown"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "source_evidence_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Evidence Reason"
+        },
+        "source_index_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Index Url"
+        },
+        "vcs_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vcs Commit"
+        },
+        "vcs_repository": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vcs Repository"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "normalized_name",
+        "version"
+      ],
+      "title": "PackageInstallEvidence",
+      "type": "object"
     },
     "PackageLock": {
       "additionalProperties": false,
@@ -58,12 +478,35 @@
           "default": null,
           "title": "Artifact"
         },
+        "artifact_hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "dependencies": {
           "items": {
             "type": "string"
           },
           "title": "Dependencies",
           "type": "array"
+        },
+        "direct": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direct"
         },
         "direct_url": {
           "anyOf": [
@@ -76,6 +519,18 @@
           ],
           "default": null,
           "title": "Direct Url"
+        },
+        "editable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Editable"
         },
         "hash": {
           "anyOf": [
@@ -105,6 +560,55 @@
           "title": "Name",
           "type": "string"
         },
+        "normalized_name": {
+          "default": "",
+          "title": "Normalized Name",
+          "type": "string"
+        },
+        "record_entries": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Record Entries"
+        },
+        "record_failed_entries": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Record Failed Entries",
+          "type": "array"
+        },
+        "record_integrity": {
+          "default": "unknown",
+          "enum": [
+            "verified",
+            "failed",
+            "missing",
+            "unknown"
+          ],
+          "title": "Record Integrity",
+          "type": "string"
+        },
+        "record_verified_entries": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Record Verified Entries"
+        },
         "requested": {
           "anyOf": [
             {
@@ -131,6 +635,54 @@
           "title": "Source",
           "type": "string"
         },
+        "source_evidence_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Evidence Reason"
+        },
+        "source_index_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Index Url"
+        },
+        "vcs_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vcs Commit"
+        },
+        "vcs_repository": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vcs Repository"
+        },
         "version": {
           "anyOf": [
             {
@@ -148,6 +700,170 @@
         "name"
       ],
       "title": "PackageLock",
+      "type": "object"
+    },
+    "PrecisionMode": {
+      "enum": [
+        "fp32",
+        "tf32",
+        "fp16",
+        "bf16",
+        "fp8",
+        "mixed_bf16",
+        "mixed_fp16"
+      ],
+      "title": "PrecisionMode",
+      "type": "string"
+    },
+    "ProbeMemoryEvidence": {
+      "additionalProperties": false,
+      "description": "Measured resource evidence for one bounded probe, with scopes kept explicit.",
+      "properties": {
+        "baseline_gpu_allocated_bytes": {
+          "minimum": 0,
+          "title": "Baseline Gpu Allocated Bytes",
+          "type": "integer"
+        },
+        "baseline_gpu_reserved_bytes": {
+          "minimum": 0,
+          "title": "Baseline Gpu Reserved Bytes",
+          "type": "integer"
+        },
+        "baseline_host_rss_bytes": {
+          "minimum": 0,
+          "title": "Baseline Host Rss Bytes",
+          "type": "integer"
+        },
+        "baseline_nvidia_smi_process_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Baseline Nvidia Smi Process Bytes"
+        },
+        "duration_seconds": {
+          "minimum": 0,
+          "title": "Duration Seconds",
+          "type": "number"
+        },
+        "gpu_allocator_scope": {
+          "const": "pytorch_cuda_allocator_process",
+          "default": "pytorch_cuda_allocator_process",
+          "title": "Gpu Allocator Scope",
+          "type": "string"
+        },
+        "gpu_device_scope": {
+          "default": "unavailable",
+          "enum": [
+            "nvidia_smi_current_process",
+            "unavailable"
+          ],
+          "title": "Gpu Device Scope",
+          "type": "string"
+        },
+        "host_memory_scope": {
+          "const": "current_process_rss",
+          "default": "current_process_rss",
+          "title": "Host Memory Scope",
+          "type": "string"
+        },
+        "peak_gpu_allocated_bytes": {
+          "minimum": 0,
+          "title": "Peak Gpu Allocated Bytes",
+          "type": "integer"
+        },
+        "peak_gpu_reserved_bytes": {
+          "minimum": 0,
+          "title": "Peak Gpu Reserved Bytes",
+          "type": "integer"
+        },
+        "peak_host_rss_bytes": {
+          "minimum": 0,
+          "title": "Peak Host Rss Bytes",
+          "type": "integer"
+        },
+        "peak_nvidia_smi_process_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Peak Nvidia Smi Process Bytes"
+        }
+      },
+      "required": [
+        "baseline_gpu_allocated_bytes",
+        "baseline_gpu_reserved_bytes",
+        "peak_gpu_allocated_bytes",
+        "peak_gpu_reserved_bytes",
+        "baseline_host_rss_bytes",
+        "peak_host_rss_bytes",
+        "duration_seconds"
+      ],
+      "title": "ProbeMemoryEvidence",
+      "type": "object"
+    },
+    "ProbeResult": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "execution_combinations": {
+          "items": {
+            "$ref": "#/$defs/ExecutionCapabilityCombination"
+          },
+          "title": "Execution Combinations",
+          "type": "array"
+        },
+        "measured": {
+          "additionalProperties": true,
+          "title": "Measured",
+          "type": "object"
+        },
+        "outcome": {
+          "$ref": "#/$defs/FailureTaxonomy"
+        },
+        "probe": {
+          "title": "Probe",
+          "type": "string"
+        },
+        "proves": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Proves",
+          "type": "object"
+        }
+      },
+      "required": [
+        "probe",
+        "outcome"
+      ],
+      "title": "ProbeResult",
       "type": "object"
     },
     "PythonRuntime": {
@@ -224,6 +940,119 @@
       "title": "PythonRuntime",
       "type": "object"
     },
+    "QloraExecutionProbeSpec": {
+      "additionalProperties": false,
+      "description": "The exact complete QLoRA tuple a readiness environment must prove as one operation.",
+      "properties": {
+        "attention_api": {
+          "const": "sdpa",
+          "default": "sdpa",
+          "title": "Attention Api",
+          "type": "string"
+        },
+        "compute_dtype": {
+          "const": "bf16",
+          "default": "bf16",
+          "title": "Compute Dtype",
+          "type": "string"
+        },
+        "device": {
+          "const": "cuda:0",
+          "default": "cuda:0",
+          "title": "Device",
+          "type": "string"
+        },
+        "double_quantization": {
+          "const": true,
+          "default": true,
+          "title": "Double Quantization",
+          "type": "boolean"
+        },
+        "execution_combination": {
+          "$ref": "#/$defs/ExecutionCapabilityCombination"
+        },
+        "flash_sdp_enabled": {
+          "const": false,
+          "default": false,
+          "title": "Flash Sdp Enabled",
+          "type": "boolean"
+        },
+        "gradient_checkpointing": {
+          "const": true,
+          "default": true,
+          "title": "Gradient Checkpointing",
+          "type": "boolean"
+        },
+        "math_sdp_enabled": {
+          "const": true,
+          "default": true,
+          "title": "Math Sdp Enabled",
+          "type": "boolean"
+        },
+        "memory_efficient_sdp_enabled": {
+          "const": false,
+          "default": false,
+          "title": "Memory Efficient Sdp Enabled",
+          "type": "boolean"
+        },
+        "optimizer": {
+          "const": "adamw_torch",
+          "default": "adamw_torch",
+          "title": "Optimizer",
+          "type": "string"
+        },
+        "probe": {
+          "const": "cuda_qlora_math_execution",
+          "default": "cuda_qlora_math_execution",
+          "title": "Probe",
+          "type": "string"
+        },
+        "quantization": {
+          "const": "nf4",
+          "default": "nf4",
+          "title": "Quantization",
+          "type": "string"
+        },
+        "require_adapter_round_trip": {
+          "const": true,
+          "default": true,
+          "title": "Require Adapter Round Trip",
+          "type": "boolean"
+        },
+        "required_distributions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Distributions",
+          "type": "array"
+        },
+        "target_modules": {
+          "const": "all-linear",
+          "default": "all-linear",
+          "title": "Target Modules",
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_combination"
+      ],
+      "title": "QloraExecutionProbeSpec",
+      "type": "object"
+    },
+    "QuantizationMode": {
+      "enum": [
+        "none",
+        "int8",
+        "int4",
+        "nf4",
+        "fp4",
+        "gptq",
+        "awq",
+        "hqq"
+      ],
+      "title": "QuantizationMode",
+      "type": "string"
+    },
     "Ref": {
       "additionalProperties": false,
       "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
@@ -249,6 +1078,73 @@
         "id"
       ],
       "title": "Ref",
+      "type": "object"
+    },
+    "WorkerArtifactIdentity": {
+      "additionalProperties": false,
+      "description": "Immutable identity of the exact wheel executed by a managed backend worker.\n\nA mutable checkout is not a worker identity. The plan binds a concrete wheel before mutation;\nthe post-install lock binds the same wheel and the installed distribution evidence.",
+      "properties": {
+        "content_hash": {
+          "$ref": "#/$defs/HashRef"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "distribution_name": {
+          "minLength": 1,
+          "title": "Distribution Name",
+          "type": "string"
+        },
+        "filename": {
+          "minLength": 1,
+          "title": "Filename",
+          "type": "string"
+        },
+        "metadata_hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "normalized_name": {
+          "minLength": 1,
+          "title": "Normalized Name",
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "distribution_name",
+        "normalized_name",
+        "version",
+        "filename",
+        "path",
+        "size_bytes",
+        "content_hash"
+      ],
+      "title": "WorkerArtifactIdentity",
       "type": "object"
     }
   },
@@ -337,6 +1233,13 @@
       "title": "Manager Version",
       "type": "string"
     },
+    "package_install_evidence": {
+      "items": {
+        "$ref": "#/$defs/PackageInstallEvidence"
+      },
+      "title": "Package Install Evidence",
+      "type": "array"
+    },
     "packages": {
       "items": {
         "$ref": "#/$defs/PackageLock"
@@ -349,6 +1252,17 @@
       "title": "Platform Tag",
       "type": "string"
     },
+    "probe_evidence": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EnvironmentProbeEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "python_version": {
       "default": "",
       "title": "Python Version",
@@ -356,6 +1270,17 @@
     },
     "recipe_ref": {
       "$ref": "#/$defs/Ref"
+    },
+    "resolution_ref": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ref"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "runtime": {
       "anyOf": [
@@ -391,6 +1316,17 @@
       ],
       "default": null,
       "title": "Torch Version"
+    },
+    "worker_artifact": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkerArtifactIdentity"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

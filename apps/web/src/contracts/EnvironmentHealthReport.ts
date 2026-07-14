@@ -106,17 +106,47 @@ export type FailureTaxonomy =
 export type HardwareMismatch = boolean;
 export type Artifact = string | null;
 export type Dependencies = string[];
+export type Direct = boolean | null;
 export type DirectUrl = string | null;
+export type Editable = boolean | null;
 export type Installer = string | null;
 export type Name = string;
+export type NormalizedName = string;
+export type RecordEntries = number | null;
+export type RecordFailedEntries = string[];
+export type RecordIntegrity = "verified" | "failed" | "missing" | "unknown";
+export type RecordVerifiedEntries = number | null;
 export type Requested = boolean | null;
 export type Source = "pypi" | "wheel" | "sdist" | "conda" | "vcs" | "local" | "unknown";
+export type SourceEvidenceReason = string | null;
+export type SourceIndexUrl = string | null;
+export type VcsCommit = string | null;
+export type VcsRepository = string | null;
 export type Version = string | null;
 export type InstalledPackages = PackageLock[];
 export type InterpreterMissing = boolean;
 export type LockMismatch = boolean;
 export type MissingRequirements = string[];
-export type Detail1 = string | null;
+export type ContractVersion3 = "1.0.0";
+export type EvidenceHash = string;
+export type EvidenceId = string;
+export type BaselineGpuAllocatedBytes = number;
+export type BaselineGpuReservedBytes = number;
+export type BaselineHostRssBytes = number;
+export type BaselineNvidiaSmiProcessBytes = number | null;
+export type DurationSeconds = number;
+export type GpuAllocatorScope = "pytorch_cuda_allocator_process";
+export type GpuDeviceScope = "nvidia_smi_current_process" | "unavailable";
+export type HostMemoryScope = "current_process_rss";
+export type PeakGpuAllocatedBytes = number;
+export type PeakGpuReservedBytes = number;
+export type PeakHostRssBytes = number;
+export type PeakNvidiaSmiProcessBytes = number | null;
+export type ProfileSignature = string;
+export type AttentionApi = "sdpa";
+export type ComputeDtype = "bf16";
+export type Device = "cuda:0";
+export type DoubleQuantization = true;
 export type AdapterMethod =
   "none" | "lora" | "qlora" | "dora" | "ia3" | "full_finetune" | "prompt_tuning" | "prefix_tuning";
 /**
@@ -150,8 +180,19 @@ export type PrecisionMode = "fp32" | "tf32" | "fp16" | "bf16" | "fp8" | "mixed_b
 export type Probe = string;
 export type QuantizationMode = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
 export type RuntimeMode = "training" | "cpu_toy";
+export type FlashSdpEnabled = false;
+export type GradientCheckpointing = true;
+export type MathSdpEnabled = true;
+export type MemoryEfficientSdpEnabled = false;
+export type Optimizer1 = "adamw_torch";
+export type Probe1 = "cuda_qlora_math_execution";
+export type Quantization = "nf4";
+export type RequireAdapterRoundTrip = true;
+export type RequiredDistributions = string[];
+export type TargetModules = "all-linear";
+export type Detail1 = string | null;
 export type ExecutionCombinations = ExecutionCapabilityCombination[];
-export type Probe1 = string;
+export type Probe2 = string;
 export type ProbeResults = ProbeResult[];
 export type PythonVersion = string;
 export type RecipeDriftDetected = boolean;
@@ -196,6 +237,7 @@ export interface EnvironmentHealthReport {
   lock_mismatch?: LockMismatch;
   lock_ref?: Ref | null;
   missing_requirements?: MissingRequirements;
+  probe_evidence?: EnvironmentProbeEvidence | null;
   probe_results?: ProbeResults;
   python_version?: PythonVersion;
   recipe_drift_detected?: RecipeDriftDetected;
@@ -283,22 +325,76 @@ export interface MemoryMetrics {
  */
 export interface PackageLock {
   artifact?: Artifact;
+  artifact_hash?: HashRef | null;
   dependencies?: Dependencies;
+  direct?: Direct;
   direct_url?: DirectUrl;
+  editable?: Editable;
   hash?: HashRef | null;
   installer?: Installer;
   name: Name;
+  normalized_name?: NormalizedName;
+  record_entries?: RecordEntries;
+  record_failed_entries?: RecordFailedEntries;
+  record_integrity?: RecordIntegrity;
+  record_verified_entries?: RecordVerifiedEntries;
   requested?: Requested;
   source?: Source;
+  source_evidence_reason?: SourceEvidenceReason;
+  source_index_url?: SourceIndexUrl;
+  vcs_commit?: VcsCommit;
+  vcs_repository?: VcsRepository;
   version?: Version;
 }
-export interface ProbeResult {
-  detail?: Detail1;
-  execution_combinations?: ExecutionCombinations;
-  measured?: Measured;
-  outcome: FailureTaxonomy;
-  probe: Probe1;
-  proves?: Proves;
+/**
+ * Hash-sealed evidence that a required complete execution tuple passed as a unit.
+ */
+export interface EnvironmentProbeEvidence {
+  capability_report_hash: HashRef;
+  contract_version?: ContractVersion3;
+  evidence_hash: EvidenceHash;
+  evidence_id: EvidenceId;
+  memory: ProbeMemoryEvidence;
+  profile_signature: ProfileSignature;
+  required_spec: QloraExecutionProbeSpec;
+  tuple_result: ProbeResult;
+}
+/**
+ * Measured resource evidence for one bounded probe, with scopes kept explicit.
+ */
+export interface ProbeMemoryEvidence {
+  baseline_gpu_allocated_bytes: BaselineGpuAllocatedBytes;
+  baseline_gpu_reserved_bytes: BaselineGpuReservedBytes;
+  baseline_host_rss_bytes: BaselineHostRssBytes;
+  baseline_nvidia_smi_process_bytes?: BaselineNvidiaSmiProcessBytes;
+  duration_seconds: DurationSeconds;
+  gpu_allocator_scope?: GpuAllocatorScope;
+  gpu_device_scope?: GpuDeviceScope;
+  host_memory_scope?: HostMemoryScope;
+  peak_gpu_allocated_bytes: PeakGpuAllocatedBytes;
+  peak_gpu_reserved_bytes: PeakGpuReservedBytes;
+  peak_host_rss_bytes: PeakHostRssBytes;
+  peak_nvidia_smi_process_bytes?: PeakNvidiaSmiProcessBytes;
+}
+/**
+ * The exact complete QLoRA tuple a readiness environment must prove as one operation.
+ */
+export interface QloraExecutionProbeSpec {
+  attention_api?: AttentionApi;
+  compute_dtype?: ComputeDtype;
+  device?: Device;
+  double_quantization?: DoubleQuantization;
+  execution_combination: ExecutionCapabilityCombination;
+  flash_sdp_enabled?: FlashSdpEnabled;
+  gradient_checkpointing?: GradientCheckpointing;
+  math_sdp_enabled?: MathSdpEnabled;
+  memory_efficient_sdp_enabled?: MemoryEfficientSdpEnabled;
+  optimizer?: Optimizer1;
+  probe?: Probe1;
+  quantization?: Quantization;
+  require_adapter_round_trip?: RequireAdapterRoundTrip;
+  required_distributions?: RequiredDistributions;
+  target_modules?: TargetModules;
 }
 /**
  * One execution tuple demonstrated together by a bounded functional probe.
@@ -321,6 +417,14 @@ export interface ExecutionCapabilityCombination {
   probe: Probe;
   quantization: QuantizationMode;
   runtime_mode: RuntimeMode;
+}
+export interface ProbeResult {
+  detail?: Detail1;
+  execution_combinations?: ExecutionCombinations;
+  measured?: Measured;
+  outcome: FailureTaxonomy;
+  probe: Probe2;
+  proves?: Proves;
 }
 export interface Measured {
   [k: string]: unknown;

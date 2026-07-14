@@ -1,5 +1,6 @@
 /* GENERATED from docs/contracts/EnvironmentRecipe.schema.json — do not edit. Run: npm run gen:contracts */
 
+export type BootstrapPipVersion = string | null;
 export type CapabilityProbes = string[];
 export type ContractVersion = "1.0.0";
 export type DefaultIndexUrl = string | null;
@@ -30,8 +31,63 @@ export type MinComputeCapability = string | null;
 export type Notes = string[];
 export type PythonRequires = string;
 export type RecipeId = string;
+export type AttentionApi = "sdpa";
+export type ComputeDtype = "bf16";
+export type Device = "cuda:0";
+export type DoubleQuantization = true;
+export type AdapterMethod =
+  "none" | "lora" | "qlora" | "dora" | "ia3" | "full_finetune" | "prompt_tuning" | "prefix_tuning";
+/**
+ * ``math``/``eager`` is forced on native-Windows/WDDM Blackwell sm_120 because the fused flash
+ * kernel deadlocks there. Other platforms require their own functional capability result; WSL
+ * evidence is not bare-Linux proof.
+ */
+export type AttentionImpl =
+  "math" | "eager" | "sdpa" | "flash_attention_2" | "flash_attention_3" | "mem_efficient" | "xformers";
+/**
+ * The exact attention implementation an execution policy permits at runtime.
+ */
+export type AttentionKernel =
+  | "eager"
+  | "torch_sdpa_math"
+  | "torch_sdpa_flash"
+  | "torch_sdpa_mem_efficient"
+  | "flash_attention_2"
+  | "flash_attention_3"
+  | "xformers";
+export type CheckpointImpl = "full_state" | "adapter_only" | "sharded" | "distcp" | "safetensors";
+export type DeviceKind = "cuda" | "rocm" | "mps" | "xpu" | "cpu";
+export type ExecutionContractVersion = string;
+export type ExportFormat =
+  "adapter_peft" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
+export type LossImpl = "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt";
+export type Optimizer =
+  | "adamw_torch"
+  | "adamw_torch_fused"
+  | "adamw_8bit"
+  | "adamw_bnb_8bit"
+  | "paged_adamw_8bit"
+  | "paged_adamw_32bit"
+  | "adafactor"
+  | "lion"
+  | "sgd";
+export type PrecisionMode = "fp32" | "tf32" | "fp16" | "bf16" | "fp8" | "mixed_bf16" | "mixed_fp16";
+export type Probe = string;
+export type QuantizationMode = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
+export type RuntimeMode = "training" | "cpu_toy";
+export type FlashSdpEnabled = false;
+export type GradientCheckpointing = true;
+export type MathSdpEnabled = true;
+export type MemoryEfficientSdpEnabled = false;
+export type Optimizer1 = "adamw_torch";
+export type Probe1 = "cuda_qlora_math_execution";
+export type Quantization = "nf4";
+export type RequireAdapterRoundTrip = true;
+export type RequiredDistributions = string[];
+export type TargetModules = "all-linear";
 export type RequiresCuda = boolean;
 export type RequiresNativeBuild = boolean;
+export type RequiresWorkerWheel = boolean;
 export type OperatingSystem = "windows" | "wsl" | "linux" | "macos" | "unknown";
 export type SupportedOs = OperatingSystem[];
 export type Target = string;
@@ -50,6 +106,7 @@ export type RecipeVerification = "declared" | "build_verified" | "functional_ver
  * real optional extras (pyproject ``[train]`` / ``[parquet]`` / ``[tokenizer]``).
  */
 export interface EnvironmentRecipe {
+  bootstrap_pip_version?: BootstrapPipVersion;
   capability_probes?: CapabilityProbes;
   contract_version?: ContractVersion;
   cuda_index_urls?: CudaIndexUrls;
@@ -64,8 +121,10 @@ export interface EnvironmentRecipe {
   notes?: Notes;
   python_requires?: PythonRequires;
   recipe_id: RecipeId;
+  required_execution_probe?: QloraExecutionProbeSpec | null;
   requires_cuda?: RequiresCuda;
   requires_native_build?: RequiresNativeBuild;
+  requires_worker_wheel?: RequiresWorkerWheel;
   supported_os?: SupportedOs;
   target?: Target;
   verification?: RecipeVerification;
@@ -83,4 +142,46 @@ export interface DependencyConflict {
   condition: Condition;
   packages: Packages;
   severity?: Severity;
+}
+/**
+ * The exact complete QLoRA tuple a readiness environment must prove as one operation.
+ */
+export interface QloraExecutionProbeSpec {
+  attention_api?: AttentionApi;
+  compute_dtype?: ComputeDtype;
+  device?: Device;
+  double_quantization?: DoubleQuantization;
+  execution_combination: ExecutionCapabilityCombination;
+  flash_sdp_enabled?: FlashSdpEnabled;
+  gradient_checkpointing?: GradientCheckpointing;
+  math_sdp_enabled?: MathSdpEnabled;
+  memory_efficient_sdp_enabled?: MemoryEfficientSdpEnabled;
+  optimizer?: Optimizer1;
+  probe?: Probe1;
+  quantization?: Quantization;
+  require_adapter_round_trip?: RequireAdapterRoundTrip;
+  required_distributions?: RequiredDistributions;
+  target_modules?: TargetModules;
+}
+/**
+ * One execution tuple demonstrated together by a bounded functional probe.
+ *
+ * Independent successes on precision, quantization, adapter, optimizer, loss, attention, and
+ * checkpoint axes are diagnostic only. The planner may seal a run only from one of these complete
+ * tuples, preventing a union of unrelated probes from becoming a fictional capability.
+ */
+export interface ExecutionCapabilityCombination {
+  adapter_method: AdapterMethod;
+  attention_impl: AttentionImpl;
+  attention_kernel: AttentionKernel;
+  checkpoint_impl: CheckpointImpl;
+  device: DeviceKind;
+  execution_contract_version: ExecutionContractVersion;
+  export_format: ExportFormat;
+  loss_impl: LossImpl;
+  optimizer: Optimizer;
+  precision: PrecisionMode;
+  probe: Probe;
+  quantization: QuantizationMode;
+  runtime_mode: RuntimeMode;
 }

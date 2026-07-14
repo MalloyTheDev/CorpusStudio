@@ -15,6 +15,7 @@ import shutil
 import sys
 from threading import Event
 from typing import Any
+import zipfile
 
 import pytest
 from typer.testing import CliRunner
@@ -24,7 +25,9 @@ import corpus_studio.platform.environment_manager as manager_module
 from corpus_studio.cli import app
 from corpus_studio.platform.common import HashRef, Ref
 from corpus_studio.platform.contracts import (
+    EnvironmentLock,
     EnvironmentInstallation,
+    InstallStep,
     PythonRuntime,
     RunPlan,
 )
@@ -53,11 +56,16 @@ def _record_hash(name: str, version: str) -> str:
 def _package(name: str, version: str = "1.0") -> dict[str, Any]:
     return {
         "name": name,
+        "normalized_name": name.lower().replace("_", "-"),
         "version": version,
         "record_sha256": _record_hash(name, version),
         "direct_url": None,
         "installer": "pip",
         "requested": True,
+        "record_integrity": "verified",
+        "record_entries": 2,
+        "record_verified_entries": 1,
+        "record_failed_entries": [],
         "dependencies": ["packaging>=23"],
     }
 
@@ -68,6 +76,7 @@ class FakeEnvironmentRunner:
     import_ok: bool = True
     functional_ok: bool = True
     hardware_ok: bool = True
+    complete_probe_ok: bool = False
     fail_phase: str | None = None
     timeout_phase: str | None = None
     cancel_phase: str | None = None
@@ -179,40 +188,7 @@ class FakeEnvironmentRunner:
                 }
             ) + "\n"
         elif phase == "capability_probe":
-            signature = "c" * 64
-            gpus = []
-            if self.cuda:
-                gpus.append(
-                    {
-                        "index": 0,
-                        "kind": "cuda",
-                        "name": "Synthetic managed GPU",
-                        "compute_capability": self.compute_capability,
-                        "compute_capability_major": 12,
-                        "supported_dtypes": ["fp32", "fp16", "bf16"],
-                    }
-                )
-            stdout = json.dumps(
-                {
-                    "profile": {
-                        "environment_signature": signature,
-                        "host": {"os": _host_os().value},
-                        "gpus": gpus,
-                    },
-                    "capability_report": {
-                        "backend_id": "corpus_studio",
-                        "environment_ref": {"id": signature},
-                        "readiness": "ready" if self.cuda else "cpu_toy_only",
-                        "bitsandbytes_ok": self.cuda,
-                        "effective_capabilities": {
-                            "precision_modes": ["bf16"] if self.cuda else ["fp32"],
-                            "quantization_modes": ["nf4"] if self.cuda else ["none"],
-                            "attention_impls": ["math"],
-                            "adapter_methods": ["qlora"] if self.cuda else ["lora"],
-                        },
-                    },
-                }
-            ) + "\n"
+            stdout = json.dumps(self._capability_payload()) + "\n"
 
         if self.native_build_output and phase == "install":
             stderr += "Building wheel for simulated-native-package\n"
@@ -229,7 +205,185 @@ class FakeEnvironmentRunner:
             exit_code = -1
         stdout_path.write_text(stdout, encoding="utf-8")
         stderr_path.write_text(stderr, encoding="utf-8")
+        self._write_pip_report(argv)
         return CommandOutcome(exit_code, timed_out=timed_out, cancelled=cancelled)
+
+    def _write_pip_report(self, argv: list[str]) -> None:
+        if "--report" not in argv:
+            return
+        path = Path(argv[argv.index("--report") + 1])
+        if "upgrade-pip" in path.name:
+            selected = [item for item in self.packages if item["name"].lower() == "pip"]
+        elif "install-torch" in path.name:
+            selected = [item for item in self.packages if item["name"].lower() == "torch"]
+        elif "install-worker" in path.name:
+            selected = [
+                item
+                for item in self.packages
+                if item["normalized_name"] == "corpus-studio-engine"
+            ]
+        else:
+            selected = [
+                item
+                for item in self.packages
+                if item["name"].lower() not in {"pip", "torch"}
+                and item["normalized_name"] != "corpus-studio-engine"
+            ]
+        installs = []
+        for item in selected:
+            worker = item["normalized_name"] == "corpus-studio-engine"
+            url = (
+                Path(argv[-1]).resolve().as_uri()
+                if worker
+                else f"https://files.pythonhosted.org/{item['name']}-{item['version']}.whl"
+            )
+            installs.append(
+                {
+                    "download_info": {
+                        "url": url,
+                        "archive_info": {
+                            "hashes": {
+                                "sha256": manager_module._hash_file(Path(argv[-1]))
+                                if worker
+                                else _record_hash(item["name"], item["version"])
+                            }
+                        },
+                    },
+                    "is_direct": worker,
+                    "requested": True,
+                    "metadata": {"name": item["name"], "version": item["version"]},
+                }
+            )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"version": "1", "install": installs}), encoding="utf-8")
+
+    def _capability_payload(self) -> dict[str, Any]:
+        signature = "c" * 64
+        gpus = []
+        if self.cuda:
+            gpus.append(
+                {
+                    "index": 0,
+                    "kind": "cuda",
+                    "name": "Synthetic managed GPU",
+                    "compute_capability": self.compute_capability,
+                    "compute_capability_major": 12,
+                    "supported_dtypes": ["fp32", "fp16", "bf16"],
+                }
+            )
+        if not self.complete_probe_ok:
+            return {
+                "profile": {
+                    "environment_signature": signature,
+                    "host": {"os": _host_os().value},
+                    "gpus": gpus,
+                },
+                "capability_report": {
+                    "backend_id": "corpus_studio",
+                    "environment_ref": {"id": signature},
+                    "readiness": "ready" if self.cuda else "cpu_toy_only",
+                    "bitsandbytes_ok": self.cuda,
+                    "effective_capabilities": {
+                        "precision_modes": ["bf16"] if self.cuda else ["fp32"],
+                        "quantization_modes": ["nf4"] if self.cuda else ["none"],
+                        "attention_impls": ["math"],
+                        "adapter_methods": ["qlora"] if self.cuda else ["lora"],
+                    },
+                },
+            }
+        combination = {
+            "runtime_mode": "training",
+            "device": "cuda",
+            "precision": "bf16",
+            "quantization": "nf4",
+            "adapter_method": "qlora",
+            "attention_impl": "math",
+            "attention_kernel": "torch_sdpa_math",
+            "optimizer": "adamw_torch",
+            "loss_impl": "cross_entropy",
+            "checkpoint_impl": "adapter_only",
+            "export_format": "adapter_peft",
+            "execution_contract_version": "1.0.0",
+            "probe": "cuda_qlora_math_execution",
+        }
+        package_versions = {
+            item["normalized_name"]: item["version"]
+            for item in self.packages
+            if item["normalized_name"]
+            in {
+                "accelerate",
+                "bitsandbytes",
+                "datasets",
+                "peft",
+                "safetensors",
+                "tokenizers",
+                "torch",
+                "transformers",
+                "trl",
+            }
+        }
+        tuple_result = {
+            "probe": "cuda_qlora_math_execution",
+            "outcome": "PASS",
+            "measured": {
+                "runtime": {"packages": package_versions},
+                "memory": {
+                    "gpu_allocator_scope": "pytorch_cuda_allocator_process",
+                    "gpu_device_scope": "nvidia_smi_current_process",
+                    "host_memory_scope": "current_process_rss",
+                    "baseline_gpu_allocated_bytes": 1,
+                    "baseline_gpu_reserved_bytes": 2,
+                    "peak_gpu_allocated_bytes": 3,
+                    "peak_gpu_reserved_bytes": 4,
+                    "baseline_nvidia_smi_process_bytes": 5,
+                    "peak_nvidia_smi_process_bytes": 6,
+                    "baseline_host_rss_bytes": 7,
+                    "peak_host_rss_bytes": 8,
+                    "duration_seconds": 0.5,
+                },
+            },
+            "proves": {
+                "precision": ["bf16"],
+                "quantization": ["nf4"],
+                "attention": ["math", "sdpa"],
+                "attention_kernel": ["torch_sdpa_math"],
+                "adapter": ["qlora"],
+                "loss": ["cross_entropy"],
+                "optimizer": ["adamw_torch"],
+                "checkpoint": ["adapter_only"],
+            },
+            "execution_combinations": [combination],
+        }
+        bnb_result = {
+            "probe": "bnb_4bit_load",
+            "outcome": "PASS",
+            "proves": {"quantization": ["nf4"]},
+        }
+        return {
+            "profile": {
+                "environment_signature": signature,
+                "host": {"os": _host_os().value},
+                "gpus": gpus,
+            },
+            "capability_report": {
+                "backend_id": "corpus_studio",
+                "environment_ref": {"id": signature},
+                "readiness": "ready",
+                "bitsandbytes_ok": True,
+                "probe_results": [bnb_result, tuple_result],
+                "effective_capabilities": {
+                    "precision_modes": ["bf16"],
+                    "quantization_modes": ["nf4"],
+                    "attention_impls": ["math", "sdpa"],
+                    "attention_kernels": ["torch_sdpa_math"],
+                    "adapter_methods": ["qlora"],
+                    "loss_impls": ["cross_entropy"],
+                    "optimizers": ["adamw_torch"],
+                    "checkpoint_impls": ["adapter_only"],
+                    "execution_combinations": [combination],
+                },
+            },
+        }
 
     def _phase(self, argv: list[str]) -> str:
         joined = " ".join(argv)
@@ -248,10 +402,10 @@ class FakeEnvironmentRunner:
             return "import_probe"
         if "checkpoint_reload" in script:
             return "functional_probe"
-        if '"cuda_available"' in script:
-            return "hardware_probe"
         if "build_environment_profile" in script and "run_capability_probes" in script:
             return "capability_probe"
+        if '"cuda_available"' in script:
+            return "hardware_probe"
         return "unknown"
 
     def _lock_payload(self) -> dict[str, Any]:
@@ -305,6 +459,84 @@ def _manager_and_resolution(tmp_path: Path, runner: FakeEnvironmentRunner, env_i
     return manager, resolution
 
 
+def _worker_wheel(tmp_path: Path, *, marker: str = "worker-v1") -> Path:
+    path = tmp_path / "corpus_studio_engine-1.3.0-py3-none-any.whl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "corpus_studio_engine-1.3.0.dist-info/METADATA",
+            "Metadata-Version: 2.1\nName: corpus-studio-engine\nVersion: 1.3.0\n",
+        )
+        archive.writestr("corpus_studio/readiness_marker.txt", marker)
+    return path
+
+
+def _readiness_packages() -> list[dict[str, Any]]:
+    versions = {
+        "pip": "26.1.2",
+        "pydantic": "2.13.4",
+        "typer": "0.26.8",
+        "orjson": "3.11.9",
+        "torch": "2.11.0+cu128",
+        "transformers": "5.13.1",
+        "peft": "0.19.1",
+        "trl": "1.8.0",
+        "accelerate": "1.14.0",
+        "datasets": "5.0.0",
+        "bitsandbytes": "0.49.2",
+        "safetensors": "0.8.0",
+        "tokenizers": "0.22.2",
+        "corpus-studio-engine": "1.3.0",
+    }
+    return [_package(name, version) for name, version in versions.items()]
+
+
+def _manager_and_readiness_resolution(
+    tmp_path: Path,
+    *,
+    complete_probe_ok: bool = True,
+) -> tuple[EnvironmentManager, Any, FakeEnvironmentRunner, Path]:
+    wheel = _worker_wheel(tmp_path / "artifacts")
+    packages = _readiness_packages()
+    worker_package = next(
+        item for item in packages if item["normalized_name"] == "corpus-studio-engine"
+    )
+    worker_package["direct_url"] = {
+        "url": wheel.resolve().as_uri(),
+        "archive_info": {"hashes": {"sha256": manager_module._hash_file(wheel)}},
+    }
+    runner = FakeEnvironmentRunner(
+        cuda=True,
+        complete_probe_ok=complete_probe_ok,
+        packages=packages,
+    )
+    runtime = PythonRuntime(
+        runtime_id="python-readiness-v2",
+        executable=str(tmp_path / "base-python"),
+        version="3.12.10",
+        implementation="CPython",
+        architecture="64-bit",
+        platform="test-platform",
+        os=OperatingSystem.linux,
+        venv_available=True,
+        compatible=True,
+    )
+    manager = EnvironmentManager(
+        tmp_path / "manager",
+        runner=runner,
+        runtime_probe=lambda executable, requirement: runtime,
+    )
+    resolution = manager.preview(
+        "backend-corpus-studio-readiness-v2",
+        env_id="backend-corpus-studio-readiness-v2",
+        runtime_executable=runtime.executable,
+        accelerator_tag="cu128",
+        worker_wheel=wheel,
+    )
+    assert resolution.resolvable and resolution.resolution_hash
+    return manager, resolution, runner, wheel
+
+
 def _create(tmp_path: Path, runner: FakeEnvironmentRunner, env_id: str = "ref-env"):
     manager, resolution = _manager_and_resolution(tmp_path, runner, env_id)
     result = manager.create(
@@ -323,7 +555,8 @@ def test_reference_environment_full_cpu_lifecycle_is_recorded(tmp_path):
     assert result.lock.torch_version == "2.7.1+cu128"
     assert {package.name for package in result.lock.packages} >= {"torch", "transformers"}
     torch = next(package for package in result.lock.packages if package.name == "torch")
-    assert torch.source == "unknown"
+    assert torch.source == "wheel"
+    assert torch.source_index_url
     assert torch.hash and torch.dependencies == ["packaging>=23"]
     assert result.descriptor.lock_ref and result.descriptor.lock_ref.hash
     assert result.health.state == EnvironmentState.functional_probe_passed
@@ -344,6 +577,120 @@ def test_cuda_hardware_probe_earns_hardware_verified_only_after_math_path(tmp_pa
     assert hardware.measured["attention_backend"] == "math"
     assert result.lock.cuda_runtime_version == "12.8"
     assert result.lock.compute_capability == "12.0"
+
+
+def test_readiness_v2_plan_is_stable_hash_bound_and_plan_only(tmp_path):
+    manager, first, _, wheel = _manager_and_readiness_resolution(tmp_path)
+    second = manager.preview(
+        "backend-corpus-studio-readiness-v2",
+        env_id="backend-corpus-studio-readiness-v2",
+        runtime_executable=first.runtime.executable if first.runtime else "python",
+        accelerator_tag="cu128",
+        worker_wheel=wheel,
+    )
+    assert first == second
+    assert first.worker_artifact and first.worker_artifact.content_hash.value
+    assert first.required_execution_probe is not None
+    assert not manager.root.exists()
+
+    original_hash = first.resolution_hash
+    _worker_wheel(wheel.parent, marker="worker-v2")
+    changed = manager.preview(
+        "backend-corpus-studio-readiness-v2",
+        env_id="backend-corpus-studio-readiness-v2",
+        runtime_executable=first.runtime.executable if first.runtime else "python",
+        accelerator_tag="cu128",
+        worker_wheel=wheel,
+    )
+    assert changed.resolution_hash != original_hash
+    with pytest.raises(EnvironmentManagerError, match="canonical plan|worker wheel changed"):
+        manager.create(first, confirmed_resolution_hash=original_hash or "")
+    assert not manager.root.exists()
+
+
+def test_readiness_v2_seals_only_after_complete_tuple_and_records_memory(tmp_path):
+    manager, resolution, runner, _ = _manager_and_readiness_resolution(tmp_path)
+    result = manager.create(
+        resolution, confirmed_resolution_hash=resolution.resolution_hash or ""
+    )
+    assert result.descriptor.state == EnvironmentState.hardware_verified
+    assert result.lock is not None and result.descriptor.lock_ref is not None
+    assert result.lock.probe_evidence is not None
+    assert result.installation.pre_probe_inventory is not None
+    assert result.installation.post_probe_inventory is not None
+    assert (
+        result.installation.pre_probe_inventory.evidence_hash
+        == result.installation.post_probe_inventory.evidence_hash
+    )
+    assert result.installation.pre_probe_inventory.evidence_id.startswith("inventory-")
+    assert result.lock.lock_id.startswith("lock-")
+    memory = result.lock.probe_evidence.memory
+    assert memory.gpu_allocator_scope == "pytorch_cuda_allocator_process"
+    assert memory.gpu_device_scope == "nvidia_smi_current_process"
+    assert memory.host_memory_scope == "current_process_rss"
+    assert memory.peak_gpu_allocated_bytes >= memory.baseline_gpu_allocated_bytes
+    assert memory.peak_host_rss_bytes >= memory.baseline_host_rss_bytes
+    command_phases = [item.phase for item in result.installation.commands]
+    capability_index = command_phases.index("capability_probe")
+    inventory_indexes = [
+        index for index, phase in enumerate(command_phases) if phase == "inventory"
+    ]
+    assert inventory_indexes[0] < capability_index < inventory_indexes[1]
+    assert runner.calls[-1]["phase"] == "lock"
+    assert all(item.source_evidence_reason or item.source != "unknown" for item in result.lock.packages)
+
+
+def test_failed_or_independently_unionable_probes_never_seal_readiness_v2(tmp_path):
+    manager, resolution, _, _ = _manager_and_readiness_resolution(
+        tmp_path, complete_probe_ok=False
+    )
+    result = manager.create(
+        resolution, confirmed_resolution_hash=resolution.resolution_hash or ""
+    )
+    assert result.descriptor.state == EnvironmentState.incompatible
+    assert result.lock is None
+    assert result.descriptor.lock_ref is None
+    assert not (manager.registry_root / result.descriptor.env_id / "locks").exists()
+    assert result.health.probe_results[-1].probe == "cuda_qlora_math_execution"
+
+
+def test_lock_finalization_refuses_missing_complete_probe_evidence(tmp_path):
+    manager, resolution, _, _ = _manager_and_readiness_resolution(tmp_path)
+    result = manager.create(
+        resolution, confirmed_resolution_hash=resolution.resolution_hash or ""
+    )
+    assert result.lock is not None
+    assert result.installation.post_probe_inventory is not None
+    recipe = get_recipe("backend-corpus-studio-readiness-v2")
+    assert recipe is not None
+    with pytest.raises(EnvironmentManagerError, match="cannot be finalized"):
+        manager._finalize_lock(
+            result.installation.post_probe_inventory,
+            resolution=resolution,
+            recipe=recipe,
+            installation=result.installation,
+            probe_evidence=None,
+        )
+
+
+def test_readiness_v2_worker_artifact_and_dependency_drift_are_detected(tmp_path):
+    manager, resolution, runner, wheel = _manager_and_readiness_resolution(tmp_path)
+    result = manager.create(
+        resolution, confirmed_resolution_hash=resolution.resolution_hash or ""
+    )
+    assert result.lock is not None
+    _worker_wheel(wheel.parent, marker="tampered-worker")
+    report = manager.health(result.descriptor.env_id)
+    assert report.state == EnvironmentState.drifted
+    assert any("worker artifact identity changed" in item for item in report.drifted_packages)
+
+    _worker_wheel(wheel.parent)
+    torch_package = next(item for item in runner.packages if item["name"] == "torch")
+    torch_package["version"] = "2.11.1+cu128"
+    torch_package["record_sha256"] = _record_hash("torch", torch_package["version"])
+    report = manager.health(result.descriptor.env_id)
+    assert report.state == EnvironmentState.drifted
+    assert any("torch" in item.lower() for item in report.drifted_packages)
 
 
 def test_capability_snapshot_is_proved_inside_the_managed_interpreter(tmp_path):
@@ -429,7 +776,9 @@ def test_actionable_preview_is_concrete_explicit_and_does_not_mutate(tmp_path, m
     assert all(step.environment.get("PIP_CONFIG_FILE") == os.devnull for step in resolution.install_steps)
     assert all("CORPUS_STUDIO_TEST_SECRET" not in step.environment for step in resolution.install_steps)
     worker_step = resolution.install_steps[-1]
-    assert worker_step.argv[-2:] == ["--no-deps", str(engine_source.resolve())]
+    assert "--no-deps" in worker_step.argv
+    assert worker_step.argv[-1] == str(engine_source.resolve())
+    assert worker_step.evidence_path
     assert worker_step.network_required is True
     assert not manager.root.exists()
 
@@ -772,6 +1121,93 @@ def test_runtime_and_provenance_helper_edge_cases(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="probe exploded"):
         probe_python_runtime("python")
     assert manager_module.default_manager_root().name == "environment-manager"
+
+
+def test_install_source_evidence_sanitizes_credentials_and_preserves_unknown(tmp_path):
+    report = tmp_path / "pip-report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "install": [
+                    {
+                        "download_info": {
+                            "url": "https://user:secret@example.invalid/pkg.whl?X-Amz-Signature=secret",
+                            "archive_info": {"hashes": {"sha256": "a" * 64}},
+                        },
+                        "is_direct": True,
+                        "requested": True,
+                        "metadata": {"name": "Known_Pkg", "version": "1.0"},
+                    },
+                    {
+                        "download_info": {"url": "https://cdn.invalid/unknown.whl"},
+                        "is_direct": False,
+                        "requested": False,
+                        "metadata": {"name": "Unknown.Pkg", "version": "2.0"},
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    step = InstallStep(
+        phase="install",
+        argv=["python", "-m", "pip", "install"],
+        configured_index_urls=[],
+    )
+    captured = manager_module._install_evidence_from_report(
+        report, step=step, command_id="command-001"
+    )
+    known = next(item for item in captured if item.normalized_name == "known-pkg")
+    assert known.direct_url == "https://example.invalid/pkg.whl"
+    assert "secret" not in known.model_dump_json().lower()
+    unknown = next(item for item in captured if item.normalized_name == "unknown-pkg")
+    assert unknown.source == "unknown"
+    assert unknown.source_evidence_reason
+
+
+def test_legacy_environment_lock_digest_remains_compatible(tmp_path):
+    package = manager_module.PackageLock(
+        name="torch",
+        version="2.7.1+cu128",
+        hash=HashRef(value="a" * 64),
+        installer="pip",
+    )
+    legacy = EnvironmentLock(
+        lock_id="lock-legacy",
+        recipe_ref=Ref(id="backend-corpus-studio", hash=HashRef(value="b" * 64)),
+        manager_version="1.0.0",
+        python_version="3.12.3",
+        packages=[package],
+    )
+    body = legacy.model_dump(
+        mode="json", exclude={"lock_id", "created_at", "lock_hash"}
+    )
+    for field_name in (
+        "resolution_ref",
+        "package_install_evidence",
+        "worker_artifact",
+        "probe_evidence",
+    ):
+        body.pop(field_name)
+    for field_name in (
+        "normalized_name",
+        "source_index_url",
+        "artifact_hash",
+        "direct",
+        "editable",
+        "vcs_repository",
+        "vcs_commit",
+        "source_evidence_reason",
+        "record_integrity",
+        "record_entries",
+        "record_verified_entries",
+        "record_failed_entries",
+    ):
+        body["packages"][0].pop(field_name)
+    expected = manager_module._canonical_sha256(body)
+    sealed = legacy.model_copy(update={"lock_hash": expected})
+    manager = EnvironmentManager(tmp_path / "manager")
+    assert manager._lock_digest(sealed) == expected
 
 
 def test_real_subprocess_runner_success_timeout_and_cancellation(tmp_path):

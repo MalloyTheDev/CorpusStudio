@@ -88,6 +88,15 @@ probed on this host.
 
 (84 distributions are locked in total; the table lists the training-relevant ones.)
 
+### Readiness-v2 status
+
+`backend-corpus-studio-readiness-v2` is a separate exact-pinned recipe and replacement environment
+plan. It does not replace, mutate, or reinterpret the environment above. As of this record, the
+readiness-v2 environment has **not** been created or installed and therefore has no lock or health
+state. Its plan binds a concrete `corpus-studio-engine` wheel and requires the complete QLoRA tuple
+described in [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md) before a lock can be sealed. Creating
+it still requires separate explicit authorization.
+
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 
 `HARDWARE_VERIFIED` is the **Environment Manager** evidence level, not a training-run result.

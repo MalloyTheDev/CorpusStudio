@@ -25,6 +25,7 @@ CONTRACT_VERSION_LITERAL = Literal["1.0.0"]
 
 HashAlgo = Literal["sha256", "sha256-ordered-exact-v1", "blake3", "none"]
 PackageSource = Literal["pypi", "wheel", "sdist", "conda", "vcs", "local", "unknown"]
+RecordIntegrity = Literal["verified", "failed", "missing", "unknown"]
 LicenseSource = Literal["declared", "model_card", "dataset_card", "user_asserted", "unknown"]
 
 
@@ -62,14 +63,30 @@ class PackageLock(ContractModel):
     """
 
     name: str = Field(min_length=1)
+    # PEP 503-normalized name. Empty only for legacy records written before source-evidence v2.
+    normalized_name: str = ""
     # Installed version string, or null when the distribution is absent (environment stores None).
     version: str | None = None
     hash: HashRef | None = None
     source: PackageSource = "unknown"
+    source_index_url: str | None = None
     direct_url: str | None = None
     artifact: str | None = None
+    artifact_hash: HashRef | None = None
     installer: str | None = None
     requested: bool | None = None
+    direct: bool | None = None
+    editable: bool | None = None
+    vcs_repository: str | None = None
+    vcs_commit: str | None = None
+    source_evidence_reason: str | None = None
+    # RECORD metadata identity and installed-file verification are distinct claims. ``hash`` above
+    # remains the canonical digest of the RECORD text; these fields say whether every hash-bearing
+    # entry in that RECORD still matches the installed bytes.
+    record_integrity: RecordIntegrity = "unknown"
+    record_entries: int | None = Field(default=None, ge=0)
+    record_verified_entries: int | None = Field(default=None, ge=0)
+    record_failed_entries: list[str] = Field(default_factory=list)
     dependencies: list[str] = Field(default_factory=list)
 
 

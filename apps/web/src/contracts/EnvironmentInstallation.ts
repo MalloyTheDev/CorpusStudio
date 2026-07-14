@@ -110,9 +110,11 @@ export type Phase =
   | "lock"
   | "import_probe"
   | "verify"
+  | "inventory"
   | "dependency_probe"
   | "functional_probe"
   | "hardware_probe"
+  | "capability_probe"
   | "health_probe";
 export type StartedAt = string;
 export type StderrPath = string | null;
@@ -127,6 +129,141 @@ export type Value = string | null;
 export type Id = string;
 export type FinishedAt1 = string | null;
 export type InstallationId = string;
+export type ArtifactFilename = string | null;
+export type ConfiguredIndexUrls = string[];
+export type Direct = boolean | null;
+export type DirectUrl = string | null;
+export type Editable = boolean | null;
+export type InstallerCommandId = string | null;
+export type NormalizedName = string;
+export type Requested = boolean | null;
+export type Source = "pypi" | "wheel" | "sdist" | "conda" | "vcs" | "local" | "unknown";
+export type SourceEvidenceReason = string | null;
+export type SourceIndexUrl = string | null;
+export type VcsCommit = string | null;
+export type VcsRepository = string | null;
+export type Version = string;
+export type PackageInstallEvidence = PackageInstallEvidence1[];
+export type Architecture = string;
+export type CapturedAt = string | null;
+export type ComputeCapability = string | null;
+export type ContractVersion3 = "1.0.0";
+export type CudaRuntimeVersion = string | null;
+export type EvidenceHash = string;
+export type EvidenceId = string;
+export type Implementation = string;
+export type IndexUrls = string[];
+export type PackageInstallEvidence2 = PackageInstallEvidence1[];
+export type Artifact = string | null;
+export type Dependencies = string[];
+export type Direct1 = boolean | null;
+export type DirectUrl1 = string | null;
+export type Editable1 = boolean | null;
+export type Installer = string | null;
+export type Name = string;
+export type NormalizedName1 = string;
+export type RecordEntries = number | null;
+export type RecordFailedEntries = string[];
+export type RecordIntegrity = "verified" | "failed" | "missing" | "unknown";
+export type RecordVerifiedEntries = number | null;
+export type Requested1 = boolean | null;
+export type Source1 = "pypi" | "wheel" | "sdist" | "conda" | "vcs" | "local" | "unknown";
+export type SourceEvidenceReason1 = string | null;
+export type SourceIndexUrl1 = string | null;
+export type VcsCommit1 = string | null;
+export type VcsRepository1 = string | null;
+export type Version1 = string | null;
+export type Packages = PackageLock[];
+export type PlatformTag = string;
+export type PythonVersion = string;
+export type Architecture1 = string;
+export type Compatible = boolean;
+export type ContractVersion4 = "1.0.0";
+export type Executable = string;
+export type Implementation1 = string;
+export type IncompatibilityReasons = string[];
+export type IsVirtualEnvironment = boolean;
+export type OperatingSystem = "windows" | "wsl" | "linux" | "macos" | "unknown";
+export type Platform = string;
+export type RuntimeId = string;
+export type VenvAvailable = boolean;
+export type Version2 = string;
+export type TorchBuild = string | null;
+export type TorchVersion = string | null;
+export type ContractVersion5 = "1.0.0";
+export type DistributionName = string;
+export type Filename = string;
+export type NormalizedName2 = string;
+export type Path = string;
+export type SizeBytes = number;
+export type Version3 = string;
+export type ContractVersion6 = "1.0.0";
+export type EvidenceHash1 = string;
+export type EvidenceId1 = string;
+export type BaselineGpuAllocatedBytes = number;
+export type BaselineGpuReservedBytes = number;
+export type BaselineHostRssBytes = number;
+export type BaselineNvidiaSmiProcessBytes = number | null;
+export type DurationSeconds = number;
+export type GpuAllocatorScope = "pytorch_cuda_allocator_process";
+export type GpuDeviceScope = "nvidia_smi_current_process" | "unavailable";
+export type HostMemoryScope = "current_process_rss";
+export type PeakGpuAllocatedBytes = number;
+export type PeakGpuReservedBytes = number;
+export type PeakHostRssBytes = number;
+export type PeakNvidiaSmiProcessBytes = number | null;
+export type ProfileSignature = string;
+export type AttentionApi = "sdpa";
+export type ComputeDtype = "bf16";
+export type Device = "cuda:0";
+export type DoubleQuantization = true;
+export type AdapterMethod =
+  "none" | "lora" | "qlora" | "dora" | "ia3" | "full_finetune" | "prompt_tuning" | "prefix_tuning";
+/**
+ * The exact attention implementation an execution policy permits at runtime.
+ */
+export type AttentionKernel =
+  | "eager"
+  | "torch_sdpa_math"
+  | "torch_sdpa_flash"
+  | "torch_sdpa_mem_efficient"
+  | "flash_attention_2"
+  | "flash_attention_3"
+  | "xformers";
+export type CheckpointImpl = "full_state" | "adapter_only" | "sharded" | "distcp" | "safetensors";
+export type DeviceKind = "cuda" | "rocm" | "mps" | "xpu" | "cpu";
+export type ExecutionContractVersion = string;
+export type ExportFormat =
+  "adapter_peft" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
+export type LossImpl = "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt";
+export type Optimizer =
+  | "adamw_torch"
+  | "adamw_torch_fused"
+  | "adamw_8bit"
+  | "adamw_bnb_8bit"
+  | "paged_adamw_8bit"
+  | "paged_adamw_32bit"
+  | "adafactor"
+  | "lion"
+  | "sgd";
+export type PrecisionMode = "fp32" | "tf32" | "fp16" | "bf16" | "fp8" | "mixed_bf16" | "mixed_fp16";
+export type Probe = string;
+export type QuantizationMode = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
+export type RuntimeMode = "training" | "cpu_toy";
+export type FlashSdpEnabled = false;
+export type GradientCheckpointing = true;
+export type MathSdpEnabled = true;
+export type MemoryEfficientSdpEnabled = false;
+export type Optimizer1 = "adamw_torch";
+export type Probe1 = "cuda_qlora_math_execution";
+export type Quantization = "nf4";
+export type RequireAdapterRoundTrip = true;
+export type RequiredDistributions = string[];
+export type TargetModules = "all-linear";
+export type Detail1 = string | null;
+export type ExecutionCombinations = ExecutionCapabilityCombination[];
+export type Probe2 = string;
+export type ProbeResults = ProbeResult[];
 export type RetryRequiresRecreate = boolean;
 export type StartedAt1 = string;
 /**
@@ -158,11 +295,17 @@ export interface EnvironmentInstallation {
   failure?: FailureRecord | null;
   finished_at?: FinishedAt1;
   installation_id: InstallationId;
+  package_install_evidence?: PackageInstallEvidence;
+  post_probe_inventory?: InstalledEnvironmentEvidence | null;
+  pre_probe_inventory?: InstalledEnvironmentEvidence | null;
+  probe_evidence?: EnvironmentProbeEvidence | null;
+  probe_results?: ProbeResults;
   recipe_ref: Ref;
   resolution_ref: Ref;
   retry_requires_recreate?: RetryRequiresRecreate;
   started_at: StartedAt1;
   state?: EnvironmentState;
+  worker_artifact?: WorkerArtifactIdentity | null;
 }
 /**
  * Durable evidence for one bounded, argv-only creation/install/probe command.
@@ -257,4 +400,202 @@ export interface Ref {
 export interface HashRef {
   algo?: Algo;
   value?: Value;
+}
+/**
+ * Sanitized pip-install provenance retained separately from installed-file inspection.
+ */
+export interface PackageInstallEvidence1 {
+  artifact_filename?: ArtifactFilename;
+  artifact_hash?: HashRef | null;
+  configured_index_urls?: ConfiguredIndexUrls;
+  direct?: Direct;
+  direct_url?: DirectUrl;
+  editable?: Editable;
+  installer_command_id?: InstallerCommandId;
+  normalized_name: NormalizedName;
+  requested?: Requested;
+  source?: Source;
+  source_evidence_reason?: SourceEvidenceReason;
+  source_index_url?: SourceIndexUrl;
+  vcs_commit?: VcsCommit;
+  vcs_repository?: VcsRepository;
+  version: Version;
+}
+/**
+ * A pre- or post-probe installed-state inventory; explicitly not a final environment lock.
+ */
+export interface InstalledEnvironmentEvidence {
+  architecture?: Architecture;
+  captured_at?: CapturedAt;
+  compute_capability?: ComputeCapability;
+  contract_version?: ContractVersion3;
+  cuda_runtime_version?: CudaRuntimeVersion;
+  evidence_hash: EvidenceHash;
+  evidence_id: EvidenceId;
+  implementation?: Implementation;
+  index_urls?: IndexUrls;
+  package_install_evidence?: PackageInstallEvidence2;
+  packages?: Packages;
+  platform_tag?: PlatformTag;
+  python_version?: PythonVersion;
+  recipe_ref: Ref;
+  runtime?: PythonRuntime | null;
+  torch_build?: TorchBuild;
+  torch_version?: TorchVersion;
+  worker_artifact?: WorkerArtifactIdentity | null;
+}
+/**
+ * A resolved dependency and its install provenance.
+ *
+ * ``hash`` seals the installed distribution's RECORD metadata when that evidence is available; it
+ * is not mislabelled as the original wheel hash. ``direct_url`` and ``artifact`` preserve the
+ * stronger source identity pip exposes for direct/VCS/local installs. ``dependencies`` is the
+ * installed metadata dependency graph, not a second resolver.
+ */
+export interface PackageLock {
+  artifact?: Artifact;
+  artifact_hash?: HashRef | null;
+  dependencies?: Dependencies;
+  direct?: Direct1;
+  direct_url?: DirectUrl1;
+  editable?: Editable1;
+  hash?: HashRef | null;
+  installer?: Installer;
+  name: Name;
+  normalized_name?: NormalizedName1;
+  record_entries?: RecordEntries;
+  record_failed_entries?: RecordFailedEntries;
+  record_integrity?: RecordIntegrity;
+  record_verified_entries?: RecordVerifiedEntries;
+  requested?: Requested1;
+  source?: Source1;
+  source_evidence_reason?: SourceEvidenceReason1;
+  source_index_url?: SourceIndexUrl1;
+  vcs_commit?: VcsCommit1;
+  vcs_repository?: VcsRepository1;
+  version?: Version1;
+}
+/**
+ * A discovered Python executable that can potentially create an isolated worker environment.
+ *
+ * Discovery never assumes the control-plane interpreter is the only installation. Compatibility is
+ * an explicit verdict against the selected recipe, while ``venv_available`` proves the stdlib venv
+ * module can be located without creating anything.
+ */
+export interface PythonRuntime {
+  architecture?: Architecture1;
+  compatible?: Compatible;
+  contract_version?: ContractVersion4;
+  executable: Executable;
+  implementation?: Implementation1;
+  incompatibility_reasons?: IncompatibilityReasons;
+  is_virtual_environment?: IsVirtualEnvironment;
+  os?: OperatingSystem;
+  platform?: Platform;
+  runtime_id: RuntimeId;
+  venv_available?: VenvAvailable;
+  version?: Version2;
+}
+/**
+ * Immutable identity of the exact wheel executed by a managed backend worker.
+ *
+ * A mutable checkout is not a worker identity. The plan binds a concrete wheel before mutation;
+ * the post-install lock binds the same wheel and the installed distribution evidence.
+ */
+export interface WorkerArtifactIdentity {
+  content_hash: HashRef;
+  contract_version?: ContractVersion5;
+  distribution_name: DistributionName;
+  filename: Filename;
+  metadata_hash?: HashRef | null;
+  normalized_name: NormalizedName2;
+  path: Path;
+  size_bytes: SizeBytes;
+  version: Version3;
+}
+/**
+ * Hash-sealed evidence that a required complete execution tuple passed as a unit.
+ */
+export interface EnvironmentProbeEvidence {
+  capability_report_hash: HashRef;
+  contract_version?: ContractVersion6;
+  evidence_hash: EvidenceHash1;
+  evidence_id: EvidenceId1;
+  memory: ProbeMemoryEvidence;
+  profile_signature: ProfileSignature;
+  required_spec: QloraExecutionProbeSpec;
+  tuple_result: ProbeResult;
+}
+/**
+ * Measured resource evidence for one bounded probe, with scopes kept explicit.
+ */
+export interface ProbeMemoryEvidence {
+  baseline_gpu_allocated_bytes: BaselineGpuAllocatedBytes;
+  baseline_gpu_reserved_bytes: BaselineGpuReservedBytes;
+  baseline_host_rss_bytes: BaselineHostRssBytes;
+  baseline_nvidia_smi_process_bytes?: BaselineNvidiaSmiProcessBytes;
+  duration_seconds: DurationSeconds;
+  gpu_allocator_scope?: GpuAllocatorScope;
+  gpu_device_scope?: GpuDeviceScope;
+  host_memory_scope?: HostMemoryScope;
+  peak_gpu_allocated_bytes: PeakGpuAllocatedBytes;
+  peak_gpu_reserved_bytes: PeakGpuReservedBytes;
+  peak_host_rss_bytes: PeakHostRssBytes;
+  peak_nvidia_smi_process_bytes?: PeakNvidiaSmiProcessBytes;
+}
+/**
+ * The exact complete QLoRA tuple a readiness environment must prove as one operation.
+ */
+export interface QloraExecutionProbeSpec {
+  attention_api?: AttentionApi;
+  compute_dtype?: ComputeDtype;
+  device?: Device;
+  double_quantization?: DoubleQuantization;
+  execution_combination: ExecutionCapabilityCombination;
+  flash_sdp_enabled?: FlashSdpEnabled;
+  gradient_checkpointing?: GradientCheckpointing;
+  math_sdp_enabled?: MathSdpEnabled;
+  memory_efficient_sdp_enabled?: MemoryEfficientSdpEnabled;
+  optimizer?: Optimizer1;
+  probe?: Probe1;
+  quantization?: Quantization;
+  require_adapter_round_trip?: RequireAdapterRoundTrip;
+  required_distributions?: RequiredDistributions;
+  target_modules?: TargetModules;
+}
+/**
+ * One execution tuple demonstrated together by a bounded functional probe.
+ *
+ * Independent successes on precision, quantization, adapter, optimizer, loss, attention, and
+ * checkpoint axes are diagnostic only. The planner may seal a run only from one of these complete
+ * tuples, preventing a union of unrelated probes from becoming a fictional capability.
+ */
+export interface ExecutionCapabilityCombination {
+  adapter_method: AdapterMethod;
+  attention_impl: AttentionImpl;
+  attention_kernel: AttentionKernel;
+  checkpoint_impl: CheckpointImpl;
+  device: DeviceKind;
+  execution_contract_version: ExecutionContractVersion;
+  export_format: ExportFormat;
+  loss_impl: LossImpl;
+  optimizer: Optimizer;
+  precision: PrecisionMode;
+  probe: Probe;
+  quantization: QuantizationMode;
+  runtime_mode: RuntimeMode;
+}
+export interface ProbeResult {
+  detail?: Detail1;
+  execution_combinations?: ExecutionCombinations;
+  measured?: Measured;
+  outcome: FailureTaxonomy;
+  probe: Probe2;
+  proves?: Proves;
+}
+export interface Measured {
+  [k: string]: unknown;
+}
+export interface Proves {
+  [k: string]: string[];
 }

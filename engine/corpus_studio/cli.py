@@ -789,7 +789,14 @@ def platform_plan(
             profile, report = manager.capability_snapshot(environment_id)
             descriptor = manager.load_descriptor(environment_id)
             lock = manager.load_lock(environment_id)
-            if backend != "corpus_studio" or descriptor.recipe_ref.id != "backend-corpus-studio":
+            from corpus_studio.platform.environments import get_recipe
+
+            managed_recipe = get_recipe(descriptor.recipe_ref.id)
+            if (
+                backend != "corpus_studio"
+                or managed_recipe is None
+                or managed_recipe.target != "corpus_studio"
+            ):
                 raise EnvironmentManagerError(
                     "the selected managed environment belongs to the corpus_studio backend"
                 )
@@ -1373,6 +1380,14 @@ def env_plan(
     manager_root: Optional[Path] = typer.Option(
         None, "--manager-root", help="Environment Manager state root. Default: per-user local data."
     ),
+    worker_wheel: Optional[Path] = typer.Option(
+        None,
+        "--worker-wheel",
+        help="Exact CorpusStudio wheel required by readiness-v2; its bytes are hash-bound.",
+    ),
+    out: Optional[Path] = typer.Option(
+        None, "--out", help="Write the canonical DependencyResolution JSON to this path."
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit the full DependencyResolution JSON."),
 ):
     """PREVIEW provisioning a recipe on this host - the exact argv install steps, the CUDA-aware wheel
@@ -1386,12 +1401,17 @@ def env_plan(
             accelerator=accelerator,
             manager_root=manager_root,
             python_version=python_version,
+            worker_wheel=worker_wheel,
         )
     except Exception as exc:  # EnvironmentManagerError plus bounded runtime-probe failures
         _environment_cli_error(exc)
 
+    rendered = json.dumps(resolution.model_dump(mode="json"), indent=2) + "\n"
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(rendered, encoding="utf-8")
     if json_out:
-        typer.echo(json.dumps(resolution.model_dump(mode="json"), indent=2))
+        typer.echo(rendered, nl=False)
         raise typer.Exit(0 if resolution.resolvable else 1)
 
     def _gb(value: Optional[int]) -> str:
@@ -1410,6 +1430,14 @@ def env_plan(
         f"on disk: {_gb(resolution.estimated_disk_bytes)}",
         f"  network indexes: {', '.join(resolution.resolved_index_urls) or '(none)'}",
     ]
+    if resolution.worker_artifact is not None:
+        lines.append(
+            "  worker artifact: "
+            f"{resolution.worker_artifact.filename} "
+            f"({resolution.worker_artifact.content_hash.value})"
+        )
+    if out is not None:
+        lines.append(f"  plan file: {out}")
     for reason in resolution.blocking_reasons:
         lines.append(f"  BLOCKED: {reason}")
     for warning in resolution.warnings:
@@ -1435,6 +1463,7 @@ def _build_environment_resolution(
     accelerator: Optional[str],
     manager_root: Optional[Path],
     python_version: Optional[str] = None,
+    worker_wheel: Optional[Path] = None,
 ):
     """Build the same concrete, sealed plan for env-plan/create/recreate."""
     from corpus_studio.platform.environment_manager import EnvironmentManager
@@ -1463,6 +1492,7 @@ def _build_environment_resolution(
         env_id=env_id,
         runtime_executable=runtime or Path(sys.executable),
         accelerator_tag=tag,
+        worker_wheel=worker_wheel,
     )
     if python_version and not resolution.python_version.startswith(python_version):
         blocked = resolution.model_copy(
@@ -1529,7 +1559,7 @@ def env_runtimes(
 def _creation_payload(result: Any) -> dict[str, Any]:
     return {
         "descriptor": result.descriptor.model_dump(mode="json"),
-        "lock": result.lock.model_dump(mode="json"),
+        "lock": result.lock.model_dump(mode="json") if result.lock is not None else None,
         "health": result.health.model_dump(mode="json"),
         "installation": result.installation.model_dump(mode="json"),
     }
@@ -1537,17 +1567,20 @@ def _creation_payload(result: Any) -> dict[str, Any]:
 
 @app.command("env-create")
 def env_create(
-    recipe_id: str = typer.Argument("backend-corpus-studio", help="Reference backend recipe id."),
+    recipe_id: str = typer.Argument("backend-corpus-studio", help="Managed worker recipe id."),
     env_id: Optional[str] = typer.Option(None, "--env-id", help="Environment id. Default: recipe id."),
     runtime: Optional[Path] = typer.Option(None, "--runtime", help="Base Python executable."),
     accelerator: Optional[str] = typer.Option(None, "--accelerator", help="Wheel tag override."),
     manager_root: Optional[Path] = typer.Option(None, "--manager-root", help="Manager state root."),
+    worker_wheel: Optional[Path] = typer.Option(
+        None, "--worker-wheel", help="Exact worker wheel used when the reviewed plan was generated."
+    ),
     confirmed_hash: str = typer.Option(
         ..., "--confirm", help="Exact resolution hash printed by env-plan."
     ),
     json_out: bool = typer.Option(False, "--json", help="Emit lifecycle records as JSON."),
 ):
-    """Create the sealed reference-backend environment after exact plan-hash confirmation."""
+    """Create a managed-worker environment after exact plan-hash confirmation."""
     try:
         manager, resolution = _build_environment_resolution(
             recipe_id,
@@ -1555,6 +1588,7 @@ def env_create(
             runtime=runtime,
             accelerator=accelerator,
             manager_root=manager_root,
+            worker_wheel=worker_wheel,
         )
         result = manager.create(
             resolution, confirmed_resolution_hash=confirmed_hash
@@ -1563,11 +1597,19 @@ def env_create(
         _environment_cli_error(exc)
     if json_out:
         typer.echo(json.dumps(_creation_payload(result), indent=2))
+        if result.lock is None:
+            raise typer.Exit(1)
         return
     typer.echo(f"Environment: {result.descriptor.env_id}")
     typer.echo(f"State: {result.descriptor.state.value}")
-    typer.echo(f"Lock: {result.lock.lock_id} ({result.lock.lock_hash})")
+    typer.echo(
+        f"Lock: {result.lock.lock_id} ({result.lock.lock_hash})"
+        if result.lock is not None
+        else "Lock: (not sealed - required probes did not pass)"
+    )
     typer.echo(f"Installation journal: {result.installation.installation_id}")
+    if result.lock is None:
+        raise typer.Exit(1)
 
 
 @app.command("env-status")
@@ -1679,11 +1721,14 @@ def env_remove(
 
 @app.command("env-recreate")
 def env_recreate(
-    recipe_id: str = typer.Argument("backend-corpus-studio", help="Reference backend recipe id."),
+    recipe_id: str = typer.Argument("backend-corpus-studio", help="Managed worker recipe id."),
     env_id: Optional[str] = typer.Option(None, "--env-id", help="Environment id. Default: recipe id."),
     runtime: Optional[Path] = typer.Option(None, "--runtime", help="Base Python executable."),
     accelerator: Optional[str] = typer.Option(None, "--accelerator", help="Wheel tag override."),
     manager_root: Optional[Path] = typer.Option(None, "--manager-root", help="Manager state root."),
+    worker_wheel: Optional[Path] = typer.Option(
+        None, "--worker-wheel", help="Exact worker wheel used when the reviewed plan was generated."
+    ),
     confirmed_hash: str = typer.Option(..., "--confirm", help="Exact new env-plan resolution hash."),
     confirmed_remove_env_id: str = typer.Option(
         ..., "--confirm-remove", help="Exact existing environment id to remove first."
@@ -1699,6 +1744,7 @@ def env_recreate(
             runtime=runtime,
             accelerator=accelerator,
             manager_root=manager_root,
+            worker_wheel=worker_wheel,
         )
         result = manager.recreate(
             resolution,
@@ -1709,9 +1755,17 @@ def env_recreate(
         _environment_cli_error(exc)
     if json_out:
         typer.echo(json.dumps(_creation_payload(result), indent=2))
+        if result.lock is None:
+            raise typer.Exit(1)
         return
     typer.echo(f"Environment {result.descriptor.env_id}: {result.descriptor.state.value}")
-    typer.echo(f"Lock: {result.lock.lock_id} ({result.lock.lock_hash})")
+    typer.echo(
+        f"Lock: {result.lock.lock_id} ({result.lock.lock_hash})"
+        if result.lock is not None
+        else "Lock: (not sealed - required probes did not pass)"
+    )
+    if result.lock is None:
+        raise typer.Exit(1)
 
 
 @app.command()
