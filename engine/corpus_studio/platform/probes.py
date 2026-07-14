@@ -13,8 +13,9 @@ The one probe that must not actually execute on **native-Windows** Blackwell sm_
 ``flash_attn_backward``: the fused flash SDPA backward deadlocks on the first backward under the
 Windows WDDM driver (documented in ``training/environment.py``), so there it short-circuits to
 ``KERNEL_STALL`` rather than hanging the probe process. Outside native Windows, the known WDDM refusal
-does not apply, so the probe executes and must itself PASS before it proves flash/sdpa. WSL has
-separately labeled passing evidence; bare-Linux RTX 5070 behavior remains unverified.
+does not apply, so the probe executes and must itself PASS before it proves flash/sdpa. The native-
+Linux RTX 5070 has passing evidence for the bounded forced-flash readiness tuple only; the first real
+0.5B smoke stopped before adapter insertion and no real optimizer step or sequence 4096 is proved.
 """
 
 from __future__ import annotations
@@ -534,6 +535,52 @@ def _probe_cuda_qlora_sdpa_flash_execution(
     )
 
 
+def _restore_qlora_probe_process_state(
+    torch_module: Any,
+    *,
+    previous_toggles: tuple[bool, bool, bool],
+    cpu_rng_state: Any | None,
+    cuda_rng_states: Any | None,
+    sampler_stop: Any | None,
+    sampler_thread: Any | None,
+) -> None:
+    """Restore process-global probe state and fail if a sampler descendant remains alive."""
+
+    failures: list[str] = []
+    if sampler_stop is not None:
+        sampler_stop.set()
+    if sampler_thread is not None:
+        sampler_thread.join(timeout=3)
+        if sampler_thread.is_alive():
+            failures.append("resource sampler did not terminate")
+    restorations = (
+        ("flash SDPA", torch_module.backends.cuda.enable_flash_sdp, previous_toggles[0]),
+        (
+            "memory-efficient SDPA",
+            torch_module.backends.cuda.enable_mem_efficient_sdp,
+            previous_toggles[1],
+        ),
+        ("math SDPA", torch_module.backends.cuda.enable_math_sdp, previous_toggles[2]),
+    )
+    for label, restore, value in restorations:
+        try:
+            restore(value)
+        except Exception:  # noqa: BLE001 - attempt every independent restoration.
+            failures.append(f"{label} setting was not restored")
+    if cpu_rng_state is not None:
+        try:
+            torch_module.random.set_rng_state(cpu_rng_state)
+        except Exception:  # noqa: BLE001
+            failures.append("CPU RNG state was not restored")
+    if cuda_rng_states is not None:
+        try:
+            torch_module.cuda.set_rng_state_all(cuda_rng_states)
+        except Exception:  # noqa: BLE001
+            failures.append("CUDA RNG state was not restored")
+    if failures:
+        raise RuntimeError("QLoRA probe cleanup failed: " + "; ".join(failures))
+
+
 def _probe_cuda_qlora_sdpa_execution_tuple(
     profile: EnvironmentProfile,
     *,
@@ -576,6 +623,11 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
         import torch  # noqa: PLC0415
         import trl  # noqa: F401,PLC0415
         from bitsandbytes.nn import Linear4bit as BnbLinear4bit  # noqa: PLC0415
+        from corpus_studio.training.trainer import (  # noqa: PLC0415
+            _buffer_devices,
+            _offload_hook_deviations,
+            _parameter_devices,
+        )
         from peft import (  # noqa: PLC0415
             LoraConfig,
             PeftModel,
@@ -622,6 +674,13 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
     baseline_gpu_reserved = 0
     baseline_host_rss = 0
     baseline_nvidia: int | None = None
+    cpu_rng_state = None
+    cuda_rng_states = None
+    try:
+        # nvidia-smi uses physical ordinals; CUDA device 0 may be remapped by CUDA_VISIBLE_DEVICES.
+        nvidia_gpu_id: str | None = str(torch.cuda._get_nvml_device_index(0))
+    except Exception:  # noqa: BLE001 - unavailable mapping makes nvidia-smi evidence unavailable.
+        nvidia_gpu_id = None
 
     def _rss_bytes() -> int:
         try:
@@ -636,10 +695,13 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                 return 0
 
     def _nvidia_process_bytes() -> int | None:
+        if nvidia_gpu_id is None:
+            return None
         try:
             completed = subprocess.run(
                 [
                     "nvidia-smi",
+                    f"--id={nvidia_gpu_id}",
                     "--query-compute-apps=pid,used_gpu_memory",
                     "--format=csv,noheader,nounits",
                 ],
@@ -666,10 +728,13 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
         return total_mib * 1024 * 1024 if found else None
 
     def _nvidia_thermal() -> dict[str, float | None]:
+        if nvidia_gpu_id is None:
+            return {"gpu_temperature_celsius": None, "gpu_power_watts": None}
         try:
             completed = subprocess.run(
                 [
                     "nvidia-smi",
+                    f"--id={nvidia_gpu_id}",
                     "--query-gpu=temperature.gpu,power.draw",
                     "--format=csv,noheader,nounits",
                 ],
@@ -746,7 +811,26 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
             outcome.measured["memory"] = memory
         return outcome
 
+    def _placement_deviation(candidate: Any) -> str | None:
+        expected_map = {"": "cuda:0"}
+        parameters = _parameter_devices(candidate)
+        if not parameters:
+            return "the QLoRA model exposes no parameter inventory"
+        bad_parameters = [name for name, device in parameters if device != "cuda:0"]
+        bad_buffers = [
+            name for name, device in _buffer_devices(candidate) if device != "cuda:0"
+        ]
+        hidden_offload = _offload_hook_deviations(candidate, expected_map)
+        if bad_parameters or bad_buffers or hidden_offload:
+            return (
+                f"parameters={bad_parameters[:5]}, buffers={bad_buffers[:5]}, "
+                f"hidden_offload={hidden_offload[:5]}"
+            )
+        return None
+
     try:
+        cpu_rng_state = torch.random.get_rng_state()
+        cuda_rng_states = torch.cuda.get_rng_state_all()
         torch.manual_seed(0)
         torch.backends.cuda.enable_flash_sdp(enable_flash)
         torch.backends.cuda.enable_mem_efficient_sdp(False)
@@ -831,9 +915,18 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                     target_modules="all-linear",
                 ),
             )
+            placement_deviation = _placement_deviation(model)
+            if placement_deviation is not None:
+                return _with_memory(
+                    ProbeOutcome(
+                        _TX.UNSUPPORTED_CONFIGURATION,
+                        "QLoRA singleton cuda:0 placement was not realized: "
+                        + placement_deviation,
+                    )
+                )
             trainable = [parameter for parameter in model.parameters() if parameter.requires_grad]
             if not trainable or any(
-                parameter.device.type != "cuda" or parameter.dtype != torch.float32
+                parameter.device != torch.device("cuda:0") or parameter.dtype != torch.float32
                 for parameter in trainable
             ):
                 return _with_memory(
@@ -854,13 +947,13 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                 bool(getattr(getattr(module.weight, "quant_state", None), "nested", False))
                 for module in linear4bit_modules
             }
-            quantized_devices = {module.weight.device.type for module in linear4bit_modules}
+            quantized_devices = {str(module.weight.device) for module in linear4bit_modules}
             if (
                 not linear4bit_modules
                 or quant_types != {"nf4"}
                 or compute_dtypes != {torch.bfloat16}
                 or nested_states != {True}
-                or quantized_devices != {"cuda"}
+                or quantized_devices != {"cuda:0"}
             ):
                 return _with_memory(
                     ProbeOutcome(
@@ -872,7 +965,7 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                     )
                 )
             optimizer = torch.optim.AdamW(trainable, lr=1e-3)
-            before = trainable[0].detach().clone()
+            before = [parameter.detach().clone() for parameter in trainable]
             # Shared with math/flash readiness probes for comparable measurements.
             input_ids = torch.randint(3, 64, (1, 8), device="cuda", dtype=torch.long)
             operation_toggles = {
@@ -926,10 +1019,19 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                         f"forced SDPBackend.{sdp_backend_name} execution failed: {exc}",
                     )
                 )
-            gradients = [parameter.grad for parameter in trainable if parameter.grad is not None]
-            if not gradients or any(gradient.dtype != torch.float32 for gradient in gradients):
+            gradients = [parameter.grad for parameter in trainable]
+            if any(
+                gradient is None
+                or gradient.dtype != torch.float32
+                or gradient.device != torch.device("cuda:0")
+                or not bool(torch.isfinite(gradient).all().item())
+                for gradient in gradients
+            ):
                 return _with_memory(
-                    ProbeOutcome(_TX.NUMERICAL_FAILURE, "QLoRA gradients were not FP32")
+                    ProbeOutcome(
+                        _TX.NUMERICAL_FAILURE,
+                        "QLoRA gradients were not finite FP32 tensors on cuda:0",
+                    )
                 )
             torch.cuda.synchronize(0)
             optimizer_started = time.perf_counter()
@@ -938,12 +1040,23 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
             phase_timings["optimizer_step_duration_seconds"] = (
                 time.perf_counter() - optimizer_started
             )
-            if not bool(torch.isfinite(output.loss).item()) or torch.equal(before, trainable[0]):
+            if not bool(torch.isfinite(output.loss).item()) or all(
+                torch.equal(old, parameter) for old, parameter in zip(before, trainable, strict=True)
+            ):
                 return _with_memory(
                     ProbeOutcome(
                         _TX.NUMERICAL_FAILURE,
                         f"BF16/NF4/QLoRA {attention_kernel} AdamW step was invalid",
                     )
+                )
+            adapter_state = {
+                name: tensor.detach().cpu().clone()
+                for name, tensor in model.state_dict().items()
+                if "lora_" in name
+            }
+            if not adapter_state:
+                return _with_memory(
+                    ProbeOutcome(_TX.CHECKPOINT_FAILURE, "adapter state inventory was empty")
                 )
             model.save_pretrained(adapter_dir, safe_serialization=True)
             adapter_path = adapter_dir / "adapter_model.safetensors"
@@ -969,6 +1082,30 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
             if not bool(torch.isfinite(reload_loss).item()):
                 return _with_memory(
                     ProbeOutcome(_TX.CHECKPOINT_FAILURE, "reloaded QLoRA adapter was non-finite")
+                )
+            reloaded_state = {
+                name: tensor.detach().cpu()
+                for name, tensor in reloaded.state_dict().items()
+                if "lora_" in name
+            }
+            if set(reloaded_state) != set(adapter_state) or any(
+                not torch.equal(adapter_state[name], reloaded_state[name])
+                for name in adapter_state
+            ):
+                return _with_memory(
+                    ProbeOutcome(
+                        _TX.CHECKPOINT_FAILURE,
+                        "reloaded Safetensors adapter bytes differ from the saved adapter state",
+                    )
+                )
+            reload_placement_deviation = _placement_deviation(reloaded)
+            if reload_placement_deviation is not None:
+                return _with_memory(
+                    ProbeOutcome(
+                        _TX.CHECKPOINT_FAILURE,
+                        "reloaded QLoRA singleton cuda:0 placement was not realized: "
+                        + reload_placement_deviation,
+                    )
                 )
             if record_phase_timing:
                 thermal.update(_nvidia_thermal())
@@ -1016,6 +1153,7 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                     "loss": float(output.loss.detach().item()),
                     "reload_loss": float(reload_loss.detach().item()),
                     "adapter_weight_bytes": adapter_bytes,
+                    "adapter_round_trip_verified": True,
                     "runtime": runtime_evidence,
                     "configuration": {
                         "compute_dtype": "bf16",
@@ -1057,13 +1195,14 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
             ProbeOutcome(_TX.FAIL, f"CUDA QLoRA execution tuple failed: {exc}")
         )
     finally:
-        if sampler_stop is not None:
-            sampler_stop.set()
-        if sampler_thread is not None:
-            sampler_thread.join(timeout=3)
-        torch.backends.cuda.enable_flash_sdp(previous[0])
-        torch.backends.cuda.enable_mem_efficient_sdp(previous[1])
-        torch.backends.cuda.enable_math_sdp(previous[2])
+        _restore_qlora_probe_process_state(
+            torch,
+            previous_toggles=previous,
+            cpu_rng_state=cpu_rng_state,
+            cuda_rng_states=cuda_rng_states,
+            sampler_stop=sampler_stop,
+            sampler_thread=sampler_thread,
+        )
 
 
 def _probe_gpu_responsive(profile: EnvironmentProfile) -> ProbeOutcome:

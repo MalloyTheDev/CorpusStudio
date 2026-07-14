@@ -6,9 +6,12 @@ doc disagrees with this file, this file wins (and the other doc should be fixed)
 Last reconciled: 2026-07-14 (through **v1.3** — Evaluation Suites & Chat Gates — plus the **platform
 run lifecycle** re-scope: profile → plan → predict-fit → run → measure-fit → artifacts, a multi-backend
 registry, and subprocess reliability. The pre-Phase-9B real GPU workload evidence remains historical
-native Windows/WDDM evidence. PR #421 adds a separate native-Linux result: the managed
-`backend-corpus-studio` environment is `HARDWARE_VERIFIED` for its minimal CUDA/4-bit/forward-backward/
-math-SDPA probe tuple. That environment-level result is not a Phase-9B or 7B workload/offload result.
+native Windows/WDDM evidence. The managed native-Linux environments now separately seal the legacy
+minimal hardware tuple, the readiness-v2 complete math QLoRA tuple, and the readiness-flash-v1 tiny
+forced-flash QLoRA tuple. The first real 0.5B bounded flash smoke loaded the model but failed placement
+verification before adapter insertion; a placement-only diagnostic found every parameter and buffer
+on `cuda:0`. No real optimizer step has passed through `platform-run`, and sequence length 4096 remains
+unverified. These environment/diagnostic results are not a 7B workload or offload result.
 The post-v1.3 additions reconciled below include the **reasoning-traces** data loop, a dataset
 **truncation guardrail** +
 configurable **checkpoint retention**, and a dependency-light **storage safe-spill** profiler —
@@ -210,8 +213,16 @@ per-item error isolation, and off-thread document opens.
   `backend-corpus-studio-readiness-flash-v1` recipe. It discovers Python runtimes, renders concrete
   no-shell argv + explicit indexes, binds a byte-exact worker wheel for readiness recipes, and
   requires the exact plan hash before mutation. Installation captures sanitized pip source/artifact
-  evidence and verifies installed `RECORD` bytes; a final lock is sealed only after the required
-  probes and a stable post-probe inventory. Readiness-v2 requires one complete BF16/NF4/double-quant
+  evidence, validates the worker wheel's own METADATA/RECORD before install, compares its immutable
+  payload files with the installed worker, and inventories every installed `RECORD` byte plus a
+  manager-computed digest of every listed file. Unrecorded site-package files and symlinks fail before
+  installed torch is imported in a second process; a final lock is sealed only after the required
+  probes and a stable post-probe inventory.
+  Health/capability probes are also bracketed by clean inventories. Manager 1.2 preserves the sealed
+  1.1 readiness-v2 math rollback identity while requiring stronger measured configuration for every
+  new creation. The existing manager-1.1 flash lock is preserved as historical evidence but is not
+  grandfathered across the new adapter-state equality requirement; it requires replacement before a
+  manager-1.2 health claim. Readiness-v2 requires one complete BF16/NF4/double-quant
   QLoRA math-SDPA forward/loss/backward/optimizer/adapter-reload tuple. Flash readiness-v1 requires
   the same complete QLoRA evidence under forced `SDPBackend.FLASH_ATTENTION` (no math/mem-efficient
   fallback), with CUDA bf16 autocast on the forced forward/backward so attention dtypes match real
@@ -222,9 +233,11 @@ per-item error isolation, and off-thread document opens.
   only contained owned paths.
   `RunPlan.environment_ref` pins the immutable
   lock hash and `platform-run --subprocess` dispatches with that managed interpreter after a live
-  health check. Tests use fake installers and bounded synthetic probe evidence. Separately, the current native-Linux host's
-  managed `backend-corpus-studio` environment passed the exact minimal hardware-probe tuple documented
-  in [`HOST_STATE.md`](HOST_STATE.md); that environment result is not workload or offload proof. See
+  health check. Tests use fake installers and bounded synthetic probe evidence. Separately, the current
+  native-Linux host has preserved seals for all three distinct tuples (the manager-1.1 flash instance
+  now requires replacement before a manager-1.2 health claim);
+  the first real 0.5B smoke failed before adapter insertion and completed zero optimizer steps. See
+  [`HOST_STATE.md`](HOST_STATE.md); none of those facts is full-workload or offload proof. See
   [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md); the full
   3-layer + MoE-safe forward plan is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) +
   [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md).
@@ -309,7 +322,8 @@ per-item error isolation, and off-thread document opens.
   matching trainer surface; independent precision/quantization/optimizer/loss/kernel results cannot
   be unioned into support. The worker verifies and echoes the configuration hash before model
   loading, reapplies kernel toggles, consumes stabilized dataset bytes, rechecks local model/tokenizer
-  roots after load, and observes post-adapter placement/precision. Echo cannot execute a training
+  roots after load, inventories singleton placement from every parameter and registered buffer, rejects
+  hidden Accelerate CPU/disk offload state, and observes post-adapter placement/precision. Echo cannot execute a training
   plan. Runtime lane/`max_steps` flags are assertions only; they cannot alter the seal. Chat-template
   errors block and truncation analysis covers the complete pinned JSONL unless the plan explicitly
   permits truncation. Runner selection derives from the pinned backend manifest, successful training

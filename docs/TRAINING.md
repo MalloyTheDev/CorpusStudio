@@ -228,17 +228,20 @@ native-Windows WDDM driver** — the training step hangs at 100% GPU util but ~5
 pulls 150–250 W). Verified on a real RTX 5070: bitsandbytes 4-bit, the *mem-efficient* SDPA
 kernel, and the *math* path all work — **only the fused flash kernel hangs, and only on native
 Windows**. WSL2 testing on the 5070 showed the same flash kernel running ~1000× faster than the math
-fallback. Bare-Linux FlashAttention has not yet been verified for the real workload on the current
-native-Linux host; its managed-environment probe verified the math path only. WSL evidence must not be
-reported as a native-Linux result.
+fallback. On the current native-Linux host, readiness-v2 separately verified the tiny complete math
+tuple and readiness-flash-v1 verified a tiny forced `SDPBackend.FLASH_ATTENTION` BF16/NF4/QLoRA tuple.
+The first real 0.5B flash smoke loaded the model but failed placement verification before adapter
+insertion, so no real flash optimizer step or sequence-4096 workload has passed. WSL evidence must not
+be reported as a native-Linux result.
 
 CorpusStudio treats **WSL as its own platform** (`OperatingSystem.wsl`): it has separately measured
 flash evidence but `wddm` memory-residency like Windows (it still spills - see below). A new platform
 plan binds an exact attention API, effective kernel, and all three PyTorch SDPA toggles. The known
 native-Windows + Blackwell hazard resolves to the math path; another host still needs a passing exact
-execution-combination probe before that policy can be sealed. These measurements predate the Phase 9B
-effective execution contract; that enforcement path still needs a fresh eligible-hardware run.
-Bare-Linux RTX 5070 real-workload behavior remains unverified; only the managed-environment math-path probe is verified.
+execution-combination probe before that policy can be sealed. The managed flash tuple now supplies
+environment-level evidence for this host, but the Phase 9B production path still needs a successful
+eligible-hardware optimizer step. Bare-Linux RTX 5070 real-workload behavior and sequence length 4096
+remain unverified.
 
 The real ceiling (measured, and it is **not** an attention-kernel problem): on a **12 GB** card
 the 7B 4-bit QLoRA training peak is ~10.8 GB @ `sequence_len` 1024 → 13.8 GB @ 2048, so above

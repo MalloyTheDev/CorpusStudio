@@ -1,7 +1,8 @@
 # CorpusStudio — Session Handoff
 
-**Last updated:** 2026-07-14 (native-Linux host onboarding - see [`docs/HOST_STATE.md`](docs/HOST_STATE.md);
-previous snapshot 2026-07-13). This is a snapshot for the next agent session (Claude Code or Codex).
+**Last updated:** 2026-07-14 (native-Linux flash readiness and first bounded smoke - see
+[`docs/HOST_STATE.md`](docs/HOST_STATE.md); previous snapshot 2026-07-13). This is a snapshot for the
+next agent session (Claude Code or Codex).
 For the authoritative *feature* state see [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md); for the
 forward plan see [`docs/ROADMAP.md`](docs/ROADMAP.md) + [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
 
@@ -15,9 +16,13 @@ forward plan see [`docs/ROADMAP.md`](docs/ROADMAP.md) + [`docs/IMPLEMENTATION_PL
   [`docs/HOST_STATE.md`](docs/HOST_STATE.md); read it first for anything hardware-adjacent.
 - Engine virtualenv: **`/mnt/training-nvme/repos/CorpusStudio/engine/.venv`** (CPython 3.12.3,
   dependency-light core + `[dev]`, torch-free).
-- The GPU **training** runtime is now the managed **`backend-corpus-studio`** environment (torch
-  2.11.0+cu128, `[train]` stack), built and `HARDWARE_VERIFIED` on this host — it supersedes the old
-  standalone `cs-train-venv`. See [`docs/HOST_STATE.md`](docs/HOST_STATE.md) and
+- The GPU **training** runtime is managed by the Environment Manager. The legacy
+  **`backend-corpus-studio`**, math rollback **`backend-corpus-studio-readiness-v2`**, and forced-flash
+  **`backend-corpus-studio-readiness-flash-v1`** environments have separate preserved
+  `HARDWARE_VERIFIED` evidence for their exact environment-level tuples. Manager 1.2 preserves the
+  math rollback but requires replacement of the manager-1.1 flash instance before a new health claim.
+  They supersede the old standalone `cs-train-venv`; none is a real-workload success claim. See
+  [`docs/HOST_STATE.md`](docs/HOST_STATE.md) and
   [`docs/ENVIRONMENT_MANAGER.md`](docs/ENVIRONMENT_MANAGER.md).
 - **History (mounted, do not work from):** this repo previously lived on Windows `F:` (USB) then `C:`
   (migrated 2026-07-13). Those filesystems are mounted read-write — `C:\…` → `/mnt/windows-c`,
@@ -106,6 +111,14 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   Avalonia `Watermark` deprecation warnings). The PR and the four post-merge `main` workflows (Engine,
   web, Desktop, and CodeQL) all passed. See
   `docs/EFFECTIVE_EXECUTION_CONFIGURATION.md`.
+- **#429 and #430 merged flash-readiness evidence sealing and semantic singleton placement** as
+  `c53efe52` and `bbd14146`. The Linux-only flash environment passed its tiny forced
+  `SDPBackend.FLASH_ATTENTION` BF16/NF4/QLoRA tuple. The first separately authorized real 0.5B,
+  three-step smoke loaded the model but failed before adapter insertion because Transformers exposed
+  no `hf_device_map`; it completed zero optimizer steps and wrote no adapter. A separate placement-only
+  diagnostic then found all 290 parameters and both buffers resident on `cuda:0`. That diagnostic is
+  evidence about that load only, not a completed `platform-run`, optimizer step, or sequence-4096
+  result. Preserved evidence is indexed in [`docs/HOST_STATE.md`](docs/HOST_STATE.md).
 
 ## 3. The architecture North Star + binding directives
 
@@ -189,9 +202,10 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 - **Predicted fit is never `NATIVE_SAFE`** — only a *measured* run earns it (the calibrator/watchdog).
 - **Blackwell / sm_120**: the **math** attention path is the verified-safe default — the fused flash-SDPA
   kernel **deadlocks on the first backward under native-Windows WDDM** (high GPU util, low power). WSL
-  flash was measured separately. On the native-Linux host the env hardware probe verified the **math**
-  path; bare-Linux FlashAttention for the real workload is still not claimed (the WDDM deadlock reason
-  does not apply here, but that is the absence of a blocker, not a positive flash result). Unsloth is
+  flash was measured separately. On the native-Linux host, readiness-v2 verified the environment-level
+  **math** tuple and readiness-flash-v1 separately verified the tiny forced **flash** tuple. The first
+  real 0.5B smoke stopped at placement verification before adapter insertion, so bare-Linux flash for
+  a real optimizer step or the sequence-4096 workload is still not claimed. Unsloth is
   honestly **refused on native-Windows/WDDM Blackwell** (it declares no math path) and routed to
   `backend-corpus-studio`. Other hosts still need their own exact functional evidence.
 - **Dependency-light boundary**: `import corpus_studio.platform` pulls **no torch**; all heavy imports
@@ -201,11 +215,14 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 7. Immediate next actions (ranked)
 
-1. **Artifact and environment integrity hardening:** share
-   the safe model-inventory implementation
-   across artifacts/checkpoints/environment inputs; verify installed bytes against `RECORD`; build and
-   hash the exact worker wheel before approval; add manager/per-environment inter-process locks; make
-   recreation blue/green. Keep this one coherent slice.
+1. **Remaining environment concurrency/transaction hardening:** installed environment inventories now
+   verify every contained RECORD entry, reject unrecorded site-package files and symlinks, then import
+   torch only in a second process after the parent validates that evidence. Readiness workers also
+   compare installed payload files with the reviewed wheel's RECORD/METADATA/pip identity. The
+   remaining slice is to share
+   safe inventory primitives across artifacts/checkpoints, add manager/per-environment inter-process
+   locks, and make recreation blue/green. Build and hash an exact worker wheel only from an approved
+   audited commit.
 2. **Continue hardware-independent work alongside the measured workload bring-up:** bounded event
    journaling, prepared-dataset/transactional row-store groundwork, TraceRecord identity/governance,
    and remaining desktop/web contracts. Keep non-trivial placement/offload execution unimplemented
@@ -227,8 +244,8 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   native-Linux *workload* VRAM behavior and every real offload fit are not yet measured.
 - **Hard verification boundary (host now assembled):** the native-Linux host and its `HARDWARE_VERIFIED`
   `backend-corpus-studio` env are real GPU evidence for the env-manager probe, but that is not a workload
-  result - still do not claim full-sequence 7B success, DeepSpeed NVMe offload, Linux FSDP, bare-Linux
-  FlashAttention for the real workload, PCIe 4.0 NVMe throughput, sustained NVMe writes, real offload
+  result - still do not claim full-sequence 7B success, DeepSpeed NVMe offload, Linux FSDP, a
+  bare-Linux flash optimizer step, PCIe 4.0 NVMe throughput, sustained NVMe writes, real offload
   fit, or MoE runtime capability. Contract representation, fake workers, CI, and a passing env hardware
   probe are not workload proof. See [`docs/HOST_STATE.md`](docs/HOST_STATE.md).
 - **Engine venv (control plane)**: `/mnt/training-nvme/repos/CorpusStudio/engine/.venv` (CPython 3.12.3,
@@ -251,9 +268,15 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   `platform/environment_manager.py` (runtime discovery, creation, journals, lock/probe/drift, owned
   removal/recreation, and RunPlan compatibility). Readiness recipes bind an exact worker wheel and a
   complete QLoRA probe tuple in the plan (math `cuda_qlora_math_execution` or forced-flash
-  `cuda_qlora_sdpa_flash_execution`), capture sanitized pip/RECORD evidence, and seal the lock only
-  after required probes plus a stable post-probe inventory. Math readiness-v2 is the preserved
-  baseline/rollback; flash readiness-v1 remains plan-only until separately authorized. The legacy
+  `cuda_qlora_sdpa_flash_execution`), capture sanitized pip/RECORD plus complete record-owned
+  installed-file-tree evidence, compare the installed worker payload with the reviewed wheel,
+  and seal the lock only after required probes plus stable pre/post inventories. Manager 1.2 preserves
+  the sealed 1.1 math rollback identity while requiring stronger evidence for new creations. Math
+  readiness-v2 is the preserved
+  baseline/rollback; the manager-1.1 flash readiness-v1 lock remains preserved historical evidence for
+  its tiny forced-flash tuple, but manager 1.2 does not grandfather its missing adapter-state equality
+  observation. It requires replacement before a new health claim. Its first real 0.5B smoke did not
+  reach adapter insertion or an optimizer step. The legacy
   `backend-corpus-studio` environment also remains available.
 - **Model/Tokenizer foundation** (Phase 3): `platform/model_inspector.py` + the `ModelDescriptor` /
   `TokenizerDescriptor` roots. `model-inspect` inventories local snapshots without network access,

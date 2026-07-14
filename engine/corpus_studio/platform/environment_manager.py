@@ -11,16 +11,21 @@ previewed, but they do not become "supported" merely because the resolver can re
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Callable, Mapping, Sequence
+import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.parser import Parser
 import hashlib
+import io
 import json
+import math
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -68,7 +73,7 @@ from .process_control import (
     terminate_process_tree,
 )
 
-MANAGER_VERSION = "1.1.0"
+MANAGER_VERSION = "1.2.0"
 REFERENCE_RECIPE_ID = "backend-corpus-studio"
 SUPPORTED_CREATION_RECIPES = frozenset(
     {REFERENCE_RECIPE_ID, READINESS_V2_RECIPE_ID, READINESS_FLASH_V1_RECIPE_ID}
@@ -81,6 +86,11 @@ _HEALTH_FILENAME = "EnvironmentHealthReport.json"
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 _PROBE_TAIL_LIMIT = 32_000
 _LOCK_OUTPUT_LIMIT = 16_000_000
+_MAX_WORKER_WHEEL_BYTES = 256 * 1024 * 1024
+_MAX_WORKER_WHEEL_EXPANDED_BYTES = 512 * 1024 * 1024
+_MAX_WORKER_ARCHIVE_MEMBERS = 10_000
+_MAX_DISTRIBUTION_METADATA_BYTES = 4 * 1024 * 1024
+_MAX_DISTRIBUTION_RECORD_BYTES = 16 * 1024 * 1024
 _ENVIRONMENT_ALLOWLIST = frozenset(
     {
         "APPDATA",
@@ -136,21 +146,42 @@ def _normalized_package_name(value: str) -> str:
     return re.sub(r"[-_.]+", "-", value).lower()
 
 
+def _validated_package_name(value: object) -> tuple[str, str]:
+    if not isinstance(value, str) or not value or any(ord(char) < 32 for char in value):
+        raise EnvironmentManagerError("package evidence contains an invalid distribution name")
+    normalized = _normalized_package_name(value)
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", normalized):
+        raise EnvironmentManagerError("package evidence contains an invalid distribution name")
+    return value, normalized
+
+
 def _sanitize_url(value: str | None) -> str | None:
     """Remove credentials, query parameters, and fragments from persisted source evidence."""
     if not value:
         return None
+    if any(
+        character.isspace() or ord(character) < 32 or ord(character) == 127
+        for character in value
+    ) or "\\" in value or re.search(r"%(?![0-9A-Fa-f]{2})", value):
+        return None
     try:
         parsed = urlsplit(value)
-    except ValueError:
+        scheme = parsed.scheme.casefold()
+        hostname = parsed.hostname
+        parsed_port = parsed.port
+    except (TypeError, ValueError):
         return None
-    if not parsed.scheme:
-        return value
-    hostname = parsed.hostname or ""
+    if not scheme or not re.fullmatch(r"[a-z][a-z0-9+.-]*", scheme):
+        return None
+    if scheme != "file" and not hostname:
+        return None
+    if scheme == "file" and (not parsed.path.startswith("/") or parsed_port is not None):
+        return None
+    hostname = hostname or ""
     if ":" in hostname and not hostname.startswith("["):
         hostname = f"[{hostname}]"
-    port = f":{parsed.port}" if parsed.port is not None else ""
-    return urlunsplit((parsed.scheme, f"{hostname}{port}", parsed.path, "", ""))
+    port = f":{parsed_port}" if parsed_port is not None else ""
+    return urlunsplit((scheme, f"{hostname}{port}", parsed.path, "", ""))
 
 
 def _hash_file(path: Path) -> str:
@@ -162,38 +193,328 @@ def _hash_file(path: Path) -> str:
 
 
 def _worker_artifact_identity(path: str | Path) -> WorkerArtifactIdentity:
-    wheel = Path(path).expanduser().resolve(strict=True)
+    candidate = Path(path).expanduser()
+    try:
+        if candidate.is_symlink():
+            raise EnvironmentManagerError(
+                "the readiness worker artifact cannot be a symbolic link"
+            )
+        wheel = candidate.resolve(strict=True)
+    except EnvironmentManagerError:
+        raise
+    except (OSError, RuntimeError) as exc:
+        raise EnvironmentManagerError(f"the readiness worker artifact is unavailable: {exc}") from exc
     if not wheel.is_file() or wheel.suffix.casefold() != ".whl":
         raise EnvironmentManagerError("the readiness worker artifact must be a concrete wheel")
     try:
-        with zipfile.ZipFile(wheel) as archive:
+        before = wheel.stat()
+        if (
+            before.st_nlink != 1
+            or before.st_size <= 0
+            or before.st_size > _MAX_WORKER_WHEEL_BYTES
+        ):
+            raise EnvironmentManagerError(
+                "the readiness worker artifact must be a singly linked bounded file"
+            )
+        with wheel.open("rb") as stream:
+            opened_before = os.fstat(stream.fileno())
+            wheel_bytes = stream.read(_MAX_WORKER_WHEEL_BYTES + 1)
+            opened_after = os.fstat(stream.fileno())
+        if len(wheel_bytes) > _MAX_WORKER_WHEEL_BYTES:
+            raise EnvironmentManagerError(
+                "the readiness worker artifact exceeds the bounded wheel size"
+            )
+        after = wheel.stat()
+        identities = {
+            (item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns)
+            for item in (before, opened_before, opened_after, after)
+        }
+        if len(identities) != 1:
+            raise EnvironmentManagerError(
+                "the readiness worker artifact changed while its identity was captured"
+            )
+        with zipfile.ZipFile(io.BytesIO(wheel_bytes)) as archive:
+            names = archive.namelist()
+            if len(names) > _MAX_WORKER_ARCHIVE_MEMBERS:
+                raise EnvironmentManagerError("the worker wheel contains too many archive members")
+            if len(names) != len(set(names)):
+                raise EnvironmentManagerError("the worker wheel contains duplicate archive members")
+            expanded_bytes = 0
+            for info in archive.infolist():
+                member = PurePosixPath(info.filename)
+                raw_member = info.filename[:-1] if info.is_dir() else info.filename
+                unix_mode = info.external_attr >> 16
+                file_type = stat.S_IFMT(unix_mode)
+                expanded_bytes += info.file_size
+                if (
+                    not raw_member
+                    or member.is_absolute()
+                    or ".." in member.parts
+                    or "\\" in info.filename
+                    or member.as_posix() != raw_member
+                    or any(ord(character) < 32 or ord(character) == 127 for character in raw_member)
+                    or info.flag_bits & 0x1
+                    or (not info.is_dir() and file_type not in {0, stat.S_IFREG})
+                ):
+                    raise EnvironmentManagerError(
+                        "the worker wheel contains an unsafe archive member"
+                    )
+            if expanded_bytes > _MAX_WORKER_WHEEL_EXPANDED_BYTES:
+                raise EnvironmentManagerError(
+                    "the worker wheel exceeds the bounded expanded size"
+                )
             metadata_names = sorted(
-                name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+                name for name in names if name.endswith(".dist-info/METADATA")
             )
             if len(metadata_names) != 1:
                 raise EnvironmentManagerError(
                     "the worker wheel must contain exactly one dist-info/METADATA file"
                 )
+            metadata_path = PurePosixPath(metadata_names[0])
+            if (
+                len(metadata_path.parts) != 2
+                or archive.getinfo(metadata_names[0]).file_size
+                > _MAX_DISTRIBUTION_METADATA_BYTES
+            ):
+                raise EnvironmentManagerError("the worker wheel METADATA is not at wheel root")
+            if any(
+                member.parts
+                and member.parts[0].endswith(".dist-info")
+                and member.parts[0] != metadata_path.parent.name
+                for member in (PurePosixPath(name) for name in names)
+            ):
+                raise EnvironmentManagerError(
+                    "the worker wheel contains more than one dist-info identity"
+                )
             metadata_bytes = archive.read(metadata_names[0])
-    except (OSError, zipfile.BadZipFile, KeyError) as exc:
+            record_names = sorted(name for name in names if name.endswith(".dist-info/RECORD"))
+            if len(record_names) != 1:
+                raise EnvironmentManagerError(
+                    "the worker wheel must contain exactly one dist-info/RECORD file"
+                )
+            record_path = PurePosixPath(record_names[0])
+            if (
+                len(record_path.parts) != 2
+                or record_path.parent != metadata_path.parent
+                or archive.getinfo(record_names[0]).file_size
+                > _MAX_DISTRIBUTION_RECORD_BYTES
+            ):
+                raise EnvironmentManagerError(
+                    "the worker wheel RECORD does not match its root METADATA identity"
+                )
+            try:
+                record_rows = list(
+                    csv.reader(
+                        io.StringIO(
+                            archive.read(record_names[0]).decode("utf-8", errors="strict")
+                        )
+                    )
+                )
+            except (UnicodeError, csv.Error) as exc:
+                raise EnvironmentManagerError(f"the worker wheel RECORD is malformed: {exc}") from exc
+            archive_files = {info.filename: info for info in archive.infolist() if not info.is_dir()}
+            recorded_files: set[str] = set()
+            for row in record_rows:
+                if len(row) != 3 or not row[0] or row[0] in recorded_files:
+                    raise EnvironmentManagerError("the worker wheel RECORD contains malformed rows")
+                record_member, hash_spec, size_text = row
+                record_info = archive_files.get(record_member)
+                if record_info is None:
+                    raise EnvironmentManagerError(
+                        "the worker wheel RECORD names a missing archive member"
+                    )
+                recorded_files.add(record_member)
+                if record_member == record_names[0]:
+                    if hash_spec or size_text:
+                        raise EnvironmentManagerError(
+                            "the worker wheel RECORD self-entry must be unhashed"
+                        )
+                    continue
+                try:
+                    algorithm, expected = hash_spec.split("=", 1)
+                    expected_size = int(size_text)
+                    decoded_expected = base64.urlsafe_b64decode(
+                        expected + "=" * (-len(expected) % 4)
+                    )
+                except (ValueError, TypeError) as exc:
+                    raise EnvironmentManagerError(
+                        "the worker wheel RECORD contains a malformed digest or size"
+                    ) from exc
+                actual_bytes = archive.read(record_member)
+                if (
+                    algorithm != "sha256"
+                    or not re.fullmatch(r"[A-Za-z0-9_-]+", expected)
+                    or len(decoded_expected) != hashlib.sha256().digest_size
+                    or expected_size != len(actual_bytes)
+                    or hashlib.sha256(actual_bytes).digest() != decoded_expected
+                ):
+                    raise EnvironmentManagerError(
+                        "the worker wheel RECORD does not verify its archive bytes"
+                    )
+            if recorded_files != set(archive_files):
+                raise EnvironmentManagerError(
+                    "the worker wheel RECORD does not inventory every archive file"
+                )
+    except EnvironmentManagerError:
+        raise
+    except (OSError, UnicodeError, zipfile.BadZipFile, KeyError) as exc:
         raise EnvironmentManagerError(f"the worker wheel is unreadable: {exc}") from exc
-    metadata = Parser().parsestr(metadata_bytes.decode("utf-8", errors="strict"))
-    name = str(metadata.get("Name") or "")
-    version = str(metadata.get("Version") or "")
-    if not name or not version or _normalized_package_name(name) != "corpus-studio-engine":
+    try:
+        metadata = Parser().parsestr(metadata_bytes.decode("utf-8", errors="strict"))
+    except UnicodeError as exc:
+        raise EnvironmentManagerError(f"the worker wheel METADATA is invalid UTF-8: {exc}") from exc
+    names = metadata.get_all("Name", [])
+    versions = metadata.get_all("Version", [])
+    if len(names) != 1 or len(versions) != 1:
+        raise EnvironmentManagerError(
+            "the worker wheel METADATA must contain exactly one Name and Version"
+        )
+    name, normalized_name = _validated_package_name(str(names[0]))
+    version = str(versions[0])
+    if (
+        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.!+_-]*", version)
+        or normalized_name != "corpus-studio-engine"
+    ):
         raise EnvironmentManagerError(
             "the worker wheel METADATA must identify the corpus-studio-engine distribution"
         )
+    filename_parts = wheel.stem.split("-")
+    dist_info_identity = metadata_path.parts[0].removesuffix(".dist-info").rsplit("-", 1)
+    if (
+        len(filename_parts) < 5
+        or _normalized_package_name(filename_parts[0]) != normalized_name
+        or filename_parts[1] != version
+        or len(dist_info_identity) != 2
+        or _normalized_package_name(dist_info_identity[0]) != normalized_name
+        or dist_info_identity[1] != version
+    ):
+        raise EnvironmentManagerError(
+            "the worker wheel filename, dist-info directory, and METADATA identity disagree"
+        )
     return WorkerArtifactIdentity(
         distribution_name=name,
-        normalized_name=_normalized_package_name(name),
+        normalized_name=normalized_name,
         version=version,
         filename=wheel.name,
         path=str(wheel),
-        size_bytes=wheel.stat().st_size,
-        content_hash=HashRef(value=_hash_file(wheel)),
+        size_bytes=len(wheel_bytes),
+        content_hash=HashRef(value=hashlib.sha256(wheel_bytes).hexdigest()),
         metadata_hash=HashRef(value=hashlib.sha256(metadata_bytes).hexdigest()),
     )
+
+
+def _worker_wheel_payload_manifest(
+    artifact: WorkerArtifactIdentity,
+) -> dict[str, str]:
+    """Return immutable wheel-member SHA-256s, excluding RECORD which pip rewrites."""
+
+    if _worker_artifact_identity(artifact.path) != artifact:
+        raise EnvironmentManagerError("the reviewed worker wheel identity changed")
+    wheel = Path(artifact.path)
+    try:
+        wheel_bytes = wheel.read_bytes()
+        if (
+            len(wheel_bytes) != artifact.size_bytes
+            or hashlib.sha256(wheel_bytes).hexdigest() != artifact.content_hash.value
+        ):
+            raise EnvironmentManagerError("the reviewed worker wheel identity changed")
+        with zipfile.ZipFile(io.BytesIO(wheel_bytes)) as archive:
+            record_names = [
+                name for name in archive.namelist() if name.endswith(".dist-info/RECORD")
+            ]
+            if len(record_names) != 1:
+                raise EnvironmentManagerError("the reviewed worker wheel RECORD is ambiguous")
+            record_name = record_names[0]
+            rows = csv.reader(
+                io.StringIO(archive.read(record_name).decode("utf-8", errors="strict"))
+            )
+            manifest: dict[str, str] = {}
+            for row in rows:
+                if len(row) != 3 or not row[0] or row[0] in manifest:
+                    raise EnvironmentManagerError("the reviewed worker wheel RECORD is malformed")
+                if row[0] == record_name:
+                    continue
+                algorithm, encoded = row[1].split("=", 1)
+                decoded = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+                if algorithm != "sha256" or len(decoded) != hashlib.sha256().digest_size:
+                    raise EnvironmentManagerError(
+                        "the reviewed worker wheel RECORD has an unsupported digest"
+                    )
+                manifest[row[0]] = decoded.hex()
+    except EnvironmentManagerError:
+        raise
+    except (OSError, UnicodeError, ValueError, zipfile.BadZipFile) as exc:
+        raise EnvironmentManagerError(
+            f"the reviewed worker wheel payload is unreadable: {exc}"
+        ) from exc
+    return manifest
+
+
+def _worker_wheel_entry_point_scripts(
+    artifact: WorkerArtifactIdentity,
+) -> tuple[set[str], set[str]]:
+    """Return reviewed console/gui script names that pip may generate outside site-packages."""
+
+    manifest = _worker_wheel_payload_manifest(artifact)
+    metadata_members = [
+        PurePosixPath(path)
+        for path in manifest
+        if path.endswith(".dist-info/METADATA")
+    ]
+    if len(metadata_members) != 1:
+        raise EnvironmentManagerError("the reviewed worker wheel has ambiguous metadata")
+    entry_points_path = metadata_members[0].parent / "entry_points.txt"
+    if entry_points_path.as_posix() not in manifest:
+        return set(), set()
+    try:
+        wheel_bytes = Path(artifact.path).read_bytes()
+        if (
+            len(wheel_bytes) != artifact.size_bytes
+            or hashlib.sha256(wheel_bytes).hexdigest() != artifact.content_hash.value
+        ):
+            raise EnvironmentManagerError("the reviewed worker wheel identity changed")
+        with zipfile.ZipFile(io.BytesIO(wheel_bytes)) as archive:
+            content = archive.read(entry_points_path.as_posix()).decode(
+                "utf-8", errors="strict"
+            )
+    except EnvironmentManagerError:
+        raise
+    except (OSError, UnicodeError, zipfile.BadZipFile, KeyError) as exc:
+        raise EnvironmentManagerError(
+            f"the reviewed worker entry points are unreadable: {exc}"
+        ) from exc
+
+    groups: dict[str, set[str]] = {"console_scripts": set(), "gui_scripts": set()}
+    section: str | None = None
+    all_names: set[str] = set()
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        section_match = re.fullmatch(r"\[([A-Za-z0-9_.-]+)\]", line)
+        if section_match:
+            section = section_match.group(1)
+            continue
+        if section not in groups:
+            continue
+        if "=" not in line:
+            raise EnvironmentManagerError(
+                "the reviewed worker entry_points.txt is malformed"
+            )
+        name, target = (part.strip() for part in line.split("=", 1))
+        if (
+            not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name)
+            or not target
+            or len(target) > 4096
+            or any(ord(character) < 32 or ord(character) == 127 for character in target)
+            or name in all_names
+        ):
+            raise EnvironmentManagerError(
+                "the reviewed worker entry_points.txt contains an unsafe script identity"
+            )
+        groups[section].add(name)
+        all_names.add(name)
+    return groups["console_scripts"], groups["gui_scripts"]
 
 
 def _command_environment(extra: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -556,37 +877,281 @@ def _native_build_evidence(stderr: str, stdout: str) -> bool:
 
 
 _LOCK_PROBE = r"""
-import base64, csv, hashlib, importlib.metadata as metadata, io, json, os, platform, re, struct, sys
+import base64, csv, hashlib, importlib.metadata as metadata, importlib.util, io, json, marshal, os, platform, re, stat, struct, sys, types
+from email.parser import Parser
+from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
+environment_root = Path(sys.argv[1]).resolve(strict=True)
+if os.name == "nt":
+    site_candidates = [environment_root / "Lib" / "site-packages"]
+else:
+    version_dir = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    site_candidates = [environment_root / "lib" / version_dir / "site-packages", environment_root / "lib64" / version_dir / "site-packages"]
+site_roots = []
+def is_linklike(path):
+    return path.is_symlink() or bool(getattr(path, "is_junction", lambda: False)())
+
+for candidate in site_candidates:
+    if not candidate.is_dir(): continue
+    cursor = Path(os.path.abspath(candidate)); symlinked_candidate = False
+    while cursor != environment_root:
+        if is_linklike(cursor): symlinked_candidate = True; break
+        parent = cursor.parent
+        if parent == cursor: raise RuntimeError("site-packages is outside the managed environment")
+        cursor = parent
+    if symlinked_candidate: continue
+    resolved_site = candidate.resolve(strict=True)
+    if environment_root not in resolved_site.parents: raise RuntimeError("site-packages escapes the managed environment")
+    if str(resolved_site) not in site_roots: site_roots.append(str(resolved_site))
+if not site_roots: raise RuntimeError("managed site-packages is missing")
+
+def safe_label(value):
+    return re.sub(r"[^A-Za-z0-9._/+ -]", "?", str(value))[:200]
+
+def sanitize_url(value):
+    if not isinstance(value, str) or not value: raise RuntimeError("direct URL is malformed")
+    if any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value) or "\\" in value or re.search(r"%(?![0-9A-Fa-f]{2})", value):
+        raise RuntimeError("direct URL is malformed")
+    try:
+        parsed = urlsplit(value); scheme = parsed.scheme.casefold(); hostname = parsed.hostname; parsed_port = parsed.port
+    except Exception as exc: raise RuntimeError("direct URL is malformed") from exc
+    if not scheme or not re.fullmatch(r"[a-z][a-z0-9+.-]*", scheme): raise RuntimeError("direct URL is malformed")
+    if scheme != "file" and not hostname: raise RuntimeError("direct URL is malformed")
+    if scheme == "file" and (not parsed.path.startswith("/") or parsed_port is not None): raise RuntimeError("direct URL is malformed")
+    hostname = hostname or ""
+    if ":" in hostname and not hostname.startswith("["): hostname = f"[{hostname}]"
+    port = f":{parsed_port}" if parsed_port is not None else ""
+    return urlunsplit((scheme, f"{hostname}{port}", parsed.path, "", ""))
+
+def sanitize_direct_metadata(value):
+    if value is None: return None
+    if not isinstance(value, dict): raise RuntimeError("direct_url metadata is malformed")
+    kinds = [key for key in ("archive_info", "dir_info", "vcs_info") if key in value]
+    if len(kinds) != 1 or not isinstance(value[kinds[0]], dict): raise RuntimeError("direct_url metadata is malformed")
+    sanitized = {"url": sanitize_url(value.get("url"))}
+    kind = kinds[0]; details = value[kind]
+    if kind == "archive_info":
+        sanitized[kind] = {}
+    elif kind == "dir_info":
+        editable = details.get("editable")
+        if editable is not None and not isinstance(editable, bool): raise RuntimeError("direct_url metadata is malformed")
+        sanitized[kind] = {"editable": bool(editable)}
+    else:
+        vcs = details.get("vcs"); commit = details.get("commit_id")
+        if not isinstance(vcs, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+-]{0,31}", vcs): raise RuntimeError("direct_url VCS identity is malformed")
+        if not isinstance(commit, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", commit): raise RuntimeError("direct_url VCS identity is malformed")
+        sanitized[kind] = {"vcs": vcs, "commit_id": commit}
+    return sanitized
+
+def hash_regular_file(path):
+    before = path.stat(); digest = hashlib.sha256(); size = 0
+    with path.open("rb") as stream:
+        opened_before = os.fstat(stream.fileno())
+        while True:
+            chunk = stream.read(1024 * 1024)
+            if not chunk: break
+            digest.update(chunk); size += len(chunk)
+        opened_after = os.fstat(stream.fileno())
+    after = path.stat()
+    identities = {(item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns) for item in (before, opened_before, opened_after, after)}
+    if (
+        len(identities) != 1
+        or not stat.S_ISREG(opened_after.st_mode)
+        or opened_after.st_nlink != 1
+    ):
+        raise RuntimeError("installed file changed while it was inventoried")
+    return digest.digest(), size
+
+def read_bounded_regular_file(path, limit):
+    if is_linklike(path): raise RuntimeError("installed file crosses a symbolic link or junction")
+    before = path.stat()
+    if not stat.S_ISREG(before.st_mode) or before.st_size > limit: raise RuntimeError("installed file is not a bounded regular file")
+    with path.open("rb") as stream:
+        opened_before = os.fstat(stream.fileno()); content = stream.read(limit + 1); opened_after = os.fstat(stream.fileno())
+    after = path.stat()
+    identities = {(item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns) for item in (before, opened_before, opened_after, after)}
+    if len(content) > limit or len(identities) != 1 or opened_after.st_nlink != 1:
+        raise RuntimeError("installed file changed or exceeded its bound")
+    return content
+
+def verify_source_bytecode(path):
+    match = re.fullmatch(r"(.+)\.(?:cpython|pypy)-[0-9]+(?:\.opt-([0-9]+))?\.pyc", path.name)
+    if match is None or path.parent.name != "__pycache__": raise RuntimeError("worker bytecode has no canonical source identity")
+    source_path = path.parent.parent / f"{match.group(1)}.py"
+    cursor = Path(os.path.abspath(source_path))
+    while cursor != environment_root:
+        if is_linklike(cursor): raise RuntimeError("worker bytecode source crosses a symbolic link or junction")
+        parent = cursor.parent
+        if parent == cursor: raise RuntimeError("worker bytecode source is outside the managed environment")
+        cursor = parent
+    resolved_source = source_path.resolve(strict=True)
+    if environment_root not in resolved_source.parents: raise RuntimeError("worker bytecode source escapes the managed environment")
+    pyc_bytes = read_bounded_regular_file(path, 16 * 1024 * 1024)
+    source_bytes = read_bounded_regular_file(resolved_source, 16 * 1024 * 1024)
+    if len(pyc_bytes) < 16 or pyc_bytes[:4] != importlib.util.MAGIC_NUMBER or int.from_bytes(pyc_bytes[4:8], "little") not in {0, 1, 3}:
+        raise RuntimeError("worker bytecode header is invalid")
+    marshalled = io.BytesIO(pyc_bytes[16:])
+    try: observed = marshal.load(marshalled)
+    except Exception as exc: raise RuntimeError("worker bytecode payload is malformed") from exc
+    if marshalled.read(1) or not isinstance(observed, types.CodeType): raise RuntimeError("worker bytecode payload is malformed")
+    if not isinstance(observed.co_filename, str) or len(observed.co_filename) > 4096 or "\x00" in observed.co_filename:
+        raise RuntimeError("worker bytecode filename is malformed")
+    optimize = int(match.group(2) or 0)
+    try: expected = compile(source_bytes, observed.co_filename, "exec", dont_inherit=True, optimize=optimize)
+    except Exception as exc: raise RuntimeError("worker bytecode source cannot be compiled") from exc
+    def code_signature(code):
+        def constant_signature(value):
+            if isinstance(value, types.CodeType):
+                return code_signature(value)
+            if isinstance(value, tuple):
+                return ("tuple", tuple(constant_signature(item) for item in value))
+            if isinstance(value, frozenset):
+                return (
+                    "frozenset",
+                    tuple(sorted(repr(constant_signature(item)) for item in value)),
+                )
+            return (type(value).__name__, repr(value))
+        return (
+            code.co_argcount,
+            code.co_posonlyargcount,
+            code.co_kwonlyargcount,
+            code.co_nlocals,
+            code.co_stacksize,
+            code.co_flags,
+            code.co_code,
+            tuple(constant_signature(item) for item in code.co_consts),
+            code.co_names,
+            code.co_varnames,
+            code.co_freevars,
+            code.co_cellvars,
+            getattr(code, "co_exceptiontable", b""),
+        )
+    if code_signature(observed) != code_signature(expected): raise RuntimeError("worker bytecode differs from reviewed source")
+
+def read_metadata_file(distribution_path, filename, limit, required=False):
+    path = distribution_path / filename
+    if is_linklike(path): raise RuntimeError("distribution metadata contains a symbolic link or junction")
+    try: before = path.stat()
+    except FileNotFoundError:
+        if required: raise RuntimeError(f"distribution metadata is missing {filename}")
+        return None
+    if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
+        raise RuntimeError(f"distribution metadata {filename} is not a bounded regular file")
+    with path.open("rb") as stream:
+        opened_before = os.fstat(stream.fileno()); content = stream.read(limit + 1); opened_after = os.fstat(stream.fileno())
+    after = path.stat()
+    identities = {(item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns) for item in (before, opened_before, opened_after, after)}
+    if len(content) > limit or len(identities) != 1:
+        raise RuntimeError(f"distribution metadata {filename} changed or exceeded its bound")
+    try: return content.decode("utf-8", errors="strict")
+    except UnicodeError as exc: raise RuntimeError(f"distribution metadata {filename} is not UTF-8") from exc
+
 packages = []
-for dist in metadata.distributions():
-    name = dist.metadata.get("Name") or getattr(dist, "name", "")
-    if not name: continue
-    direct_text = dist.read_text("direct_url.json")
-    try: direct = json.loads(direct_text) if direct_text else None
-    except Exception: direct = None
-    record = dist.read_text("RECORD")
-    installer = dist.read_text("INSTALLER")
+owned_record_files = {}
+seen_distribution_names = set()
+for dist in metadata.distributions(path=site_roots):
+    distribution_location = getattr(dist, "_path", None)
+    if distribution_location is None: raise RuntimeError("distribution metadata has no concrete path")
+    distribution_path = Path(distribution_location)
+    cursor = Path(os.path.abspath(distribution_path))
+    while cursor != environment_root:
+        if is_linklike(cursor): raise RuntimeError("distribution metadata crosses a symbolic link or junction")
+        parent = cursor.parent
+        if parent == cursor: raise RuntimeError("distribution metadata is outside the managed environment")
+        cursor = parent
+    resolved_distribution = distribution_path.resolve(strict=True)
+    if not resolved_distribution.is_dir() or not any(Path(root) in resolved_distribution.parents for root in site_roots):
+        raise RuntimeError("distribution metadata escapes managed site-packages")
+    metadata_text = read_metadata_file(distribution_path, "METADATA", 4 * 1024 * 1024, required=True)
+    metadata_headers = Parser().parsestr(metadata_text)
+    names = metadata_headers.get_all("Name", [])
+    versions = metadata_headers.get_all("Version", [])
+    if len(names) != 1 or len(versions) != 1:
+        raise RuntimeError("distribution metadata has an ambiguous identity")
+    name = str(names[0]); version = str(versions[0])
+    normalized_name = re.sub(r"[-_.]+", "-", name).lower()
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", normalized_name) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.!+_-]*", version):
+        raise RuntimeError("distribution metadata has an invalid identity")
+    if normalized_name in seen_distribution_names:
+        raise RuntimeError("managed site-packages contains duplicate normalized distributions")
+    seen_distribution_names.add(normalized_name)
+    direct_text = read_metadata_file(distribution_path, "direct_url.json", 1024 * 1024)
+    direct_parse_error = False
+    try:
+        direct = sanitize_direct_metadata(json.loads(direct_text)) if direct_text else None
+    except Exception:
+        direct = None
+        direct_parse_error = True
+    if direct_parse_error:
+        raise RuntimeError("installed direct_url metadata is malformed")
+    record = read_metadata_file(distribution_path, "RECORD", 16 * 1024 * 1024)
+    installer = read_metadata_file(distribution_path, "INSTALLER", 64 * 1024)
+    dependencies = metadata_headers.get_all("Requires-Dist", [])
+    if any(any(ord(character) < 32 and character not in "\t" for character in item) for item in dependencies):
+        raise RuntimeError("distribution metadata has malformed dependencies")
     record_entries = 0
     verified_entries = 0
     failed_entries = []
+    installed_files = []
+    seen_record_paths = set()
     if record:
-        for row in csv.reader(io.StringIO(record)):
+        try: rows = list(csv.reader(io.StringIO(record)))
+        except Exception: rows = [] ; failed_entries.append("<malformed RECORD CSV>")
+        for row in rows:
             if not row: continue
             record_entries += 1
-            relative = row[0]
-            hash_spec = row[1] if len(row) > 1 else ""
-            if not hash_spec: continue
+            relative = row[0] if row else ""
             try:
-                algorithm, expected = hash_spec.split("=", 1)
-                path = dist.locate_file(relative)
-                digest = hashlib.new(algorithm, path.read_bytes()).digest()
-                actual = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
-                if actual == expected:
+                if len(row) != 3 or not relative or relative in seen_record_paths:
+                    raise ValueError("malformed or duplicate RECORD row")
+                seen_record_paths.add(relative)
+                if any(ord(character) < 32 or ord(character) == 127 for character in relative):
+                    raise ValueError("unsafe RECORD path")
+                hash_spec, size_text = row[1], row[2]
+                relative_path = Path(relative)
+                if relative_path.is_absolute():
+                    raise ValueError("absolute RECORD path")
+                path = Path(dist.locate_file(relative))
+                resolved = path.resolve(strict=True)
+                if resolved != environment_root and environment_root not in resolved.parents:
+                    raise ValueError("RECORD path escapes the managed environment")
+                cursor = Path(os.path.abspath(path))
+                while cursor != environment_root:
+                    if is_linklike(cursor):
+                        raise ValueError("RECORD path crosses a symbolic link or junction")
+                    parent = cursor.parent
+                    if parent == cursor:
+                        raise ValueError("RECORD path is outside the managed environment")
+                    cursor = parent
+                if not resolved.is_file():
+                    raise ValueError("RECORD entry is not a regular file")
+                digest, installed_size = hash_regular_file(resolved)
+                resolved_key = str(resolved)
+                prior_owner = owned_record_files.get(resolved_key)
+                if prior_owner is not None and prior_owner[1:] != (digest.hex(), installed_size):
+                    raise ValueError("multiple RECORD entries own one installed file with different bytes")
+                owned_record_files[resolved_key] = (name, digest.hex(), installed_size)
+                installed_files.append((relative, digest.hex()))
+                if (
+                    normalized_name == "corpus-studio-engine"
+                    and relative_path.name.endswith(".pyc")
+                ):
+                    verify_source_bytecode(resolved)
+                if hash_spec:
+                    algorithm, expected = hash_spec.split("=", 1)
+                    if algorithm != "sha256" or not re.fullmatch(r"[A-Za-z0-9_-]+", expected):
+                        raise ValueError("unsupported or malformed RECORD digest")
+                    actual = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+                    if actual != expected or not size_text or int(size_text) != installed_size:
+                        raise ValueError("RECORD digest or size mismatch")
                     verified_entries += 1
-                else:
-                    failed_entries.append(relative)
+                elif not (
+                    relative.endswith(".dist-info/RECORD")
+                    or ("/__pycache__/" in f"/{relative}" and relative.endswith(".pyc"))
+                ):
+                    raise ValueError("unexpected unhashed RECORD entry")
             except Exception:
-                failed_entries.append(relative)
+                failed_entries.append(safe_label(relative or "<empty RECORD path>"))
     if not record:
         record_integrity = "missing"
     elif failed_entries:
@@ -595,30 +1160,39 @@ for dist in metadata.distributions():
         record_integrity = "verified"
     else:
         record_integrity = "unknown"
+    installed_files_hash = None
+    if record_integrity == "verified":
+        installed_files_hash = hashlib.sha256(json.dumps(sorted(installed_files), separators=(",", ":"), ensure_ascii=True).encode("utf-8")).hexdigest()
     packages.append({
       "name": name,
-      "normalized_name": re.sub(r"[-_.]+", "-", name).lower(),
-      "version": dist.version,
+      "normalized_name": normalized_name,
+      "version": version,
       "record_sha256": hashlib.sha256(record.encode("utf-8")).hexdigest() if record else None,
       "record_integrity": record_integrity,
       "record_entries": record_entries,
       "record_verified_entries": verified_entries,
-      "record_failed_entries": sorted(failed_entries),
+      "record_failed_entries": sorted(set(failed_entries)),
+      "installed_files_sha256": installed_files_hash,
+      "installed_file_count": len(installed_files),
+      "installed_file_manifest": sorted(installed_files) if normalized_name == "corpus-studio-engine" else None,
+      "metadata_sha256": hashlib.sha256(metadata_text.encode("utf-8")).hexdigest() if metadata_text else None,
       "direct_url": direct,
+      "direct_url_parse_error": direct_parse_error,
       "installer": installer.strip() if installer else None,
-      "requested": dist.read_text("REQUESTED") is not None,
-      "dependencies": sorted(dist.requires or []),
+      "requested": (distribution_path / "REQUESTED").is_file(),
+      "dependencies": sorted(dependencies),
     })
+for site_root in site_roots:
+    for current_root, directory_names, file_names in os.walk(site_root, followlinks=False):
+        current = Path(current_root)
+        for entry_name in [*directory_names, *file_names]:
+            if is_linklike(current / entry_name):
+                raise RuntimeError("managed site-packages contains a symbolic link or junction")
+        for file_name in file_names:
+            installed_path = (current / file_name).resolve(strict=True)
+            if not installed_path.is_file() or str(installed_path) not in owned_record_files:
+                raise RuntimeError("managed site-packages contains an unrecorded file")
 torch_data = {"version": None, "build": None, "cuda": None, "compute_capability": None}
-try:
-    import torch
-    torch_data["version"] = str(torch.__version__)
-    torch_data["build"] = str(getattr(torch.version, "git_version", None) or torch.__version__)
-    torch_data["cuda"] = getattr(torch.version, "cuda", None)
-    if torch.cuda.is_available():
-        torch_data["compute_capability"] = ".".join(map(str, torch.cuda.get_device_capability(0)))
-except Exception as exc:
-    torch_data["error"] = str(exc)
 system = platform.system(); release = platform.release()
 if system.lower() == "windows": os_name = "windows"
 elif system.lower() == "darwin": os_name = "macos"
@@ -633,12 +1207,57 @@ print(json.dumps({
     "architecture": f"{struct.calcsize('P') * 8}-bit",
     "platform": platform.platform(),
     "os": os_name,
-    "is_virtual_environment": sys.prefix != sys.base_prefix,
+    "is_virtual_environment": environment_root != Path(sys.base_prefix).resolve(strict=True),
     "venv_available": True,
   },
   "packages": sorted(packages, key=lambda p: p["name"].lower()),
   "torch": torch_data,
 }, sort_keys=True))
+""".strip()
+
+
+_TORCH_INVENTORY_PROBE = r"""
+import json, os, sys, tempfile
+from importlib import metadata
+from importlib.util import find_spec
+from pathlib import Path
+environment_root = Path(sys.argv[1]).resolve(strict=True)
+if os.name == "nt":
+    candidates = [environment_root / "Lib" / "site-packages"]
+else:
+    version_dir = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    candidates = [environment_root / "lib" / version_dir / "site-packages", environment_root / "lib64" / version_dir / "site-packages"]
+site_roots = [candidate.resolve(strict=True) for candidate in candidates if candidate.is_dir()]
+if not site_roots or any(environment_root not in root.parents for root in site_roots):
+    raise RuntimeError("managed site-packages is missing or escapes the environment")
+sys.path[:0] = [str(root) for root in site_roots]
+result = {"version": None, "build": None, "cuda": None, "compute_capability": None}
+try:
+    with tempfile.TemporaryDirectory(prefix="corpusstudio-inventory-pyc-") as pycache_root:
+        sys.pycache_prefix = pycache_root; sys.dont_write_bytecode = True
+        torch_distribution = metadata.distribution("torch")
+        torch_files = {
+            torch_distribution.locate_file(item).resolve(strict=True)
+            for item in (torch_distribution.files or ())
+        }
+        torch_spec = find_spec("torch")
+        if torch_spec is None or torch_spec.origin is None:
+            raise RuntimeError("installed torch has no import origin")
+        expected_framework_file = Path(torch_spec.origin).resolve(strict=True)
+        if expected_framework_file not in torch_files:
+            raise RuntimeError("torch import origin is not owned by the torch distribution")
+        import torch
+        framework_file = Path(torch.__file__).resolve(strict=True)
+        if framework_file != expected_framework_file or not any(root in framework_file.parents for root in site_roots):
+            raise RuntimeError("torch imported outside managed site-packages")
+        result["version"] = str(torch.__version__)
+        result["build"] = str(getattr(torch.version, "git_version", None) or torch.__version__)
+        result["cuda"] = getattr(torch.version, "cuda", None)
+        if torch.cuda.is_available():
+            result["compute_capability"] = ".".join(map(str, torch.cuda.get_device_capability(0)))
+except Exception as exc:
+    result["error"] = f"{type(exc).__name__}: {exc}"
+print(json.dumps(result, sort_keys=True))
 """.strip()
 
 
@@ -788,6 +1407,84 @@ def _direct_metadata(direct: object) -> tuple[bool | None, bool | None, str | No
     return True, editable, repository, commit
 
 
+def _validate_installed_direct_url(direct: object) -> None:
+    """Fail closed on malformed PEP 610 metadata before classifying its source."""
+
+    if direct is None:
+        return
+    if not isinstance(direct, dict):
+        raise EnvironmentManagerError(
+            "environment inventory contains malformed direct_url metadata"
+        )
+    raw_url = direct.get("url")
+    if not isinstance(raw_url, str) or _sanitize_url(raw_url) is None:
+        raise EnvironmentManagerError(
+            "environment inventory contains a malformed direct artifact URL"
+        )
+    kinds = [key for key in ("archive_info", "dir_info", "vcs_info") if key in direct]
+    if len(kinds) != 1 or not isinstance(direct[kinds[0]], dict):
+        raise EnvironmentManagerError(
+            "environment inventory direct_url must identify exactly one source kind"
+        )
+    subdirectory = direct.get("subdirectory")
+    if subdirectory is not None and (
+        not isinstance(subdirectory, str)
+        or any(ord(character) < 32 for character in subdirectory)
+    ):
+        raise EnvironmentManagerError(
+            "environment inventory direct_url contains a malformed subdirectory"
+        )
+    if kinds[0] == "dir_info":
+        editable = direct["dir_info"].get("editable")
+        if editable is not None and not isinstance(editable, bool):
+            raise EnvironmentManagerError(
+                "environment inventory direct_url contains a malformed editable flag"
+            )
+    if kinds[0] == "archive_info":
+        archive_info = direct["archive_info"]
+        hashes = archive_info.get("hashes")
+        legacy_hash = archive_info.get("hash")
+        if hashes is not None and (
+            not isinstance(hashes, dict)
+            or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in hashes.items()
+            )
+        ):
+            raise EnvironmentManagerError(
+                "environment inventory direct_url contains malformed archive hashes"
+            )
+        if legacy_hash is not None and not isinstance(legacy_hash, str):
+            raise EnvironmentManagerError(
+                "environment inventory direct_url contains a malformed archive hash"
+            )
+    if kinds[0] == "vcs_info":
+        vcs_info = direct["vcs_info"]
+        vcs = vcs_info.get("vcs")
+        commit_id = vcs_info.get("commit_id")
+        if (
+            not isinstance(vcs, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+-]{0,31}", vcs)
+            or not isinstance(commit_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", commit_id)
+        ):
+            raise EnvironmentManagerError(
+                "environment inventory direct_url contains malformed VCS identity"
+            )
+        requested_revision = vcs_info.get("requested_revision")
+        if requested_revision is not None and (
+            not isinstance(requested_revision, str)
+            or len(requested_revision) > 1024
+            or any(
+                ord(character) < 32 or ord(character) == 127
+                for character in requested_revision
+            )
+        ):
+            raise EnvironmentManagerError(
+                "environment inventory direct_url contains a malformed VCS revision"
+            )
+
+
 def _install_evidence_from_report(
     report_path: Path,
     *,
@@ -799,38 +1496,140 @@ def _install_evidence_from_report(
     except (OSError, json.JSONDecodeError) as exc:
         raise EnvironmentManagerError(f"pip install evidence is missing or malformed: {exc}") from exc
     raw_installs = payload.get("install") if isinstance(payload, dict) else None
-    if not isinstance(raw_installs, list):
+    if (
+        not isinstance(payload, dict)
+        or payload.get("version") != "1"
+        or not isinstance(raw_installs, list)
+    ):
         raise EnvironmentManagerError("pip install evidence has no install list")
-    configured_indexes = [
-        sanitized
-        for value in step.configured_index_urls
-        if (sanitized := _sanitize_url(value)) is not None
-    ]
+    configured_indexes: list[str] = []
+    for value in step.configured_index_urls:
+        sanitized = _sanitize_url(value)
+        if sanitized is None:
+            raise EnvironmentManagerError("pip install evidence contains a malformed index URL")
+        configured_indexes.append(sanitized)
     evidence: list[PackageInstallEvidence] = []
-    for raw in raw_installs:
+    seen_names: set[str] = set()
+    for position, raw in enumerate(raw_installs):
         if not isinstance(raw, dict):
-            continue
+            raise EnvironmentManagerError(
+                f"pip install evidence entry {position} is not an object"
+            )
         metadata = raw.get("metadata")
         download = raw.get("download_info")
         if not isinstance(metadata, dict) or not isinstance(download, dict):
-            continue
-        name = str(metadata.get("name") or "")
-        version = str(metadata.get("version") or "")
-        if not name or not version:
-            continue
-        raw_url = str(download.get("url") or "") or None
+            raise EnvironmentManagerError(
+                f"pip install evidence entry {position} lacks metadata or download_info"
+            )
+        name, normalized_name = _validated_package_name(metadata.get("name"))
+        version_value = metadata.get("version")
+        if (
+            not isinstance(version_value, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.!+_-]*", version_value)
+        ):
+            raise EnvironmentManagerError(
+                f"pip install evidence for {name} contains an invalid version"
+            )
+        version = version_value
+        if normalized_name in seen_names:
+            raise EnvironmentManagerError(
+                f"pip install evidence contains duplicate normalized distribution {normalized_name}"
+            )
+        seen_names.add(normalized_name)
+        raw_url_value = download.get("url")
+        if not isinstance(raw_url_value, str) or not raw_url_value:
+            raise EnvironmentManagerError(f"pip install evidence for {name} has no artifact URL")
+        raw_url = raw_url_value
         sanitized_url = _sanitize_url(raw_url)
-        is_direct = bool(raw.get("is_direct"))
+        if sanitized_url is None:
+            raise EnvironmentManagerError(
+                f"pip install evidence for {name} contains a malformed artifact URL"
+            )
+        is_direct_value = raw.get("is_direct")
+        if not isinstance(is_direct_value, bool):
+            raise EnvironmentManagerError(
+                f"pip install evidence for {name} has an invalid is_direct flag"
+            )
+        is_direct = is_direct_value
         archive_info = download.get("archive_info")
         dir_info = download.get("dir_info")
         vcs_info = download.get("vcs_info")
+        if any(
+            key in download and not isinstance(download.get(key), dict)
+            for key in ("archive_info", "dir_info", "vcs_info")
+        ):
+            raise EnvironmentManagerError(
+                f"pip install evidence for {name} contains malformed source metadata"
+            )
+        source_kinds = sum(
+            isinstance(item, dict) for item in (archive_info, dir_info, vcs_info)
+        )
+        if source_kinds != 1:
+            raise EnvironmentManagerError(
+                f"pip install evidence for {name} must identify exactly one source kind"
+            )
+        if not is_direct and (isinstance(dir_info, dict) or isinstance(vcs_info, dict)):
+            raise EnvironmentManagerError(
+                f"pip install evidence for {name} marks a local or VCS source as indirect"
+            )
         hashes = archive_info.get("hashes") if isinstance(archive_info, dict) else None
         sha256 = str(hashes.get("sha256") or "") if isinstance(hashes, dict) else ""
+        if isinstance(archive_info, dict) and not re.fullmatch(r"[0-9a-fA-F]{64}", sha256):
+            raise EnvironmentManagerError(
+                f"pip install evidence for {name} lacks a valid artifact SHA-256"
+            )
+        sha256 = sha256.lower()
         artifact = (
             Path(unquote(urlparse(sanitized_url).path)).name
             if sanitized_url
             else None
         ) or None
+        if artifact is not None and any(
+            ord(character) < 32 or ord(character) == 127 for character in artifact
+        ):
+            raise EnvironmentManagerError(
+                f"pip install evidence for {name} contains an unsafe artifact filename"
+            )
+        requested_value = raw.get("requested")
+        if requested_value is not None and not isinstance(requested_value, bool):
+            raise EnvironmentManagerError(
+                f"pip install evidence for {name} has an invalid requested flag"
+            )
+        if isinstance(dir_info, dict):
+            editable_value = dir_info.get("editable")
+            if editable_value is not None and not isinstance(editable_value, bool):
+                raise EnvironmentManagerError(
+                    f"pip install evidence for {name} has an invalid editable flag"
+                )
+            if urlparse(sanitized_url).scheme.casefold() != "file":
+                raise EnvironmentManagerError(
+                    f"pip install evidence for {name} has a non-file local source"
+                )
+        if isinstance(vcs_info, dict):
+            vcs = vcs_info.get("vcs")
+            commit_id = vcs_info.get("commit_id")
+            if (
+                not isinstance(vcs, str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+-]{0,31}", vcs)
+                or not isinstance(commit_id, str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", commit_id)
+            ):
+                raise EnvironmentManagerError(
+                    f"pip install evidence for {name} has malformed VCS identity"
+                )
+            requested_revision = vcs_info.get("requested_revision")
+            if requested_revision is not None and (
+                not isinstance(requested_revision, str)
+                or len(requested_revision) > 1024
+                or any(
+                    ord(character) < 32 or ord(character) == 127
+                    for character in requested_revision
+                )
+            ):
+                raise EnvironmentManagerError(
+                    f"pip install evidence for {name} has a malformed VCS revision"
+                )
+        source_index_url: str | None = None
         if isinstance(vcs_info, dict):
             source: PackageSource = "vcs"
         elif is_direct and isinstance(dir_info, dict):
@@ -838,14 +1637,24 @@ def _install_evidence_from_report(
         elif is_direct and isinstance(archive_info, dict):
             source = "wheel" if artifact and artifact.casefold().endswith(".whl") else "sdist"
         elif configured_indexes:
-            # Host identity only - avoid substring checks on full URLs (CodeQL).
-            if any(
-                (urlparse(item).hostname or "").casefold() in {"pypi.org", "www.pypi.org"}
-                for item in configured_indexes
-            ):
-                source = "pypi"
-            elif artifact and artifact.casefold().endswith(".whl"):
-                source = "wheel"
+            artifact_host = (urlparse(sanitized_url).hostname or "").casefold()
+            matching_indexes: list[tuple[str, bool]] = []
+            for index_url in configured_indexes:
+                index_host = (urlparse(index_url).hostname or "").casefold()
+                pypi = index_host in {"pypi.org", "www.pypi.org"}
+                if artifact_host == index_host or (
+                    pypi and artifact_host in {"files.pythonhosted.org", "pypi.org"}
+                ):
+                    matching_indexes.append((index_url, pypi))
+            if len(matching_indexes) == 1:
+                source_index_url, pypi = matching_indexes[0]
+                source = (
+                    "pypi"
+                    if pypi
+                    else "wheel"
+                    if artifact and artifact.casefold().endswith(".whl")
+                    else "sdist"
+                )
             else:
                 source = "unknown"
         else:
@@ -855,20 +1664,18 @@ def _install_evidence_from_report(
             reason = (
                 "pip report did not prove an index or direct source"
                 if not configured_indexes
-                else "configured index is recorded but its source class is not recognized"
+                else "artifact host did not identify exactly one configured index"
             )
         evidence.append(
             PackageInstallEvidence(
-                normalized_name=_normalized_package_name(name),
+                normalized_name=normalized_name,
                 version=version,
                 source=source,
-                source_index_url=configured_indexes[0]
-                if not is_direct and len(configured_indexes) == 1
-                else None,
+                source_index_url=source_index_url,
                 direct_url=sanitized_url if is_direct else None,
                 artifact_filename=artifact,
                 artifact_hash=HashRef(value=sha256) if sha256 else None,
-                requested=bool(raw.get("requested")),
+                requested=requested_value,
                 direct=is_direct,
                 editable=bool(dir_info.get("editable"))
                 if isinstance(dir_info, dict)
@@ -883,6 +1690,27 @@ def _install_evidence_from_report(
             )
         )
     return sorted(evidence, key=lambda item: (item.normalized_name, item.version))
+
+
+def _assert_worker_install_evidence(
+    evidence: Sequence[PackageInstallEvidence], artifact: WorkerArtifactIdentity
+) -> None:
+    worker_installs = [
+        item for item in evidence if item.normalized_name == artifact.normalized_name
+    ]
+    expected_url = _sanitize_url(Path(artifact.path).resolve(strict=True).as_uri())
+    if (
+        len(worker_installs) != 1
+        or worker_installs[0].source != "wheel"
+        or worker_installs[0].direct is not True
+        or worker_installs[0].direct_url != expected_url
+        or worker_installs[0].artifact_filename != artifact.filename
+        or worker_installs[0].artifact_hash != artifact.content_hash
+        or worker_installs[0].version != artifact.version
+    ):
+        raise EnvironmentManagerError(
+            "pip evidence does not prove installation of the reviewed worker wheel"
+        )
 
 
 class EnvironmentManager:
@@ -952,6 +1780,14 @@ class EnvironmentManager:
                     worker_artifact = _worker_artifact_identity(worker_wheel)
                 except EnvironmentManagerError as exc:
                     blocking.append(str(exc))
+            if worker_artifact is not None:
+                artifact_path = Path(worker_artifact.path)
+                target_root = self.environment_root(env_id)
+                if artifact_path == target_root or target_root in artifact_path.parents:
+                    blocking.append(
+                        "the readiness worker wheel cannot live inside the environment being replaced"
+                    )
+                    worker_artifact = None
             if worker_artifact is not None:
                 evidence_path = str(
                     self.environment_root(env_id)
@@ -1142,6 +1978,15 @@ class EnvironmentManager:
             env_root.mkdir(parents=True, exist_ok=False)
             self._write_owner(env_root, env_id, created_at)
             for step in resolution.install_steps:
+                if (
+                    resolution.worker_artifact is not None
+                    and resolution.worker_artifact.path in step.argv
+                    and _worker_artifact_identity(resolution.worker_artifact.path)
+                    != resolution.worker_artifact
+                ):
+                    raise EnvironmentManagerError(
+                        "the CorpusStudio worker wheel changed immediately before installation"
+                    )
                 installation = self._execute_step(
                     env_id,
                     installation,
@@ -1149,6 +1994,16 @@ class EnvironmentManager:
                     cancel=cancel,
                     require_evidence=recipe.requires_worker_wheel,
                 )
+                if (
+                    resolution.worker_artifact is not None
+                    and resolution.worker_artifact.path in step.argv
+                ):
+                    # Compare pip's hash before launching any newly installed interpreter process.
+                    # A wheel swapped after the pre-step stat check can never reach an import probe.
+                    _assert_worker_install_evidence(
+                        installation.package_install_evidence,
+                        resolution.worker_artifact,
+                    )
             installation = installation.model_copy(
                 update={"worker_artifact": resolution.worker_artifact}
             )
@@ -1164,6 +2019,18 @@ class EnvironmentManager:
                 update={"pre_probe_inventory": pre_probe}
             )
             self._write_installation(env_id, installation)
+            if recipe.requires_worker_wheel:
+                unverified = [
+                    item.name
+                    for item in pre_probe.packages
+                    if item.record_integrity != "verified"
+                    or item.installed_files_hash is None
+                ]
+                if unverified:
+                    raise EnvironmentManagerError(
+                        "installed package bytes must verify before readiness probes may import them: "
+                        + ", ".join(sorted(unverified, key=str.casefold))
+                    )
             probe_results, final_state, installation, probe_evidence = self._run_creation_probes(
                 descriptor,
                 installation,
@@ -1193,7 +2060,11 @@ class EnvironmentManager:
                 descriptor = self._update_descriptor(descriptor, state=final_state)
                 finished = _timestamp(self.now)
                 installation = installation.model_copy(
-                    update={"state": final_state, "finished_at": finished}
+                    update={
+                        "state": final_state,
+                        "finished_at": finished,
+                        "retry_requires_recreate": True,
+                    }
                 )
                 self._write_installation(env_id, installation)
                 health = EnvironmentHealthReport(
@@ -1225,7 +2096,11 @@ class EnvironmentManager:
                 descriptor = self._update_descriptor(descriptor, state=final_state)
                 finished = _timestamp(self.now)
                 installation = installation.model_copy(
-                    update={"state": final_state, "finished_at": finished}
+                    update={
+                        "state": final_state,
+                        "finished_at": finished,
+                        "retry_requires_recreate": True,
+                    }
                 )
                 self._write_installation(env_id, installation)
                 health = EnvironmentHealthReport(
@@ -1261,7 +2136,11 @@ class EnvironmentManager:
             # A final live inventory is compared with the just-sealed state. This is the first point
             # at which health/drift is evaluated against a final lock.
             live_inventory = self._inspect_live_inventory(
-                descriptor, lock.recipe_ref, lock.index_urls, cancel
+                descriptor,
+                lock.recipe_ref,
+                lock.index_urls,
+                cancel,
+                worker_artifact=lock.worker_artifact,
             )
             drifted, changed_sources = self._package_drift(
                 lock.packages, live_inventory.packages
@@ -1409,7 +2288,11 @@ class EnvironmentManager:
             return report
         try:
             live_inventory = self._inspect_live_inventory(
-                descriptor, lock.recipe_ref, lock.index_urls, cancel
+                descriptor,
+                lock.recipe_ref,
+                lock.index_urls,
+                cancel,
+                worker_artifact=lock.worker_artifact,
             )
         except EnvironmentManagerError as exc:
             report = EnvironmentHealthReport(
@@ -1445,12 +2328,12 @@ class EnvironmentManager:
             lock.lock_hash != self._lock_digest(lock)
             or descriptor_lock_hash != lock.lock_hash
         )
+        if recipe is not None and self._locked_probe_evidence_mismatch(
+            lock, recipe.required_execution_probe
+        ):
+            lock_mismatch = True
         cuda_mismatch = lock.cuda_runtime_version != live_inventory.cuda_runtime_version
         hardware_mismatch = lock.compute_capability != live_inventory.compute_capability
-
-        probe_results, probe_state, probe_evidence = self._health_probes(
-            descriptor, cancel=cancel
-        )
         drift = bool(
             drifted
             or changed_sources
@@ -1459,6 +2342,68 @@ class EnvironmentManager:
             or cuda_mismatch
             or hardware_mismatch
         )
+        probe_results: list[ProbeResult] = []
+        probe_state = descriptor.state
+        probe_evidence: EnvironmentProbeEvidence | None = None
+        if not drift:
+            # Never import a package set that already differs from its lock. After clean probes, take
+            # a second isolated (-I -S) inventory so probe-side mutation cannot be reported healthy.
+            probe_results, probe_state, probe_evidence = self._health_probes(
+                descriptor,
+                lock=lock,
+                cancel=cancel,
+            )
+            try:
+                post_probe_inventory = self._inspect_live_inventory(
+                    descriptor,
+                    lock.recipe_ref,
+                    lock.index_urls,
+                    cancel,
+                    worker_artifact=lock.worker_artifact,
+                )
+            except EnvironmentManagerError as exc:
+                report = EnvironmentHealthReport(
+                    environment_ref=Ref(id=env_id),
+                    recipe_ref=descriptor.recipe_ref,
+                    lock_ref=descriptor.lock_ref,
+                    state=EnvironmentState.broken,
+                    checked_at=checked_at,
+                    probe_results=probe_results,
+                    probe_evidence=probe_evidence,
+                    failure=exc.failure,
+                    remediation=(
+                        "A post-probe inventory failed; inspect health logs and recreate from a "
+                        "reviewed plan."
+                    ),
+                )
+                self._write_health(env_id, report)
+                self._update_descriptor(descriptor, state=EnvironmentState.broken)
+                return report
+            post_drifted, post_sources = self._package_drift(
+                lock.packages, post_probe_inventory.packages
+            )
+            post_worker_drift = self._worker_artifact_drift(lock.worker_artifact)
+            if post_worker_drift:
+                post_drifted.append(post_worker_drift)
+            drifted = sorted(set(drifted + post_drifted))
+            changed_sources = sorted(set(changed_sources + post_sources))
+            live_inventory = post_probe_inventory
+            cuda_mismatch = lock.cuda_runtime_version != live_inventory.cuda_runtime_version
+            hardware_mismatch = lock.compute_capability != live_inventory.compute_capability
+            try:
+                post_probe_lock = self.load_lock(env_id)
+            except EnvironmentManagerError:
+                lock_mismatch = True
+            else:
+                lock_mismatch = lock_mismatch or post_probe_lock != lock
+            drift = bool(
+                drifted
+                or changed_sources
+                or recipe_drift
+                or lock_mismatch
+                or cuda_mismatch
+                or hardware_mismatch
+            )
         state = EnvironmentState.drifted if drift else probe_state
         report = EnvironmentHealthReport(
             environment_ref=Ref(id=env_id),
@@ -1512,6 +2457,7 @@ class EnvironmentManager:
                 f"managed environment '{env_id}' is {health.state.value}, not functionally verified"
             )
         descriptor = self.load_descriptor(env_id)
+        lock = self.load_lock(env_id)
         recipe = get_recipe(descriptor.recipe_ref.id)
         probes = (
             recipe.capability_probes
@@ -1551,6 +2497,23 @@ class EnvironmentManager:
         if report.backend_id != "corpus_studio" or report.environment_ref.id != profile.environment_signature:
             raise EnvironmentManagerError(
                 "managed capability report does not match its environment profile"
+            )
+        post_probe_inventory = self._inspect_live_inventory(
+            descriptor,
+            lock.recipe_ref,
+            lock.index_urls,
+            cancel,
+            worker_artifact=lock.worker_artifact,
+        )
+        drifted, changed_sources = self._package_drift(
+            lock.packages, post_probe_inventory.packages
+        )
+        worker_drift = self._worker_artifact_drift(lock.worker_artifact)
+        if worker_drift:
+            drifted.append(worker_drift)
+        if drifted or changed_sources or self.load_lock(env_id) != lock:
+            raise EnvironmentManagerError(
+                "managed capability probing changed the sealed environment; recreate it"
             )
         return profile, report
 
@@ -1758,6 +2721,17 @@ class EnvironmentManager:
         by_name = {
             item.normalized_name: item for item in installation.package_install_evidence
         }
+        collisions = sorted(
+            item.normalized_name for item in captured if item.normalized_name in by_name
+        )
+        if collisions:
+            failure = FailureRecord(
+                taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
+                message="pip install evidence repeats a distribution across install steps",
+                detail=", ".join(collisions),
+            )
+            installation = self._mark_last_command_failure(env_id, installation, failure)
+            raise EnvironmentManagerError(failure.message, failure, installation)
         by_name.update({item.normalized_name: item for item in captured})
         installation = installation.model_copy(
             update={
@@ -1896,15 +2870,56 @@ class EnvironmentManager:
             descriptor.env_id,
             installation,
             phase="inventory",
-            argv=[descriptor.python_executable, "-c", _LOCK_PROBE],
+            argv=[
+                descriptor.python_executable,
+                "-I",
+                "-S",
+                "-c",
+                _LOCK_PROBE,
+                descriptor.root_path,
+            ],
             cwd=Path(descriptor.root_path),
             environment=_command_environment(),
             timeout_seconds=120,
             cancel=cancel,
         )
-        output = Path(installation.commands[-1].stdout_path or "")
+        inventory_output = Path(installation.commands[-1].stdout_path or "")
         try:
-            payload = _last_json_object(_read_tail(output, _LOCK_OUTPUT_LIMIT))
+            payload = _last_json_object(
+                _read_tail(inventory_output, _LOCK_OUTPUT_LIMIT)
+            )
+            # Validate all non-executable metadata and worker bytes before importing torch from the
+            # newly installed environment in a separate process.
+            self._inventory_from_payload(
+                descriptor,
+                resolution.recipe_ref,
+                resolution.resolved_index_urls,
+                payload,
+                package_install_evidence=installation.package_install_evidence,
+                worker_artifact=resolution.worker_artifact,
+                require_framework_identity=False,
+            )
+            installation = self._execute_recorded(
+                descriptor.env_id,
+                installation,
+                phase="inventory",
+                argv=[
+                    descriptor.python_executable,
+                    "-I",
+                    "-S",
+                    "-c",
+                    _TORCH_INVENTORY_PROBE,
+                    descriptor.root_path,
+                ],
+                cwd=Path(descriptor.root_path),
+                environment=_command_environment(),
+                timeout_seconds=120,
+                cancel=cancel,
+            )
+            framework_output = Path(installation.commands[-1].stdout_path or "")
+            framework_payload = _last_json_object(_read_tail(framework_output))
+            payload = dict(payload)
+            payload["torch"] = framework_payload
             inventory = self._inventory_from_payload(
                 descriptor,
                 resolution.recipe_ref,
@@ -1941,15 +2956,29 @@ class EnvironmentManager:
         recipe_ref: Ref,
         index_urls: Sequence[str],
         cancel: CancellationToken | None,
+        *,
+        worker_artifact: WorkerArtifactIdentity | None = None,
     ) -> InstalledEnvironmentEvidence:
         registry = self._registry_dir(descriptor.env_id)
+        verifiable_worker_artifact = worker_artifact
+        if self._worker_artifact_drift(worker_artifact) is not None:
+            # Preserve package/file drift inspection when the external authorization wheel moved or
+            # disappeared. The caller records that worker-artifact drift separately.
+            verifiable_worker_artifact = None
         log_dir = registry / "logs" / "health"
         stamp = uuid.uuid4().hex[:12]
         stdout_path = log_dir / f"{stamp}-inventory.stdout.log"
         stderr_path = log_dir / f"{stamp}-inventory.stderr.log"
         try:
             outcome = self.runner(
-                [descriptor.python_executable, "-c", _LOCK_PROBE],
+                [
+                    descriptor.python_executable,
+                    "-I",
+                    "-S",
+                    "-c",
+                    _LOCK_PROBE,
+                    descriptor.root_path,
+                ],
                 cwd=Path(descriptor.root_path),
                 environment=_command_environment(),
                 timeout_seconds=120,
@@ -1981,7 +3010,69 @@ class EnvironmentManager:
             )
         try:
             payload = _last_json_object(_read_tail(stdout_path, _LOCK_OUTPUT_LIMIT))
-            return self._inventory_from_payload(descriptor, recipe_ref, index_urls, payload)
+            self._inventory_from_payload(
+                descriptor,
+                recipe_ref,
+                index_urls,
+                payload,
+                worker_artifact=verifiable_worker_artifact,
+                require_framework_identity=False,
+            )
+            framework_stdout = log_dir / f"{stamp}-framework.stdout.log"
+            framework_stderr = log_dir / f"{stamp}-framework.stderr.log"
+            try:
+                framework_outcome = self.runner(
+                    [
+                        descriptor.python_executable,
+                        "-I",
+                        "-S",
+                        "-c",
+                        _TORCH_INVENTORY_PROBE,
+                        descriptor.root_path,
+                    ],
+                    cwd=Path(descriptor.root_path),
+                    environment=_command_environment(),
+                    timeout_seconds=120,
+                    stdout_path=framework_stdout,
+                    stderr_path=framework_stderr,
+                    cancel=cancel,
+                )
+            except Exception as exc:
+                raise EnvironmentManagerError(
+                    "failed to start verified torch runtime inspection",
+                    FailureRecord(
+                        taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
+                        message="failed to start verified torch runtime inspection",
+                        detail=str(exc),
+                        exception_type=type(exc).__name__,
+                    ),
+                ) from exc
+            if (
+                framework_outcome.exit_code != 0
+                or framework_outcome.timed_out
+                or framework_outcome.cancelled
+            ):
+                raise EnvironmentManagerError(
+                    "failed to inspect the verified torch runtime",
+                    FailureRecord(
+                        taxonomy=FailureTaxonomy.TIMEOUT
+                        if framework_outcome.timed_out
+                        else FailureTaxonomy.ENVIRONMENT_FAILURE,
+                        exit_code=framework_outcome.exit_code,
+                        message="failed to inspect the verified torch runtime",
+                        detail=_read_tail(framework_stderr) or None,
+                    ),
+                )
+            framework_payload = _last_json_object(_read_tail(framework_stdout))
+            payload = dict(payload)
+            payload["torch"] = framework_payload
+            return self._inventory_from_payload(
+                descriptor,
+                recipe_ref,
+                index_urls,
+                payload,
+                worker_artifact=verifiable_worker_artifact,
+            )
         except (ValueError, json.JSONDecodeError) as exc:
             raise EnvironmentManagerError(
                 "the live environment inventory probe returned malformed data",
@@ -2001,30 +3092,90 @@ class EnvironmentManager:
         *,
         package_install_evidence: Sequence[PackageInstallEvidence] = (),
         worker_artifact: WorkerArtifactIdentity | None = None,
+        require_framework_identity: bool = True,
     ) -> InstalledEnvironmentEvidence:
         raw_runtime = payload.get("runtime")
         raw_packages = payload.get("packages")
         raw_torch = payload.get("torch")
-        if not isinstance(raw_runtime, dict) or not isinstance(raw_packages, list):
+        if (
+            not isinstance(raw_runtime, dict)
+            or not isinstance(raw_packages, list)
+            or not raw_packages
+            or not isinstance(raw_torch, dict)
+        ):
             raise EnvironmentManagerError("the environment inventory probe returned malformed data")
         runtime = _runtime_from_payload(raw_runtime, ">=3.11")
-        evidence_by_name = {
-            item.normalized_name: item for item in package_install_evidence
-        }
+        evidence_by_name: dict[str, PackageInstallEvidence] = {}
+        for item in package_install_evidence:
+            if item.normalized_name in evidence_by_name:
+                raise EnvironmentManagerError(
+                    "package install evidence contains duplicate normalized distribution "
+                    f"{item.normalized_name}"
+                )
+            evidence_by_name[item.normalized_name] = item
         packages: list[PackageLock] = []
-        for raw in raw_packages:
+        seen_names: set[str] = set()
+        for position, raw in enumerate(raw_packages):
             if not isinstance(raw, dict):
-                continue
-            installer = str(raw.get("installer") or "") or None
-            source, direct_url, artifact = _package_source(raw.get("direct_url"))
-            direct, editable, vcs_repository, vcs_commit = _direct_metadata(
-                raw.get("direct_url")
-            )
-            record_hash = str(raw.get("record_sha256") or "") or None
-            name = str(raw.get("name") or "")
-            normalized_name = str(raw.get("normalized_name") or "") or _normalized_package_name(
-                name
-            )
+                raise EnvironmentManagerError(
+                    f"environment inventory package entry {position} is not an object"
+                )
+            raw_installer = raw.get("installer")
+            if raw_installer is not None and (
+                not isinstance(raw_installer, str)
+                or any(ord(character) < 32 for character in raw_installer)
+            ):
+                raise EnvironmentManagerError(
+                    "environment inventory contains malformed installer metadata"
+                )
+            installer = raw_installer or None
+            direct_payload = raw.get("direct_url")
+            if raw.get("direct_url_parse_error") is not False:
+                raise EnvironmentManagerError(
+                    "environment inventory could not parse installed direct_url metadata"
+                )
+            _validate_installed_direct_url(direct_payload)
+            source, direct_url, artifact = _package_source(direct_payload)
+            direct, editable, vcs_repository, vcs_commit = _direct_metadata(direct_payload)
+            raw_record_hash = raw.get("record_sha256")
+            if raw_record_hash is not None and (
+                not isinstance(raw_record_hash, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", raw_record_hash)
+            ):
+                raise EnvironmentManagerError(
+                    "environment inventory contains a malformed RECORD SHA-256"
+                )
+            record_hash = raw_record_hash
+            raw_installed_hash = raw.get("installed_files_sha256")
+            if raw_installed_hash is not None and (
+                not isinstance(raw_installed_hash, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", raw_installed_hash)
+            ):
+                raise EnvironmentManagerError(
+                    "environment inventory contains a malformed installed-files SHA-256"
+                )
+            name, normalized_name = _validated_package_name(raw.get("name"))
+            emitted_normalized = raw.get("normalized_name")
+            if not isinstance(emitted_normalized, (str, type(None))) or (
+                emitted_normalized not in {None, "", normalized_name}
+            ):
+                raise EnvironmentManagerError(
+                    f"environment inventory normalized name disagrees for {name}"
+                )
+            if normalized_name in seen_names:
+                raise EnvironmentManagerError(
+                    "environment inventory contains duplicate normalized distribution "
+                    f"{normalized_name}"
+                )
+            seen_names.add(normalized_name)
+            raw_version = raw.get("version")
+            if (
+                not isinstance(raw_version, str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.!+_-]*", raw_version)
+            ):
+                raise EnvironmentManagerError(
+                    f"environment inventory contains an invalid version for {name}"
+                )
             install_evidence = evidence_by_name.get(normalized_name)
             if install_evidence is not None:
                 source = install_evidence.source
@@ -2040,18 +3191,185 @@ class EnvironmentManager:
             if worker_artifact is not None and normalized_name == worker_artifact.normalized_name:
                 artifact = worker_artifact.filename
                 artifact_hash = worker_artifact.content_hash
+                observed_metadata_hash = raw.get("metadata_sha256")
+                if (
+                    worker_artifact.metadata_hash is None
+                    or not isinstance(observed_metadata_hash, str)
+                    or observed_metadata_hash != worker_artifact.metadata_hash.value
+                ):
+                    raise EnvironmentManagerError(
+                        "installed CorpusStudio worker METADATA differs from the reviewed wheel"
+                    )
+                raw_manifest = raw.get("installed_file_manifest")
+                if not isinstance(raw_manifest, list):
+                    raise EnvironmentManagerError(
+                        "installed CorpusStudio worker omitted its file manifest"
+                    )
+                installed_manifest: dict[str, str] = {}
+                for entry in raw_manifest:
+                    if (
+                        not isinstance(entry, list)
+                        or len(entry) != 2
+                        or not isinstance(entry[0], str)
+                        or not isinstance(entry[1], str)
+                        or entry[0] in installed_manifest
+                        or not re.fullmatch(r"[0-9a-f]{64}", entry[1])
+                    ):
+                        raise EnvironmentManagerError(
+                            "installed CorpusStudio worker emitted a malformed file manifest"
+                        )
+                    installed_manifest[entry[0]] = entry[1]
+                expected_manifest = _worker_wheel_payload_manifest(worker_artifact)
+                console_scripts, gui_scripts = _worker_wheel_entry_point_scripts(
+                    worker_artifact
+                )
+                mismatched_worker_files = sorted(
+                    path
+                    for path, expected_hash in expected_manifest.items()
+                    if installed_manifest.get(path) != expected_hash
+                )
+                if mismatched_worker_files:
+                    raise EnvironmentManagerError(
+                        "installed CorpusStudio worker files differ from the reviewed wheel: "
+                        + ", ".join(mismatched_worker_files[:5])
+                    )
+                metadata_members = [
+                    PurePosixPath(path)
+                    for path in expected_manifest
+                    if path.endswith(".dist-info/METADATA")
+                ]
+                if len(metadata_members) != 1:
+                    raise EnvironmentManagerError(
+                        "reviewed CorpusStudio worker has ambiguous metadata"
+                    )
+                dist_info = metadata_members[0].parent
+
+                if runtime.os == OperatingSystem.windows:
+                    generated_script_directory = "scripts"
+                    casefold_generated_scripts = True
+                    generated_script_names = {
+                        *(f"{name}.exe".casefold() for name in console_scripts | gui_scripts),
+                        *(f"{name}-script.py".casefold() for name in console_scripts),
+                        *(f"{name}-script.pyw".casefold() for name in gui_scripts),
+                    }
+                else:
+                    generated_script_directory = "bin"
+                    casefold_generated_scripts = False
+                    generated_script_names = console_scripts | gui_scripts
+
+                def _allowed_generated_worker_file(path: str) -> bool:
+                    member = PurePosixPath(path)
+                    if (
+                        len(member.parts) >= 2
+                        and (
+                            member.parts[-2].casefold()
+                            if casefold_generated_scripts
+                            else member.parts[-2]
+                        )
+                        == generated_script_directory
+                        and member.parts[:-2]
+                        and all(part == ".." for part in member.parts[:-2])
+                        and (
+                            member.name.casefold()
+                            if casefold_generated_scripts
+                            else member.name
+                        )
+                        in generated_script_names
+                    ):
+                        return True
+                    if member.parent == dist_info and member.name in {
+                        "RECORD",
+                        "INSTALLER",
+                        "REQUESTED",
+                        "direct_url.json",
+                    }:
+                        return True
+                    pyc_match = re.fullmatch(
+                        r"(.+)\.(?:cpython|pypy)-[0-9]+(?:\.opt-[0-9]+)?\.pyc",
+                        member.name,
+                    )
+                    if pyc_match and member.parent.name == "__pycache__":
+                        source = member.parent.parent / f"{pyc_match.group(1)}.py"
+                        return source.as_posix() in expected_manifest
+                    return False
+
+                unexpected_worker_files = sorted(
+                    path
+                    for path in installed_manifest
+                    if path not in expected_manifest
+                    and not _allowed_generated_worker_file(path)
+                )
+                if unexpected_worker_files:
+                    raise EnvironmentManagerError(
+                        "installed CorpusStudio worker contains files absent from the reviewed wheel: "
+                        + ", ".join(unexpected_worker_files[:5])
+                    )
+            raw_metadata_hash = raw.get("metadata_sha256")
+            if raw_metadata_hash is not None and (
+                not isinstance(raw_metadata_hash, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", raw_metadata_hash)
+            ):
+                raise EnvironmentManagerError(
+                    f"environment inventory contains a malformed METADATA SHA-256 for {name}"
+                )
             raw_integrity = str(raw.get("record_integrity") or "unknown")
+            if raw_integrity not in {"verified", "failed", "missing", "unknown"}:
+                raise EnvironmentManagerError(
+                    f"environment inventory contains invalid RECORD status for {name}"
+                )
             record_integrity = cast(
                 Literal["verified", "failed", "missing", "unknown"],
-                raw_integrity
-                if raw_integrity in {"verified", "failed", "missing", "unknown"}
-                else "unknown",
+                raw_integrity,
             )
+            raw_failed_entries = raw.get("record_failed_entries") or []
+            raw_dependencies = raw.get("dependencies") or []
+            if not isinstance(raw_failed_entries, list) or not isinstance(
+                raw_dependencies, list
+            ):
+                raise EnvironmentManagerError(
+                    f"environment inventory contains malformed lists for {name}"
+                )
+            if any(
+                not isinstance(item, str) or any(ord(character) < 32 for character in item)
+                for item in [*raw_failed_entries, *raw_dependencies]
+            ):
+                raise EnvironmentManagerError(
+                    f"environment inventory contains malformed list values for {name}"
+                )
+            count_values: dict[str, int] = {}
+            for field_name in (
+                "record_entries",
+                "record_verified_entries",
+                "installed_file_count",
+            ):
+                value = raw.get(field_name)
+                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                    raise EnvironmentManagerError(
+                        f"environment inventory contains an invalid {field_name} for {name}"
+                    )
+                count_values[field_name] = value
+            if count_values["record_verified_entries"] > count_values["record_entries"]:
+                raise EnvironmentManagerError(
+                    f"environment inventory RECORD counts disagree for {name}"
+                )
+            if record_integrity == "verified" and (
+                record_hash is None
+                or raw_installed_hash is None
+                or count_values["installed_file_count"] != count_values["record_entries"]
+            ):
+                raise EnvironmentManagerError(
+                    f"environment inventory lacks complete verified-file evidence for {name}"
+                )
+            raw_requested = raw.get("requested")
+            if not isinstance(raw_requested, bool):
+                raise EnvironmentManagerError(
+                    f"environment inventory contains an invalid requested flag for {name}"
+                )
             packages.append(
                 PackageLock(
                     name=name,
                     normalized_name=normalized_name,
-                    version=str(raw.get("version") or "") or None,
+                    version=raw_version,
                     hash=HashRef(value=record_hash) if record_hash else None,
                     source=source,
                     source_index_url=install_evidence.source_index_url
@@ -2061,7 +3379,7 @@ class EnvironmentManager:
                     artifact=artifact,
                     artifact_hash=artifact_hash,
                     installer=installer,
-                    requested=bool(raw.get("requested")),
+                    requested=raw_requested,
                     direct=direct,
                     editable=editable,
                     vcs_repository=vcs_repository,
@@ -2074,16 +3392,71 @@ class EnvironmentManager:
                         else "installed metadata and pip reports did not prove the source"
                     ),
                     record_integrity=record_integrity,
-                    record_entries=int(raw.get("record_entries") or 0),
-                    record_verified_entries=int(raw.get("record_verified_entries") or 0),
-                    record_failed_entries=sorted(
-                        str(item) for item in raw.get("record_failed_entries") or []
-                    ),
-                    dependencies=sorted(str(item) for item in raw.get("dependencies") or []),
+                    record_entries=count_values["record_entries"],
+                    record_verified_entries=count_values["record_verified_entries"],
+                    record_failed_entries=sorted(raw_failed_entries),
+                    installed_files_hash=HashRef(value=raw_installed_hash)
+                    if raw_installed_hash
+                    else None,
+                    installed_file_count=count_values["installed_file_count"],
+                    dependencies=sorted(raw_dependencies),
                 )
             )
+        missing_installs = sorted(set(evidence_by_name) - seen_names)
+        if missing_installs:
+            raise EnvironmentManagerError(
+                "package install evidence names distributions absent from the inventory: "
+                + ", ".join(missing_installs)
+            )
+        version_mismatches = [
+            item.normalized_name
+            for item in packages
+            if (evidence := evidence_by_name.get(item.normalized_name)) is not None
+            and item.version != evidence.version
+        ]
+        if version_mismatches:
+            raise EnvironmentManagerError(
+                "package install evidence versions disagree with the inventory: "
+                + ", ".join(sorted(version_mismatches))
+            )
         packages.sort(key=lambda package: package.name.casefold())
-        torch_data = raw_torch if isinstance(raw_torch, dict) else {}
+        torch_data = raw_torch
+        if require_framework_identity and (
+            torch_data.get("error") is not None
+            or not isinstance(torch_data.get("version"), str)
+            or not torch_data.get("version")
+            or not isinstance(torch_data.get("build"), str)
+            or not torch_data.get("build")
+        ):
+            raise EnvironmentManagerError(
+                "environment inventory could not verify the installed torch runtime"
+            )
+        for field_name in ("version", "build", "cuda", "compute_capability"):
+            value = torch_data.get(field_name)
+            if value is not None and (
+                not isinstance(value, str)
+                or any(ord(character) < 32 for character in value)
+            ):
+                raise EnvironmentManagerError(
+                    f"environment inventory contains malformed torch {field_name} metadata"
+                )
+        if require_framework_identity:
+            torch_packages = [
+                item for item in packages if item.normalized_name == "torch"
+            ]
+            if (
+                len(torch_packages) != 1
+                or torch_data.get("version") != torch_packages[0].version
+            ):
+                raise EnvironmentManagerError(
+                    "imported torch identity disagrees with installed distribution metadata"
+                )
+        sanitized_indexes: list[str] = []
+        for value in index_urls:
+            sanitized = _sanitize_url(value)
+            if sanitized is None:
+                raise EnvironmentManagerError("environment inventory contains a malformed index URL")
+            sanitized_indexes.append(sanitized)
         draft = InstalledEnvironmentEvidence(
             evidence_id="inventory-pending",
             recipe_ref=recipe_ref,
@@ -2097,7 +3470,7 @@ class EnvironmentManager:
             torch_build=str(torch_data.get("build") or "") or None,
             cuda_runtime_version=str(torch_data.get("cuda") or "") or None,
             compute_capability=str(torch_data.get("compute_capability") or "") or None,
-            index_urls=[item for value in index_urls if (item := _sanitize_url(value))],
+            index_urls=sanitized_indexes,
             packages=packages,
             package_install_evidence=list(package_install_evidence),
             worker_artifact=worker_artifact,
@@ -2120,6 +3493,29 @@ class EnvironmentManager:
             mode="json",
             exclude={"lock_id", "created_at", "lock_hash"},
         )
+        # Manager 1.1 locks predate the additive installed-file tree digest. Preserve their seals;
+        # manager 1.2 locks populate these fields and therefore bind them normally.
+        if all(
+            item.installed_files_hash is None and item.installed_file_count is None
+            for item in lock.packages
+        ):
+            for package in body.get("packages", []):
+                package.pop("installed_files_hash", None)
+                package.pop("installed_file_count", None)
+        optional_flash_memory_fields = (
+            "forward_duration_seconds",
+            "backward_duration_seconds",
+            "optimizer_step_duration_seconds",
+            "gpu_temperature_celsius",
+            "gpu_power_watts",
+        )
+        if lock.probe_evidence is not None and all(
+            getattr(lock.probe_evidence.memory, field_name) is None
+            for field_name in optional_flash_memory_fields
+        ):
+            memory_body = body.get("probe_evidence", {}).get("memory", {})
+            for field_name in optional_flash_memory_fields:
+                memory_body.pop(field_name, None)
         legacy_packages = all(
             not item.normalized_name
             and item.source_index_url is None
@@ -2133,6 +3529,8 @@ class EnvironmentManager:
             and item.record_entries is None
             and item.record_verified_entries is None
             and not item.record_failed_entries
+            and item.installed_files_hash is None
+            and item.installed_file_count is None
             for item in lock.packages
         )
         if (
@@ -2159,6 +3557,8 @@ class EnvironmentManager:
                 "record_entries",
                 "record_verified_entries",
                 "record_failed_entries",
+                "installed_files_hash",
+                "installed_file_count",
             }
             for package in body.get("packages", []):
                 for field_name in package_fields:
@@ -2208,6 +3608,21 @@ class EnvironmentManager:
                 for item in inventory.packages
             }
             version_mismatches: list[str] = []
+            runtime_payload = probe_evidence.tuple_result.measured.get("runtime")
+            runtime_packages = (
+                runtime_payload.get("packages") if isinstance(runtime_payload, dict) else None
+            )
+            if not isinstance(runtime_packages, dict):
+                raise EnvironmentManagerError(
+                    "the complete QLoRA tuple omitted runtime package identity"
+                )
+            for runtime_name, runtime_version in runtime_packages.items():
+                _, normalized_runtime_name = _validated_package_name(runtime_name)
+                if installed_versions.get(normalized_runtime_name) != runtime_version:
+                    version_mismatches.append(
+                        f"{normalized_runtime_name}: probe observed {runtime_version}, "
+                        f"inventory observed {installed_versions.get(normalized_runtime_name)}"
+                    )
             for requirement in recipe.dependency_requirements:
                 specifier = requirement.specifier or ""
                 exact = specifier.split(";", 1)[0].strip()
@@ -2236,28 +3651,10 @@ class EnvironmentManager:
                 )
             if resolution.worker_artifact is None:
                 raise EnvironmentManagerError("the environment lock has no worker artifact identity")
-            worker_install = next(
-                (
-                    item
-                    for item in installation.package_install_evidence
-                    if item.normalized_name == resolution.worker_artifact.normalized_name
-                ),
-                None,
+            _assert_worker_install_evidence(
+                installation.package_install_evidence,
+                resolution.worker_artifact,
             )
-            expected_worker_url = _sanitize_url(
-                Path(resolution.worker_artifact.path).resolve(strict=True).as_uri()
-            )
-            if (
-                worker_install is None
-                or worker_install.source != "wheel"
-                or worker_install.direct is not True
-                or worker_install.direct_url != expected_worker_url
-                or worker_install.artifact_filename != resolution.worker_artifact.filename
-                or worker_install.artifact_hash != resolution.worker_artifact.content_hash
-            ):
-                raise EnvironmentManagerError(
-                    "pip evidence does not prove installation of the reviewed worker wheel"
-                )
             worker_package = next(
                 (
                     item
@@ -2301,8 +3698,144 @@ class EnvironmentManager:
         )
 
     def _probe_evidence_digest(self, evidence: EnvironmentProbeEvidence) -> str:
-        return _canonical_sha256(
-            evidence.model_dump(mode="json", exclude={"evidence_id", "evidence_hash"})
+        body = evidence.model_dump(
+            mode="json", exclude={"evidence_id", "evidence_hash"}
+        )
+        # Manager 1.1 math evidence predates the additive flash timing/thermal fields. Preserve the
+        # nested evidence seal just as _lock_digest preserves the enclosing lock seal.
+        optional_flash_memory_fields = (
+            "forward_duration_seconds",
+            "backward_duration_seconds",
+            "optimizer_step_duration_seconds",
+            "gpu_temperature_celsius",
+            "gpu_power_watts",
+        )
+        if all(
+            getattr(evidence.memory, field_name) is None
+            for field_name in optional_flash_memory_fields
+        ):
+            memory_body = body.get("memory", {})
+            for field_name in optional_flash_memory_fields:
+                memory_body.pop(field_name, None)
+        return _canonical_sha256(body)
+
+    @staticmethod
+    def _validate_probe_configuration(
+        configuration: Mapping[str, object],
+        required: QloraExecutionProbeSpec,
+        *,
+        legacy_math_configuration: bool,
+    ) -> None:
+        """Validate the execution meaning recorded by one complete readiness tuple."""
+
+        expected_kernel = required.execution_combination.attention_kernel.value
+        expected_backend = (
+            "FLASH_ATTENTION"
+            if required.probe == "cuda_qlora_sdpa_flash_execution"
+            else "MATH"
+        )
+        expected_toggles = {
+            "flash_sdp_enabled": required.flash_sdp_enabled,
+            "memory_efficient_sdp_enabled": required.memory_efficient_sdp_enabled,
+            "math_sdp_enabled": required.math_sdp_enabled,
+        }
+        expected_configuration: dict[str, object] = {
+            "compute_dtype": required.compute_dtype,
+            "quantization": required.quantization,
+            "double_quantization": required.double_quantization,
+            "attention_api": required.attention_api,
+            "device_map": {"": required.device},
+            "target_modules": required.target_modules,
+            "gradient_checkpointing": required.gradient_checkpointing,
+            "optimizer": required.optimizer,
+        }
+        if legacy_math_configuration:
+            if required.probe != "cuda_qlora_math_execution":
+                raise EnvironmentManagerError(
+                    "legacy complete-tuple evidence is valid only for the sealed math rollback"
+                )
+        else:
+            expected_configuration.update(
+                {
+                    # BF16 forward autocast is part of the already-sealed compute policy, not free
+                    # text for every new readiness environment.
+                    "forward_autocast": required.compute_dtype,
+                    "attention_kernel": expected_kernel,
+                    "forced_sdp_backend": expected_backend,
+                    # These constants define the bounded evidence scope. They remain manager
+                    # acceptance policy so the readiness-v2 recipe digest itself stays stable.
+                    "batch_size": 1,
+                    "sequence_length": 8,
+                    "lora_r": 2,
+                    "lora_alpha": 4,
+                    "seed": 0,
+                }
+            )
+        mismatched_configuration = sorted(
+            key
+            for key, expected in expected_configuration.items()
+            if configuration.get(key) != expected
+        )
+        if mismatched_configuration:
+            raise EnvironmentManagerError(
+                "the complete QLoRA tuple measured configuration disagrees with the recipe: "
+                + ", ".join(mismatched_configuration)
+            )
+        toggle_keys = (
+            ("attention_toggles",)
+            if legacy_math_configuration
+            else ("attention_toggles", "attention_toggles_during")
+        )
+        for key in toggle_keys:
+            if configuration.get(key) != expected_toggles:
+                raise EnvironmentManagerError(
+                    f"the complete QLoRA tuple did not enforce sealed SDPA settings in {key}"
+                )
+
+    def _locked_probe_evidence_mismatch(
+        self,
+        lock: EnvironmentLock,
+        required: QloraExecutionProbeSpec | None,
+    ) -> bool:
+        """Reject a weak/tampered readiness seal before health probes import installed code."""
+
+        if required is None:
+            return lock.probe_evidence is not None
+        evidence = lock.probe_evidence
+        if evidence is None or evidence.required_spec != required:
+            return True
+        if evidence.evidence_hash != self._probe_evidence_digest(evidence):
+            return True
+        tuple_result = evidence.tuple_result
+        if (
+            tuple_result.outcome != FailureTaxonomy.PASS
+            or required.execution_combination not in tuple_result.execution_combinations
+        ):
+            return True
+        configuration = tuple_result.measured.get("configuration")
+        if not isinstance(configuration, dict):
+            return True
+        legacy_math_configuration = (
+            lock.manager_version == "1.1.0"
+            and required.probe == "cuda_qlora_math_execution"
+            and "forward_autocast" not in configuration
+        )
+        try:
+            self._validate_probe_configuration(
+                configuration,
+                required,
+                legacy_math_configuration=legacy_math_configuration,
+            )
+            measured_memory = ProbeMemoryEvidence.model_validate(
+                tuple_result.measured.get("memory")
+            )
+        except (EnvironmentManagerError, ValueError):
+            return True
+        if measured_memory != evidence.memory:
+            return True
+        return (
+            not legacy_math_configuration
+            and tuple_result.measured.get("adapter_round_trip_verified") is not True
         )
 
     def _worker_artifact_drift(
@@ -2474,6 +4007,8 @@ class EnvironmentManager:
         self,
         payload: Mapping[str, object],
         required: QloraExecutionProbeSpec,
+        *,
+        legacy_math_configuration: bool = False,
     ) -> tuple[list[ProbeResult], EnvironmentProbeEvidence]:
         raw_profile = payload.get("profile")
         raw_report = payload.get("capability_report")
@@ -2508,14 +4043,65 @@ class EnvironmentManager:
             raise EnvironmentManagerError(
                 "the required complete QLoRA tuple did not pass as one probe"
             )
+        configuration = tuple_result.measured.get("configuration")
+        if not isinstance(configuration, dict):
+            raise EnvironmentManagerError(
+                "the complete QLoRA tuple did not record its measured execution configuration"
+            )
+        self._validate_probe_configuration(
+            configuration,
+            required,
+            legacy_math_configuration=legacy_math_configuration,
+        )
+        for key in ("loss", "reload_loss"):
+            value = tuple_result.measured.get(key)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(
+                float(value)
+            ):
+                raise EnvironmentManagerError(
+                    f"the complete QLoRA tuple did not record a finite {key}"
+                )
+        adapter_bytes = tuple_result.measured.get("adapter_weight_bytes")
+        if (
+            required.require_adapter_round_trip
+            and (
+                isinstance(adapter_bytes, bool)
+                or not isinstance(adapter_bytes, int)
+                or adapter_bytes <= 0
+            )
+        ):
+            raise EnvironmentManagerError(
+                "the complete QLoRA tuple did not prove a Safetensors adapter round trip"
+            )
+        if (
+            not legacy_math_configuration
+            and tuple_result.measured.get("adapter_round_trip_verified") is not True
+        ):
+            raise EnvironmentManagerError(
+                "the complete QLoRA tuple did not compare reloaded adapter bytes"
+            )
         runtime = tuple_result.measured.get("runtime")
         package_versions = runtime.get("packages") if isinstance(runtime, dict) else None
         if not isinstance(package_versions, dict):
             raise EnvironmentManagerError(
                 "the complete QLoRA tuple did not record dependency runtime versions"
             )
-        observed_names = {_normalized_package_name(str(name)) for name in package_versions}
-        missing = sorted(set(required.required_distributions) - observed_names)
+        observed_versions: dict[str, str] = {}
+        for raw_name, raw_version in package_versions.items():
+            _, normalized_name = _validated_package_name(raw_name)
+            if normalized_name in observed_versions:
+                raise EnvironmentManagerError(
+                    "the complete QLoRA tuple recorded duplicate normalized runtime packages"
+                )
+            if (
+                not isinstance(raw_version, str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.!+_-]*", raw_version)
+            ):
+                raise EnvironmentManagerError(
+                    f"the complete QLoRA tuple recorded an invalid runtime version for {normalized_name}"
+                )
+            observed_versions[normalized_name] = raw_version
+        missing = sorted(set(required.required_distributions) - set(observed_versions))
         if missing:
             raise EnvironmentManagerError(
                 "the complete QLoRA tuple omitted runtime versions for: " + ", ".join(missing)
@@ -2527,6 +4113,52 @@ class EnvironmentManager:
             raise EnvironmentManagerError(
                 f"the complete QLoRA tuple emitted invalid memory evidence: {exc}"
             ) from exc
+        if (
+            memory.peak_gpu_allocated_bytes < memory.baseline_gpu_allocated_bytes
+            or memory.peak_gpu_reserved_bytes < memory.baseline_gpu_reserved_bytes
+            or memory.peak_host_rss_bytes < memory.baseline_host_rss_bytes
+            or (
+                memory.baseline_nvidia_smi_process_bytes is not None
+                and memory.peak_nvidia_smi_process_bytes is not None
+                and memory.peak_nvidia_smi_process_bytes
+                < memory.baseline_nvidia_smi_process_bytes
+            )
+        ):
+            raise EnvironmentManagerError(
+                "the complete QLoRA tuple reported a peak below its measurement baseline"
+            )
+        finite_measurements = {
+            "duration_seconds": memory.duration_seconds,
+            "forward_duration_seconds": memory.forward_duration_seconds,
+            "backward_duration_seconds": memory.backward_duration_seconds,
+            "optimizer_step_duration_seconds": memory.optimizer_step_duration_seconds,
+            "gpu_temperature_celsius": memory.gpu_temperature_celsius,
+            "gpu_power_watts": memory.gpu_power_watts,
+        }
+        non_finite = sorted(
+            name
+            for name, value in finite_measurements.items()
+            if value is not None and not math.isfinite(value)
+        )
+        if non_finite:
+            raise EnvironmentManagerError(
+                "the complete QLoRA tuple reported non-finite measurements: "
+                + ", ".join(non_finite)
+            )
+        if memory.gpu_device_scope == "unavailable" and (
+            memory.baseline_nvidia_smi_process_bytes is not None
+            or memory.peak_nvidia_smi_process_bytes is not None
+        ):
+            raise EnvironmentManagerError(
+                "unavailable nvidia-smi scope cannot carry process-residency measurements"
+            )
+        if memory.gpu_device_scope == "nvidia_smi_current_process" and (
+            memory.baseline_nvidia_smi_process_bytes is None
+            and memory.peak_nvidia_smi_process_bytes is None
+        ):
+            raise EnvironmentManagerError(
+                "nvidia-smi process scope requires at least one process-residency measurement"
+            )
         report_hash = _canonical_sha256(report.model_dump(mode="json"))
         draft = EnvironmentProbeEvidence(
             evidence_id="probe-evidence-pending",
@@ -2550,6 +4182,7 @@ class EnvironmentManager:
         self,
         descriptor: EnvironmentDescriptor,
         *,
+        lock: EnvironmentLock,
         cancel: CancellationToken | None,
     ) -> tuple[list[ProbeResult], EnvironmentState, EnvironmentProbeEvidence | None]:
         results: list[ProbeResult] = []
@@ -2642,8 +4275,21 @@ class EnvironmentManager:
             cancel,
         )
         try:
+            sealed_configuration = (
+                lock.probe_evidence.tuple_result.measured.get("configuration")
+                if lock.probe_evidence is not None
+                else None
+            )
+            legacy_math_configuration = (
+                lock.manager_version == "1.1.0"
+                and required.probe == "cuda_qlora_math_execution"
+                and isinstance(sealed_configuration, dict)
+                and "forward_autocast" not in sealed_configuration
+            )
             capability_results, evidence = self._complete_probe_evidence(
-                capability_payload, required
+                capability_payload,
+                required,
+                legacy_math_configuration=legacy_math_configuration,
             )
         except EnvironmentManagerError as exc:
             results.append(
@@ -2771,16 +4417,28 @@ class EnvironmentManager:
     def _package_drift(
         self, expected: Sequence[PackageLock], actual: Sequence[PackageLock]
     ) -> tuple[list[str], list[str]]:
-        expected_by_name = {
-            item.normalized_name or _normalized_package_name(item.name): item
-            for item in expected
-        }
-        actual_by_name = {
-            item.normalized_name or _normalized_package_name(item.name): item
-            for item in actual
-        }
         drifted: list[str] = []
         sources: list[str] = []
+
+        def _by_name(
+            packages: Sequence[PackageLock], label: str
+        ) -> dict[str, PackageLock]:
+            indexed: dict[str, PackageLock] = {}
+            duplicates: set[str] = set()
+            for item in packages:
+                name = item.normalized_name or _normalized_package_name(item.name)
+                if name in indexed:
+                    duplicates.add(name)
+                else:
+                    indexed[name] = item
+            drifted.extend(
+                f"{name}: duplicate normalized distribution in {label} inventory"
+                for name in sorted(duplicates)
+            )
+            return indexed
+
+        expected_by_name = _by_name(expected, "locked")
+        actual_by_name = _by_name(actual, "live")
         for name in sorted(expected_by_name.keys() | actual_by_name.keys()):
             before = expected_by_name.get(name)
             after = actual_by_name.get(name)
@@ -2797,6 +4455,29 @@ class EnvironmentManager:
             after_hash = after.hash.value if after.hash else None
             if before_hash != after_hash:
                 drifted.append(f"{before.name}: installed RECORD hash changed")
+            before_files_hash = (
+                before.installed_files_hash.value if before.installed_files_hash else None
+            )
+            after_files_hash = (
+                after.installed_files_hash.value if after.installed_files_hash else None
+            )
+            if before_files_hash is not None and before_files_hash != after_files_hash:
+                drifted.append(f"{before.name}: installed file bytes changed")
+            if (
+                before.installed_file_count is not None
+                and before.installed_file_count != after.installed_file_count
+            ):
+                drifted.append(f"{before.name}: installed RECORD file count changed")
+            before_artifact_hash = (
+                before.artifact_hash.value if before.artifact_hash else None
+            )
+            after_artifact_hash = after.artifact_hash.value if after.artifact_hash else None
+            if (
+                before_artifact_hash is not None
+                and after_artifact_hash is not None
+                and before_artifact_hash != after_artifact_hash
+            ):
+                drifted.append(f"{before.name}: installed artifact hash changed")
             if after.record_integrity == "failed":
                 drifted.append(f"{before.name}: installed RECORD file integrity failed")
             elif (
@@ -2811,6 +4492,18 @@ class EnvironmentManager:
                 before.direct_url is not None or after.direct_url is not None
             ):
                 sources.append(f"{before.name}: direct source changed")
+            elif before.vcs_repository != after.vcs_repository or before.vcs_commit != after.vcs_commit:
+                sources.append(f"{before.name}: VCS source changed")
+            elif (before.direct is True or after.direct is True) and (
+                before.editable != after.editable
+            ):
+                sources.append(f"{before.name}: editable-source status changed")
+            elif (
+                before.source_index_url is not None
+                and after.source_index_url is not None
+                and before.source_index_url != after.source_index_url
+            ):
+                sources.append(f"{before.name}: package index changed")
             elif (
                 before.source != "unknown"
                 and after.source != "unknown"

@@ -1,7 +1,7 @@
 # Host State — Native-Linux RTX 5070 Workstation
 
-**Last verified:** 2026-07-14 (Environment Manager health report `checked_at`
-2026-07-14T03:29:28Z; GPU + paths re-checked the same day).
+**Last verified:** 2026-07-14 (latest preserved flash-environment health report `checked_at`
+2026-07-14T20:27:18Z; legacy environment, GPU, and paths were checked earlier the same day).
 
 This file records the *verified* runtime facts of the machine CorpusStudio currently runs
 on. It supersedes the Windows `C:`/`F:` host descriptions in older docs for **"where you
@@ -92,9 +92,12 @@ probed on this host.
 
 `backend-corpus-studio-readiness-v2` is a separate exact-pinned managed environment that does not
 replace or reinterpret the legacy environment above. It is `HARDWARE_VERIFIED` for one complete
-BF16 + NF4 + double-quant + QLoRA + **math-only SDPA** + AdamW + adapter round-trip tuple. Treat it as
-the flash-work safety baseline and rollback path; do not modify, recreate, reseal, or delete it while
-developing flash readiness.
+BF16-configured NF4 + double-quant + QLoRA + **math-only SDPA** + AdamW + adapter-reload tuple. Its
+sealed manager-1.1 evidence predates the explicit `forward_autocast` field, so it is not retroactively
+an observed BF16-activation/autocast claim. Manager 1.2 preserves that exact narrow identity for
+rollback health checks; all new readiness creation uses the stronger measured configuration. Treat it
+as the flash-work safety baseline and rollback path; do not modify, recreate, reseal, or delete it
+while developing flash readiness.
 
 Recorded identities for recovery:
 
@@ -114,13 +117,16 @@ baseline and must not reuse or mutate readiness-v2. **Linux-only** recipe (nativ
 flash SDPA is refused on the Windows path; do not claim flash from a Windows math environment).
 
 **Sealed on this host (2026-07-14):** after the bf16-autocast probe fix, the environment was
-recreated from commit `f15f1bfeec0b54c4c863b78f03f2b1c3032bd768` and is **`HARDWARE_VERIFIED`**.
-`env-status --refresh` and `env-probe` both report `HARDWARE_VERIFIED` with `drift_detected=false`.
-Math readiness-v2 was not mutated.
+recreated from commit `f15f1bfeec0b54c4c863b78f03f2b1c3032bd768`. Its preserved manager-1.1
+`env-status --refresh` and `env-probe` reports are **`HARDWARE_VERIFIED`** with
+`drift_detected=false`. Math readiness-v2 was not mutated. Manager 1.2 preserves those lock/evidence
+digests as historical evidence but does not grandfather flash across the new adapter-state equality
+requirement; the flash environment needs an audited-wheel replacement before a new manager-1.2 health
+claim. No such recreation occurred during the audit.
 
 | Item | Value |
 |---|---|
-| State | `HARDWARE_VERIFIED` |
+| Preserved manager-1.1 state | `HARDWARE_VERIFIED` |
 | Environment path | `/mnt/training-nvme/corpusstudio/xdg-data/corpusstudio/environment-manager/environments/backend-corpus-studio-readiness-flash-v1` |
 | Lock ID | `lock-8a988a716c68beacfa8c` |
 | Lock digest | `8a988a716c68beacfa8c8fb46925987ea7c9aca198537340471e1fd08f9c75fe` |
@@ -141,14 +147,40 @@ above; it is not a positive flash claim for the old wheel.
 This sealed flash result is still **environment-probe** evidence only — not full-sequence 7B training,
 not Transformers `flash_attention_2`, not external `flash-attn`, and not MoE runtime capability.
 
+### First bounded flash smoke and placement-only diagnostic
+
+The separately authorized production-path smoke used Qwen2.5-0.5B, sequence length 256, exactly three
+planned steps, the sealed flash kernel/toggles, and the current flash lock. Its preserved evidence is
+under
+`/mnt/training-nvme/corpusstudio/evidence/bounded-flash-smoke/20260714T194401Z/`.
+
+| Item | Preserved result |
+|---|---|
+| Run ID | `run-019f6229-9fda-7067-a20b-80fbf6c1c709` |
+| Plan hash | `d9f2763f69df5b7a32b2b2b8fdd2b9f5c965ac8a8848cd30950c4e485c62e41e` |
+| Execution-configuration hash | `846d0ac61199b3eaa08c1556ca98481b335da3662ee80f858c4c7f2e8792f687` |
+| Production smoke | `failed` / `UNSUPPORTED_CONFIGURATION` at `placement_deviation` because `hf_device_map` was absent |
+| Boundary reached | Real model load completed; adapter insertion did not start |
+| Optimizer steps / adapter | `0` / none written |
+| Post-run environment | `HARDWARE_VERIFIED`, `drift_detected=false` |
+| Placement-only diagnostic | All 290 parameters and both registered buffers observed on `cuda:0`; no CPU, disk, meta, or other-GPU state observed |
+| Diagnostic classification | `PLACEMENT_MAP_REPRESENTATION_MISMATCH` |
+
+The placement-only diagnostic confirms actual singleton CUDA residency for that one authorized load;
+it is not a successful `platform-run`, adapter insertion, backward pass, or optimizer step. No real
+optimizer step has yet passed through `platform-run`, and sequence length 4096 remains unverified.
+If the flash environment is recreated with a new worker wheel, its new lock hash invalidates this old
+RunPlan; generate a new plan against the replacement lock before any later smoke.
+
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 
 `HARDWARE_VERIFIED` is the **Environment Manager** evidence level, not a training-run result.
-Per [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md), the passing
-`reference_backend_hardware` probe proves the managed interpreter can, on this GPU: allocate
+Per [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md), the legacy passing
+`reference_backend_hardware` probe proves its managed interpreter can, on this GPU: allocate
 CUDA memory, read compute capability, produce a BF16 signal, construct a bitsandbytes 4-bit
 layer, run a **minimal** GPU forward/backward, and execute the safe **math** SDPA attention
-path.
+path. The readiness-v2 and readiness-flash-v1 locks add their own distinct complete tiny QLoRA tuple
+evidence; they do not broaden the legacy lock or one another.
 
 That is **real native-Linux GPU evidence** — the old "until the Linux NVMe is installed in the
 final RTX 5070 machine, do not claim native-Linux" precondition is now satisfied *for the
@@ -162,10 +194,11 @@ must not be claimed from this state alone:
   `backend-corpus-studio` reference exists.
 - **Real offload fit, PCIe/NVMe throughput, sustained-write endurance** — the NVMe has not been
   benchmarked (`platform-storage` is non-destructive and reads no SMART data).
-- **Bare-Linux FlashAttention for the real workload** — readiness-v2 verified the *math* path only.
-  A separate forced `torch_sdpa_flash` readiness environment is the positive path for SDPA flash
-  evidence; it is not the same identity as Transformers `flash_attention_2` or an external
-  flash-attn package, and it is not full-sequence 7B proof.
+- **Bare-Linux flash for a real optimizer step or sequence 4096** — readiness-v2 verified the math
+  tuple and the separate readiness-flash-v1 environment verified only its tiny forced
+  `torch_sdpa_flash` tuple. The first real 0.5B smoke stopped before adapter insertion. Neither
+  environment is the same identity as Transformers `flash_attention_2` or an external `flash-attn`
+  package, and neither is full-sequence 7B proof.
 - **MoE runtime capability** — static inspection only (Phase 8); no MoE execution.
 
 "Installed ≠ supported" and "a completed step ≠ proven fit" both still hold: a passing

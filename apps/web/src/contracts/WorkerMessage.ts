@@ -237,6 +237,7 @@ export type Dependencies = string[];
 export type Direct = boolean | null;
 export type DirectUrl = string | null;
 export type Editable = boolean | null;
+export type InstalledFileCount = number | null;
 export type Installer = string | null;
 export type Name2 = string;
 export type NormalizedName = string;
@@ -974,6 +975,8 @@ export interface PackageLock {
   direct_url?: DirectUrl;
   editable?: Editable;
   hash?: HashRef | null;
+  installed_file_count?: InstalledFileCount;
+  installed_files_hash?: HashRef | null;
   installer?: Installer;
   name: Name2;
   normalized_name?: NormalizedName;
