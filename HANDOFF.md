@@ -1,6 +1,7 @@
 # CorpusStudio — Session Handoff
 
-**Last updated:** 2026-07-13. This is a snapshot for the next agent session (Claude Code or Codex).
+**Last updated:** 2026-07-14 (native-Linux host onboarding - see [`docs/HOST_STATE.md`](docs/HOST_STATE.md);
+previous snapshot 2026-07-13). This is a snapshot for the next agent session (Claude Code or Codex).
 For the authoritative *feature* state see [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md); for the
 forward plan see [`docs/ROADMAP.md`](docs/ROADMAP.md) + [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
 
@@ -8,20 +9,24 @@ forward plan see [`docs/ROADMAP.md`](docs/ROADMAP.md) + [`docs/IMPLEMENTATION_PL
 
 ## 0. READ FIRST — where you are
 
-- **CorpusStudio now lives at `C:\CorpusStudio`.** It was migrated off the **F: USB external drive**
-  onto internal C: on 2026-07-13 (F: is USB-connected — poor for an active runtime). **Open your
-  session at `C:\CorpusStudio`.**
-- `F:\CorpusStudio` is the **old copy — a fallback, do not use it** for new work (it will drift).
-- Engine virtualenv: **`C:\CorpusStudio\engine\.venv`** (Python 3.12.10, dependency-light core + `[dev]`).
-- The GPU **training** venv was NOT recreated on C: (was `F:\cs-train-venv`, torch cu128). Rebuild it
-  when you next actually train on the GPU.
-- WorldBibleGenerator (the "WBG" reference project): **`C:\WorldBibleGenerator`** holds the *important*
-  stuff (source + datasets + trained adapters, ~2.4 GB). The large merged/GGUF models + pretrain data
-  (~260 GB) were intentionally left on `F:\WorldBibleGenerator` (reproducible from adapters).
-- **WBG WSL training now points to C:** — the launch scripts / configs / README under
-  `C:\WorldBibleGenerator\training` were repointed off `/mnt/f` → `/mnt/c` (the venv stays on the Linux
-  FS `~/wbg-venv`, which is correct). The base model loads from the HF cache, so the data→adapter path
-  is self-contained on C:. (Those edits are uncommitted in the WBG git repo.)
+- **CorpusStudio now runs on a native-Linux RTX 5070 host** (Ubuntu 24.04). Open your session at
+  **`/mnt/training-nvme/repos/CorpusStudio`** on the Linux training NVMe. The verified host facts —
+  paths, GPU, and the `HARDWARE_VERIFIED` managed environment — are in
+  [`docs/HOST_STATE.md`](docs/HOST_STATE.md); read it first for anything hardware-adjacent.
+- Engine virtualenv: **`/mnt/training-nvme/repos/CorpusStudio/engine/.venv`** (CPython 3.12.3,
+  dependency-light core + `[dev]`, torch-free).
+- The GPU **training** runtime is now the managed **`backend-corpus-studio`** environment (torch
+  2.11.0+cu128, `[train]` stack), built and `HARDWARE_VERIFIED` on this host — it supersedes the old
+  standalone `cs-train-venv`. See [`docs/HOST_STATE.md`](docs/HOST_STATE.md) and
+  [`docs/ENVIRONMENT_MANAGER.md`](docs/ENVIRONMENT_MANAGER.md).
+- **History (mounted, do not work from):** this repo previously lived on Windows `F:` (USB) then `C:`
+  (migrated 2026-07-13). Those Windows drives are now read-through mounts — `C:\…` → `/mnt/windows-c`,
+  `F:\…` → `/mnt/windows-f` (e.g. old `C:\CorpusStudio` → `/mnt/windows-c/CorpusStudio`). They are stale
+  fallbacks that will drift; the active runtime is the `/mnt/training-nvme` checkout.
+- WorldBibleGenerator (the "WBG" reference project) still lives on the Windows mounts:
+  `/mnt/windows-c/WorldBibleGenerator` (source + datasets + trained adapters) and the large merged/GGUF
+  models + pretrain data on `/mnt/windows-f/WorldBibleGenerator` (reproducible from adapters). WBG is a
+  separate git repo with its own uncommitted training-path edits; it is not part of this repo's build.
 
 ## 1. What CorpusStudio is
 
@@ -31,8 +36,10 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
    first-party TRL/PEFT QLoRA trainer.
 2. **Platform** (`engine/corpus_studio/platform/`) — a **contract-first, torch-free** run lifecycle:
    profile → plan (hash-sealed RunPlan) → predict-fit → run (supervised, in-proc or kill-able
-   subprocess) → measure-fit (watchdog) → artifacts. The existing real RTX 5070 evidence is from
-   native Windows/WDDM (plus separately labeled WSL probes), not bare-Linux or real-offload proof.
+   subprocess) → measure-fit (watchdog) → artifacts. The historical run-lifecycle evidence is from
+   native Windows/WDDM (plus separately labeled WSL probes); the native-Linux host now adds a
+   `HARDWARE_VERIFIED` managed environment (env-manager GPU probe — see
+   [`docs/HOST_STATE.md`](docs/HOST_STATE.md)), still not bare-Linux full-workload or real-offload proof.
 3. **UI heads** — WPF (shipping), Avalonia (cross-platform interim), Tauri 2 + React (`apps/web`,
    contract-first future head). The UI is a **client** over the engine CLI; it never owns training.
 
@@ -137,23 +144,23 @@ The big epic (memory `platform-architecture-epic`). Non-negotiables the user has
 
 ## 4. How to build + verify (the gate)
 
-From `C:\CorpusStudio\engine` (PowerShell):
+From `/mnt/training-nvme/repos/CorpusStudio/engine` (bash):
 ```
-.\.venv\Scripts\python.exe -m ruff check corpus_studio tests
-.\.venv\Scripts\python.exe -m mypy corpus_studio
-.\.venv\Scripts\python.exe -m pytest -q --no-header --basetemp=.pytest_tmp
+.venv/bin/python -m ruff check corpus_studio tests
+.venv/bin/python -m mypy corpus_studio
+.venv/bin/python -m pytest -q --no-header --basetemp=.pytest_tmp
 ```
 CI (GitHub Actions, **Linux + Python 3.11**) runs `pytest --cov=corpus_studio --cov-report=term-missing`
 with **`--cov-fail-under=88`**, plus `avalonia-linux-build`, `desktop-tests`, web typecheck/build,
 schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
-- **★ COVERAGE GOTCHA:** running the suite on **Windows under-measures** `storage_profiler`'s
-  Linux-only detection by ~0.3% (those lines only execute on the Linux CI runner). **Target ≥ 88.2%
-  locally** to have CI margin. Windows-only detection funcs are marked `# pragma: no cover`.
+- **★ COVERAGE:** this host is native Linux, so `storage_profiler`'s Linux-only detection now executes
+  locally — the old ~0.3% Windows-run under-measurement no longer applies and local coverage tracks CI.
+  The CI floor is `--cov-fail-under=88`; Windows-only detection funcs stay marked `# pragma: no cover`.
 - **After changing any `platform/` contract**, regenerate the committed JSON Schemas and update the
   count test:
   ```
-  .\.venv\Scripts\python.exe -c "from corpus_studio.platform.schema_export import export_json_schemas; export_json_schemas('../docs/contracts')"
+  .venv/bin/python -c "from corpus_studio.platform.schema_export import export_json_schemas; export_json_schemas('../docs/contracts')"
   ```
   then fix the two counts in `tests/test_platform_contracts.py` (`len(ROOT_CONTRACTS)` + the export
   test). This branch exports **28 root contracts**.
@@ -179,11 +186,13 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   are `argv` lists, never shell strings); single-writer `examples.jsonl` (desktop is the only writer;
   the engine refuses to write it); provider policy enforced **in the engine**, not just the UI.
 - **Predicted fit is never `NATIVE_SAFE`** — only a *measured* run earns it (the calibrator/watchdog).
-- **Blackwell / sm_120**: force the **math** attention path — the fused flash-SDPA kernel **deadlocks
-  on the first backward under native-Windows WDDM** (high GPU util, low power). WSL flash was measured
-  separately; bare-Linux FlashAttention remains unverified until the final machine is available.
-  Unsloth is honestly **refused on native-Windows/WDDM Blackwell** (it declares no math path) and
-  routed to `backend-corpus-studio`. Other hosts still need their own exact functional evidence.
+- **Blackwell / sm_120**: the **math** attention path is the verified-safe default — the fused flash-SDPA
+  kernel **deadlocks on the first backward under native-Windows WDDM** (high GPU util, low power). WSL
+  flash was measured separately. On the native-Linux host the env hardware probe verified the **math**
+  path; bare-Linux FlashAttention for the real workload is still not claimed (the WDDM deadlock reason
+  does not apply here, but that is the absence of a blocker, not a positive flash result). Unsloth is
+  honestly **refused on native-Windows/WDDM Blackwell** (it declares no math path) and routed to
+  `backend-corpus-studio`. Other hosts still need their own exact functional evidence.
 - **Dependency-light boundary**: `import corpus_studio.platform` pulls **no torch**; all heavy imports
   are lazy inside `run()`/functions. There is a test that asserts this.
 - **Storage guardrail (new, #405/#407)**: USB/`/mnt`-WSL/cloud-sync/in-repo/near-full paths are
@@ -202,22 +211,30 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
    until an isolated backend proves it.
 3. **Then continue down the revised order (§3):** dense backends → existing-model MoE FT
    → full MoE → resource-elastic expert runtime.
-4. **Only after the Linux NVMe is installed in the RTX 5070 desktop:** install the NVIDIA/CUDA stack,
-   build/probe `backend-corpus-studio`, run a tiny GPU smoke, benchmark the NVMe non-destructively,
-   then step the 7B workload from sequence 1024 upward before CPU and finally NVMe offload.
+4. **GPU workload bring-up (host now assembled; env `HARDWARE_VERIFIED`):** the Linux NVMe is
+   installed, the NVIDIA/CUDA stack lives in the managed env, and `backend-corpus-studio` is built and
+   probed ([`docs/HOST_STATE.md`](docs/HOST_STATE.md)). The env hardware probe is a *minimal* GPU check,
+   so the remaining hardware work is still open: run a real GPU smoke, benchmark the NVMe
+   non-destructively, then step the 7B workload from sequence 1024 upward before CPU and finally NVMe
+   offload - none of which the env probe proves.
 
 ## 8. Hardware + environments
 
-- **GPU**: RTX 5070, 12 GB, Blackwell (sm_120, cc 12.0), Windows/WDDM. Measured VRAM ceiling for 7B
-  4-bit QLoRA: **~10.8 GB @ seq 1024, ~13.8 GB @ 2048**; above ~1280 the WDDM path spills to system RAM
-  and crawls. Expected native-Linux behavior and every real offload fit remain unverified.
-- **Hard verification boundary until the final machine is assembled:** do not claim native-Linux RTX
-  5070 training, DeepSpeed NVMe offload, Linux FSDP, bare-Linux FlashAttention, PCIe 4.0 NVMe
-  throughput, sustained NVMe writes, real offload fit, full-sequence 7B success, or MoE runtime
-  capability. Contract representation, fake workers, and CI are not hardware proof.
-- **Engine venv**: `C:\CorpusStudio\engine\.venv` (3.12.10). Recreate with
-  `py -3.12 -m venv .venv; .\.venv\Scripts\python -m pip install -e .[dev]`.
-- **GPU train venv**: rebuild `C:\cs-train-venv` when training (was torch 2.11.0+cu128 + `[train]`).
+- **GPU**: RTX 5070, 12 GB (12227 MiB), Blackwell (sm_120, cc 12.0), driver 595.71.05, now on **native
+  Linux** (Ubuntu 24.04). The **historical** WDDM-measured VRAM ceiling for 7B 4-bit QLoRA was **~10.8 GB
+  @ seq 1024, ~13.8 GB @ 2048** (above ~1280 the WDDM path spilled to system RAM and crawled);
+  native-Linux *workload* VRAM behavior and every real offload fit are not yet measured.
+- **Hard verification boundary (host now assembled):** the native-Linux host and its `HARDWARE_VERIFIED`
+  `backend-corpus-studio` env are real GPU evidence for the env-manager probe, but that is not a workload
+  result - still do not claim full-sequence 7B success, DeepSpeed NVMe offload, Linux FSDP, bare-Linux
+  FlashAttention for the real workload, PCIe 4.0 NVMe throughput, sustained NVMe writes, real offload
+  fit, or MoE runtime capability. Contract representation, fake workers, CI, and a passing env hardware
+  probe are not workload proof. See [`docs/HOST_STATE.md`](docs/HOST_STATE.md).
+- **Engine venv (control plane)**: `/mnt/training-nvme/repos/CorpusStudio/engine/.venv` (CPython 3.12.3,
+  torch-free). Recreate with `python3.12 -m venv .venv && .venv/bin/python -m pip install -e .[dev]`.
+- **GPU training runtime**: the managed **`backend-corpus-studio`** env (torch 2.11.0+cu128 + `[train]`),
+  built and `HARDWARE_VERIFIED` - it replaces the old standalone `cs-train-venv`. Recreate/probe it via
+  the Environment Manager (`env-plan` / `env-create` / `env-probe`), not by hand.
 - **Optional extras**: `[train]` (torch/transformers/peft/trl/bitsandbytes), `[parquet]` (pyarrow),
   `[tokenizer]` (tiktoken), `[model-tokenizer]` (tokenizers).
 
@@ -273,9 +290,10 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   `docs/ENVIRONMENT_MANAGER.md`; objectives `docs/TRAINING_OBJECTIVES.md`; parameter evidence
   `docs/PARAMETER_ACCOUNTING.md`; platform run `docs/PLATFORM_RUN.md`; worker boundary
   `docs/BACKEND_WORKER_PROTOCOL.md`.
-- **Claude memory** (persists across Claude sessions): `C:\Users\Brend\.claude\projects\F--CorpusStudio\memory\`
-  — start at `MEMORY.md` (index); `platform-architecture-epic.md` is the big one;
-  `storage-migration-c-drive.md` records this move.
+- **Claude memory** (persists across Claude sessions): on this Linux host,
+  `~/.claude/projects/-mnt-training-nvme-repos-CorpusStudio/memory/` — start at `MEMORY.md` (index);
+  `platform-architecture-epic.md` is the big one. (Pre-migration Windows sessions used
+  `C:\Users\Brend\.claude\projects\F--CorpusStudio\memory\`.)
 
 ## 10. Notes for Codex specifically
 

@@ -1,5 +1,6 @@
 """Training pre-flight: cheap fail-fast checks before a long launch."""
 
+import sys
 from pathlib import Path
 
 from corpus_studio.training import gpu_probe
@@ -27,7 +28,10 @@ def _data(tmp_path: Path, name: str = "train.jsonl") -> Path:
 def _run(tmp_path, **overrides):
     kwargs = dict(
         config_path=_config(tmp_path),
-        launch_argv=["python", str(tmp_path / "config.yaml")],  # python is on PATH
+        # sys.executable is an absolute path shutil.which always resolves, so the trainer-on-PATH
+        # check is deterministic regardless of whether a bare `python` symlink exists (stock Ubuntu
+        # ships only `python3`; CI's setup-python provides `python`).
+        launch_argv=[sys.executable, str(tmp_path / "config.yaml")],
         dependencies=["trl", "transformers", "torch"],
         data_paths=[_data(tmp_path)],
         dataset_row_count=100,
@@ -200,7 +204,9 @@ def test_native_windows_blackwell_gpu_checks_against_the_higher_math_estimate(tm
     # On NATIVE WINDOWS + Blackwell (sm_120) the trainer is forced onto the math attention path (WDDM
     # flash deadlock), which uses MORE VRAM (seq² scores). The pre-flight must check the higher math
     # estimate there — so a config that "fits" on the flash estimate can still warn on a 12 GB card.
-    monkeypatch.setattr("corpus_studio.training.preflight.sys.platform", "win32")
+    # Force the native-Windows branch via the isolated helper, NOT by faking sys.platform
+    # globally (that breaks shutil.which on Python 3.12, whose win32 path calls _winapi).
+    monkeypatch.setattr("corpus_studio.training.preflight._native_windows", lambda: True)
     _gpu(monkeypatch, GpuMemory(total_gb=12.0, free_gb=11.6, compute_capability="12.0"))
     report = _run(tmp_path, vram_min_gb=10.7, vram_min_gb_math=12.1)  # flash ~fits, math over the ceiling
     gpu_check = next(c for c in report.checks if c.name == "gpu_memory")

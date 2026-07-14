@@ -4134,7 +4134,11 @@ def dataset_card(
         raise typer.Exit(code=1) from exc
 
     examples_path = project_dir / "examples.jsonl"
-    rows = list(read_jsonl(examples_path)) if examples_path.exists() else []
+    try:
+        rows = list(read_jsonl(examples_path)) if examples_path.exists() else []
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
 
     resolved_export_dir = export_dir or (
         _repo_relative_path("CORPUS_STUDIO_EXPORT_DIR", Path("exports")) / project_dir.name
@@ -4269,6 +4273,19 @@ def export(
     ),
 ):
     """Validate and export a JSONL file, optionally cleaning it first."""
+    # Single-writer invariant: the engine must never write the dataset's source of truth
+    # (examples.jsonl) -- the desktop is its only writer. `export` writes an arbitrary
+    # --output, so refuse the canonical name here too (every other engine write path guards
+    # it; see hf-import above). casefold (NOT normcase, a no-op on Linux) so `Examples.jsonl`
+    # can't slip past on a case-insensitive filesystem; refusing it on Linux too is safe.
+    if output_path.name.casefold() == "examples.jsonl":
+        typer.echo(
+            "Refusing to write examples.jsonl: export writes a training deliverable, not the "
+            "project's dataset. Choose a different --output (the desktop is the single writer "
+            "of examples.jsonl).",
+            err=True,
+        )
+        raise typer.Exit(code=2)
     export_format = export_format.strip().lower()
     if export_format not in ("jsonl", "csv", "tsv", "parquet"):
         typer.echo(

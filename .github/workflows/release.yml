@@ -56,11 +56,14 @@ jobs:
 
       - name: Package
         shell: pwsh
+        env:
+          REF: ${{ github.ref_name }}
         run: |
           # Sanitize the ref for a filename: a workflow_dispatch dry-run can run on a branch whose
           # name has a '/' (e.g. feat/x), which would otherwise make Compress-Archive target a missing
-          # subdirectory. Tags (v1.2.3) are unaffected.
-          $version = "${{ github.ref_name }}".Replace('/', '-')
+          # subdirectory. Tags (v1.2.3) are unaffected. Read the ref from env (never spliced into the
+          # script text) so a crafted branch name can't inject commands.
+          $version = "$env:REF".Replace('/', '-')
           $zip = "CorpusStudio-$version-win-x64.zip"
           Compress-Archive -Path apps/desktop/CorpusStudio.Desktop/bin/publish/win-x64/* -DestinationPath $zip
           "ASSET=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
@@ -79,7 +82,8 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" "${{ env.ASSET }}" --title "${{ github.ref_name }}" --generate-notes
+          REF: ${{ github.ref_name }}
+        run: gh release create "$env:REF" "${{ env.ASSET }}" --title "$env:REF" --generate-notes
 
   # macOS/Linux distributables (Avalonia head). Built on NATIVE runners so the executable + native
   # libs (Skia/HarfBuzz) are correct and carry the exec bit. `needs: release` so these only run once
@@ -115,9 +119,12 @@ jobs:
           -o dist/${{ matrix.rid }}
 
       - name: Package (tar.gz)
+        env:
+          REF: ${{ github.ref_name }}
         run: |
           # Sanitize the ref for a filename (a dry-run branch like feat/x has a '/'); tags are unaffected.
-          ref="${{ github.ref_name }}"
+          # Read the ref from env (never spliced into the script) so a crafted branch name can't inject.
+          ref="$REF"
           asset="CorpusStudio-${ref//\//-}-${{ matrix.rid }}.tar.gz"
           tar -czf "$asset" -C "dist/${{ matrix.rid }}" .
           echo "ASSET=$asset" >> "$GITHUB_ENV"
@@ -133,4 +140,5 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.ref_name }}" "${{ env.ASSET }}" --clobber
+          REF: ${{ github.ref_name }}
+        run: gh release upload "$REF" "${{ env.ASSET }}" --clobber

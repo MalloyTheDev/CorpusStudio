@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+# Least privilege: building + testing only needs to read the repository.
+permissions:
+  contents: read
+
 jobs:
   desktop-tests:
     runs-on: windows-latest
