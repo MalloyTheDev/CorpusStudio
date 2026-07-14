@@ -838,7 +838,11 @@ def _install_evidence_from_report(
         elif is_direct and isinstance(archive_info, dict):
             source = "wheel" if artifact and artifact.casefold().endswith(".whl") else "sdist"
         elif configured_indexes:
-            if any("pypi.org" in item for item in configured_indexes):
+            # Host identity only - avoid substring checks on full URLs (CodeQL).
+            if any(
+                (urlparse(item).hostname or "").casefold() in {"pypi.org", "www.pypi.org"}
+                for item in configured_indexes
+            ):
                 source = "pypi"
             elif artifact and artifact.casefold().endswith(".whl"):
                 source = "wheel"
