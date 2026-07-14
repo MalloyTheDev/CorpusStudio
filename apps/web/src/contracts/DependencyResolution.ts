@@ -70,12 +70,12 @@ export type PrecisionMode = "fp32" | "tf32" | "fp16" | "bf16" | "fp8" | "mixed_b
 export type Probe = string;
 export type QuantizationMode = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
 export type RuntimeMode = "training" | "cpu_toy";
-export type FlashSdpEnabled = false;
+export type FlashSdpEnabled = boolean;
 export type GradientCheckpointing = true;
-export type MathSdpEnabled = true;
+export type MathSdpEnabled = boolean;
 export type MemoryEfficientSdpEnabled = false;
 export type Optimizer1 = "adamw_torch";
-export type Probe1 = "cuda_qlora_math_execution";
+export type Probe1 = "cuda_qlora_math_execution" | "cuda_qlora_sdpa_flash_execution";
 export type Quantization = "nf4";
 export type RequireAdapterRoundTrip = true;
 export type RequiredDistributions = string[];
@@ -169,6 +169,9 @@ export interface Environment {
 }
 /**
  * The exact complete QLoRA tuple a readiness environment must prove as one operation.
+ *
+ * Math and flash tuples are independent identities. A math-only seal is never a flash claim, and
+ * independent flash/bitsandbytes/optimizer probes cannot be unioned into a complete capability.
  */
 export interface QloraExecutionProbeSpec {
   attention_api?: AttentionApi;

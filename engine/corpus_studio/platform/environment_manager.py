@@ -56,6 +56,7 @@ from .contracts import (
 from .enums import DependencyLayer, EnvironmentState, FailureTaxonomy, OperatingSystem
 from .environments import (
     get_recipe,
+    READINESS_FLASH_V1_RECIPE_ID,
     READINESS_V2_RECIPE_ID,
     recipe_digest,
     resolution_digest,
@@ -69,7 +70,9 @@ from .process_control import (
 
 MANAGER_VERSION = "1.1.0"
 REFERENCE_RECIPE_ID = "backend-corpus-studio"
-SUPPORTED_CREATION_RECIPES = frozenset({REFERENCE_RECIPE_ID, READINESS_V2_RECIPE_ID})
+SUPPORTED_CREATION_RECIPES = frozenset(
+    {REFERENCE_RECIPE_ID, READINESS_V2_RECIPE_ID, READINESS_FLASH_V1_RECIPE_ID}
+)
 
 _OWNER_FILENAME = ".corpusstudio-owner.json"
 _OWNER_KIND = "corpus-studio-managed-environment-v1"
@@ -161,7 +164,7 @@ def _hash_file(path: Path) -> str:
 def _worker_artifact_identity(path: str | Path) -> WorkerArtifactIdentity:
     wheel = Path(path).expanduser().resolve(strict=True)
     if not wheel.is_file() or wheel.suffix.casefold() != ".whl":
-        raise EnvironmentManagerError("the readiness-v2 worker artifact must be a concrete wheel")
+        raise EnvironmentManagerError("the readiness worker artifact must be a concrete wheel")
     try:
         with zipfile.ZipFile(wheel) as archive:
             metadata_names = sorted(
@@ -938,7 +941,7 @@ class EnvironmentManager:
             blocking = list(resolution.blocking_reasons)
             if worker_wheel is None:
                 blocking.append(
-                    "readiness-v2 requires --worker-wheel pointing to a reviewed CorpusStudio wheel"
+                    "readiness recipes require --worker-wheel pointing to a reviewed CorpusStudio wheel"
                 )
             else:
                 try:

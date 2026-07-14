@@ -77,6 +77,8 @@ class FakeEnvironmentRunner:
     functional_ok: bool = True
     hardware_ok: bool = True
     complete_probe_ok: bool = False
+    # Independent complete-tuple identities: math readiness-v2 vs flash readiness-v1.
+    complete_probe_name: str = "cuda_qlora_math_execution"
     fail_phase: str | None = None
     timeout_phase: str | None = None
     cancel_phase: str | None = None
@@ -291,20 +293,23 @@ class FakeEnvironmentRunner:
                     },
                 },
             }
+        flash = self.complete_probe_name == "cuda_qlora_sdpa_flash_execution"
+        attention_impl = "sdpa" if flash else "math"
+        attention_kernel = "torch_sdpa_flash" if flash else "torch_sdpa_math"
         combination = {
             "runtime_mode": "training",
             "device": "cuda",
             "precision": "bf16",
             "quantization": "nf4",
             "adapter_method": "qlora",
-            "attention_impl": "math",
-            "attention_kernel": "torch_sdpa_math",
+            "attention_impl": attention_impl,
+            "attention_kernel": attention_kernel,
             "optimizer": "adamw_torch",
             "loss_impl": "cross_entropy",
             "checkpoint_impl": "adapter_only",
             "export_format": "adapter_peft",
             "execution_contract_version": "1.0.0",
-            "probe": "cuda_qlora_math_execution",
+            "probe": self.complete_probe_name,
         }
         package_versions = {
             item["normalized_name"]: item["version"]
@@ -322,31 +327,42 @@ class FakeEnvironmentRunner:
                 "trl",
             }
         }
+        memory = {
+            "gpu_allocator_scope": "pytorch_cuda_allocator_process",
+            "gpu_device_scope": "nvidia_smi_current_process",
+            "host_memory_scope": "current_process_rss",
+            "baseline_gpu_allocated_bytes": 1,
+            "baseline_gpu_reserved_bytes": 2,
+            "peak_gpu_allocated_bytes": 3,
+            "peak_gpu_reserved_bytes": 4,
+            "baseline_nvidia_smi_process_bytes": 5,
+            "peak_nvidia_smi_process_bytes": 6,
+            "baseline_host_rss_bytes": 7,
+            "peak_host_rss_bytes": 8,
+            "duration_seconds": 0.5,
+        }
+        if flash:
+            memory.update(
+                {
+                    "forward_duration_seconds": 0.1,
+                    "backward_duration_seconds": 0.2,
+                    "optimizer_step_duration_seconds": 0.05,
+                    "gpu_temperature_celsius": 42.0,
+                    "gpu_power_watts": 80.0,
+                }
+            )
         tuple_result = {
-            "probe": "cuda_qlora_math_execution",
+            "probe": self.complete_probe_name,
             "outcome": "PASS",
             "measured": {
                 "runtime": {"packages": package_versions},
-                "memory": {
-                    "gpu_allocator_scope": "pytorch_cuda_allocator_process",
-                    "gpu_device_scope": "nvidia_smi_current_process",
-                    "host_memory_scope": "current_process_rss",
-                    "baseline_gpu_allocated_bytes": 1,
-                    "baseline_gpu_reserved_bytes": 2,
-                    "peak_gpu_allocated_bytes": 3,
-                    "peak_gpu_reserved_bytes": 4,
-                    "baseline_nvidia_smi_process_bytes": 5,
-                    "peak_nvidia_smi_process_bytes": 6,
-                    "baseline_host_rss_bytes": 7,
-                    "peak_host_rss_bytes": 8,
-                    "duration_seconds": 0.5,
-                },
+                "memory": memory,
             },
             "proves": {
                 "precision": ["bf16"],
                 "quantization": ["nf4"],
-                "attention": ["math", "sdpa"],
-                "attention_kernel": ["torch_sdpa_math"],
+                "attention": ["sdpa"] if flash else ["math", "sdpa"],
+                "attention_kernel": [attention_kernel],
                 "adapter": ["qlora"],
                 "loss": ["cross_entropy"],
                 "optimizer": ["adamw_torch"],
@@ -374,8 +390,8 @@ class FakeEnvironmentRunner:
                 "effective_capabilities": {
                     "precision_modes": ["bf16"],
                     "quantization_modes": ["nf4"],
-                    "attention_impls": ["math", "sdpa"],
-                    "attention_kernels": ["torch_sdpa_math"],
+                    "attention_impls": ["sdpa"] if flash else ["math", "sdpa"],
+                    "attention_kernels": [attention_kernel],
                     "adapter_methods": ["qlora"],
                     "loss_impls": ["cross_entropy"],
                     "optimizers": ["adamw_torch"],
@@ -495,6 +511,8 @@ def _manager_and_readiness_resolution(
     tmp_path: Path,
     *,
     complete_probe_ok: bool = True,
+    recipe_id: str = "backend-corpus-studio-readiness-v2",
+    complete_probe_name: str = "cuda_qlora_math_execution",
 ) -> tuple[EnvironmentManager, Any, FakeEnvironmentRunner, Path]:
     wheel = _worker_wheel(tmp_path / "artifacts")
     packages = _readiness_packages()
@@ -508,10 +526,11 @@ def _manager_and_readiness_resolution(
     runner = FakeEnvironmentRunner(
         cuda=True,
         complete_probe_ok=complete_probe_ok,
+        complete_probe_name=complete_probe_name,
         packages=packages,
     )
     runtime = PythonRuntime(
-        runtime_id="python-readiness-v2",
+        runtime_id="python-readiness",
         executable=str(tmp_path / "base-python"),
         version="3.12.10",
         implementation="CPython",
@@ -527,8 +546,8 @@ def _manager_and_readiness_resolution(
         runtime_probe=lambda executable, requirement: runtime,
     )
     resolution = manager.preview(
-        "backend-corpus-studio-readiness-v2",
-        env_id="backend-corpus-studio-readiness-v2",
+        recipe_id,
+        env_id=recipe_id,
         runtime_executable=runtime.executable,
         accelerator_tag="cu128",
         worker_wheel=wheel,
@@ -652,6 +671,45 @@ def test_failed_or_independently_unionable_probes_never_seal_readiness_v2(tmp_pa
     assert result.descriptor.lock_ref is None
     assert not (manager.registry_root / result.descriptor.env_id / "locks").exists()
     assert result.health.probe_results[-1].probe == "cuda_qlora_math_execution"
+
+
+def test_readiness_flash_v1_seals_only_after_forced_flash_tuple(tmp_path):
+    manager, resolution, _, _ = _manager_and_readiness_resolution(
+        tmp_path,
+        recipe_id="backend-corpus-studio-readiness-flash-v1",
+        complete_probe_name="cuda_qlora_sdpa_flash_execution",
+    )
+    assert resolution.required_execution_probe is not None
+    assert resolution.required_execution_probe.probe == "cuda_qlora_sdpa_flash_execution"
+    assert resolution.required_execution_probe.flash_sdp_enabled is True
+    assert resolution.required_execution_probe.math_sdp_enabled is False
+    result = manager.create(
+        resolution, confirmed_resolution_hash=resolution.resolution_hash or ""
+    )
+    assert result.descriptor.state == EnvironmentState.hardware_verified
+    assert result.lock is not None and result.lock.probe_evidence is not None
+    assert result.lock.probe_evidence.tuple_result.probe == "cuda_qlora_sdpa_flash_execution"
+    memory = result.lock.probe_evidence.memory
+    assert memory.forward_duration_seconds == 0.1
+    assert memory.backward_duration_seconds == 0.2
+    assert memory.optimizer_step_duration_seconds == 0.05
+    assert memory.gpu_temperature_celsius == 42.0
+    assert memory.gpu_power_watts == 80.0
+
+
+def test_failed_flash_tuple_never_seals_readiness_flash_v1(tmp_path):
+    manager, resolution, _, _ = _manager_and_readiness_resolution(
+        tmp_path,
+        complete_probe_ok=False,
+        recipe_id="backend-corpus-studio-readiness-flash-v1",
+        complete_probe_name="cuda_qlora_sdpa_flash_execution",
+    )
+    result = manager.create(
+        resolution, confirmed_resolution_hash=resolution.resolution_hash or ""
+    )
+    assert result.descriptor.state == EnvironmentState.incompatible
+    assert result.lock is None
+    assert result.health.probe_results[-1].probe == "cuda_qlora_sdpa_flash_execution"
 
 
 def test_lock_finalization_refuses_missing_complete_probe_evidence(tmp_path):

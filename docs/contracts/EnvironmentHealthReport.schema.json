@@ -930,6 +930,19 @@
       "additionalProperties": false,
       "description": "Measured resource evidence for one bounded probe, with scopes kept explicit.",
       "properties": {
+        "backward_duration_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backward Duration Seconds"
+        },
         "baseline_gpu_allocated_bytes": {
           "minimum": 0,
           "title": "Baseline Gpu Allocated Bytes",
@@ -963,6 +976,19 @@
           "title": "Duration Seconds",
           "type": "number"
         },
+        "forward_duration_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Forward Duration Seconds"
+        },
         "gpu_allocator_scope": {
           "const": "pytorch_cuda_allocator_process",
           "default": "pytorch_cuda_allocator_process",
@@ -978,11 +1004,48 @@
           "title": "Gpu Device Scope",
           "type": "string"
         },
+        "gpu_power_watts": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gpu Power Watts"
+        },
+        "gpu_temperature_celsius": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gpu Temperature Celsius"
+        },
         "host_memory_scope": {
           "const": "current_process_rss",
           "default": "current_process_rss",
           "title": "Host Memory Scope",
           "type": "string"
+        },
+        "optimizer_step_duration_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Optimizer Step Duration Seconds"
         },
         "peak_gpu_allocated_bytes": {
           "minimum": 0,
@@ -1079,7 +1142,7 @@
     },
     "QloraExecutionProbeSpec": {
       "additionalProperties": false,
-      "description": "The exact complete QLoRA tuple a readiness environment must prove as one operation.",
+      "description": "The exact complete QLoRA tuple a readiness environment must prove as one operation.\n\nMath and flash tuples are independent identities. A math-only seal is never a flash claim, and\nindependent flash/bitsandbytes/optimizer probes cannot be unioned into a complete capability.",
       "properties": {
         "attention_api": {
           "const": "sdpa",
@@ -1109,7 +1172,6 @@
           "$ref": "#/$defs/ExecutionCapabilityCombination"
         },
         "flash_sdp_enabled": {
-          "const": false,
           "default": false,
           "title": "Flash Sdp Enabled",
           "type": "boolean"
@@ -1121,7 +1183,6 @@
           "type": "boolean"
         },
         "math_sdp_enabled": {
-          "const": true,
           "default": true,
           "title": "Math Sdp Enabled",
           "type": "boolean"
@@ -1139,8 +1200,11 @@
           "type": "string"
         },
         "probe": {
-          "const": "cuda_qlora_math_execution",
           "default": "cuda_qlora_math_execution",
+          "enum": [
+            "cuda_qlora_math_execution",
+            "cuda_qlora_sdpa_flash_execution"
+          ],
           "title": "Probe",
           "type": "string"
         },

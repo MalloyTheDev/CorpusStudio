@@ -2915,18 +2915,24 @@ class WorkerArtifactIdentity(ContractModel):
 
 
 class QloraExecutionProbeSpec(ContractModel):
-    """The exact complete QLoRA tuple a readiness environment must prove as one operation."""
+    """The exact complete QLoRA tuple a readiness environment must prove as one operation.
 
-    probe: Literal["cuda_qlora_math_execution"] = "cuda_qlora_math_execution"
+    Math and flash tuples are independent identities. A math-only seal is never a flash claim, and
+    independent flash/bitsandbytes/optimizer probes cannot be unioned into a complete capability.
+    """
+
+    probe: Literal["cuda_qlora_math_execution", "cuda_qlora_sdpa_flash_execution"] = (
+        "cuda_qlora_math_execution"
+    )
     execution_combination: ExecutionCapabilityCombination
     device: Literal["cuda:0"] = "cuda:0"
     compute_dtype: Literal["bf16"] = "bf16"
     quantization: Literal["nf4"] = "nf4"
     double_quantization: Literal[True] = True
     attention_api: Literal["sdpa"] = "sdpa"
-    flash_sdp_enabled: Literal[False] = False
+    flash_sdp_enabled: bool = False
     memory_efficient_sdp_enabled: Literal[False] = False
-    math_sdp_enabled: Literal[True] = True
+    math_sdp_enabled: bool = True
     target_modules: Literal["all-linear"] = "all-linear"
     gradient_checkpointing: Literal[True] = True
     optimizer: Literal["adamw_torch"] = "adamw_torch"
@@ -2935,15 +2941,28 @@ class QloraExecutionProbeSpec(ContractModel):
 
     @model_validator(mode="after")
     def _validate_complete_tuple(self) -> QloraExecutionProbeSpec:
-        combination = self.execution_combination
+        if self.probe == "cuda_qlora_math_execution":
+            attention_impl = "math"
+            attention_kernel = "torch_sdpa_math"
+            if self.flash_sdp_enabled is not False or self.math_sdp_enabled is not True:
+                raise ValueError(
+                    "math QLoRA readiness requires flash_sdp_enabled=false and math_sdp_enabled=true"
+                )
+        else:
+            attention_impl = "sdpa"
+            attention_kernel = "torch_sdpa_flash"
+            if self.flash_sdp_enabled is not True or self.math_sdp_enabled is not False:
+                raise ValueError(
+                    "flash QLoRA readiness requires flash_sdp_enabled=true and math_sdp_enabled=false"
+                )
         expected = (
             "training",
             "cuda",
             "bf16",
             "nf4",
             "qlora",
-            "math",
-            "torch_sdpa_math",
+            attention_impl,
+            attention_kernel,
             "adamw_torch",
             "cross_entropy",
             "adapter_only",
@@ -2951,8 +2970,10 @@ class QloraExecutionProbeSpec(ContractModel):
             "1.0.0",
             self.probe,
         )
-        if combination.canonical_key() != expected:
+        if self.execution_combination.canonical_key() != expected:
             raise ValueError("QLoRA readiness probe spec does not describe the required complete tuple")
+        if self.memory_efficient_sdp_enabled is not False:
+            raise ValueError("QLoRA readiness probes must disable memory-efficient SDPA")
         normalized = sorted(set(self.required_distributions))
         if self.required_distributions != normalized:
             raise ValueError("required_distributions must be sorted and unique")
@@ -2976,6 +2997,12 @@ class ProbeMemoryEvidence(ContractModel):
     baseline_host_rss_bytes: int = Field(ge=0)
     peak_host_rss_bytes: int = Field(ge=0)
     duration_seconds: float = Field(ge=0)
+    # Optional phase timing / thermal fields (flash readiness records them; math may omit).
+    forward_duration_seconds: float | None = Field(default=None, ge=0)
+    backward_duration_seconds: float | None = Field(default=None, ge=0)
+    optimizer_step_duration_seconds: float | None = Field(default=None, ge=0)
+    gpu_temperature_celsius: float | None = None
+    gpu_power_watts: float | None = None
 
 
 class EnvironmentProbeEvidence(ContractModel):

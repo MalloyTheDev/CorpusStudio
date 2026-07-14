@@ -51,14 +51,19 @@ export type PlatformTag = string;
 export type ContractVersion1 = "1.0.0";
 export type EvidenceHash = string;
 export type EvidenceId = string;
+export type BackwardDurationSeconds = number | null;
 export type BaselineGpuAllocatedBytes = number;
 export type BaselineGpuReservedBytes = number;
 export type BaselineHostRssBytes = number;
 export type BaselineNvidiaSmiProcessBytes = number | null;
 export type DurationSeconds = number;
+export type ForwardDurationSeconds = number | null;
 export type GpuAllocatorScope = "pytorch_cuda_allocator_process";
 export type GpuDeviceScope = "nvidia_smi_current_process" | "unavailable";
+export type GpuPowerWatts = number | null;
+export type GpuTemperatureCelsius = number | null;
 export type HostMemoryScope = "current_process_rss";
+export type OptimizerStepDurationSeconds = number | null;
 export type PeakGpuAllocatedBytes = number;
 export type PeakGpuReservedBytes = number;
 export type PeakHostRssBytes = number;
@@ -108,12 +113,12 @@ export type PrecisionMode = "fp32" | "tf32" | "fp16" | "bf16" | "fp8" | "mixed_b
 export type Probe = string;
 export type QuantizationMode = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
 export type RuntimeMode = "training" | "cpu_toy";
-export type FlashSdpEnabled = false;
+export type FlashSdpEnabled = boolean;
 export type GradientCheckpointing = true;
-export type MathSdpEnabled = true;
+export type MathSdpEnabled = boolean;
 export type MemoryEfficientSdpEnabled = false;
 export type Optimizer1 = "adamw_torch";
-export type Probe1 = "cuda_qlora_math_execution";
+export type Probe1 = "cuda_qlora_math_execution" | "cuda_qlora_sdpa_flash_execution";
 export type Quantization = "nf4";
 export type RequireAdapterRoundTrip = true;
 export type RequiredDistributions = string[];
@@ -267,14 +272,19 @@ export interface EnvironmentProbeEvidence {
  * Measured resource evidence for one bounded probe, with scopes kept explicit.
  */
 export interface ProbeMemoryEvidence {
+  backward_duration_seconds?: BackwardDurationSeconds;
   baseline_gpu_allocated_bytes: BaselineGpuAllocatedBytes;
   baseline_gpu_reserved_bytes: BaselineGpuReservedBytes;
   baseline_host_rss_bytes: BaselineHostRssBytes;
   baseline_nvidia_smi_process_bytes?: BaselineNvidiaSmiProcessBytes;
   duration_seconds: DurationSeconds;
+  forward_duration_seconds?: ForwardDurationSeconds;
   gpu_allocator_scope?: GpuAllocatorScope;
   gpu_device_scope?: GpuDeviceScope;
+  gpu_power_watts?: GpuPowerWatts;
+  gpu_temperature_celsius?: GpuTemperatureCelsius;
   host_memory_scope?: HostMemoryScope;
+  optimizer_step_duration_seconds?: OptimizerStepDurationSeconds;
   peak_gpu_allocated_bytes: PeakGpuAllocatedBytes;
   peak_gpu_reserved_bytes: PeakGpuReservedBytes;
   peak_host_rss_bytes: PeakHostRssBytes;
@@ -282,6 +292,9 @@ export interface ProbeMemoryEvidence {
 }
 /**
  * The exact complete QLoRA tuple a readiness environment must prove as one operation.
+ *
+ * Math and flash tuples are independent identities. A math-only seal is never a flash claim, and
+ * independent flash/bitsandbytes/optimizer probes cannot be unioned into a complete capability.
  */
 export interface QloraExecutionProbeSpec {
   attention_api?: AttentionApi;

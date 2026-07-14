@@ -6,14 +6,16 @@ packs, and isolated backend-worker environments. Heavy frameworks do not share t
 interpreter or each other's dependency graph.
 
 > **Implemented status:** the create-to-remove lifecycle supports the legacy
-> `backend-corpus-studio` rollback recipe and the exact-pinned
-> `backend-corpus-studio-readiness-v2` recipe. Readiness-v2 remains plan-only until a separately
-> authorized creation: declaring the recipe and generating its sealed plan do not prove the
-> environment. The lifecycle is covered in default CI by fake installers and CPU-only probes. On the
-> current native-Linux host, the existing managed
-> `backend-corpus-studio` environment is `HARDWARE_VERIFIED` for its exact minimal CUDA-allocation,
-> 4-bit-construction, GPU forward/backward, and math-SDPA probe tuple. Rebuilding it remains an explicit
-> network-using operation. This environment result does not verify a real 7B workload or offload.
+> `backend-corpus-studio` rollback recipe, the exact-pinned math
+> `backend-corpus-studio-readiness-v2` recipe, and the exact-pinned flash
+> `backend-corpus-studio-readiness-flash-v1` recipe. Flash readiness remains plan-only until a
+> separately authorized creation: declaring the recipe and generating its sealed plan do not prove
+> the environment. The lifecycle is covered in default CI by fake installers and CPU-only probes. On
+> the current native-Linux host, the managed `backend-corpus-studio` and
+> `backend-corpus-studio-readiness-v2` environments are `HARDWARE_VERIFIED` for their respective
+> exact probe tuples (legacy minimal hardware probe; readiness-v2 complete math QLoRA tuple).
+> Rebuilding either remains an explicit network-using operation. These environment results do not
+> verify a real 7B workload, offload, or flash-enabled training.
 
 ## Dependency layers
 
@@ -40,11 +42,14 @@ DEPENDENCY_PROBE_PASSED -> FUNCTIONAL_PROBE_PASSED -> HARDWARE_VERIFIED
 `FUNCTIONAL_PROBE_PASSED`; they do not earn GPU support. The legacy recipe retains its existing
 minimal hardware-probe meaning. Readiness-v2 additionally requires one complete probe to prove BF16,
 NF4 with double quantization, math-only SDPA toggles, exact CUDA placement, QLoRA adapter insertion,
-finite forward loss, backward, AdamW update, and adapter safetensors reload as one tuple. Independent
-passing probes cannot be unioned into this support claim. On native-Windows Blackwell, the probe never
-executes the known
-deadlocking fused SDPA path. `HARDWARE_VERIFIED` is evidence for that exact environment-level tuple,
-not backend-wide, workload, 7B, offload, FlashAttention, distributed, or MoE support.
+finite forward loss, backward, AdamW update, and adapter safetensors reload as one tuple. Flash
+readiness-v1 is a separate complete probe identity: the same QLoRA tuple forced onto
+`SDPBackend.FLASH_ATTENTION` with flash enabled and math/mem-efficient disabled, with no automatic
+dispatch fallback. Independent passing probes cannot be unioned into either complete support claim.
+On native-Windows Blackwell, the known-deadlocking fused SDPA path is refused for the standalone
+flash probe; readiness flash environments are Linux-only. `HARDWARE_VERIFIED` is evidence for that
+exact environment-level tuple, not backend-wide, workload, 7B, offload, external `flash_attention_2`,
+distributed, or MoE support.
 
 ## Runtime discovery and plan review
 
@@ -58,8 +63,8 @@ stdlib `venv` module is available, and compatibility reasons.
 - exact argv arrays, working directories, a small explicit non-secret environment, timeouts, expected
   outputs, and whether each step uses the network;
 - explicit PyPI and accelerator-specific PyTorch indexes (`cu128` for the Blackwell reference host);
-- for the legacy recipe, the reviewed local CorpusStudio worker source; for readiness-v2, a concrete
-  `corpus-studio-engine` wheel whose size, METADATA digest, and byte hash are part of the plan;
+- for the legacy recipe, the reviewed local CorpusStudio worker source; for readiness recipes, a
+  concrete `corpus-studio-engine` wheel whose size, METADATA digest, and byte hash are part of the plan;
 - estimated download and installed sizes;
 - a recipe digest and `resolution_hash` over the concrete plan.
 
@@ -78,8 +83,9 @@ engine/.venv/bin/corpus-studio env-plan backend-corpus-studio \
   --accelerator cu128
 ```
 
-Readiness-v2 requires an already-built local wheel and can write the canonical plan without creating
-an environment:
+Readiness recipes require an already-built local wheel and can write the canonical plan without
+creating an environment. Math readiness-v2 remains the safety/rollback baseline; flash readiness is a
+separate environment id and must not mutate it:
 
 ```bash
 engine/.venv/bin/corpus-studio env-plan backend-corpus-studio-readiness-v2 \
@@ -89,6 +95,14 @@ engine/.venv/bin/corpus-studio env-plan backend-corpus-studio-readiness-v2 \
   --worker-wheel /mnt/training-nvme/artifacts/corpusstudio-worker/<commit>/<wheel>.whl \
   --manager-root /mnt/training-nvme/corpusstudio/xdg-data/corpusstudio/environment-manager \
   --out /mnt/training-nvme/artifacts/corpusstudio-worker/<commit>/DependencyResolution.json
+
+engine/.venv/bin/corpus-studio env-plan backend-corpus-studio-readiness-flash-v1 \
+  --env-id backend-corpus-studio-readiness-flash-v1 \
+  --runtime /usr/bin/python3 \
+  --accelerator cu128 \
+  --worker-wheel /mnt/training-nvme/artifacts/corpusstudio-worker/<commit>/<wheel>.whl \
+  --manager-root /mnt/training-nvme/corpusstudio/xdg-data/corpusstudio/environment-manager \
+  --out /mnt/training-nvme/artifacts/corpusstudio-worker/<commit>/DependencyResolution.flash-v1.json
 ```
 
 The plan prints its exact `resolution hash`. Creation requires that same value and the same planning

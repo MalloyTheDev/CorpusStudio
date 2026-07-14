@@ -289,7 +289,7 @@
     },
     "QloraExecutionProbeSpec": {
       "additionalProperties": false,
-      "description": "The exact complete QLoRA tuple a readiness environment must prove as one operation.",
+      "description": "The exact complete QLoRA tuple a readiness environment must prove as one operation.\n\nMath and flash tuples are independent identities. A math-only seal is never a flash claim, and\nindependent flash/bitsandbytes/optimizer probes cannot be unioned into a complete capability.",
       "properties": {
         "attention_api": {
           "const": "sdpa",
@@ -319,7 +319,6 @@
           "$ref": "#/$defs/ExecutionCapabilityCombination"
         },
         "flash_sdp_enabled": {
-          "const": false,
           "default": false,
           "title": "Flash Sdp Enabled",
           "type": "boolean"
@@ -331,7 +330,6 @@
           "type": "boolean"
         },
         "math_sdp_enabled": {
-          "const": true,
           "default": true,
           "title": "Math Sdp Enabled",
           "type": "boolean"
@@ -349,8 +347,11 @@
           "type": "string"
         },
         "probe": {
-          "const": "cuda_qlora_math_execution",
           "default": "cuda_qlora_math_execution",
+          "enum": [
+            "cuda_qlora_math_execution",
+            "cuda_qlora_sdpa_flash_execution"
+          ],
           "title": "Probe",
           "type": "string"
         },

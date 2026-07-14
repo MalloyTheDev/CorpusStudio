@@ -205,15 +205,20 @@ per-item error isolation, and off-thread document opens.
   `env-status` / `env-probe` / `env-lock` / `env-remove` / `env-recreate`): the 3-layer dependency
   model in code — a lightweight always-installable **control plane**, opt-in **capability profiles**,
   and **isolated per-backend worker environments**. The side-effectful path is deliberately limited
-  to the legacy `backend-corpus-studio` rollback recipe and the plan-only, exact-pinned
-  `backend-corpus-studio-readiness-v2` recipe. It discovers Python runtimes, renders concrete no-shell
-  argv + explicit indexes, binds a byte-exact worker wheel for readiness-v2, and requires the exact
-  plan hash before mutation. Installation captures sanitized pip source/artifact evidence and verifies
-  installed `RECORD` bytes; a final lock is sealed only after the required probes and a stable
-  post-probe inventory. Readiness-v2 requires one complete BF16/NF4/double-quant QLoRA math-SDPA
-  forward/loss/backward/optimizer/adapter-reload tuple, with scoped GPU allocator, `nvidia-smi`
-  process-memory, host-RSS, and duration evidence. Independent probes cannot be unioned. The manager
-  detects worker/dependency drift and safely removes or recreates only contained owned paths.
+  to the legacy `backend-corpus-studio` rollback recipe, the exact-pinned math
+  `backend-corpus-studio-readiness-v2` recipe, and the exact-pinned flash
+  `backend-corpus-studio-readiness-flash-v1` recipe. It discovers Python runtimes, renders concrete
+  no-shell argv + explicit indexes, binds a byte-exact worker wheel for readiness recipes, and
+  requires the exact plan hash before mutation. Installation captures sanitized pip source/artifact
+  evidence and verifies installed `RECORD` bytes; a final lock is sealed only after the required
+  probes and a stable post-probe inventory. Readiness-v2 requires one complete BF16/NF4/double-quant
+  QLoRA math-SDPA forward/loss/backward/optimizer/adapter-reload tuple. Flash readiness-v1 requires
+  the same complete QLoRA evidence under forced `SDPBackend.FLASH_ATTENTION` (no math/mem-efficient
+  fallback), with scoped GPU allocator, `nvidia-smi` process-memory, host-RSS, phase timing, and
+  optional temperature/power evidence. Independent probes cannot be unioned across either complete
+  tuple. The math readiness-v2 environment is the preserved safety/rollback baseline and must not be
+  mutated by flash work. The manager detects worker/dependency drift and safely removes or recreates
+  only contained owned paths.
   `RunPlan.environment_ref` pins the immutable
   lock hash and `platform-run --subprocess` dispatches with that managed interpreter after a live
   health check. Tests use fake installers and bounded synthetic probe evidence. Separately, the current native-Linux host's

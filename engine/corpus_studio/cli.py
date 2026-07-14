@@ -1383,7 +1383,7 @@ def env_plan(
     worker_wheel: Optional[Path] = typer.Option(
         None,
         "--worker-wheel",
-        help="Exact CorpusStudio wheel required by readiness-v2; its bytes are hash-bound.",
+        help="Exact CorpusStudio wheel required by readiness recipes; its bytes are hash-bound.",
     ),
     out: Optional[Path] = typer.Option(
         None, "--out", help="Write the canonical DependencyResolution JSON to this path."

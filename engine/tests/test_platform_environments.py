@@ -107,6 +107,47 @@ def test_readiness_v2_recipe_is_exact_and_probe_changes_reseal_the_plan():
     assert first.resolution_hash != second.resolution_hash
 
 
+def test_readiness_flash_v1_is_exact_forced_flash_and_independent_of_math():
+    math_recipe = get_recipe("backend-corpus-studio-readiness-v2")
+    flash_recipe = get_recipe("backend-corpus-studio-readiness-flash-v1")
+    assert math_recipe is not None and flash_recipe is not None
+    assert flash_recipe.required_execution_probe is not None
+    assert flash_recipe.requires_worker_wheel is True
+    assert flash_recipe.verification == RecipeVerification.declared
+    assert flash_recipe.required_execution_probe.probe == "cuda_qlora_sdpa_flash_execution"
+    assert flash_recipe.required_execution_probe.flash_sdp_enabled is True
+    assert flash_recipe.required_execution_probe.math_sdp_enabled is False
+    assert (
+        flash_recipe.required_execution_probe.execution_combination.attention_kernel.value
+        == "torch_sdpa_flash"
+    )
+    assert all(
+        requirement.specifier and requirement.specifier.startswith("==")
+        for requirement in flash_recipe.dependency_requirements
+    )
+    math_resolution = resolve_dependencies(
+        math_recipe,
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+    )
+    flash_resolution = resolve_dependencies(
+        flash_recipe,
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+    )
+    assert math_resolution.recipe_ref.hash != flash_resolution.recipe_ref.hash
+    assert math_resolution.resolution_hash != flash_resolution.resolution_hash
+    # Math baseline digest must remain stable for the existing managed environment.
+    from corpus_studio.platform.environments import recipe_digest
+
+    assert (
+        recipe_digest(math_recipe)
+        == "4c0cb365b596cfe2b1371afd5f95130a40e41c7e5b27df833b0c914bd492289c"
+    )
+
+
 def test_unsloth_recipe_is_declared_cuda_only_and_conflict_flagged():
     recipe = get_recipe("backend-unsloth")
     assert recipe is not None
