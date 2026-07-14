@@ -121,6 +121,9 @@ def test_readiness_flash_v1_is_exact_forced_flash_and_independent_of_math():
         flash_recipe.required_execution_probe.execution_combination.attention_kernel.value
         == "torch_sdpa_flash"
     )
+    # Flash readiness is a Linux-positive path (native Windows WDDM flash is refused elsewhere).
+    assert flash_recipe.supported_os == [OperatingSystem.linux]
+    assert flash_recipe.requires_cuda is True
     assert all(
         requirement.specifier and requirement.specifier.startswith("==")
         for requirement in flash_recipe.dependency_requirements
@@ -146,6 +149,30 @@ def test_readiness_flash_v1_is_exact_forced_flash_and_independent_of_math():
         recipe_digest(math_recipe)
         == "4c0cb365b596cfe2b1371afd5f95130a40e41c7e5b27df833b0c914bd492289c"
     )
+
+
+def test_complete_qlora_tuple_uses_bf16_autocast_without_sdpa_fallback():
+    """Forced flash/math QLoRA probes must match trainer bf16 compute and never soft-fallback.
+
+    Live host evidence: PEFT k-bit prep leaves float32 residual tensors; forced FLASH_ATTENTION
+    aborts without CUDA bf16 autocast and must not enable math/mem-efficient as a substitute.
+    """
+    import inspect
+
+    from corpus_studio.platform import probes as probes_mod
+
+    source = inspect.getsource(probes_mod._probe_cuda_qlora_sdpa_execution_tuple)
+    assert "torch.autocast" in source
+    assert "bfloat16" in source
+    assert "No fallback to math / mem-efficient / eager" in source
+    assert "enable_mem_efficient_sdp(False)" in source
+    # Flash and math share the tuple helper; flash entrypoint forces FLASH only.
+    flash_src = inspect.getsource(probes_mod._probe_cuda_qlora_sdpa_flash_execution)
+    assert "FLASH_ATTENTION" in flash_src
+    assert "enable_math=False" in flash_src
+    math_src = inspect.getsource(probes_mod._probe_cuda_qlora_math_execution)
+    assert "enable_flash=False" in math_src
+    assert "enable_math=True" in math_src
 
 
 def test_unsloth_recipe_is_declared_cuda_only_and_conflict_flagged():

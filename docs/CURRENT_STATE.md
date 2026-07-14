@@ -214,10 +214,11 @@ per-item error isolation, and off-thread document opens.
   probes and a stable post-probe inventory. Readiness-v2 requires one complete BF16/NF4/double-quant
   QLoRA math-SDPA forward/loss/backward/optimizer/adapter-reload tuple. Flash readiness-v1 requires
   the same complete QLoRA evidence under forced `SDPBackend.FLASH_ATTENTION` (no math/mem-efficient
-  fallback), with scoped GPU allocator, `nvidia-smi` process-memory, host-RSS, phase timing, and
-  optional temperature/power evidence. Independent probes cannot be unioned across either complete
-  tuple. The math readiness-v2 environment is the preserved safety/rollback baseline and must not be
-  mutated by flash work. The manager detects worker/dependency drift and safely removes or recreates
+  fallback), with CUDA bf16 autocast on the forced forward/backward so attention dtypes match real
+  TRL/PEFT QLoRA training, plus scoped GPU allocator, `nvidia-smi` process-memory, host-RSS, phase
+  timing, and optional temperature/power evidence. Flash readiness is Linux-only; independent probes
+  cannot be unioned across either complete tuple. The math readiness-v2 environment is the preserved
+  safety/rollback baseline and must not be mutated by flash work. The manager detects worker/dependency drift and safely removes or recreates
   only contained owned paths.
   `RunPlan.environment_ref` pins the immutable
   lock hash and `platform-run --subprocess` dispatches with that managed interpreter after a live

@@ -551,6 +551,10 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
 
     Uses the same tiny model, seed, batch, sequence length, LoRA rank, and optimizer so math and
     flash measurements remain comparable. Never falls back to another SDPA backend.
+
+    Forward/backward run under CUDA bf16 autocast so attention Q/K/V match the first-party trainer
+    (TRL SFTConfig bf16) and forced flash SDPA (which rejects float32). PEFT k-bit prep still keeps
+    non-4bit master weights and LoRA grads in FP32; those policies are checked outside autocast.
     """
 
     del profile  # host refusal is decided by the managed environment recipe/OS, not this body
@@ -888,7 +892,14 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
             try:
                 torch.cuda.synchronize(0)
                 forward_started = time.perf_counter()
-                with sdpa_kernel([sdp_backend]):
+                # Autocast matches real QLoRA training compute dtype. Without it, PEFT k-bit prep
+                # leaves residual/attention tensors in float32; math SDPA accepts float32 but forced
+                # FLASH_ATTENTION aborts ("No available kernel"). Never enable math/mem-efficient
+                # as a silent fallback when the forced backend fails.
+                with (
+                    sdpa_kernel([sdp_backend]),
+                    torch.autocast(device_type="cuda", dtype=torch.bfloat16),
+                ):
                     output = model(input_ids=input_ids, labels=input_ids)
                     torch.cuda.synchronize(0)
                     phase_timings["forward_duration_seconds"] = (
@@ -942,7 +953,11 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                 )
             reloaded = PeftModel.from_pretrained(_load_base(), adapter_dir)
             try:
-                with torch.no_grad(), sdpa_kernel([sdp_backend]):
+                with (
+                    torch.no_grad(),
+                    sdpa_kernel([sdp_backend]),
+                    torch.autocast(device_type="cuda", dtype=torch.bfloat16),
+                ):
                     reload_loss = reloaded(input_ids=input_ids, labels=input_ids).loss
             except Exception as exc:  # noqa: BLE001
                 return _with_memory(
@@ -1004,6 +1019,7 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                     "runtime": runtime_evidence,
                     "configuration": {
                         "compute_dtype": "bf16",
+                        "forward_autocast": "bf16",
                         "quantization": "nf4",
                         "double_quantization": True,
                         "attention_api": "sdpa",

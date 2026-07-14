@@ -8,14 +8,18 @@ interpreter or each other's dependency graph.
 > **Implemented status:** the create-to-remove lifecycle supports the legacy
 > `backend-corpus-studio` rollback recipe, the exact-pinned math
 > `backend-corpus-studio-readiness-v2` recipe, and the exact-pinned flash
-> `backend-corpus-studio-readiness-flash-v1` recipe. Flash readiness remains plan-only until a
-> separately authorized creation: declaring the recipe and generating its sealed plan do not prove
-> the environment. The lifecycle is covered in default CI by fake installers and CPU-only probes. On
-> the current native-Linux host, the managed `backend-corpus-studio` and
-> `backend-corpus-studio-readiness-v2` environments are `HARDWARE_VERIFIED` for their respective
-> exact probe tuples (legacy minimal hardware probe; readiness-v2 complete math QLoRA tuple).
-> Rebuilding either remains an explicit network-using operation. These environment results do not
-> verify a real 7B workload, offload, or flash-enabled training.
+> `backend-corpus-studio-readiness-flash-v1` recipe. Flash readiness is Linux-only and seals only
+> after the complete forced-flash QLoRA tuple (`cuda_qlora_sdpa_flash_execution`) with math and
+> mem-efficient SDPA disabled; the tuple uses CUDA bf16 autocast so attention dtypes match real
+> TRL/PEFT QLoRA training (float32 residual after k-bit prep is not accepted as flash proof).
+> Declaring the recipe or generating a sealed plan does not prove the environment. The lifecycle is
+> covered in default CI by fake installers and CPU-only probes. On the current native-Linux host,
+> the managed `backend-corpus-studio` and `backend-corpus-studio-readiness-v2` environments are
+> `HARDWARE_VERIFIED` for their respective exact probe tuples (legacy minimal hardware probe;
+> readiness-v2 complete math QLoRA tuple). Flash-v1 remains unsealed until a successful authorized
+> create after the bf16-autocast probe fix lands in the installed worker wheel. Rebuilding remains
+> an explicit network-using operation. These environment results do not verify a real 7B workload,
+> offload, or full-sequence flash training.
 
 ## Dependency layers
 

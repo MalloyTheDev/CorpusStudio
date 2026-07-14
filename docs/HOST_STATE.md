@@ -110,8 +110,27 @@ Recorded identities for recovery:
 
 `backend-corpus-studio-readiness-flash-v1` is a separate exact-pinned recipe for a complete forced
 `torch_sdpa_flash` QLoRA tuple (`cuda_qlora_sdpa_flash_execution`). It is independent of the math
-baseline and must not reuse or mutate readiness-v2. As of the flash implementation slice, the flash
-environment remains **plan-only** until separately authorized creation and probe.
+baseline and must not reuse or mutate readiness-v2. **Linux-only** recipe (native Windows/WDDM fused
+flash SDPA is refused on the Windows path; do not claim flash from a Windows math environment).
+
+**Authorized create (2026-07-14, commit `082cb15`, old wheel):** environment
+`backend-corpus-studio-readiness-flash-v1` was created and left **`INCOMPATIBLE`** — standalone
+`flash_attn_backward` PASS, complete `cuda_qlora_sdpa_flash_execution` FAIL with forced
+`FLASH_ATTENTION` aborting on float32 Q/K/V after PEFT k-bit prep. Lock was not sealed. Failed env
+and evidence were preserved (not deleted). Math readiness-v2 was not mutated.
+
+**Probe fix (working tree after that create):** complete QLoRA tuple now runs under CUDA **bf16
+autocast** (aligned with first-party TRL `bf16` training) while still forcing flash only (math and
+mem-efficient disabled). Live check on this host with the failed env's heavy stack + fixed
+`probes.py`: complete flash tuple **PASS** (forward/backward/AdamW/adapter reload). That live check
+is **not** a sealed `HARDWARE_VERIFIED` lock — sealing still requires a new hash-bound worker wheel,
+a matching `env-plan` confirm hash, and an authorized `env-create` (or recreate) that runs probes
+from the installed wheel, not from a developer `PYTHONPATH` override.
+
+WIP wheel (uncommitted tree; rebuild after commit for release identity):
+`/mnt/training-nvme/artifacts/corpusstudio-worker/readiness-flash-v1/wip-bf16-autocast-082cb15/corpus_studio_engine-1.3.0-py3-none-any.whl`
+(SHA-256 `fef0ceffd77f33e603b4eaa27cdcc92df28e4f564bfda7c17997df3e544ae91d`). Recipe digest after
+notes update: `52016adedd5011328efb05e089d54c8edd5c9308e0a38409897cd0f554240fb7`.
 
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 

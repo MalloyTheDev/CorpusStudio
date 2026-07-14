@@ -334,9 +334,13 @@ def builtin_recipes() -> list[EnvironmentRecipe]:
                 "Plan-only until a separately authorized environment creation.",
                 "Requires forced SDPBackend.FLASH_ATTENTION with math and mem-efficient disabled; "
                 "automatic SDPA dispatch is not accepted.",
+                "Complete tuple forward/backward uses CUDA bf16 autocast (trainer-aligned); "
+                "float32 residual after PEFT k-bit prep is not accepted as flash proof.",
                 "HARDWARE_VERIFIED requires the one complete cuda_qlora_sdpa_flash_execution tuple; "
                 "independent probe passes cannot be unioned.",
                 "Does not replace backend-corpus-studio-readiness-v2 (math baseline/rollback).",
+                "Linux-only recipe: native Windows/WDDM fused flash SDPA is refused elsewhere; "
+                "do not claim flash from a Windows math environment.",
                 "This is torch_sdpa_flash identity, not Transformers flash_attention_2 or an "
                 "external flash-attn package.",
             ],
