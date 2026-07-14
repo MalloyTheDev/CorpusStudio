@@ -113,24 +113,33 @@ Recorded identities for recovery:
 baseline and must not reuse or mutate readiness-v2. **Linux-only** recipe (native Windows/WDDM fused
 flash SDPA is refused on the Windows path; do not claim flash from a Windows math environment).
 
-**Authorized create (2026-07-14, commit `082cb15`, old wheel):** environment
-`backend-corpus-studio-readiness-flash-v1` was created and left **`INCOMPATIBLE`** — standalone
-`flash_attn_backward` PASS, complete `cuda_qlora_sdpa_flash_execution` FAIL with forced
-`FLASH_ATTENTION` aborting on float32 Q/K/V after PEFT k-bit prep. Lock was not sealed. Failed env
-and evidence were preserved (not deleted). Math readiness-v2 was not mutated.
+**Sealed on this host (2026-07-14):** after the bf16-autocast probe fix, the environment was
+recreated from commit `f15f1bfeec0b54c4c863b78f03f2b1c3032bd768` and is **`HARDWARE_VERIFIED`**.
+`env-status --refresh` and `env-probe` both report `HARDWARE_VERIFIED` with `drift_detected=false`.
+Math readiness-v2 was not mutated.
 
-**Probe fix (working tree after that create):** complete QLoRA tuple now runs under CUDA **bf16
-autocast** (aligned with first-party TRL `bf16` training) while still forcing flash only (math and
-mem-efficient disabled). Live check on this host with the failed env's heavy stack + fixed
-`probes.py`: complete flash tuple **PASS** (forward/backward/AdamW/adapter reload). That live check
-is **not** a sealed `HARDWARE_VERIFIED` lock — sealing still requires a new hash-bound worker wheel,
-a matching `env-plan` confirm hash, and an authorized `env-create` (or recreate) that runs probes
-from the installed wheel, not from a developer `PYTHONPATH` override.
+| Item | Value |
+|---|---|
+| State | `HARDWARE_VERIFIED` |
+| Environment path | `/mnt/training-nvme/corpusstudio/xdg-data/corpusstudio/environment-manager/environments/backend-corpus-studio-readiness-flash-v1` |
+| Lock ID | `lock-8a988a716c68beacfa8c` |
+| Lock digest | `8a988a716c68beacfa8c8fb46925987ea7c9aca198537340471e1fd08f9c75fe` |
+| Recipe digest | `52016adedd5011328efb05e089d54c8edd5c9308e0a38409897cd0f554240fb7` |
+| Resolution hash | `941da281bda775a9ca097801900356a99d8b16917a5172b452da1a4d8013b57a` |
+| Probe evidence hash | `ad9b5e0c07b4d8d437905d6f0bf888afa2151531f097270b4d40cdb39c7830b8` |
+| Capability-report hash | `bb00d68fc76dfdd4bb7b8014e9dadd06ac138b5c114f44a3cecedaa161866215` |
+| Worker source commit | `f15f1bfeec0b54c4c863b78f03f2b1c3032bd768` |
+| Worker wheel | `.../readiness-flash-v1/f15f1bfeec0b54c4c863b78f03f2b1c3032bd768/corpus_studio_engine-1.3.0-py3-none-any.whl` |
+| Worker-wheel SHA-256 | `cb5c05b7d4d8e640d06a4d845ae638930b9e9f3769f937c87365f0e7e445d5f5` |
+| Complete probe | `cuda_qlora_sdpa_flash_execution` **PASS** (`torch_sdpa_flash`, forced `FLASH_ATTENTION`, math/mem-efficient off, `forward_autocast=bf16`) |
+| Evidence pack | `/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-readiness-flash-v1/` (`env-recreate-f15f1bf.json`, status/probe) |
 
-WIP wheel (uncommitted tree; rebuild after commit for release identity):
-`/mnt/training-nvme/artifacts/corpusstudio-worker/readiness-flash-v1/wip-bf16-autocast-082cb15/corpus_studio_engine-1.3.0-py3-none-any.whl`
-(SHA-256 `fef0ceffd77f33e603b4eaa27cdcc92df28e4f564bfda7c17997df3e544ae91d`). Recipe digest after
-notes update: `52016adedd5011328efb05e089d54c8edd5c9308e0a38409897cd0f554240fb7`.
+**History:** an earlier authorized create at `082cb15` failed seal (`INCOMPATIBLE`) because float32
+Q/K/V under forced flash without bf16 autocast. That failure is superseded by the sealed recreate
+above; it is not a positive flash claim for the old wheel.
+
+This sealed flash result is still **environment-probe** evidence only — not full-sequence 7B training,
+not Transformers `flash_attention_2`, not external `flash-attn`, and not MoE runtime capability.
 
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 

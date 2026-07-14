@@ -14,11 +14,12 @@ interpreter or each other's dependency graph.
 > TRL/PEFT QLoRA training (float32 residual after k-bit prep is not accepted as flash proof).
 > Declaring the recipe or generating a sealed plan does not prove the environment. The lifecycle is
 > covered in default CI by fake installers and CPU-only probes. On the current native-Linux host,
-> the managed `backend-corpus-studio` and `backend-corpus-studio-readiness-v2` environments are
-> `HARDWARE_VERIFIED` for their respective exact probe tuples (legacy minimal hardware probe;
-> readiness-v2 complete math QLoRA tuple). Flash-v1 remains unsealed until a successful authorized
-> create after the bf16-autocast probe fix lands in the installed worker wheel. Rebuilding remains
-> an explicit network-using operation. These environment results do not verify a real 7B workload,
+> the managed `backend-corpus-studio`, `backend-corpus-studio-readiness-v2`, and
+> `backend-corpus-studio-readiness-flash-v1` environments are `HARDWARE_VERIFIED` on the native-Linux
+> host for their respective exact probe tuples (legacy minimal hardware probe; readiness-v2 complete
+> math QLoRA tuple; readiness-flash-v1 complete forced-flash QLoRA tuple with bf16 autocast). Sealed
+> digests for flash-v1 are recorded in [`HOST_STATE.md`](HOST_STATE.md). Rebuilding remains an
+> explicit network-using operation. These environment results do not verify a real 7B workload,
 > offload, or full-sequence flash training.
 
 ## Dependency layers
