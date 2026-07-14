@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from corpus_studio.platform.common import HashRef, Ref
+from corpus_studio.platform.contracts import RunDispatchBody
 from corpus_studio.platform.enums import AdapterMethod, LossImpl, QuantizationMode
 from corpus_studio.platform.execution_config import (
     ExecutionConfigurationError,
@@ -23,6 +24,12 @@ from corpus_studio.platform.execution_config import (
 from corpus_studio.platform.planner import compute_plan_hash, run_plan_hash_payload
 from corpus_studio.platform.runners import demo_training_plan
 from corpus_studio.platform.supervisor import demo_run_plan
+from corpus_studio.platform.worker_protocol import (
+    build_worker_message,
+    decode_worker_message,
+    encode_worker_message,
+    parse_worker_body,
+)
 
 
 def _execution():
@@ -220,3 +227,24 @@ def test_execution_objective_is_bound_to_worker_semantics(monkeypatch):
     )
     with pytest.raises(ExecutionConfigurationError, match="adapter artifact"):
         verify_execution_objective(config, task_type="sft")
+
+
+def test_objective_seal_survives_worker_protocol_exclude_none_roundtrip():
+    plan = demo_training_plan()
+    execution = plan.resolved_execution
+    assert execution is not None
+    message = build_worker_message(
+        "run_dispatch",
+        RunDispatchBody(run_id="run-objective-seal", plan=plan),
+        message_id="dispatch-objective-seal",
+        direction="core_to_worker",
+    )
+
+    decoded = decode_worker_message(
+        encode_worker_message(message), expected_direction="core_to_worker"
+    )
+    body = parse_worker_body(decoded)
+    assert isinstance(body, RunDispatchBody)
+    reloaded_execution = body.plan.resolved_execution
+    assert reloaded_execution is not None
+    assert reloaded_execution.objective_ref == execution.objective_ref

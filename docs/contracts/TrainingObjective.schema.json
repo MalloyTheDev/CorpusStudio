@@ -587,7 +587,7 @@
               "type": "null"
             }
           ],
-          "default": 1.0,
+          "default": null,
           "title": "Default Weight"
         },
         "kind": {

@@ -20,6 +20,7 @@ from corpus_studio.platform.contracts import (
     ObjectiveBackendRequirement,
     ObjectiveCompatibilityAxis,
     ObjectiveCompatibilityReport,
+    ObjectiveLossComponent,
     ObjectiveUpdatePolicy,
     ObjectiveVerification,
     TrainingObjective,
@@ -320,6 +321,47 @@ def test_objective_can_keep_sparse_auxiliary_losses_separate_from_primary_loss()
         "primary_loss",
         "router_z_loss",
     ]
+
+
+def test_unspecified_loss_weight_survives_exclude_none_and_objective_seal_roundtrips():
+    omitted = ObjectiveLossComponent(
+        component_id="router_z_loss",
+        kind="router_z_loss",
+        construction="Router-logit stabilization term.",
+    )
+    explicit = ObjectiveLossComponent(
+        component_id="router_z_loss",
+        kind="router_z_loss",
+        construction="Router-logit stabilization term.",
+        default_weight=None,
+    )
+    assert omitted.default_weight is None
+    assert explicit == omitted
+    assert ObjectiveLossComponent.model_validate_json(explicit.model_dump_json()) == explicit
+
+    wire_payload = explicit.model_dump(mode="json", exclude_none=True)
+    assert "default_weight" not in wire_payload
+    assert ObjectiveLossComponent.model_validate(wire_payload) == explicit
+
+    objective = get_objective("full_parameter_sft")
+    assert objective is not None
+    payload = objective.model_dump(mode="json")
+    payload["objective_hash"] = "0" * 64
+    payload["loss_components"].append(explicit.model_dump(mode="json"))
+    payload["loss_components"].sort(key=lambda item: item["component_id"])
+    unsealed = TrainingObjective.model_validate(payload)
+    sealed = unsealed.model_copy(update={"objective_hash": objective_hash_for(unsealed)})
+
+    reloaded = TrainingObjective.model_validate(
+        sealed.model_dump(mode="json", exclude_none=True)
+    )
+    assert reloaded.loss_components[-1].default_weight is None
+    assert reloaded.objective_hash == sealed.objective_hash
+    assert verify_objective_hash(reloaded)
+
+    qlora = get_objective("qlora")
+    assert qlora is not None
+    assert qlora.loss_components[0].default_weight == 1.0
 
 
 def test_all_not_applicable_compatibility_axes_keep_a_not_applicable_overall():

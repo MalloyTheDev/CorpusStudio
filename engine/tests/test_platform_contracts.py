@@ -536,6 +536,10 @@ def test_export_json_schemas_writes_language_neutral_files(tmp_path):
     objective_properties = objective_schema["properties"]
     assert "loss_components" in objective_properties
     assert "loss_masks" in objective_properties
+    default_weight = objective_schema["$defs"]["ObjectiveLossComponent"]["properties"][
+        "default_weight"
+    ]
+    assert default_weight["default"] is None
     fit_claim = objective_schema["$defs"]["ObjectiveHardwareImplications"]["properties"][
         "fit_claim"
     ]

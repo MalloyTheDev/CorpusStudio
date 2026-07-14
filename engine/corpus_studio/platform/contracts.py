@@ -2032,7 +2032,7 @@ class ObjectiveLossComponent(ContractModel):
     construction: str = Field(min_length=1)
     label_ref: str | None = Field(default=None, pattern=_ID)
     mask_ref: str | None = Field(default=None, pattern=_ID)
-    default_weight: float | None = Field(default=1.0, ge=0)
+    default_weight: float | None = Field(default=None, ge=0)
     reduction: Literal["mean", "sum", "token_mean", "pair_mean", "none"] = "mean"
 
 
