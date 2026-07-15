@@ -24,15 +24,19 @@ import pytest
 from corpus_studio.platform import telemetry as T
 
 # Captured verbatim from `nvidia-smi --query-gpu=index,uuid,utilization.gpu,utilization.memory,
-# power.draw,temperature.gpu,clocks.gr,clocks.mem,pstate --format=csv,noheader,nounits --id=0` on the
-# RTX 5070 host (driver 595.71.05).
-REAL_NOUNITS = "0, GPU-0944f0c7-0790-6bc8-5d8a-a3e6287594b5, 0, 25, 6.47, 38, 180, 405, P8"
+# power.draw,temperature.gpu,clocks.gr,clocks.mem,pstate,memory.used,memory.total
+# --format=csv,noheader,nounits --id=0` on the RTX 5070 host (driver 595.71.05). The trailing two
+# columns are device memory (MiB) - the driver-side used/free the torch-free sampler folds in.
+REAL_NOUNITS = "0, GPU-0944f0c7-0790-6bc8-5d8a-a3e6287594b5, 0, 25, 6.47, 38, 180, 405, P8, 10, 12227"
 # The same query WITHOUT --nounits (units + spacing the parser must tolerate defensively).
-REAL_UNITS = "0, GPU-0944f0c7-0790-6bc8-5d8a-a3e6287594b5, 0 %, 25 %, 6.47 W, 38, 180 MHz, 405 MHz, P8"
+REAL_UNITS = (
+    "0, GPU-0944f0c7-0790-6bc8-5d8a-a3e6287594b5, 0 %, 25 %, 6.47 W, 38, 180 MHz, 405 MHz, P8, "
+    "10 MiB, 12227 MiB"
+)
 
 PROBE_QUERY = [
     "index", "uuid", "utilization.gpu", "utilization.memory", "power.draw",
-    "temperature.gpu", "clocks.gr", "clocks.mem", "pstate",
+    "temperature.gpu", "clocks.gr", "clocks.mem", "pstate", "memory.used", "memory.total",
 ]
 
 
@@ -65,6 +69,10 @@ def test_every_probe_field_parses_from_real_nounits_output(monkeypatch) -> None:
     assert gpu.graphics_clock_mhz == 180.0
     assert gpu.memory_clock_mhz == 405.0
     assert gpu.performance_state == "P8"
+    # Driver device memory (MiB -> bytes) rides on the same probe even with no torch allocator sample.
+    assert reading.memory is not None
+    assert reading.memory.cuda_device_used_bytes == 10 * 1024 * 1024
+    assert reading.memory.cuda_device_free_bytes == (12227 - 10) * 1024 * 1024
 
 
 def test_units_and_extra_spacing_are_tolerated(monkeypatch) -> None:

@@ -11,6 +11,7 @@ import struct
 import pytest
 
 import corpus_studio.platform as P
+from corpus_studio.platform.common import MemoryMetrics
 from corpus_studio.platform.enums import FailureTaxonomy, StageMarker
 from corpus_studio.platform.execution_config import (
     canonical_sha256,
@@ -229,6 +230,94 @@ def _fake_run_training(steps, *, loss_by_step=None, capture=None, checkpoints=Fa
         )
 
     return _run
+
+
+# ---- per-step telemetry emission ---------------------------------------------
+
+
+def test_progress_emits_step_time_worker_memory_and_token_rates(monkeypatch):
+    # The runner runs in the CUDA-owning child, so it measures per-step wall time (monotonic deltas at
+    # the optimizer-step boundary), samples the worker torch allocator memory, and folds in the
+    # trainer's per-step token counts - all into the one metric RunEvent for that step.
+    import itertools
+
+    ticks = itertools.count()
+    monkeypatch.setattr("time.monotonic", lambda: next(ticks) * 0.5)  # strictly increasing
+
+    def _fake(config, *, progress_callback=None, stage_callback=None, token_callback=None, **_kw):
+        if stage_callback is not None:
+            stage_callback("optimizer_created", "observed the real optimizer")
+        losses = {1: 1.0, 2: 0.5}
+        for step in range(1, 3):  # the demo plan seals a 2-step schedule
+            if token_callback is not None:
+                token_callback(step, 100 * step, 40 * step)  # nonpadding, supervised
+            if progress_callback is not None:
+                progress_callback(step, 2, losses[step])
+        adapter_path = _write_fake_adapter(config.output_dir)
+        return TrainResult(
+            output_dir=config.output_dir,
+            adapter_path=adapter_path,
+            base_model=config.base_model,
+            cpu_toy=config.cpu_toy,
+            steps=2,
+            final_loss=losses[2],
+            checkpoints=[],
+            execution_evidence=_execution_evidence(2, losses),
+        )
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _fake)
+    runner = TrainingRunner(
+        cpu_toy=True,
+        memory_sampler=lambda: MemoryMetrics(torch_allocated_bytes=42),
+    )
+    result = execute_run(demo_training_plan(), runner, clock=_CLOCK)
+    assert result.manifest.state == "succeeded"
+
+    metrics = {
+        event.optimizer_step: event.metrics
+        for event in result.events
+        if event.event_type == "metric" and event.optimizer_step
+    }
+    # Worker allocator memory rides on every step's metric record (persisted into RunEvents.jsonl).
+    assert metrics[1].memory is not None and metrics[1].memory.torch_allocated_bytes == 42
+    assert metrics[1].loss == 1.0
+    # Step 1 has no prior boundary, so it carries no wall time and thus no derived token rate.
+    assert metrics[1].step_time_seconds is None
+    assert metrics[1].tokens_per_sec is None
+    # Step 2 has a measured wall time and derived non-padding / supervised token rates.
+    assert metrics[2].step_time_seconds is not None and metrics[2].step_time_seconds > 0
+    assert metrics[2].tokens_per_sec is not None and metrics[2].tokens_per_sec > 0
+    assert metrics[2].supervised_tokens_per_sec is not None
+
+
+def test_progress_step_time_is_null_without_token_or_time_data(monkeypatch):
+    # A trainer that never reports tokens still emits step_time + loss; token rates stay null (honest).
+    def _fake(config, *, progress_callback=None, stage_callback=None, token_callback=None, **_kw):
+        if stage_callback is not None:
+            stage_callback("optimizer_created", "opt")
+        for step in range(1, 3):
+            if progress_callback is not None:
+                progress_callback(step, 2, 1.0 / step)
+        adapter_path = _write_fake_adapter(config.output_dir)
+        return TrainResult(
+            output_dir=config.output_dir,
+            adapter_path=adapter_path,
+            base_model=config.base_model,
+            cpu_toy=config.cpu_toy,
+            steps=2,
+            final_loss=0.5,
+            checkpoints=[],
+            execution_evidence=_execution_evidence(2, {1: 1.0, 2: 0.5}),
+        )
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _fake)
+    result = execute_run(demo_training_plan(), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    metrics = {
+        event.optimizer_step: event.metrics
+        for event in result.events
+        if event.event_type == "metric" and event.optimizer_step
+    }
+    assert metrics[2].tokens_per_sec is None and metrics[2].supervised_tokens_per_sec is None
 
 
 # ---- demo plan ---------------------------------------------------------------

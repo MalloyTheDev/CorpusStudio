@@ -16,6 +16,7 @@ from typing import Any
 from corpus_studio.training.trainer import (
     ProgressCallback,
     StageCallback,
+    TokenCallback,
     TrainerError,
     TrainResult,
     TrainRunConfig,
@@ -60,11 +61,14 @@ def run_unsloth_training(
     *,
     progress_callback: ProgressCallback | None = None,
     stage_callback: StageCallback | None = None,
+    token_callback: TokenCallback | None = None,
 ) -> TrainResult:
     """Train via Unsloth (accelerated 4-bit QLoRA). Lazy-imports Unsloth; raises
     :class:`TrainerError` when it (or a CUDA GPU) is unavailable — the clean "can't run this here"
     signal the platform classifies as ENVIRONMENT_FAILURE. The training itself is user-smoke-tested.
-    ``stage_callback`` fires setup milestones during the silent load (see ``trainer.run_training``)."""
+    ``stage_callback`` fires setup milestones during the silent load (see ``trainer.run_training``).
+    ``token_callback`` is accepted for a uniform runner call; Unsloth token accounting is not wired
+    (Unsloth is refused on this host), so it is intentionally unused here."""
     try:
         from unsloth import FastLanguageModel  # noqa: PLC0415 - lazy; the whole point of the backend
     except ImportError as exc:

@@ -20,11 +20,13 @@ from corpus_studio.platform.contracts import (
     FailureRecord,
     GpuTelemetrySample,
     HostTelemetrySample,
+    ResumeLineage,
     RunEvent,
     RunManifest,
     RunTelemetrySummary,
     TelemetryIdentity,
     TelemetrySample,
+    WorkerArtifactIdentity,
 )
 from corpus_studio.platform.enums import FailureTaxonomy, OperatingSystem, StageMarker
 from corpus_studio.platform.supervisor import (
@@ -241,6 +243,30 @@ def test_full_run_is_scientifically_complete(tmp_path: Path) -> None:
     assert summary.completeness.missing_required_paper_fields == []
 
 
+def test_full_run_is_scientifically_complete_from_plan_and_worker_overlay(tmp_path: Path) -> None:
+    # The managed run reaches completeness WITHOUT a hand-authored identity: the resolved plan supplies
+    # the plan/env/execution hashes and the worker artifact overlay supplies the wheel sha + source
+    # commit. This is the exact identity path ``platform-run`` now threads.
+    from corpus_studio.platform.runners import demo_training_plan
+
+    _full_run(tmp_path)
+    wheel = tmp_path / "corpus_studio_engine-1.3.0-py3-none-any.whl"
+    wheel.write_bytes(b"wheel")
+    (tmp_path / "BUILD_PROVENANCE.json").write_text(
+        '{"source_commit": "' + "e" * 40 + '"}', encoding="utf-8"
+    )
+    overlay = T.worker_identity_overlay(_worker_artifact(str(wheel)))
+
+    plan = demo_training_plan()
+    summary = T.summarize_run_telemetry(tmp_path, plan=plan, identity_overlay=overlay)
+    assert summary.completeness.scientifically_complete is True
+    assert summary.completeness.missing_required_paper_fields == []
+    assert plan.resolved_execution is not None
+    assert summary.identity.execution_configuration_hash == plan.resolved_execution.configuration_hash
+    assert summary.identity.worker_wheel_sha256 == "2" * 64
+    assert summary.identity.repository_commit == "e" * 40
+
+
 # --------------------------------------------------------------------------------------------------
 # A telemetry gap never manufactures paper data
 # --------------------------------------------------------------------------------------------------
@@ -423,18 +449,37 @@ def test_run_nvidia_smi_parses_and_handles_errors(monkeypatch) -> None:
 def test_probe_gpu_builds_sample_from_row(monkeypatch) -> None:
     monkeypatch.setattr(
         T, "_run_nvidia_smi",
-        lambda query: ["0", "GPU-abc", "55", "12", "130.5", "61", "2100", "7001", "P2"],
+        # ...memory.used=100 MiB, memory.total=8000 MiB (the two new device-memory columns).
+        lambda query: ["0", "GPU-abc", "55", "12", "130.5", "61", "2100", "7001", "P2", "100", "8000"],
     )
     monkeypatch.setattr(
         "corpus_studio.platform.watchdog.sample_gpu_memory",
-        lambda: MemoryMetrics(torch_allocated_bytes=1, cuda_device_used_bytes=2),
+        lambda: MemoryMetrics(torch_allocated_bytes=1),
     )
     reading = T.probe_gpu()
     assert reading.gpu is not None
     assert reading.gpu.device_index == 0 and reading.gpu.power_watts == 130.5
     assert reading.gpu.performance_state == "P2"
+    # The torch allocator field survives; the driver device used/free is overlaid from nvidia-smi.
     assert reading.memory is not None and reading.memory.torch_allocated_bytes == 1
+    assert reading.memory.cuda_device_used_bytes == 100 * 1024 * 1024
+    assert reading.memory.cuda_device_free_bytes == (8000 - 100) * 1024 * 1024
     assert reading.unavailable == []
+
+
+def test_probe_gpu_uses_driver_device_memory_when_torch_absent(monkeypatch) -> None:
+    # The control-plane sampler has no torch, so the allocator probe returns None; the sample must
+    # still carry driver device memory from nvidia-smi (so gpu.memory is not spuriously missing).
+    monkeypatch.setattr(
+        T, "_run_nvidia_smi",
+        lambda query: ["0", "GPU-abc", "55", "12", "130.5", "61", "2100", "7001", "P2", "250", "8000"],
+    )
+    monkeypatch.setattr("corpus_studio.platform.watchdog.sample_gpu_memory", lambda: None)
+    reading = T.probe_gpu()
+    assert reading.memory is not None
+    assert reading.memory.torch_allocated_bytes is None
+    assert reading.memory.cuda_device_used_bytes == 250 * 1024 * 1024
+    assert "gpu_memory" not in reading.unavailable
 
 
 def test_probe_gpu_marks_unavailable_when_absent(monkeypatch) -> None:
@@ -496,7 +541,7 @@ def test_sampler_start_twice_raises_and_overhead_without_samples(tmp_path: Path)
 def test_probe_gpu_tolerates_nonint_device_index(monkeypatch) -> None:
     monkeypatch.setattr(
         T, "_run_nvidia_smi",
-        lambda query: ["n/a", "GPU-z", "10", "5", "90.0", "50", "2000", "7000", "P0"],
+        lambda query: ["n/a", "GPU-z", "10", "5", "90.0", "50", "2000", "7000", "P0", "0", "8000"],
     )
     monkeypatch.setattr("corpus_studio.platform.watchdog.sample_gpu_memory", lambda: None)
     reading = T.probe_gpu()
@@ -616,3 +661,104 @@ def test_identity_overlay_wins_over_plan(tmp_path: Path) -> None:
     assert summary.identity.study_id == "cs-ieee"
     assert summary.identity.repository_commit == "df86db5"
     assert summary.identity.plan_hash == plan.plan_hash  # plan value retained where overlay is silent
+
+
+def test_execution_configuration_hash_flows_from_resolved_plan() -> None:
+    # A prior version read a non-existent ``execution_configuration_hash`` attribute (always null); the
+    # sealed hash lives on the resolved config as ``configuration_hash`` and must flow into identity.
+    from corpus_studio.platform.runners import demo_training_plan
+
+    plan = demo_training_plan()
+    manifest = RunManifest(
+        run_id="run-x",
+        plan_ref=Ref(id="p", hash=HashRef(value="a" * 64)),
+        created_at="t",
+        updated_at="t",
+        state="succeeded",
+    )
+    identity = T.identity_from_plan(plan, manifest)
+    assert plan.resolved_execution is not None
+    assert identity.execution_configuration_hash == plan.resolved_execution.configuration_hash
+
+
+def _worker_artifact(path: str) -> WorkerArtifactIdentity:
+    return WorkerArtifactIdentity(
+        distribution_name="corpus-studio-engine",
+        normalized_name="corpus-studio-engine",
+        version="1.3.0",
+        filename="corpus_studio_engine-1.3.0-py3-none-any.whl",
+        path=path,
+        size_bytes=1234,
+        content_hash=HashRef(value="2" * 64),
+    )
+
+
+def test_worker_identity_overlay_reads_wheel_hash_and_provenance_commit(tmp_path: Path) -> None:
+    wheel = tmp_path / "corpus_studio_engine-1.3.0-py3-none-any.whl"
+    wheel.write_bytes(b"wheel")
+    (tmp_path / "BUILD_PROVENANCE.json").write_text(
+        '{"source_commit": "713fde14c8a6bae1888c43851fa6a487a031a242"}', encoding="utf-8"
+    )
+    overlay = T.worker_identity_overlay(_worker_artifact(str(wheel)))
+    assert overlay.worker_wheel_sha256 == "2" * 64
+    assert overlay.repository_commit == "713fde14c8a6bae1888c43851fa6a487a031a242"
+
+
+def test_worker_identity_overlay_null_commit_when_sidecar_absent_or_malformed(tmp_path: Path) -> None:
+    wheel = tmp_path / "w.whl"
+    wheel.write_bytes(b"wheel")
+    # No sidecar at all -> null commit (never fabricated), wheel hash still reported.
+    overlay = T.worker_identity_overlay(_worker_artifact(str(wheel)))
+    assert overlay.worker_wheel_sha256 == "2" * 64
+    assert overlay.repository_commit is None
+    # Malformed sidecar / missing key -> still null, no raise.
+    (tmp_path / "BUILD_PROVENANCE.json").write_text("not json", encoding="utf-8")
+    assert T.worker_identity_overlay(_worker_artifact(str(wheel))).repository_commit is None
+    (tmp_path / "BUILD_PROVENANCE.json").write_text('{"other": 1}', encoding="utf-8")
+    assert T.worker_identity_overlay(_worker_artifact(str(wheel))).repository_commit is None
+
+
+def test_identity_overlay_never_clobbers_manifest_resume_lineage() -> None:
+    # A resumed run's lineage is manifest-authoritative; an overlay's default resumed=False (a non-None
+    # value that survives exclude_none) must not silently overwrite it.
+    manifest = RunManifest(
+        run_id="run-child",
+        plan_ref=Ref(id="p", hash=HashRef(value="a" * 64)),
+        created_at="t",
+        updated_at="t",
+        state="succeeded",
+        resume_lineage=ResumeLineage(
+            parent_run_id="run-parent",
+            parent_checkpoint_id="ckpt-000006",
+            parent_checkpoint_hash="b" * 64,
+            resumed_from_global_step=6,
+        ),
+    )
+    overlay = TelemetryIdentity(worker_wheel_sha256="c" * 64)  # resumed defaults to False
+    identity = T.identity_from_plan(None, manifest, overlay)
+    assert identity.resumed is True
+    assert identity.parent_run_id == "run-parent"
+    assert identity.resumed_from_global_step == 6
+    assert identity.worker_wheel_sha256 == "c" * 64  # non-lineage overlay fields still apply
+
+
+def test_combine_memory_overlays_device_onto_allocator() -> None:
+    allocator = MemoryMetrics(torch_allocated_bytes=10, torch_reserved_bytes=20)
+    device = MemoryMetrics(cuda_device_used_bytes=100, cuda_device_free_bytes=900)
+    combined = T._combine_memory(allocator, device)
+    assert combined is not None
+    assert combined.torch_allocated_bytes == 10  # allocator field preserved
+    assert combined.cuda_device_used_bytes == 100 and combined.cuda_device_free_bytes == 900
+    # Either-or fallbacks, and null when both are absent.
+    assert T._combine_memory(None, device) is device
+    assert T._combine_memory(allocator, None) is allocator
+    assert T._combine_memory(None, None) is None
+
+
+def test_nvidia_smi_device_memory_converts_mib_and_handles_missing() -> None:
+    mem = T._nvidia_smi_device_memory("100", "8000")
+    assert mem is not None
+    assert mem.cuda_device_used_bytes == 100 * 1024 * 1024
+    assert mem.cuda_device_free_bytes == (8000 - 100) * 1024 * 1024
+    assert T._nvidia_smi_device_memory("", "8000") is None
+    assert T._nvidia_smi_device_memory("100", "n/a") is None

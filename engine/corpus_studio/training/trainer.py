@@ -18,7 +18,7 @@ verified via the CPU toy path.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 import contextlib
 from dataclasses import dataclass
 import hashlib
@@ -52,10 +52,77 @@ from corpus_studio.training.quantization import find_linear4bit_modules
 TINY_TOY_MODEL = "hf-internal-testing/tiny-random-LlamaForCausalLM"
 
 ProgressCallback = Callable[[int, int, float | None], None]
+# (optimizer_step, nonpadding_tokens, supervised_tokens) — the real token counts the trainer consumed
+# for one completed optimizer step (summed across its accumulation microbatches). Kept separate from
+# ProgressCallback so the loss path is untouched; token accounting is pure observation and never
+# influences training.
+TokenCallback = Callable[[int, int, int], None]
 # (stage_name, message) — platform-agnostic strings so the trainer stays decoupled from the platform
 # enums. Fires at setup milestones so a supervisor sees progress during the long silent model-load.
 StageCallback = Callable[[str, str], None]
 _MAX_PREFLIGHT_PROGRESS_EVENTS = 20
+
+
+def _flatten_ints(value: Any) -> Iterator[int]:
+    """Yield every scalar in ``value`` as an int, flattening nested rows. Frameworks expose ``tolist``
+    (torch/numpy), which collapses a tensor to nested python lists; a plain nested list/tuple is walked
+    directly. Read-only - it never mutates the batch it inspects."""
+
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        value = tolist()
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _flatten_ints(item)
+    else:
+        yield int(value)
+
+
+def count_batch_tokens(batch: Mapping[str, Any]) -> tuple[int, int]:
+    """Count ``(nonpadding, supervised)`` tokens in one collated microbatch. Non-padding = attention
+    mask ones (or, absent a mask, every ``input_ids`` position); supervised = label positions not equal
+    to the ``-100`` cross-entropy ignore index. Framework-agnostic (torch tensor / numpy / nested list)
+    and purely observational, so it is unit-testable without the training stack and can never change a
+    training byte."""
+
+    mask = batch.get("attention_mask")
+    input_ids = batch.get("input_ids")
+    labels = batch.get("labels")
+    if mask is not None:
+        nonpadding = sum(1 for token in _flatten_ints(mask) if token != 0)
+    elif input_ids is not None:
+        nonpadding = sum(1 for _ in _flatten_ints(input_ids))
+    else:
+        nonpadding = 0
+    supervised = (
+        sum(1 for label in _flatten_ints(labels) if label != -100) if labels is not None else 0
+    )
+    return nonpadding, supervised
+
+
+class _TokenAccumulator:
+    """Sums per-microbatch token counts into a per-optimizer-step total, flushed and reset at each
+    step boundary. With the sealed single-worker dataloader (no background prefetch) every microbatch
+    for step N is collated before step N's boundary fires, so the flush attributes exactly step N's
+    tokens. Fully observational: a counting fault is swallowed so training is never disturbed."""
+
+    def __init__(self) -> None:
+        self._nonpadding = 0
+        self._supervised = 0
+
+    def observe(self, batch: Mapping[str, Any]) -> None:
+        try:
+            nonpadding, supervised = count_batch_tokens(batch)
+        except Exception:  # noqa: BLE001 - token accounting must never affect training
+            return
+        self._nonpadding += nonpadding
+        self._supervised += supervised
+
+    def flush(self) -> tuple[int, int]:
+        totals = (self._nonpadding, self._supervised)
+        self._nonpadding = 0
+        self._supervised = 0
+        return totals
 
 
 class TrainerError(Exception):
@@ -2406,6 +2473,7 @@ def run_training(  # pragma: no cover - optional training-stack integration
     *,
     progress_callback: ProgressCallback | None = None,
     stage_callback: StageCallback | None = None,
+    token_callback: TokenCallback | None = None,
 ) -> TrainResult:
     """Run the training. Lazy-imports the heavy stack; verified via the CPU toy path (a real GPU QLoRA
     can only be user-smoke-tested). Raises :class:`TrainerError` if the runtime can't run the request.
@@ -2710,6 +2778,11 @@ def run_training(  # pragma: no cover - optional training-stack integration
         else None
     )
 
+    # Token accounting is fully observational: the accumulator only reads collated batches, and its
+    # per-step total is reported through ``token_callback`` at the step boundary. Any fault degrades to
+    # no token evidence (null downstream) - it can never fail or alter training.
+    token_accumulator = _TokenAccumulator() if token_callback is not None else None
+
     class _ProgressCallback(TrainerCallback):  # type: ignore[misc]
         def on_train_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
             optimizer = kwargs.get("optimizer")
@@ -2724,6 +2797,12 @@ def run_training(  # pragma: no cover - optional training-stack integration
                 execution_tracker.on_step_end(int(state.global_step), optimizer)
             elif optimizer is not None:
                 verify_optimizer_state_precision(optimizer, torch, config)
+            if token_accumulator is not None and token_callback is not None:
+                nonpadding, supervised = token_accumulator.flush()
+                try:
+                    token_callback(int(state.global_step), nonpadding, supervised)
+                except Exception:  # noqa: BLE001 - token accounting must never affect training
+                    pass
 
         def on_log(
             self,
@@ -2762,7 +2841,32 @@ def run_training(  # pragma: no cover - optional training-stack integration
         trainer_kwargs["processing_class"] = tokenizer
     elif "tokenizer" in trainer_params:
         trainer_kwargs["tokenizer"] = tokenizer
-    trainer = SFTTrainer(**trainer_kwargs)
+
+    class _TokenObservingSFTTrainer(SFTTrainer):  # type: ignore[misc,valid-type]
+        """SFTTrainer that observes the real collated batches for token accounting without altering
+        them. It wraps the configured dataloader's ``collate_fn`` in a strict pass-through: the inner
+        collator's exact output object is returned unchanged, and only a copy-free read feeds the
+        accumulator. When there is no accumulator it is byte-identical to ``SFTTrainer``; any wiring or
+        counting fault degrades to no token evidence and never disturbs the training dataloader."""
+
+        def get_train_dataloader(self) -> Any:
+            loader = super().get_train_dataloader()
+            if token_accumulator is None:
+                return loader
+            try:
+                inner_collate = loader.collate_fn
+
+                def _observing_collate(features: Any, _inner: Any = inner_collate) -> Any:
+                    batch = _inner(features)
+                    token_accumulator.observe(batch)
+                    return batch
+
+                loader.collate_fn = _observing_collate
+            except Exception:  # noqa: BLE001 - instrumentation is optional; training must proceed
+                return loader
+            return loader
+
+    trainer = _TokenObservingSFTTrainer(**trainer_kwargs)
     evidence_model = getattr(trainer, "model", model)
     if gradient_tracker is not None:
         restored_trainable = reassert_trainable_precision(

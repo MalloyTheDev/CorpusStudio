@@ -548,6 +548,7 @@ def platform_run(
             raise typer.Exit(2) from exc
 
     managed_worker_argv = None
+    telemetry_identity_overlay = None
     managed_lease = contextlib.ExitStack()
     managed_environment = (
         plan.resolved_execution.environment_binding == "managed_lock"
@@ -574,6 +575,12 @@ def platform_run(
             health = manager.health(plan.environment_ref.id)
             descriptor = manager.load_descriptor(plan.environment_ref.id)
             lock = manager.load_lock(plan.environment_ref.id)
+            # The wheel sha256 + worker source commit are lineage the plan cannot carry; thread them
+            # into the telemetry summary so a managed run is scientifically complete on identity.
+            if lock.worker_artifact is not None:
+                from corpus_studio.platform.telemetry import worker_identity_overlay
+
+                telemetry_identity_overlay = worker_identity_overlay(lock.worker_artifact)
             blockers = verify_run_plan_environment(plan, descriptor, lock)
             if health.state not in {
                 EnvironmentState.functional_probe_passed,
@@ -675,6 +682,7 @@ def platform_run(
         summary = summarize_run_telemetry(
             record_dir,
             plan=plan,
+            identity_overlay=telemetry_identity_overlay,
             requested_interval_ms=telemetry_interval_ms,
             overhead=overhead,
         )
