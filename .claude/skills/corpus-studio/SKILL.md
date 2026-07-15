@@ -132,6 +132,68 @@ evidence; a **completed step is not a proven fit** (predicted fit is never `NATI
 commit ids, lock hashes, plan ids, and run ids OUT of this file - `HANDOFF.md` + `docs/HOST_STATE.md`
 own those.
 
+## Worker execution closure and identity impact
+
+Before editing any `platform/` module, decide whether it runs INSIDE the managed worker child, because
+that decides whether the change needs a new worker wheel + new sealed environments (v-lineage bump) or
+is control-plane-only.
+
+- **The worker execution closure** = everything the `--subprocess` child imports/executes:
+  `platform/worker.py::run_worker` -> `supervisor.py::execute_run` -> the success-admission chain
+  (`validate_training_success_evidence` -> `validate_sealed_adapter_artifact` in `platform/artifacts.py`)
+  -> the runner (`platform/runners.py`) -> the trainer (`training/trainer.py`). **`artifacts.py` and
+  `runners.py` are worker code even though they live under `platform/`.** Success admission runs in the
+  child; the parent `subprocess_supervisor.py` re-validates for defense in depth but does not move the
+  boundary.
+- **Consequence:** changing any file in that closure changes worker execution bytes. A sealed
+  environment is pinned to a wheel content hash and is IMMUTABLE - it cannot be patched in place and
+  must not be recreated under the same id. So a worker-closure change needs: a fresh amendment ->
+  effective-matrix bump -> superset `RESERVED_IDENTITIES` -> a new wheel (built reproducibly, twice,
+  byte-identical) -> new `-vN` environments -> fresh plans. Control-plane-only changes (planner, CLI
+  wiring, schema, summary aggregation, the parent-side telemetry sampler) do not.
+- **Once identities are instantiated** (wheel built, environments sealed, a plan dispatched, a visible
+  run produced) a "reuse the existing lineage" rationale that depended on non-instantiation no longer
+  holds - prove worker non-impact by call-graph, or bump the lineage. Do not guess; trace the import
+  path in source and write the classification down (WORKER_CHANGE_REQUIRED vs control-plane-only).
+
+## Framework output-tree admission
+
+The trainer runs a third-party framework (TRL/transformers) that writes its own files into the adapter
+output dir. The sealed artifact validator must admit exactly the benign framework metadata and still
+fail-closed on real alternate weight payloads.
+
+- TRL's `SFTTrainer.save_model` writes `training_args.bin` (a `TrainingArguments` pickle - NOT weights)
+  next to `adapter_model.safetensors`. The `.bin` suffix is in `_WEIGHT_SUFFIXES`, so a naive check
+  rejects it as an "alternate or nested model-weight payload" (a false rejection at the export gate).
+- The fix pattern (see `platform/artifacts.py`): a **narrow, named allowlist** of root auxiliary
+  metadata files, admitted only under strict guards (regular file, single hard link, small size cap,
+  never deserialized). Everything else with a weight suffix is still rejected. Never widen the check to
+  "ignore all `.bin`" - that would let a real payload through. The file still enters the content hash.
+- General rule: when a framework legitimately emits a non-weight file into a sealed tree, admit it by
+  an explicit name + structural guards, never by relaxing the payload class.
+
+## Scientific telemetry gate
+
+A run can be a workload success yet not paper-usable. `RunTelemetrySummary.completeness
+.scientifically_complete` is true only when every `REQUIRED_PAPER_FIELDS` entry
+(`platform/telemetry.py`) is genuinely present; it is reported, never hidden, and never faked.
+
+- **Each field comes from a real measurement and is null (never zero-filled) when its source is
+  unavailable.** Do not manufacture a value to flip completeness.
+- **Know which process owns each source.** The parent telemetry sampler is torch-free, so the torch
+  allocator memory probe returns null there; the CUDA-owning child owns torch allocator + token counts +
+  step boundaries. GPU memory therefore has two honest sources: parent nvidia-smi device used/free
+  (`probe_gpu`) and worker torch-allocator memory emitted per step into `RunEvents.jsonl`.
+- **Identity lineage the plan cannot carry** (worker wheel sha256, source repository commit) is threaded
+  as a `worker_identity_overlay` from the sealed environment lock (+ the wheel's `BUILD_PROVENANCE.json`)
+  at `platform-run` time; the sealed `execution_configuration_hash` is the resolved config's real
+  `configuration_hash` field. Resume lineage stays manifest-authoritative - an overlay never supplies it.
+- **Worker-side instrumentation is untestable in the torch-free venv**, so keep the pure logic (token
+  counting, hash derivation) at module level and unit-test it, keep the framework wiring in the
+  `pragma: no cover` integration path, and make it degrade-to-null and pass-through so it can never alter
+  or fail training. Field-by-field root cause before implementing: **do not guess why a field was
+  missing - read the preserved raw records.**
+
 ## Never do (project policy)
 
 - **No multi-agent workflow fan-outs** for CorpusStudio work (cost) - verify inline, one Claude process.
@@ -172,11 +234,15 @@ own those.
 ## Where the current program stands (update this as it moves)
 
 The active thread is bringing CorpusStudio to full 7B training/research readiness. Amendment 0002 ->
-effective matrix 1.2.0 is merged (v5 identities allocated, v4 reserved). The Section-11 measurement
-harness and the exact checkpoint/resume execution engine (#440) are merged and CI-green - resume is
-proven by a real-torch fresh-process bitwise-equivalence test, and short/checkpoint-free runs are
-unchanged. Remaining gates, each needing separate human authorization: freeze the ~500-output corpus,
-then the v5 0.5B GPU bring-up (`research/ieee-linux-training/RUNBOOK_v5_bringup.md`; the worker source
-must have `df86db5` as a git ancestor, not equal it), then the 7B sequence ladder, then full runs. This
-paragraph goes stale fast: the authoritative, volatile identity + readiness detail always lives in
-`HANDOFF.md` + `docs/HOST_STATE.md` - trust those over this paragraph.
+effective matrix 1.2.0 is merged (v5 identities allocated). The **v5 0.5B GPU bring-up was attempted and
+produced its first real training** (12 genuine QLoRA optimizer steps on the RTX 5070, decreasing loss)
+but terminally failed - first on two planning defects (product GA=8 vs matrix GA=1; a chat fixture
+planned as instruction), then at the export gate on a false-positive artifact rejection of TRL's
+`training_args.bin`. Those are fixed on `main`: the artifact allowlist (#461) and the telemetry
+scientific-completeness closure (#462, step time / tokens / GPU memory / identity). **Both touch the
+worker execution closure, so v5's sealed wheel + environments cannot be reused** - the defensible next
+step is a prospective amendment 0003 -> effective matrix 1.3.0 -> `RESERVED_IDENTITIES.v3` -> a fresh v6
+wheel -> `-math-v6`/`-flash-v6` environments -> fresh v6 plans -> new smokes. Remaining gates each need
+separate human authorization: the corpus freeze, the v6 bring-up, then the 7B sequence ladder and full
+runs. This paragraph goes stale fast: the authoritative, volatile identity + readiness detail always
+lives in `HANDOFF.md` + `docs/HOST_STATE.md` - trust those over this paragraph.
