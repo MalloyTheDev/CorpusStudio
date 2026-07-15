@@ -18,12 +18,21 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 STUDY_ROOT = Path(__file__).resolve().parent
 BASE_PROTOCOL = STUDY_ROOT / "PROTOCOL.md"
 BASE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.yaml"
-EFFECTIVE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.v1.1.0.json"
-AMENDMENT = STUDY_ROOT / "amendments/0001-2026-07-15-manager-1.3-blue-green-identities.md"
+# Current (newest) amendment: 0002 -> effective matrix 1.2.0, reserved-identity registry v2.
+EFFECTIVE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.v1.2.0.json"
+AMENDMENT = STUDY_ROOT / "amendments/0002-2026-07-15-post-audit-v5-identities.md"
 AMENDMENT_MANIFEST = STUDY_ROOT / (
+    "amendments/0002-2026-07-15-post-audit-v5-identities.manifest.json"
+)
+RESERVED_IDENTITIES = STUDY_ROOT / "amendments/RESERVED_IDENTITIES.v2.json"
+# Frozen prior amendment (0001 -> effective matrix 1.1.0). The current amendment supersedes it; the
+# chain is verified below so 0001 stays byte-frozen and the amendment ordering is provable.
+PRIOR_AMENDMENT = STUDY_ROOT / "amendments/0001-2026-07-15-manager-1.3-blue-green-identities.md"
+PRIOR_AMENDMENT_MANIFEST = STUDY_ROOT / (
     "amendments/0001-2026-07-15-manager-1.3-blue-green-identities.manifest.json"
 )
-RESERVED_IDENTITIES = STUDY_ROOT / "amendments/RESERVED_IDENTITIES.v1.json"
+PRIOR_EFFECTIVE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.v1.1.0.json"
+PRIOR_RESERVED_IDENTITIES = STUDY_ROOT / "amendments/RESERVED_IDENTITIES.v1.json"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 HASH_IDENTITY_FIELDS = {
@@ -236,6 +245,45 @@ def _validate_reserved(reserved: dict[str, Any]) -> None:
         raise ProtocolValidationError("historical identity reuse must remain unauthorized")
 
 
+def _validate_reserved_superset(reserved: dict[str, Any]) -> None:
+    """The reserved registry is append-only: every prior-version reserved identity must remain
+    reserved, so a superseding amendment can never silently drop a historical identity from the
+    non-reuse set."""
+
+    prior = _load_json(PRIOR_RESERVED_IDENTITIES)
+    prior_classes = prior.get("disjointness_required_for_new_evidence")
+    if not isinstance(prior_classes, list) or not prior_classes:
+        raise ProtocolValidationError("prior reserved identity classes are missing")
+    for field in prior_classes:
+        if field not in reserved.get("disjointness_required_for_new_evidence", []):
+            raise ProtocolValidationError(f"reserved registry dropped identity class: {field}")
+        missing = sorted(set(prior.get(field, [])) - set(reserved.get(field, [])))
+        if missing:
+            raise ProtocolValidationError(
+                f"reserved registry dropped prior identities in {field}: {', '.join(missing)}"
+            )
+
+
+def _validate_supersession(manifest: dict[str, Any]) -> None:
+    """Bind the frozen prior amendment by exact hash so the amendment chain is ordered and 0001 is
+    provably unmodified. A superseding amendment records the prior effective version and the raw-byte
+    hashes of the prior manifest, narrative, effective matrix, and reserved-identity set."""
+
+    supersedes = manifest.get("supersedes")
+    if not isinstance(supersedes, dict):
+        raise ProtocolValidationError("amendment must record the superseded prior amendment")
+    if supersedes.get("effective_protocol_version") != "1.1.0":
+        raise ProtocolValidationError("amendment must supersede exactly effective version 1.1.0")
+    prior_files = {
+        "prior_amendment_manifest_sha256": PRIOR_AMENDMENT_MANIFEST,
+        "prior_narrative_sha256": PRIOR_AMENDMENT,
+        "prior_effective_matrix_sha256": PRIOR_EFFECTIVE_MATRIX,
+        "prior_reserved_identities_sha256": PRIOR_RESERVED_IDENTITIES,
+    }
+    for field, path in prior_files.items():
+        _require_hash(_sha256(path), supersedes.get(field), f"superseded {field}")
+
+
 def _validate_affected_counts(effective: dict[str, Any]) -> None:
     snapshot = effective.get("affected_scope_snapshot")
     primary = effective.get("primary_matrix")
@@ -426,6 +474,8 @@ def validate(
             "effective matrix differs from the exact base-plus-amendment construction"
         )
     _validate_reserved(reserved)
+    _validate_reserved_superset(reserved)
+    _validate_supersession(manifest)
     _validate_affected_counts(effective)
 
     non_reuse = effective.get("historical_identity_non_reuse")
