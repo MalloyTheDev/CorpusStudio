@@ -754,6 +754,58 @@ def telemetry_summarize(
         )
 
 
+@app.command("checkpoint-verify")
+def checkpoint_verify(
+    checkpoint_dir: Path = typer.Argument(
+        ..., help="A checkpoint directory containing CheckpointManifest.json."
+    ),
+    plan_path: Optional[Path] = typer.Option(
+        None,
+        "--plan",
+        help="A target RunPlan JSON; also verify the checkpoint is a compatible resume source for it.",
+    ),
+):
+    """Verify a checkpoint's completion marker and per-file byte integrity, and (with --plan) that it
+    is a compatible resume source. Fails closed: any partial, corrupt, incomplete, externally-changed,
+    or incompatible checkpoint exits non-zero. This never resumes or executes anything - resume stays
+    blocked until a separately reviewed trainer change consumes it (#440)."""
+    from corpus_studio.platform.checkpoint import (
+        CheckpointError,
+        verify_checkpoint_integrity,
+        verify_resumable_into,
+    )
+    from corpus_studio.platform.contracts import RunPlan
+
+    try:
+        manifest = verify_checkpoint_integrity(checkpoint_dir)
+    except CheckpointError as exc:
+        typer.echo(f"checkpoint integrity FAILED ({exc.reason}): {exc}", err=True)
+        raise typer.Exit(1) from exc
+    if plan_path is not None:
+        try:
+            plan = RunPlan.model_validate_json(plan_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, ValidationError) as exc:
+            typer.echo(f"Invalid RunPlan: {exc}", err=True)
+            raise typer.Exit(2) from exc
+        try:
+            verify_resumable_into(manifest, plan)
+        except CheckpointError as exc:
+            typer.echo(
+                f"checkpoint is NOT a compatible resume source ({exc.reason}): {exc}", err=True
+            )
+            raise typer.Exit(1) from exc
+        typer.echo(
+            f"checkpoint {manifest.checkpoint_id} verified and compatible with the target plan "
+            f"(resume from optimizer step {manifest.state.global_optimizer_step})."
+        )
+    else:
+        typer.echo(
+            f"checkpoint {manifest.checkpoint_id} verified: complete, {len(manifest.files)} files "
+            f"byte-intact, sealed hash {manifest.checkpoint_manifest_hash[:12]} "
+            f"(resume from optimizer step {manifest.state.global_optimizer_step})."
+        )
+
+
 @app.command("platform-plan")
 def platform_plan(
     base_model: str = typer.Option(..., "--base-model", help="The base model to fine-tune."),

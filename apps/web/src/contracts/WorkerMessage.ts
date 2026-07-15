@@ -538,6 +538,9 @@ export type TokenizerParameter = "tokenizer" | "processing_class";
 export type TrustRemoteCode = false;
 export type UseSafetensors = true;
 export type Seed1 = number;
+export type CheckpointDir = string;
+export type CheckpointId = string;
+export type CheckpointManifestHash = string;
 export type RunId = string;
 export type ExecutionConfigurationHash = string | null;
 export type Pid = number | null;
@@ -783,6 +786,10 @@ export type DatasetRowCount = number;
 export type EngineVersion1 = string;
 export type Platform = string;
 export type PythonVersion1 = string;
+export type ParentCheckpointHash = string;
+export type ParentCheckpointId = string;
+export type ParentRunId = string;
+export type ResumedFromGlobalStep = number;
 export type RunId7 = string;
 export type StartedAt = string | null;
 export type State = "prepared" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
@@ -1171,6 +1178,7 @@ export interface Proves {
 export interface RunDispatchBody {
   heartbeat_interval_seconds?: HeartbeatIntervalSeconds;
   plan: RunPlan;
+  resume?: CheckpointResumeRequest | null;
   run_id: RunId;
 }
 /**
@@ -1502,6 +1510,16 @@ export interface TrainerInterfacePolicy {
 export interface TrainingConfigSnapshot {
   [k: string]: unknown;
 }
+/**
+ * Core->worker resume instruction (reserved for the trainer change that will consume it): the
+ * exact checkpoint identity + sealed manifest hash to restore before continuing. The worker must
+ * refuse it unless the restored bytes reproduce the sealed hash.
+ */
+export interface CheckpointResumeRequest {
+  checkpoint_dir: CheckpointDir;
+  checkpoint_id: CheckpointId;
+  checkpoint_manifest_hash: CheckpointManifestHash;
+}
 export interface RunAcceptedBody {
   execution_configuration_hash?: ExecutionConfigurationHash;
   pid?: Pid;
@@ -1829,6 +1847,7 @@ export interface RunManifest {
   plan_ref: Ref;
   process?: RunProcessInfo | null;
   reproducibility?: RunReproducibility | null;
+  resume_lineage?: ResumeLineage | null;
   run_id: RunId7;
   started_at?: StartedAt;
   state?: State;
@@ -1861,6 +1880,17 @@ export interface RunReproducibility {
   engine_version?: EngineVersion1;
   platform?: Platform;
   python_version?: PythonVersion1;
+}
+/**
+ * Recorded on a resumed run's :class:`RunManifest` so a resumed run always shows the exact parent
+ * run and parent checkpoint it continued from - a fresh run identity with explicit provenance, never
+ * a silent reuse of the parent run.
+ */
+export interface ResumeLineage {
+  parent_checkpoint_hash: ParentCheckpointHash;
+  parent_checkpoint_id: ParentCheckpointId;
+  parent_run_id: ParentRunId;
+  resumed_from_global_step: ResumedFromGlobalStep;
 }
 /**
  * All gates required before a resolved run or measured fit may be called successful.

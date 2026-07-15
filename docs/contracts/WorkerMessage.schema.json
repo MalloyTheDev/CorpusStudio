@@ -1133,6 +1133,34 @@
       "title": "CheckpointPolicy",
       "type": "object"
     },
+    "CheckpointResumeRequest": {
+      "additionalProperties": false,
+      "description": "Core->worker resume instruction (reserved for the trainer change that will consume it): the\nexact checkpoint identity + sealed manifest hash to restore before continuing. The worker must\nrefuse it unless the restored bytes reproduce the sealed hash.",
+      "properties": {
+        "checkpoint_dir": {
+          "minLength": 1,
+          "title": "Checkpoint Dir",
+          "type": "string"
+        },
+        "checkpoint_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Checkpoint Id",
+          "type": "string"
+        },
+        "checkpoint_manifest_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Checkpoint Manifest Hash",
+          "type": "string"
+        }
+      },
+      "required": [
+        "checkpoint_id",
+        "checkpoint_manifest_hash",
+        "checkpoint_dir"
+      ],
+      "title": "CheckpointResumeRequest",
+      "type": "object"
+    },
     "CheckpointSemantics": {
       "additionalProperties": false,
       "properties": {
@@ -5151,6 +5179,40 @@
       "title": "ResolvedExecutionConfiguration",
       "type": "object"
     },
+    "ResumeLineage": {
+      "additionalProperties": false,
+      "description": "Recorded on a resumed run's :class:`RunManifest` so a resumed run always shows the exact parent\nrun and parent checkpoint it continued from - a fresh run identity with explicit provenance, never\na silent reuse of the parent run.",
+      "properties": {
+        "parent_checkpoint_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Parent Checkpoint Hash",
+          "type": "string"
+        },
+        "parent_checkpoint_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Parent Checkpoint Id",
+          "type": "string"
+        },
+        "parent_run_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Parent Run Id",
+          "type": "string"
+        },
+        "resumed_from_global_step": {
+          "minimum": 1,
+          "title": "Resumed From Global Step",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "parent_run_id",
+        "parent_checkpoint_id",
+        "parent_checkpoint_hash",
+        "resumed_from_global_step"
+      ],
+      "title": "ResumeLineage",
+      "type": "object"
+    },
     "RouteMissAction": {
       "description": "What the physical scheduler does when requested state is not ready. Semantic fallback is\nnever implicit: it requires a separately pinned learned-policy reference.",
       "enum": [
@@ -5252,6 +5314,17 @@
         },
         "plan": {
           "$ref": "#/$defs/RunPlan"
+        },
+        "resume": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckpointResumeRequest"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "run_id": {
           "minLength": 1,
@@ -5590,6 +5663,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/RunReproducibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "resume_lineage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResumeLineage"
             },
             {
               "type": "null"

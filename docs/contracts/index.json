@@ -102,6 +102,10 @@
       "file": "RunTelemetrySummary.schema.json"
     },
     {
+      "contract": "CheckpointManifest",
+      "file": "CheckpointManifest.schema.json"
+    },
+    {
       "contract": "ArtifactManifest",
       "file": "ArtifactManifest.schema.json"
     },

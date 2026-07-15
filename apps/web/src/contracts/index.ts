@@ -2,6 +2,7 @@
 export type { ArtifactManifest } from "./ArtifactManifest";
 export type { BackendManifest } from "./BackendManifest";
 export type { CapabilityReport } from "./CapabilityReport";
+export type { CheckpointManifest } from "./CheckpointManifest";
 export type { DatasetManifest } from "./DatasetManifest";
 export type { DependencyResolution } from "./DependencyResolution";
 export type { EnvironmentDescriptor } from "./EnvironmentDescriptor";

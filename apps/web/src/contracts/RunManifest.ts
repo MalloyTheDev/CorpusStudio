@@ -128,6 +128,10 @@ export type DatasetRowCount = number;
 export type EngineVersion = string;
 export type Platform = string;
 export type PythonVersion = string;
+export type ParentCheckpointHash = string;
+export type ParentCheckpointId = string;
+export type ParentRunId = string;
+export type ResumedFromGlobalStep = number;
 export type RunId1 = string;
 export type StartedAt = string | null;
 export type State = "prepared" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
@@ -208,6 +212,7 @@ export interface RunManifest {
   plan_ref: Ref;
   process?: RunProcessInfo | null;
   reproducibility?: RunReproducibility | null;
+  resume_lineage?: ResumeLineage | null;
   run_id: RunId1;
   started_at?: StartedAt;
   state?: State;
@@ -310,6 +315,17 @@ export interface RunReproducibility {
   engine_version?: EngineVersion;
   platform?: Platform;
   python_version?: PythonVersion;
+}
+/**
+ * Recorded on a resumed run's :class:`RunManifest` so a resumed run always shows the exact parent
+ * run and parent checkpoint it continued from - a fresh run identity with explicit provenance, never
+ * a silent reuse of the parent run.
+ */
+export interface ResumeLineage {
+  parent_checkpoint_hash: ParentCheckpointHash;
+  parent_checkpoint_id: ParentCheckpointId;
+  parent_run_id: ParentRunId;
+  resumed_from_global_step: ResumedFromGlobalStep;
 }
 /**
  * All gates required before a resolved run or measured fit may be called successful.

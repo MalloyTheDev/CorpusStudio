@@ -1,0 +1,380 @@
+{
+  "$defs": {
+    "CheckpointBoundIdentities": {
+      "additionalProperties": false,
+      "description": "Everything a resumed run must match to reuse this checkpoint. A mismatch on ANY field makes the\ncheckpoint inadmissible (incompatible) - the resume fails closed. ``environment_lock_hash`` /\n``worker_wheel_sha256`` are null only for an unmanaged (profile-snapshot) source run.",
+      "properties": {
+        "backend_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "chat_template_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chat Template Sha256"
+        },
+        "data_seed": {
+          "minimum": 0,
+          "title": "Data Seed",
+          "type": "integer"
+        },
+        "dataset_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "environment_lock_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Environment Lock Hash"
+        },
+        "execution_configuration_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Execution Configuration Hash",
+          "type": "string"
+        },
+        "formatter_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Formatter Sha256"
+        },
+        "model_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "objective_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "plan_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Plan Hash",
+          "type": "string"
+        },
+        "seed": {
+          "minimum": 0,
+          "title": "Seed",
+          "type": "integer"
+        },
+        "tokenizer_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "worker_wheel_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Worker Wheel Sha256"
+        }
+      },
+      "required": [
+        "plan_hash",
+        "execution_configuration_hash",
+        "backend_ref",
+        "model_ref",
+        "tokenizer_ref",
+        "dataset_ref",
+        "objective_ref",
+        "seed",
+        "data_seed"
+      ],
+      "title": "CheckpointBoundIdentities",
+      "type": "object"
+    },
+    "CheckpointFileEntry": {
+      "additionalProperties": false,
+      "description": "One required file inside a checkpoint, pinned by exact bytes. ``path`` is relative to the\ncheckpoint directory and must be a canonical, non-escaping POSIX path.",
+      "properties": {
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "optimizer",
+            "scheduler",
+            "scaler",
+            "rng",
+            "sampler",
+            "trainer_state",
+            "adapter_weights",
+            "other"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "role",
+        "sha256",
+        "size_bytes"
+      ],
+      "title": "CheckpointFileEntry",
+      "type": "object"
+    },
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Ref",
+      "type": "object"
+    },
+    "SealedTrainingState": {
+      "additionalProperties": false,
+      "description": "The resumable training state the worker sealed, described WITHOUT torch. Presence flags assert\neach component was actually captured (its bytes live in a :class:`CheckpointFileEntry`); the\ncounters place the checkpoint exactly on the optimizer-step / microstep / epoch timeline so a\nresume continues from the precise position, never an approximate one.",
+      "properties": {
+        "consumed_microsteps": {
+          "minimum": 0,
+          "title": "Consumed Microsteps",
+          "type": "integer"
+        },
+        "epoch": {
+          "minimum": 0,
+          "title": "Epoch",
+          "type": "number"
+        },
+        "global_optimizer_step": {
+          "minimum": 1,
+          "title": "Global Optimizer Step",
+          "type": "integer"
+        },
+        "gradient_accumulation_steps": {
+          "minimum": 1,
+          "title": "Gradient Accumulation Steps",
+          "type": "integer"
+        },
+        "microstep_within_step": {
+          "minimum": 0,
+          "title": "Microstep Within Step",
+          "type": "integer"
+        },
+        "optimizer_captured": {
+          "const": true,
+          "default": true,
+          "title": "Optimizer Captured",
+          "type": "boolean"
+        },
+        "rng_algorithm": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rng Algorithm"
+        },
+        "rng_captured": {
+          "title": "Rng Captured",
+          "type": "boolean"
+        },
+        "sampler_state_captured": {
+          "title": "Sampler State Captured",
+          "type": "boolean"
+        },
+        "scaler_captured": {
+          "title": "Scaler Captured",
+          "type": "boolean"
+        },
+        "scheduler_captured": {
+          "title": "Scheduler Captured",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "scheduler_captured",
+        "scaler_captured",
+        "rng_captured",
+        "sampler_state_captured",
+        "epoch",
+        "global_optimizer_step",
+        "microstep_within_step",
+        "gradient_accumulation_steps",
+        "consumed_microsteps"
+      ],
+      "title": "SealedTrainingState",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A single hash-sealed checkpoint instance. ``complete`` is the atomic completion marker: it is\nFalse until every file has been hashed and the manifest sealed, so a torn write is never mistaken\nfor a resumable checkpoint. ``checkpoint_manifest_hash`` is the canonical digest of the manifest\nbody (every field except the hash itself), and ``parent_checkpoint_hash`` chains lineage back to\nthe parent checkpoint by that same digest.",
+  "properties": {
+    "bound": {
+      "$ref": "#/$defs/CheckpointBoundIdentities"
+    },
+    "checkpoint_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Checkpoint Id",
+      "type": "string"
+    },
+    "checkpoint_manifest_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Checkpoint Manifest Hash",
+      "type": "string"
+    },
+    "complete": {
+      "default": false,
+      "title": "Complete",
+      "type": "boolean"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "created_at": {
+      "title": "Created At",
+      "type": "string"
+    },
+    "files": {
+      "items": {
+        "$ref": "#/$defs/CheckpointFileEntry"
+      },
+      "minItems": 1,
+      "title": "Files",
+      "type": "array"
+    },
+    "parent_checkpoint_hash": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parent Checkpoint Hash"
+    },
+    "parent_checkpoint_id": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parent Checkpoint Id"
+    },
+    "schema_kind": {
+      "const": "checkpoint-manifest-v1",
+      "default": "checkpoint-manifest-v1",
+      "title": "Schema Kind",
+      "type": "string"
+    },
+    "source_run_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Source Run Id",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/SealedTrainingState"
+    }
+  },
+  "required": [
+    "checkpoint_id",
+    "checkpoint_manifest_hash",
+    "source_run_id",
+    "created_at",
+    "bound",
+    "state",
+    "files"
+  ],
+  "title": "CheckpointManifest",
+  "type": "object"
+}

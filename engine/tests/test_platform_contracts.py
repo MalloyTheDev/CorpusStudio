@@ -36,7 +36,7 @@ def test_contract_version_is_pinned():
 
 
 def test_all_root_contracts_registered():
-    assert len(P.ROOT_CONTRACTS) == 30
+    assert len(P.ROOT_CONTRACTS) == 31
     assert "StorageProfile" in P.ROOT_CONTRACTS
     for expected in (
         "ModelDescriptor",
@@ -55,6 +55,7 @@ def test_all_root_contracts_registered():
         "ResolvedExecutionConfiguration",
         "TelemetrySample",
         "RunTelemetrySummary",
+        "CheckpointManifest",
     ):
         assert expected in P.ROOT_CONTRACTS
     for name, model in P.ROOT_CONTRACTS.items():
@@ -699,10 +700,10 @@ def test_worker_message_rejects_wrong_direction_and_body_shape():
 def test_export_json_schemas_writes_language_neutral_files(tmp_path):
     written = P.export_json_schemas(tmp_path)
     # 30 contract schemas + index.json
-    assert len(written) == 31
+    assert len(written) == 32
     index = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
     assert index["contract_version"] == "1.0.0"
-    assert len(index["contracts"]) == 30
+    assert len(index["contracts"]) == 31
     # every emitted schema is valid JSON with a proper object shape
     for name in P.ROOT_CONTRACTS:
         schema = json.loads((tmp_path / f"{name}.schema.json").read_text(encoding="utf-8"))
