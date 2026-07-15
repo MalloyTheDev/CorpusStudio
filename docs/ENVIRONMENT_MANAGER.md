@@ -17,9 +17,10 @@ interpreter or each other's dependency graph.
 > the managed `backend-corpus-studio`, `backend-corpus-studio-readiness-v2`, and
 > `backend-corpus-studio-readiness-flash-v1` environments have preserved `HARDWARE_VERIFIED` evidence
 > for their respective exact probe tuples (legacy minimal hardware probe; readiness-v2 complete math
-> QLoRA tuple; readiness-flash-v1 complete forced-flash QLoRA tuple with bf16 autocast). Manager 1.2
-> preserves the math rollback identity but requires replacement of the manager-1.1 flash instance
-> before a new health claim. Sealed flash-v1 digests are recorded in [`HOST_STATE.md`](HOST_STATE.md).
+> QLoRA tuple; readiness-flash-v1 complete forced-flash QLoRA tuple with bf16 autocast). Manager 1.3
+> preserves those files as historical evidence but requires a new lock with complete positive RECORD
+> counts before any of them can authorize new planning or execution. Sealed identities are recorded
+> in [`HOST_STATE.md`](HOST_STATE.md).
 > Rebuilding remains an
 > explicit network-using operation. These environment results do not verify a real 7B workload,
 > offload, or full-sequence flash training.
@@ -195,11 +196,14 @@ The sealed `EnvironmentLock` contains:
 - normalized package names, exact versions, sanitized index/direct/VCS evidence, artifact filenames
   and mandatory hashes for archive installs, plus an explicit reason when an otherwise hash-backed
   artifact host cannot be attributed to exactly one configured index;
-- installed `RECORD` metadata hashes, verification of every SHA-256-bearing installed file, a
-  manager-computed tree digest over every regular file named by `RECORD` (including generated,
-  unhashed bytecode), and dependency metadata. Every site-package file must be owned by one such
-  record; unrecorded files, duplicate normalized distributions, and symlinks fail closed. An entry
-  must resolve inside the managed environment and may not use an absolute or escaping path;
+- installed `RECORD` metadata hashes, row-by-row completion for every regular file named by RECORD,
+  and a manager-computed tree digest over those exact bytes (including generated, unhashed bytecode).
+  New complete evidence carries `record_count_semantics="all_record_rows_v2"` and requires positive counts with
+  `record_verified_entries == record_entries == installed_file_count` and no failed row; a
+  SHA-256-bearing row additionally must match its distribution-provided digest. Every site-package
+  file must be owned by one such record; unrecorded files, duplicate normalized distributions, and
+  symlinks fail closed. An entry must resolve inside the managed environment and may not use an
+  absolute or escaping path;
 - torch build, CUDA runtime, and compute capability;
 - recipe and resolution identities, selected indexes, exact worker wheel identity, complete-probe
   evidence, manager version, timestamp, and a canonical lock digest.
@@ -221,14 +225,16 @@ after the parent validates that non-executable evidence does a second isolated p
 Health and capability probes are bracketed by fresh inventories; a probe-side package/file mutation
 cannot be returned as healthy.
 
-Manager 1.2 preserves the sealed 1.1 lock digests. In particular, the pre-autocast-field
-readiness-v2 math evidence remains a narrow, untouched rollback identity during health checks. New
-math or flash creations must emit the stronger measured configuration, including BF16 forward
-autocast, forced kernel/toggles, bounded probe shape, and an adapter-state equality check; the legacy
-exception is never accepted for flash or for a new creation.
-The current manager-1.1 flash lock predates the adapter-state equality observation. Its lock and
-probe-evidence digests remain valid historical evidence, but manager 1.2 intentionally does not treat
-it as a rollback exception; replacement is required before it can receive a manager-1.2 health claim.
+Manager 1.3 leaves every manager-1.1/1.2 file and digest untouched as historical evidence. Missing
+count semantics preserves the old hash-bearing-row meaning, so those contracts and their hashes stay
+readable; it is never reinterpreted as the new all-row claim. A health request returns a non-mutating
+`DEGRADED` admission refusal before importing installed code, and planning cannot consume it. New
+health, planning, or creation admission requires the explicit marker and positive count equality
+above. Therefore an older lock with `record_verified_entries < record_entries` must be preserved for
+reconstruction but replaced under a new environment identity before it can authorize new work. New math or flash creations also emit the
+stronger measured configuration, including BF16 forward autocast, forced kernel/toggles, bounded
+probe shape, and an adapter-state equality check. The current manager-1.1 flash lock predates that
+observation and remains historical evidence only; it is not a rollback exception for new admission.
 
 Probe categories remain separate:
 
@@ -294,7 +300,8 @@ capability probe, the manager re-verifies the live installed inventory against t
 joins the matching lock records back into the profile and capability report. Required trainer
 packages therefore carry artifact hashes, verified RECORD counts, and installed-tree hashes into a
 new managed `RunPlan`; version-only or `record_integrity=unknown` package evidence is refused for
-managed planning. Packages explicitly found absent by the profiler are recorded as `missing` with
+managed planning. `verified` specifically means the positive RECORD, verified-row, and installed-file
+counts are equal. Packages explicitly found absent by the profiler are recorded as `missing` with
 zero RECORD entries rather than ambiguous unknown integrity. This integrity join does not add
 packages or combine independent functional probes.
 

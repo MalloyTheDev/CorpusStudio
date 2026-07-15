@@ -12,9 +12,12 @@ QLoRA tuples. Fresh matched 0.5B sequence-256 attempts both verified model/post-
 forced their intended kernel, and attached QLoRA, then failed before optimizer step 1 because the
 production verifier inspected a BF16 pre-accumulation autograd tensor instead of the sealed FP32
 materialized leaf gradient. The verifier now targets post-accumulation `parameter.grad` and retains
-fail-closed dtype/device checks, but that correction has not yet passed a new hardware smoke. No real
-optimizer step has passed through `platform-run`, and sequence length 4096 remains unverified. These
-environment/diagnostic results are not a 7B workload or offload result.
+fail-closed dtype/device checks. Training-success admission now also requires canonical adapter-state
+change, honest gradient coverage, a real optimizer, one finite loss per exact completed step, and all
+output/artifact integrity gates before measured fit becomes proven. Package admission now requires
+complete positive RECORD counts. These corrections have CPU/unit evidence only and have not passed a
+new hardware smoke. No real optimizer step has passed through `platform-run`, and sequence length 4096
+remains unverified. These environment/diagnostic results are not a 7B workload or offload result.
 The post-v1.3 additions reconciled below include the **reasoning-traces** data loop, a dataset
 **truncation guardrail** +
 external-trainer **checkpoint retention**, and a dependency-light **storage safe-spill** profiler —
@@ -176,7 +179,21 @@ per-item error isolation, and off-thread document opens.
   `<output-root>/runs/<run-id>/`. Legacy step-checkpoint documents remain readable but the runner and
   trainer refuse them before training; an unexpected worker checkpoint fails the run. The trainer
   saves the **LoRA adapter** + tokenizer + model card, not a full base copy. Exact sealed resume and
-  checkpoint lineage remain future work; first-party runs expected to exceed 30 minutes are blocked.
+  checkpoint lineage remain future work under
+  [#440](https://github.com/MalloyTheDev/CorpusStudio/issues/440); first-party runs expected to exceed
+  30 minutes are blocked.
+- **Resolved training-success evidence**: the trainer hashes the complete sorted trainable adapter
+  state before and after optimization and requires at least one changed tensor. It records at least
+  one materialized post-accumulation gradient with honest observed/eligible coverage, observes a real
+  optimizer from `on_train_begin`, and binds exactly one finite loss to every completed step under
+  sealed per-step/no-filter logging; final trainable tensors must also be finite. A separate canonical
+  PEFT-export state hash binds the trained tensor keys/shapes/dtypes/bytes to the exact saved
+  Safetensors, while a complete semantic config hash binds the in-memory adapter configuration to
+  `adapter_config.json`. The runner and subprocess parent reject link-like output descendants,
+  alternate/nested weights, malformed or gapped Safetensors, and independent weight/config drift.
+  Artifact and terminal manifests are persisted before terminal success is released, and a claimed
+  proven fit is reconstructed from the raw measured peak. Failed non-spilling runs remain
+  `NATIVE_UNPROVEN`, and structured failure taxonomy retains the last verified stage and child detail.
 - **Versioned reasoning/tool trace foundation** — the language-neutral, hash-sealed `TraceRecord`
   preserves exact source-row lineage, ordered role context, reasoning/action/tool/result/final-answer
   boundaries, producer/model/prompt/request/response evidence, typed validation findings, and a
@@ -220,12 +237,16 @@ per-item error isolation, and off-thread document opens.
   requires the exact plan hash before mutation. Installation captures sanitized pip source/artifact
   evidence, validates the worker wheel's own METADATA/RECORD before install, compares its immutable
   payload files with the installed worker, and inventories every installed `RECORD` byte plus a
-  manager-computed digest of every listed file. Unrecorded site-package files and symlinks fail before
+  manager-computed digest of every listed file. A new `verified` PackageLock carries
+  `record_count_semantics="all_record_rows_v2"` and requires positive counts with
+  `record_verified_entries == record_entries == installed_file_count` and no failed row;
+  unrecorded site-package files and symlinks fail before
   installed torch is imported in a second process; a final lock is sealed only after the required
   probes and a stable post-probe inventory.
-  Health/capability probes are also bracketed by clean inventories. Manager 1.2 preserves the sealed
-  1.1 readiness-v2 math rollback identity while requiring stronger measured configuration for every
-  new creation. The existing manager-1.1 flash lock is preserved as historical evidence but is not
+  Health/capability probes are also bracketed by clean inventories. Manager 1.3 keeps legacy-count
+  contracts hash-verifiable for reconstruction, returns a non-mutating health admission refusal, and
+  requires explicit complete RECORD semantics plus stronger measured configuration for
+  every new creation. The existing manager-1.1 flash lock is preserved as historical evidence but is not
   grandfathered across the new adapter-state equality requirement; it requires replacement before a
   manager-1.2 health claim. Readiness-v2 requires one complete BF16/NF4/double-quant
   QLoRA math-SDPA forward/loss/backward/optimizer/adapter-reload tuple. Flash readiness-v1 requires
@@ -247,7 +268,10 @@ per-item error isolation, and off-thread document opens.
   research math/flash environments. Fresh matched 0.5B attempts reached verified post-adapter
   placement but both failed before step 1 on the pre- versus post-accumulation gradient-verifier
   mismatch; each completed zero optimizer steps and produced no artifact or checkpoint. See
-  [`HOST_STATE.md`](HOST_STATE.md); none of those facts is full-workload or offload proof. See
+  [`HOST_STATE.md`](HOST_STATE.md). A later manager-1.2 v3 pair and normalized plan candidates are
+  preserved but were never dispatched; all 84 packages in those locks used the older partial-count
+  meaning of `verified`, so those locks and plans cannot authorize new admission. None of those facts
+  is full-workload or offload proof. See
   [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md); the full
   3-layer + MoE-safe forward plan is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) +
   [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md).
@@ -336,8 +360,10 @@ per-item error isolation, and off-thread document opens.
   hidden Accelerate CPU/disk offload state, and observes post-adapter placement/precision. Echo cannot execute a training
   plan. Runtime lane/`max_steps` flags are assertions only; they cannot alter the seal. Chat-template
   errors block and truncation analysis covers the complete pinned JSONL unless the plan explicitly
-  permits truncation. Runner selection derives from the pinned backend manifest, successful training
-  requires optimizer-step and adapter-byte evidence, every execution gets a fresh UUIDv7 run ID, and
+  permits truncation. Runner selection derives from the pinned backend manifest. Successful training
+  requires canonical adapter change, honest materialized-gradient coverage, a real optimizer, exact
+  per-step finite losses, verified output containment, recognized adapter bytes, and artifact
+  integrity before measured fit becomes proven. Every execution gets a fresh UUIDv7 run ID, and
   final-adapter output is isolated under `<output-root>/runs/<run-id>/`; intermediate checkpoints are
   disabled until exact sealed resume exists. Adapter IDs include the
   run, role, and weight-content hash; persisted manifests live under `<record-root>/runs/<run-id>/`.

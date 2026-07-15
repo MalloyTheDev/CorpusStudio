@@ -208,6 +208,11 @@
         "TIMEOUT",
         "KERNEL_STALL",
         "NUMERICAL_FAILURE",
+        "GRADIENT_FAILURE",
+        "LOSS_EVIDENCE_FAILURE",
+        "OPTIMIZER_FAILURE",
+        "UPDATE_FAILURE",
+        "ARTIFACT_FAILURE",
         "CHECKPOINT_FAILURE",
         "ENVIRONMENT_FAILURE",
         "UNSUPPORTED_CONFIGURATION",
@@ -464,6 +469,105 @@
     },
     "PackageLock": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "record_integrity": {
+                "const": "verified"
+              }
+            },
+            "required": [
+              "record_integrity"
+            ]
+          },
+          "then": {
+            "properties": {
+              "hash": {
+                "properties": {
+                  "algo": {
+                    "const": "sha256"
+                  },
+                  "value": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "record_entries": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "record_failed_entries": {
+                "maxItems": 0
+              },
+              "record_verified_entries": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "version": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            },
+            "required": [
+              "version",
+              "hash",
+              "record_entries",
+              "record_verified_entries",
+              "record_failed_entries"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "record_count_semantics": {
+                "const": "all_record_rows_v2"
+              }
+            },
+            "required": [
+              "record_count_semantics"
+            ]
+          },
+          "then": {
+            "properties": {
+              "installed_file_count": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "installed_files_hash": {
+                "properties": {
+                  "algo": {
+                    "const": "sha256"
+                  },
+                  "value": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "record_integrity": {
+                "const": "verified"
+              }
+            },
+            "required": [
+              "record_integrity",
+              "installed_files_hash",
+              "installed_file_count"
+            ]
+          }
+        }
+      ],
       "description": "A resolved dependency and its install provenance.\n\n``hash`` seals the installed distribution's RECORD metadata when that evidence is available; it\nis not mislabelled as the original wheel hash. ``direct_url`` and ``artifact`` preserve the\nstronger source identity pip exposes for direct/VCS/local installs. ``dependencies`` is the\ninstalled metadata dependency graph, not a second resolver.",
       "properties": {
         "artifact": {
@@ -554,6 +658,7 @@
             }
           ],
           "default": null,
+          "description": "Number of files sealed by installed_files_hash; equals record_entries when record_integrity is verified.",
           "title": "Installed File Count"
         },
         "installed_files_hash": {
@@ -589,6 +694,20 @@
           "title": "Normalized Name",
           "type": "string"
         },
+        "record_count_semantics": {
+          "anyOf": [
+            {
+              "const": "all_record_rows_v2",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Explicit all-RECORD-row count meaning. Missing means preserved legacy hash-bearing-row counts and is not admissible for new health, planning, or execution.",
+          "title": "Record Count Semantics"
+        },
         "record_entries": {
           "anyOf": [
             {
@@ -600,6 +719,7 @@
             }
           ],
           "default": null,
+          "description": "Number of regular installed files named by the distribution RECORD; positive when record_integrity is verified.",
           "title": "Record Entries"
         },
         "record_failed_entries": {
@@ -631,6 +751,7 @@
             }
           ],
           "default": null,
+          "description": "Verified row count under record_count_semantics; manager <=1.2 counted only hash-bearing rows, while all_record_rows_v2 equals record_entries.",
           "title": "Record Verified Entries"
         },
         "requested": {

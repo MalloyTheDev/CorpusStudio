@@ -101,6 +101,11 @@ export type FailureTaxonomy =
   | "TIMEOUT"
   | "KERNEL_STALL"
   | "NUMERICAL_FAILURE"
+  | "GRADIENT_FAILURE"
+  | "LOSS_EVIDENCE_FAILURE"
+  | "OPTIMIZER_FAILURE"
+  | "UPDATE_FAILURE"
+  | "ARTIFACT_FAILURE"
   | "CHECKPOINT_FAILURE"
   | "ENVIRONMENT_FAILURE"
   | "UNSUPPORTED_CONFIGURATION"
@@ -164,13 +169,26 @@ export type Dependencies = string[];
 export type Direct1 = boolean | null;
 export type DirectUrl1 = string | null;
 export type Editable1 = boolean | null;
+/**
+ * Number of files sealed by installed_files_hash; equals record_entries when record_integrity is verified.
+ */
 export type InstalledFileCount = number | null;
 export type Installer = string | null;
 export type Name = string;
 export type NormalizedName1 = string;
+/**
+ * Explicit all-RECORD-row count meaning. Missing means preserved legacy hash-bearing-row counts and is not admissible for new health, planning, or execution.
+ */
+export type RecordCountSemantics = "all_record_rows_v2" | null;
+/**
+ * Number of regular installed files named by the distribution RECORD; positive when record_integrity is verified.
+ */
 export type RecordEntries = number | null;
 export type RecordFailedEntries = string[];
 export type RecordIntegrity = "verified" | "failed" | "missing" | "unknown";
+/**
+ * Verified row count under record_count_semantics; manager <=1.2 counted only hash-bearing rows, while all_record_rows_v2 equals record_entries.
+ */
 export type RecordVerifiedEntries = number | null;
 export type Requested1 = boolean | null;
 export type Source1 = "pypi" | "wheel" | "sdist" | "conda" | "vcs" | "local" | "unknown";
@@ -479,6 +497,7 @@ export interface PackageLock {
   installer?: Installer;
   name: Name;
   normalized_name?: NormalizedName1;
+  record_count_semantics?: RecordCountSemantics;
   record_entries?: RecordEntries;
   record_failed_entries?: RecordFailedEntries;
   record_integrity?: RecordIntegrity;

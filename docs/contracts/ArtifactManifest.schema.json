@@ -39,6 +39,19 @@
           ],
           "title": "Current Integrity",
           "type": "string"
+        },
+        "metadata_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata Hash"
         }
       },
       "title": "ArtifactIntegrity",

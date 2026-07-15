@@ -53,6 +53,7 @@ from corpus_studio.platform.parameter_accounting import (
     load_parameter_events,
     parameter_accounting_hash_for,
     reconcile_parameter_accounting_events,
+    validate_safetensors_tensor_file,
     verify_parameter_accounting_hash,
     write_parameter_accounting_report,
 )
@@ -95,6 +96,7 @@ def _write_safetensors(path: Path, tensors: dict[str, tuple[str, list[int]]]) ->
         }
         offset = end
     encoded = json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    encoded += b" " * (-len(encoded) % 8)
     path.write_bytes(struct.pack("<Q", len(encoded)) + encoded + (b"\0" * offset))
 
 
@@ -795,6 +797,7 @@ def test_duplicate_keys_inside_one_safetensors_header_are_rejected(tmp_path: Pat
         b'{"weight":{"dtype":"I8","shape":[1],"data_offsets":[0,1]},'
         b'"weight":{"dtype":"I8","shape":[1],"data_offsets":[0,1]}}'
     )
+    header += b" " * (-len(header) % 8)
     (root / "model.safetensors").write_bytes(
         struct.pack("<Q", len(header)) + header + b"\0"
     )
@@ -809,6 +812,73 @@ def test_duplicate_keys_inside_one_safetensors_header_are_rejected(tmp_path: Pat
     report = build_model_parameter_accounting(model, snapshot_root=root, now=_fixed_now)
 
     assert any(gap.reason == ParameterGapReason.malformed_evidence for gap in report.gaps)
+
+
+@pytest.mark.parametrize(
+    ("offsets", "data_bytes"),
+    [
+        ([1, 2], b"\0\0"),
+        ([0, 1], b"\0\0"),
+    ],
+)
+def test_adapter_safetensors_requires_complete_contiguous_payload(
+    tmp_path: Path, offsets: list[int], data_bytes: bytes
+):
+    path = tmp_path / "adapter_model.safetensors"
+    header = json.dumps(
+        {"adapter.lora_A.weight": {"dtype": "I8", "shape": [1], "data_offsets": offsets}},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    header += b" " * (-len(header) % 8)
+    path.write_bytes(struct.pack("<Q", len(header)) + header + data_bytes)
+
+    with pytest.raises(ParameterAccountingError, match="cover|non-contiguous"):
+        validate_safetensors_tensor_file(path)
+
+
+def test_adapter_safetensors_rejects_interior_gap_and_unaligned_header(tmp_path: Path):
+    path = tmp_path / "adapter_model.safetensors"
+    header = json.dumps(
+        {
+            "a": {"dtype": "I8", "shape": [1], "data_offsets": [0, 1]},
+            "b": {"dtype": "I8", "shape": [1], "data_offsets": [2, 3]},
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    header += b" " * (-len(header) % 8)
+    path.write_bytes(struct.pack("<Q", len(header)) + header + b"\0\0\0")
+    with pytest.raises(ParameterAccountingError, match="non-contiguous"):
+        validate_safetensors_tensor_file(path)
+
+    unaligned = b'{"a":{"dtype":"I8","shape":[1],"data_offsets":[0,1]}}'
+    while len(unaligned) % 8 == 0:
+        unaligned += b" "
+    path.write_bytes(struct.pack("<Q", len(unaligned)) + unaligned + b"\0")
+    with pytest.raises(ParameterAccountingError, match="unaligned"):
+        validate_safetensors_tensor_file(path)
+
+
+def test_adapter_safetensors_detects_atomic_path_replacement_during_read(
+    tmp_path: Path, monkeypatch
+):
+    path = tmp_path / "adapter_model.safetensors"
+    replacement = tmp_path / "replacement.safetensors"
+    _write_safetensors(path, {"adapter.lora_A.weight": ("F32", [1])})
+    _write_safetensors(replacement, {"adapter.lora_A.weight": ("F32", [1])})
+    original_decode = accounting._decode_safetensors_header
+    replaced = False
+
+    def _replace_after_decode(*args, **kwargs):
+        nonlocal replaced
+        result = original_decode(*args, **kwargs)
+        if not replaced:
+            replacement.replace(path)
+            replaced = True
+        return result
+
+    monkeypatch.setattr(accounting, "_decode_safetensors_header", _replace_after_decode)
+    with pytest.raises(ParameterAccountingError, match="changed while"):
+        validate_safetensors_tensor_file(path)
 
 
 def test_duplicate_tensor_names_across_shards_are_not_double_counted_as_exact(tmp_path: Path):

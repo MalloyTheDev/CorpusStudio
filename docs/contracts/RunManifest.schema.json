@@ -1,5 +1,69 @@
 {
   "$defs": {
+    "AdapterExportStateEvidence": {
+      "additionalProperties": false,
+      "description": "Canonical identity for the exact PEFT state expected in adapter_model.safetensors.",
+      "properties": {
+        "adapter_config_semantic_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Adapter Config Semantic Sha256",
+          "type": "string"
+        },
+        "after_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "After Sha256",
+          "type": "string"
+        },
+        "before_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Before Sha256",
+          "type": "string"
+        },
+        "changed_tensor_count": {
+          "minimum": 1,
+          "title": "Changed Tensor Count",
+          "type": "integer"
+        },
+        "changed_tensor_names": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Changed Tensor Names",
+          "type": "array"
+        },
+        "hash_algorithm": {
+          "const": "sha256-safetensors-tensor-state-v1",
+          "default": "sha256-safetensors-tensor-state-v1",
+          "title": "Hash Algorithm",
+          "type": "string"
+        },
+        "tensor_count": {
+          "minimum": 1,
+          "title": "Tensor Count",
+          "type": "integer"
+        },
+        "tensor_names": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Tensor Names",
+          "type": "array"
+        }
+      },
+      "required": [
+        "before_sha256",
+        "after_sha256",
+        "tensor_count",
+        "tensor_names",
+        "changed_tensor_count",
+        "changed_tensor_names",
+        "adapter_config_semantic_sha256"
+      ],
+      "title": "AdapterExportStateEvidence",
+      "type": "object"
+    },
     "AttentionImpl": {
       "description": "``math``/``eager`` is forced on native-Windows/WDDM Blackwell sm_120 because the fused flash\nkernel deadlocks there. Other platforms require their own functional capability result; WSL\nevidence is not bare-Linux proof.",
       "enum": [
@@ -170,6 +234,11 @@
         "TIMEOUT",
         "KERNEL_STALL",
         "NUMERICAL_FAILURE",
+        "GRADIENT_FAILURE",
+        "LOSS_EVIDENCE_FAILURE",
+        "OPTIMIZER_FAILURE",
+        "UPDATE_FAILURE",
+        "ARTIFACT_FAILURE",
         "CHECKPOINT_FAILURE",
         "ENVIRONMENT_FAILURE",
         "UNSUPPORTED_CONFIGURATION",
@@ -270,6 +339,46 @@
         "classification"
       ],
       "title": "FitClassification",
+      "type": "object"
+    },
+    "GradientCoverageEvidence": {
+      "additionalProperties": false,
+      "description": "Observed materialized adapter gradients without claiming unused tensors had gradients.",
+      "properties": {
+        "eligible_tensor_count": {
+          "minimum": 1,
+          "title": "Eligible Tensor Count",
+          "type": "integer"
+        },
+        "eligible_tensor_names": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Eligible Tensor Names",
+          "type": "array"
+        },
+        "observed_tensor_count": {
+          "minimum": 1,
+          "title": "Observed Tensor Count",
+          "type": "integer"
+        },
+        "observed_tensor_names": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Observed Tensor Names",
+          "type": "array"
+        }
+      },
+      "required": [
+        "eligible_tensor_count",
+        "eligible_tensor_names",
+        "observed_tensor_count",
+        "observed_tensor_names"
+      ],
+      "title": "GradientCoverageEvidence",
       "type": "object"
     },
     "HashRef": {
@@ -439,6 +548,27 @@
         }
       },
       "title": "MemoryMetrics",
+      "type": "object"
+    },
+    "OptimizerStepLossEvidence": {
+      "additionalProperties": false,
+      "description": "One finite loss bound to exactly one completed optimizer step.",
+      "properties": {
+        "loss": {
+          "title": "Loss",
+          "type": "number"
+        },
+        "optimizer_step": {
+          "minimum": 1,
+          "title": "Optimizer Step",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "optimizer_step",
+        "loss"
+      ],
+      "title": "OptimizerStepLossEvidence",
       "type": "object"
     },
     "Ref": {
@@ -648,6 +778,162 @@
       ],
       "title": "StageMarker",
       "type": "string"
+    },
+    "TrainableStateChangeEvidence": {
+      "additionalProperties": false,
+      "description": "Canonical before/after identity for the complete trainable adapter state.",
+      "properties": {
+        "after_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "After Sha256",
+          "type": "string"
+        },
+        "before_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Before Sha256",
+          "type": "string"
+        },
+        "changed_tensor_count": {
+          "minimum": 1,
+          "title": "Changed Tensor Count",
+          "type": "integer"
+        },
+        "changed_tensor_names": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Changed Tensor Names",
+          "type": "array"
+        },
+        "hash_algorithm": {
+          "const": "sha256-trainable-state-v1",
+          "default": "sha256-trainable-state-v1",
+          "title": "Hash Algorithm",
+          "type": "string"
+        },
+        "trainable_tensor_count": {
+          "minimum": 1,
+          "title": "Trainable Tensor Count",
+          "type": "integer"
+        },
+        "trainable_tensor_names": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Trainable Tensor Names",
+          "type": "array"
+        }
+      },
+      "required": [
+        "before_sha256",
+        "after_sha256",
+        "trainable_tensor_count",
+        "trainable_tensor_names",
+        "changed_tensor_count",
+        "changed_tensor_names"
+      ],
+      "title": "TrainableStateChangeEvidence",
+      "type": "object"
+    },
+    "TrainingExecutionEvidence": {
+      "additionalProperties": false,
+      "description": "Trainer-side proof produced before adapter export is admitted as a success.",
+      "properties": {
+        "adapter_export_state": {
+          "$ref": "#/$defs/AdapterExportStateEvidence"
+        },
+        "completed_optimizer_steps": {
+          "minimum": 1,
+          "title": "Completed Optimizer Steps",
+          "type": "integer"
+        },
+        "gradient_coverage": {
+          "$ref": "#/$defs/GradientCoverageEvidence"
+        },
+        "optimizer_created": {
+          "const": true,
+          "title": "Optimizer Created",
+          "type": "boolean"
+        },
+        "step_losses": {
+          "items": {
+            "$ref": "#/$defs/OptimizerStepLossEvidence"
+          },
+          "minItems": 1,
+          "title": "Step Losses",
+          "type": "array"
+        },
+        "trainable_state": {
+          "$ref": "#/$defs/TrainableStateChangeEvidence"
+        }
+      },
+      "required": [
+        "trainable_state",
+        "adapter_export_state",
+        "gradient_coverage",
+        "optimizer_created",
+        "completed_optimizer_steps",
+        "step_losses"
+      ],
+      "title": "TrainingExecutionEvidence",
+      "type": "object"
+    },
+    "TrainingSuccessEvidence": {
+      "additionalProperties": false,
+      "description": "All gates required before a resolved run or measured fit may be called successful.",
+      "properties": {
+        "adapter_bytes_verified": {
+          "const": true,
+          "title": "Adapter Bytes Verified",
+          "type": "boolean"
+        },
+        "adapter_config_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Adapter Config Sha256",
+          "type": "string"
+        },
+        "adapter_safetensors_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Adapter Safetensors Sha256",
+          "type": "string"
+        },
+        "artifact_integrity_verified": {
+          "const": true,
+          "title": "Artifact Integrity Verified",
+          "type": "boolean"
+        },
+        "execution": {
+          "$ref": "#/$defs/TrainingExecutionEvidence"
+        },
+        "measured_peak": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "output_path_verified": {
+          "const": true,
+          "title": "Output Path Verified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "execution",
+        "output_path_verified",
+        "adapter_bytes_verified",
+        "artifact_integrity_verified",
+        "adapter_safetensors_sha256",
+        "adapter_config_sha256"
+      ],
+      "title": "TrainingSuccessEvidence",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -825,6 +1111,17 @@
       "default": "",
       "title": "Target",
       "type": "string"
+    },
+    "training_success_evidence": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrainingSuccessEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "updated_at": {
       "title": "Updated At",

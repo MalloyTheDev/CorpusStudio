@@ -1,7 +1,8 @@
 # CorpusStudio — Session Handoff
 
-**Last updated:** 2026-07-15 (matched manager-1.2 math/flash environments and bounded smokes - see
-[`docs/HOST_STATE.md`](docs/HOST_STATE.md); previous snapshot 2026-07-14). This is a snapshot for the
+**Last updated:** 2026-07-15 (training-success evidence and complete RECORD-count hardening after the
+matched manager-1.2 math/flash failures - see [`docs/HOST_STATE.md`](docs/HOST_STATE.md); previous
+snapshot 2026-07-14). This is a snapshot for the
 next agent session (Claude Code or Codex).
 For the authoritative *feature* state see [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md); for the
 forward plan see [`docs/ROADMAP.md`](docs/ROADMAP.md) + [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
@@ -133,12 +134,38 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   verifier now uses post-accumulation leaf-gradient evidence, but that code has only unit evidence:
   build a new wheel, create new environment IDs/locks, generate new plans, and obtain separate smoke
   approval before claiming the correction on hardware. See [`docs/HOST_STATE.md`](docs/HOST_STATE.md).
+- **A first-party success now requires evidence stronger than "the loop returned":** canonical hashes
+  of the complete trainable adapter state must differ before/after; at least one materialized adapter
+  gradient and honest observed/eligible coverage must be recorded; `on_train_begin` must expose the
+  real optimizer; and every completed optimizer step must have exactly one finite loss under sealed
+  `logging_strategy="steps"`, `logging_steps=1`, and `logging_nan_inf_filter=false`. Final trainable
+  tensors must remain finite. A second canonical identity binds the exact PEFT export keys, shapes,
+  dtypes, and bytes to `adapter_model.safetensors`; the complete in-memory PEFT config is likewise
+  bound to `adapter_config.json`. Link-like output components, alternate/nested weight payloads,
+  incomplete Safetensors ranges, and config or weight mutation fail closed. Weight and config hashes,
+  durable artifact/run records, and raw measured-peak evidence must all pass before terminal success
+  or a measured native fit is exposed. Gradient, loss, optimizer, update, artifact, environment, and
+  numerical failures retain their own taxonomy/stage.
+- **Manager 1.3 makes complete RECORD counts authoritative:** new evidence carries explicit
+  `record_count_semantics="all_record_rows_v2"` and requires positive `record_entries`,
+  `record_verified_entries == record_entries`, and the same positive installed-file count, with no
+  failed row. Unhashed RECORD/pyc rows count only after their paths and exact bytes are bound by the
+  installed-tree digest. Missing semantics retains the older hash-bearing-row meaning so manager-1.2
+  locks and plans remain hash-verifiable for reconstruction, but health returns a non-mutating
+  admission refusal and those identities cannot authorize planning or execution.
+- **The manager-1.2 v3 pair is preserved, unexecuted evidence:** the wheel from repository commit
+  `16ef6e95722ec3988ee8826b45333c9356ef76f9`, research-math-v3/research-flash-v3 environments, and
+  normalized RunPlan candidates were all created before this audit checkpoint. Neither plan was
+  dispatched and no model load or GPU workload occurred for them. All 84 packages in each lock used
+  the older partial RECORD-count meaning of `verified`, so the environments and plans must not be
+  mutated, relabeled, or reused. Exact identities are in [`docs/HOST_STATE.md`](docs/HOST_STATE.md).
 - **The first-party checkpoint boundary is now fail-closed:** new plans seal
   `save_strategy="no"` with no cadence or retention, both sealed and explicitly unsealed trainer paths
   refuse legacy step-checkpoint execution before loading data or weights, and the runner rejects any
   unexpected checkpoint result. Final adapter output remains run-scoped. Exact sealed resume is still
   unimplemented, so short benchmark trials are checkpoint-free and runs expected to exceed 30 minutes
-  remain blocked pending a separate resume-lineage design.
+  remain blocked pending the exact resume-lineage design tracked by
+  [#440](https://github.com/MalloyTheDev/CorpusStudio/issues/440).
 - **Managed-environment concurrency is fail-closed:** bounded manager/per-environment inter-process
   locks serialize create/recreate/remove, evidence-producing health and planning operations take a
   consistent environment lease, and `platform-run` holds that lease through worker termination.
@@ -242,26 +269,20 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 7. Immediate next actions (ranked)
 
-1. **Remaining environment concurrency/transaction hardening:** installed environment inventories now
-   verify every contained RECORD entry, reject unrecorded site-package files and symlinks, then import
-   torch only in a second process after the parent validates that evidence. Readiness workers also
-   compare installed payload files with the reviewed wheel's RECORD/METADATA/pip identity. The
-   remaining slice is to share
-   safe inventory primitives across artifacts/checkpoints, add manager/per-environment inter-process
-   locks, and make recreation blue/green. Build and hash an exact worker wheel only from an approved
-   audited commit.
+1. **Finish and merge the focused training-success evidence hardening before any new worker wheel.**
+   Do not reuse the preserved manager-1.2 v2/v3 environments, plans, failed runs, or artifacts. After
+   the merge, a new wheel and new blue/green environment IDs/locks are required because both the worker
+   behavior and PackageLock admission meaning changed.
 2. **Continue hardware-independent work alongside the measured workload bring-up:** bounded event
    journaling, prepared-dataset/transactional row-store groundwork, TraceRecord identity/governance,
    and remaining desktop/web contracts. Keep non-trivial placement/offload execution unimplemented
    until an isolated backend proves it.
 3. **Then continue down the revised order (§3):** dense backends → existing-model MoE FT
    → full MoE → resource-elastic expert runtime.
-4. **GPU workload bring-up (host now assembled; env `HARDWARE_VERIFIED`):** the Linux NVMe is
-   installed, the NVIDIA/CUDA stack lives in the managed env, and `backend-corpus-studio` is built and
-   probed ([`docs/HOST_STATE.md`](docs/HOST_STATE.md)). The env hardware probe is a *minimal* GPU check,
-   so the remaining hardware work is still open: run a real GPU smoke, benchmark the NVMe
-   non-destructively, then step the 7B workload from sequence 1024 upward before CPU and finally NVMe
-   offload - none of which the env probe proves.
+4. **GPU workload bring-up remains approval-gated:** only after the hardened wheel, new environments,
+   fresh normalized-equal plans, and a field-by-field plan diff may one corrected 0.5B math smoke and
+   one corrected 0.5B flash smoke be separately approved. The 500-output corpus and 7B workload are not
+   ready and must not be loaded or trained. NVMe/offload work remains later and separately evidenced.
 
 ## 8. Hardware + environments
 
@@ -297,13 +318,13 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   complete QLoRA probe tuple in the plan (math `cuda_qlora_math_execution` or forced-flash
   `cuda_qlora_sdpa_flash_execution`), capture sanitized pip/RECORD plus complete record-owned
   installed-file-tree evidence, compare the installed worker payload with the reviewed wheel,
-  and seal the lock only after required probes plus stable pre/post inventories. Manager 1.2 preserves
-  the sealed 1.1 math rollback identity while requiring stronger evidence for new creations. Math
-  readiness-v2 is the preserved
-  baseline/rollback; the manager-1.1 flash readiness-v1 lock remains preserved historical evidence for
+  and seal the lock only after required probes plus stable pre/post inventories. Manager 1.3 keeps the
+  sealed 1.1 math files and hashes readable as historical rollback evidence while refusing a new
+  health/planning claim without complete-count replacement. Math readiness-v2 is the preserved
+  historical baseline; the manager-1.1 flash readiness-v1 lock remains preserved historical evidence for
   its tiny forced-flash tuple, but manager 1.2 does not grandfather its missing adapter-state equality
   observation. It requires replacement before a new health claim. Blue/green research-math-v2 and
-  research-flash-v2 now provide the manager-1.2 identities; their matched 0.5B attempts reached
+  research-flash-v2 preserve the manager-1.2 identities; their matched 0.5B attempts reached
   adapter insertion but failed before step 1 on the common materialized-gradient-verifier mismatch.
   The legacy
   `backend-corpus-studio` environment also remains available.

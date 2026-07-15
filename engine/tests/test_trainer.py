@@ -6,6 +6,7 @@ verified separately via the CPU toy path (installing the CPU subset of the [trai
 
 from __future__ import annotations
 
+import contextlib
 import json
 from pathlib import Path
 import sys
@@ -21,10 +22,15 @@ from corpus_studio.platform.trace_records import (
 )
 from corpus_studio.training.traces import Trace
 from corpus_studio.training.environment import TrainingRuntimeReport
+from corpus_studio.platform.enums import StageMarker
 from corpus_studio.training.quantization import find_linear4bit_modules
 from corpus_studio.training.trainer import (
     TINY_TOY_MODEL,
     ExecutionPlacementDeviation,
+    GradientObservationTracker,
+    TrainingEvidenceError,
+    TrainingExecutionTracker,
+    TrainerEnvironmentError,
     TrainerError,
     TrainRunConfig,
     analyze_truncation,
@@ -32,7 +38,11 @@ from corpus_studio.training.trainer import (
     build_lora_kwargs,
     build_model_load_kwargs,
     build_training_kwargs,
+    capture_adapter_export_state,
+    capture_trainable_state,
+    compare_trainable_states,
     enforce_trainable_precision,
+    enforced_attention_training_kernel,
     format_example_text,
     load_run_config_from_file,
     resolve_attention_implementation,
@@ -505,6 +515,15 @@ class _FakeTorch:
     def __init__(self, cuda_backend=None):
         self.backends = type("Backends", (), {"cuda": cuda_backend or _FakeSdpBackend()})()
 
+    @staticmethod
+    def isfinite(tensor):
+        finite = getattr(tensor, "finite", True)
+        return type(
+            "FiniteResult",
+            (),
+            {"all": lambda self: self, "item": lambda self: finite},
+        )()
+
 
 def _sealed_config(**overrides):
     base = {
@@ -537,6 +556,40 @@ def test_attention_policy_refuses_an_observed_toggle_deviation():
     cfg = _sealed_config(math_sdp_enabled=False)
     with pytest.raises(TrainerError, match="attention policy deviation"):
         apply_attention_execution_policy(torch, cfg)
+
+
+def test_attention_policy_classifies_backend_setter_failure_as_environment():
+    class RaisingBackend(_FakeSdpBackend):
+        def enable_flash_sdp(self, value):
+            raise RuntimeError("driver refused toggle")
+
+    with pytest.raises(TrainerEnvironmentError, match="could not be applied or observed"):
+        apply_attention_execution_policy(_FakeTorch(RaisingBackend()), _sealed_config())
+
+
+def test_training_attention_context_detects_mutation_and_restores_the_seal():
+    torch = _FakeTorch()
+    entered = []
+
+    @contextlib.contextmanager
+    def kernel_context(backends):
+        entered.extend(backends)
+        yield
+
+    with pytest.raises(TrainerEnvironmentError, match="attention policy deviation"):
+        with enforced_attention_training_kernel(
+            torch,
+            _sealed_config(),
+            kernel_context_factory=kernel_context,
+            backend_values={"torch_sdpa_math": "math"},
+        ):
+            torch.backends.cuda.flash = True
+            torch.backends.cuda.math = False
+
+    assert entered == ["math"]
+    assert torch.backends.cuda.flash_sdp_enabled() is False
+    assert torch.backends.cuda.mem_efficient_sdp_enabled() is False
+    assert torch.backends.cuda.math_sdp_enabled() is True
 
 
 def test_model_load_kwargs_pin_quantization_dtype_revision_and_device_map():
@@ -1296,7 +1349,8 @@ def test_trainable_precision_enforces_master_weights_and_gradient_contract():
         {"named_parameters": lambda self: iter([("base", frozen), ("adapter", adapter)])},
     )()
     cfg = _sealed_config(master_weight_dtype="fp32", gradient_dtype="fp32")
-    enforce_trainable_precision(model, torch, cfg)
+    tracker = enforce_trainable_precision(model, torch, cfg)
+    assert tracker is not None
     assert adapter.dtype is torch.float32 and adapter.post_accumulate_hook is not None
 
     # The sealed contract describes the materialized leaf gradient, not an earlier autocast edge
@@ -1305,14 +1359,19 @@ def test_trainable_precision_enforces_master_weights_and_gradient_contract():
     good = type("Gradient", (), {"dtype": torch.float32, "device": "cuda:0"})()
     adapter.grad = good
     assert adapter.post_accumulate_hook(adapter) is None
+    coverage = tracker.evidence()
+    assert coverage.eligible_tensor_count == 1
+    assert coverage.observed_tensor_names == ["adapter"]
     bad_dtype = type("Gradient", (), {"dtype": torch.float16, "device": "cuda:0"})()
     adapter.grad = bad_dtype
     with pytest.raises(TrainerError, match="gradient dtype deviation"):
         adapter.post_accumulate_hook(adapter)
     bad_device = type("Gradient", (), {"dtype": torch.float32, "device": "cpu"})()
     adapter.grad = bad_device
-    with pytest.raises(ExecutionPlacementDeviation, match="gradient adapter"):
+    with pytest.raises(TrainingEvidenceError, match="gradient adapter") as misplaced:
         adapter.post_accumulate_hook(adapter)
+    assert misplaced.value.taxonomy.value == "GRADIENT_FAILURE"
+    assert misplaced.value.stage.value == "backward"
     adapter.grad = None
     with pytest.raises(TrainerError, match="materialized gradient is missing"):
         adapter.post_accumulate_hook(adapter)
@@ -1362,6 +1421,384 @@ def test_trainable_precision_refuses_missing_or_empty_adapter_state():
         enforce_trainable_precision(empty, torch, _sealed_config(master_weight_dtype=None))
     with pytest.raises(TrainerError, match="no trainable parameters"):
         enforce_trainable_precision(empty, torch, _sealed_config(master_weight_dtype="fp32"))
+
+
+class _ByteTensor:
+    def __init__(self, payload: bytes, *, name: str = "float32", finite: bool = True):
+        self.payload = payload
+        self.finite = finite
+        self.requires_grad = True
+        self.dtype = name
+        self.shape = (len(payload),)
+
+    def detach(self):
+        return self
+
+    def cpu(self):
+        return self
+
+    def contiguous(self):
+        return self
+
+    def view(self, _dtype):
+        return self
+
+    def numpy(self):
+        payload = self.payload
+        return type("Array", (), {"tobytes": lambda self: payload})()
+
+
+def _trainable_model(entries):
+    return type("Model", (), {"named_parameters": lambda self: iter(entries)})()
+
+
+def test_trainable_state_hash_is_canonical_and_proves_an_exact_tensor_change():
+    torch = _FakeTorch()
+    first = _ByteTensor(b"first")
+    second = _ByteTensor(b"second")
+    before = capture_trainable_state(
+        _trainable_model([("adapter.b", second), ("adapter.a", first)]), torch
+    )
+    reordered = capture_trainable_state(
+        _trainable_model([("adapter.a", first), ("adapter.b", second)]), torch
+    )
+    assert before.state_sha256 == reordered.state_sha256
+
+    changed = capture_trainable_state(
+        _trainable_model(
+            [("adapter.a", _ByteTensor(b"other")), ("adapter.b", second)]
+        ),
+        torch,
+    )
+    evidence = compare_trainable_states(before, changed)
+    assert evidence.before_sha256 == before.state_sha256
+    assert evidence.after_sha256 == changed.state_sha256
+    assert evidence.changed_tensor_names == ["adapter.a"]
+    assert evidence.changed_tensor_count == 1
+
+
+def test_trainable_state_refuses_unchanged_or_mutated_inventory():
+    torch = _FakeTorch()
+    before = capture_trainable_state(
+        _trainable_model([("adapter", _ByteTensor(b"same"))]), torch
+    )
+    with pytest.raises(TrainingEvidenceError, match="did not change") as unchanged:
+        compare_trainable_states(before, before)
+    assert unchanged.value.taxonomy.value == "UPDATE_FAILURE"
+    with pytest.raises(TrainingEvidenceError, match="inventory changed"):
+        compare_trainable_states(
+            before,
+            capture_trainable_state(
+                _trainable_model([("different", _ByteTensor(b"changed"))]), torch
+            ),
+        )
+
+
+def test_final_trainable_state_rejects_nonfinite_adapter_bytes_at_exact_stage():
+    with pytest.raises(TrainingEvidenceError, match="non-finite") as exc:
+        capture_trainable_state(
+            _trainable_model([("adapter", _ByteTensor(b"nan!", finite=False))]),
+            _FakeTorch(),
+            stage=StageMarker.optimizer_step,
+        )
+    assert exc.value.taxonomy.value == "NUMERICAL_FAILURE"
+    assert exc.value.stage == StageMarker.optimizer_step
+
+
+def test_training_state_capture_fails_closed_on_unprovable_or_empty_state():
+    torch = _FakeTorch()
+    frozen = _ByteTensor(b"frozen")
+    frozen.requires_grad = False
+    with pytest.raises(TrainingEvidenceError, match="no trainable state"):
+        capture_trainable_state(_trainable_model([("frozen", frozen)]), torch)
+
+    duplicate = _ByteTensor(b"duplicate")
+    with pytest.raises(TrainingEvidenceError, match="duplicate trainable tensor name"):
+        capture_trainable_state(
+            _trainable_model([("adapter", duplicate), ("adapter", duplicate)]), torch
+        )
+
+    class UnreadableTensor(_ByteTensor):
+        def numpy(self):
+            raise RuntimeError("synthetic byte-read failure")
+
+    with pytest.raises(TrainingEvidenceError, match="canonical trainable tensor bytes"):
+        capture_trainable_state(
+            _trainable_model([("adapter", UnreadableTensor(b"unreadable"))]), torch
+        )
+
+    broken_torch = _FakeTorch()
+    broken_torch.isfinite = lambda _tensor: (_ for _ in ()).throw(
+        RuntimeError("synthetic finite-check failure")
+    )
+    with pytest.raises(TrainingEvidenceError, match="could not verify finite"):
+        capture_trainable_state(
+            _trainable_model([("adapter", _ByteTensor(b"state"))]), broken_torch
+        )
+
+
+def test_adapter_export_capture_requires_tensors_with_sealed_dtypes():
+    with pytest.raises(TrainingEvidenceError, match="no adapter tensors"):
+        capture_adapter_export_state({}, _FakeTorch(), stage=StageMarker.export)
+    with pytest.raises(TrainingEvidenceError, match="no sealed Safetensors identity"):
+        capture_adapter_export_state(
+            {"adapter": _ByteTensor(b"state", name="complex64")},
+            _FakeTorch(),
+            stage=StageMarker.export,
+        )
+
+
+def test_gradient_coverage_requires_one_observation_but_not_every_tensor():
+    tracker = GradientObservationTracker(["adapter.a", "adapter.b", "adapter.c"])
+    tracker.observe("adapter.b")
+    evidence = tracker.evidence()
+    assert evidence.eligible_tensor_count == 3
+    assert evidence.observed_tensor_count == 1
+    assert evidence.observed_tensor_names == ["adapter.b"]
+    with pytest.raises(TrainingEvidenceError, match="no materialized adapter gradient"):
+        GradientObservationTracker(["adapter.a"]).evidence()
+
+
+def test_gradient_tracker_rejects_post_hook_inventory_addition_or_replacement():
+    original = type("Parameter", (), {"requires_grad": True})()
+    replacement = type("Parameter", (), {"requires_grad": True})()
+    tracker = GradientObservationTracker(["adapter"])
+    tracker.eligible_parameter_ids = {"adapter": id(original)}
+
+    replaced_model = type(
+        "Model",
+        (),
+        {"named_parameters": lambda self: iter([("adapter", replacement)])},
+    )()
+    with pytest.raises(TrainingEvidenceError, match="inventory changed"):
+        tracker.verify_model_inventory(replaced_model)
+
+    added_model = type(
+        "Model",
+        (),
+        {
+            "named_parameters": lambda self: iter(
+                [("adapter", original), ("adapter.extra", replacement)]
+            )
+        },
+    )()
+    with pytest.raises(TrainingEvidenceError, match="inventory changed"):
+        tracker.verify_model_inventory(added_model)
+
+
+def test_training_execution_tracker_binds_optimizer_steps_and_finite_losses():
+    torch = _FakeTorch()
+    adapter_parameter = _ByteTensor(b"before")
+    optimizer = type(
+        "Optimizer",
+        (),
+        {
+            "param_groups": [{"params": [adapter_parameter]}],
+            "state": {},
+            "step": lambda self: None,
+            "zero_grad": lambda self: None,
+        },
+    )()
+    gradients = GradientObservationTracker(["adapter.a"])
+    gradients.eligible_parameter_ids = {"adapter.a": id(adapter_parameter)}
+    gradients.observe("adapter.a")
+    stages = []
+    progress = []
+    tracker = TrainingExecutionTracker(
+        config=_sealed_config(max_steps=2),
+        torch_module=torch,
+        gradients=gradients,
+        progress_callback=lambda step, total, loss: progress.append((step, total, loss)),
+        stage_callback=lambda stage, message: stages.append((stage, message)),
+    )
+    tracker.on_train_begin(optimizer)
+    tracker.on_step_end(1, optimizer)
+    tracker.on_log(1, 2, {"loss": 0.9})
+    tracker.on_step_end(2, optimizer)
+    tracker.on_log(2, 2, {"loss": 0.5})
+    model = _trainable_model([("adapter.a", adapter_parameter)])
+    before = capture_trainable_state(model, torch)
+    before_export = capture_adapter_export_state(
+        {"adapter.lora_A.weight": adapter_parameter},
+        torch,
+        stage=StageMarker.adapter_attached,
+    )
+    adapter_parameter.payload = b"after!"
+    after_export = capture_adapter_export_state(
+        {"adapter.lora_A.weight": adapter_parameter},
+        torch,
+        stage=StageMarker.optimizer_step,
+    )
+    evidence = tracker.finalize(
+        steps=2,
+        before=before,
+        before_export=before_export,
+        after_export=after_export,
+        adapter_config_semantic_sha256="f" * 64,
+        model=model,
+    )
+    assert stages == [("optimizer_created", "observed the real optimizer at on_train_begin")]
+    assert progress == [(1, 2, 0.9), (2, 2, 0.5)]
+    assert [item.optimizer_step for item in evidence.step_losses] == [1, 2]
+
+
+def test_training_execution_finalize_rejects_train_time_parameter_replacement():
+    torch = _FakeTorch()
+    original = _ByteTensor(b"before")
+    replacement = _ByteTensor(b"after!")
+    current = [("adapter", original)]
+    model = type("Model", (), {"named_parameters": lambda self: iter(current)})()
+    gradients = GradientObservationTracker(["adapter"])
+    gradients.eligible_parameter_ids = {"adapter": id(original)}
+    gradients.observe("adapter")
+    optimizer = type(
+        "Optimizer",
+        (),
+        {
+            "param_groups": [{"params": [original]}],
+            "state": {},
+            "step": lambda self: None,
+            "zero_grad": lambda self: None,
+        },
+    )()
+    tracker = TrainingExecutionTracker(
+        config=_sealed_config(max_steps=1),
+        torch_module=torch,
+        gradients=gradients,
+        progress_callback=None,
+        stage_callback=None,
+    )
+    tracker.on_train_begin(optimizer)
+    tracker.on_step_end(1, optimizer)
+    tracker.on_log(1, 1, {"loss": 0.4})
+    before = capture_trainable_state(model, torch)
+    before_export = capture_adapter_export_state(
+        {"adapter.lora_A.weight": original},
+        torch,
+        stage=StageMarker.adapter_attached,
+    )
+    after_export = capture_adapter_export_state(
+        {"adapter.lora_A.weight": replacement},
+        torch,
+        stage=StageMarker.optimizer_step,
+    )
+
+    current[:] = [("adapter", replacement)]
+    with pytest.raises(TrainingEvidenceError, match="inventory changed") as changed:
+        tracker.finalize(
+            steps=1,
+            before=before,
+            before_export=before_export,
+            after_export=after_export,
+            adapter_config_semantic_sha256="f" * 64,
+            model=model,
+        )
+    assert changed.value.taxonomy.value == "GRADIENT_FAILURE"
+    assert changed.value.stage.value == "optimizer_step"
+
+
+def test_training_execution_tracker_rejects_fake_optimizer_and_bad_loss_records():
+    adapter_parameter = object()
+    gradients = GradientObservationTracker(["adapter"])
+    gradients.eligible_parameter_ids = {"adapter": id(adapter_parameter)}
+    tracker = TrainingExecutionTracker(
+        config=_sealed_config(max_steps=1),
+        torch_module=_FakeTorch(),
+        gradients=gradients,
+        progress_callback=None,
+        stage_callback=None,
+    )
+    with pytest.raises(TrainingEvidenceError, match="real optimizer") as missing:
+        tracker.on_train_begin(None)
+    assert missing.value.taxonomy.value == "OPTIMIZER_FAILURE"
+
+    optimizer = type(
+        "Optimizer",
+        (),
+        {
+            "param_groups": [{"params": [adapter_parameter]}],
+            "state": {},
+            "step": lambda self: None,
+            "zero_grad": lambda self: None,
+        },
+    )()
+    tracker.on_train_begin(optimizer)
+    tracker.on_step_end(1, optimizer)
+    with pytest.raises(TrainingEvidenceError, match="non-finite") as nonfinite:
+        tracker.on_log(1, 1, {"loss": float("nan")})
+    assert nonfinite.value.taxonomy.value == "NUMERICAL_FAILURE"
+    for coerced in (True, "0.4"):
+        with pytest.raises(TrainingEvidenceError, match="not numeric") as nonnumeric:
+            tracker.on_log(1, 1, {"loss": coerced})
+        assert nonnumeric.value.taxonomy.value == "LOSS_EVIDENCE_FAILURE"
+    tracker.on_log(1, 1, {"loss": 0.4})
+    with pytest.raises(TrainingEvidenceError, match="duplicate loss"):
+        tracker.on_log(1, 1, {"loss": 0.3})
+
+
+@pytest.mark.parametrize("case", ["unrelated", "missing", "duplicate"])
+def test_training_execution_tracker_binds_exact_optimizer_parameter_inventory(case):
+    first = object()
+    second = object()
+    gradients = GradientObservationTracker(["adapter.a", "adapter.b"])
+    gradients.eligible_parameter_ids = {
+        "adapter.a": id(first),
+        "adapter.b": id(second),
+    }
+    parameters = {
+        "unrelated": [first, object()],
+        "missing": [first],
+        "duplicate": [first, second, second],
+    }[case]
+    optimizer = type(
+        "Optimizer",
+        (),
+        {
+            "param_groups": [{"params": parameters}],
+            "state": {},
+            "step": lambda self: None,
+            "zero_grad": lambda self: None,
+        },
+    )()
+    tracker = TrainingExecutionTracker(
+        config=_sealed_config(max_steps=1),
+        torch_module=_FakeTorch(),
+        gradients=gradients,
+        progress_callback=None,
+        stage_callback=None,
+    )
+    with pytest.raises(TrainingEvidenceError, match="complete trainable adapter inventory") as exc:
+        tracker.on_train_begin(optimizer)
+    assert exc.value.taxonomy.value == "OPTIMIZER_FAILURE"
+    assert exc.value.stage.value == "optimizer_created"
+
+
+def test_training_execution_tracker_rechecks_optimizer_parameter_identity_per_step():
+    adapter_parameter = object()
+    optimizer = type(
+        "Optimizer",
+        (),
+        {
+            "param_groups": [{"params": [adapter_parameter]}],
+            "state": {},
+            "step": lambda self: None,
+            "zero_grad": lambda self: None,
+        },
+    )()
+    gradients = GradientObservationTracker(["adapter"])
+    gradients.eligible_parameter_ids = {"adapter": id(adapter_parameter)}
+    tracker = TrainingExecutionTracker(
+        config=_sealed_config(max_steps=1),
+        torch_module=_FakeTorch(),
+        gradients=gradients,
+        progress_callback=None,
+        stage_callback=None,
+    )
+    tracker.on_train_begin(optimizer)
+    optimizer.param_groups[0]["params"] = [object()]
+    with pytest.raises(TrainingEvidenceError, match="complete trainable adapter inventory") as exc:
+        tracker.on_step_end(1, optimizer)
+    assert exc.value.stage.value == "optimizer_step"
 
 
 def test_formatter_identity_hashes_the_renderer_implementation(monkeypatch):

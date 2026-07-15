@@ -629,15 +629,13 @@ def _has_verified_package_integrity(package: PackageLock) -> bool:
     artifact_hash = package.artifact_hash
     installed_files_hash = package.installed_files_hash
     return (
-        package.record_integrity == "verified"
-        and package.record_entries is not None
-        and package.record_verified_entries is not None
-        and not package.record_failed_entries
+        package.has_complete_record_count_evidence()
         and record_hash is not None
         and record_hash.value is not None
         and installed_files_hash is not None
         and installed_files_hash.value is not None
         and package.installed_file_count is not None
+        and package.installed_file_count == package.record_entries
         and artifact_hash is not None
         and artifact_hash.value is not None
     )
@@ -686,6 +684,8 @@ def _trainer_interface(
         "gradient_accumulation_steps",
         "gradient_checkpointing",
         "learning_rate",
+        "logging_nan_inf_filter",
+        "logging_strategy",
         "logging_steps",
         "lr_scheduler_type",
         "optim",
@@ -749,6 +749,9 @@ def _trainer_interface(
             "required_sft_config_fields": sorted(required),
             "sequence_length_field": sequence_field,
             "tokenizer_parameter": tokenizer_parameter,
+            "logging_strategy": "steps",
+            "logging_steps": 1,
+            "logging_nan_inf_filter": False,
         }
     )
 

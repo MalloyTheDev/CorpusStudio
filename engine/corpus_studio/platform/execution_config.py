@@ -152,6 +152,61 @@ def _within(path: Path, root: Path) -> bool:
     return path == root or root in path.parents
 
 
+def verify_run_scoped_output_path(
+    config: ResolvedExecutionConfiguration,
+    run_id: str,
+    *,
+    observed_path: str | Path | None = None,
+    require_exists: bool = False,
+) -> Path:
+    """Require the exact lexical run output and reject link-like descendants before/after training."""
+
+    sealed_root = Path(config.output_dir).absolute()
+    expected = run_scoped_training_output(config, run_id).absolute()
+    candidate = Path(observed_path).absolute() if observed_path is not None else expected
+    if candidate != expected:
+        raise ExecutionConfigurationError(
+            "trainer output differs from the exact sealed run-scoped output adapter path"
+        )
+    try:
+        expected.relative_to(sealed_root)
+    except ValueError as exc:  # pragma: no cover - construction above is defensive-by-shape.
+        raise ExecutionConfigurationError("run-scoped output escapes its sealed root") from exc
+
+    current = sealed_root
+    relative_parts = expected.relative_to(sealed_root).parts
+    for part in (None, *relative_parts):
+        if part is not None:
+            current = current / part
+        try:
+            exists = current.exists() or current.is_symlink()
+        except OSError as exc:
+            raise ExecutionConfigurationError(
+                f"cannot inspect run-scoped output component: {current}"
+            ) from exc
+        if exists and _is_link_like(current):
+            raise ExecutionConfigurationError(
+                f"run-scoped output contains a link-like component: {current}"
+            )
+        if exists:
+            try:
+                resolved = current.resolve(strict=True)
+                root_resolved = sealed_root.resolve(strict=sealed_root.exists())
+            except (OSError, RuntimeError) as exc:
+                raise ExecutionConfigurationError(
+                    f"cannot resolve run-scoped output component: {current}"
+                ) from exc
+            if not _within(resolved, root_resolved):
+                raise ExecutionConfigurationError(
+                    f"run-scoped output component escapes the sealed root: {current}"
+                )
+    if require_exists and (not expected.is_dir() or _is_link_like(expected)):
+        raise ExecutionConfigurationError(
+            "trainer did not produce a regular run-scoped adapter directory"
+        )
+    return expected
+
+
 def _stable_file_read(
     path: str | Path,
     *,

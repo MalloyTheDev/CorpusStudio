@@ -104,6 +104,11 @@ export type FailureTaxonomy =
   | "TIMEOUT"
   | "KERNEL_STALL"
   | "NUMERICAL_FAILURE"
+  | "GRADIENT_FAILURE"
+  | "LOSS_EVIDENCE_FAILURE"
+  | "OPTIMIZER_FAILURE"
+  | "UPDATE_FAILURE"
+  | "ARTIFACT_FAILURE"
   | "CHECKPOINT_FAILURE"
   | "ENVIRONMENT_FAILURE"
   | "UNSUPPORTED_CONFIGURATION"
@@ -127,6 +132,56 @@ export type RunId1 = string;
 export type StartedAt = string | null;
 export type State = "prepared" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
 export type Target = string;
+export type AdapterBytesVerified = true;
+export type AdapterConfigSha256 = string;
+export type AdapterSafetensorsSha256 = string;
+export type ArtifactIntegrityVerified = true;
+export type AdapterConfigSemanticSha256 = string;
+export type AfterSha256 = string;
+export type BeforeSha256 = string;
+export type ChangedTensorCount = number;
+/**
+ * @minItems 1
+ */
+export type ChangedTensorNames = [string, ...string[]];
+export type HashAlgorithm = "sha256-safetensors-tensor-state-v1";
+export type TensorCount = number;
+/**
+ * @minItems 1
+ */
+export type TensorNames = [string, ...string[]];
+export type CompletedOptimizerSteps = number;
+export type EligibleTensorCount = number;
+/**
+ * @minItems 1
+ */
+export type EligibleTensorNames = [string, ...string[]];
+export type ObservedTensorCount = number;
+/**
+ * @minItems 1
+ */
+export type ObservedTensorNames = [string, ...string[]];
+export type OptimizerCreated = true;
+/**
+ * @minItems 1
+ */
+export type StepLosses = [OptimizerStepLossEvidence, ...OptimizerStepLossEvidence[]];
+export type Loss = number;
+export type OptimizerStep = number;
+export type AfterSha2561 = string;
+export type BeforeSha2561 = string;
+export type ChangedTensorCount1 = number;
+/**
+ * @minItems 1
+ */
+export type ChangedTensorNames1 = [string, ...string[]];
+export type HashAlgorithm1 = "sha256-trainable-state-v1";
+export type TrainableTensorCount = number;
+/**
+ * @minItems 1
+ */
+export type TrainableTensorNames = [string, ...string[]];
+export type OutputPathVerified = true;
 export type UpdatedAt = string;
 
 /**
@@ -157,6 +212,7 @@ export interface RunManifest {
   started_at?: StartedAt;
   state?: State;
   target?: Target;
+  training_success_evidence?: TrainingSuccessEvidence | null;
   updated_at: UpdatedAt;
 }
 /**
@@ -254,4 +310,68 @@ export interface RunReproducibility {
   engine_version?: EngineVersion;
   platform?: Platform;
   python_version?: PythonVersion;
+}
+/**
+ * All gates required before a resolved run or measured fit may be called successful.
+ */
+export interface TrainingSuccessEvidence {
+  adapter_bytes_verified: AdapterBytesVerified;
+  adapter_config_sha256: AdapterConfigSha256;
+  adapter_safetensors_sha256: AdapterSafetensorsSha256;
+  artifact_integrity_verified: ArtifactIntegrityVerified;
+  execution: TrainingExecutionEvidence;
+  measured_peak?: MemoryMetrics | null;
+  output_path_verified: OutputPathVerified;
+}
+/**
+ * Trainer-side proof produced before adapter export is admitted as a success.
+ */
+export interface TrainingExecutionEvidence {
+  adapter_export_state: AdapterExportStateEvidence;
+  completed_optimizer_steps: CompletedOptimizerSteps;
+  gradient_coverage: GradientCoverageEvidence;
+  optimizer_created: OptimizerCreated;
+  step_losses: StepLosses;
+  trainable_state: TrainableStateChangeEvidence;
+}
+/**
+ * Canonical identity for the exact PEFT state expected in adapter_model.safetensors.
+ */
+export interface AdapterExportStateEvidence {
+  adapter_config_semantic_sha256: AdapterConfigSemanticSha256;
+  after_sha256: AfterSha256;
+  before_sha256: BeforeSha256;
+  changed_tensor_count: ChangedTensorCount;
+  changed_tensor_names: ChangedTensorNames;
+  hash_algorithm?: HashAlgorithm;
+  tensor_count: TensorCount;
+  tensor_names: TensorNames;
+}
+/**
+ * Observed materialized adapter gradients without claiming unused tensors had gradients.
+ */
+export interface GradientCoverageEvidence {
+  eligible_tensor_count: EligibleTensorCount;
+  eligible_tensor_names: EligibleTensorNames;
+  observed_tensor_count: ObservedTensorCount;
+  observed_tensor_names: ObservedTensorNames;
+}
+/**
+ * One finite loss bound to exactly one completed optimizer step.
+ */
+export interface OptimizerStepLossEvidence {
+  loss: Loss;
+  optimizer_step: OptimizerStep;
+}
+/**
+ * Canonical before/after identity for the complete trainable adapter state.
+ */
+export interface TrainableStateChangeEvidence {
+  after_sha256: AfterSha2561;
+  before_sha256: BeforeSha2561;
+  changed_tensor_count: ChangedTensorCount1;
+  changed_tensor_names: ChangedTensorNames1;
+  hash_algorithm?: HashAlgorithm1;
+  trainable_tensor_count: TrainableTensorCount;
+  trainable_tensor_names: TrainableTensorNames;
 }

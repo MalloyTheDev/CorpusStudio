@@ -21,7 +21,6 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import Callable, Sequence
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
@@ -159,6 +158,8 @@ class TrainingRunner:
         self.name = backend_label
         from corpus_studio.training.trainer import (  # noqa: PLC0415
             ExecutionPlacementDeviation,
+            TrainingEvidenceError,
+            TrainerEnvironmentError,
             TrainerError,
         )
 
@@ -167,6 +168,27 @@ class TrainingRunner:
             f"training run [{backend_label}]: validating sealed execution inputs",
         )
         config = self._resolve_config(ctx.plan, ctx.run_id)
+        execution = ctx.plan.resolved_execution
+        if execution is None:  # pragma: no cover - _resolve_config rejects this first.
+            raise RunnerFailure(
+                "training plan has no resolved execution configuration",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.process_start,
+            )
+        from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+            ExecutionConfigurationError,
+            verify_run_scoped_output_path,
+        )
+
+        try:
+            verify_run_scoped_output_path(execution, ctx.run_id)
+        except ExecutionConfigurationError as exc:
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                stage=StageMarker.process_start,
+                remediation="repair the sealed output root before dispatching a new run",
+            ) from exc
 
         def _on_stall() -> None:
             # A true CUDA hang can't be force-killed in-process (the training thread is stuck in the
@@ -190,32 +212,34 @@ class TrainingRunner:
             on_stall=_on_stall,
         )
 
+        last_stage = StageMarker.process_start
+
         def _progress(step: int, total: int, loss: float | None) -> None:
+            nonlocal last_stage
             if ctx.cancelled:
                 raise _CancelTraining
             watchdog.beat()
             watchdog.sample()  # per-step peak capture (the thread also samples between steps)
             ctx.emit_metric(optimizer_step=step, loss=loss, message=f"[{step}/{total}] step")
+            last_stage = StageMarker.loss
 
         def _stage(name: str, message: str) -> None:
             # A setup milestone (model_loaded / quantized / …). Beat the watchdog so a long silent LOAD
             # doesn't look like a stall, and emit a stage RunEvent — which, over the worker pipe, resets
             # the subprocess supervisor's silence timer. Real progress, not a liveness heartbeat.
             watchdog.beat()
+            nonlocal last_stage
             try:
                 marker = StageMarker(name)
             except ValueError:
                 ctx.emit_log(f"{name}: {message}")
                 return
+            last_stage = marker
             ctx.emit_stage(marker, message)
 
-        succeeded = False
         try:
             with watchdog:
                 result = trainer_fn(config, progress_callback=_progress, stage_callback=_stage)
-            # A worker that violates the disabled checkpoint policy did not complete this sealed
-            # execution, even if its optimizer loop returned. Preserve its measurements as unproven.
-            succeeded = not result.checkpoints
         except _CancelTraining:
             raise RunCancelled from None
         except ExecutionPlacementDeviation as exc:
@@ -225,28 +249,46 @@ class TrainingRunner:
                 stage=StageMarker.placement_deviation,
                 remediation="regenerate the RunPlan or use a backend that enforces its device map",
             ) from exc
-        except TrainerError as exc:
-            # A clean "can't run this request" (runtime/deps/GPU missing, bad config) — not a crash.
+        except TrainingEvidenceError as exc:
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=exc.taxonomy,
+                stage=exc.stage,
+                remediation=exc.remediation,
+            ) from exc
+        except TrainerEnvironmentError as exc:
             raise RunnerFailure(
                 str(exc),
                 taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
-                stage=StageMarker.env_loaded,
-                remediation="run 'corpus-studio train-check' to see what's missing",
+                stage=last_stage,
+                remediation="run 'corpus-studio train-check' and verify the sealed environment",
+            ) from exc
+        except TrainerError as exc:
+            # Unclassified trainer refusals are configuration deviations. Actual missing runtime
+            # paths use RunnerFailure/TrainerEnvironmentError explicitly; never label every semantic
+            # evidence failure as an environment problem.
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=last_stage,
+                remediation="preserve the failed run and inspect the sealed execution contract",
             ) from exc
         except Exception as exc:  # noqa: BLE001 — classify the runtime failure, don't leak it as FAIL
             taxonomy, remediation = classify_training_error(exc)
             raise RunnerFailure(
                 str(exc) or type(exc).__name__,
                 taxonomy=taxonomy,
+                stage=last_stage,
                 remediation=remediation,
             ) from exc
         finally:
             # Record whatever the watchdog measured — on EVERY terminal path. A failed/cancelled run
             # that spilled is the richest diagnostic; capturing it only on success would discard that.
-            # But proven=succeeded so a FAILED run never gets a NATIVE_SAFE "fit proven" verdict from
-            # its partial peak (a spill still classifies honestly). The supervisor writes ctx.final_fit
-            # onto the manifest for any terminal state.
-            ctx.final_fit = watchdog.measured_fit(proven=succeeded)
+            # This layer can record only an UNPROVEN observation. The supervisor promotes it after
+            # output containment, adapter bytes, artifact integrity, losses, optimizer, and update
+            # evidence all pass. A measured spill remains classified on either path.
+            ctx.measured_peak = watchdog.peak
+            ctx.final_fit = watchdog.measured_fit(proven=False)
             if watchdog.spilled:
                 ctx.emit_warning(
                     "MEASURED a GPU-memory spill to shared system RAM during training (10-25x "
@@ -266,16 +308,26 @@ class TrainingRunner:
                 stage=StageMarker.export,
                 remediation="preserve the failed-run evidence and repair the first-party worker",
             )
-        expected_output = Path(config.output_dir).resolve(strict=False)
-        observed_output = Path(result.output_dir).resolve(strict=False)
-        observed_adapter = Path(result.adapter_path).resolve(strict=False)
-        if observed_output != expected_output or observed_adapter != expected_output:
+        try:
+            verify_run_scoped_output_path(
+                execution,
+                ctx.run_id,
+                observed_path=result.output_dir,
+                require_exists=True,
+            )
+            verify_run_scoped_output_path(
+                execution,
+                ctx.run_id,
+                observed_path=result.adapter_path,
+                require_exists=True,
+            )
+        except ExecutionConfigurationError as exc:
             raise RunnerFailure(
-                "trainer output deviated from the sealed run-scoped adapter directory",
-                taxonomy=FailureTaxonomy.CHECKPOINT_FAILURE,
+                str(exc),
+                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
                 stage=StageMarker.export,
                 remediation="use the exact backend adapter for this execution contract",
-            )
+            ) from exc
 
         from corpus_studio.training.artifact_registry import (  # noqa: PLC0415
             compute_weight_content_hash,
@@ -285,10 +337,24 @@ class TrainingRunner:
         if content_hash is None:
             raise RunnerFailure(
                 "training returned without readable adapter weight bytes",
-                taxonomy=FailureTaxonomy.CHECKPOINT_FAILURE,
+                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
                 stage=StageMarker.export,
                 remediation="inspect the trainer output and rerun from a new derived plan",
             )
+        if result.execution_evidence is None:
+            raise RunnerFailure(
+                "training returned without sealed optimizer, loss, gradient, and update evidence",
+                taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+                stage=StageMarker.optimizer_step,
+                remediation="preserve the failed run and repair the first-party worker",
+            )
+        if result.steps != result.execution_evidence.completed_optimizer_steps:
+            raise RunnerFailure(
+                "trainer step count disagrees with its sealed execution evidence",
+                taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                stage=StageMarker.optimizer_step,
+            )
+        ctx.training_execution_evidence = result.execution_evidence
         ctx.emit_stage(StageMarker.export, f"adapter saved: {result.adapter_path}")
         artifact = ProducedArtifact(
             artifact_id=f"{ctx.run_id}-adapter-{content_hash[:12]}",

@@ -136,15 +136,25 @@ corpus-studio platform-run ./plan/RunPlan.json --subprocess --out ./run
 - Mints a fresh UUIDv7 `run_id` for every execution. A resolved run derives its trainer directory from
   the sealed output-root policy as `<output-root>/runs/<run-id>/artifacts/adapter`, so rerunning one
   plan cannot mix adapters. Intermediate checkpoints are disabled; an unexpected one is a failed-run
-  deviation and remains preserved as evidence.
+  deviation and remains preserved as evidence. Exact resume lineage for runs expected to exceed 30
+  minutes is tracked separately in
+  [#440](https://github.com/MalloyTheDev/CorpusStudio/issues/440).
 - Writes the terminal **RunManifest** to stdout (and `./run/runs/<run-id>/RunManifest.json`), classifying the
   terminal state — `succeeded / failed / cancelled` — with a **FailureRecord taxonomy** on abnormal
-  termination (`OOM`, `NUMERICAL_FAILURE`, `ENVIRONMENT_FAILURE`, …).
-- A training success requires at least one optimizer-step metric and an integrity-checked adapter with
-  readable weight bytes. The adapter ID is `<run-id>-adapter-<content-hash-prefix>`. Its
-  **ArtifactManifest** is written to `./run/runs/<run-id>/artifacts/<id>.json` (a cheap size+mtime
-  fingerprint + a byte-exact weight sha256 content hash — the current promote gate). The platform
-  never moves your weights; it only references + re-checks them.
+  termination (`OOM`, `NUMERICAL_FAILURE`, `ENVIRONMENT_FAILURE`, …). Subprocess terminal events are
+  held by the parent until terminal identity, artifacts, and durable records are admitted; a child
+  success overturned by parent admission is exposed only as the final classified failure.
+- A training success requires canonical before/after identities for the complete trainable adapter
+  state with at least one changed tensor, at least one verified materialized gradient with honest
+  eligible/observed name inventories, a real optimizer observed before step evidence, and exactly one
+  finite loss for every completed sealed step. Final trainable tensors must remain finite, and the
+  exact trained PEFT export state/config must equal the independently parsed saved Safetensors/config.
+  The runner then verifies the exact non-link output path, one recognized adapter payload, and an
+  **ArtifactManifest** with independent weight and config hashes; the subprocess parent reconstructs
+  the same gate and the claimed fit from raw peak evidence. Artifact evidence and the terminal record
+  are persisted before a succeeded terminal event. The adapter ID is
+  `<run-id>-adapter-<content-hash-prefix>`. The platform never moves your weights; it only references
+  and re-checks them.
 
 ### Smoke-test the pipeline without a GPU
 
@@ -201,7 +211,9 @@ or MoE-runtime evidence.
 | profile / probe | **measured** — a kernel ran (or was safely refused) |
 | plan | **resolved** — valid + sealed against proven capabilities and immutable inputs |
 | fit | **predicted** — an estimate, explicitly *not* a proven fit |
-| run | **measured** — the terminal state + artifact are real |
+| failed/cancelled run with peak memory | **measured but unproven** — native non-spill stays `NATIVE_UNPROVEN`; an observed spill stays a spill |
+| succeeded run after every success gate | **measured and proven** — output, adapter bytes, artifact integrity, losses, optimizer, gradients, and update all passed |
 
-The fit prediction becomes *measured* truth only after a real run reports its peak memory. Until then
-the platform is careful to say **"predicted"**, not **"it fits"**.
+A peak-memory sample makes fit *measured*, not automatically proven. Native fit becomes proven only
+after the complete succeeded-run evidence gate above. Until then the platform says **"predicted"** or
+**`NATIVE_UNPROVEN`**, not **"it fits"**.

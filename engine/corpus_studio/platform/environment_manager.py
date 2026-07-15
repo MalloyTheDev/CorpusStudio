@@ -81,7 +81,7 @@ from .process_control import (
     terminate_process_tree,
 )
 
-MANAGER_VERSION = "1.2.0"
+MANAGER_VERSION = "1.3.0"
 REFERENCE_RECIPE_ID = "backend-corpus-studio"
 SUPPORTED_CREATION_RECIPES = frozenset(
     {REFERENCE_RECIPE_ID, READINESS_V2_RECIPE_ID, READINESS_FLASH_V1_RECIPE_ID}
@@ -887,15 +887,11 @@ def _bind_capability_package_integrity(
                 f"{normalized_name}"
             )
         if (
-            sealed.record_integrity != "verified"
-            or sealed.record_entries is None
-            or sealed.record_verified_entries is None
-            or sealed.record_failed_entries
+            not sealed.has_complete_record_count_evidence()
             or sealed.hash is None
             or sealed.hash.value is None
             or sealed.installed_files_hash is None
             or sealed.installed_files_hash.value is None
-            or sealed.installed_file_count is None
             or sealed.artifact_hash is None
             or sealed.artifact_hash.value is None
         ):
@@ -1376,19 +1372,23 @@ for dist in metadata.distributions(path=site_roots):
                     actual = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
                     if actual != expected or not size_text or int(size_text) != installed_size:
                         raise ValueError("RECORD digest or size mismatch")
-                    verified_entries += 1
                 elif not (
                     relative.endswith(".dist-info/RECORD")
                     or ("/__pycache__/" in f"/{relative}" and relative.endswith(".pyc"))
                 ):
                     raise ValueError("unexpected unhashed RECORD entry")
+                # A row is verified when all path, ownership, byte hashing, and (when supplied)
+                # RECORD digest/size checks above succeeded.  RECORD itself and generated pyc rows
+                # are intentionally unhashed by installers, but their exact bytes are still bound by
+                # installed_files_hash, so they count as completely verified rows here.
+                verified_entries += 1
             except Exception:
                 failed_entries.append(safe_label(relative or "<empty RECORD path>"))
     if not record:
         record_integrity = "missing"
     elif failed_entries:
         record_integrity = "failed"
-    elif verified_entries:
+    elif verified_entries == record_entries and record_entries > 0:
         record_integrity = "verified"
     else:
         record_integrity = "unknown"
@@ -1401,6 +1401,7 @@ for dist in metadata.distributions(path=site_roots):
       "version": version,
       "record_sha256": hashlib.sha256(record.encode("utf-8")).hexdigest() if record else None,
       "record_integrity": record_integrity,
+      "record_count_semantics": "all_record_rows_v2" if record_integrity == "verified" else None,
       "record_entries": record_entries,
       "record_verified_entries": verified_entries,
       "record_failed_entries": sorted(set(failed_entries)),
@@ -2321,7 +2322,7 @@ class EnvironmentManager:
                 unverified = [
                     item.name
                     for item in pre_probe.packages
-                    if item.record_integrity != "verified"
+                    if not item.has_complete_record_count_evidence()
                     or item.installed_files_hash is None
                 ]
                 if unverified:
@@ -2612,6 +2613,62 @@ class EnvironmentManager:
             self._write_health(env_id, report)
             self._update_descriptor(descriptor, state=EnvironmentState.broken)
             return report
+        descriptor_lock_hash = (
+            descriptor.lock_ref.hash.value
+            if descriptor.lock_ref is not None and descriptor.lock_ref.hash is not None
+            else None
+        )
+        lock_identity_mismatch = (
+            lock.lock_hash != self._lock_digest(lock)
+            or descriptor_lock_hash != lock.lock_hash
+        )
+        legacy_record_counts = sorted(
+            item.name
+            for item in lock.packages
+            if item.version is not None and not item.has_complete_record_count_evidence()
+        )
+        if legacy_record_counts:
+            # The lock is truthful historical evidence, not a corrupt lock and not manager-1.3
+            # admission evidence. Refuse before importing installed code, and deliberately do not
+            # rewrite the descriptor or historical health record under a different classification.
+            if lock_identity_mismatch:
+                return EnvironmentHealthReport(
+                    environment_ref=Ref(id=env_id),
+                    recipe_ref=descriptor.recipe_ref,
+                    lock_ref=descriptor.lock_ref,
+                    state=EnvironmentState.broken,
+                    checked_at=checked_at,
+                    lock_mismatch=True,
+                    failure=FailureRecord(
+                        taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
+                        message="historical environment lock identity verification failed",
+                    ),
+                    remediation=(
+                        "Preserve the environment and registry evidence; reconstruct the lock and "
+                        "descriptor identities before any use."
+                    ),
+                )
+            return EnvironmentHealthReport(
+                environment_ref=Ref(id=env_id),
+                recipe_ref=descriptor.recipe_ref,
+                lock_ref=descriptor.lock_ref,
+                state=EnvironmentState.degraded,
+                checked_at=checked_at,
+                failure=FailureRecord(
+                    taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                    message=(
+                        "historical environment lock predates complete all-row RECORD count evidence"
+                    ),
+                    detail=(
+                        "packages requiring a replacement lock: "
+                        + ", ".join(legacy_record_counts)
+                    ),
+                ),
+                remediation=(
+                    "Preserve this environment and its evidence unchanged; create a replacement "
+                    "under a new environment ID before new health, planning, or execution."
+                ),
+            )
         try:
             live_inventory = self._inspect_live_inventory(
                 descriptor,
@@ -2648,15 +2705,7 @@ class EnvironmentManager:
             or descriptor.recipe_ref.hash is None
             or descriptor.recipe_ref.hash.value != recipe_digest(recipe)
         )
-        descriptor_lock_hash = (
-            descriptor.lock_ref.hash.value
-            if descriptor.lock_ref is not None and descriptor.lock_ref.hash is not None
-            else None
-        )
-        lock_mismatch = (
-            lock.lock_hash != self._lock_digest(lock)
-            or descriptor_lock_hash != lock.lock_hash
-        )
+        lock_mismatch = lock_identity_mismatch
         if recipe is not None and self._locked_probe_evidence_mismatch(
             lock, recipe.required_execution_probe
         ):
@@ -3709,6 +3758,25 @@ class EnvironmentManager:
                 Literal["verified", "failed", "missing", "unknown"],
                 raw_integrity,
             )
+            raw_count_semantics = raw.get("record_count_semantics")
+            if raw_count_semantics is not None and not isinstance(
+                raw_count_semantics, str
+            ):
+                raise EnvironmentManagerError(
+                    f"environment inventory contains invalid RECORD count semantics for {name}"
+                )
+            if raw_count_semantics not in (None, "all_record_rows_v2"):
+                raise EnvironmentManagerError(
+                    f"environment inventory contains invalid RECORD count semantics for {name}"
+                )
+            if record_integrity == "verified" and raw_count_semantics != "all_record_rows_v2":
+                raise EnvironmentManagerError(
+                    f"environment inventory omitted complete RECORD count semantics for {name}"
+                )
+            if record_integrity != "verified" and raw_count_semantics is not None:
+                raise EnvironmentManagerError(
+                    f"environment inventory attached complete counts to unverified package {name}"
+                )
             raw_failed_entries = raw.get("record_failed_entries") or []
             raw_dependencies = raw.get("dependencies") or []
             if not isinstance(raw_failed_entries, list) or not isinstance(
@@ -3743,7 +3811,10 @@ class EnvironmentManager:
             if record_integrity == "verified" and (
                 record_hash is None
                 or raw_installed_hash is None
+                or count_values["record_entries"] <= 0
+                or count_values["record_verified_entries"] != count_values["record_entries"]
                 or count_values["installed_file_count"] != count_values["record_entries"]
+                or raw_failed_entries
             ):
                 raise EnvironmentManagerError(
                     f"environment inventory lacks complete verified-file evidence for {name}"
@@ -3780,6 +3851,9 @@ class EnvironmentManager:
                         else "installed metadata and pip reports did not prove the source"
                     ),
                     record_integrity=record_integrity,
+                    record_count_semantics=(
+                        "all_record_rows_v2" if raw_count_semantics is not None else None
+                    ),
                     record_entries=count_values["record_entries"],
                     record_verified_entries=count_values["record_verified_entries"],
                     record_failed_entries=sorted(raw_failed_entries),
@@ -3963,6 +4037,16 @@ class EnvironmentManager:
         probe_evidence: EnvironmentProbeEvidence | None,
     ) -> EnvironmentLock:
         """Seal a lock only after every recipe-required post-install fact is present."""
+        bad_records = [
+            item.name
+            for item in inventory.packages
+            if item.version is not None and not item.has_complete_record_count_evidence()
+        ]
+        if bad_records:
+            raise EnvironmentManagerError(
+                "the environment lock cannot be finalized without complete all-row RECORD "
+                "evidence: " + ", ".join(sorted(bad_records, key=str.casefold))
+            )
         if recipe.required_execution_probe is not None:
             if probe_evidence is None:
                 raise EnvironmentManagerError(
@@ -3981,16 +4065,6 @@ class EnvironmentManager:
                 )
             if probe_evidence.evidence_hash != self._probe_evidence_digest(probe_evidence):
                 raise EnvironmentManagerError("the complete QLoRA probe evidence hash is invalid")
-            bad_records = [
-                item.name
-                for item in inventory.packages
-                if item.record_integrity != "verified"
-            ]
-            if bad_records:
-                raise EnvironmentManagerError(
-                    "the environment lock cannot be finalized without verified installed RECORDs: "
-                    + ", ".join(sorted(bad_records, key=str.casefold))
-                )
             installed_versions = {
                 item.normalized_name or _normalized_package_name(item.name): item.version
                 for item in inventory.packages
@@ -4851,6 +4925,18 @@ class EnvironmentManager:
             )
             if before_files_hash is not None and before_files_hash != after_files_hash:
                 drifted.append(f"{before.name}: installed file bytes changed")
+            if before.record_count_semantics != after.record_count_semantics:
+                drifted.append(f"{before.name}: RECORD count semantics changed")
+            if (
+                before.record_entries is not None
+                and before.record_entries != after.record_entries
+            ):
+                drifted.append(f"{before.name}: installed RECORD entry count changed")
+            if (
+                before.record_verified_entries is not None
+                and before.record_verified_entries != after.record_verified_entries
+            ):
+                drifted.append(f"{before.name}: verified RECORD entry count changed")
             if (
                 before.installed_file_count is not None
                 and before.installed_file_count != after.installed_file_count

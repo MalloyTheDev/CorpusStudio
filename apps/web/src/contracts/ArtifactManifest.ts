@@ -7,6 +7,7 @@ export type CreatedAt = string | null;
 export type CheapFingerprint = string | null;
 export type ContentHash = string | null;
 export type CurrentIntegrity = "ok" | "missing" | "modified" | "unknown";
+export type MetadataHash = string | null;
 export type Kind = "adapter" | "checkpoint" | "merged_model" | "gguf" | "onnx" | "quantized" | "other";
 export type Notes = string;
 export type Algo = "sha256" | "sha256-ordered-exact-v1" | "blake3" | "none";
@@ -45,6 +46,7 @@ export interface ArtifactIntegrity {
   cheap_fingerprint?: CheapFingerprint;
   content_hash?: ContentHash;
   current_integrity?: CurrentIntegrity;
+  metadata_hash?: MetadataHash;
 }
 /**
  * A stable reference to another contract instance by id, optionally pinned to a content hash so
