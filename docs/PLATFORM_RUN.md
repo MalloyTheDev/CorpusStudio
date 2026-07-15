@@ -136,9 +136,12 @@ corpus-studio platform-run ./plan/RunPlan.json --subprocess --out ./run
 - Mints a fresh UUIDv7 `run_id` for every execution. A resolved run derives its trainer directory from
   the sealed output-root policy as `<output-root>/runs/<run-id>/artifacts/adapter`, so rerunning one
   plan cannot mix adapters. Intermediate checkpoints are disabled; an unexpected one is a failed-run
-  deviation and remains preserved as evidence. Exact resume lineage for runs expected to exceed 30
-  minutes is tracked separately in
-  [#440](https://github.com/MalloyTheDev/CorpusStudio/issues/440).
+  deviation and remains preserved as evidence. The control-plane design + verifier for exact resume
+  lineage (a hash-sealed checkpoint manifest, fail-closed byte integrity, and resume admission) lands
+  in [`CHECKPOINT_RESUME.md`](CHECKPOINT_RESUME.md) / `corpus-studio checkpoint-verify`
+  ([#440](https://github.com/MalloyTheDev/CorpusStudio/issues/440)); automatic resume stays blocked
+  until a separately reviewed trainer change consumes it, so runs expected to exceed 30 minutes remain
+  gated.
 - Writes the terminal **RunManifest** to stdout (and `./run/runs/<run-id>/RunManifest.json`), classifying the
   terminal state — `succeeded / failed / cancelled` — with a **FailureRecord taxonomy** on abnormal
   termination (`OOM`, `NUMERICAL_FAILURE`, `ENVIRONMENT_FAILURE`, …). Subprocess terminal events are

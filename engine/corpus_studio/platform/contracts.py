@@ -4639,6 +4639,9 @@ class RunManifest(ContractModel):
     # Post-run fit reconciliation from observed peak memory (planned NATIVE_SAFE, or a spill?).
     final_fit: FitClassification | None = None
     training_success_evidence: TrainingSuccessEvidence | None = None
+    # Present only on a run that resumed from a parent checkpoint - explicit parent-run + parent-
+    # checkpoint provenance for a fresh run identity (#440). Absent for an ordinary from-scratch run.
+    resume_lineage: ResumeLineage | None = None
     notes: str = ""
 
     @field_validator("parameter_accounting_refs")
@@ -4989,6 +4992,143 @@ class RunTelemetrySummary(ContractModel):
 
 
 # --------------------------------------------------------------------------------------------------
+# Checkpoint + resume lineage (#440) — a hash-sealed, byte-integrity checkpoint manifest so a long
+# first-party run can be resumed with EXACT lineage. Control-plane-first and torch-free: the worker
+# populates the state counters and file hashes; the platform seals + verifies the manifest and admits
+# a resume only against a byte-identical, fully compatible target. This does not enable automatic
+# resume - execution stays checkpoint-free until a separate reviewed trainer change consumes it.
+# --------------------------------------------------------------------------------------------------
+class CheckpointFileEntry(ContractModel):
+    """One required file inside a checkpoint, pinned by exact bytes. ``path`` is relative to the
+    checkpoint directory and must be a canonical, non-escaping POSIX path."""
+
+    path: str = Field(min_length=1)
+    role: Literal[
+        "optimizer",
+        "scheduler",
+        "scaler",
+        "rng",
+        "sampler",
+        "trainer_state",
+        "adapter_weights",
+        "other",
+    ]
+    sha256: str = Field(pattern=SHA256_PATTERN)
+    size_bytes: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _canonical_relative_path(self) -> CheckpointFileEntry:
+        pure = PurePosixPath(self.path)
+        if pure.is_absolute() or ".." in pure.parts or "." in pure.parts or str(pure) != self.path:
+            raise ValueError("checkpoint file path must be a canonical, non-escaping relative path")
+        return self
+
+
+class SealedTrainingState(ContractModel):
+    """The resumable training state the worker sealed, described WITHOUT torch. Presence flags assert
+    each component was actually captured (its bytes live in a :class:`CheckpointFileEntry`); the
+    counters place the checkpoint exactly on the optimizer-step / microstep / epoch timeline so a
+    resume continues from the precise position, never an approximate one."""
+
+    optimizer_captured: Literal[True] = True
+    scheduler_captured: bool
+    scaler_captured: bool
+    rng_captured: bool
+    sampler_state_captured: bool
+    rng_algorithm: str | None = None
+    epoch: float = Field(ge=0)
+    global_optimizer_step: int = Field(ge=1)
+    microstep_within_step: int = Field(ge=0)
+    gradient_accumulation_steps: int = Field(ge=1)
+    consumed_microsteps: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _consistent_step_position(self) -> SealedTrainingState:
+        if self.microstep_within_step >= self.gradient_accumulation_steps:
+            raise ValueError(
+                "microstep_within_step must be less than gradient_accumulation_steps"
+            )
+        if self.rng_captured and not self.rng_algorithm:
+            raise ValueError("a captured RNG state must name its algorithm")
+        return self
+
+
+class CheckpointBoundIdentities(ContractModel):
+    """Everything a resumed run must match to reuse this checkpoint. A mismatch on ANY field makes the
+    checkpoint inadmissible (incompatible) - the resume fails closed. ``environment_lock_hash`` /
+    ``worker_wheel_sha256`` are null only for an unmanaged (profile-snapshot) source run."""
+
+    plan_hash: str = Field(pattern=SHA256_PATTERN)
+    execution_configuration_hash: str = Field(pattern=SHA256_PATTERN)
+    backend_ref: Ref
+    environment_lock_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    worker_wheel_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    model_ref: Ref
+    tokenizer_ref: Ref
+    dataset_ref: Ref
+    chat_template_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    formatter_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    objective_ref: Ref
+    seed: int = Field(ge=0)
+    data_seed: int = Field(ge=0)
+
+
+class CheckpointManifest(ContractModel):
+    """A single hash-sealed checkpoint instance. ``complete`` is the atomic completion marker: it is
+    False until every file has been hashed and the manifest sealed, so a torn write is never mistaken
+    for a resumable checkpoint. ``checkpoint_manifest_hash`` is the canonical digest of the manifest
+    body (every field except the hash itself), and ``parent_checkpoint_hash`` chains lineage back to
+    the parent checkpoint by that same digest."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    schema_kind: Literal["checkpoint-manifest-v1"] = "checkpoint-manifest-v1"
+    checkpoint_id: str = Field(pattern=_ID)
+    checkpoint_manifest_hash: str = Field(pattern=SHA256_PATTERN)
+    source_run_id: str = Field(pattern=_ID)
+    parent_checkpoint_id: str | None = Field(default=None, pattern=_ID)
+    parent_checkpoint_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    created_at: str
+    complete: bool = False
+    bound: CheckpointBoundIdentities
+    state: SealedTrainingState
+    files: list[CheckpointFileEntry] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _sorted_files_and_lineage(self) -> CheckpointManifest:
+        paths = [entry.path for entry in self.files]
+        if paths != sorted(paths) or len(paths) != len(set(paths)):
+            raise ValueError("checkpoint files must be sorted and unique by path")
+        if not any(entry.role == "optimizer" for entry in self.files):
+            raise ValueError("a resumable checkpoint must include the optimizer state file")
+        if (self.parent_checkpoint_id is None) != (self.parent_checkpoint_hash is None):
+            raise ValueError("parent checkpoint id and hash must be provided together or not at all")
+        if self.parent_checkpoint_id == self.checkpoint_id:
+            raise ValueError("a checkpoint cannot be its own parent")
+        return self
+
+
+class ResumeLineage(ContractModel):
+    """Recorded on a resumed run's :class:`RunManifest` so a resumed run always shows the exact parent
+    run and parent checkpoint it continued from - a fresh run identity with explicit provenance, never
+    a silent reuse of the parent run."""
+
+    parent_run_id: str = Field(pattern=_ID)
+    parent_checkpoint_id: str = Field(pattern=_ID)
+    parent_checkpoint_hash: str = Field(pattern=SHA256_PATTERN)
+    resumed_from_global_step: int = Field(ge=1)
+
+
+class CheckpointResumeRequest(ContractModel):
+    """Core->worker resume instruction (reserved for the trainer change that will consume it): the
+    exact checkpoint identity + sealed manifest hash to restore before continuing. The worker must
+    refuse it unless the restored bytes reproduce the sealed hash."""
+
+    checkpoint_id: str = Field(pattern=_ID)
+    checkpoint_manifest_hash: str = Field(pattern=SHA256_PATTERN)
+    checkpoint_dir: str = Field(min_length=1)
+
+
+# --------------------------------------------------------------------------------------------------
 # WorkerProtocol — the versioned core↔worker message envelope (NEW).
 # --------------------------------------------------------------------------------------------------
 class HelloBody(ContractModel):
@@ -5016,6 +5156,10 @@ class RunDispatchBody(ContractModel):
     run_id: str = Field(min_length=1)
     plan: RunPlan
     heartbeat_interval_seconds: int = Field(default=30, ge=1)
+    # Reserved for the trainer change that will consume it: restore this sealed checkpoint before
+    # continuing. Absent for an ordinary from-scratch dispatch; the worker refuses it unless the
+    # restored bytes reproduce the sealed manifest hash (#440).
+    resume: CheckpointResumeRequest | None = None
 
 
 class RunAcceptedBody(ContractModel):

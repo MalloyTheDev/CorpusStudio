@@ -598,6 +598,40 @@
       "title": "Ref",
       "type": "object"
     },
+    "ResumeLineage": {
+      "additionalProperties": false,
+      "description": "Recorded on a resumed run's :class:`RunManifest` so a resumed run always shows the exact parent\nrun and parent checkpoint it continued from - a fresh run identity with explicit provenance, never\na silent reuse of the parent run.",
+      "properties": {
+        "parent_checkpoint_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Parent Checkpoint Hash",
+          "type": "string"
+        },
+        "parent_checkpoint_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Parent Checkpoint Id",
+          "type": "string"
+        },
+        "parent_run_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Parent Run Id",
+          "type": "string"
+        },
+        "resumed_from_global_step": {
+          "minimum": 1,
+          "title": "Resumed From Global Step",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "parent_run_id",
+        "parent_checkpoint_id",
+        "parent_checkpoint_hash",
+        "resumed_from_global_step"
+      ],
+      "title": "ResumeLineage",
+      "type": "object"
+    },
     "RunEvaluationLink": {
       "additionalProperties": false,
       "properties": {
@@ -1070,6 +1104,17 @@
       "anyOf": [
         {
           "$ref": "#/$defs/RunReproducibility"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "resume_lineage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ResumeLineage"
         },
         {
           "type": "null"
