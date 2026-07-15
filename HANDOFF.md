@@ -1,7 +1,7 @@
 # CorpusStudio — Session Handoff
 
-**Last updated:** 2026-07-15 (training-success evidence and complete RECORD-count hardening after the
-matched manager-1.2 math/flash failures - see [`docs/HOST_STATE.md`](docs/HOST_STATE.md); previous
+**Last updated:** 2026-07-15 (manager-1.3 v4 math failure, preserved flash non-dispatch, and the
+post-trainer sealed-precision correction - see [`docs/HOST_STATE.md`](docs/HOST_STATE.md); previous
 snapshot 2026-07-14). This is a snapshot for the
 next agent session (Claude Code or Codex).
 For the authoritative *feature* state see [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md); for the
@@ -19,8 +19,8 @@ forward plan see [`docs/ROADMAP.md`](docs/ROADMAP.md) + [`docs/IMPLEMENTATION_PL
   dependency-light core + `[dev]`, torch-free).
 - The GPU **training** runtime is managed by the Environment Manager. The legacy
   **`backend-corpus-studio`**, readiness environments, and blue/green manager-1.2 research
-  **`backend-corpus-studio-research-math-v2`** / **`backend-corpus-studio-research-flash-v2`**
-  environments have separate preserved `HARDWARE_VERIFIED` evidence for their exact
+  **`backend-corpus-studio-research-math-v2`** / **`backend-corpus-studio-research-flash-v2`** and
+  the later preserved v3/v4 identities have separate evidence for their exact
   environment-level tuples. They supersede the old standalone `cs-train-venv`; none is a completed
   real-workload claim. See
   [`docs/HOST_STATE.md`](docs/HOST_STATE.md) and
@@ -125,6 +125,11 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   immutable blue/green environment IDs, PyTorch prerequisite artifacts are hash-bound, and managed
   planning retains verified package artifact/RECORD/installed-tree evidence. The matched research
   environments use the same worker wheel and package artifacts with separate math/flash locks.
+- **#441 through #443 merged the success-evidence, manager-1.3, and host-build prerequisites:** a
+  successful training run now requires canonical adapter updates, honest materialized-gradient
+  coverage, exact per-step loss evidence, a real optimizer, trained-to-saved artifact identity, and
+  complete output/integrity gates before proven fit. Manager-1.3 requires complete positive RECORD
+  counts for every installed package, and the desktop gate is compatible with the pinned .NET 8 host.
 - **The first matched manager-1.2 0.5B attempts are preserved failures, not retries or paper data.**
   Fresh normalized-equal plans ran once each (math then flash). Both verified the exact execution
   hash, intended kernel/toggles, model and post-adapter CUDA placement, QLoRA insertion, and trainer
@@ -159,6 +164,18 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   dispatched and no model load or GPU workload occurred for them. All 84 packages in each lock used
   the older partial RECORD-count meaning of `verified`, so the environments and plans must not be
   mutated, relabeled, or reused. Exact identities are in [`docs/HOST_STATE.md`](docs/HOST_STATE.md).
+- **The manager-1.3 v4 math attempt is a preserved failure; its flash plan was not dispatched.** The
+  v4 pair used one wheel from `e7875629fc6e046dc2a84a53aa941b3d073c18bd`, complete RECORD evidence,
+  fresh locks, and normalized-equal sequence-256 plans. Math ran once as
+  `run-019f6518-3927-7d73-b106-15f385b61415`; it verified math attention, placement, QLoRA, and a real
+  optimizer, then failed before step 1 with `GRADIENT_FAILURE` at `backward`. Pinned TRL had recast
+  the sealed FP32 trainable parameters to BF16 during `SFTTrainer` construction, and the corrected
+  post-accumulation hook accurately observed the BF16 materialized gradient. The run remained
+  `NATIVE_UNPROVEN`, wrote no artifact/checkpoint/output, retained drift=false, and released VRAM. The
+  worker now restores the sealed master dtype on the same identities after trainer construction and
+  re-verifies placement/quantization/precision before training; this latest correction has unit
+  evidence only. Preserve all v4 identities and evidence. A later attempt requires another wheel,
+  new environment IDs/locks, fresh plans, and separate authorization.
 - **The first-party checkpoint boundary is now fail-closed:** new plans seal
   `save_strategy="no"` with no cadence or retention, both sealed and explicitly unsealed trainer paths
   refuse legacy step-checkpoint execution before loading data or weights, and the runner rejects any
@@ -257,9 +274,11 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   kernel **deadlocks on the first backward under native-Windows WDDM** (high GPU util, low power). WSL
   flash was measured separately. On the native-Linux host, readiness-v2 verified the environment-level
   **math** tuple and the research flash environment separately verified the tiny forced **flash**
-  tuple. The matched real 0.5B attempts reached verified adapter insertion but stopped before step 1
-  on their common gradient-verifier mismatch, so bare-Linux flash for a real optimizer step or the
-  sequence-4096 workload is still not claimed. Unsloth is
+  tuple. The manager-1.2 matched real 0.5B attempts stopped before step 1 on their earlier verifier
+  mismatch. The later manager-1.3 v4 math attempt also stopped before step 1 when the corrected
+  materialized-gradient verifier exposed TRL's constructor-time BF16 adapter recast; its paired flash
+  plan was not dispatched. Bare-Linux flash for a real optimizer step and sequence 4096 are therefore
+  still not claimed. Unsloth is
   honestly **refused on native-Windows/WDDM Blackwell** (it declares no math path) and routed to
   `backend-corpus-studio`. Other hosts still need their own exact functional evidence.
 - **Dependency-light boundary**: `import corpus_studio.platform` pulls **no torch**; all heavy imports
@@ -269,17 +288,17 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 7. Immediate next actions (ranked)
 
-1. **Finish and merge the focused training-success evidence hardening before any new worker wheel.**
-   Do not reuse the preserved manager-1.2 v2/v3 environments, plans, failed runs, or artifacts. After
-   the merge, a new wheel and new blue/green environment IDs/locks are required because both the worker
-   behavior and PackageLock admission meaning changed.
+1. **Finish and merge the focused post-trainer precision correction before any new worker wheel.** Do
+   not reuse the preserved manager-1.2 v2/v3 or manager-1.3 v4 environments, plans, failed runs, or
+   artifacts. After the merge, a new wheel and new blue/green environment IDs/locks are required
+   because worker behavior changed.
 2. **Continue hardware-independent work alongside the measured workload bring-up:** bounded event
    journaling, prepared-dataset/transactional row-store groundwork, TraceRecord identity/governance,
    and remaining desktop/web contracts. Keep non-trivial placement/offload execution unimplemented
    until an isolated backend proves it.
 3. **Then continue down the revised order (§3):** dense backends → existing-model MoE FT
    → full MoE → resource-elastic expert runtime.
-4. **GPU workload bring-up remains approval-gated:** only after the hardened wheel, new environments,
+4. **GPU workload bring-up remains approval-gated:** only after the corrected wheel, new environments,
    fresh normalized-equal plans, and a field-by-field plan diff may one corrected 0.5B math smoke and
    one corrected 0.5B flash smoke be separately approved. The 500-output corpus and 7B workload are not
    ready and must not be loaded or trained. NVMe/offload work remains later and separately evidenced.
@@ -324,9 +343,12 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   historical baseline; the manager-1.1 flash readiness-v1 lock remains preserved historical evidence for
   its tiny forced-flash tuple, but manager 1.2 does not grandfather its missing adapter-state equality
   observation. It requires replacement before a new health claim. Blue/green research-math-v2 and
-  research-flash-v2 preserve the manager-1.2 identities; their matched 0.5B attempts reached
-  adapter insertion but failed before step 1 on the common materialized-gradient-verifier mismatch.
-  The legacy
+  research-flash-v2 preserve the manager-1.2 identities; their matched 0.5B attempts reached adapter
+  insertion but failed before step 1 on the earlier verifier mismatch. Manager-1.2 v3 is preserved
+  but inadmissible under complete RECORD semantics. Manager-1.3 v4 has complete package evidence, but
+  its one math attempt exposed the post-constructor precision issue and its flash plan was withheld;
+  both v4 identities now remain historical because the worker correction changes their execution
+  bytes. The legacy
   `backend-corpus-studio` environment also remains available.
 - **Model/Tokenizer foundation** (Phase 3): `platform/model_inspector.py` + the `ModelDescriptor` /
   `TokenizerDescriptor` roots. `model-inspect` inventories local snapshots without network access,

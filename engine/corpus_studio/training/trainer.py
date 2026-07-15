@@ -1548,6 +1548,57 @@ def enforce_trainable_precision(
     return tracker
 
 
+def reassert_trainable_precision(
+    model: Any,
+    torch_module: Any,
+    config: TrainRunConfig,
+    tracker: GradientObservationTracker,
+) -> tuple[str, ...]:
+    """Restore the sealed master dtype after trainer construction without replacing hooks.
+
+    TRL may recast QLoRA adapter parameters while constructing ``SFTTrainer``.  The sealed executor
+    owns the effective precision policy, so it must restore the exact master dtype after all trainer
+    initialization mutations and before the first backward pass.  Parameter identity is checked both
+    before and after the recast so an upstream wrapper cannot transfer an old hook observation to new
+    trainable state.
+    """
+
+    if config.execution_configuration_hash is None:
+        return ()
+    tracker.verify_model_inventory(model, stage=StageMarker.adapter_attached)
+    if config.master_weight_dtype is None:
+        raise TrainingEvidenceError(
+            "sealed execution omitted the trainable master-weight dtype",
+            taxonomy=FailureTaxonomy.GRADIENT_FAILURE,
+            stage=StageMarker.adapter_attached,
+        )
+    master_dtype = _torch_dtype(torch_module, config.master_weight_dtype)
+    restored: list[str] = []
+    for name, parameter in model.named_parameters():
+        if not parameter.requires_grad:
+            continue
+        if parameter.dtype != master_dtype:
+            try:
+                parameter.data = parameter.data.to(dtype=master_dtype)
+            except Exception as exc:  # noqa: BLE001 - normalize framework tensor failures.
+                raise TrainingEvidenceError(
+                    f"could not restore sealed master-weight dtype for {name} after trainer "
+                    "initialization",
+                    taxonomy=FailureTaxonomy.GRADIENT_FAILURE,
+                    stage=StageMarker.adapter_attached,
+                ) from exc
+            restored.append(name)
+        if parameter.dtype != master_dtype:
+            raise TrainingEvidenceError(
+                f"could not restore sealed master-weight dtype for {name} after trainer "
+                "initialization",
+                taxonomy=FailureTaxonomy.GRADIENT_FAILURE,
+                stage=StageMarker.adapter_attached,
+            )
+    tracker.verify_model_inventory(model, stage=StageMarker.adapter_attached)
+    return tuple(sorted(restored))
+
+
 def verify_model_state_execution(
     model: Any,
     torch_module: Any,
@@ -2656,7 +2707,20 @@ def run_training(  # pragma: no cover - optional training-stack integration
     trainer = SFTTrainer(**trainer_kwargs)
     evidence_model = getattr(trainer, "model", model)
     if gradient_tracker is not None:
-        gradient_tracker.verify_model_inventory(evidence_model)
+        restored_trainable = reassert_trainable_precision(
+            evidence_model,
+            torch,
+            config,
+            gradient_tracker,
+        )
+        # SFTTrainer initialization is part of the semantic execution boundary: it may not replace,
+        # move, or silently recast sealed adapter/base state before the first backward pass.
+        verify_model_state_execution(evidence_model, torch, config, quantize=quantize)
+        _stage(
+            "precision_verified",
+            "reasserted and reverified sealed trainable precision after trainer "
+            f"initialization; restored {len(restored_trainable)} tensor(s)",
+        )
     before_trainable_state = (
         capture_trainable_state(
             evidence_model,
