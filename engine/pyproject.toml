@@ -23,6 +23,9 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.5",
     "mypy>=1.8",
+    # The preregistered research matrix is YAML; CI verifies its append-only effective-spec
+    # amendments and exact content hashes without converting the source document in place.
+    "pyyaml>=6.0",
     # Installed in dev/CI so the optional Parquet round-trip is actually exercised
     # (it is a runtime *optional* extra for users — see `parquet` below).
     "pyarrow>=15"

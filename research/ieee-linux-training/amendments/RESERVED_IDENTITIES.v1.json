@@ -1,0 +1,121 @@
+{
+  "schema_version": "1.0.0",
+  "captured_at": "2026-07-15T08:05:34Z",
+  "classification": "PRESERVED_HISTORICAL_IDENTITIES_NOT_AUTHORIZED_FOR_REUSE",
+  "source_manifests": [
+    {
+      "path": "/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-research-matched-v2/SHA256SUMS",
+      "sha256": "c38f39dde5b12d4802b72acd76882a8929cea735012e78ffe0faf1ec3f3d3695"
+    },
+    {
+      "path": "/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-research-matched-v3/SHA256SUMS",
+      "sha256": "78e55c3b0daee7cedf468ed261f46ad7df62a3a77efcf99038f95e96ed844a7b"
+    },
+    {
+      "path": "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v2/20260715T034634Z/post-execution-SHA256SUMS",
+      "sha256": "98fafc7e01793add52351b14a4662ab9f24aa3303c6fae4c22f97cb568616e32"
+    },
+    {
+      "path": "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v3/20260715T052743Z/SHA256SUMS",
+      "sha256": "c07a6cc6956f24492b4d39515c069a42c0d14a391cfd47176f4242c39172fa64"
+    },
+    {
+      "path": "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v3/20260715T052743Z/forbidden-identities.json",
+      "sha256": "516fc3ab29a7c1a5f265536c5bfa80cd7d5517fc15e5faa83b6260c527f9a6d3"
+    }
+  ],
+  "environment_ids": [
+    "backend-corpus-studio",
+    "backend-corpus-studio-readiness-flash-v1",
+    "backend-corpus-studio-readiness-v2",
+    "backend-corpus-studio-research-flash-v2",
+    "backend-corpus-studio-research-flash-v3",
+    "backend-corpus-studio-research-math-v1",
+    "backend-corpus-studio-research-math-v2",
+    "backend-corpus-studio-research-math-v3"
+  ],
+  "environment_lock_hashes": [
+    "21dd38cbadd11fbf42f8f4de9f87a5c29642b139baefc13008dffe26d0751c13",
+    "256acc9c437897bb02c6ff1cb6d45cf42470612d88e78a4977647b7f27c30416",
+    "7ffa59ea68a243331cf16f6ab5a16f0c47d3d1e6ae415692d42260cba36decf4",
+    "8a988a716c68beacfa8c8fb46925987ea7c9aca198537340471e1fd08f9c75fe",
+    "a2b839b160e4676d968cdd006040dde6cce756c30f51a2c92ef2b1442132aa2a",
+    "cd86808ce8e96533b6d6d3a0b4c0472e2e6e27ecf8d25bad916a9a08d4e6887d",
+    "dbc528f0167a2ec0ccfa42d46ce86c9061be126e02aa557ae5ef5741788a8045"
+  ],
+  "worker_wheel_sha256": [
+    "6ecc82595af761142b723017a31b980241fe6ef4afebf0a2223f90b8bcef724d",
+    "cb5c05b7d4d8e640d06a4d845ae638930b9e9f3769f937c87365f0e7e445d5f5",
+    "de747839c300bc4f7bc3288963d6814b204a95402efba3f1787fa6e6462e135f",
+    "eb4cbde415cadda523bb316c11919ba5c8083fccbcecd0d9e04aaa1a65539d3b"
+  ],
+  "plan_ids": [
+    "plan-019f6216-46cf-7e22-b319-5c1cace048bc",
+    "plan-019f63e5-f299-7656-b50c-3b49dfa125d8",
+    "plan-019f63e8-203d-76db-95f7-c8572ac60878",
+    "plan-019f63fb-d351-7d67-ab30-7405b569b70e",
+    "plan-019f63fd-a3d1-7116-8b57-c5714b1155c4",
+    "plan-019f644b-a3c2-7373-abc0-39a0f7d753eb",
+    "plan-019f644c-511c-7008-a21b-24586c6b4637"
+  ],
+  "plan_hashes": [
+    "22a135923ed3572633b8718ad54976a56bca2b543f83f42694c65f02cbfc730e",
+    "60b390c3e7fa0d0dd6276854be4266c67f29e71b630653ebd1b7a75eeaa2506a",
+    "8ee25b2dc14b6192dd0da6d0ad4f2c6aa5a3222c82a45e78285da91d32c2ed8b",
+    "9eb729883ff71a911f41f45895e70a335b12bd55c2426c300572af2bb811bee0",
+    "ab0ccce0ce26e2d21d7f4e9704a11839839f1df981f4915a75960d87782b4baa",
+    "cc4856f75f251b8d26cb86e50af7874c21abce1fde2708f183ff9a3ab2a47ed7",
+    "d9f2763f69df5b7a32b2b2b8fdd2b9f5c965ac8a8848cd30950c4e485c62e41e"
+  ],
+  "execution_configuration_ids": [
+    "plan-019f6216-46cf-7e22-b319-5c1cace048bc-execution",
+    "plan-019f63e5-f299-7656-b50c-3b49dfa125d8-execution",
+    "plan-019f63e8-203d-76db-95f7-c8572ac60878-execution",
+    "plan-019f63fb-d351-7d67-ab30-7405b569b70e-execution",
+    "plan-019f63fd-a3d1-7116-8b57-c5714b1155c4-execution",
+    "plan-019f644b-a3c2-7373-abc0-39a0f7d753eb-execution",
+    "plan-019f644c-511c-7008-a21b-24586c6b4637-execution"
+  ],
+  "execution_configuration_hashes": [
+    "4453d60d23ecd7bcd3811a616a1381b51e68e6d941bfcaa673c9895b79a854c5",
+    "6255b05ec60f75bb4d91383965f6d11a5f00092fb0fbe92b21a01003f8543872",
+    "846d0ac61199b3eaa08c1556ca98481b335da3662ee80f858c4c7f2e8792f687",
+    "8c76ef736c079f589c66f4c4d6ad1d4de54a646e6adea1d368cd34b888a165c4",
+    "b34661a2ef46017da475e1310a6afcab91f274eda697a997212a62bd4dd8e168",
+    "eb04ab3a16c2052f6177c26728f6a1ea65f52313169a9090654f980609dadbb5",
+    "fe2d99cea56a35a14da71e1352d0b977282d6865a73dbc41861d496ceec6fa53"
+  ],
+  "run_ids": [
+    "run-019f6229-9fda-7067-a20b-80fbf6c1c709",
+    "run-019f640f-a587-7f79-9bf1-2a36c05854fd",
+    "run-019f6413-c34b-7570-a5b4-ea69caa0579b"
+  ],
+  "output_paths": [
+    "/mnt/training-nvme/corpusstudio/runs/ieee-linux-training/phase3-qwen25-05b-matched-v2",
+    "/mnt/training-nvme/corpusstudio/runs/ieee-linux-training/phase3-qwen25-05b-matched-v3",
+    "/mnt/training-nvme/runs/corpusstudio/qwen25-05b-flash-pipeline-smoke"
+  ],
+  "artifact_ids": [],
+  "evidence_roots": [
+    "/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-research-matched-v2",
+    "/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-research-matched-v3",
+    "/mnt/training-nvme/corpusstudio/evidence/bounded-flash-smoke/20260714T194401Z",
+    "/mnt/training-nvme/corpusstudio/evidence/flash-smoke-plan",
+    "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v2/20260715T034634Z",
+    "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v3/20260715T052743Z"
+  ],
+  "disjointness_required_for_new_evidence": [
+    "environment_ids",
+    "environment_lock_hashes",
+    "worker_wheel_sha256",
+    "plan_ids",
+    "plan_hashes",
+    "execution_configuration_ids",
+    "execution_configuration_hashes",
+    "run_ids",
+    "output_paths",
+    "artifact_ids",
+    "evidence_roots"
+  ],
+  "reuse_authorized": false
+}
