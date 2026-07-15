@@ -50,7 +50,11 @@ jobs:
       # Upload coverage to Codecov. Soft-fail: this is best-effort reporting and must never
       # break the gate — it no-ops until a CODECOV_TOKEN secret is configured for the repo.
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
+        # Pinned to an immutable commit SHA (not the mutable @v7 tag) because this third-party
+        # action receives CODECOV_TOKEN: a moved/retagged upstream release must not run with the
+        # secret. SHA is codecov/codecov-action tag v7 (fb8b3582 = v7 head at time of pinning);
+        # bump deliberately with a re-review. See issue #426.
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
         with:
           files: ./engine/coverage.xml
           flags: engine
