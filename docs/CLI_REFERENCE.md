@@ -181,8 +181,8 @@ fit → account for the artifact. Dependency-light (torch is lazy-imported only 
 | `env-status [ID] [--refresh] [--manager-root DIR --json]` | Show durable descriptors and health. `--refresh` performs live lock, import, functional, hardware, and drift checks. |
 | `env-probe ID [--manager-root DIR --json]` | Re-run all live health and drift checks. Importability, CPU functional proof, and GPU hardware proof remain distinct states. |
 | `env-lock ID [--manager-root DIR]` | Print the immutable installed-package, source, metadata-hash, Python, torch/CUDA, recipe, and manager lock. |
-| `env-remove ID --confirm ID [--manager-root DIR]` | Remove only a contained environment with a matching manager ownership marker; keep registry evidence. |
-| `env-recreate [recipe-id] --confirm HASH --confirm-remove ID [--env-id ID --runtime PYTHON --accelerator TAG --manager-root DIR --worker-wheel FILE --json]` | Explicitly remove an owned environment and recreate it from a newly reviewed plan. No hidden repair or alternate-source retry occurs. |
+| `env-remove ID --confirm ID [--manager-root DIR]` | Remove only a contained environment with a matching manager ownership marker; keep registry evidence and reserve the logical ID against silent reuse. |
+| `env-recreate [recipe-id] --confirm HASH --confirm-remove ID [--env-id ID --runtime PYTHON --accelerator TAG --manager-root DIR --worker-wheel FILE --json]` | Recover an unsealed failed attempt from a newly reviewed plan. A sealed identity cannot be recreated; create its blue/green replacement under a new ID. No hidden repair or alternate-source retry occurs. |
 
 ---
 

@@ -125,6 +125,12 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   unexpected checkpoint result. Final adapter output remains run-scoped. Exact sealed resume is still
   unimplemented, so short benchmark trials are checkpoint-free and runs expected to exceed 30 minutes
   remain blocked pending a separate resume-lineage design.
+- **Managed-environment concurrency is fail-closed:** bounded manager/per-environment inter-process
+  locks serialize create/recreate/remove, evidence-producing health and planning operations take a
+  consistent environment lease, and `platform-run` holds that lease through worker termination.
+  Sealed environment IDs cannot be recreated or silently reused after removal; use a new blue/green
+  ID so the previous lock remains an unambiguous rollback and evidence identity. Same-ID
+  `env-recreate` remains available only for an unsealed failed attempt.
 
 ## 3. The architecture North Star + binding directives
 

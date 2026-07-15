@@ -135,6 +135,7 @@ XDG data directory on Linux/macOS. It has two separate areas:
 
 ```text
 environment-manager/
+  .locks/                        # persistent manager/per-environment lock files; never delete
   environments/<env-id>/          # the venv; contains .corpusstudio-owner.json
   registry/<env-id>/
     EnvironmentDescriptor.json
@@ -165,6 +166,15 @@ The manager does not use a pre-install hash as a final environment lock. Its det
 6. capture a post-probe inventory and refuse sealing if the environment changed;
 7. seal the `EnvironmentLock` only after all required evidence passes;
 8. recompute live package, worker-artifact, hardware, and lock drift against that sealed state.
+
+Lifecycle mutation is protected across processes by a bounded manager lock followed by an exclusive
+per-environment lease. Create, recreate, and removal hold both locks for their complete transaction;
+health/capability checks and managed planning hold the environment lease for a consistent evidence
+snapshot. `platform-run` keeps the same lease from its pre-dispatch health check until the worker has
+terminated, so a concurrent remove or recreate cannot invalidate the interpreter beneath a live run.
+Lock acquisition fails with an explicit `TIMEOUT`; stale lock files are harmless bookkeeping because
+the operating-system lock is released on process exit, and the files must not be deleted to break
+contention.
 
 A failed complete probe leaves `lock_ref` absent. It may produce an honest `INCOMPATIBLE` or
 `DEGRADED` installation record, marked `retry_requires_recreate=true`, but never a final lock or
@@ -233,11 +243,11 @@ engine/.venv/bin/corpus-studio env-probe <env-id> [--json]
 engine/.venv/bin/corpus-studio env-lock <env-id>
 ```
 
-## Safe removal and recreation
+## Safe removal, immutable identities, and failed-attempt recovery
 
 Removal requires both path containment under the manager's `environments` directory and a matching
-ownership marker. It also requires the exact environment ID as confirmation. Registry evidence is
-retained.
+ownership marker. It also requires the exact environment ID as confirmation. Registry evidence and
+the logical environment identity are retained; a later `env-create` cannot silently reuse that ID.
 
 ```bash
 cd /mnt/training-nvme/repos/CorpusStudio
@@ -245,13 +255,18 @@ engine/.venv/bin/corpus-studio env-remove backend-corpus-studio \
   --confirm backend-corpus-studio
 ```
 
-Recreation is intentionally two confirmations: the new plan hash and the exact old environment ID.
+`env-recreate` is recovery for an **unsealed failed attempt** only. It is intentionally two
+confirmations: the new plan hash and the exact old environment ID. Once any environment has a sealed
+lock, in-place recreation is refused even after removal. Create its replacement under a new ID, check
+the new lock, then explicitly move callers to that identity; this preserves rollback and historical
+evidence instead of overwriting its meaning.
 
 ```bash
 cd /mnt/training-nvme/repos/CorpusStudio
-engine/.venv/bin/corpus-studio env-recreate backend-corpus-studio \
+engine/.venv/bin/corpus-studio env-recreate backend-corpus-studio-failed-attempt \
+  --env-id backend-corpus-studio-failed-attempt \
   --confirm <new-resolution-hash> \
-  --confirm-remove backend-corpus-studio
+  --confirm-remove backend-corpus-studio-failed-attempt
 ```
 
 An arbitrary directory, an unmarked directory, a marker owned by another manager root, or a path that
@@ -286,8 +301,9 @@ from it. CI regenerates and diffs both layers.
 ## Verification boundary and deferred work
 
 Default CI proves command construction, confirmation seals, path containment, ownership, atomic
-records, timeout/cancellation, failure recovery, lock generation, CPU probes, drift, safe
-remove/recreate, RunPlan pinning, and managed-interpreter dispatch using fakes and temp directories.
+records, timeout/cancellation, failure recovery, lock generation, CPU probes, drift, bounded
+cross-process lifecycle exclusion, sealed-identity preservation, RunPlan pinning, and
+managed-interpreter dispatch using fakes and temp directories.
 
 Current-host evidence covers three distinct managed environments: the legacy minimal hardware tuple,
 the readiness-v2 complete math QLoRA tuple, and the readiness-flash-v1 tiny forced-flash QLoRA tuple.
@@ -299,7 +315,8 @@ or optimizer offload, MoE execution, or resource-elastic expert paging.
 
 Also not claimed by this slice:
 
-- in-place package repair (recreate is the safe supported recovery path);
+- in-place package repair (`env-recreate` only replaces an unsealed failed attempt; sealed
+  replacements use a new ID);
 - side-effectful creation for capability packs or any backend other than the three CorpusStudio worker
   recipes;
 - container, conda, `uv`, or remote environment providers.
