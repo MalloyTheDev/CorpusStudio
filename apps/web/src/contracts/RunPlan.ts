@@ -199,13 +199,26 @@ export type Dependencies = string[];
 export type Direct = boolean | null;
 export type DirectUrl = string | null;
 export type Editable = boolean | null;
+/**
+ * Number of files sealed by installed_files_hash; equals record_entries when record_integrity is verified.
+ */
 export type InstalledFileCount = number | null;
 export type Installer = string | null;
 export type Name = string;
 export type NormalizedName = string;
+/**
+ * Explicit all-RECORD-row count meaning. Missing means preserved legacy hash-bearing-row counts and is not admissible for new health, planning, or execution.
+ */
+export type RecordCountSemantics = "all_record_rows_v2" | null;
+/**
+ * Number of regular installed files named by the distribution RECORD; positive when record_integrity is verified.
+ */
 export type RecordEntries = number | null;
 export type RecordFailedEntries = string[];
 export type RecordIntegrity = "verified" | "failed" | "missing" | "unknown";
+/**
+ * Verified row count under record_count_semantics; manager <=1.2 counted only hash-bearing rows, while all_record_rows_v2 equals record_entries.
+ */
 export type RecordVerifiedEntries = number | null;
 export type Requested = boolean | null;
 export type Source = "pypi" | "wheel" | "sdist" | "conda" | "vcs" | "local" | "unknown";
@@ -270,7 +283,9 @@ export type MaxSequenceLen = number;
 export type Packing1 = boolean;
 export type TruncationAllowed = boolean;
 export type DisableTqdm = boolean;
-export type LoggingSteps = number;
+export type LoggingNanInfFilter = false | null;
+export type LoggingSteps = 1;
+export type LoggingStrategy = "steps" | null;
 /**
  * @minItems 1
  */
@@ -582,6 +597,7 @@ export interface PackageLock {
   installer?: Installer;
   name: Name;
   normalized_name?: NormalizedName;
+  record_count_semantics?: RecordCountSemantics;
   record_entries?: RecordEntries;
   record_failed_entries?: RecordFailedEntries;
   record_integrity?: RecordIntegrity;
@@ -663,7 +679,9 @@ export interface SequenceSpec {
  */
 export interface TrainerInterfacePolicy {
   disable_tqdm?: DisableTqdm;
+  logging_nan_inf_filter?: LoggingNanInfFilter;
   logging_steps?: LoggingSteps;
+  logging_strategy?: LoggingStrategy;
   package_versions: PackageVersions;
   report_to?: ReportTo;
   required_sft_config_fields: RequiredSftConfigFields;

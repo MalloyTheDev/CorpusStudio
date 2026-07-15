@@ -14,15 +14,281 @@ Dependency-light: the file-integrity helpers are reused from ``training.artifact
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
+from enum import Enum
+import hashlib
+import json
 import os
+import re
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 
-from corpus_studio.platform.contracts import ArtifactManifest
+from corpus_studio.platform.contracts import (
+    AdapterExportStateEvidence,
+    ArtifactManifest,
+    ResolvedExecutionConfiguration,
+)
 
 _ARTIFACT_KINDS = frozenset(
     {"adapter", "checkpoint", "merged_model", "gguf", "onnx", "quantized", "other"}
 )
+_MAX_ADAPTER_CONFIG_BYTES = 1024 * 1024
+
+
+@dataclass(frozen=True)
+class SealedAdapterEvidence:
+    safetensors_sha256: str
+    adapter_config_sha256: str
+    tensor_state_sha256: str
+    adapter_config_semantic_sha256: str
+    tensor_names: tuple[str, ...]
+    target_modules: tuple[str, ...]
+
+
+_SET_LIKE_CONFIG_FIELDS = frozenset(
+    {"exclude_modules", "modules_to_save", "target_modules", "target_parameters"}
+)
+_LORA_TENSOR = re.compile(
+    r"^(?P<module>.+)\.lora_(?P<side>A|B)(?:\.[^.]+)?\.weight$"
+)
+_WEIGHT_SUFFIXES = frozenset(
+    {".bin", ".ckpt", ".gguf", ".onnx", ".pt", ".pth", ".safetensors"}
+)
+
+
+def _semantic_json_value(value: object, *, field_name: str | None = None) -> object:
+    if isinstance(value, Enum):
+        return _semantic_json_value(value.value, field_name=field_name)
+    if isinstance(value, Mapping):
+        return {
+            str(key): _semantic_json_value(item, field_name=str(key))
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, (set, frozenset)):
+        normalized = [_semantic_json_value(item) for item in value]
+        return sorted(normalized, key=lambda item: json.dumps(item, sort_keys=True))
+    if isinstance(value, (list, tuple)):
+        normalized = [_semantic_json_value(item) for item in value]
+        if field_name in _SET_LIKE_CONFIG_FIELDS:
+            return sorted(normalized, key=lambda item: json.dumps(item, sort_keys=True))
+        return normalized
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    raise ValueError(f"adapter config contains non-JSON semantic value {type(value).__name__}")
+
+
+def canonical_adapter_config_sha256(config: Mapping[str, object]) -> str:
+    """Canonical identity for every serialized PEFT config field, including future fields."""
+
+    normalized = _semantic_json_value(config)
+    return hashlib.sha256(
+        json.dumps(
+            normalized,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _stable_bounded_file_bytes(path: Path, *, limit: int) -> bytes:
+    """Read one regular non-link file and prove the pathname still names the opened inode."""
+
+    try:
+        before_path = path.lstat()
+        if not stat.S_ISREG(before_path.st_mode) or path.is_symlink():
+            raise ValueError(f"{path.name} must be a regular non-link file")
+        with path.open("rb") as handle:
+            opened_before = os.fstat(handle.fileno())
+            payload = handle.read(limit + 1)
+            opened_after = os.fstat(handle.fileno())
+        after_path = path.lstat()
+    except OSError as exc:
+        raise ValueError(f"{path.name} could not be read") from exc
+    identities = {
+        (item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns)
+        for item in (before_path, opened_before, opened_after, after_path)
+    }
+    if len(identities) != 1:
+        raise ValueError(f"{path.name} changed while it was read")
+    if not payload or len(payload) > limit:
+        raise ValueError(f"{path.name} size is invalid")
+    return payload
+
+
+def _validate_adapter_tree(root: Path) -> None:
+    """Reject links, checkpoint payloads, and any second model-weight format recursively."""
+
+    try:
+        root_stat = root.lstat()
+    except OSError as exc:
+        raise ValueError("adapter artifact directory is unavailable") from exc
+    if not stat.S_ISDIR(root_stat.st_mode) or root.is_symlink():
+        raise ValueError("adapter artifact must be a regular, non-link directory")
+    resolved_root = root.resolve(strict=True)
+    try:
+        for current_raw, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+            current = Path(current_raw)
+            for name in sorted(dirnames):
+                candidate = current / name
+                if candidate.is_symlink() or not stat.S_ISDIR(candidate.lstat().st_mode):
+                    raise ValueError("adapter artifact contains a linked or irregular directory")
+                if name.startswith("checkpoint-"):
+                    raise ValueError("adapter artifact contains an intermediate checkpoint")
+                candidate.resolve(strict=True).relative_to(resolved_root)
+            for name in sorted(filenames):
+                candidate = current / name
+                if candidate.is_symlink() or not stat.S_ISREG(candidate.lstat().st_mode):
+                    raise ValueError("adapter artifact contains a linked or irregular file")
+                candidate.resolve(strict=True).relative_to(resolved_root)
+                relative = candidate.relative_to(root).as_posix()
+                if (
+                    relative != "adapter_model.safetensors"
+                    and (
+                        candidate.suffix.lower() in _WEIGHT_SUFFIXES
+                        or name.startswith("adapter_model.")
+                        or name.startswith("pytorch_model")
+                    )
+                ):
+                    raise ValueError(
+                        "adapter artifact contains an alternate or nested model-weight payload"
+                    )
+    except (OSError, RuntimeError, ValueError) as exc:
+        if isinstance(exc, ValueError) and str(exc).startswith("adapter artifact"):
+            raise
+        raise ValueError("adapter artifact tree is unsafe or changed during validation") from exc
+
+
+def validate_sealed_adapter_artifact(
+    path: str | Path,
+    execution: ResolvedExecutionConfiguration,
+    export_evidence: AdapterExportStateEvidence,
+) -> SealedAdapterEvidence:
+    """Validate the exact usable PEFT adapter payload against the sealed adapter policy."""
+
+    root = Path(path)
+    _validate_adapter_tree(root)
+    safetensors_path = root / "adapter_model.safetensors"
+    config_path = root / "adapter_config.json"
+    for label, candidate in (
+        ("adapter Safetensors", safetensors_path),
+        ("adapter config", config_path),
+    ):
+        if not candidate.is_file() or candidate.is_symlink():
+            raise ValueError(f"{label} is missing, non-regular, or link-like")
+        try:
+            candidate.resolve(strict=True).relative_to(root.resolve(strict=True))
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ValueError(f"{label} escapes the adapter artifact") from exc
+    from corpus_studio.platform.parameter_accounting import (  # noqa: PLC0415
+        ParameterAccountingError,
+        validate_safetensors_tensor_file,
+    )
+
+    try:
+        tensor_state = validate_safetensors_tensor_file(safetensors_path)
+    except ParameterAccountingError as exc:
+        raise ValueError(f"adapter Safetensors is invalid: {exc}") from exc
+    if (
+        tensor_state.tensor_state_sha256 != export_evidence.after_sha256
+        or list(tensor_state.tensor_names) != export_evidence.tensor_names
+    ):
+        raise ValueError("saved adapter tensor state differs from the trained export state")
+
+    raw_config = _stable_bounded_file_bytes(config_path, limit=_MAX_ADAPTER_CONFIG_BYTES)
+
+    def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"adapter config repeats key {key!r}")
+            result[key] = value
+        return result
+
+    try:
+        config = json.loads(
+            raw_config.decode("utf-8"),
+            object_pairs_hook=reject_duplicate_keys,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+        raise ValueError("adapter config is not valid bounded JSON") from exc
+    if not isinstance(config, dict):
+        raise ValueError("adapter config must be a JSON object")
+
+    sealed = execution.adapter
+    expected: dict[str, object] = {
+        "peft_type": "LORA",
+        "task_type": execution.adapter_task_type,
+        "r": sealed.lora_r,
+        "lora_alpha": sealed.lora_alpha,
+        "bias": sealed.bias,
+    }
+    for field_name, expected_value in expected.items():
+        if config.get(field_name) != expected_value:
+            raise ValueError(f"adapter config field {field_name!r} differs from the seal")
+    dropout = config.get("lora_dropout")
+    if isinstance(dropout, bool) or not isinstance(dropout, (int, float)):
+        raise ValueError("adapter config lora_dropout is invalid")
+    if float(dropout) != sealed.lora_dropout:
+        raise ValueError("adapter config lora_dropout differs from the seal")
+    raw_targets = config.get("target_modules")
+    if (
+        not isinstance(raw_targets, list)
+        or not raw_targets
+        or any(not isinstance(item, str) or not item for item in raw_targets)
+        or len(raw_targets) != len(set(raw_targets))
+    ):
+        raise ValueError("adapter config target_modules are invalid")
+
+    tensor_sides: dict[str, set[str]] = {}
+    for tensor_name in tensor_state.tensor_names:
+        match = _LORA_TENSOR.fullmatch(tensor_name)
+        if match is None:
+            raise ValueError("adapter Safetensors contains non-LoRA trainable state")
+        module = match.group("module")
+        tensor_sides.setdefault(module, set()).add(match.group("side"))
+    if any(sides != {"A", "B"} for sides in tensor_sides.values()):
+        raise ValueError("adapter Safetensors does not contain complete LoRA A/B tensor pairs")
+    config_targets = sorted(raw_targets)
+    matched_targets: set[str] = set()
+    for module in tensor_sides:
+        matches = [
+            target
+            for target in config_targets
+            if module == target or module.endswith("." + target)
+        ]
+        if len(matches) != 1:
+            raise ValueError("adapter config targets do not uniquely cover saved LoRA modules")
+        matched_targets.add(matches[0])
+    if matched_targets != set(config_targets):
+        raise ValueError("adapter config contains a target with no saved LoRA tensor pair")
+    if sealed.target_modules != ["all-linear"] and config_targets != sealed.target_modules:
+        raise ValueError("adapter config target_modules differ from the explicit seal")
+
+    if config.get("base_model_name_or_path") != execution.inputs.model.location:
+        raise ValueError("adapter config base-model linkage differs from the seal")
+    if config.get("inference_mode") is not True:
+        raise ValueError("saved adapter config must be inference-mode reloadable")
+    package_versions = {
+        item.name: item.version for item in execution.trainer_interface.package_versions
+    }
+    if package_versions.get("peft") is not None and config.get("peft_version") != package_versions["peft"]:
+        raise ValueError("adapter config PEFT version differs from the sealed runtime")
+
+    config_semantic_sha256 = canonical_adapter_config_sha256(config)
+    if config_semantic_sha256 != export_evidence.adapter_config_semantic_sha256:
+        raise ValueError("saved adapter config semantics differ from the trainer-bound config")
+    _validate_adapter_tree(root)
+    return SealedAdapterEvidence(
+        safetensors_sha256=tensor_state.content_sha256,
+        adapter_config_sha256=hashlib.sha256(raw_config).hexdigest(),
+        tensor_state_sha256=tensor_state.tensor_state_sha256,
+        adapter_config_semantic_sha256=config_semantic_sha256,
+        tensor_names=tensor_state.tensor_names,
+        target_modules=tuple(config_targets),
+    )
 
 
 def _now_iso() -> str:
@@ -53,6 +319,17 @@ def build_artifact_manifest(
     stamp = now or _now_iso()
     fingerprint = compute_fingerprint(path)
     content_hash = compute_content_hash(path)
+    metadata_hash = None
+    if kind == "adapter":
+        try:
+            config_bytes = _stable_bounded_file_bytes(
+                Path(path) / "adapter_config.json",
+                limit=_MAX_ADAPTER_CONFIG_BYTES,
+            )
+        except ValueError:
+            pass
+        else:
+            metadata_hash = hashlib.sha256(config_bytes).hexdigest()
     return ArtifactManifest.model_validate(
         {
             "artifact_id": artifact_id,
@@ -65,6 +342,7 @@ def build_artifact_manifest(
             "integrity": {
                 "cheap_fingerprint": fingerprint,
                 "content_hash": content_hash,
+                "metadata_hash": metadata_hash,
                 "current_integrity": "ok" if fingerprint is not None else "missing",
             },
             "reload_verified": reload_verified,
@@ -91,8 +369,24 @@ def recheck_artifact_integrity(
         return manifest
 
     current_fingerprint = compute_fingerprint(manifest.path)
+    metadata_matches = True
+    if stored.metadata_hash is not None:
+        try:
+            current_metadata = hashlib.sha256(
+                _stable_bounded_file_bytes(
+                    Path(manifest.path) / "adapter_config.json",
+                    limit=_MAX_ADAPTER_CONFIG_BYTES,
+                )
+            ).hexdigest()
+        except ValueError:
+            metadata_matches = False
+        else:
+            metadata_matches = current_metadata == stored.metadata_hash
+
     if current_fingerprint is None:
         status = "missing"
+    elif not metadata_matches:
+        status = "modified"
     elif stored.content_hash is not None:
         status = "ok" if compute_content_hash(manifest.path) == stored.content_hash else "modified"
     elif stored.cheap_fingerprint is not None:

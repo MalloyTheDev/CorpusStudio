@@ -70,12 +70,14 @@ def test_all_root_contracts_registered():
 
 
 def test_failure_and_fit_taxonomies_complete():
-    assert len(FailureTaxonomy) == 11
+    assert len(FailureTaxonomy) == 16
     assert len(FitClass) == 12
     assert len(StageMarker) == 25
     # the spill-vs-OOM distinction that is the whole point
     assert FailureTaxonomy.KERNEL_STALL.value == "KERNEL_STALL"
     assert FailureTaxonomy.ACCIDENTAL_SPILL.value == "ACCIDENTAL_SPILL"
+    assert FailureTaxonomy.GRADIENT_FAILURE.value == "GRADIENT_FAILURE"
+    assert FailureTaxonomy.ARTIFACT_FAILURE.value == "ARTIFACT_FAILURE"
     assert FitClass.ACCIDENTAL_WDDM_SPILL.value == "ACCIDENTAL_WDDM_SPILL"
     assert FitClass.PLANNED_UNPROVEN.value == "PLANNED_UNPROVEN"
     assert FitClass.NATIVE_SAFE.value == "NATIVE_SAFE"
@@ -96,6 +98,221 @@ def test_token_stats_supervised_and_no_truncation_default():
     assert ts.supervised_tokens == 900_000
     with pytest.raises(ValidationError):
         P.TokenStats(example_count=-1)  # ge=0
+
+
+def _verified_package_lock_payload():
+    return {
+        "name": "torch",
+        "normalized_name": "torch",
+        "version": "2.7.1",
+        "hash": {"algo": "sha256", "value": "a" * 64},
+        "record_integrity": "verified",
+        "record_count_semantics": "all_record_rows_v2",
+        "record_entries": 3,
+        "record_verified_entries": 3,
+        "record_failed_entries": [],
+        "installed_files_hash": {"algo": "sha256", "value": "b" * 64},
+        "installed_file_count": 3,
+    }
+
+
+def test_verified_package_lock_requires_complete_positive_record_counts():
+    lock = P.PackageLock.model_validate(_verified_package_lock_payload())
+    assert lock.record_verified_entries == lock.record_entries == lock.installed_file_count == 3
+
+    invalid_updates = [
+        {"record_entries": 0, "record_verified_entries": 0, "installed_file_count": 0},
+        {"record_verified_entries": 2},
+        {"record_verified_entries": 4},
+        {"installed_file_count": 2},
+        {"record_failed_entries": ["torch/__init__.py"]},
+        {"hash": None},
+        {"installed_files_hash": None},
+    ]
+    for update in invalid_updates:
+        payload = _verified_package_lock_payload()
+        payload.update(update)
+        with pytest.raises(ValidationError):
+            P.PackageLock.model_validate(payload)
+
+
+def test_legacy_partial_record_counts_remain_parseable_but_not_complete():
+    payload = _verified_package_lock_payload()
+    payload.pop("record_count_semantics")
+    payload["record_verified_entries"] = 2
+    legacy = P.PackageLock.model_validate(payload)
+    assert legacy.record_count_semantics is None
+    assert not legacy.has_complete_record_count_evidence()
+    assert "record_count_semantics" not in legacy.model_dump(mode="json")
+
+    manager_11 = dict(payload)
+    manager_11["installed_files_hash"] = None
+    manager_11["installed_file_count"] = None
+    tree_less = P.PackageLock.model_validate(manager_11)
+    assert tree_less.record_integrity == "verified"
+    assert tree_less.installed_files_hash is None
+    assert not tree_less.has_complete_record_count_evidence()
+
+
+def test_package_lock_schema_exposes_conditional_verified_evidence_rules():
+    schema = P.PackageLock.model_json_schema()
+    conditions = schema["allOf"]
+    assert any(
+        item.get("if", {}).get("properties", {}).get("record_integrity", {}).get("const")
+        == "verified"
+        and item.get("then", {}).get("properties", {}).get("record_entries", {})
+        == {"type": "integer", "minimum": 1}
+        for item in conditions
+    )
+    assert any(
+        item.get("if", {})
+        .get("properties", {})
+        .get("record_count_semantics", {})
+        .get("const")
+        == "all_record_rows_v2"
+        for item in conditions
+    )
+
+
+def test_training_success_evidence_requires_finite_exact_step_losses_and_real_update():
+    payload = {
+        "trainable_state": {
+            "before_sha256": "a" * 64,
+            "after_sha256": "b" * 64,
+            "trainable_tensor_count": 2,
+            "trainable_tensor_names": ["adapter.other_weight", "adapter.weight"],
+            "changed_tensor_count": 1,
+            "changed_tensor_names": ["adapter.weight"],
+        },
+        "adapter_export_state": {
+            "before_sha256": "c" * 64,
+            "after_sha256": "d" * 64,
+            "tensor_count": 2,
+            "tensor_names": ["adapter.lora_A.weight", "adapter.lora_B.weight"],
+            "changed_tensor_count": 1,
+            "changed_tensor_names": ["adapter.lora_B.weight"],
+            "adapter_config_semantic_sha256": "e" * 64,
+        },
+        "gradient_coverage": {
+            "eligible_tensor_count": 2,
+            "eligible_tensor_names": ["adapter.other_weight", "adapter.weight"],
+            "observed_tensor_count": 1,
+            "observed_tensor_names": ["adapter.weight"],
+        },
+        "optimizer_created": True,
+        "completed_optimizer_steps": 2,
+        "step_losses": [
+            {"optimizer_step": 1, "loss": 0.9},
+            {"optimizer_step": 2, "loss": 0.5},
+        ],
+    }
+    evidence = P.TrainingExecutionEvidence.model_validate(payload)
+    assert evidence.gradient_coverage.observed_tensor_count == 1
+    for bad_losses in (
+        [{"optimizer_step": 1, "loss": 0.9}],
+        [
+            {"optimizer_step": 1, "loss": 0.9},
+            {"optimizer_step": 1, "loss": 0.5},
+        ],
+        [
+            {"optimizer_step": 1, "loss": 0.9},
+            {"optimizer_step": 2, "loss": float("inf")},
+        ],
+        [
+            {"optimizer_step": 1, "loss": True},
+            {"optimizer_step": 2, "loss": 0.5},
+        ],
+        [
+            {"optimizer_step": 1, "loss": "0.9"},
+            {"optimizer_step": 2, "loss": 0.5},
+        ],
+    ):
+        with pytest.raises(ValidationError):
+            P.TrainingExecutionEvidence.model_validate({**payload, "step_losses": bad_losses})
+    with pytest.raises(ValidationError):
+        P.TrainingExecutionEvidence.model_validate(
+            {
+                **payload,
+                "trainable_state": {
+                    **payload["trainable_state"],
+                    "after_sha256": "a" * 64,
+                },
+            }
+        )
+    with pytest.raises(ValidationError, match="changed trainable tensor names"):
+        P.TrainingExecutionEvidence.model_validate(
+            {
+                **payload,
+                "trainable_state": {
+                    **payload["trainable_state"],
+                    "changed_tensor_count": 2,
+                    "changed_tensor_names": ["adapter.fabricated", "adapter.weight"],
+                },
+            }
+        )
+    with pytest.raises(ValidationError):
+        P.TrainingExecutionEvidence.model_validate(
+            {
+                **payload,
+                "gradient_coverage": {
+                    "eligible_tensor_count": 2,
+                    "eligible_tensor_names": ["adapter.other_weight", "adapter.weight"],
+                    "observed_tensor_count": 1,
+                    "observed_tensor_names": ["adapter.other_weight"],
+                },
+            }
+        )
+
+
+def test_event_loss_is_finite_and_trainer_logging_policy_is_exact():
+    with pytest.raises(ValidationError):
+        P.EventMetrics(loss=float("nan"))
+    policy = P.TrainerInterfacePolicy(
+        package_versions=[P.PackageLock(name="trl", version="0.19.1")],
+        required_sft_config_fields=[
+            "logging_nan_inf_filter",
+            "logging_steps",
+            "logging_strategy",
+            "max_length",
+        ],
+        sequence_length_field="max_length",
+        tokenizer_parameter="processing_class",
+        logging_strategy="steps",
+        logging_nan_inf_filter=False,
+    )
+    assert policy.logging_strategy == "steps"
+    assert policy.logging_steps == 1
+    assert policy.logging_nan_inf_filter is False
+    with pytest.raises(ValidationError):
+        P.TrainerInterfacePolicy.model_validate(
+            {**policy.model_dump(mode="json"), "logging_steps": 2}
+        )
+
+
+def test_failed_manifest_cannot_carry_a_proven_native_fit():
+    body = {
+        "run_id": "run-failed-fit",
+        "plan_ref": {"id": "plan", "hash": {"value": "a" * 64}},
+        "created_at": "2026-07-15T00:00:00Z",
+        "updated_at": "2026-07-15T00:00:01Z",
+        "state": "failed",
+        "failure": {"taxonomy": "FAIL", "message": "failed"},
+    }
+    with pytest.raises(ValidationError, match="proven native fit"):
+        P.RunManifest.model_validate(
+            {
+                **body,
+                "final_fit": {"classification": "NATIVE_SAFE"},
+            }
+        )
+    manifest = P.RunManifest.model_validate(
+        {
+            **body,
+            "final_fit": {"classification": "ACCIDENTAL_WDDM_SPILL"},
+        }
+    )
+    assert manifest.final_fit is not None
+    assert manifest.final_fit.classification == FitClass.ACCIDENTAL_WDDM_SPILL
 
 
 # ---- helpers -----------------------------------------------------------------

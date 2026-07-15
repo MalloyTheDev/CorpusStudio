@@ -2,12 +2,23 @@
 real temp 'adapter' directory exercises the cheap fingerprint, the byte-exact content hash, and the
 live re-check (ok / modified / missing). Also covers execute_run surfacing + writing the manifests."""
 
+from enum import Enum
+import hashlib
+import json
+from pathlib import Path
 import re
+import struct
+
+import pytest
 
 import corpus_studio.platform as P
 from corpus_studio.platform.artifacts import (
+    _stable_bounded_file_bytes,
+    _validate_adapter_tree,
     build_artifact_manifest,
+    canonical_adapter_config_sha256,
     recheck_artifact_integrity,
+    validate_sealed_adapter_artifact,
     write_artifact_manifest,
 )
 from corpus_studio.platform.supervisor import (
@@ -31,6 +42,264 @@ def _make_adapter(directory):
     return directory
 
 
+def _make_sealed_adapter(directory, *, tensor_names=None):
+    from corpus_studio.platform.parameter_accounting import canonical_tensor_state_sha256
+    from corpus_studio.platform.runners import demo_training_plan
+
+    execution = demo_training_plan().resolved_execution
+    assert execution is not None
+    directory.mkdir(parents=True, exist_ok=True)
+    names = tensor_names or [
+        "base_model.model.layers.0.q_proj.lora_A.weight",
+        "base_model.model.layers.0.q_proj.lora_B.weight",
+    ]
+    data = struct.pack(
+        "<" + "f" * len(names),
+        *(float(index + 1) for index in range(len(names))),
+    )
+    header = json.dumps(
+        {
+            name: {
+                "dtype": "F32",
+                "shape": [1],
+                "data_offsets": [index * 4, (index + 1) * 4],
+            }
+            for index, name in enumerate(names)
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    header += b" " * (-len(header) % 8)
+    (directory / "adapter_model.safetensors").write_bytes(
+        struct.pack("<Q", len(header)) + header + data
+    )
+    config = {
+        "peft_type": "LORA",
+        "task_type": execution.adapter_task_type,
+        "r": execution.adapter.lora_r,
+        "lora_alpha": execution.adapter.lora_alpha,
+        "lora_dropout": execution.adapter.lora_dropout,
+        "bias": execution.adapter.bias,
+        "target_modules": ["q_proj"],
+        "base_model_name_or_path": execution.inputs.model.location,
+        "inference_mode": True,
+        "peft_version": next(
+            item.version
+            for item in execution.trainer_interface.package_versions
+            if item.name == "peft"
+        ),
+        "use_dora": False,
+        "use_rslora": False,
+    }
+    (directory / "adapter_config.json").write_text(
+        json.dumps(config, sort_keys=True), encoding="utf-8"
+    )
+    records = [
+        {
+            "name": name,
+            "dtype": "F32",
+            "shape": [1],
+            "content_sha256": hashlib.sha256(
+                data[index * 4 : (index + 1) * 4]
+            ).hexdigest(),
+        }
+        for index, name in enumerate(names)
+    ]
+    evidence = P.AdapterExportStateEvidence(
+        before_sha256="a" * 64,
+        after_sha256=canonical_tensor_state_sha256(records),
+        tensor_count=len(names),
+        tensor_names=names,
+        changed_tensor_count=1,
+        changed_tensor_names=[names[-1]],
+        adapter_config_semantic_sha256=canonical_adapter_config_sha256(config),
+    )
+    return execution, evidence, config
+
+
+def test_adapter_config_canonicalization_handles_enums_sets_and_order():
+    class Value(str, Enum):
+        one = "one"
+
+    first = {"target_modules": {"b", "a"}, "value": Value.one, "ordered": (2, 1)}
+    second = {"ordered": [2, 1], "value": "one", "target_modules": ["a", "b"]}
+    assert canonical_adapter_config_sha256(first) == canonical_adapter_config_sha256(second)
+    with pytest.raises(ValueError, match="non-JSON"):
+        canonical_adapter_config_sha256({"bad": object()})
+
+
+def test_bounded_metadata_reader_rejects_empty_and_linked_files(tmp_path):
+    empty = tmp_path / "empty.json"
+    empty.write_bytes(b"")
+    with pytest.raises(ValueError, match="size"):
+        _stable_bounded_file_bytes(empty, limit=10)
+    target = tmp_path / "target.json"
+    target.write_text("{}", encoding="utf-8")
+    linked = tmp_path / "linked.json"
+    linked.symlink_to(target)
+    with pytest.raises(ValueError, match="non-link"):
+        _stable_bounded_file_bytes(linked, limit=10)
+
+
+def test_bounded_metadata_reader_detects_an_open_file_identity_change(tmp_path, monkeypatch):
+    import corpus_studio.platform.artifacts as artifacts_module
+
+    path = tmp_path / "config.json"
+    path.write_text("{}", encoding="utf-8")
+    real_fstat = artifacts_module.os.fstat
+    calls = 0
+
+    def changed_fstat(file_descriptor):
+        nonlocal calls
+        calls += 1
+        observed = real_fstat(file_descriptor)
+        if calls == 2:
+            return type(
+                "ChangedStat",
+                (),
+                {
+                    "st_dev": observed.st_dev,
+                    "st_ino": observed.st_ino,
+                    "st_size": observed.st_size,
+                    "st_mtime_ns": observed.st_mtime_ns + 1,
+                },
+            )()
+        return observed
+
+    monkeypatch.setattr(artifacts_module.os, "fstat", changed_fstat)
+    with pytest.raises(ValueError, match="changed while it was read"):
+        _stable_bounded_file_bytes(path, limit=10)
+
+
+def test_adapter_tree_rejects_missing_roots_links_and_alternate_weights(tmp_path):
+    with pytest.raises(ValueError, match="unavailable"):
+        _validate_adapter_tree(tmp_path / "missing")
+    file_root = tmp_path / "file-root"
+    file_root.write_text("not a directory", encoding="utf-8")
+    with pytest.raises(ValueError, match="directory"):
+        _validate_adapter_tree(file_root)
+    linked_root = tmp_path / "linked-root"
+    real_root = tmp_path / "real-root"
+    real_root.mkdir()
+    linked_root.symlink_to(real_root, target_is_directory=True)
+    with pytest.raises(ValueError, match="non-link"):
+        _validate_adapter_tree(linked_root)
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "weights").mkdir()
+    (nested / "weights" / "model.safetensors").write_bytes(b"x")
+    with pytest.raises(ValueError, match="alternate or nested"):
+        _validate_adapter_tree(nested)
+
+    linked_directory_root = tmp_path / "linked-directory-root"
+    linked_directory_root.mkdir()
+    (linked_directory_root / "linked-child").symlink_to(
+        real_root, target_is_directory=True
+    )
+    with pytest.raises(ValueError, match="linked or irregular directory"):
+        _validate_adapter_tree(linked_directory_root)
+
+    linked_file_root = tmp_path / "linked-file-root"
+    linked_file_root.mkdir()
+    (linked_file_root / "linked-file").symlink_to(file_root)
+    with pytest.raises(ValueError, match="linked or irregular file"):
+        _validate_adapter_tree(linked_file_root)
+
+
+def test_adapter_tree_normalizes_unexpected_resolution_failures(tmp_path, monkeypatch):
+    root = tmp_path / "adapter"
+    unsafe = root / "unsafe"
+    unsafe.mkdir(parents=True)
+    real_resolve = Path.resolve
+
+    def fail_for_child(path, *, strict=False):
+        if path == unsafe:
+            raise RuntimeError("synthetic resolution failure")
+        return real_resolve(path, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", fail_for_child)
+    with pytest.raises(ValueError, match="tree is unsafe"):
+        _validate_adapter_tree(root)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        ({"r": 99}, "field 'r' differs"),
+        ({"lora_dropout": True}, "dropout is invalid"),
+        ({"lora_dropout": 0.2}, "dropout differs"),
+        ({"target_modules": []}, "target_modules are invalid"),
+        ({"target_modules": ["q_proj", "k_proj"]}, "no saved LoRA"),
+        ({"base_model_name_or_path": "wrong/model"}, "base-model linkage"),
+        ({"inference_mode": False}, "inference-mode"),
+        ({"peft_version": "wrong"}, "PEFT version"),
+        ({"use_dora": True}, "semantics differ"),
+    ],
+)
+def test_sealed_adapter_rejects_config_semantic_deviations(tmp_path, mutation, expected):
+    adapter = tmp_path / "adapter"
+    execution, evidence, config = _make_sealed_adapter(adapter)
+    config.update(mutation)
+    (adapter / "adapter_config.json").write_text(
+        json.dumps(config, sort_keys=True), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match=expected):
+        validate_sealed_adapter_artifact(adapter, execution, evidence)
+
+
+@pytest.mark.parametrize("payload", [b"not json", b"[]", b'{"r":1,"r":2}'])
+def test_sealed_adapter_rejects_malformed_config_documents(tmp_path, payload):
+    adapter = tmp_path / "adapter"
+    execution, evidence, _config = _make_sealed_adapter(adapter)
+    (adapter / "adapter_config.json").write_bytes(payload)
+    with pytest.raises(ValueError):
+        validate_sealed_adapter_artifact(adapter, execution, evidence)
+
+
+def test_sealed_adapter_rejects_missing_config_and_invalid_tensor_file(tmp_path):
+    adapter = tmp_path / "adapter"
+    execution, evidence, _config = _make_sealed_adapter(adapter)
+    (adapter / "adapter_config.json").unlink()
+    with pytest.raises(ValueError, match="missing"):
+        validate_sealed_adapter_artifact(adapter, execution, evidence)
+    (adapter / "adapter_config.json").write_text("{}", encoding="utf-8")
+    (adapter / "adapter_model.safetensors").write_bytes(b"invalid")
+    with pytest.raises(ValueError, match="Safetensors is invalid"):
+        validate_sealed_adapter_artifact(adapter, execution, evidence)
+
+
+def test_sealed_adapter_rejects_targets_that_differ_from_an_explicit_seal(tmp_path):
+    adapter = tmp_path / "adapter"
+    execution, evidence, _config = _make_sealed_adapter(adapter)
+    explicit = execution.model_copy(
+        update={
+            "adapter": execution.adapter.model_copy(
+                update={"target_modules": ["k_proj"]}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="target_modules differ from the explicit seal"):
+        validate_sealed_adapter_artifact(adapter, explicit, evidence)
+
+
+@pytest.mark.parametrize(
+    ("tensor_names", "expected"),
+    [
+        (["base_model.model.layers.0.q_proj.weight"], "non-LoRA"),
+        (["base_model.model.layers.0.q_proj.lora_A.weight"], "complete LoRA"),
+    ],
+)
+def test_sealed_adapter_requires_only_complete_lora_tensor_pairs(
+    tmp_path, tensor_names, expected
+):
+    adapter = tmp_path / "adapter"
+    execution, evidence, _config = _make_sealed_adapter(
+        adapter, tensor_names=tensor_names
+    )
+    with pytest.raises(ValueError, match=expected):
+        validate_sealed_adapter_artifact(adapter, execution, evidence)
+
+
 # ---- build ------------------------------------------------------------------
 
 
@@ -49,6 +318,7 @@ def test_build_manifest_for_a_real_adapter_computes_two_tier_integrity(tmp_path)
     assert manifest.integrity is not None
     assert manifest.integrity.current_integrity == "ok"
     assert _SHA256.match(manifest.integrity.content_hash or "")
+    assert _SHA256.match(manifest.integrity.metadata_hash or "")
     assert manifest.integrity.cheap_fingerprint  # size:mtime present
     assert P.ArtifactManifest.model_validate_json(manifest.model_dump_json()) == manifest
 
@@ -97,6 +367,15 @@ def test_recheck_detects_modified_weights(tmp_path):
     manifest = build_artifact_manifest(artifact_id="a", path=str(adapter), run_id="r", now="t")
     # Byte-swap the weights (same-ish size) — the content hash must catch it.
     (adapter / "adapter_model.safetensors").write_bytes(b"weights-v2")
+    rechecked = recheck_artifact_integrity(manifest)
+    assert rechecked.integrity is not None
+    assert rechecked.integrity.current_integrity == "modified"
+
+
+def test_recheck_detects_modified_adapter_config_independently_of_weights(tmp_path):
+    adapter = _make_adapter(tmp_path / "adapter")
+    manifest = build_artifact_manifest(artifact_id="a", path=str(adapter), run_id="r", now="t")
+    (adapter / "adapter_config.json").write_text('{"r": 8}', encoding="utf-8")
     rechecked = recheck_artifact_integrity(manifest)
     assert rechecked.integrity is not None
     assert rechecked.integrity.current_integrity == "modified"

@@ -68,8 +68,9 @@ def _package(name: str, version: str = "1.0") -> dict[str, Any]:
         "installer": "pip",
         "requested": True,
         "record_integrity": "verified",
+        "record_count_semantics": "all_record_rows_v2",
         "record_entries": 2,
-        "record_verified_entries": 1,
+        "record_verified_entries": 2,
         "record_failed_entries": [],
         "installed_files_sha256": _record_hash(f"{name}-files", version),
         "installed_file_count": 2,
@@ -923,6 +924,7 @@ def test_unverified_pre_probe_files_stop_before_any_installed_import(tmp_path):
     manager, resolution, runner, _ = _manager_and_readiness_resolution(tmp_path)
     torch_package = next(item for item in runner.packages if item["name"] == "torch")
     torch_package["record_integrity"] = "failed"
+    torch_package["record_count_semantics"] = None
     torch_package["record_failed_entries"] = ["torch/library.py"]
     torch_package["installed_files_sha256"] = None
     with pytest.raises(EnvironmentManagerError, match="before readiness probes"):
@@ -931,6 +933,21 @@ def test_unverified_pre_probe_files_stop_before_any_installed_import(tmp_path):
             confirmed_resolution_hash=resolution.resolution_hash or "",
         )
     assert all(call["phase"] != "import_probe" for call in runner.calls)
+
+
+def test_inventory_rejects_non_scalar_record_count_semantics(tmp_path):
+    fake = FakeEnvironmentRunner()
+    manager, _, result = _create(tmp_path, fake)
+    payload = json.loads(json.dumps(fake._lock_payload()))
+    payload["packages"][0]["record_count_semantics"] = ["all_record_rows_v2"]
+
+    with pytest.raises(EnvironmentManagerError, match="invalid RECORD count semantics"):
+        manager._inventory_from_payload(
+            result.descriptor,
+            result.lock.recipe_ref,
+            result.lock.index_urls,
+            payload,
+        )
 
 
 def test_installed_worker_payload_must_match_the_reviewed_wheel(tmp_path):
@@ -2248,7 +2265,11 @@ def test_lock_probe_proves_generated_worker_bytecode_matches_its_source(tmp_path
         assert completed.returncode == 0, completed.stderr
         return json.loads(completed.stdout.splitlines()[-1])["packages"][0]
 
-    assert inspect()["record_integrity"] == "verified"
+    verified = inspect()
+    assert verified["record_integrity"] == "verified"
+    assert verified["record_entries"] == 4
+    assert verified["record_verified_entries"] == verified["record_entries"]
+    assert verified["installed_file_count"] == verified["record_entries"]
 
     source.write_text("VALUE = 'unreviewed'\n", encoding="utf-8")
     py_compile.compile(str(source), cfile=str(pyc), doraise=True)
@@ -2789,6 +2810,75 @@ def test_legacy_environment_lock_digest_remains_compatible(tmp_path):
     sealed = legacy.model_copy(update={"lock_hash": expected})
     manager = EnvironmentManager(tmp_path / "manager")
     assert manager._lock_digest(sealed) == expected
+
+
+def test_manager_12_partial_count_lock_is_readable_but_health_refusal_is_non_mutating(
+    tmp_path,
+):
+    fake = FakeEnvironmentRunner(cuda=True)
+    manager, _, _ = _create(tmp_path, fake, "legacy-count-env")
+    current = manager.load_lock("legacy-count-env")
+    legacy_packages = [
+        item.model_copy(
+            update={
+                "record_count_semantics": None,
+                "record_verified_entries": max(1, (item.record_entries or 1) - 1),
+            }
+        )
+        for item in current.packages
+    ]
+    draft = current.model_copy(
+        update={
+            "manager_version": "1.2.0",
+            "packages": legacy_packages,
+            "lock_hash": "0" * 64,
+        }
+    )
+    legacy = draft.model_copy(update={"lock_hash": manager._lock_digest(draft)})
+    descriptor = manager.load_descriptor("legacy-count-env")
+    assert descriptor.lock_ref is not None
+    descriptor = descriptor.model_copy(
+        update={
+            "manager_version": "1.2.0",
+            "lock_ref": descriptor.lock_ref.model_copy(
+                update={"hash": HashRef(value=legacy.lock_hash)}
+            ),
+        }
+    )
+    manager._write_lock("legacy-count-env", legacy)
+    manager._write_descriptor(descriptor)
+
+    registry = manager._registry_dir("legacy-count-env")
+    lock_path = registry / "locks" / f"{legacy.lock_id}.json"
+    descriptor_path = registry / "EnvironmentDescriptor.json"
+    health_path = registry / "EnvironmentHealthReport.json"
+    before = {
+        path: path.read_bytes() for path in (lock_path, descriptor_path, health_path)
+    }
+    calls_before = len(fake.calls)
+
+    parsed = manager.load_lock("legacy-count-env")
+    assert manager._lock_digest(parsed) == parsed.lock_hash
+    assert all(not item.has_complete_record_count_evidence() for item in parsed.packages)
+    report = manager.health("legacy-count-env")
+    assert report.state == EnvironmentState.degraded
+    assert report.failure is not None
+    assert report.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert len(fake.calls) == calls_before
+    assert {path: path.read_bytes() for path in before} == before
+
+    tampered = legacy.model_copy(update={"lock_hash": "f" * 64})
+    manager._write_lock("legacy-count-env", tampered)
+    tampered_before = {
+        path: path.read_bytes() for path in (lock_path, descriptor_path, health_path)
+    }
+    report = manager.health("legacy-count-env")
+    assert report.state == EnvironmentState.broken
+    assert report.lock_mismatch is True
+    assert report.failure is not None
+    assert report.failure.taxonomy == FailureTaxonomy.ENVIRONMENT_FAILURE
+    assert len(fake.calls) == calls_before
+    assert {path: path.read_bytes() for path in tampered_before} == tampered_before
 
 
 def test_real_subprocess_runner_success_timeout_and_cancellation(tmp_path):

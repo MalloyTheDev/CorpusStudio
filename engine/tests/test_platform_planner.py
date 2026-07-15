@@ -193,6 +193,7 @@ def _report(
                 artifact=f"{name}-1.0-py3-none-any.whl",
                 artifact_hash=P.HashRef(value="2" * 64),
                 record_integrity="verified",
+                record_count_semantics="all_record_rows_v2",
                 record_entries=1,
                 record_verified_entries=1,
                 installed_files_hash=P.HashRef(value="3" * 64),

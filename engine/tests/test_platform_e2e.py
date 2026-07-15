@@ -4,10 +4,16 @@ chain is provable on a core-only install (no GPU / no [train]). This is the regr
 catch a break between any two slices (a snapshot key the runner drops, a plan field the calibrator
 misreads, an artifact that isn't written)."""
 
+import json
+import hashlib
 from pathlib import Path
+import struct
 
 import corpus_studio.platform as P
-from corpus_studio.platform.artifacts import recheck_artifact_integrity
+from corpus_studio.platform.artifacts import (
+    canonical_adapter_config_sha256,
+    recheck_artifact_integrity,
+)
 from corpus_studio.platform.calibrator import classify_fit
 from corpus_studio.platform.contracts import (
     CapabilityReport,
@@ -23,6 +29,7 @@ from corpus_studio.platform.common import HashRef, PackageLock, Ref
 from corpus_studio.platform.enums import FitClass
 from corpus_studio.platform.execution_config import stable_file_sha256
 from corpus_studio.platform.planner import PlannerConstraints, build_run_plan
+from corpus_studio.platform.parameter_accounting import canonical_tensor_state_sha256
 from corpus_studio.platform.profile_store import resolve_capabilities
 from corpus_studio.platform.runners import TrainingRunner
 from corpus_studio.platform.supervisor import execute_run
@@ -139,18 +146,106 @@ def _fake_trainer(*, steps=2):
     """A stand-in run_training that writes a real adapter dir (so integrity is checkable) and drives
     the progress callback — no torch, no model, no dataset."""
 
-    def _run(config, *, progress_callback=None, **_kw):
+    def _run(config, *, progress_callback=None, stage_callback=None, **_kw):
         adapter_dir = Path(config.output_dir)
         adapter_dir.mkdir(parents=True, exist_ok=True)
-        (adapter_dir / "adapter_config.json").write_text('{"r": 16}', encoding="utf-8")
-        (adapter_dir / "adapter_model.safetensors").write_bytes(b"trained-weights")
+        adapter_config = {
+            "peft_type": "LORA",
+            "task_type": config.adapter_task_type,
+            "r": config.lora_r,
+            "lora_alpha": config.lora_alpha,
+            "lora_dropout": config.lora_dropout,
+            "bias": config.lora_bias,
+            "target_modules": ["q_proj"],
+            "base_model_name_or_path": config.base_model,
+            "inference_mode": True,
+            "peft_version": config.package_versions.get("peft"),
+            "use_dora": False,
+            "use_rslora": False,
+        }
+        (adapter_dir / "adapter_config.json").write_text(
+            json.dumps(adapter_config, sort_keys=True),
+            encoding="utf-8",
+        )
+        tensor_names = [
+            "base_model.model.layers.0.q_proj.lora_A.weight",
+            "base_model.model.layers.0.q_proj.lora_B.weight",
+        ]
+        header = json.dumps(
+            {
+                tensor_names[0]: {
+                    "dtype": "F32",
+                    "shape": [1],
+                    "data_offsets": [0, 4],
+                },
+                tensor_names[1]: {
+                    "dtype": "F32",
+                    "shape": [1],
+                    "data_offsets": [4, 8],
+                },
+            },
+            separators=(",", ":"), sort_keys=True,
+        ).encode("utf-8")
+        header += b" " * (-len(header) % 8)
+        tensor_bytes = struct.pack("<ff", 1.0, 2.0)
+        (adapter_dir / "adapter_model.safetensors").write_bytes(
+            struct.pack("<Q", len(header)) + header + tensor_bytes
+        )
+        if stage_callback is not None:
+            stage_callback("optimizer_created", "observed the real optimizer")
+        losses = {step: 1.0 / step for step in range(1, steps + 1)}
         for step in range(1, steps + 1):
             if progress_callback is not None:
-                progress_callback(step, steps, 1.0 / step)
+                progress_callback(step, steps, losses[step])
         return TrainResult(
             output_dir=str(adapter_dir), adapter_path=str(adapter_dir),
             base_model=config.base_model, cpu_toy=config.cpu_toy, steps=steps, final_loss=0.5,
             checkpoints=[],
+            execution_evidence=P.TrainingExecutionEvidence(
+                trainable_state={
+                    "before_sha256": "a" * 64,
+                    "after_sha256": "b" * 64,
+                    "trainable_tensor_count": 2,
+                    "trainable_tensor_names": ["adapter.a", "adapter.b"],
+                    "changed_tensor_count": 1,
+                    "changed_tensor_names": ["adapter.b"],
+                },
+                adapter_export_state={
+                    "before_sha256": "c" * 64,
+                    "after_sha256": canonical_tensor_state_sha256(
+                        [
+                            {
+                                "name": name,
+                                "dtype": "F32",
+                                "shape": [1],
+                                "content_sha256": hashlib.sha256(
+                                    tensor_bytes[index * 4 : (index + 1) * 4]
+                                ).hexdigest(),
+                            }
+                            for index, name in enumerate(tensor_names)
+                        ]
+                    ),
+                    "tensor_count": 2,
+                    "tensor_names": tensor_names,
+                    "changed_tensor_count": 1,
+                    "changed_tensor_names": [tensor_names[1]],
+                    "adapter_config_semantic_sha256": canonical_adapter_config_sha256(
+                        adapter_config
+                    ),
+                },
+                gradient_coverage={
+                    "eligible_tensor_count": 2,
+                    "eligible_tensor_names": ["adapter.a", "adapter.b"],
+                    "observed_tensor_count": 1,
+                    "observed_tensor_names": ["adapter.b"],
+                },
+                optimizer_created=True,
+                completed_optimizer_steps=steps,
+                step_losses=[
+                    {"optimizer_step": step, "loss": losses[step]}
+                    for step in range(1, steps + 1)
+                ],
+            ),
         )
 
     return _run
@@ -231,6 +326,7 @@ def test_cpu_toy_chain_composes(tmp_path, monkeypatch):
             dataset_path=str(dataset),
             dataset_content_sha256=dataset_digest,
             allow_cpu_toy=True,
+            max_steps=1,
             output_dir=str(tmp_path / "toy-planned-output"),
         ),
         plan_id="toy",

@@ -3,14 +3,25 @@ supervisor. Pure tests (no torch): ``run_training`` is monkeypatched, so the pro
 adaptation, the produced-artifact handoff, and the failure/cancel classification are all provable on
 a core-only install. The real training path is user-smoke-tested (a GPU + the [train] extra)."""
 
+import json
+import hashlib
 from pathlib import Path
+import struct
 
 import pytest
 
 import corpus_studio.platform as P
 from corpus_studio.platform.enums import FailureTaxonomy, StageMarker
-from corpus_studio.platform.execution_config import execution_configuration_hash_for
-from corpus_studio.platform.planner import compute_plan_hash, run_plan_hash_payload
+from corpus_studio.platform.execution_config import (
+    canonical_sha256,
+    execution_configuration_hash_for,
+    verify_execution_configuration_hash,
+)
+from corpus_studio.platform.planner import (
+    compute_plan_hash,
+    run_plan_hash_payload,
+    verify_run_plan_hash,
+)
 from corpus_studio.platform.runners import (
     TrainingRunner,
     classify_training_error,
@@ -19,8 +30,11 @@ from corpus_studio.platform.runners import (
 from corpus_studio.platform.supervisor import execute_run
 from corpus_studio.training.trainer import (
     ExecutionPlacementDeviation,
+    TrainingEvidenceError,
+    TrainerEnvironmentError,
     TrainerError,
     TrainResult,
+    train_config_from_resolved,
 )
 
 _CLOCK = lambda: "2026-07-11T00:00:00+00:00"  # noqa: E731
@@ -34,8 +48,123 @@ def _isolate_relative_training_outputs(tmp_path: Path, monkeypatch):
 def _write_fake_adapter(path: str) -> str:
     adapter = Path(path)
     adapter.mkdir(parents=True, exist_ok=True)
-    (adapter / "adapter_model.safetensors").write_bytes(b"fake-adapter-weights")
+    header = json.dumps(_fake_adapter_header(), separators=(",", ":"), sort_keys=True).encode(
+        "utf-8"
+    )
+    header += b" " * (-len(header) % 8)
+    (adapter / "adapter_model.safetensors").write_bytes(
+        struct.pack("<Q", len(header)) + header + _fake_adapter_bytes()
+    )
+    (adapter / "adapter_config.json").write_text(
+        json.dumps(
+            {
+                "peft_type": "LORA",
+                "task_type": "CAUSAL_LM",
+                "r": 4,
+                "lora_alpha": 8,
+                "lora_dropout": 0.05,
+                "bias": "none",
+                "target_modules": ["q_proj"],
+                "base_model_name_or_path": "hf-internal-testing/tiny-random-LlamaForCausalLM",
+                "inference_mode": True,
+                "peft_version": "not-installed",
+                "use_dora": False,
+                "use_rslora": False,
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
     return str(adapter)
+
+
+def _fake_adapter_header() -> dict[str, object]:
+    return {
+        "base_model.model.layers.0.q_proj.lora_A.weight": {
+            "dtype": "F32",
+            "shape": [1],
+            "data_offsets": [0, 4],
+        },
+        "base_model.model.layers.0.q_proj.lora_B.weight": {
+            "dtype": "F32",
+            "shape": [1],
+            "data_offsets": [4, 8],
+        },
+    }
+
+
+def _fake_adapter_bytes() -> bytes:
+    return struct.pack("<ff", 1.0, 2.0)
+
+
+def _fake_export_evidence() -> dict[str, object]:
+    from corpus_studio.platform.artifacts import canonical_adapter_config_sha256
+    from corpus_studio.platform.parameter_accounting import canonical_tensor_state_sha256
+
+    names = sorted(_fake_adapter_header())
+    payload = _fake_adapter_bytes()
+    records = []
+    for index, name in enumerate(names):
+        records.append(
+            {
+                "name": name,
+                "dtype": "F32",
+                "shape": [1],
+                "content_sha256": hashlib.sha256(
+                    payload[index * 4 : (index + 1) * 4]
+                ).hexdigest(),
+            }
+        )
+    config = {
+        "peft_type": "LORA",
+        "task_type": "CAUSAL_LM",
+        "r": 4,
+        "lora_alpha": 8,
+        "lora_dropout": 0.05,
+        "bias": "none",
+        "target_modules": ["q_proj"],
+        "base_model_name_or_path": "hf-internal-testing/tiny-random-LlamaForCausalLM",
+        "inference_mode": True,
+        "peft_version": "not-installed",
+        "use_dora": False,
+        "use_rslora": False,
+    }
+    return {
+        "before_sha256": "c" * 64,
+        "after_sha256": canonical_tensor_state_sha256(records),
+        "tensor_count": 2,
+        "tensor_names": names,
+        "changed_tensor_count": 1,
+        "changed_tensor_names": [names[1]],
+        "adapter_config_semantic_sha256": canonical_adapter_config_sha256(config),
+    }
+
+
+def _execution_evidence(steps: int, losses: dict[int, float] | None = None):
+    losses = losses or {step: round(1.0 / step, 6) for step in range(1, steps + 1)}
+    return P.TrainingExecutionEvidence(
+        trainable_state={
+            "before_sha256": "a" * 64,
+            "after_sha256": "b" * 64,
+            "trainable_tensor_count": 2,
+            "trainable_tensor_names": ["adapter.other_weight", "adapter.weight"],
+            "changed_tensor_count": 1,
+            "changed_tensor_names": ["adapter.weight"],
+        },
+        adapter_export_state=_fake_export_evidence(),
+        gradient_coverage={
+            "eligible_tensor_count": 2,
+            "eligible_tensor_names": ["adapter.other_weight", "adapter.weight"],
+            "observed_tensor_count": 1,
+            "observed_tensor_names": ["adapter.weight"],
+        },
+        optimizer_created=True,
+        completed_optimizer_steps=steps,
+        step_losses=[
+            {"optimizer_step": step, "loss": losses[step]}
+            for step in range(1, steps + 1)
+        ],
+    )
 
 
 def _reseal(body: dict) -> P.RunPlan:
@@ -45,17 +174,48 @@ def _reseal(body: dict) -> P.RunPlan:
     return draft.model_copy(update={"plan_hash": compute_plan_hash(run_plan_hash_payload(draft))})
 
 
+def test_legacy_resolved_plan_remains_hash_verifiable_but_is_not_executable():
+    body = demo_training_plan().model_dump(mode="json")
+    execution = body["resolved_execution"]
+    interface = execution["trainer_interface"]
+    interface.pop("logging_strategy")
+    interface.pop("logging_nan_inf_filter")
+    interface["required_sft_config_fields"] = [
+        name
+        for name in interface["required_sft_config_fields"]
+        if name not in {"logging_strategy", "logging_nan_inf_filter"}
+    ]
+    execution["configuration_hash"] = canonical_sha256(
+        {key: value for key, value in execution.items() if key != "configuration_hash"}
+    )
+    plan_payload = {
+        key: value for key, value in body.items() if key not in {"plan_hash", "created_at"}
+    }
+    body["plan_hash"] = compute_plan_hash(plan_payload)
+
+    legacy = P.RunPlan.model_validate(body)
+    assert legacy.resolved_execution is not None
+    assert verify_execution_configuration_hash(legacy.resolved_execution)
+    assert verify_run_plan_hash(legacy)
+    with pytest.raises(TrainerError, match="predates exact per-step loss logging"):
+        train_config_from_resolved(legacy.resolved_execution)
+
+
 def _fake_run_training(steps, *, loss_by_step=None, capture=None, checkpoints=False):
     """Build a stand-in for run_training that drives the progress callback `steps` times then returns
     a TrainResult — no torch, no model, no dataset."""
 
-    def _run(config, *, progress_callback=None, **_kw):
+    def _run(config, *, progress_callback=None, stage_callback=None, **_kw):
         if capture is not None:
             capture["config"] = config
+        if stage_callback is not None:
+            stage_callback("optimizer_created", "observed the real optimizer")
+        losses = loss_by_step or {
+            step: round(1.0 / step, 6) for step in range(1, steps + 1)
+        }
         for step in range(1, steps + 1):
             if progress_callback is not None:
-                loss = (loss_by_step or {}).get(step)
-                progress_callback(step, steps, loss)
+                progress_callback(step, steps, losses[step])
         adapter_path = _write_fake_adapter(config.output_dir)
         return TrainResult(
             output_dir=config.output_dir,
@@ -63,8 +223,9 @@ def _fake_run_training(steps, *, loss_by_step=None, capture=None, checkpoints=Fa
             base_model=config.base_model,
             cpu_toy=config.cpu_toy,
             steps=steps,
-            final_loss=(loss_by_step or {}).get(steps),
+            final_loss=losses[steps],
             checkpoints=[f"{config.output_dir}/checkpoint-{steps}"] if checkpoints else [],
+            execution_evidence=_execution_evidence(steps, losses),
         )
 
     return _run
@@ -93,7 +254,7 @@ def test_training_runner_leaves_dataset_hash_and_capture_to_the_trainer(monkeypa
     )
     monkeypatch.setattr(
         "corpus_studio.training.trainer.run_training",
-        _fake_run_training(1),
+        _fake_run_training(2),
     )
 
     result = execute_run(plan, TrainingRunner(cpu_toy=True), clock=_CLOCK)
@@ -151,7 +312,7 @@ def test_training_runner_success_adapts_progress_and_produces_the_adapter(monkey
     capture: dict = {}
     monkeypatch.setattr(
         "corpus_studio.training.trainer.run_training",
-        _fake_run_training(3, loss_by_step={1: 0.9, 2: 0.5, 3: 0.3}, capture=capture),
+        _fake_run_training(2, loss_by_step={1: 0.9, 2: 0.5}, capture=capture),
     )
     result = execute_run(
         demo_training_plan(), TrainingRunner(cpu_toy=True), run_id="run-1", clock=_CLOCK
@@ -163,7 +324,7 @@ def test_training_runner_success_adapts_progress_and_produces_the_adapter(monkey
     assert capture["config"].cpu_toy is True
 
     metrics = [e for e in result.events if e.event_type == "metric"]
-    assert [m.optimizer_step for m in metrics] == [1, 2, 3]
+    assert [m.optimizer_step for m in metrics] == [1, 2]
     assert metrics[0].metrics is not None
     assert metrics[0].metrics.loss == 0.9
 
@@ -176,6 +337,13 @@ def test_training_runner_success_adapts_progress_and_produces_the_adapter(monkey
     artifact_id = f"run-1-adapter-{content_hash[:12]}"
     assert result.manifest.artifact_ids == [artifact_id]
     assert result.manifest.output_dir == str(adapter_path)
+    assert result.manifest.training_success_evidence is not None
+    success = result.manifest.training_success_evidence
+    assert success.output_path_verified is True
+    assert success.adapter_bytes_verified is True
+    assert success.artifact_integrity_verified is True
+    assert success.execution.gradient_coverage.observed_tensor_count == 1
+    assert [item.loss for item in success.execution.step_losses] == [0.9, 0.5]
     produced = next(e for e in result.events if e.event_type == "artifact_produced")
     assert produced.payload == {
         "artifact_id": artifact_id,
@@ -183,6 +351,72 @@ def test_training_runner_success_adapts_progress_and_produces_the_adapter(monkey
         "path": str(adapter_path),
     }
     assert not any("checkpoint-" in (e.message or "") for e in result.events)
+
+
+@pytest.mark.parametrize("tamper", ["tensor", "config", "nested_weight"])
+def test_training_success_rejects_bytes_not_bound_to_trainer_evidence(monkeypatch, tamper):
+    base = _fake_run_training(2)
+
+    def _tampered(*args, **kwargs):
+        result = base(*args, **kwargs)
+        adapter = Path(result.adapter_path)
+        if tamper == "tensor":
+            path = adapter / "adapter_model.safetensors"
+            payload = bytearray(path.read_bytes())
+            payload[-1] ^= 1
+            path.write_bytes(payload)
+        elif tamper == "config":
+            path = adapter / "adapter_config.json"
+            config = json.loads(path.read_text(encoding="utf-8"))
+            config["target_modules"] = ["k_proj"]
+            path.write_text(json.dumps(config, sort_keys=True), encoding="utf-8")
+        else:
+            nested = adapter / "checkpoint-shadow"
+            nested.mkdir()
+            (nested / "model.safetensors").write_bytes(b"unsealed")
+        return result
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _tampered)
+    result = execute_run(
+        demo_training_plan(),
+        TrainingRunner(cpu_toy=True),
+        run_id=f"run-tamper-{tamper}",
+        clock=_CLOCK,
+    )
+
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.ARTIFACT_FAILURE
+    assert result.manifest.failure.stage == StageMarker.export
+    assert result.manifest.training_success_evidence is None
+
+
+def test_training_runner_rejects_linked_output_root_before_invoking_trainer(
+    tmp_path, monkeypatch
+):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    Path("output").symlink_to(outside, target_is_directory=True)
+    invoked = False
+
+    def _unexpected(*_args, **_kwargs):
+        nonlocal invoked
+        invoked = True
+        raise AssertionError("trainer must not run through a linked output root")
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _unexpected)
+    result = execute_run(
+        demo_training_plan(),
+        TrainingRunner(cpu_toy=True),
+        run_id="run-linked-output",
+        clock=_CLOCK,
+    )
+
+    assert invoked is False
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.ARTIFACT_FAILURE
+    assert "link-like" in result.manifest.failure.message
 
 
 def test_training_runner_refuses_unexpected_intermediate_checkpoint_output(monkeypatch):
@@ -221,7 +455,7 @@ def test_training_runner_refuses_a_readable_adapter_outside_the_run_scope(monkey
 
     assert result.manifest.state == "failed"
     assert result.manifest.failure is not None
-    assert result.manifest.failure.taxonomy == FailureTaxonomy.CHECKPOINT_FAILURE
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.ARTIFACT_FAILURE
     assert "run-scoped" in result.manifest.failure.message
     assert result.manifest.artifact_ids == []
 
@@ -248,9 +482,193 @@ def test_training_runner_refuses_descriptor_only_adapter_output(monkeypatch):
 
     assert result.manifest.state == "failed"
     assert result.manifest.failure is not None
-    assert result.manifest.failure.taxonomy == FailureTaxonomy.CHECKPOINT_FAILURE
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.ARTIFACT_FAILURE
     assert "weight bytes" in result.manifest.failure.message
     assert result.manifest.artifact_ids == []
+
+
+def test_training_runner_refuses_missing_execution_evidence(monkeypatch):
+    def _missing_evidence(config, *, progress_callback=None, stage_callback=None, **_kw):
+        if stage_callback is not None:
+            stage_callback("optimizer_created", "synthetic")
+        if progress_callback is not None:
+            progress_callback(1, 2, 0.9)
+            progress_callback(2, 2, 0.5)
+        adapter = _write_fake_adapter(config.output_dir)
+        return TrainResult(
+            output_dir=config.output_dir,
+            adapter_path=adapter,
+            base_model=config.base_model,
+            cpu_toy=True,
+            steps=2,
+        )
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _missing_evidence)
+    result = execute_run(demo_training_plan(), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.UPDATE_FAILURE
+    assert result.manifest.failure.stage == StageMarker.optimizer_step
+
+
+def test_supervisor_rejects_loss_or_optimizer_event_evidence_mismatch(monkeypatch):
+    def _mismatched(config, *, progress_callback=None, stage_callback=None, **_kw):
+        if stage_callback is not None:
+            stage_callback("optimizer_created", "first")
+            stage_callback("optimizer_created", "duplicate")
+        if progress_callback is not None:
+            progress_callback(1, 2, 0.9)
+            progress_callback(2, 2, 0.4)
+        adapter = _write_fake_adapter(config.output_dir)
+        return TrainResult(
+            output_dir=config.output_dir,
+            adapter_path=adapter,
+            base_model=config.base_model,
+            cpu_toy=True,
+            steps=2,
+            execution_evidence=_execution_evidence(2, {1: 0.9, 2: 0.5}),
+        )
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _mismatched)
+    result = execute_run(demo_training_plan(), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.OPTIMIZER_FAILURE
+    assert result.manifest.failure.stage == StageMarker.optimizer_created
+
+
+def test_supervisor_rejects_step_loss_values_that_disagree_with_terminal_evidence(monkeypatch):
+    def _mismatched(config, *, progress_callback=None, stage_callback=None, **_kw):
+        if stage_callback is not None:
+            stage_callback("optimizer_created", "observed")
+        if progress_callback is not None:
+            progress_callback(1, 2, 0.9)
+            progress_callback(2, 2, 0.4)
+        adapter = _write_fake_adapter(config.output_dir)
+        return TrainResult(
+            output_dir=config.output_dir,
+            adapter_path=adapter,
+            base_model=config.base_model,
+            cpu_toy=True,
+            steps=2,
+            execution_evidence=_execution_evidence(2, {1: 0.9, 2: 0.5}),
+        )
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _mismatched)
+    result = execute_run(demo_training_plan(), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.LOSS_EVIDENCE_FAILURE
+    assert result.manifest.failure.stage == StageMarker.loss
+
+
+@pytest.mark.parametrize("loss_before_optimizer", [True, False])
+def test_supervisor_rejects_reversed_or_lossless_completed_step_events(
+    monkeypatch, loss_before_optimizer
+):
+    def _invalid(config, *, progress_callback=None, stage_callback=None, **_kw):
+        if loss_before_optimizer and progress_callback is not None:
+            progress_callback(1, 1, 0.5)
+        if stage_callback is not None:
+            stage_callback("optimizer_created", "observed")
+        if progress_callback is not None:
+            if not loss_before_optimizer:
+                progress_callback(1, 1, None)
+                progress_callback(1, 1, 0.5)
+            progress_callback(2, 2, 0.4)
+        adapter = _write_fake_adapter(config.output_dir)
+        return TrainResult(
+            output_dir=config.output_dir,
+            adapter_path=adapter,
+            base_model=config.base_model,
+            cpu_toy=True,
+            steps=2,
+            execution_evidence=_execution_evidence(2, {1: 0.5, 2: 0.4}),
+        )
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _invalid)
+    result = execute_run(demo_training_plan(), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.LOSS_EVIDENCE_FAILURE
+    assert result.manifest.failure.stage == StageMarker.loss
+
+
+def test_event_sink_failure_cannot_rewrite_a_success(monkeypatch):
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _fake_run_training(2))
+
+    def _raising_sink(_event):
+        raise RuntimeError("observer failed")
+
+    result = execute_run(
+        demo_training_plan(), TrainingRunner(cpu_toy=True), sink=_raising_sink, clock=_CLOCK
+    )
+    assert result.manifest.state == "succeeded"
+    assert result.manifest.notes == "event sink failures were isolated: RuntimeError"
+    assert sum(event.event_type == "terminal" for event in result.events) == 1
+
+
+def test_artifact_manifest_persistence_fails_before_success_manifest(
+    tmp_path, monkeypatch
+):
+    from corpus_studio.platform import supervisor as supervisor_module
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _fake_run_training(2))
+    monkeypatch.setattr(
+        supervisor_module,
+        "write_artifact_manifest",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
+    )
+    result = execute_run(
+        demo_training_plan(),
+        TrainingRunner(cpu_toy=True),
+        out_dir=tmp_path / "records",
+        clock=_CLOCK,
+    )
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.ARTIFACT_FAILURE
+    assert result.manifest.failure.stage == StageMarker.export
+    persisted = P.RunManifest.model_validate_json(
+        (tmp_path / "records" / "runs" / result.manifest.run_id / "RunManifest.json").read_text()
+    )
+    assert persisted.state == "failed"
+    assert persisted.training_success_evidence is None
+
+
+def test_artifact_gate_failure_cannot_promote_measured_fit(monkeypatch):
+    from corpus_studio.platform import supervisor as supervisor_module
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _fake_run_training(2))
+    real_builder = supervisor_module.build_artifact_manifest
+
+    def _modified_manifest(**kwargs):
+        manifest = real_builder(**kwargs)
+        assert manifest.integrity is not None
+        return manifest.model_copy(
+            update={
+                "integrity": manifest.integrity.model_copy(
+                    update={"current_integrity": "modified"}
+                )
+            }
+        )
+
+    monkeypatch.setattr(supervisor_module, "build_artifact_manifest", _modified_manifest)
+    result = execute_run(
+        demo_training_plan(),
+        TrainingRunner(
+            cpu_toy=True,
+            memory_sampler=lambda: _sample(peak_reserved=6 * GB),
+        ),
+        clock=_CLOCK,
+    )
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.ARTIFACT_FAILURE
+    assert result.manifest.failure.stage == StageMarker.export
+    assert result.manifest.final_fit is not None
+    assert result.manifest.final_fit.classification.value == "NATIVE_UNPROVEN"
+    assert result.manifest.training_success_evidence is None
 
 
 def test_max_steps_override_is_refused_without_calling_the_trainer(monkeypatch):
@@ -477,6 +895,7 @@ def test_runner_streams_setup_stage_events_from_the_trainer(monkeypatch):
             base_model=config.base_model,
             cpu_toy=True,
             steps=1,
+            execution_evidence=_execution_evidence(1, {1: 0.5}),
         )
 
     monkeypatch.setattr("corpus_studio.training.trainer.run_training", _trainer_with_stages)
@@ -490,7 +909,7 @@ def test_runner_streams_setup_stage_events_from_the_trainer(monkeypatch):
 def test_runner_records_the_measured_fit_from_the_watchdog(monkeypatch):
     # The per-step progress callback samples memory; the observed peak reconciles to a MEASURED fit on
     # the manifest — a run that stayed on-device earns NATIVE_SAFE (an estimate never does).
-    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _fake_run_training(3))
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _fake_run_training(2))
     runner = TrainingRunner(cpu_toy=True, memory_sampler=lambda: _sample(peak_reserved=6 * GB))
     result = execute_run(demo_training_plan(), runner, clock=_CLOCK)
     assert result.manifest.state == "succeeded"
@@ -521,9 +940,13 @@ def test_runner_does_not_abort_on_a_stall_and_warns_instead(monkeypatch):
     # returns WITHOUT another beat, so watchdog.stalled is still set at the end.
     import time
 
-    def _stalling_trainer(config, *, progress_callback=None, **_kw):
+    def _stalling_trainer(config, *, progress_callback=None, stage_callback=None, **_kw):
+        if stage_callback is not None:
+            stage_callback("optimizer_created", "observed the real optimizer")
+        losses = {1: 0.9, 2: 0.8}
         if progress_callback is not None:
-            progress_callback(1, 3, 0.9)  # one beat, then go silent
+            for step in range(1, 3):
+                progress_callback(step, 2, losses[step])
         time.sleep(0.4)  # > heartbeat_timeout_s; the watchdog thread trips (heads-up only, no cancel)
         adapter_path = _write_fake_adapter(config.output_dir)
         return TrainResult(
@@ -531,7 +954,8 @@ def test_runner_does_not_abort_on_a_stall_and_warns_instead(monkeypatch):
             adapter_path=adapter_path,
             base_model=config.base_model,
             cpu_toy=True,
-            steps=3,
+            steps=2,
+            execution_evidence=_execution_evidence(2, losses),
         )
 
     monkeypatch.setattr("corpus_studio.training.trainer.run_training", _stalling_trainer)
@@ -558,6 +982,8 @@ def test_runner_records_the_measured_fit_even_on_failure(monkeypatch):
     runner = TrainingRunner(cpu_toy=True, memory_sampler=lambda: _sample(peak_reserved=6 * GB))
     result = execute_run(demo_training_plan(), runner, clock=_CLOCK)
     assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.stage == StageMarker.loss
     assert result.manifest.final_fit is not None  # the measured peak survived the failure
     assert result.manifest.final_fit.estimated_peak_bytes == 6 * GB
     # HONESTY: a FAILED run must NOT be stamped NATIVE_SAFE "fit proven" from its partial peak — the
@@ -631,7 +1057,7 @@ def test_runner_survives_a_raising_memory_sampler(monkeypatch):
 
 def test_missing_runtime_is_environment_failure(monkeypatch):
     def _raise(config, *, progress_callback=None, **_kw):
-        raise TrainerError("CPU toy training needs torch + transformers + …")
+            raise TrainerEnvironmentError("CPU toy training needs torch + transformers + …")
 
     monkeypatch.setattr("corpus_studio.training.trainer.run_training", _raise)
     result = execute_run(demo_training_plan(), TrainingRunner(cpu_toy=True), clock=_CLOCK)
@@ -639,7 +1065,7 @@ def test_missing_runtime_is_environment_failure(monkeypatch):
     assert result.manifest.state == "failed"
     assert result.manifest.failure is not None
     assert result.manifest.failure.taxonomy == FailureTaxonomy.ENVIRONMENT_FAILURE
-    assert result.manifest.failure.stage == StageMarker.env_loaded
+    assert result.manifest.failure.stage == StageMarker.process_start
     assert "train-check" in (result.manifest.failure.remediation or "")
 
 
@@ -657,6 +1083,34 @@ def test_placement_deviation_is_structured_and_fails_closed(monkeypatch):
     assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
     assert result.manifest.failure.stage == StageMarker.placement_deviation
     assert any(event.stage == StageMarker.placement_deviation for event in result.events)
+
+
+@pytest.mark.parametrize(
+    ("taxonomy", "stage"),
+    [
+        (FailureTaxonomy.GRADIENT_FAILURE, StageMarker.backward),
+        (FailureTaxonomy.NUMERICAL_FAILURE, StageMarker.loss),
+        (FailureTaxonomy.LOSS_EVIDENCE_FAILURE, StageMarker.loss),
+        (FailureTaxonomy.OPTIMIZER_FAILURE, StageMarker.optimizer_created),
+        (FailureTaxonomy.UPDATE_FAILURE, StageMarker.optimizer_step),
+    ],
+)
+def test_training_evidence_failures_retain_exact_taxonomy_and_stage(
+    monkeypatch, taxonomy, stage
+):
+    def _raise(config, **_kw):
+        raise TrainingEvidenceError(
+            "synthetic evidence failure",
+            taxonomy=taxonomy,
+            stage=stage,
+        )
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _raise)
+    result = execute_run(demo_training_plan(), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == taxonomy
+    assert result.manifest.failure.stage == stage
 
 
 def test_cancellation_during_training_yields_cancelled(monkeypatch):

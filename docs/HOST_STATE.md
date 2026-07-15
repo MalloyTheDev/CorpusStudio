@@ -1,7 +1,8 @@
 # Host State — Native-Linux RTX 5070 Workstation
 
-**Last verified:** 2026-07-15 (matched manager-1.2 math/flash environment health and bounded
-production-path smoke evidence; legacy environment, GPU, and paths were checked 2026-07-14).
+**Last verified:** 2026-07-15 (matched manager-1.2 math/flash evidence plus the later preserved,
+unexecuted v3 candidates were audited at the training-success checkpoint; legacy environment, GPU,
+and paths were checked 2026-07-14).
 
 This file records the *verified* runtime facts of the machine CorpusStudio currently runs
 on. It supersedes the Windows `C:`/`F:` host descriptions in older docs for **"where you
@@ -94,10 +95,10 @@ probed on this host.
 replace or reinterpret the legacy environment above. It is `HARDWARE_VERIFIED` for one complete
 BF16-configured NF4 + double-quant + QLoRA + **math-only SDPA** + AdamW + adapter-reload tuple. Its
 sealed manager-1.1 evidence predates the explicit `forward_autocast` field, so it is not retroactively
-an observed BF16-activation/autocast claim. Manager 1.2 preserves that exact narrow identity for
-rollback health checks; all new readiness creation uses the stronger measured configuration. Treat it
-as the flash-work safety baseline and rollback path; do not modify, recreate, reseal, or delete it
-while developing flash readiness.
+an observed BF16-activation/autocast claim. Its exact narrow identity remains readable historical
+rollback evidence. Manager 1.3 does not grant it a new health/planning claim without a replacement
+lock carrying complete all-row RECORD counts. Do not modify, recreate, reseal, or delete it while
+developing flash readiness.
 
 Recorded identities for recovery:
 
@@ -212,6 +213,39 @@ wrong-device materialized gradients. That code correction is unit evidence only 
 new immutable environments/locks, fresh RunPlans, and separately approved smokes are produced. The
 two failed plans and runs are preserved and must not be retried or reused. No real optimizer step has
 yet passed through `platform-run`, and sequence length 4096 remains unverified.
+
+### Pre-checkpoint manager-1.2 v3 candidates (preserve; do not admit)
+
+Before the training-success audit checkpoint, a worker wheel from repository commit
+`16ef6e95722ec3988ee8826b45333c9356ef76f9`, two manager-1.2 v3 environments, and one normalized
+math/flash RunPlan pair were created. The plans were never dispatched: there is no run ID, run output,
+model load, adapter insertion, optimizer step, or GPU-workload result for this pair. They remain
+read-only reconstruction evidence and must not be deleted, mutated, relabeled, retried, or reused.
+
+| Item | Math | Flash |
+|---|---|---|
+| Environment | `backend-corpus-studio-research-math-v3` | `backend-corpus-studio-research-flash-v3` |
+| Lock hash | `cd86808ce8e96533b6d6d3a0b4c0472e2e6e27ecf8d25bad916a9a08d4e6887d` | `a2b839b160e4676d968cdd006040dde6cce756c30f51a2c92ef2b1442132aa2a` |
+| Plan ID | `plan-019f644b-a3c2-7373-abc0-39a0f7d753eb` | `plan-019f644c-511c-7008-a21b-24586c6b4637` |
+| Plan hash | `60b390c3e7fa0d0dd6276854be4266c67f29e71b630653ebd1b7a75eeaa2506a` | `cc4856f75f251b8d26cb86e50af7874c21abce1fde2708f183ff9a3ab2a47ed7` |
+| Execution hash | `4453d60d23ecd7bcd3811a616a1381b51e68e6d941bfcaa673c9895b79a854c5` | `fe2d99cea56a35a14da71e1352d0b977282d6865a73dbc41861d496ceec6fa53` |
+
+Both environments used `corpus-studio-engine==1.3.0` wheel SHA-256
+`6ecc82595af761142b723017a31b980241fe6ef4afebf0a2223f90b8bcef724d` (METADATA SHA-256
+`c8eb3e03d457da4495545bc0bb355131a02d3d48f397bc4a9c07fe1cff9704fe`). Evidence is under
+`/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-research-matched-v3/` and
+`/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v3/20260715T052743Z/`.
+
+The old investigation correctly found no `record_integrity=unknown` or null RECORD count in the
+authoritative v3 plan bundle under manager-1.2 semantics; unknown fields occurred only in preserved
+version-only probe journals and were not admitted. The audit checkpoint nevertheless found a stricter
+integrity gap: all 84 installed packages in each v3 lock claimed `verified` while
+`record_verified_entries < record_entries`. Manager 1.3 tags the new meaning explicitly with
+`record_count_semantics="all_record_rows_v2"` and requires positive equality with the installed-file
+count. Missing semantics keeps the old documents hash-verifiable, but health refuses them without
+rewriting their historical state. Consequently these locks and plans cannot authorize new work. A post-merge
+worker wheel, new immutable environment IDs/locks, and completely fresh RunPlans are required before
+any separately approved smoke.
 
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 

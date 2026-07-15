@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 import hashlib
 import json
+import math
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
 
@@ -3529,7 +3530,16 @@ class TrainerInterfacePolicy(ContractModel):
     required_sft_config_fields: list[str] = Field(min_length=1)
     sequence_length_field: Literal["max_seq_length", "max_length"]
     tokenizer_parameter: Literal["tokenizer", "processing_class"]
-    logging_steps: int = Field(default=1, ge=1)
+    # Null/missing is retained only so preserved pre-success-evidence plans remain hash-verifiable
+    # for inspection. Every new planner-produced policy sets both additive fields explicitly, and
+    # execution refuses the legacy form.
+    logging_strategy: Literal["steps"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    logging_steps: Literal[1] = 1
+    logging_nan_inf_filter: Literal[False] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     report_to: list[str] = Field(default_factory=list)
     disable_tqdm: bool = True
 
@@ -3544,6 +3554,13 @@ class TrainerInterfacePolicy(ContractModel):
             raise ValueError("required trainer fields must be sorted and unique")
         if self.sequence_length_field not in self.required_sft_config_fields:
             raise ValueError("the exact sequence-length field must be required")
+        logging_fields = {"logging_strategy", "logging_steps", "logging_nan_inf_filter"}
+        if (self.logging_strategy is None) != (self.logging_nan_inf_filter is None):
+            raise ValueError("the additive exact loss-logging policy must be complete")
+        if self.logging_strategy is not None and not logging_fields.issubset(
+            self.required_sft_config_fields
+        ):
+            raise ValueError("the exact per-step loss logging fields must be required")
         if self.report_to != sorted(set(self.report_to)):
             raise ValueError("report destinations must be sorted and unique")
         return self
@@ -4217,6 +4234,9 @@ class ArtifactIntegrity(ContractModel):
 
     cheap_fingerprint: str | None = None
     content_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    # Adapter manifests bind their semantics-bearing adapter_config.json independently from the
+    # weight payload. Older/non-adapter artifacts remain valid without this field.
+    metadata_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
     current_integrity: Literal["ok", "missing", "modified", "unknown"] = "unknown"
 
 
@@ -4359,6 +4379,13 @@ class EventMetrics(ContractModel):
             raise ValueError("event parameter observations must be sorted by unique observation_id")
         return values
 
+    @field_validator("loss")
+    @classmethod
+    def _finite_loss(cls, value: float | None) -> float | None:
+        if value is not None and not math.isfinite(value):
+            raise ValueError("event loss must be finite")
+        return value
+
 
 class RunEvent(ContractModel):
     """One envelope in the structured telemetry stream a worker emits for a run — the RunEvent half
@@ -4423,6 +4450,163 @@ class RunReproducibility(ContractModel):
     python_version: str = ""
 
 
+class OptimizerStepLossEvidence(ContractModel):
+    """One finite loss bound to exactly one completed optimizer step."""
+
+    optimizer_step: int = Field(ge=1)
+    loss: float
+
+    @field_validator("loss", mode="before")
+    @classmethod
+    def _strict_numeric_loss(cls, value: object) -> object:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("optimizer-step loss evidence must be a JSON number")
+        return value
+
+    @field_validator("loss")
+    @classmethod
+    def _finite_loss(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("optimizer-step loss evidence must be finite")
+        return value
+
+
+class TrainableStateChangeEvidence(ContractModel):
+    """Canonical before/after identity for the complete trainable adapter state."""
+
+    hash_algorithm: Literal["sha256-trainable-state-v1"] = "sha256-trainable-state-v1"
+    before_sha256: str = Field(pattern=SHA256_PATTERN)
+    after_sha256: str = Field(pattern=SHA256_PATTERN)
+    trainable_tensor_count: int = Field(ge=1)
+    trainable_tensor_names: list[str] = Field(min_length=1)
+    changed_tensor_count: int = Field(ge=1)
+    changed_tensor_names: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _proved_change(self) -> TrainableStateChangeEvidence:
+        if self.before_sha256 == self.after_sha256:
+            raise ValueError("trainable state hashes must differ after a successful update")
+        if self.trainable_tensor_names != sorted(set(self.trainable_tensor_names)):
+            raise ValueError("trainable tensor names must be sorted and unique")
+        if self.trainable_tensor_count != len(self.trainable_tensor_names):
+            raise ValueError("trainable tensor count must match its complete name inventory")
+        if self.changed_tensor_names != sorted(set(self.changed_tensor_names)):
+            raise ValueError("changed trainable tensor names must be sorted and unique")
+        if self.changed_tensor_count != len(self.changed_tensor_names):
+            raise ValueError("changed trainable tensor count must match its name inventory")
+        if self.changed_tensor_count > self.trainable_tensor_count:
+            raise ValueError("changed trainable tensor count exceeds the trainable inventory")
+        if not set(self.changed_tensor_names).issubset(self.trainable_tensor_names):
+            raise ValueError("changed trainable tensor names must belong to the trainable inventory")
+        return self
+
+
+class GradientCoverageEvidence(ContractModel):
+    """Observed materialized adapter gradients without claiming unused tensors had gradients."""
+
+    eligible_tensor_count: int = Field(ge=1)
+    eligible_tensor_names: list[str] = Field(min_length=1)
+    observed_tensor_count: int = Field(ge=1)
+    observed_tensor_names: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _honest_coverage(self) -> GradientCoverageEvidence:
+        if self.eligible_tensor_names != sorted(set(self.eligible_tensor_names)):
+            raise ValueError("eligible gradient tensor names must be sorted and unique")
+        if self.eligible_tensor_count != len(self.eligible_tensor_names):
+            raise ValueError("eligible gradient count must match its complete name inventory")
+        if self.observed_tensor_names != sorted(set(self.observed_tensor_names)):
+            raise ValueError("observed gradient tensor names must be sorted and unique")
+        if self.observed_tensor_count != len(self.observed_tensor_names):
+            raise ValueError("observed gradient count must match its name inventory")
+        if self.observed_tensor_count > self.eligible_tensor_count:
+            raise ValueError("observed gradient count exceeds the eligible trainable inventory")
+        if not set(self.observed_tensor_names).issubset(self.eligible_tensor_names):
+            raise ValueError("observed gradient names must belong to the eligible inventory")
+        return self
+
+
+class AdapterExportStateEvidence(ContractModel):
+    """Canonical identity for the exact PEFT state expected in adapter_model.safetensors."""
+
+    hash_algorithm: Literal["sha256-safetensors-tensor-state-v1"] = (
+        "sha256-safetensors-tensor-state-v1"
+    )
+    before_sha256: str = Field(pattern=SHA256_PATTERN)
+    after_sha256: str = Field(pattern=SHA256_PATTERN)
+    tensor_count: int = Field(ge=1)
+    tensor_names: list[str] = Field(min_length=1)
+    changed_tensor_count: int = Field(ge=1)
+    changed_tensor_names: list[str] = Field(min_length=1)
+    adapter_config_semantic_sha256: str = Field(pattern=SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def _proved_export_change(self) -> AdapterExportStateEvidence:
+        if self.before_sha256 == self.after_sha256:
+            raise ValueError("adapter export state must change during successful training")
+        if self.tensor_names != sorted(set(self.tensor_names)):
+            raise ValueError("adapter export tensor names must be sorted and unique")
+        if self.tensor_count != len(self.tensor_names):
+            raise ValueError("adapter export tensor count must match its complete name inventory")
+        if self.changed_tensor_names != sorted(set(self.changed_tensor_names)):
+            raise ValueError("changed adapter export names must be sorted and unique")
+        if self.changed_tensor_count != len(self.changed_tensor_names):
+            raise ValueError("changed adapter export count must match its name inventory")
+        if not set(self.changed_tensor_names).issubset(self.tensor_names):
+            raise ValueError("changed adapter export names must belong to the export inventory")
+        return self
+
+
+class TrainingExecutionEvidence(ContractModel):
+    """Trainer-side proof produced before adapter export is admitted as a success."""
+
+    trainable_state: TrainableStateChangeEvidence
+    adapter_export_state: AdapterExportStateEvidence
+    gradient_coverage: GradientCoverageEvidence
+    optimizer_created: Literal[True]
+    completed_optimizer_steps: int = Field(ge=1)
+    step_losses: list[OptimizerStepLossEvidence] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _one_loss_per_completed_step(self) -> TrainingExecutionEvidence:
+        observed_steps = [item.optimizer_step for item in self.step_losses]
+        expected_steps = list(range(1, self.completed_optimizer_steps + 1))
+        if observed_steps != expected_steps:
+            raise ValueError(
+                "step_losses must contain exactly one ordered finite loss for every completed step"
+            )
+        changed = set(self.trainable_state.changed_tensor_names)
+        observed_gradients = set(self.gradient_coverage.observed_tensor_names)
+        if (
+            self.gradient_coverage.eligible_tensor_names
+            != self.trainable_state.trainable_tensor_names
+        ):
+            raise ValueError(
+                "gradient eligibility must equal the complete trainable-state inventory"
+            )
+        if not changed.intersection(observed_gradients):
+            raise ValueError(
+                "at least one changed trainable tensor must have an observed materialized gradient"
+            )
+        if self.adapter_export_state.tensor_count != self.trainable_state.trainable_tensor_count:
+            raise ValueError(
+                "adapter export tensor count must equal the complete trainable-state inventory"
+            )
+        return self
+
+
+class TrainingSuccessEvidence(ContractModel):
+    """All gates required before a resolved run or measured fit may be called successful."""
+
+    execution: TrainingExecutionEvidence
+    output_path_verified: Literal[True]
+    adapter_bytes_verified: Literal[True]
+    artifact_integrity_verified: Literal[True]
+    adapter_safetensors_sha256: str = Field(pattern=SHA256_PATTERN)
+    adapter_config_sha256: str = Field(pattern=SHA256_PATTERN)
+    measured_peak: MemoryMetrics | None = None
+
+
 class RunManifest(ContractModel):
     """A single run INSTANCE: the crash-safe durable record of one execution of a RunPlan.
     Formalizes run_registry.TrainingRunRecord almost field-for-field + its state machine (terminal =
@@ -4454,6 +4638,7 @@ class RunManifest(ContractModel):
     failure: FailureRecord | None = None
     # Post-run fit reconciliation from observed peak memory (planned NATIVE_SAFE, or a spill?).
     final_fit: FitClassification | None = None
+    training_success_evidence: TrainingSuccessEvidence | None = None
     notes: str = ""
 
     @field_validator("parameter_accounting_refs")
@@ -4470,6 +4655,24 @@ class RunManifest(ContractModel):
         if keys != sorted(set(keys)):
             raise ValueError("parameter_accounting_refs must be sorted and unique")
         return values
+
+    @model_validator(mode="after")
+    def _success_evidence_is_terminal_only(self) -> RunManifest:
+        if self.state != "succeeded" and self.training_success_evidence is not None:
+            raise ValueError("only a succeeded run may carry training success evidence")
+        if (
+            self.state != "succeeded"
+            and self.final_fit is not None
+            and self.final_fit.classification in {FitClass.NATIVE_SAFE, FitClass.NATIVE_TIGHT}
+        ):
+            raise ValueError("a non-succeeded run cannot carry a proven native fit")
+        if (
+            self.final_fit is not None
+            and self.final_fit.classification in {FitClass.NATIVE_SAFE, FitClass.NATIVE_TIGHT}
+            and self.training_success_evidence is None
+        ):
+            raise ValueError("a proven native fit requires complete training success evidence")
+        return self
 
 
 # --------------------------------------------------------------------------------------------------

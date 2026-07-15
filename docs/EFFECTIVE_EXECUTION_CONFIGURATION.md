@@ -68,7 +68,10 @@ Before model loading, the execution path:
    stabilized bytes rather than reopened or rehashed.
 3. Verifies the sealed package versions and formatter/chat-template identity. Managed planning also
    requires every trainer package copied into the configuration to retain its sealed artifact,
-   RECORD, and installed-tree integrity evidence; version-only unknown integrity is refused.
+   RECORD, and installed-tree integrity evidence; version-only unknown integrity is refused. A
+   new complete package uses `record_count_semantics="all_record_rows_v2"` and must have positive counts with
+   `record_verified_entries == record_entries == installed_file_count`, no failed row, and both the
+   RECORD-text and installed-file-tree SHA-256 identities.
 4. Applies the exact Flash, memory-efficient, and math SDPA toggles and checks the observed global
    state; SDPA paths run a tiny forward/backward with only the required kernel enabled.
 5. Loads the model with the immutable revision, `trust_remote_code=False`, safetensors-only policy,
@@ -77,10 +80,13 @@ Before model loading, the execution path:
    after third-party loading.
 7. After PEFT attachment, observes every parameter device, base storage/NF4 identity,
    dequantization dtype, and trainable master dtype; a post-accumulation hook verifies each
-   materialized leaf gradient (not an earlier autocast edge tensor), and optimizer-state dtype/device
-   guards run when those tensors materialize. A mismatch becomes a structured `placement_deviation`
-   or unsupported-configuration failure.
+   materialized leaf gradient (not an earlier autocast edge tensor), records observed versus eligible
+   coverage without claiming every eligible tensor received a gradient, and requires at least one
+   changed adapter tensor to intersect that observed set. Optimizer-state dtype/device guards run
+   when those tensors materialize. A mismatch retains a structured taxonomy and last verified stage.
 8. Requires the exact sealed TRL configuration surface; semantic fields are never silently removed.
+   In particular, `logging_strategy="steps"`, `logging_steps=1`, and
+   `logging_nan_inf_filter=false` are part of the execution meaning.
 
 For subprocess runs, protocol 2.0 includes the execution-configuration hash in `run_accepted`. The
 parent compares it with the dispatched plan before accepting any run events.
@@ -88,8 +94,9 @@ parent compares it with the dispatched plan before accepting any run events.
 Resolved training setup is supervised separately from optimizer execution. Its first recognized
 setup stage starts one absolute `--preflight-timeout` budget; bounded same-thread dataset and
 tokenization progress plus actual tokenizer/model-load boundaries are observable but cannot extend
-that deadline. `optimizer_created` (or the first optimizer metric) permanently restores the ordinary
-`--timeout` silence rule. Heartbeats extend neither deadline.
+that deadline. `optimizer_created` is emitted only from `on_train_begin` after the callback observes
+a real optimizer (the first optimizer metric is still a defensive supervision boundary). That event
+permanently restores the ordinary `--timeout` silence rule. Heartbeats extend neither deadline.
 
 The runner lane is part of the execution boundary: an echo worker cannot consume a training plan.
 `platform-run` defaults to `--runner auto`, which selects the one lane allowed by the seal.
@@ -98,12 +105,20 @@ execution semantics, generate a new plan and therefore new hashes.
 
 Runner identity is derived from the pinned backend manifest, not accepted as an independent source of
 training authority. Echo is valid only for an explicit evaluation/demo plan bound to the echo backend.
-A resolved training success must contain optimizer-step evidence and an integrity-checked adapter.
-The runner also requires the trainer's reported output and adapter paths to equal the derived
-run-scoped path. A readable path elsewhere is a placement deviation, not an artifact. Promotion uses
-recognized adapter/model weight bytes only; descriptor files such as `adapter_config.json` cannot
-stand in for trained weights. The subprocess parent independently repeats the path and weight-hash
-checks on the terminal manifest.
+A resolved training success must contain canonical before/after hashes for the complete trainable
+adapter state with at least one changed tensor, observed materialized-gradient coverage, a verified
+real optimizer, exactly one finite loss for every completed optimizer step, and finite final adapter
+tensors. The exact post-training PEFT export state must equal the independently parsed Safetensors
+tensor state; the complete PEFT config semantics must equal parsed `adapter_config.json`. The runner
+also requires the trainer's reported output and adapter paths to equal the derived run-scoped path and
+rejects symlink/junction descendants, alternate weight payloads, and checkpoints. A readable path
+elsewhere is not an artifact. Promotion uses recognized adapter/model weight bytes only; a descriptor
+cannot stand in for trained weights, but its independent metadata hash is also mandatory. Artifact
+construction, content/config rehashing, durable manifest writes, and raw peak-memory reconciliation
+must pass before terminal success is released or measured fit receives `proven=true`. The subprocess
+parent independently reconstructs these gates and defers the child's terminal event until admission
+and persistence finish. A failed non-spilling run remains `NATIVE_UNPROVEN`; only observed spill may
+retain a spill classification.
 
 Every invocation mints a fresh UUIDv7 `run_id`, even when the same immutable plan is executed again.
 The sealed `output_dir` is an output **root** with `output_layout=run_scoped_v1`; the worker derives:
@@ -119,6 +134,9 @@ an intermediate checkpoint under the disabled policy fails the run. The final ad
 across executions; its artifact ID
 contains the run ID, `adapter` role, and weight-content-hash prefix. `platform-run --out RECORD_ROOT`
 persists the terminal records under `RECORD_ROOT/runs/<run-id>/`.
+
+Exact source-run/checkpoint identity, optimizer/scheduler/RNG/sampler state, and fresh resumed-run
+lineage for first-party runs expected to exceed 30 minutes are tracked separately in issue #440.
 
 The shipping WPF/Avalonia desktop no longer constructs or launches `train-run`. A first-party config
 export has no executable argv and directs the user to Platform planning. The retained low-level CLI
@@ -177,6 +195,10 @@ DeepSpeed NVMe offload, Linux FSDP, CPU/NVMe offload, bare-Linux FlashAttention 
 PCIe 4.0 NVMe throughput, sustained NVMe writes, real offload fit, and MoE runtime capability remain
 explicitly unverified.
 
-The next integrity slice should harden artifact/checkpoint inventories and managed environments:
-shared stable file inventories, installed-file verification against `RECORD`, a content-hashed worker
-wheel, inter-process lifecycle locks, and blue/green recreation.
+The repository now has CPU/unit evidence for the stricter training-success gate and complete RECORD
+count admission. It has not been exercised by another model load or GPU workload. The preserved
+manager-1.2 v3 wheel, environments, and unexecuted plans predate these semantics and cannot be reused
+for new admission. The next operational slice, after merge and separate approval, is a new audited
+worker wheel, new immutable environment IDs/locks, completely fresh matched plans, and at most one
+non-retried 0.5B math/flash smoke pair. The user's in-progress 500-output corpus and every 7B workload
+remain out of scope until the user marks them ready.

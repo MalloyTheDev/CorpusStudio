@@ -87,6 +87,11 @@ export type FailureTaxonomy =
   | "TIMEOUT"
   | "KERNEL_STALL"
   | "NUMERICAL_FAILURE"
+  | "GRADIENT_FAILURE"
+  | "LOSS_EVIDENCE_FAILURE"
+  | "OPTIMIZER_FAILURE"
+  | "UPDATE_FAILURE"
+  | "ARTIFACT_FAILURE"
   | "CHECKPOINT_FAILURE"
   | "ENVIRONMENT_FAILURE"
   | "UNSUPPORTED_CONFIGURATION"
@@ -242,13 +247,26 @@ export type Dependencies = string[];
 export type Direct = boolean | null;
 export type DirectUrl = string | null;
 export type Editable = boolean | null;
+/**
+ * Number of files sealed by installed_files_hash; equals record_entries when record_integrity is verified.
+ */
 export type InstalledFileCount = number | null;
 export type Installer = string | null;
 export type Name2 = string;
 export type NormalizedName = string;
+/**
+ * Explicit all-RECORD-row count meaning. Missing means preserved legacy hash-bearing-row counts and is not admissible for new health, planning, or execution.
+ */
+export type RecordCountSemantics = "all_record_rows_v2" | null;
+/**
+ * Number of regular installed files named by the distribution RECORD; positive when record_integrity is verified.
+ */
 export type RecordEntries = number | null;
 export type RecordFailedEntries = string[];
 export type RecordIntegrity = "verified" | "failed" | "missing" | "unknown";
+/**
+ * Verified row count under record_count_semantics; manager <=1.2 counted only hash-bearing rows, while all_record_rows_v2 equals record_entries.
+ */
 export type RecordVerifiedEntries = number | null;
 export type Requested = boolean | null;
 export type Source = "pypi" | "wheel" | "sdist" | "conda" | "vcs" | "local" | "unknown";
@@ -503,7 +521,9 @@ export type MaxSequenceLen = number;
 export type Packing1 = boolean;
 export type TruncationAllowed = boolean;
 export type DisableTqdm = boolean;
-export type LoggingSteps = number;
+export type LoggingNanInfFilter = false | null;
+export type LoggingSteps = 1;
+export type LoggingStrategy = "steps" | null;
 /**
  * @minItems 1
  */
@@ -700,6 +720,7 @@ export type CreatedAt1 = string | null;
 export type CheapFingerprint = string | null;
 export type ContentHash = string | null;
 export type CurrentIntegrity = "ok" | "missing" | "modified" | "unknown";
+export type MetadataHash = string | null;
 export type Kind2 = "adapter" | "checkpoint" | "merged_model" | "gguf" | "onnx" | "quantized" | "other";
 export type Notes3 = string;
 export type Path2 = string;
@@ -766,6 +787,56 @@ export type RunId7 = string;
 export type StartedAt = string | null;
 export type State = "prepared" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
 export type Target = string;
+export type AdapterBytesVerified = true;
+export type AdapterConfigSha256 = string;
+export type AdapterSafetensorsSha256 = string;
+export type ArtifactIntegrityVerified = true;
+export type AdapterConfigSemanticSha256 = string;
+export type AfterSha256 = string;
+export type BeforeSha256 = string;
+export type ChangedTensorCount = number;
+/**
+ * @minItems 1
+ */
+export type ChangedTensorNames = [string, ...string[]];
+export type HashAlgorithm = "sha256-safetensors-tensor-state-v1";
+export type TensorCount = number;
+/**
+ * @minItems 1
+ */
+export type TensorNames = [string, ...string[]];
+export type CompletedOptimizerSteps = number;
+export type EligibleTensorCount = number;
+/**
+ * @minItems 1
+ */
+export type EligibleTensorNames = [string, ...string[]];
+export type ObservedTensorCount = number;
+/**
+ * @minItems 1
+ */
+export type ObservedTensorNames = [string, ...string[]];
+export type OptimizerCreated = true;
+/**
+ * @minItems 1
+ */
+export type StepLosses = [OptimizerStepLossEvidence, ...OptimizerStepLossEvidence[]];
+export type Loss1 = number;
+export type OptimizerStep2 = number;
+export type AfterSha2561 = string;
+export type BeforeSha2561 = string;
+export type ChangedTensorCount1 = number;
+/**
+ * @minItems 1
+ */
+export type ChangedTensorNames1 = [string, ...string[]];
+export type HashAlgorithm1 = "sha256-trainable-state-v1";
+export type TrainableTensorCount = number;
+/**
+ * @minItems 1
+ */
+export type TrainableTensorNames = [string, ...string[]];
+export type OutputPathVerified = true;
 export type UpdatedAt1 = string;
 export type CorrelationId = string | null;
 export type Direction = "core_to_worker" | "worker_to_core";
@@ -985,6 +1056,7 @@ export interface PackageLock {
   installer?: Installer;
   name: Name2;
   normalized_name?: NormalizedName;
+  record_count_semantics?: RecordCountSemantics;
   record_entries?: RecordEntries;
   record_failed_entries?: RecordFailedEntries;
   record_integrity?: RecordIntegrity;
@@ -1418,7 +1490,9 @@ export interface SequenceSpec {
  */
 export interface TrainerInterfacePolicy {
   disable_tqdm?: DisableTqdm;
+  logging_nan_inf_filter?: LoggingNanInfFilter;
   logging_steps?: LoggingSteps;
+  logging_strategy?: LoggingStrategy;
   package_versions: PackageVersions;
   report_to?: ReportTo;
   required_sft_config_fields: RequiredSftConfigFields;
@@ -1653,6 +1727,7 @@ export interface ArtifactIntegrity {
   cheap_fingerprint?: CheapFingerprint;
   content_hash?: ContentHash;
   current_integrity?: CurrentIntegrity;
+  metadata_hash?: MetadataHash;
 }
 /**
  * The outcome of evaluating a model/dataset, with an explicit as-served vs raw distinction so a
@@ -1758,6 +1833,7 @@ export interface RunManifest {
   started_at?: StartedAt;
   state?: State;
   target?: Target;
+  training_success_evidence?: TrainingSuccessEvidence | null;
   updated_at: UpdatedAt1;
 }
 export interface RunEvaluationLink {
@@ -1785,4 +1861,68 @@ export interface RunReproducibility {
   engine_version?: EngineVersion1;
   platform?: Platform;
   python_version?: PythonVersion1;
+}
+/**
+ * All gates required before a resolved run or measured fit may be called successful.
+ */
+export interface TrainingSuccessEvidence {
+  adapter_bytes_verified: AdapterBytesVerified;
+  adapter_config_sha256: AdapterConfigSha256;
+  adapter_safetensors_sha256: AdapterSafetensorsSha256;
+  artifact_integrity_verified: ArtifactIntegrityVerified;
+  execution: TrainingExecutionEvidence;
+  measured_peak?: MemoryMetrics | null;
+  output_path_verified: OutputPathVerified;
+}
+/**
+ * Trainer-side proof produced before adapter export is admitted as a success.
+ */
+export interface TrainingExecutionEvidence {
+  adapter_export_state: AdapterExportStateEvidence;
+  completed_optimizer_steps: CompletedOptimizerSteps;
+  gradient_coverage: GradientCoverageEvidence;
+  optimizer_created: OptimizerCreated;
+  step_losses: StepLosses;
+  trainable_state: TrainableStateChangeEvidence;
+}
+/**
+ * Canonical identity for the exact PEFT state expected in adapter_model.safetensors.
+ */
+export interface AdapterExportStateEvidence {
+  adapter_config_semantic_sha256: AdapterConfigSemanticSha256;
+  after_sha256: AfterSha256;
+  before_sha256: BeforeSha256;
+  changed_tensor_count: ChangedTensorCount;
+  changed_tensor_names: ChangedTensorNames;
+  hash_algorithm?: HashAlgorithm;
+  tensor_count: TensorCount;
+  tensor_names: TensorNames;
+}
+/**
+ * Observed materialized adapter gradients without claiming unused tensors had gradients.
+ */
+export interface GradientCoverageEvidence {
+  eligible_tensor_count: EligibleTensorCount;
+  eligible_tensor_names: EligibleTensorNames;
+  observed_tensor_count: ObservedTensorCount;
+  observed_tensor_names: ObservedTensorNames;
+}
+/**
+ * One finite loss bound to exactly one completed optimizer step.
+ */
+export interface OptimizerStepLossEvidence {
+  loss: Loss1;
+  optimizer_step: OptimizerStep2;
+}
+/**
+ * Canonical before/after identity for the complete trainable adapter state.
+ */
+export interface TrainableStateChangeEvidence {
+  after_sha256: AfterSha2561;
+  before_sha256: BeforeSha2561;
+  changed_tensor_count: ChangedTensorCount1;
+  changed_tensor_names: ChangedTensorNames1;
+  hash_algorithm?: HashAlgorithm1;
+  trainable_tensor_count: TrainableTensorCount;
+  trainable_tensor_names: TrainableTensorNames;
 }

@@ -15,7 +15,7 @@ import time
 import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 CONTRACT_VERSION = "1.0.0"
 
@@ -26,6 +26,7 @@ CONTRACT_VERSION_LITERAL = Literal["1.0.0"]
 HashAlgo = Literal["sha256", "sha256-ordered-exact-v1", "blake3", "none"]
 PackageSource = Literal["pypi", "wheel", "sdist", "conda", "vcs", "local", "unknown"]
 RecordIntegrity = Literal["verified", "failed", "missing", "unknown"]
+RecordCountSemantics = Literal["all_record_rows_v2"]
 LicenseSource = Literal["declared", "model_card", "dataset_card", "user_asserted", "unknown"]
 
 
@@ -62,6 +63,82 @@ class PackageLock(ContractModel):
     installed metadata dependency graph, not a second resolver.
     """
 
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {"record_integrity": {"const": "verified"}},
+                        "required": ["record_integrity"],
+                    },
+                    "then": {
+                        "required": [
+                            "version",
+                            "hash",
+                            "record_entries",
+                            "record_verified_entries",
+                            "record_failed_entries",
+                        ],
+                        "properties": {
+                            "version": {"not": {"type": "null"}},
+                            "hash": {
+                                "type": "object",
+                                "properties": {
+                                    "algo": {"const": "sha256"},
+                                    "value": {
+                                        "type": "string",
+                                        "pattern": SHA256_PATTERN,
+                                    },
+                                },
+                                "required": ["value"],
+                            },
+                            "record_entries": {"type": "integer", "minimum": 1},
+                            "record_verified_entries": {
+                                "type": "integer",
+                                "minimum": 1,
+                            },
+                            "record_failed_entries": {"maxItems": 0},
+                        },
+                    },
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "record_count_semantics": {"const": "all_record_rows_v2"}
+                        },
+                        "required": ["record_count_semantics"],
+                    },
+                    "then": {
+                        "properties": {
+                            "record_integrity": {"const": "verified"},
+                            "installed_files_hash": {
+                                "type": "object",
+                                "properties": {
+                                    "algo": {"const": "sha256"},
+                                    "value": {
+                                        "type": "string",
+                                        "pattern": SHA256_PATTERN,
+                                    },
+                                },
+                                "required": ["value"],
+                            },
+                            "installed_file_count": {
+                                "type": "integer",
+                                "minimum": 1,
+                            },
+                        },
+                        "required": [
+                            "record_integrity",
+                            "installed_files_hash",
+                            "installed_file_count",
+                        ],
+                    },
+                },
+            ]
+        },
+    )
+
     name: str = Field(min_length=1)
     # PEP 503-normalized name. Empty only for legacy records written before source-evidence v2.
     normalized_name: str = ""
@@ -81,17 +158,149 @@ class PackageLock(ContractModel):
     vcs_commit: str | None = None
     source_evidence_reason: str | None = None
     # RECORD metadata identity and installed-file verification are distinct claims. ``hash`` above
-    # remains the canonical digest of the RECORD text; these fields say whether every hash-bearing
-    # entry in that RECORD still matches the installed bytes.
+    # remains the canonical digest of the RECORD text. Manager <=1.2 used
+    # ``record_verified_entries`` for hash-bearing rows only; manager 1.3 explicitly tags the new
+    # all-row meaning so preserved evidence remains parseable without silently changing semantics.
     record_integrity: RecordIntegrity = "unknown"
-    record_entries: int | None = Field(default=None, ge=0)
-    record_verified_entries: int | None = Field(default=None, ge=0)
+    record_count_semantics: RecordCountSemantics | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Explicit all-RECORD-row count meaning. Missing means preserved legacy hash-bearing-row "
+            "counts and is not admissible for new health, planning, or execution."
+        ),
+    )
+    record_entries: int | None = Field(
+        default=None,
+        ge=0,
+        description="Number of regular installed files named by the distribution RECORD; positive when record_integrity is verified.",
+    )
+    record_verified_entries: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Verified row count under record_count_semantics; manager <=1.2 counted only "
+            "hash-bearing rows, while all_record_rows_v2 equals record_entries."
+        ),
+    )
     record_failed_entries: list[str] = Field(default_factory=list)
     # Deterministic digest of every regular file named by RECORD, including generated unhashed pyc
     # files. This complements (and does not replace) the distribution-provided RECORD digest above.
     installed_files_hash: HashRef | None = None
-    installed_file_count: int | None = Field(default=None, ge=0)
+    installed_file_count: int | None = Field(
+        default=None,
+        ge=0,
+        description="Number of files sealed by installed_files_hash; equals record_entries when record_integrity is verified.",
+    )
     dependencies: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _verified_record_evidence_is_complete(self) -> PackageLock:
+        """Validate complete new evidence while retaining truthful legacy documents.
+
+        RECORD legitimately leaves its own row and generated bytecode unhashed.  The manager still
+        reads and hashes those files into ``installed_files_hash``; consequently a successful row is
+        verified by either its RECORD digest or that installed-tree digest. Manager 1.3 labels that
+        changed counter meaning explicitly. A missing label retains the manager <=1.2 meaning for
+        reconstruction only; admission separately requires the v2 label.
+        """
+
+        entries = self.record_entries
+        verified = self.record_verified_entries
+        installed = self.installed_file_count
+        if entries is not None and verified is not None and verified > entries:
+            raise ValueError("record_verified_entries cannot exceed record_entries")
+        if self.record_count_semantics is not None and self.record_integrity != "verified":
+            raise ValueError("all-row RECORD count semantics require verified integrity")
+        if self.record_integrity != "verified":
+            return self
+        if self.version is None:
+            raise ValueError("an absent package cannot carry verified RECORD evidence")
+        if entries is None or entries <= 0:
+            raise ValueError("verified RECORD evidence requires positive record_entries")
+        if verified is None or verified <= 0:
+            raise ValueError("verified RECORD evidence requires positive verified-entry counts")
+        if self.record_count_semantics == "all_record_rows_v2" and verified != entries:
+            raise ValueError(
+                "all-row verified RECORD evidence requires "
+                "record_verified_entries == record_entries"
+            )
+        if self.record_failed_entries:
+            raise ValueError("verified RECORD evidence cannot carry failed entries")
+        for label, digest in (("RECORD", self.hash),):
+            if (
+                digest is None
+                or digest.algo != "sha256"
+                or digest.value is None
+                or len(digest.value) != 64
+                or any(character not in "0123456789abcdef" for character in digest.value)
+            ):
+                raise ValueError(f"verified {label} evidence requires an exact SHA-256 digest")
+        if self.record_count_semantics == "all_record_rows_v2":
+            if installed != entries:
+                raise ValueError(
+                    "all-row verified RECORD evidence requires "
+                    "installed_file_count == record_entries"
+                )
+            digest = self.installed_files_hash
+            if (
+                digest is None
+                or digest.algo != "sha256"
+                or digest.value is None
+                or len(digest.value) != 64
+                or any(character not in "0123456789abcdef" for character in digest.value)
+            ):
+                raise ValueError(
+                    "verified installed files evidence requires an exact SHA-256 digest"
+                )
+        elif (self.installed_files_hash is None) != (installed is None):
+            raise ValueError(
+                "legacy installed-file evidence must provide both its digest and count"
+            )
+        elif installed is not None:
+            if installed != entries:
+                raise ValueError(
+                    "legacy installed_file_count must equal record_entries when present"
+                )
+            digest = self.installed_files_hash
+            if (
+                digest is None
+                or digest.algo != "sha256"
+                or digest.value is None
+                or len(digest.value) != 64
+                or any(character not in "0123456789abcdef" for character in digest.value)
+            ):
+                raise ValueError(
+                    "legacy installed files evidence requires an exact SHA-256 digest"
+                )
+        return self
+
+    def has_complete_record_count_evidence(self) -> bool:
+        """Whether this package carries the manager-1.3 all-row admission meaning."""
+
+        return (
+            self.record_integrity == "verified"
+            and self.record_count_semantics == "all_record_rows_v2"
+            and self.record_entries is not None
+            and self.record_entries > 0
+            and self.record_verified_entries == self.record_entries
+            and self.installed_file_count == self.record_entries
+            and not self.record_failed_entries
+            and self.version is not None
+            and self.hash is not None
+            and self.hash.algo == "sha256"
+            and self.hash.value is not None
+            and len(self.hash.value) == 64
+            and all(character in "0123456789abcdef" for character in self.hash.value)
+            and self.installed_files_hash is not None
+            and self.installed_files_hash.algo == "sha256"
+            and self.installed_files_hash.value is not None
+            and len(self.installed_files_hash.value) == 64
+            and all(
+                character in "0123456789abcdef"
+                for character in self.installed_files_hash.value
+            )
+        )
 
 
 class License(ContractModel):

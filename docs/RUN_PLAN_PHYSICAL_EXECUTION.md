@@ -90,6 +90,15 @@ The current VRAM calibrator handles only the singleton path. Any non-trivial phy
 Existing training runners also fail with `UNSUPPORTED_CONFIGURATION` before importing or invoking a
 trainer if they cannot consume the spec.
 
+For the supported singleton training path, measured memory is still not proof of successful fit. A
+native fit receives `proven=true` only after the exact output path, recognized adapter bytes,
+artifact integrity, canonical before/after trainable-state change, materialized-gradient coverage, a
+real optimizer, one finite loss for every completed sealed step, finite final tensors, exact
+trained-to-saved PEFT tensor/config identity, and durable terminal admission all pass. The raw peak is
+carried in success evidence so the subprocess parent can reconstruct the fit instead of trusting a
+child classification. A failed non-spilling run remains `NATIVE_UNPROVEN`; only an actually measured
+spill retains a spill classification.
+
 ## Immutability and compatibility
 
 `plan_hash` covers the fully defaulted physical spec on every new plan. `platform-run` and the worker

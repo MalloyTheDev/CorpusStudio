@@ -20,9 +20,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 import contextlib
+from dataclasses import dataclass
 import hashlib
 import importlib.metadata
 import json
+import math
+from numbers import Real
 import re
 import sys
 from pathlib import Path
@@ -31,6 +34,14 @@ from typing import Any, Callable, Literal, cast
 from pydantic import BaseModel, Field, model_validator
 
 from corpus_studio.importers.jsonl_importer import read_jsonl, read_jsonl_bytes
+from corpus_studio.platform.contracts import (
+    AdapterExportStateEvidence,
+    GradientCoverageEvidence,
+    OptimizerStepLossEvidence,
+    TrainableStateChangeEvidence,
+    TrainingExecutionEvidence,
+)
+from corpus_studio.platform.enums import FailureTaxonomy, StageMarker
 from corpus_studio.training.environment import INSTALL_HINT, probe_training_runtime
 from corpus_studio.training.quantization import find_linear4bit_modules
 
@@ -53,6 +64,27 @@ class TrainerError(Exception):
 
 class ExecutionPlacementDeviation(TrainerError):
     """The loaded model does not match the device placement sealed by the RunPlan."""
+
+
+class TrainerEnvironmentError(TrainerError):
+    """The sealed runtime, package set, or device is unavailable or drifted."""
+
+
+class TrainingEvidenceError(TrainerError):
+    """A classified trainer-side success invariant failed at an exact lifecycle stage."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        taxonomy: FailureTaxonomy,
+        stage: StageMarker,
+        remediation: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.taxonomy = taxonomy
+        self.stage = stage
+        self.remediation = remediation
 
 
 class TrainRunConfig(BaseModel):
@@ -132,7 +164,9 @@ class TrainRunConfig(BaseModel):
     save_steps: int | None = Field(default=None, gt=0)
     save_total_limit: int | None = Field(default=None, ge=1)
     save_strategy: Literal["no", "steps"] = "no"
-    logging_steps: int = Field(default=1, ge=1)
+    logging_strategy: Literal["steps"] = "steps"
+    logging_steps: Literal[1] = 1
+    logging_nan_inf_filter: Literal[False] = False
     report_to: list[str] = Field(default_factory=list)
     dataset_text_field: str = "text"
     disable_tqdm: bool = True
@@ -164,6 +198,7 @@ class TrainResult(BaseModel):
     steps: int = 0
     final_loss: float | None = None
     checkpoints: list[str] = Field(default_factory=list)
+    execution_evidence: TrainingExecutionEvidence | None = None
 
 
 def _require_checkpoint_free_execution(config: TrainRunConfig) -> None:
@@ -183,6 +218,14 @@ def _require_checkpoint_free_execution(config: TrainRunConfig) -> None:
 def train_config_from_resolved(execution: Any) -> TrainRunConfig:
     """Map the typed platform contract to the import-light trainer boundary without defaults."""
 
+    if (
+        execution.trainer_interface.logging_strategy != "steps"
+        or execution.trainer_interface.logging_steps != 1
+        or execution.trainer_interface.logging_nan_inf_filter is not False
+    ):
+        raise TrainerError(
+            "resolved execution predates exact per-step loss logging; regenerate the RunPlan"
+        )
     package_versions = {
         item.name: item.version
         for item in execution.trainer_interface.package_versions
@@ -257,7 +300,9 @@ def train_config_from_resolved(execution: Any) -> TrainRunConfig:
         save_steps=execution.checkpoint_policy.cadence_optimizer_steps,
         save_total_limit=execution.checkpoint_policy.keep_last,
         save_strategy=execution.save_strategy,
+        logging_strategy=execution.trainer_interface.logging_strategy,
         logging_steps=execution.trainer_interface.logging_steps,
+        logging_nan_inf_filter=execution.trainer_interface.logging_nan_inf_filter,
         report_to=execution.trainer_interface.report_to,
         disable_tqdm=execution.trainer_interface.disable_tqdm,
         packing=execution.data.packing,
@@ -374,9 +419,11 @@ def verify_sealed_runtime(
         try:
             observed = importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError as exc:
-            raise TrainerError(f"sealed package is missing at execution: {package}=={expected}") from exc
+            raise TrainerEnvironmentError(
+                f"sealed package is missing at execution: {package}=={expected}"
+            ) from exc
         if observed != expected:
-            raise TrainerError(
+            raise TrainerEnvironmentError(
                 f"sealed package drift: {package} expected {expected}, observed {observed}"
             )
     if config.dataset_sha256 is None:
@@ -445,7 +492,9 @@ def _torch_dtype(torch_module: Any, name: str) -> Any:
     }
     attribute = mapping.get(name)
     if attribute is None or not hasattr(torch_module, attribute):
-        raise TrainerError(f"the sealed tensor dtype {name!r} is not supported by this torch build")
+        raise TrainerEnvironmentError(
+            f"the sealed tensor dtype {name!r} is not supported by this torch build"
+        )
     return getattr(torch_module, attribute)
 
 
@@ -472,20 +521,104 @@ def apply_attention_execution_policy(torch_module: Any, config: TrainRunConfig) 
         "math_sdp_enabled",
     )
     if cuda is None or any(not hasattr(cuda, name) for name in required_methods):
-        raise TrainerError("this torch build cannot enforce and observe all SDP kernel toggles")
-    cuda.enable_flash_sdp(bool(config.flash_sdp_enabled))
-    cuda.enable_mem_efficient_sdp(bool(config.mem_efficient_sdp_enabled))
-    cuda.enable_math_sdp(bool(config.math_sdp_enabled))
-    observed = (
-        bool(cuda.flash_sdp_enabled()),
-        bool(cuda.mem_efficient_sdp_enabled()),
-        bool(cuda.math_sdp_enabled()),
+        raise TrainerEnvironmentError(
+            "this torch build cannot enforce and observe all SDP kernel toggles"
+        )
+    try:
+        cuda.enable_flash_sdp(bool(config.flash_sdp_enabled))
+        cuda.enable_mem_efficient_sdp(bool(config.mem_efficient_sdp_enabled))
+        cuda.enable_math_sdp(bool(config.math_sdp_enabled))
+    except Exception as exc:  # noqa: BLE001 - normalize torch/driver enforcement failures.
+        raise TrainerEnvironmentError(
+            f"the sealed SDP kernel policy could not be applied or observed: {exc}"
+        ) from exc
+    verify_attention_execution_policy(torch_module, config)
+    return config.attention_kernel
+
+
+def verify_attention_execution_policy(torch_module: Any, config: TrainRunConfig) -> str:
+    """Observe the three global SDP toggles without correcting a mid-execution deviation."""
+
+    requested = (
+        config.flash_sdp_enabled,
+        config.mem_efficient_sdp_enabled,
+        config.math_sdp_enabled,
     )
+    backend = getattr(torch_module, "backends", None)
+    cuda = getattr(backend, "cuda", None)
+    if cuda is None:
+        raise TrainerEnvironmentError("this torch build cannot observe SDP kernel toggles")
+    try:
+        observed = (
+            bool(cuda.flash_sdp_enabled()),
+            bool(cuda.mem_efficient_sdp_enabled()),
+            bool(cuda.math_sdp_enabled()),
+        )
+    except Exception as exc:  # noqa: BLE001 - normalize torch/driver observation failures.
+        raise TrainerEnvironmentError(
+            f"the sealed SDP kernel policy could not be observed: {exc}"
+        ) from exc
     if observed != requested:
-        raise TrainerError(
+        raise TrainerEnvironmentError(
             f"attention policy deviation: requested SDP toggles {requested}, observed {observed}"
         )
-    return config.attention_kernel
+    return config.attention_kernel or "auto"
+
+
+@contextlib.contextmanager
+def enforced_attention_training_kernel(
+    torch_module: Any,
+    config: TrainRunConfig,
+    *,
+    kernel_context_factory: Callable[[list[Any]], Any] | None = None,
+    backend_values: Mapping[str, Any] | None = None,
+):
+    """Keep the sealed torch-SDPA backend exclusive for the complete train call."""
+
+    if config.execution_configuration_hash is None or config.attention_kernel in {
+        "eager",
+        "flash_attention_2",
+        "flash_attention_3",
+        "xformers",
+    }:
+        yield
+        return
+    kernel_name = config.attention_kernel
+    if kernel_name is None:  # pragma: no cover - sealed config validation rejects this.
+        raise TrainerError("sealed attention kernel is missing")
+    if kernel_context_factory is None or backend_values is None:
+        try:
+            from torch.nn.attention import SDPBackend, sdpa_kernel  # noqa: PLC0415
+        except Exception as exc:  # noqa: BLE001 - normalize an incompatible torch build.
+            raise TrainerEnvironmentError(
+                "this torch build cannot provide an exclusive SDPA training context"
+            ) from exc
+        kernel_context_factory = sdpa_kernel
+        backend_values = {
+            "torch_sdpa_math": SDPBackend.MATH,
+            "torch_sdpa_flash": SDPBackend.FLASH_ATTENTION,
+            "torch_sdpa_mem_efficient": SDPBackend.EFFICIENT_ATTENTION,
+        }
+    try:
+        selected_backend = backend_values[kernel_name]
+        context = kernel_context_factory([selected_backend])
+        stack = contextlib.ExitStack()
+        stack.enter_context(context)
+    except Exception as exc:  # noqa: BLE001 - normalize context construction/entry failures.
+        raise TrainerEnvironmentError(
+            f"the sealed SDPA training context could not be entered: {exc}"
+        ) from exc
+    try:
+        apply_attention_execution_policy(torch_module, config)
+        yield
+        verify_attention_execution_policy(torch_module, config)
+    finally:
+        try:
+            stack.close()
+        finally:
+            # sdpa_kernel restores the prior process-global state. Reassert the seal so later export
+            # and any subsequent operation cannot inherit an unsealed fallback policy.
+            apply_attention_execution_policy(torch_module, config)
 
 
 def probe_effective_attention_kernel(torch_module: Any, config: TrainRunConfig) -> None:
@@ -499,7 +632,9 @@ def probe_effective_attention_kernel(torch_module: Any, config: TrainRunConfig) 
     }:
         return
     if not torch_module.cuda.is_available():
-        raise TrainerError("the sealed GPU attention policy cannot be probed without CUDA")
+        raise TrainerEnvironmentError(
+            "the sealed GPU attention policy cannot be probed without CUDA"
+        )
     kernel_name = config.attention_kernel
     if kernel_name is None:  # narrowed for type checkers; sealed validation rejects this above.
         raise TrainerError("sealed attention kernel is missing")
@@ -520,7 +655,7 @@ def probe_effective_attention_kernel(torch_module: Any, config: TrainRunConfig) 
             out = functional.scaled_dot_product_attention(q, k, v)
         out.sum().backward()
     except Exception as exc:  # noqa: BLE001 - normalize framework/kernel failures.
-        raise TrainerError(
+        raise TrainerEnvironmentError(
             f"the sealed attention kernel {config.attention_kernel!r} failed its runtime probe: {exc}"
         ) from exc
 
@@ -986,32 +1121,370 @@ def verify_loaded_model_execution(model: Any, config: TrainRunConfig) -> None:
     _verify_non_singleton_placement(model, expected_map=normalized_expected)
 
 
-def enforce_trainable_precision(model: Any, torch_module: Any, config: TrainRunConfig) -> None:
+@dataclass(frozen=True)
+class TrainableStateSnapshot:
+    """Canonical logical bytes and shape/dtype inventory for every trainable tensor."""
+
+    state_sha256: str
+    tensor_sha256: dict[str, str]
+    tensor_shapes: dict[str, tuple[int, ...]]
+    tensor_dtypes: dict[str, str]
+
+
+@dataclass(frozen=True)
+class AdapterExportStateSnapshot:
+    """Canonical PEFT export-key identity using the exact logical bytes saved by Safetensors."""
+
+    state_sha256: str
+    tensor_sha256: dict[str, str]
+    tensor_shapes: dict[str, tuple[int, ...]]
+    tensor_dtypes: dict[str, str]
+
+
+class GradientObservationTracker:
+    """Tracks which eligible adapter tensors ever materialized a verified leaf gradient."""
+
+    def __init__(self, names: Sequence[str]) -> None:
+        self.eligible_names = tuple(sorted(names))
+        self.eligible_parameter_ids: dict[str, int] = {}
+        self.observed_names: set[str] = set()
+
+    def observe(self, name: str) -> None:
+        self.observed_names.add(name)
+
+    def verify_model_inventory(
+        self,
+        model: Any,
+        *,
+        stage: StageMarker = StageMarker.adapter_attached,
+    ) -> None:
+        """Refuse constructor-time additions or replacements that have no registered hook."""
+
+        current = {
+            name: id(parameter)
+            for name, parameter in model.named_parameters()
+            if parameter.requires_grad
+        }
+        if tuple(sorted(current)) != self.eligible_names or (
+            self.eligible_parameter_ids and current != self.eligible_parameter_ids
+        ):
+            raise TrainingEvidenceError(
+                "trainable adapter inventory changed after gradient hooks were registered",
+                taxonomy=FailureTaxonomy.GRADIENT_FAILURE,
+                stage=stage,
+                remediation="preserve the failed run and inspect trainer model wrapping",
+            )
+
+    def evidence(self) -> GradientCoverageEvidence:
+        observed = sorted(self.observed_names)
+        if not observed:
+            raise TrainingEvidenceError(
+                "no materialized adapter gradient was observed during training",
+                taxonomy=FailureTaxonomy.GRADIENT_FAILURE,
+                stage=StageMarker.backward,
+                remediation="preserve the failed run and inspect the adapter targets and loss graph",
+            )
+        return GradientCoverageEvidence(
+            eligible_tensor_count=len(self.eligible_names),
+            eligible_tensor_names=list(self.eligible_names),
+            observed_tensor_count=len(observed),
+            observed_tensor_names=observed,
+        )
+
+
+def _logical_tensor_bytes(
+    tensor: Any,
+    torch_module: Any,
+    *,
+    stage: StageMarker = StageMarker.optimizer_step,
+) -> bytes:
+    """Copy a tensor's logical contiguous bytes to CPU without hashing unused storage."""
+
+    try:
+        value = tensor.detach().cpu().contiguous().view(torch_module.uint8)
+        return bytes(value.numpy().tobytes())
+    except Exception as exc:  # noqa: BLE001 - normalize framework-specific tensor failures.
+        raise TrainingEvidenceError(
+            "could not read canonical trainable tensor bytes",
+            taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+            stage=stage,
+            remediation="preserve the failed run and inspect the adapter tensor representation",
+        ) from exc
+
+
+def _require_finite_tensor(
+    tensor: Any,
+    torch_module: Any,
+    *,
+    name: str,
+    stage: StageMarker,
+) -> None:
+    try:
+        observed = torch_module.isfinite(tensor.detach()).all()
+        finite = bool(observed.item() if hasattr(observed, "item") else observed)
+    except Exception as exc:  # noqa: BLE001 - absence is an evidence failure, never a pass.
+        raise TrainingEvidenceError(
+            f"could not verify finite adapter tensor state for {name}",
+            taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+            stage=stage,
+            remediation="preserve the failed run and inspect the adapter tensor representation",
+        ) from exc
+    if not finite:
+        raise TrainingEvidenceError(
+            f"adapter tensor {name} contains non-finite values",
+            taxonomy=FailureTaxonomy.NUMERICAL_FAILURE,
+            stage=stage,
+            remediation="preserve the failed run and inspect loss scaling, gradients, and optimizer state",
+        )
+
+
+def capture_trainable_state(
+    model: Any,
+    torch_module: Any,
+    *,
+    stage: StageMarker = StageMarker.optimizer_step,
+) -> TrainableStateSnapshot:
+    """Hash the sorted complete trainable-state inventory and exact logical tensor bytes."""
+
+    tensor_sha256: dict[str, str] = {}
+    tensor_shapes: dict[str, tuple[int, ...]] = {}
+    tensor_dtypes: dict[str, str] = {}
+    canonical_entries: list[dict[str, object]] = []
+    for name, parameter in model.named_parameters():
+        if not parameter.requires_grad:
+            continue
+        if name in tensor_sha256:
+            raise TrainingEvidenceError(
+                f"duplicate trainable tensor name in adapter inventory: {name}",
+                taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+                stage=stage,
+            )
+        _require_finite_tensor(parameter, torch_module, name=name, stage=stage)
+        shape = tuple(int(value) for value in parameter.shape)
+        dtype = str(parameter.dtype)
+        digest = hashlib.sha256(
+            _logical_tensor_bytes(parameter, torch_module, stage=stage)
+        ).hexdigest()
+        tensor_sha256[name] = digest
+        tensor_shapes[name] = shape
+        tensor_dtypes[name] = dtype
+        canonical_entries.append(
+            {"name": name, "shape": list(shape), "dtype": dtype, "content_sha256": digest}
+        )
+    if not canonical_entries:
+        raise TrainingEvidenceError(
+            "the sealed adapter configuration produced no trainable state to hash",
+            taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+            stage=stage,
+        )
+    canonical_entries.sort(key=lambda item: str(item["name"]))
+    encoded = json.dumps(
+        canonical_entries,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return TrainableStateSnapshot(
+        state_sha256=hashlib.sha256(encoded).hexdigest(),
+        tensor_sha256=tensor_sha256,
+        tensor_shapes=tensor_shapes,
+        tensor_dtypes=tensor_dtypes,
+    )
+
+
+def _safetensors_dtype_name(dtype: object) -> str:
+    normalized = str(dtype).removeprefix("torch.")
+    try:
+        return {
+            "bfloat16": "BF16",
+            "float16": "F16",
+            "float32": "F32",
+            "float64": "F64",
+            "int8": "I8",
+            "int16": "I16",
+            "int32": "I32",
+            "int64": "I64",
+            "uint8": "U8",
+        }[normalized]
+    except KeyError as exc:
+        raise TrainingEvidenceError(
+            f"adapter export tensor dtype {dtype!s} has no sealed Safetensors identity",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        ) from exc
+
+
+def capture_adapter_export_state(
+    state: Mapping[str, Any],
+    torch_module: Any,
+    *,
+    stage: StageMarker,
+) -> AdapterExportStateSnapshot:
+    """Hash the exact PEFT state-dict keys and logical bytes used by save_pretrained."""
+
+    from corpus_studio.platform.parameter_accounting import (  # noqa: PLC0415
+        canonical_tensor_state_sha256,
+    )
+
+    records: list[dict[str, object]] = []
+    tensor_sha256: dict[str, str] = {}
+    tensor_shapes: dict[str, tuple[int, ...]] = {}
+    tensor_dtypes: dict[str, str] = {}
+    for name, tensor in state.items():
+        if not isinstance(name, str) or not name or name in tensor_sha256:
+            raise TrainingEvidenceError(
+                "PEFT export state contains an invalid or duplicate tensor name",
+                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                stage=stage,
+            )
+        _require_finite_tensor(tensor, torch_module, name=name, stage=stage)
+        shape = tuple(int(value) for value in tensor.shape)
+        dtype = _safetensors_dtype_name(tensor.dtype)
+        digest = hashlib.sha256(
+            _logical_tensor_bytes(tensor, torch_module, stage=stage)
+        ).hexdigest()
+        tensor_sha256[name] = digest
+        tensor_shapes[name] = shape
+        tensor_dtypes[name] = dtype
+        records.append(
+            {
+                "name": name,
+                "dtype": dtype,
+                "shape": list(shape),
+                "content_sha256": digest,
+            }
+        )
+    if not records:
+        raise TrainingEvidenceError(
+            "PEFT produced no adapter tensors for export",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=stage,
+        )
+    return AdapterExportStateSnapshot(
+        state_sha256=canonical_tensor_state_sha256(records),
+        tensor_sha256=tensor_sha256,
+        tensor_shapes=tensor_shapes,
+        tensor_dtypes=tensor_dtypes,
+    )
+
+
+def compare_adapter_export_states(
+    before: AdapterExportStateSnapshot,
+    after: AdapterExportStateSnapshot,
+    *,
+    adapter_config_semantic_sha256: str,
+) -> AdapterExportStateEvidence:
+    if (
+        before.tensor_shapes != after.tensor_shapes
+        or before.tensor_dtypes != after.tensor_dtypes
+        or set(before.tensor_sha256) != set(after.tensor_sha256)
+    ):
+        raise TrainingEvidenceError(
+            "adapter export inventory changed shape, dtype, or membership during training",
+            taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+    changed = sorted(
+        name
+        for name, digest in before.tensor_sha256.items()
+        if after.tensor_sha256[name] != digest
+    )
+    if not changed or before.state_sha256 == after.state_sha256:
+        raise TrainingEvidenceError(
+            "the canonical PEFT export state did not change during training",
+            taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+    return AdapterExportStateEvidence(
+        before_sha256=before.state_sha256,
+        after_sha256=after.state_sha256,
+        tensor_count=len(after.tensor_sha256),
+        tensor_names=sorted(after.tensor_sha256),
+        changed_tensor_count=len(changed),
+        changed_tensor_names=changed,
+        adapter_config_semantic_sha256=adapter_config_semantic_sha256,
+    )
+
+
+def compare_trainable_states(
+    before: TrainableStateSnapshot,
+    after: TrainableStateSnapshot,
+) -> TrainableStateChangeEvidence:
+    """Require one stable trainable inventory and at least one exact byte change."""
+
+    if (
+        before.tensor_shapes != after.tensor_shapes
+        or before.tensor_dtypes != after.tensor_dtypes
+        or set(before.tensor_sha256) != set(after.tensor_sha256)
+    ):
+        raise TrainingEvidenceError(
+            "trainable adapter inventory changed shape, dtype, or membership during training",
+            taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+    changed = sorted(
+        name
+        for name, digest in before.tensor_sha256.items()
+        if after.tensor_sha256[name] != digest
+    )
+    if not changed or before.state_sha256 == after.state_sha256:
+        raise TrainingEvidenceError(
+            "completed optimizer steps did not change any trainable adapter tensor",
+            taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+            stage=StageMarker.optimizer_step,
+            remediation="preserve the failed run and inspect gradients, optimizer wiring, and targets",
+        )
+    return TrainableStateChangeEvidence(
+        before_sha256=before.state_sha256,
+        after_sha256=after.state_sha256,
+        trainable_tensor_count=len(before.tensor_sha256),
+        trainable_tensor_names=sorted(before.tensor_sha256),
+        changed_tensor_count=len(changed),
+        changed_tensor_names=changed,
+    )
+
+
+def enforce_trainable_precision(
+    model: Any,
+    torch_module: Any,
+    config: TrainRunConfig,
+) -> GradientObservationTracker | None:
     """Put adapter weights in the sealed master dtype and guard materialized gradients."""
 
     if config.execution_configuration_hash is None:
-        return
+        return None
     if config.master_weight_dtype is None:
-        raise TrainerError("sealed execution omitted the trainable master-weight dtype")
+        raise TrainingEvidenceError(
+            "sealed execution omitted the trainable master-weight dtype",
+            taxonomy=FailureTaxonomy.GRADIENT_FAILURE,
+            stage=StageMarker.adapter_attached,
+        )
     master_dtype = _torch_dtype(torch_module, config.master_weight_dtype)
     gradient_dtype = _torch_dtype(torch_module, config.gradient_dtype)
     expected_map = config.device_map or {}
     expected_device = _normalized_device(expected_map.get("", ""))
-    trainable = []
+    trainable: list[str] = []
+    tracker = GradientObservationTracker(trainable)
     for name, parameter in model.named_parameters():
         if not parameter.requires_grad:
             continue
         parameter.data = parameter.data.to(dtype=master_dtype)
         if parameter.dtype != master_dtype:
-            raise TrainerError(f"could not enforce master-weight dtype for {name}")
+            raise TrainingEvidenceError(
+                f"could not enforce master-weight dtype for {name}",
+                taxonomy=FailureTaxonomy.GRADIENT_FAILURE,
+                stage=StageMarker.adapter_attached,
+            )
 
         register_post_accumulate = getattr(
             parameter, "register_post_accumulate_grad_hook", None
         )
         if not callable(register_post_accumulate):
-            raise TrainerError(
+            raise TrainingEvidenceError(
                 "the training runtime cannot verify materialized adapter gradients after "
-                f"accumulation: {name}"
+                f"accumulation: {name}",
+                taxonomy=FailureTaxonomy.GRADIENT_FAILURE,
+                stage=StageMarker.backward,
             )
 
         def _verify_gradient(
@@ -1021,29 +1494,58 @@ def enforce_trainable_precision(model: Any, torch_module: Any, config: TrainRunC
             expected_parameter: Any = parameter,
         ) -> None:
             if materialized_parameter is not expected_parameter:
-                raise TrainerError(
-                    f"post-accumulation gradient hook identity changed for {parameter_name}"
+                raise TrainingEvidenceError(
+                    f"post-accumulation gradient hook identity changed for {parameter_name}",
+                    taxonomy=FailureTaxonomy.GRADIENT_FAILURE,
+                    stage=StageMarker.backward,
                 )
             gradient = getattr(expected_parameter, "grad", None)
             if gradient is None:
-                raise TrainerError(
-                    f"materialized gradient is missing for {parameter_name}"
+                raise TrainingEvidenceError(
+                    f"materialized gradient is missing for {parameter_name}",
+                    taxonomy=FailureTaxonomy.GRADIENT_FAILURE,
+                    stage=StageMarker.backward,
                 )
             if gradient.dtype != gradient_dtype:
-                raise TrainerError(
+                raise TrainingEvidenceError(
                     f"gradient dtype deviation for {parameter_name}: "
-                    f"expected {gradient_dtype}, observed {gradient.dtype}"
+                    f"expected {gradient_dtype}, observed {gradient.dtype}",
+                    taxonomy=FailureTaxonomy.GRADIENT_FAILURE,
+                    stage=StageMarker.backward,
                 )
             if _normalized_device(gradient.device) != expected_device:
-                raise ExecutionPlacementDeviation(
+                raise TrainingEvidenceError(
                     f"PLACEMENT_DEVIATION: gradient {parameter_name} is on {gradient.device}, "
-                    f"expected {expected_device}"
+                    f"expected {expected_device}",
+                    taxonomy=FailureTaxonomy.GRADIENT_FAILURE,
+                    stage=StageMarker.backward,
                 )
+            isfinite = getattr(torch_module, "isfinite", None)
+            if callable(isfinite) and not bool(isfinite(gradient).all().item()):
+                raise TrainingEvidenceError(
+                    f"materialized gradient is non-finite for {parameter_name}",
+                    taxonomy=FailureTaxonomy.NUMERICAL_FAILURE,
+                    stage=StageMarker.backward,
+                )
+            tracker.observe(parameter_name)
 
         register_post_accumulate(_verify_gradient)
         trainable.append(name)
     if not trainable:
-        raise TrainerError("the sealed adapter configuration produced no trainable parameters")
+        raise TrainingEvidenceError(
+            "the sealed adapter configuration produced no trainable parameters",
+            taxonomy=FailureTaxonomy.GRADIENT_FAILURE,
+            stage=StageMarker.adapter_attached,
+        )
+    # ``tracker`` was constructed before iteration so hook closures share one stable object.  Bind
+    # the final eligible inventory only after all hooks were registered successfully.
+    tracker.eligible_names = tuple(sorted(trainable))
+    tracker.eligible_parameter_ids = {
+        name: id(parameter)
+        for name, parameter in model.named_parameters()
+        if parameter.requires_grad
+    }
+    return tracker
 
 
 def verify_model_state_execution(
@@ -1211,14 +1713,18 @@ def verify_optimizer_state_precision(
             seen=set(),
         ):
             if hasattr(value, "dtype") and value.dtype not in allowed:
-                raise TrainerError(
+                raise TrainingEvidenceError(
                     f"optimizer-state dtype deviation for {name}: "
-                    f"expected one of {allowed}, observed {value.dtype}"
+                    f"expected one of {allowed}, observed {value.dtype}",
+                    taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                    stage=StageMarker.optimizer_step,
                 )
             if hasattr(value, "device") and _normalized_device(value.device) != expected_device:
-                raise ExecutionPlacementDeviation(
+                raise TrainingEvidenceError(
                     f"PLACEMENT_DEVIATION: optimizer state {name} is on {value.device}, "
-                    f"expected {expected_device}"
+                    f"expected {expected_device}",
+                    taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                    stage=StageMarker.optimizer_step,
                 )
 
 
@@ -1230,9 +1736,228 @@ def verify_completed_step_count(config: TrainRunConfig, steps: int) -> None:
         and config.max_steps is not None
         and steps != config.max_steps
     ):
-        raise TrainerError(
+        raise TrainingEvidenceError(
             "sealed max_steps execution deviation: "
-            f"expected {config.max_steps}, observed {steps}"
+            f"expected {config.max_steps}, observed {steps}",
+            taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+
+
+class TrainingExecutionTracker:
+    """Collect and reconcile optimizer, loss, gradient, and update evidence for one sealed run."""
+
+    def __init__(
+        self,
+        *,
+        config: TrainRunConfig,
+        torch_module: Any,
+        gradients: GradientObservationTracker,
+        progress_callback: ProgressCallback | None,
+        stage_callback: StageCallback | None,
+    ) -> None:
+        self.config = config
+        self.torch_module = torch_module
+        self.gradients = gradients
+        self.progress_callback = progress_callback
+        self.stage_callback = stage_callback
+        self.optimizer: Any | None = None
+        self.optimizer_parameter_ids: tuple[int, ...] = ()
+        self.completed_steps: list[int] = []
+        self.losses: dict[int, float] = {}
+
+    def _bound_optimizer_parameter_ids(
+        self,
+        optimizer: Any,
+        *,
+        stage: StageMarker,
+    ) -> tuple[int, ...]:
+        param_groups = getattr(optimizer, "param_groups", None)
+        if (
+            not isinstance(param_groups, Sequence)
+            or isinstance(param_groups, (str, bytes, bytearray))
+            or not param_groups
+            or not all(isinstance(group, Mapping) for group in param_groups)
+        ):
+            raise TrainingEvidenceError(
+                "optimizer does not expose materialized parameter groups",
+                taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                stage=stage,
+            )
+        parameters: list[Any] = []
+        for group in param_groups:
+            group_parameters = group.get("params")
+            if not isinstance(group_parameters, Sequence) or isinstance(
+                group_parameters, (str, bytes, bytearray)
+            ):
+                raise TrainingEvidenceError(
+                    "optimizer parameter groups are not materialized sequences",
+                    taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                    stage=stage,
+                )
+            parameters.extend(group_parameters)
+        observed_ids = [id(parameter) for parameter in parameters]
+        eligible_ids = sorted(self.gradients.eligible_parameter_ids.values())
+        if (
+            not eligible_ids
+            or len(observed_ids) != len(set(observed_ids))
+            or sorted(observed_ids) != eligible_ids
+        ):
+            raise TrainingEvidenceError(
+                "optimizer parameters do not exactly match the complete trainable adapter inventory",
+                taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                stage=stage,
+                remediation="preserve the failed run and inspect Trainer optimizer construction",
+            )
+        return tuple(eligible_ids)
+
+    def on_train_begin(self, optimizer: Any) -> None:
+        if self.optimizer is not None:
+            raise TrainingEvidenceError(
+                "optimizer creation was reported more than once",
+                taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                stage=StageMarker.optimizer_created,
+            )
+        if (
+            optimizer is None
+            or not callable(getattr(optimizer, "step", None))
+            or not callable(getattr(optimizer, "zero_grad", None))
+        ):
+            raise TrainingEvidenceError(
+                "on_train_begin did not expose a real optimizer with materialized parameter groups",
+                taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                stage=StageMarker.optimizer_created,
+                remediation="preserve the failed run and inspect Trainer optimizer construction",
+            )
+        optimizer_parameter_ids = self._bound_optimizer_parameter_ids(
+            optimizer,
+            stage=StageMarker.optimizer_created,
+        )
+        self.optimizer = optimizer
+        self.optimizer_parameter_ids = optimizer_parameter_ids
+        if self.stage_callback is not None:
+            self.stage_callback(
+                "optimizer_created",
+                "observed the real optimizer at on_train_begin",
+            )
+
+    def on_step_end(self, step: int, optimizer: Any) -> None:
+        if self.optimizer is None or optimizer is not self.optimizer:
+            raise TrainingEvidenceError(
+                "optimizer identity was absent or changed at optimizer-step completion",
+                taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                stage=StageMarker.optimizer_step,
+            )
+        if self._bound_optimizer_parameter_ids(
+            optimizer,
+            stage=StageMarker.optimizer_step,
+        ) != self.optimizer_parameter_ids:
+            raise TrainingEvidenceError(
+                "optimizer parameter identity changed after creation",
+                taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                stage=StageMarker.optimizer_step,
+            )
+        expected = len(self.completed_steps) + 1
+        if step != expected:
+            raise TrainingEvidenceError(
+                f"optimizer-step sequence deviation: expected {expected}, observed {step}",
+                taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                stage=StageMarker.optimizer_step,
+            )
+        verify_optimizer_state_precision(optimizer, self.torch_module, self.config)
+        self.completed_steps.append(step)
+
+    def on_log(self, step: int, total: int, logs: Mapping[str, Any] | None) -> None:
+        if not logs or "loss" not in logs:
+            return
+        if step not in self.completed_steps:
+            raise TrainingEvidenceError(
+                f"loss record for optimizer step {step} arrived before that step completed",
+                taxonomy=FailureTaxonomy.LOSS_EVIDENCE_FAILURE,
+                stage=StageMarker.loss,
+            )
+        if step in self.losses:
+            raise TrainingEvidenceError(
+                f"duplicate loss record for optimizer step {step}",
+                taxonomy=FailureTaxonomy.LOSS_EVIDENCE_FAILURE,
+                stage=StageMarker.loss,
+            )
+        raw_loss = logs["loss"]
+        if isinstance(raw_loss, bool) or not isinstance(raw_loss, Real):
+            raise TrainingEvidenceError(
+                f"loss record for optimizer step {step} is not numeric",
+                taxonomy=FailureTaxonomy.LOSS_EVIDENCE_FAILURE,
+                stage=StageMarker.loss,
+            )
+        loss = float(raw_loss)
+        if not math.isfinite(loss):
+            raise TrainingEvidenceError(
+                f"loss record for optimizer step {step} is non-finite",
+                taxonomy=FailureTaxonomy.NUMERICAL_FAILURE,
+                stage=StageMarker.loss,
+                remediation="preserve the failed run and inspect the batch, precision, and learning rate",
+            )
+        self.losses[step] = loss
+        if self.progress_callback is not None:
+            self.progress_callback(step, total, loss)
+
+    def finalize(
+        self,
+        *,
+        steps: int,
+        before: TrainableStateSnapshot,
+        before_export: AdapterExportStateSnapshot,
+        after_export: AdapterExportStateSnapshot,
+        adapter_config_semantic_sha256: str,
+        model: Any,
+    ) -> TrainingExecutionEvidence:
+        verify_completed_step_count(self.config, steps)
+        if self.optimizer is None:
+            raise TrainingEvidenceError(
+                "training completed without real optimizer-creation evidence",
+                taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                stage=StageMarker.optimizer_created,
+            )
+        expected = list(range(1, steps + 1))
+        if self.completed_steps != expected:
+            raise TrainingEvidenceError(
+                "completed optimizer-step evidence does not match trainer global_step",
+                taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                stage=StageMarker.optimizer_step,
+            )
+        if sorted(self.losses) != expected:
+            raise TrainingEvidenceError(
+                "training did not emit exactly one finite loss for every completed optimizer step",
+                taxonomy=FailureTaxonomy.LOSS_EVIDENCE_FAILURE,
+                stage=StageMarker.loss,
+                remediation=(
+                    "keep logging_strategy=steps, logging_steps=1, and "
+                    "logging_nan_inf_filter=false"
+                ),
+            )
+        # Bind the after-state bytes to the same parameter objects that owned the registered
+        # post-accumulation hooks. A framework must not be able to replace a parameter during
+        # ``train()`` and reuse an old gradient observation under the replacement's name.
+        self.gradients.verify_model_inventory(model, stage=StageMarker.optimizer_step)
+        after = capture_trainable_state(
+            model,
+            self.torch_module,
+            stage=StageMarker.optimizer_step,
+        )
+        return TrainingExecutionEvidence(
+            trainable_state=compare_trainable_states(before, after),
+            adapter_export_state=compare_adapter_export_states(
+                before_export,
+                after_export,
+                adapter_config_semantic_sha256=adapter_config_semantic_sha256,
+            ),
+            gradient_coverage=self.gradients.evidence(),
+            optimizer_created=True,
+            completed_optimizer_steps=steps,
+            step_losses=[
+                OptimizerStepLossEvidence(optimizer_step=step, loss=self.losses[step])
+                for step in expected
+            ],
         )
 
 
@@ -1286,6 +2011,42 @@ def build_lora_kwargs(config: TrainRunConfig) -> dict[str, Any]:
     }
 
 
+def expected_saved_adapter_config_sha256(model: Any, config: TrainRunConfig) -> str:
+    """Bind the complete in-memory PEFT config as save_pretrained will serialize it."""
+
+    configs = getattr(model, "peft_config", None)
+    if not isinstance(configs, Mapping) or len(configs) != 1:
+        raise TrainingEvidenceError(
+            "the sealed run requires exactly one materialized PEFT adapter config",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    peft_config = next(iter(configs.values()))
+    to_dict = getattr(peft_config, "to_dict", None)
+    if not callable(to_dict):
+        raise TrainingEvidenceError(
+            "the materialized PEFT adapter config is not serializable",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    try:
+        payload = dict(to_dict())
+    except Exception as exc:  # noqa: BLE001 - normalize PEFT serialization drift.
+        raise TrainingEvidenceError(
+            f"the PEFT adapter config could not be captured: {exc}",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        ) from exc
+    payload["inference_mode"] = True
+    if payload.get("base_model_name_or_path") is None:
+        payload["base_model_name_or_path"] = config.base_model
+    from corpus_studio.platform.artifacts import (  # noqa: PLC0415
+        canonical_adapter_config_sha256,
+    )
+
+    return canonical_adapter_config_sha256(payload)
+
+
 def build_training_kwargs(config: TrainRunConfig) -> dict[str, Any]:
     """TRL ``SFTConfig`` kwargs from the run config, including the exact sealed save policy."""
     _require_checkpoint_free_execution(config)
@@ -1303,7 +2064,9 @@ def build_training_kwargs(config: TrainRunConfig) -> dict[str, Any]:
         "max_grad_norm": config.max_grad_norm,
         "lr_scheduler_type": config.lr_scheduler,
         "warmup_ratio": config.warmup_ratio,
+        "logging_strategy": config.logging_strategy,
         "logging_steps": config.logging_steps,
+        "logging_nan_inf_filter": config.logging_nan_inf_filter,
         "save_strategy": config.save_strategy,
         "report_to": config.report_to,
         "dataset_text_field": config.dataset_text_field,
@@ -1469,14 +2232,14 @@ def resolve_run_plan(config: TrainRunConfig, report: Any) -> dict[str, Any]:
     (needs the full ``ready`` set: deps + GPU + bitsandbytes)."""
     if config.cpu_toy:
         if not report.cpu_toy_ready:
-            raise TrainerError(
+            raise TrainerEnvironmentError(
                 "CPU toy training needs torch + transformers + peft + trl + datasets + accelerate. "
                 f"{INSTALL_HINT}"
             )
         return {"device": "cpu", "quantize": False}
 
     if not report.ready:
-        raise TrainerError(
+        raise TrainerEnvironmentError(
             "A real QLoRA run needs the full [train] runtime + a CUDA GPU + bitsandbytes. "
             f"Run 'corpus-studio train-check' to see what's missing. {INSTALL_HINT} "
             "(or pass --cpu-toy to smoke-test the pipeline on CPU)."
@@ -1622,21 +2385,25 @@ def run_training(  # pragma: no cover - optional training-stack integration
         quantize = config.quantization_mode != "none"
         if config.cpu_toy:
             if not runtime_report.cpu_toy_ready:
-                raise TrainerError(
+                raise TrainerEnvironmentError(
                     "the sealed CPU-toy runtime packages are not usable in this worker"
                 )
         else:
             if not runtime_report.gpu.available:
-                raise TrainerError("the sealed CUDA device is not available in this worker")
+                raise TrainerEnvironmentError(
+                    "the sealed CUDA device is not available in this worker"
+                )
             if quantize and not runtime_report.bitsandbytes_ok:
-                raise TrainerError("the sealed quantized path is not available in this worker")
+                raise TrainerEnvironmentError(
+                    "the sealed quantized path is not available in this worker"
+                )
     else:
         plan = resolve_run_plan(config, runtime_report)
         quantize = bool(plan["quantize"])
 
     import torch  # noqa: PLC0415 - intentionally lazy heavy imports.
     from datasets import Dataset  # noqa: PLC0415
-    from peft import LoraConfig, get_peft_model  # noqa: PLC0415
+    from peft import LoraConfig, get_peft_model, get_peft_model_state_dict  # noqa: PLC0415
     from transformers import (  # noqa: PLC0415
         AutoConfig,
         AutoModelForCausalLM,
@@ -1691,6 +2458,10 @@ def run_training(  # pragma: no cover - optional training-stack integration
 
     effective_kernel: str | None = None
     if config.execution_configuration_hash is not None:
+        _stage(
+            "attention_policy_applied",
+            "applying the sealed SDP toggles before model allocation",
+        )
         effective_kernel = apply_attention_execution_policy(torch, config)
         probe_effective_attention_kernel(torch, config)
 
@@ -1772,7 +2543,7 @@ def run_training(  # pragma: no cover - optional training-stack integration
         )
         _stage("quantized", "prepared for 4-bit k-bit training")
     model = get_peft_model(model, LoraConfig(**build_lora_kwargs(config)))
-    enforce_trainable_precision(model, torch, config)
+    gradient_tracker = enforce_trainable_precision(model, torch, config)
     verify_model_state_execution(model, torch, config, quantize=quantize)
     if config.execution_configuration_hash is not None:
         _stage(
@@ -1818,17 +2589,48 @@ def run_training(  # pragma: no cover - optional training-stack integration
                 raw_kwargs["max_length"] = seq_len
         sft_config = SFTConfig(**{k: v for k, v in raw_kwargs.items() if k in valid_fields})
 
+    execution_tracker = (
+        TrainingExecutionTracker(
+            config=config,
+            torch_module=torch,
+            gradients=gradient_tracker,
+            progress_callback=progress_callback,
+            stage_callback=_stage,
+        )
+        if gradient_tracker is not None
+        else None
+    )
+
     class _ProgressCallback(TrainerCallback):  # type: ignore[misc]
+        def on_train_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            optimizer = kwargs.get("optimizer")
+            if execution_tracker is not None:
+                execution_tracker.on_train_begin(optimizer)
+            elif optimizer is not None:
+                _stage("optimizer_created", "observed the optimizer at on_train_begin")
+
         def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
             optimizer = kwargs.get("optimizer")
-            if optimizer is not None:
+            if execution_tracker is not None:
+                execution_tracker.on_step_end(int(state.global_step), optimizer)
+            elif optimizer is not None:
                 verify_optimizer_state_precision(optimizer, torch, config)
-            if progress_callback is None:
-                return
-            loss = None
-            if state.log_history:
-                loss = state.log_history[-1].get("loss")
-            progress_callback(int(state.global_step), int(state.max_steps or 0), loss)
+
+        def on_log(
+            self,
+            args: Any,
+            state: Any,
+            control: Any,
+            logs: Mapping[str, Any] | None = None,
+            **kwargs: Any,
+        ) -> None:
+            step = int(state.global_step)
+            total = int(state.max_steps or 0)
+            if execution_tracker is not None:
+                execution_tracker.on_log(step, total, logs)
+            elif progress_callback is not None and logs and "loss" in logs:
+                loss = float(logs["loss"])
+                progress_callback(step, total, loss)
 
     # The tokenizer arg was renamed `tokenizer` -> `processing_class`; pass it under whichever exists.
     import inspect  # noqa: PLC0415
@@ -1852,19 +2654,79 @@ def run_training(  # pragma: no cover - optional training-stack integration
     elif "tokenizer" in trainer_params:
         trainer_kwargs["tokenizer"] = tokenizer
     trainer = SFTTrainer(**trainer_kwargs)
-    _stage("optimizer_created", "SFT trainer + optimizer ready — starting training")
+    evidence_model = getattr(trainer, "model", model)
+    if gradient_tracker is not None:
+        gradient_tracker.verify_model_inventory(evidence_model)
+    before_trainable_state = (
+        capture_trainable_state(
+            evidence_model,
+            torch,
+            stage=StageMarker.adapter_attached,
+        )
+        if execution_tracker is not None
+        else None
+    )
+    before_export_state = (
+        capture_adapter_export_state(
+            get_peft_model_state_dict(evidence_model),
+            torch,
+            stage=StageMarker.adapter_attached,
+        )
+        if execution_tracker is not None
+        else None
+    )
     # Training frameworks print metrics/tqdm to STDOUT — and transformers can log to stdout during
     # SAVE too — so redirect the whole train+save block to stderr. Only the CLI's final JSON echo then
     # writes to stdout, keeping it the pure JSON result the desktop/WBG parses. Progress reaches stderr.
-    with contextlib.redirect_stdout(sys.stderr):
+    with contextlib.redirect_stdout(sys.stderr), enforced_attention_training_kernel(
+        torch,
+        config,
+    ):
         train_output = trainer.train()
 
         steps = int(getattr(trainer.state, "global_step", 0) or 0)
         verify_completed_step_count(config, steps)
+        execution_evidence = None
+        if execution_tracker is not None:
+            if (
+                before_trainable_state is None or before_export_state is None
+            ):  # pragma: no cover - constructed together above.
+                raise TrainingEvidenceError(
+                    "missing pre-training adapter/export state snapshot",
+                    taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+                    stage=StageMarker.adapter_attached,
+                )
+            trained_model = getattr(trainer, "model", evidence_model)
+            after_export_state = capture_adapter_export_state(
+                get_peft_model_state_dict(trained_model),
+                torch,
+                stage=StageMarker.optimizer_step,
+            )
+            execution_evidence = execution_tracker.finalize(
+                steps=steps,
+                before=before_trainable_state,
+                before_export=before_export_state,
+                after_export=after_export_state,
+                adapter_config_semantic_sha256=expected_saved_adapter_config_sha256(
+                    trained_model,
+                    config,
+                ),
+                model=trained_model,
+            )
 
         output_dir = Path(config.output_dir)
-        trainer.save_model(str(output_dir))  # saves the LoRA adapter
-        tokenizer.save_pretrained(str(output_dir))
+        _stage("export", "serializing the final adapter and tokenizer")
+        try:
+            trainer.save_model(str(output_dir))  # saves the LoRA adapter
+            tokenizer.save_pretrained(str(output_dir))
+            checkpoints = _list_checkpoints(output_dir)
+        except Exception as exc:  # noqa: BLE001 - normalize framework/filesystem export failures.
+            raise TrainingEvidenceError(
+                f"final adapter serialization failed: {exc}",
+                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                stage=StageMarker.export,
+                remediation="preserve the run directory and inspect storage and serializer errors",
+            ) from exc
 
         metrics = getattr(train_output, "metrics", {}) or {}
 
@@ -1896,6 +2758,11 @@ def run_training(  # pragma: no cover - optional training-stack integration
         base_model=config.base_model,
         cpu_toy=config.cpu_toy,
         steps=steps,
-        final_loss=metrics.get("train_loss"),
-        checkpoints=_list_checkpoints(output_dir),
+        final_loss=(
+            execution_evidence.step_losses[-1].loss
+            if execution_evidence is not None
+            else metrics.get("train_loss")
+        ),
+        checkpoints=checkpoints,
+        execution_evidence=execution_evidence,
     )

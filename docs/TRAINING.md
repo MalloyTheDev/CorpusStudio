@@ -53,13 +53,12 @@ launches the user's installed trainer with that config.
 
 Current status: the Python engine has a `training-config` command and the
 desktop Training tab writes a rendered config file under the configured export
-directory, **then launches the trainer** with the generated command (after a
-confirm) — the first-party `corpus_studio` trainer, or the external trainer you
-already have — streaming its logs live, listing checkpoints, recording each run,
-supporting resume-from-checkpoint, and running a post-training regression gate.
-The dependency-light core bundles no CUDA/PyTorch/Transformers; those are opt-in
-via the `[train]` extra (which delegates to TRL/peft rather than implementing a
-raw loop). (Config-export came first; the launcher followed — see below.)
+directory. It may launch a reviewed no-shell argv for an installed **external**
+trainer after confirmation, stream logs, list that trainer's checkpoints, and
+record its run. It does not launch the first-party `corpus_studio` target from a
+mutable config: that target is admitted only through `platform-plan` and
+`platform-run`. The dependency-light core bundles no CUDA/PyTorch/Transformers;
+those are opt-in via the isolated `[train]` worker runtime.
 
 Config generation should include:
 
@@ -202,7 +201,33 @@ evidence. The final PEFT adapter remains the only planned training output.
 This limitation is separate from checkpoint discovery and resume commands for supported external
 trainers. Short first-party benchmark trials are checkpoint-free. Do not approve a first-party run
 expected to exceed 30 minutes until checkpoint compatibility, source-run/checkpoint lineage, and exact
-sealed resume semantics are implemented.
+sealed resume semantics are implemented. That work is tracked separately in
+[#440](https://github.com/MalloyTheDev/CorpusStudio/issues/440).
+
+### First-party training-success evidence
+
+A trainer loop returning is not sufficient for a successful run. Before success or a proven native
+fit can be sealed, the worker and parent require all of the following:
+
+- canonical before/after SHA-256 identities for the complete trainable adapter state, with at least
+  one changed tensor, plus a finite final value check for every trainable tensor;
+- at least one observed materialized adapter gradient, honest observed/eligible coverage, and an
+  intersection between the changed and observed sets (unused trainable tensors need not be falsely
+  reported as having gradients);
+- a real optimizer observed at `on_train_begin` and exactly the sealed optimizer-step count;
+- exactly one finite loss for every completed optimizer step under
+  `logging_strategy="steps"`, `logging_steps=1`, and `logging_nan_inf_filter=false`;
+- a second canonical before/after identity for the exact PEFT export keys, shapes, dtypes, and bytes,
+  with the post-training identity equal to the parsed `adapter_model.safetensors` state;
+- the complete in-memory PEFT config semantic hash equal to parsed `adapter_config.json`, including
+  the concrete modules produced by the sealed `all-linear` policy;
+- an exact non-link run-scoped output path, one adapter payload with complete contiguous Safetensors
+  ranges, independent weight/config hashes, a content-rehashed `ArtifactManifest`, durable artifact
+  and run manifests, and terminal integrity.
+
+Until those gates all pass, a non-spilling failure remains `NATIVE_UNPROVEN`; an actual measured spill
+keeps its spill classification. Gradient, numerical, optimizer, update, artifact, and environment
+failures keep their own taxonomy and last verified stage.
 
 ### Reasoning trace approval gate
 
@@ -248,8 +273,11 @@ sequence-256 attempts both verified model and post-adapter CUDA placement, force
 attention kernel, and attached QLoRA. Both then failed before optimizer step 1 because production
 checked a BF16 pre-accumulation autograd tensor as if it were the sealed FP32 materialized leaf
 gradient. The verifier now checks post-accumulation `parameter.grad`, but that correction still needs
-a new worker, new locks/plans, and separately approved hardware evidence. No real flash optimizer
-step or sequence-4096 workload has passed. WSL evidence must not be reported as a native-Linux result.
+a new worker, new locks/plans, and separately approved hardware evidence. The stricter success logic
+above has CPU/unit evidence only; no model load or GPU workload was run for it. No real flash optimizer
+step or sequence-4096 workload has passed. The user's in-progress 500-output corpus and every 7B
+workload remain unavailable until the user marks them ready. WSL evidence must not be reported as a
+native-Linux result.
 
 CorpusStudio treats **WSL as its own platform** (`OperatingSystem.wsl`): it has separately measured
 flash evidence but `wddm` memory-residency like Windows (it still spills - see below). A new platform

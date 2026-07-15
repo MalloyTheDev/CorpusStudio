@@ -12,6 +12,7 @@ import time
 
 import pytest
 
+from corpus_studio.platform.enums import FailureTaxonomy, StageMarker
 from corpus_studio.platform.subprocess_supervisor import (
     _dispatch_line,
     execute_run_subprocess,
@@ -484,6 +485,61 @@ def test_parent_rejects_terminal_manifest_linkage_mismatch():
     assert "does not link to the dispatched RunPlan" in result.manifest.failure.message
 
 
+def test_parent_rejects_terminal_event_state_mismatch_without_exposing_success():
+    from corpus_studio.platform.contracts import RunManifest
+
+    rid = "run-terminal-mismatch"
+    manifest = RunManifest(
+        run_id=rid,
+        plan_ref={"id": _PLAN.plan_id, "hash": {"value": _PLAN.plan_hash}},
+        environment_ref=_PLAN.environment_ref,
+        dataset_ref=_PLAN.dataset_ref,
+        created_at="2026-07-13T00:00:00+00:00",
+        updated_at="2026-07-13T00:00:00+00:00",
+        state="succeeded",
+        base_model=_PLAN.base_model,
+        target=_PLAN.backend_ref.id,
+    )
+    terminal_event = {
+        "contract_version": "1.0.0",
+        "event_type": "terminal",
+        "run_id": rid,
+        "seq": 0,
+        "emitted_at": "2026-07-13T00:00:00+00:00",
+        "payload": {"state": "failed"},
+    }
+    observed = []
+    result = execute_run_subprocess(
+        _PLAN,
+        run_id=rid,
+        sink=observed.append,
+        worker_argv=_fake_worker(
+            [
+                ("run_accepted", {"run_id": rid, "pid": 1}),
+                ("event", terminal_event),
+                (
+                    "terminal_result",
+                    {
+                        "run_id": rid,
+                        "outcome": "PASS",
+                        "run_manifest": manifest.model_dump(mode="json"),
+                        "artifacts": [],
+                        "failure": None,
+                    },
+                ),
+            ]
+        ),
+        silence_timeout_s=10,
+    )
+
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert "terminal RunEvent state" in result.manifest.failure.message
+    assert [event.payload for event in observed if event.event_type == "terminal"] == [
+        {"state": "failed"}
+    ]
+
+
 @pytest.mark.parametrize(
     ("artifact_case", "expected_error"),
     [
@@ -496,7 +552,11 @@ def test_parent_rejects_false_training_artifact_success(
 ):
     from corpus_studio.platform.artifacts import build_artifact_manifest
     from corpus_studio.platform.common import HashRef
-    from corpus_studio.platform.contracts import RunEvent, RunManifest
+    from corpus_studio.platform.contracts import (
+        RunEvent,
+        RunManifest,
+        TrainingSuccessEvidence,
+    )
     from corpus_studio.platform.execution_config import (
         execution_configuration_hash_for,
         run_scoped_training_output,
@@ -536,8 +596,40 @@ def test_parent_rejects_false_training_artifact_success(
         artifact_id="run-false-artifact-adapter-deadbeef",
         path=str(artifact_path),
         run_id=rid,
+        base_model=plan.base_model,
         now="2026-07-13T00:00:00+00:00",
     )
+    execution_evidence = {
+        "trainable_state": {
+            "before_sha256": "a" * 64,
+            "after_sha256": "b" * 64,
+            "trainable_tensor_count": 1,
+            "trainable_tensor_names": ["adapter.weight"],
+            "changed_tensor_count": 1,
+            "changed_tensor_names": ["adapter.weight"],
+        },
+        "adapter_export_state": {
+            "before_sha256": "c" * 64,
+            "after_sha256": "d" * 64,
+            "tensor_count": 1,
+            "tensor_names": ["adapter.lora_A.weight"],
+            "changed_tensor_count": 1,
+            "changed_tensor_names": ["adapter.lora_A.weight"],
+            "adapter_config_semantic_sha256": "e" * 64,
+        },
+        "gradient_coverage": {
+            "eligible_tensor_count": 1,
+            "eligible_tensor_names": ["adapter.weight"],
+            "observed_tensor_count": 1,
+            "observed_tensor_names": ["adapter.weight"],
+        },
+        "optimizer_created": True,
+        "completed_optimizer_steps": 2,
+        "step_losses": [
+            {"optimizer_step": 1, "loss": 0.9},
+            {"optimizer_step": 2, "loss": 0.5},
+        ],
+    }
     manifest = RunManifest(
         run_id=rid,
         plan_ref={"id": plan.plan_id, "hash": HashRef(value=plan.plan_hash)},
@@ -550,14 +642,40 @@ def test_parent_rejects_false_training_artifact_success(
         target=plan.backend_ref.id,
         output_dir=str(artifact_path),
         artifact_ids=[artifact.artifact_id],
+        training_success_evidence=TrainingSuccessEvidence(
+            execution=execution_evidence,
+            output_path_verified=True,
+            adapter_bytes_verified=True,
+            artifact_integrity_verified=True,
+            adapter_safetensors_sha256="f" * 64,
+            adapter_config_sha256="0" * 64,
+        ),
     )
-    event = RunEvent(
-        event_type="metric",
-        run_id=rid,
-        seq=0,
-        emitted_at="2026-07-13T00:00:00+00:00",
-        optimizer_step=1,
-    )
+    events = [
+        RunEvent(
+            event_type="stage",
+            run_id=rid,
+            seq=0,
+            emitted_at="2026-07-13T00:00:00+00:00",
+            stage="optimizer_created",
+        ),
+        RunEvent(
+            event_type="metric",
+            run_id=rid,
+            seq=1,
+            emitted_at="2026-07-13T00:00:00+00:00",
+            optimizer_step=1,
+            metrics={"loss": 0.9},
+        ),
+        RunEvent(
+            event_type="metric",
+            run_id=rid,
+            seq=2,
+            emitted_at="2026-07-13T00:00:00+00:00",
+            optimizer_step=2,
+            metrics={"loss": 0.5},
+        ),
+    ]
     messages = [
         (
             "run_accepted",
@@ -567,7 +685,7 @@ def test_parent_rejects_false_training_artifact_success(
                 "execution_configuration_hash": changed.configuration_hash,
             },
         ),
-        ("event", event.model_dump(mode="json")),
+        *(("event", event.model_dump(mode="json")) for event in events),
         (
             "terminal_result",
             {
@@ -588,6 +706,8 @@ def test_parent_rejects_false_training_artifact_success(
 
     assert result.manifest.state == "failed"
     assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.ARTIFACT_FAILURE
+    assert result.manifest.failure.stage == StageMarker.export
     assert expected_error in result.manifest.failure.message
 
 
@@ -649,14 +769,16 @@ def test_worker_protocol_import_does_not_load_torch():
     assert completed.stdout.strip() == "False"
 
 
-def test_a_raising_sink_propagates_without_hanging_and_reaps_the_child():
-    # A sink that raises must not orphan the child or deadlock — the try/finally reaps it and the error
-    # propagates. (Before the fix, the exception skipped the reap and left a live worker.)
+def test_a_raising_sink_isolated_without_hanging_and_reaps_the_child():
+    # An observer cannot rewrite a valid terminal outcome or orphan the child.
     def _boom(_event):
         raise RuntimeError("sink boom")
 
-    with pytest.raises(RuntimeError, match="sink boom"):
-        execute_run_subprocess(_PLAN, runner_name="echo", sink=_boom, silence_timeout_s=30)
+    result = execute_run_subprocess(
+        _PLAN, runner_name="echo", sink=_boom, silence_timeout_s=30
+    )
+    assert result.manifest.state == "succeeded"
+    assert result.manifest.notes == "event sink failures were isolated: RuntimeError"
 
 
 def test_worker_main_empty_stdin_rejects(monkeypatch, capsys):
@@ -743,6 +865,7 @@ def test_training_preflight_can_outlive_the_ordinary_silence_budget():
     assert result.manifest.failure is not None
     assert result.manifest.failure.taxonomy.value == "ENVIRONMENT_FAILURE"
     assert result.manifest.failure.message == "synthetic preflight failure"
+    assert result.manifest.failure.stage == StageMarker.model_load
 
 
 def test_repeated_preflight_progress_cannot_extend_the_absolute_deadline():
@@ -893,7 +1016,8 @@ def test_subprocess_persists_the_childs_artifact_manifests(tmp_path):
     adapter.mkdir()
     (adapter / "adapter_model.safetensors").write_bytes(b"weights")
     am = build_artifact_manifest(
-        artifact_id="run-x-adapter", path=str(adapter), run_id="run-x", now="2026-07-12T00:00:00+00:00"
+        artifact_id="run-x-adapter", path=str(adapter), run_id="run-x",
+        base_model=_PLAN.base_model, now="2026-07-12T00:00:00+00:00"
     )
     rm = RunManifest(
         run_id="run-x",
@@ -905,7 +1029,7 @@ def test_subprocess_persists_the_childs_artifact_manifests(tmp_path):
         started_at="2026-07-12T00:00:00+00:00",
         finished_at="2026-07-12T00:00:00+00:00",
         state="succeeded",
-        base_model="m",
+        base_model=_PLAN.base_model,
         target="echo",
         output_dir="o",
         artifact_ids=["run-x-adapter"],
@@ -929,6 +1053,162 @@ def test_subprocess_persists_the_childs_artifact_manifests(tmp_path):
     assert (
         out / "runs" / "run-x" / "artifacts" / "run-x-adapter.json"
     ).exists()  # actually persisted, not just reported
+
+
+def test_subprocess_artifact_persistence_failure_cannot_leave_succeeded_manifest(
+    tmp_path, monkeypatch
+):
+    from corpus_studio.platform.artifacts import build_artifact_manifest
+    from corpus_studio.platform.contracts import RunManifest
+
+    adapter = tmp_path / "adapter-failure"
+    adapter.mkdir()
+    (adapter / "adapter_model.safetensors").write_bytes(b"weights")
+    artifact = build_artifact_manifest(
+        artifact_id="run-persist-fail-adapter",
+        path=str(adapter),
+        run_id="run-persist-fail",
+        base_model=_PLAN.base_model,
+        now="2026-07-12T00:00:00+00:00",
+    )
+    child_manifest = RunManifest(
+        run_id="run-persist-fail",
+        plan_ref={"id": _PLAN.plan_id, "hash": {"value": _PLAN.plan_hash}},
+        environment_ref=_PLAN.environment_ref,
+        dataset_ref=_PLAN.dataset_ref,
+        created_at="2026-07-12T00:00:00+00:00",
+        updated_at="2026-07-12T00:00:00+00:00",
+        state="succeeded",
+        base_model=_PLAN.base_model,
+        target="echo",
+        output_dir="o",
+        artifact_ids=[artifact.artifact_id],
+    )
+    argv = _fake_worker(
+        [
+            ("run_accepted", {"run_id": "run-persist-fail", "pid": 1}),
+            (
+                "terminal_result",
+                {
+                    "run_id": "run-persist-fail",
+                    "outcome": "PASS",
+                    "run_manifest": child_manifest.model_dump(mode="json"),
+                    "artifacts": [artifact.model_dump(mode="json")],
+                    "failure": None,
+                },
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        "corpus_studio.platform.subprocess_supervisor.write_artifact_manifest",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
+    )
+    out = tmp_path / "records"
+    result = execute_run_subprocess(
+        _PLAN,
+        run_id="run-persist-fail",
+        worker_argv=argv,
+        out_dir=out,
+        silence_timeout_s=10,
+    )
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.ARTIFACT_FAILURE
+    assert result.manifest.failure.stage == StageMarker.export
+    persisted = RunManifest.model_validate_json(
+        (out / "runs" / "run-persist-fail" / "RunManifest.json").read_text()
+    )
+    assert persisted.state == "failed"
+
+
+def test_parent_defers_terminal_success_until_run_manifest_is_durable(tmp_path, monkeypatch):
+    from corpus_studio.platform.contracts import RunManifest
+    import corpus_studio.platform.subprocess_supervisor as supervisor_module
+
+    original = supervisor_module.write_run_manifest
+    writes = 0
+
+    def _fail_first(manifest, out_dir):
+        nonlocal writes
+        writes += 1
+        if writes == 1:
+            raise OSError("synthetic terminal write failure")
+        return original(manifest, out_dir)
+
+    monkeypatch.setattr(supervisor_module, "write_run_manifest", _fail_first)
+    observed = []
+    result = execute_run_subprocess(
+        _PLAN,
+        runner_name="echo",
+        run_id="run-terminal-durable",
+        out_dir=tmp_path / "records",
+        sink=observed.append,
+        silence_timeout_s=30,
+    )
+
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.ARTIFACT_FAILURE
+    terminal = [event for event in observed if event.event_type == "terminal"]
+    assert len(terminal) == 1
+    assert terminal[0].payload == {"state": "failed"}
+    persisted = RunManifest.model_validate_json(
+        (
+            tmp_path
+            / "records"
+            / "runs"
+            / "run-terminal-durable"
+            / "RunManifest.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert persisted.state == "failed"
+
+
+def test_parent_preserves_failure_fields_and_fills_only_missing_stage():
+    stage_event = {
+        "contract_version": "1.0.0",
+        "event_type": "stage",
+        "run_id": "run-rich-failure",
+        "seq": 0,
+        "emitted_at": "2026-07-15T00:00:00+00:00",
+        "stage": "model_load",
+    }
+    failure = {
+        "run_id": "run-rich-failure",
+        "taxonomy": "ENVIRONMENT_FAILURE",
+        "exit_code": 17,
+        "signal": "SIGABRT",
+        "message": "framework aborted",
+        "detail": "sealed detail",
+        "exception_type": "CudaRuntimeError",
+        "detected_at": "2026-07-15T00:01:00+00:00",
+        "memory_at_failure": {"shared_gpu_bytes": 4096},
+        "remediation": "preserve evidence",
+        "reconciled": True,
+    }
+    result = execute_run_subprocess(
+        _PLAN,
+        run_id="run-rich-failure",
+        worker_argv=_fake_worker(
+            [
+                ("run_accepted", {"run_id": "run-rich-failure", "pid": 1}),
+                ("event", stage_event),
+                ("failure", failure),
+            ]
+        ),
+        silence_timeout_s=10,
+    )
+
+    observed = result.manifest.failure
+    assert observed is not None
+    assert observed.stage == StageMarker.model_load
+    assert observed.exit_code == 17
+    assert observed.signal == "SIGABRT"
+    assert observed.exception_type == "CudaRuntimeError"
+    assert observed.detected_at == "2026-07-15T00:01:00+00:00"
+    assert observed.memory_at_failure is not None
+    assert observed.memory_at_failure.shared_gpu_bytes == 4096
+    assert observed.reconciled is True
 
 
 def test_subprocess_writes_the_manifest_when_out_dir_given(tmp_path):

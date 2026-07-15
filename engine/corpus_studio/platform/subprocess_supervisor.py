@@ -25,11 +25,11 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from corpus_studio.platform.contracts import (
     ArtifactManifest,
     FailureRecord,
+    FitClassification,
     HeartbeatBody,
     HelloBody,
     RunAcceptedBody,
@@ -48,11 +48,14 @@ from corpus_studio.platform.process_control import (
     terminate_process_tree,
 )
 from corpus_studio.platform.supervisor import (
+    ProducedArtifact,
+    RunnerFailure,
     RunEventSink,
     SupervisedRun,
     _now_iso,
     _sanitize_id,
     run_record_directory,
+    validate_training_success_evidence,
     write_run_manifest,
 )
 from corpus_studio.platform.worker_protocol import (
@@ -137,6 +140,7 @@ def _failed_manifest(
     out_dir: str | None,
     stage: StageMarker | None = None,
     remediation: str | None = None,
+    detail: str | None = None,
     exit_code: int | None = None,
 ) -> RunManifest:
     """A parent-built terminal manifest for the cases where the child's own ``terminal_result`` is
@@ -152,6 +156,7 @@ def _failed_manifest(
         exit_code=exit_code,
         detected_at=finished,
         remediation=remediation,
+        detail=detail,
     )
     return RunManifest(
         run_id=rid,
@@ -168,6 +173,47 @@ def _failed_manifest(
         output_dir=plan.export.output_dir,
         failure=failure,
     )
+
+
+def _append_manifest_note(manifest: RunManifest, note: str) -> RunManifest:
+    if not note or note in manifest.notes:
+        return manifest
+    return manifest.model_copy(
+        update={"notes": manifest.notes + ("; " if manifest.notes else "") + note}
+    )
+
+
+def _bind_failure_record(
+    failure: FailureRecord,
+    *,
+    run_id: str,
+    current_stage: StageMarker | None,
+    finished: str,
+    returncode: int | None,
+) -> FailureRecord:
+    """Preserve authenticated child evidence while filling only absent parent-known fields."""
+
+    return failure.model_copy(
+        update={
+            "run_id": run_id,
+            "stage": failure.stage or current_stage,
+            "detected_at": failure.detected_at or finished,
+            "exit_code": (
+                failure.exit_code
+                if failure.exit_code is not None
+                else (returncode if returncode not in (None, 0) else None)
+            ),
+        }
+    )
+
+
+def _measured_failure_fit(manifest: RunManifest) -> FitClassification | None:
+    evidence = manifest.training_success_evidence
+    if evidence is None or evidence.measured_peak is None:
+        return None
+    from corpus_studio.platform.watchdog import reconcile_measured_fit  # noqa: PLC0415
+
+    return reconcile_measured_fit(evidence.measured_peak, proven=False)
 
 
 def execute_run_subprocess(
@@ -300,10 +346,13 @@ def execute_run_subprocess(
     events: list[RunEvent] = []
     artifacts: list[ArtifactManifest] = []
     terminal_manifest: RunManifest | None = None
+    deferred_terminal: RunEvent | None = None
     terminal_seen = False
-    rejection: dict[str, Any] | None = None
+    rejection: FailureRecord | None = None
+    terminal_admission_failure: RunnerFailure | None = None
     killed_failure: _KilledFailure | None = None
     protocol_failure: str | None = None
+    sink_errors: list[str] = []
     dispatched = False
     accepted = False
     seen_message_ids: set[str] = set()
@@ -357,7 +406,12 @@ def execute_run_subprocess(
     def _forward(event: RunEvent) -> None:
         events.append(event)
         if sink is not None:
-            sink(event)
+            try:
+                sink(event)
+            except Exception as exc:  # noqa: BLE001 - an observer cannot rewrite run truth.
+                label = type(exc).__name__
+                if label not in sink_errors:
+                    sink_errors.append(label)
 
     # stderr is INHERITED (not a pipe): the trainer's tqdm/transformers write \r-based progress bars
     # with no newlines, which would deadlock a line-drained stderr pipe (buffer fills and the child
@@ -420,6 +474,10 @@ def execute_run_subprocess(
                         f"dispatch {dispatch_message_id!r}"
                     )
                 body = parse_worker_body(message)
+                if deferred_terminal is not None and message.type != "terminal_result":
+                    raise WorkerProtocolError(
+                        "worker sent a message after its terminal RunEvent"
+                    )
                 if message.type == "hello":
                     raise WorkerProtocolError("worker sent a second hello")
                 if message.type == "run_accepted":
@@ -450,7 +508,12 @@ def execute_run_subprocess(
                             f"event seq {body.seq} is not greater than prior seq {last_event_seq}"
                         )
                     last_event_seq = body.seq
-                    _forward(body)
+                    if body.event_type == "terminal":
+                        if deferred_terminal is not None:  # pragma: no cover - guarded above.
+                            raise WorkerProtocolError("worker sent duplicate terminal RunEvents")
+                        deferred_terminal = body
+                    else:
+                        _forward(body)
                     now = time.monotonic()
                     if body.stage is not None:
                         _observe_stage(body.stage, now)
@@ -471,7 +534,25 @@ def execute_run_subprocess(
                         raise WorkerProtocolError(
                             "terminal_result selected the wrong body contract"
                         )
-                    terminal_manifest = _parse_terminal(body, plan, rid, events, artifacts)
+                    try:
+                        if deferred_terminal is not None:
+                            terminal_state = (deferred_terminal.payload or {}).get("state")
+                            if terminal_state != body.run_manifest.state:
+                                raise WorkerProtocolError(
+                                    "terminal RunEvent state does not match terminal_result"
+                                )
+                        terminal_manifest = _parse_terminal(body, plan, rid, events, artifacts)
+                    except RunnerFailure as exc:
+                        terminal_admission_failure = exc
+                    except WorkerProtocolError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001 - filesystem admission must be total.
+                        terminal_admission_failure = RunnerFailure(
+                            f"terminal artifact admission failed: {exc}",
+                            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                            stage=StageMarker.export,
+                            remediation="preserve the run and inspect its artifact paths and bytes",
+                        )
                     break  # terminal_result is the last legal message
                 elif message.type in {"run_rejected", "failure"}:
                     if message.type == "run_rejected" and accepted:
@@ -482,7 +563,7 @@ def execute_run_subprocess(
                         )
                     if body.run_id is not None:
                         _require_run_id(body.run_id, rid, message.type)
-                    rejection = body.model_dump(mode="json")
+                    rejection = body
                     break
                 else:
                     raise WorkerProtocolError(
@@ -498,14 +579,108 @@ def execute_run_subprocess(
     finished = clock()
     manifest = _finalize(
         plan, rid, runner_name, terminal_manifest, terminal_seen, rejection, killed_failure,
-        protocol_failure, proc.returncode, started, finished, out_dir_str,
+        terminal_admission_failure, protocol_failure, proc.returncode, started, finished,
+        out_dir_str, current_stage,
     )
     if record_dir is not None:
-        write_run_manifest(manifest, record_dir)
         # Persist the child's integrity-checked ArtifactManifests too (the child ran execute_run
-        # WITHOUT out_dir, so it built them but didn't write them). Same machine → the paths are valid.
-        for artifact_manifest in artifacts:
-            write_artifact_manifest(artifact_manifest, record_dir)
+        # WITHOUT out_dir, so it built them but didn't write them). Write these before the terminal
+        # manifest so a durable succeeded manifest can never point at missing artifact evidence.
+        try:
+            for artifact_manifest in artifacts:
+                write_artifact_manifest(artifact_manifest, record_dir)
+        except Exception as exc:  # noqa: BLE001 - classify the durable artifact gate.
+            if manifest.state == "succeeded":
+                failed_fit = _measured_failure_fit(manifest)
+                manifest = _failed_manifest(
+                    plan,
+                    rid,
+                    taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                    message=f"artifact manifest persistence failed: {exc}",
+                    target=runner_name,
+                    started=started,
+                    finished=finished,
+                    out_dir=out_dir_str,
+                    stage=StageMarker.export,
+                    remediation="preserve the run directory and repair durable artifact storage",
+                )
+                manifest = manifest.model_copy(update={"final_fit": failed_fit})
+        if sink_errors:
+            manifest = _append_manifest_note(
+                manifest,
+                "event sink failures were isolated: " + ", ".join(sink_errors),
+            )
+        try:
+            write_run_manifest(manifest, record_dir)
+        except Exception as exc:  # noqa: BLE001 - classify terminal-record durability.
+            if manifest.state == "succeeded":
+                failed_fit = _measured_failure_fit(manifest)
+                manifest = _failed_manifest(
+                    plan,
+                    rid,
+                    taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                    message=f"run manifest persistence failed: {exc}",
+                    target=runner_name,
+                    started=started,
+                    finished=clock(),
+                    out_dir=out_dir_str,
+                    stage=StageMarker.export,
+                    remediation="preserve the run directory and repair durable run-record storage",
+                )
+                manifest = manifest.model_copy(update={"final_fit": failed_fit})
+                try:
+                    write_run_manifest(manifest, record_dir)
+                except Exception as retry_exc:  # noqa: BLE001 - no durable truth channel remains.
+                    manifest = _append_manifest_note(
+                        manifest,
+                        "failed terminal manifest could not be persisted: "
+                        + type(retry_exc).__name__,
+                    )
+            else:
+                manifest = _append_manifest_note(
+                    manifest,
+                    "terminal manifest could not be persisted: " + type(exc).__name__,
+                )
+    elif sink_errors:
+        manifest = _append_manifest_note(
+            manifest,
+            "event sink failures were isolated: " + ", ".join(sink_errors),
+        )
+
+    terminal_event = None
+    if accepted:
+        terminal_message = (
+            manifest.failure.message
+            if manifest.failure is not None and manifest.failure.message
+            else manifest.state
+        )
+        terminal_event = RunEvent(
+            event_type="terminal",
+            run_id=rid,
+            seq=(
+                deferred_terminal.seq
+                if deferred_terminal is not None
+                else ((last_event_seq + 1) if last_event_seq is not None else 0)
+            ),
+            emitted_at=deferred_terminal.emitted_at if deferred_terminal is not None else clock(),
+            message=terminal_message,
+            payload={"state": manifest.state},
+        )
+        events.append(terminal_event)
+    if sink is not None and terminal_event is not None:
+        try:
+            sink(terminal_event)
+        except Exception as exc:  # noqa: BLE001 - observer failure cannot rewrite terminal truth.
+            label = type(exc).__name__
+            if label not in sink_errors:
+                sink_errors.append(label)
+            note = "event sink failures were isolated: " + ", ".join(sink_errors)
+            manifest = _append_manifest_note(manifest, note)
+            if record_dir is not None:
+                try:
+                    write_run_manifest(manifest, record_dir)
+                except Exception:  # noqa: BLE001 - observer notes are not execution truth.
+                    pass
     return SupervisedRun(manifest=manifest, events=events, artifacts=artifacts)
 
 
@@ -531,14 +706,6 @@ def _write_dispatch(proc: subprocess.Popen[str], plan: RunPlan, rid: str, hb: in
             proc.stdin.close()
         except (BrokenPipeError, OSError):  # pragma: no cover - close-after-broken-pipe is benign
             pass
-
-def _taxonomy(value: Any) -> FailureTaxonomy:
-    """A FailureTaxonomy string from a child message → the enum, defaulting to ENVIRONMENT_FAILURE."""
-    try:
-        return FailureTaxonomy(str(value))
-    except ValueError:
-        return FailureTaxonomy.ENVIRONMENT_FAILURE
-
 
 def _require_run_id(actual: str, expected: str, message_type: str) -> None:
     if actual != expected:
@@ -606,6 +773,10 @@ def _parse_terminal(
         raise WorkerProtocolError(
             "terminal run_manifest target does not match the dispatched backend"
         )
+    if manifest.base_model != plan.base_model:
+        raise WorkerProtocolError(
+            "terminal run_manifest base_model does not match the dispatched RunPlan"
+        )
     if body.failure != manifest.failure:
         raise WorkerProtocolError(
             "terminal_result failure does not match run_manifest.failure"
@@ -617,48 +788,61 @@ def _parse_terminal(
             raise WorkerProtocolError(
                 f"artifact {artifact.artifact_id!r} links to the wrong producer run"
             )
+        if artifact.base_model != plan.base_model:
+            raise WorkerProtocolError(
+                f"artifact {artifact.artifact_id!r} links to the wrong base model"
+            )
     artifact_ids = [artifact.artifact_id for artifact in parsed_artifacts]
     if artifact_ids != manifest.artifact_ids:
         raise WorkerProtocolError(
             "terminal artifact list does not match run_manifest.artifact_ids"
         )
     if plan.resolved_execution is not None and manifest.state == "succeeded":
-        if not any(
-            event.event_type == "metric"
-            and event.optimizer_step is not None
-            and event.optimizer_step > 0
-            for event in events
-        ):
-            raise WorkerProtocolError(
-                "successful training terminal has no optimizer-step evidence"
-            )
         adapters = [artifact for artifact in parsed_artifacts if artifact.kind == "adapter"]
-        if not adapters:
-            raise WorkerProtocolError(
-                "successful training terminal has no required adapter artifact"
+        if manifest.training_success_evidence is None:
+            raise RunnerFailure(
+                "successful training terminal has no sealed training-success evidence",
+                taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+                stage=StageMarker.optimizer_step,
             )
         from corpus_studio.platform.execution_config import (  # noqa: PLC0415
-            run_scoped_training_output,
+            ExecutionConfigurationError,
+            verify_run_scoped_output_path,
         )
 
         execution = plan.resolved_execution
         assert execution is not None
-        expected_output = run_scoped_training_output(execution, rid).resolve(strict=False)
-        if Path(manifest.output_dir).resolve(strict=False) != expected_output or any(
-            Path(artifact.path).resolve(strict=False) != expected_output
-            for artifact in adapters
-        ):
-            raise WorkerProtocolError(
-                "successful training terminal deviated from the sealed run-scoped output"
+        try:
+            verify_run_scoped_output_path(
+                execution,
+                rid,
+                observed_path=manifest.output_dir,
+                require_exists=True,
             )
+            for artifact in adapters:
+                verify_run_scoped_output_path(
+                    execution,
+                    rid,
+                    observed_path=artifact.path,
+                    require_exists=True,
+                )
+        except ExecutionConfigurationError as exc:
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                stage=StageMarker.export,
+            ) from exc
         if any(
             artifact.integrity is None
             or artifact.integrity.current_integrity != "ok"
             or artifact.integrity.content_hash is None
+            or artifact.integrity.metadata_hash is None
             for artifact in adapters
         ):
-            raise WorkerProtocolError(
-                "successful training terminal has no integrity-checked adapter bytes"
+            raise RunnerFailure(
+                "successful training terminal has no integrity-checked adapter bytes",
+                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                stage=StageMarker.export,
             )
         from corpus_studio.training.artifact_registry import (  # noqa: PLC0415
             compute_weight_content_hash,
@@ -669,9 +853,51 @@ def _parse_terminal(
             for artifact in adapters
             if artifact.integrity is not None
         ):
-            raise WorkerProtocolError(
-                "successful training terminal adapter weight bytes do not match its integrity hash"
+            raise RunnerFailure(
+                "successful training terminal adapter weight bytes do not match its integrity hash",
+                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                stage=StageMarker.export,
             )
+        validated = validate_training_success_evidence(
+            plan,
+            rid,
+            events,
+            [
+                ProducedArtifact(
+                    artifact_id=artifact.artifact_id,
+                    kind=artifact.kind,
+                    path=artifact.path,
+                )
+                for artifact in parsed_artifacts
+            ],
+            parsed_artifacts,
+            manifest.training_success_evidence.execution,
+            manifest.training_success_evidence.measured_peak,
+        )
+        if validated != manifest.training_success_evidence:
+            raise RunnerFailure(
+                "successful training terminal evidence does not match reconstructed admission",
+                taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+                stage=StageMarker.optimizer_step,
+            )
+        measured_peak = manifest.training_success_evidence.measured_peak
+        if (measured_peak is None) != (manifest.final_fit is None):
+            raise RunnerFailure(
+                "successful training terminal fit is not bound to raw peak-memory evidence",
+                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                stage=StageMarker.export,
+            )
+        if measured_peak is not None:
+            from corpus_studio.platform.watchdog import (  # noqa: PLC0415
+                reconcile_measured_fit,
+            )
+
+            if reconcile_measured_fit(measured_peak, proven=True) != manifest.final_fit:
+                raise RunnerFailure(
+                    "successful training terminal fit differs from parent-reconstructed evidence",
+                    taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                    stage=StageMarker.export,
+                )
     artifacts.extend(parsed_artifacts)
     return manifest
 
@@ -682,13 +908,15 @@ def _finalize(
     runner_name: str,
     terminal_manifest: RunManifest | None,
     terminal_seen: bool,
-    rejection: dict[str, Any] | None,
+    rejection: FailureRecord | None,
     killed_failure: _KilledFailure | None,
+    terminal_admission_failure: RunnerFailure | None,
     protocol_failure: str | None,
     returncode: int | None,
     started: str,
     finished: str,
     out_dir: str | None,
+    current_stage: StageMarker | None,
 ) -> RunManifest:
     if killed_failure is not None:
         taxonomy, message, stage, remediation = killed_failure
@@ -700,7 +928,33 @@ def _finalize(
             remediation=remediation,
         )
     if terminal_manifest is not None:
+        if terminal_manifest.failure is not None:
+            terminal_manifest = terminal_manifest.model_copy(
+                update={
+                    "failure": _bind_failure_record(
+                        terminal_manifest.failure,
+                        run_id=rid,
+                        current_stage=current_stage,
+                        finished=finished,
+                        returncode=returncode,
+                    )
+                }
+            )
         return terminal_manifest
+    if terminal_admission_failure is not None:
+        return _failed_manifest(
+            plan,
+            rid,
+            taxonomy=terminal_admission_failure.taxonomy,
+            message=str(terminal_admission_failure),
+            target=runner_name,
+            started=started,
+            finished=finished,
+            out_dir=out_dir,
+            stage=terminal_admission_failure.stage,
+            remediation=terminal_admission_failure.remediation,
+            exit_code=returncode,
+        )
     if protocol_failure is not None:
         return _failed_manifest(
             plan,
@@ -711,18 +965,30 @@ def _finalize(
             started=started,
             finished=finished,
             out_dir=out_dir,
+            stage=current_stage,
             exit_code=returncode,
             remediation="regenerate the RunPlan and align the core, worker, backend manifest, and "
             "managed environment lock",
         )
     if rejection is not None:
-        return _failed_manifest(
-            plan, rid, taxonomy=_taxonomy(rejection.get("taxonomy")),
-            message=str(rejection.get("message") or "the worker rejected the dispatch"),
-            target=runner_name, started=started, finished=finished, out_dir=out_dir,
-            exit_code=returncode,
-            remediation="the worker could not accept the plan — check the dispatch / worker version",
+        bound_failure = _bind_failure_record(
+            rejection,
+            run_id=rid,
+            current_stage=current_stage,
+            finished=finished,
+            returncode=returncode,
         )
+        manifest = _failed_manifest(
+            plan, rid, taxonomy=rejection.taxonomy,
+            message=rejection.message or "the worker rejected the dispatch",
+            target=runner_name, started=started, finished=finished, out_dir=out_dir,
+            stage=bound_failure.stage,
+            exit_code=bound_failure.exit_code,
+            remediation=rejection.remediation
+            or "the worker could not accept the plan — check the dispatch / worker version",
+            detail=rejection.detail,
+        )
+        return manifest.model_copy(update={"failure": bound_failure})
     if terminal_seen:
         # A terminal_result arrived but its manifest didn't validate — a protocol/schema mismatch, NOT a
         # crash. Say so honestly rather than blaming a phantom exit code.
@@ -731,6 +997,7 @@ def _finalize(
             message="the worker sent a malformed terminal_result (protocol/schema drift) — the run's "
             "own outcome could not be recovered",
             target=runner_name, started=started, finished=finished, out_dir=out_dir,
+            stage=current_stage,
             exit_code=returncode,
             remediation="check that the worker + core protocol/contract versions match",
         )
@@ -740,5 +1007,6 @@ def _finalize(
         message=f"the worker process exited (code {returncode}) without a terminal result — it crashed "
         "before completing the run",
         target=runner_name, started=started, finished=finished, out_dir=out_dir, exit_code=returncode,
+        stage=current_stage,
         remediation="check the worker's stderr; run 'corpus-studio train-check' to verify the runtime",
     )

@@ -83,6 +83,70 @@
       "title": "AcceleratorRuntime",
       "type": "object"
     },
+    "AdapterExportStateEvidence": {
+      "additionalProperties": false,
+      "description": "Canonical identity for the exact PEFT state expected in adapter_model.safetensors.",
+      "properties": {
+        "adapter_config_semantic_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Adapter Config Semantic Sha256",
+          "type": "string"
+        },
+        "after_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "After Sha256",
+          "type": "string"
+        },
+        "before_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Before Sha256",
+          "type": "string"
+        },
+        "changed_tensor_count": {
+          "minimum": 1,
+          "title": "Changed Tensor Count",
+          "type": "integer"
+        },
+        "changed_tensor_names": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Changed Tensor Names",
+          "type": "array"
+        },
+        "hash_algorithm": {
+          "const": "sha256-safetensors-tensor-state-v1",
+          "default": "sha256-safetensors-tensor-state-v1",
+          "title": "Hash Algorithm",
+          "type": "string"
+        },
+        "tensor_count": {
+          "minimum": 1,
+          "title": "Tensor Count",
+          "type": "integer"
+        },
+        "tensor_names": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Tensor Names",
+          "type": "array"
+        }
+      },
+      "required": [
+        "before_sha256",
+        "after_sha256",
+        "tensor_count",
+        "tensor_names",
+        "changed_tensor_count",
+        "changed_tensor_names",
+        "adapter_config_semantic_sha256"
+      ],
+      "title": "AdapterExportStateEvidence",
+      "type": "object"
+    },
     "AdapterMethod": {
       "enum": [
         "none",
@@ -231,6 +295,19 @@
           ],
           "title": "Current Integrity",
           "type": "string"
+        },
+        "metadata_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata Hash"
         }
       },
       "title": "ArtifactIntegrity",
@@ -2613,6 +2690,11 @@
         "TIMEOUT",
         "KERNEL_STALL",
         "NUMERICAL_FAILURE",
+        "GRADIENT_FAILURE",
+        "LOSS_EVIDENCE_FAILURE",
+        "OPTIMIZER_FAILURE",
+        "UPDATE_FAILURE",
+        "ARTIFACT_FAILURE",
         "CHECKPOINT_FAILURE",
         "ENVIRONMENT_FAILURE",
         "UNSUPPORTED_CONFIGURATION",
@@ -2838,6 +2920,46 @@
         }
       },
       "title": "GpuPcie",
+      "type": "object"
+    },
+    "GradientCoverageEvidence": {
+      "additionalProperties": false,
+      "description": "Observed materialized adapter gradients without claiming unused tensors had gradients.",
+      "properties": {
+        "eligible_tensor_count": {
+          "minimum": 1,
+          "title": "Eligible Tensor Count",
+          "type": "integer"
+        },
+        "eligible_tensor_names": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Eligible Tensor Names",
+          "type": "array"
+        },
+        "observed_tensor_count": {
+          "minimum": 1,
+          "title": "Observed Tensor Count",
+          "type": "integer"
+        },
+        "observed_tensor_names": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Observed Tensor Names",
+          "type": "array"
+        }
+      },
+      "required": [
+        "eligible_tensor_count",
+        "eligible_tensor_names",
+        "observed_tensor_count",
+        "observed_tensor_names"
+      ],
+      "title": "GradientCoverageEvidence",
       "type": "object"
     },
     "HashRef": {
@@ -3391,8 +3513,128 @@
       "title": "OptimizerSpec",
       "type": "object"
     },
+    "OptimizerStepLossEvidence": {
+      "additionalProperties": false,
+      "description": "One finite loss bound to exactly one completed optimizer step.",
+      "properties": {
+        "loss": {
+          "title": "Loss",
+          "type": "number"
+        },
+        "optimizer_step": {
+          "minimum": 1,
+          "title": "Optimizer Step",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "optimizer_step",
+        "loss"
+      ],
+      "title": "OptimizerStepLossEvidence",
+      "type": "object"
+    },
     "PackageLock": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "record_integrity": {
+                "const": "verified"
+              }
+            },
+            "required": [
+              "record_integrity"
+            ]
+          },
+          "then": {
+            "properties": {
+              "hash": {
+                "properties": {
+                  "algo": {
+                    "const": "sha256"
+                  },
+                  "value": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "record_entries": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "record_failed_entries": {
+                "maxItems": 0
+              },
+              "record_verified_entries": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "version": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            },
+            "required": [
+              "version",
+              "hash",
+              "record_entries",
+              "record_verified_entries",
+              "record_failed_entries"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "record_count_semantics": {
+                "const": "all_record_rows_v2"
+              }
+            },
+            "required": [
+              "record_count_semantics"
+            ]
+          },
+          "then": {
+            "properties": {
+              "installed_file_count": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "installed_files_hash": {
+                "properties": {
+                  "algo": {
+                    "const": "sha256"
+                  },
+                  "value": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "record_integrity": {
+                "const": "verified"
+              }
+            },
+            "required": [
+              "record_integrity",
+              "installed_files_hash",
+              "installed_file_count"
+            ]
+          }
+        }
+      ],
       "description": "A resolved dependency and its install provenance.\n\n``hash`` seals the installed distribution's RECORD metadata when that evidence is available; it\nis not mislabelled as the original wheel hash. ``direct_url`` and ``artifact`` preserve the\nstronger source identity pip exposes for direct/VCS/local installs. ``dependencies`` is the\ninstalled metadata dependency graph, not a second resolver.",
       "properties": {
         "artifact": {
@@ -3483,6 +3725,7 @@
             }
           ],
           "default": null,
+          "description": "Number of files sealed by installed_files_hash; equals record_entries when record_integrity is verified.",
           "title": "Installed File Count"
         },
         "installed_files_hash": {
@@ -3518,6 +3761,20 @@
           "title": "Normalized Name",
           "type": "string"
         },
+        "record_count_semantics": {
+          "anyOf": [
+            {
+              "const": "all_record_rows_v2",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Explicit all-RECORD-row count meaning. Missing means preserved legacy hash-bearing-row counts and is not admissible for new health, planning, or execution.",
+          "title": "Record Count Semantics"
+        },
         "record_entries": {
           "anyOf": [
             {
@@ -3529,6 +3786,7 @@
             }
           ],
           "default": null,
+          "description": "Number of regular installed files named by the distribution RECORD; positive when record_integrity is verified.",
           "title": "Record Entries"
         },
         "record_failed_entries": {
@@ -3560,6 +3818,7 @@
             }
           ],
           "default": null,
+          "description": "Verified row count under record_count_semantics; manager <=1.2 counted only hash-bearing rows, while all_record_rows_v2 equals record_entries.",
           "title": "Record Verified Entries"
         },
         "requested": {
@@ -5373,6 +5632,17 @@
           "title": "Target",
           "type": "string"
         },
+        "training_success_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrainingSuccessEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "updated_at": {
           "title": "Updated At",
           "type": "string"
@@ -6012,6 +6282,64 @@
       "title": "TerminalResultBody",
       "type": "object"
     },
+    "TrainableStateChangeEvidence": {
+      "additionalProperties": false,
+      "description": "Canonical before/after identity for the complete trainable adapter state.",
+      "properties": {
+        "after_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "After Sha256",
+          "type": "string"
+        },
+        "before_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Before Sha256",
+          "type": "string"
+        },
+        "changed_tensor_count": {
+          "minimum": 1,
+          "title": "Changed Tensor Count",
+          "type": "integer"
+        },
+        "changed_tensor_names": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Changed Tensor Names",
+          "type": "array"
+        },
+        "hash_algorithm": {
+          "const": "sha256-trainable-state-v1",
+          "default": "sha256-trainable-state-v1",
+          "title": "Hash Algorithm",
+          "type": "string"
+        },
+        "trainable_tensor_count": {
+          "minimum": 1,
+          "title": "Trainable Tensor Count",
+          "type": "integer"
+        },
+        "trainable_tensor_names": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Trainable Tensor Names",
+          "type": "array"
+        }
+      },
+      "required": [
+        "before_sha256",
+        "after_sha256",
+        "trainable_tensor_count",
+        "trainable_tensor_names",
+        "changed_tensor_count",
+        "changed_tensor_names"
+      ],
+      "title": "TrainableStateChangeEvidence",
+      "type": "object"
+    },
     "TrainerInterfacePolicy": {
       "additionalProperties": false,
       "description": "Version- and field-exact adapter to the installed TRL/Transformers surface.",
@@ -6021,11 +6349,37 @@
           "title": "Disable Tqdm",
           "type": "boolean"
         },
+        "logging_nan_inf_filter": {
+          "anyOf": [
+            {
+              "const": false,
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Logging Nan Inf Filter"
+        },
         "logging_steps": {
+          "const": 1,
           "default": 1,
-          "minimum": 1,
           "title": "Logging Steps",
           "type": "integer"
+        },
+        "logging_strategy": {
+          "anyOf": [
+            {
+              "const": "steps",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Logging Strategy"
         },
         "package_versions": {
           "items": {
@@ -6158,6 +6512,49 @@
       "title": "TrainingDataPolicy",
       "type": "object"
     },
+    "TrainingExecutionEvidence": {
+      "additionalProperties": false,
+      "description": "Trainer-side proof produced before adapter export is admitted as a success.",
+      "properties": {
+        "adapter_export_state": {
+          "$ref": "#/$defs/AdapterExportStateEvidence"
+        },
+        "completed_optimizer_steps": {
+          "minimum": 1,
+          "title": "Completed Optimizer Steps",
+          "type": "integer"
+        },
+        "gradient_coverage": {
+          "$ref": "#/$defs/GradientCoverageEvidence"
+        },
+        "optimizer_created": {
+          "const": true,
+          "title": "Optimizer Created",
+          "type": "boolean"
+        },
+        "step_losses": {
+          "items": {
+            "$ref": "#/$defs/OptimizerStepLossEvidence"
+          },
+          "minItems": 1,
+          "title": "Step Losses",
+          "type": "array"
+        },
+        "trainable_state": {
+          "$ref": "#/$defs/TrainableStateChangeEvidence"
+        }
+      },
+      "required": [
+        "trainable_state",
+        "adapter_export_state",
+        "gradient_coverage",
+        "optimizer_created",
+        "completed_optimizer_steps",
+        "step_losses"
+      ],
+      "title": "TrainingExecutionEvidence",
+      "type": "object"
+    },
     "TrainingSchedule": {
       "additionalProperties": false,
       "properties": {
@@ -6189,6 +6586,61 @@
         }
       },
       "title": "TrainingSchedule",
+      "type": "object"
+    },
+    "TrainingSuccessEvidence": {
+      "additionalProperties": false,
+      "description": "All gates required before a resolved run or measured fit may be called successful.",
+      "properties": {
+        "adapter_bytes_verified": {
+          "const": true,
+          "title": "Adapter Bytes Verified",
+          "type": "boolean"
+        },
+        "adapter_config_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Adapter Config Sha256",
+          "type": "string"
+        },
+        "adapter_safetensors_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Adapter Safetensors Sha256",
+          "type": "string"
+        },
+        "artifact_integrity_verified": {
+          "const": true,
+          "title": "Artifact Integrity Verified",
+          "type": "boolean"
+        },
+        "execution": {
+          "$ref": "#/$defs/TrainingExecutionEvidence"
+        },
+        "measured_peak": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "output_path_verified": {
+          "const": true,
+          "title": "Output Path Verified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "execution",
+        "output_path_verified",
+        "adapter_bytes_verified",
+        "artifact_integrity_verified",
+        "adapter_safetensors_sha256",
+        "adapter_config_sha256"
+      ],
+      "title": "TrainingSuccessEvidence",
       "type": "object"
     }
   },

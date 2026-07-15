@@ -289,6 +289,8 @@ def _probe_trainer_contract(profile: EnvironmentProfile) -> ProbeOutcome:
             "gradient_accumulation_steps",
             "gradient_checkpointing",
             "learning_rate",
+            "logging_nan_inf_filter",
+            "logging_strategy",
             "logging_steps",
             "lr_scheduler_type",
             "num_train_epochs",

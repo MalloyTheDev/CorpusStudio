@@ -29,15 +29,18 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from corpus_studio.platform.artifacts import build_artifact_manifest, write_artifact_manifest
-from corpus_studio.platform.common import HashRef, Ref, new_uuid7_id
+from corpus_studio.platform.common import HashRef, MemoryMetrics, Ref, new_uuid7_id
 from corpus_studio.platform.contracts import (
     ArtifactManifest,
     EventMetrics,
     FailureRecord,
     FitClassification,
+    OptimizerStepLossEvidence,
     RunEvent,
     RunManifest,
     RunPlan,
+    TrainingExecutionEvidence,
+    TrainingSuccessEvidence,
 )
 from corpus_studio.platform.enums import FailureTaxonomy, StageMarker
 
@@ -157,6 +160,11 @@ class RunContext:
         # A runner may set the MEASURED fit (from the watchdog's observed peak) — the post-run
         # reconciliation of the calibrator's *predicted* fit. The supervisor records it on the manifest.
         self.final_fit: FitClassification | None = None
+        # The training runner may report an observed peak and trainer-side execution evidence, but it
+        # cannot promote either to success. ``execute_run`` owns the output/artifact gates and is the
+        # only layer that may create TrainingSuccessEvidence or a proven native fit.
+        self.measured_peak: MemoryMetrics | None = None
+        self.training_execution_evidence: TrainingExecutionEvidence | None = None
 
     @property
     def cancelled(self) -> bool:
@@ -265,6 +273,187 @@ class SupervisedRun:
     artifacts: list[ArtifactManifest]
 
 
+def validate_training_success_evidence(
+    plan: RunPlan,
+    run_id: str,
+    events: Sequence[RunEvent],
+    produced: Sequence[ProducedArtifact],
+    artifacts: Sequence[ArtifactManifest],
+    execution_evidence: TrainingExecutionEvidence | None,
+    measured_peak: MemoryMetrics | None,
+) -> TrainingSuccessEvidence:
+    """Reconcile every resolved-training success gate before terminal PASS or proven fit."""
+
+    execution = plan.resolved_execution
+    if execution is None:  # pragma: no cover - caller restricts this helper to resolved training.
+        raise RunnerFailure(
+            "training success evidence requires a resolved execution",
+            taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+            stage=StageMarker.process_start,
+        )
+    if execution_evidence is None:
+        raise RunnerFailure(
+            "resolved training returned without trainer execution evidence",
+            taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+    if (
+        execution.schedule.max_steps is not None
+        and execution_evidence.completed_optimizer_steps != execution.schedule.max_steps
+    ):
+        raise RunnerFailure(
+            "completed optimizer steps do not match the sealed schedule",
+            taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+    optimizer_events = [
+        event
+        for event in events
+        if event.event_type == "stage" and event.stage == StageMarker.optimizer_created
+    ]
+    if len(optimizer_events) != 1 or not execution_evidence.optimizer_created:
+        raise RunnerFailure(
+            "resolved training requires exactly one real optimizer-created event",
+            taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+            stage=StageMarker.optimizer_created,
+        )
+    optimizer_event = optimizer_events[0]
+    step_metrics = [
+        event
+        for event in events
+        if event.event_type == "metric"
+        and event.optimizer_step is not None
+        and event.optimizer_step > 0
+    ]
+    if any(
+        event.seq <= optimizer_event.seq
+        or event.metrics is None
+        or event.metrics.loss is None
+        for event in step_metrics
+    ):
+        raise RunnerFailure(
+            "every completed-step metric must follow optimizer creation and carry one finite loss",
+            taxonomy=FailureTaxonomy.LOSS_EVIDENCE_FAILURE,
+            stage=StageMarker.loss,
+        )
+    event_losses: list[OptimizerStepLossEvidence] = []
+    for event in step_metrics:
+        assert event.optimizer_step is not None
+        assert event.metrics is not None and event.metrics.loss is not None
+        event_losses.append(
+            OptimizerStepLossEvidence(
+                optimizer_step=event.optimizer_step,
+                loss=event.metrics.loss,
+            )
+        )
+    if event_losses != execution_evidence.step_losses:
+        raise RunnerFailure(
+            "RunEvent losses do not provide exactly one finite record for every completed step",
+            taxonomy=FailureTaxonomy.LOSS_EVIDENCE_FAILURE,
+            stage=StageMarker.loss,
+        )
+
+    from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+        ExecutionConfigurationError,
+        verify_run_scoped_output_path,
+    )
+
+    try:
+        expected_output = verify_run_scoped_output_path(
+            execution,
+            run_id,
+            require_exists=True,
+        )
+    except ExecutionConfigurationError as exc:
+        raise RunnerFailure(
+            str(exc),
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        ) from exc
+    adapters = [artifact for artifact in produced if artifact.kind == "adapter"]
+    if (
+        len(produced) != 1
+        or len(adapters) != 1
+        or Path(adapters[0].path).absolute() != expected_output
+    ):
+        raise RunnerFailure(
+            "resolved training must return only one adapter at the sealed output path",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    adapter_manifests = [artifact for artifact in artifacts if artifact.kind == "adapter"]
+    if (
+        len(artifacts) != 1
+        or len(adapter_manifests) != 1
+        or adapter_manifests[0].artifact_id != adapters[0].artifact_id
+    ):
+        raise RunnerFailure(
+            "adapter artifact manifest does not match the produced adapter",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    manifest = adapter_manifests[0]
+    if Path(manifest.path).absolute() != expected_output:
+        raise RunnerFailure(
+            "adapter artifact manifest escaped the sealed output path",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    integrity = manifest.integrity
+    if (
+        integrity is None
+        or integrity.current_integrity != "ok"
+        or integrity.content_hash is None
+        or integrity.metadata_hash is None
+        or integrity.cheap_fingerprint is None
+    ):
+        raise RunnerFailure(
+            "adapter artifact lacks complete byte and integrity evidence",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    from corpus_studio.platform.artifacts import (  # noqa: PLC0415
+        validate_sealed_adapter_artifact,
+    )
+    from corpus_studio.training.artifact_registry import (  # noqa: PLC0415
+        compute_weight_content_hash,
+    )
+
+    try:
+        adapter_evidence = validate_sealed_adapter_artifact(
+            manifest.path,
+            execution,
+            execution_evidence.adapter_export_state,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise RunnerFailure(
+            f"adapter Safetensors/config validation failed: {exc}",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        ) from exc
+    if compute_weight_content_hash(manifest.path) != integrity.content_hash:
+        raise RunnerFailure(
+            "adapter weight bytes changed before terminal admission",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    if adapter_evidence.adapter_config_sha256 != integrity.metadata_hash:
+        raise RunnerFailure(
+            "adapter config bytes changed before terminal admission",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    return TrainingSuccessEvidence(
+        execution=execution_evidence,
+        output_path_verified=True,
+        adapter_bytes_verified=True,
+        artifact_integrity_verified=True,
+        adapter_safetensors_sha256=adapter_evidence.safetensors_sha256,
+        adapter_config_sha256=adapter_evidence.adapter_config_sha256,
+        measured_peak=measured_peak,
+    )
+
+
 def execute_run(
     plan: RunPlan,
     runner: Runner,
@@ -285,11 +474,18 @@ def execute_run(
     rid = _sanitize_id(run_id or new_uuid7_id("run"))
     cancel = cancel or CancelToken()
     events: list[RunEvent] = []
+    sink_errors: list[str] = []
+    record_dir = run_record_directory(out_dir, rid) if out_dir is not None else None
 
     def _collect(event: RunEvent) -> None:
         events.append(event)
         if sink is not None:
-            sink(event)
+            try:
+                sink(event)
+            except Exception as exc:  # noqa: BLE001 - an observer cannot rewrite run truth.
+                label = type(exc).__name__
+                if label not in sink_errors:
+                    sink_errors.append(label)
 
     ctx = RunContext(plan, rid, _collect, cancel, clock)
     started = clock()
@@ -299,6 +495,8 @@ def execute_run(
     failure: FailureRecord | None = None
     artifact_ids: list[str] = []
     produced: Sequence[ProducedArtifact] = []
+    artifact_manifests: list[ArtifactManifest] = []
+    training_success_evidence: TrainingSuccessEvidence | None = None
 
     try:
         # Defense in depth: callers can reach this public library boundary without going through the
@@ -355,29 +553,56 @@ def execute_run(
             )
         produced = runner.run(ctx)
         artifact_ids = [artifact.artifact_id for artifact in produced]
+        try:
+            artifact_manifests = [
+                build_artifact_manifest(
+                    artifact_id=artifact.artifact_id,
+                    path=artifact.path,
+                    kind=artifact.kind,
+                    run_id=rid,
+                    base_model=plan.base_model,
+                    now=clock(),
+                )
+                for artifact in produced
+            ]
+        except Exception as exc:  # noqa: BLE001 - artifact admission is a classified gate.
+            raise RunnerFailure(
+                f"artifact manifest creation failed: {exc}",
+                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                stage=StageMarker.export,
+            ) from exc
         if plan.resolved_execution is not None:
-            if not any(
-                event.event_type == "metric"
-                and event.optimizer_step is not None
-                and event.optimizer_step > 0
-                for event in events
-            ):
+            training_success_evidence = validate_training_success_evidence(
+                plan,
+                rid,
+                events,
+                produced,
+                artifact_manifests,
+                ctx.training_execution_evidence,
+                ctx.measured_peak,
+            )
+        if record_dir is not None:
+            try:
+                for artifact_manifest in artifact_manifests:
+                    write_artifact_manifest(artifact_manifest, record_dir)
+            except Exception as exc:  # noqa: BLE001 - durable artifact evidence is a success gate.
+                artifact_ids = []
                 raise RunnerFailure(
-                    "resolved training returned without optimizer-step evidence",
-                    taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
-                    stage=StageMarker.optimizer_step,
-                )
-            if "adapter" not in {artifact.kind for artifact in produced}:
-                raise RunnerFailure(
-                    "resolved training returned without its required adapter artifact",
-                    taxonomy=FailureTaxonomy.CHECKPOINT_FAILURE,
+                    f"artifact manifest persistence failed: {exc}",
+                    taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
                     stage=StageMarker.export,
-                )
+                    remediation="preserve the run directory and repair durable artifact storage",
+                ) from exc
+        if plan.resolved_execution is not None and ctx.measured_peak is not None:
+            # Promotion follows every semantic, byte-integrity, and durable-artifact gate.
+            from corpus_studio.platform.watchdog import (  # noqa: PLC0415
+                reconcile_measured_fit,
+            )
+
+            ctx.final_fit = reconcile_measured_fit(ctx.measured_peak, proven=True)
         state = "succeeded"
-        ctx.emit_terminal("succeeded")
     except RunCancelled:
         state = "cancelled"
-        ctx.emit_terminal("cancelled", "run cancelled")
     except RunnerFailure as exc:
         state = "failed"
         failure = FailureRecord(
@@ -390,7 +615,6 @@ def execute_run(
             detected_at=clock(),
             remediation=exc.remediation,
         )
-        ctx.emit_terminal("failed", str(exc))
     except Exception as exc:  # noqa: BLE001 — the supervisor must classify, not propagate, a crash
         state = "failed"
         failure = FailureRecord(
@@ -400,8 +624,11 @@ def execute_run(
             exception_type=type(exc).__name__,
             detected_at=clock(),
         )
-        ctx.emit_terminal("failed", str(exc))
 
+    if state != "succeeded" and ctx.measured_peak is not None:
+        from corpus_studio.platform.watchdog import reconcile_measured_fit  # noqa: PLC0415
+
+        ctx.final_fit = reconcile_measured_fit(ctx.measured_peak, proven=False)
     finished = clock()
     manifest = RunManifest(
         run_id=rid,
@@ -426,23 +653,97 @@ def execute_run(
         artifact_ids=artifact_ids,
         failure=failure,
         final_fit=ctx.final_fit,  # the MEASURED fit, when a runner captured one (via the watchdog)
+        training_success_evidence=(
+            training_success_evidence if state == "succeeded" else None
+        ),
+        notes=(
+            "event sink failures were isolated: " + ", ".join(sink_errors)
+            if sink_errors
+            else ""
+        ),
     )
-    artifact_manifests = [
-        build_artifact_manifest(
-            artifact_id=artifact.artifact_id,
-            path=artifact.path,
-            kind=artifact.kind,
-            run_id=rid,
-            base_model=plan.base_model,
-            now=finished,
-        )
-        for artifact in produced
-    ]
-    if out_dir is not None:
-        record_dir = run_record_directory(out_dir, rid)
-        write_run_manifest(manifest, record_dir)
-        for artifact_manifest in artifact_manifests:
-            write_artifact_manifest(artifact_manifest, record_dir)
+    if record_dir is not None:
+        try:
+            write_run_manifest(manifest, record_dir)
+        except Exception as exc:  # noqa: BLE001 - terminal truth follows durable admission.
+            if manifest.state == "succeeded":
+                from corpus_studio.platform.watchdog import (  # noqa: PLC0415
+                    reconcile_measured_fit,
+                )
+
+                failed_fit = (
+                    reconcile_measured_fit(ctx.measured_peak, proven=False)
+                    if ctx.measured_peak is not None
+                    else None
+                )
+                payload = manifest.model_dump(mode="json")
+                payload.update(
+                    {
+                        "state": "failed",
+                        "updated_at": clock(),
+                        "finished_at": clock(),
+                        "failure": FailureRecord(
+                            run_id=rid,
+                            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                            stage=StageMarker.export,
+                            message=f"run manifest persistence failed: {exc}",
+                            exception_type=type(exc).__name__,
+                            detected_at=clock(),
+                            remediation=(
+                                "preserve the run directory and repair durable run-record storage"
+                            ),
+                        ).model_dump(mode="json"),
+                        "final_fit": (
+                            failed_fit.model_dump(mode="json")
+                            if failed_fit is not None
+                            else None
+                        ),
+                        "training_success_evidence": None,
+                    }
+                )
+                manifest = RunManifest.model_validate(payload)
+                try:
+                    write_run_manifest(manifest, record_dir)
+                except Exception as retry_exc:  # noqa: BLE001 - no durable channel remains.
+                    manifest = manifest.model_copy(
+                        update={
+                            "notes": (
+                                manifest.notes
+                                + ("; " if manifest.notes else "")
+                                + "failed terminal manifest could not be persisted: "
+                                + type(retry_exc).__name__
+                            )
+                        }
+                    )
+            else:
+                manifest = manifest.model_copy(
+                    update={
+                        "notes": (
+                            manifest.notes
+                            + ("; " if manifest.notes else "")
+                            + "terminal manifest could not be persisted: "
+                            + type(exc).__name__
+                        )
+                    }
+                )
+
+    terminal_message = (
+        manifest.failure.message
+        if manifest.failure is not None and manifest.failure.message
+        else manifest.state
+    )
+    ctx.emit_terminal(manifest.state, terminal_message)
+    if sink_errors:
+        note = "event sink failures were isolated: " + ", ".join(sink_errors)
+        if note not in manifest.notes:
+            manifest = manifest.model_copy(
+                update={"notes": manifest.notes + ("; " if manifest.notes else "") + note}
+            )
+            if record_dir is not None:
+                try:
+                    write_run_manifest(manifest, record_dir)
+                except Exception:  # noqa: BLE001 - observer notes are not execution truth.
+                    pass
     return SupervisedRun(manifest=manifest, events=events, artifacts=artifact_manifests)
 
 

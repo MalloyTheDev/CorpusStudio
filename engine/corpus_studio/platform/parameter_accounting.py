@@ -7,7 +7,7 @@ runtime observations remain separately labeled until an exact, comparable reconc
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -16,7 +16,7 @@ import os
 from pathlib import Path, PurePosixPath
 import struct
 import tempfile
-from typing import Any
+from typing import Any, cast
 
 from corpus_studio import __version__
 
@@ -98,6 +98,39 @@ class _SafetensorsFileEvidence:
     coordinates: int
     tensors: tuple[dict[str, object], ...]
     integrity_verified: bool
+    content_sha256: str | None = None
+
+
+@dataclass(frozen=True)
+class SafetensorsTensorStateEvidence:
+    content_sha256: str
+    tensor_state_sha256: str
+    tensor_names: tuple[str, ...]
+
+
+def canonical_tensor_state_sha256(records: Sequence[Mapping[str, object]]) -> str:
+    """Canonical identity shared by in-memory adapter export and saved Safetensors bytes."""
+
+    normalized: list[dict[str, object]] = []
+    for record in records:
+        raw_shape = cast(Sequence[int], record["shape"])
+        normalized.append(
+            {
+                "name": str(record["name"]),
+                "dtype": str(record["dtype"]),
+                "shape": list(raw_shape),
+                "content_sha256": str(record["content_sha256"]),
+            }
+        )
+    normalized.sort(key=lambda item: str(item["name"]))
+    return hashlib.sha256(
+        json.dumps(
+            normalized,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _utcnow() -> datetime:
@@ -728,63 +761,18 @@ def _tensor_coordinates(shape: object, *, tensor_name: str) -> int:
     return coordinates
 
 
-def _read_safetensors_header(
-    path: Path,
-    relative: str,
+def _decode_safetensors_header(
+    header_bytes: bytes,
     *,
-    expected_size: int,
-    expected_sha256: str | None,
-) -> _SafetensorsFileEvidence:
-    try:
-        with path.open("rb") as handle:
-            before = os.fstat(handle.fileno())
-            if before.st_size != expected_size:
-                raise _HeaderEvidenceError(
-                    ParameterGapReason.changed_during_read,
-                    f"safetensors size differs from the descriptor inventory: {relative}",
-                )
-            raw_length = handle.read(8)
-            if len(raw_length) != 8:
-                raise _HeaderEvidenceError(
-                    ParameterGapReason.malformed_evidence,
-                    f"truncated safetensors header length: {relative}",
-                )
-            header_length = struct.unpack("<Q", raw_length)[0]
-            if header_length <= 0 or header_length > _MAX_SAFETENSORS_HEADER_BYTES:
-                raise _HeaderEvidenceError(
-                    ParameterGapReason.malformed_evidence,
-                    f"safetensors header exceeds the bounded reader limit: {relative}",
-                )
-            header_bytes = handle.read(header_length)
-            if len(header_bytes) != header_length:
-                raise _HeaderEvidenceError(
-                    ParameterGapReason.malformed_evidence,
-                    f"truncated safetensors header: {relative}",
-                )
-            actual_sha256 = None
-            if expected_sha256 is not None:
-                handle.seek(0)
-                digest = hashlib.sha256()
-                while chunk := handle.read(1024 * 1024):
-                    digest.update(chunk)
-                actual_sha256 = digest.hexdigest()
-            after = os.fstat(handle.fileno())
-    except _HeaderEvidenceError:
-        raise
-    except OSError as exc:
+    data_bytes: int,
+    relative: str,
+) -> tuple[int, list[dict[str, object]], list[tuple[int, int, str]]]:
+    """Decode and structurally validate one Safetensors header and complete data layout."""
+
+    if not header_bytes.startswith(b"{") or not header_bytes.rstrip(b" ").endswith(b"}"):
         raise _HeaderEvidenceError(
             ParameterGapReason.malformed_evidence,
-            f"cannot read safetensors header '{relative}': {exc}",
-        ) from exc
-    if before.st_size != after.st_size or before.st_mtime_ns != after.st_mtime_ns:
-        raise _HeaderEvidenceError(
-            ParameterGapReason.changed_during_read,
-            f"safetensors file changed while its header was read: {relative}",
-        )
-    if expected_sha256 is not None and actual_sha256 != expected_sha256:
-        raise _HeaderEvidenceError(
-            ParameterGapReason.changed_during_read,
-            f"safetensors content differs from the descriptor inventory: {relative}",
+            f"safetensors header has invalid framing or padding: {relative}",
         )
 
     def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -816,7 +804,10 @@ def _read_safetensors_header(
     metadata = payload.get("__metadata__")
     if metadata is not None and (
         not isinstance(metadata, dict)
-        or any(not isinstance(key, str) or not isinstance(value, str) for key, value in metadata.items())
+        or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in metadata.items()
+        )
     ):
         raise _HeaderEvidenceError(
             ParameterGapReason.malformed_evidence,
@@ -828,7 +819,6 @@ def _read_safetensors_header(
             ParameterGapReason.malformed_evidence,
             f"safetensors header has too many tensors: {relative}",
         )
-    data_bytes = before.st_size - 8 - header_length
     if data_bytes < 0:
         raise _HeaderEvidenceError(
             ParameterGapReason.malformed_evidence,
@@ -864,7 +854,7 @@ def _read_safetensors_header(
                 f"out-of-range offsets for safetensors tensor '{name}'",
             )
         tensor_coordinates = _tensor_coordinates(value.get("shape"), tensor_name=name)
-        if end - start != tensor_coordinates * _DTYPE_BYTES[str(dtype)]:
+        if end - start != tensor_coordinates * _DTYPE_BYTES[dtype]:
             raise _HeaderEvidenceError(
                 ParameterGapReason.malformed_evidence,
                 f"byte size does not match shape/dtype for safetensors tensor '{name}'",
@@ -884,17 +874,163 @@ def _read_safetensors_header(
                 "data_offsets": offsets,
             }
         )
-    for previous, current in zip(sorted(intervals), sorted(intervals)[1:], strict=False):
-        if current[0] < previous[1]:
+    cursor = 0
+    for start, end, name in sorted(intervals):
+        if start != cursor:
+            reason = "overlapping" if start < cursor else "non-contiguous"
             raise _HeaderEvidenceError(
                 ParameterGapReason.malformed_evidence,
-                f"overlapping safetensors data ranges: {previous[2]} and {current[2]}",
+                f"{reason} safetensors data range at tensor '{name}'",
             )
+        cursor = end
+    if cursor != data_bytes:
+        raise _HeaderEvidenceError(
+            ParameterGapReason.malformed_evidence,
+            f"safetensors tensor ranges do not cover the complete data buffer: {relative}",
+        )
+    return coordinates, records, intervals
+
+
+def _read_safetensors_header(
+    path: Path,
+    relative: str,
+    *,
+    expected_size: int,
+    expected_sha256: str | None,
+    hash_tensor_bytes: bool = False,
+) -> _SafetensorsFileEvidence:
+    try:
+        with path.open("rb") as handle:
+            before = os.fstat(handle.fileno())
+            if before.st_size != expected_size:
+                raise _HeaderEvidenceError(
+                    ParameterGapReason.changed_during_read,
+                    f"safetensors size differs from the descriptor inventory: {relative}",
+                )
+            raw_length = handle.read(8)
+            if len(raw_length) != 8:
+                raise _HeaderEvidenceError(
+                    ParameterGapReason.malformed_evidence,
+                    f"truncated safetensors header length: {relative}",
+                )
+            header_length = struct.unpack("<Q", raw_length)[0]
+            if (
+                header_length <= 0
+                or header_length > _MAX_SAFETENSORS_HEADER_BYTES
+                or header_length % 8 != 0
+            ):
+                raise _HeaderEvidenceError(
+                    ParameterGapReason.malformed_evidence,
+                    f"safetensors header length is invalid or unaligned: {relative}",
+                )
+            header_bytes = handle.read(header_length)
+            if len(header_bytes) != header_length:
+                raise _HeaderEvidenceError(
+                    ParameterGapReason.malformed_evidence,
+                    f"truncated safetensors header: {relative}",
+                )
+            data_start = 8 + header_length
+            coordinates, records, intervals = _decode_safetensors_header(
+                header_bytes,
+                data_bytes=before.st_size - data_start,
+                relative=relative,
+            )
+            actual_sha256 = None
+            if expected_sha256 is not None or hash_tensor_bytes:
+                handle.seek(0)
+                digest = hashlib.sha256()
+                while chunk := handle.read(1024 * 1024):
+                    digest.update(chunk)
+                actual_sha256 = digest.hexdigest()
+            if hash_tensor_bytes:
+                records_by_name = {str(record["name"]): record for record in records}
+                for start, end, name in intervals:
+                    handle.seek(data_start + start)
+                    remaining = end - start
+                    tensor_digest = hashlib.sha256()
+                    while remaining:
+                        chunk = handle.read(min(1024 * 1024, remaining))
+                        if not chunk:
+                            raise _HeaderEvidenceError(
+                                ParameterGapReason.changed_during_read,
+                                f"truncated safetensors tensor bytes for '{name}'",
+                            )
+                        tensor_digest.update(chunk)
+                        remaining -= len(chunk)
+                    records_by_name[name]["content_sha256"] = tensor_digest.hexdigest()
+            after = os.fstat(handle.fileno())
+            path_after = path.stat()
+    except _HeaderEvidenceError:
+        raise
+    except OSError as exc:
+        raise _HeaderEvidenceError(
+            ParameterGapReason.malformed_evidence,
+            f"cannot read safetensors header '{relative}': {exc}",
+        ) from exc
+    opened_identity = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+    path_identity = (
+        path_after.st_dev,
+        path_after.st_ino,
+        path_after.st_size,
+        path_after.st_mtime_ns,
+    )
+    if (
+        before.st_size != after.st_size
+        or before.st_mtime_ns != after.st_mtime_ns
+        or opened_identity != path_identity
+    ):
+        raise _HeaderEvidenceError(
+            ParameterGapReason.changed_during_read,
+            f"safetensors file changed while its header was read: {relative}",
+        )
+    if expected_sha256 is not None and actual_sha256 != expected_sha256:
+        raise _HeaderEvidenceError(
+            ParameterGapReason.changed_during_read,
+            f"safetensors content differs from the descriptor inventory: {relative}",
+        )
+
     return _SafetensorsFileEvidence(
         path=relative,
         coordinates=coordinates,
         tensors=tuple(records),
         integrity_verified=expected_sha256 is not None,
+        content_sha256=actual_sha256,
+    )
+
+
+def validate_safetensors_tensor_file(path: str | Path) -> SafetensorsTensorStateEvidence:
+    """Parse/hash one stable, regular Safetensors file and return its exact tensor identity.
+
+    This is the dependency-light artifact-admission surface. It deliberately reuses the same
+    strict header, shape, dtype, offset, overlap, containment, and change-during-read checks as
+    static parameter accounting, without loading tensor payloads or importing Safetensors/torch.
+    """
+
+    candidate = Path(path)
+    try:
+        root = _safe_snapshot_root(candidate.parent)
+        safe_file = _safe_snapshot_file(root, candidate.name)
+        stat = safe_file.stat()
+        evidence = _read_safetensors_header(
+            safe_file,
+            candidate.name,
+            expected_size=stat.st_size,
+            expected_sha256=None,
+            hash_tensor_bytes=True,
+        )
+    except (_HeaderEvidenceError, OSError) as exc:
+        raise ParameterAccountingError(str(exc)) from exc
+    names = tuple(str(record["name"]) for record in evidence.tensors)
+    if not names:
+        raise ParameterAccountingError("adapter Safetensors contains no tensors")
+    if evidence.content_sha256 is None or any(
+        record.get("content_sha256") is None for record in evidence.tensors
+    ):
+        raise ParameterAccountingError("adapter Safetensors tensor hashing was incomplete")
+    return SafetensorsTensorStateEvidence(
+        content_sha256=evidence.content_sha256,
+        tensor_state_sha256=canonical_tensor_state_sha256(evidence.tensors),
+        tensor_names=names,
     )
 
 
