@@ -63,8 +63,9 @@ recipe plus its own exact declarations and functional probes.
 Before model loading, the execution path:
 
 1. Recomputes the `RunPlan` and execution-configuration hashes.
-2. Re-hashes every local input and rejects changed or unstable bytes, linked paths, and root escapes;
-   the dataset is then parsed from the exact stabilized bytes rather than reopened.
+2. Re-hashes local model/tokenizer inputs and rejects changed or unstable bytes, linked paths, and
+   root escapes. The dataset is read and hashed once by the trainer, then parsed from those exact
+   stabilized bytes rather than reopened or rehashed.
 3. Verifies the sealed package versions and formatter/chat-template identity.
 4. Applies the exact Flash, memory-efficient, and math SDPA toggles and checks the observed global
    state; SDPA paths run a tiny forward/backward with only the required kernel enabled.
@@ -80,6 +81,12 @@ Before model loading, the execution path:
 
 For subprocess runs, protocol 2.0 includes the execution-configuration hash in `run_accepted`. The
 parent compares it with the dispatched plan before accepting any run events.
+
+Resolved training setup is supervised separately from optimizer execution. Its first recognized
+setup stage starts one absolute `--preflight-timeout` budget; bounded same-thread dataset and
+tokenization progress plus actual tokenizer/model-load boundaries are observable but cannot extend
+that deadline. `optimizer_created` (or the first optimizer metric) permanently restores the ordinary
+`--timeout` silence rule. Heartbeats extend neither deadline.
 
 The runner lane is part of the execution boundary: an echo worker cannot consume a training plan.
 `platform-run` defaults to `--runner auto`, which selects the one lane allowed by the seal.

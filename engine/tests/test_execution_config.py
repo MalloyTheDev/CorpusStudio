@@ -18,6 +18,7 @@ from corpus_studio.platform.execution_config import (
     stable_directory_sha256,
     stable_file_bytes,
     verify_execution_inputs,
+    verify_execution_non_dataset_inputs,
     verify_execution_objective,
     verify_runner_lane,
 )
@@ -118,6 +119,25 @@ def test_stable_file_and_directory_bindings_cover_exact_bytes(tmp_path: Path):
     assert stable_directory_sha256(root) != directory_digest
 
 
+def test_stable_file_bytes_reports_monotonic_completed_byte_progress(tmp_path: Path):
+    source = tmp_path / "large.bin"
+    expected = (b"a" * (2 * 1024 * 1024)) + b"tail"
+    source.write_bytes(expected)
+    progress: list[tuple[int, int]] = []
+
+    content, digest = stable_file_bytes(
+        source, progress_callback=lambda completed, total: progress.append((completed, total))
+    )
+
+    assert content == expected
+    assert len(digest) == 64
+    assert progress[-1] == (len(expected), len(expected))
+    assert [completed for completed, _total in progress] == sorted(
+        completed for completed, _total in progress
+    )
+    assert all(total == len(expected) for _completed, total in progress)
+
+
 def test_stable_input_checks_reject_missing_empty_and_link_roots(tmp_path: Path):
     with pytest.raises(ExecutionConfigurationError, match="file does not exist"):
         stable_file_bytes(tmp_path / "missing")
@@ -160,6 +180,23 @@ def test_execution_inputs_are_revalidated_against_current_local_bytes(tmp_path: 
         update={"inputs": pinned_config.inputs.model_copy(update={"model": unpinned})}
     )
     with pytest.raises(ExecutionConfigurationError, match="not pinned"):
+        verify_execution_inputs(config)
+
+
+def test_training_can_defer_dataset_revalidation_to_its_single_stable_read(tmp_path: Path):
+    dataset = tmp_path / "train.jsonl"
+    dataset.write_text('{"instruction":"a","output":"b"}\n', encoding="utf-8")
+    config = _execution()
+    binding = local_input_binding(
+        kind="dataset", location=str(dataset), ref_id="dataset", directory=False
+    )
+    config = config.model_copy(
+        update={"inputs": config.inputs.model_copy(update={"dataset": binding})}
+    )
+    dataset.write_text('{"instruction":"changed","output":"b"}\n', encoding="utf-8")
+
+    verify_execution_non_dataset_inputs(config)
+    with pytest.raises(ExecutionConfigurationError, match="dataset input bytes changed"):
         verify_execution_inputs(config)
 
 

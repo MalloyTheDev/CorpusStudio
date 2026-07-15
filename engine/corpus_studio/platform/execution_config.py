@@ -12,6 +12,7 @@ import inspect
 import json
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -151,7 +152,12 @@ def _within(path: Path, root: Path) -> bool:
     return path == root or root in path.parents
 
 
-def _stable_file_read(path: str | Path, *, capture: bool) -> tuple[bytes | None, str]:
+def _stable_file_read(
+    path: str | Path,
+    *,
+    capture: bool,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> tuple[bytes | None, str]:
     candidate = Path(path)
     if not candidate.exists() or not candidate.is_file():
         raise ExecutionConfigurationError(f"execution input file does not exist: {candidate}")
@@ -167,10 +173,14 @@ def _stable_file_read(path: str | Path, *, capture: bool) -> tuple[bytes | None,
                 raise ExecutionConfigurationError(
                     f"execution input was replaced while opening: {candidate}"
                 )
+            bytes_read = 0
             while chunk := handle.read(1024 * 1024):
                 digest.update(chunk)
                 if captured is not None:
                     captured.extend(chunk)
+                bytes_read += len(chunk)
+                if progress_callback is not None:
+                    progress_callback(bytes_read, opened_before.st_size)
             opened_after = os.fstat(handle.fileno())
         after = candidate.stat()
     except OSError as exc:
@@ -199,10 +209,18 @@ def _stable_file_read(path: str | Path, *, capture: bool) -> tuple[bytes | None,
     return bytes(captured) if captured is not None else None, digest.hexdigest()
 
 
-def stable_file_bytes(path: str | Path) -> tuple[bytes, str]:
+def stable_file_bytes(
+    path: str | Path,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> tuple[bytes, str]:
     """Read one immutable input once and return the exact bytes plus their digest."""
 
-    content, digest = _stable_file_read(path, capture=True)
+    content, digest = _stable_file_read(
+        path,
+        capture=True,
+        progress_callback=progress_callback,
+    )
     assert content is not None
     return content, digest
 
@@ -273,8 +291,8 @@ def local_input_binding(
     )
 
 
-def verify_execution_inputs(config: ResolvedExecutionConfiguration) -> None:
-    for binding in (config.inputs.dataset, config.inputs.model, config.inputs.tokenizer):
+def _verify_execution_input_bindings(bindings: tuple[ExecutionInputBinding, ...]) -> None:
+    for binding in bindings:
         if binding.source == "huggingface":
             if binding.resolved_revision is None:  # contract validation should already prevent this.
                 raise ExecutionConfigurationError(
@@ -290,6 +308,24 @@ def verify_execution_inputs(config: ResolvedExecutionConfiguration) -> None:
             raise ExecutionConfigurationError(
                 f"{binding.kind} input bytes changed after planning: {binding.location}"
             )
+
+
+def verify_execution_inputs(config: ResolvedExecutionConfiguration) -> None:
+    """Revalidate every sealed input against current local bytes."""
+
+    _verify_execution_input_bindings(
+        (config.inputs.dataset, config.inputs.model, config.inputs.tokenizer)
+    )
+
+
+def verify_execution_non_dataset_inputs(config: ResolvedExecutionConfiguration) -> None:
+    """Revalidate model/tokenizer inputs when the consumer owns the stable dataset read.
+
+    The training worker uses :func:`stable_file_bytes` to hash and capture the dataset exactly once,
+    then parses those captured bytes. Rehashing that binding here would add a redundant full pass.
+    """
+
+    _verify_execution_input_bindings((config.inputs.model, config.inputs.tokenizer))
 
 
 def verify_execution_objective(

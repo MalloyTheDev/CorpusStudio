@@ -72,7 +72,7 @@ def test_all_root_contracts_registered():
 def test_failure_and_fit_taxonomies_complete():
     assert len(FailureTaxonomy) == 11
     assert len(FitClass) == 12
-    assert len(StageMarker) == 20
+    assert len(StageMarker) == 25
     # the spill-vs-OOM distinction that is the whole point
     assert FailureTaxonomy.KERNEL_STALL.value == "KERNEL_STALL"
     assert FailureTaxonomy.ACCIDENTAL_SPILL.value == "ACCIDENTAL_SPILL"

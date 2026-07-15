@@ -162,10 +162,11 @@ class TrainingRunner:
             TrainerError,
         )
 
-        config = self._resolve_config(ctx.plan, ctx.run_id)
         ctx.emit_stage(
-            StageMarker.process_start, f"training run [{backend_label}]: {config.base_model}"
+            StageMarker.process_start,
+            f"training run [{backend_label}]: validating sealed execution inputs",
         )
+        config = self._resolve_config(ctx.plan, ctx.run_id)
 
         def _on_stall() -> None:
             # A true CUDA hang can't be force-killed in-process (the training thread is stuck in the
@@ -347,7 +348,7 @@ class TrainingRunner:
             ExecutionConfigurationError,
             run_scoped_training_output,
             verify_execution_configuration_hash,
-            verify_execution_inputs,
+            verify_execution_non_dataset_inputs,
             verify_execution_objective,
         )
         from corpus_studio.training.trainer import train_config_from_resolved  # noqa: PLC0415
@@ -380,7 +381,9 @@ class TrainingRunner:
                 remediation="create a derived RunPlan with a new execution hash",
             )
         try:
-            verify_execution_inputs(execution)
+            # The trainer owns one stable read/hash/capture of the dataset and parses those exact
+            # bytes. Revalidating it here would create a redundant full-corpus pass.
+            verify_execution_non_dataset_inputs(execution)
             verify_execution_objective(execution, task_type=plan.task_type.value)
             config = train_config_from_resolved(execution)
             return config.model_copy(

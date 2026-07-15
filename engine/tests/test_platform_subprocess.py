@@ -272,6 +272,38 @@ def _fake_worker(
     return [sys.executable, "-c", script]
 
 
+def _timed_training_worker(plan, actions: str):
+    """A training-identity fake whose action block can exercise real supervisor deadlines."""
+
+    hello = json.dumps(_hello_body(plan))
+    script = (
+        "import json,sys,time\n"
+        "def s(t,b,mid,corr=None):\n"
+        f" e={{'protocol_version':{PROTOCOL_VERSION!r},'message_id':mid,"
+        "'direction':'worker_to_core','type':t,'body':b}\n"
+        " if corr is not None:e['correlation_id']=corr\n"
+        " print(json.dumps(e),flush=True)\n"
+        f"s('hello',json.loads({hello!r}),'hello')\n"
+        "dispatch=json.loads(sys.stdin.readline());corr=dispatch['message_id'];"
+        "rid=dispatch['body']['run_id']\n"
+        "execution_hash=dispatch['body']['plan']['resolved_execution']['configuration_hash']\n"
+        "s('run_accepted',{'run_id':rid,'pid':1,'execution_configuration_hash':execution_hash},"
+        "'accepted',corr)\n"
+        "seq=0\n"
+        "def event(stage,optimizer_step=None):\n"
+        " global seq\n"
+        " body={'contract_version':'1.0.0','event_type':'stage','run_id':rid,'seq':seq,"
+        "'emitted_at':'2026-07-15T00:00:00+00:00','stage':stage,'message':stage}\n"
+        " if optimizer_step is not None:\n"
+        "  body['event_type']='metric';body['optimizer_step']=optimizer_step\n"
+        " s('event',body,'event-'+str(seq),corr);seq+=1\n"
+        "def heartbeat(index):\n"
+        " s('heartbeat',{'run_id':rid,'pid_alive':True},'hb-'+str(index),corr)\n"
+        + actions
+    )
+    return [sys.executable, "-c", script]
+
+
 def test_parent_rejects_wrong_execution_hash_before_training_events():
     from corpus_studio.platform.runners import demo_training_plan
 
@@ -667,6 +699,103 @@ def test_hung_worker_is_killed_and_classified_kernel_stall():
     assert result.manifest.state == "failed"
     assert result.manifest.failure.taxonomy.value == "KERNEL_STALL"
     assert elapsed < 15  # killed promptly, not after the 120s sleep
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        ({"silence_timeout_s": 0}, "silence_timeout_s"),
+        ({"silence_timeout_s": float("nan")}, "silence_timeout_s"),
+        ({"silence_timeout_s": float("inf")}, "silence_timeout_s"),
+        ({"preflight_timeout_s": 0}, "preflight_timeout_s"),
+        ({"preflight_timeout_s": float("nan")}, "preflight_timeout_s"),
+        ({"preflight_timeout_s": float("inf")}, "preflight_timeout_s"),
+        ({"heartbeat_interval_s": 0}, "heartbeat_interval_s"),
+    ],
+)
+def test_nonpositive_deadlines_are_rejected_before_worker_spawn(monkeypatch, kwargs, expected):
+    monkeypatch.setattr(
+        "corpus_studio.platform.subprocess_supervisor.subprocess.Popen",
+        lambda *_args, **_kwargs: pytest.fail("worker must not spawn for an invalid deadline"),
+    )
+    with pytest.raises(ValueError, match=expected):
+        execute_run_subprocess(_PLAN, **kwargs)
+
+
+def test_training_preflight_can_outlive_the_ordinary_silence_budget():
+    from corpus_studio.platform.runners import demo_training_plan
+
+    plan = demo_training_plan()
+    actions = (
+        "event('process_start')\n"
+        "time.sleep(0.7)\n"
+        "s('failure',{'run_id':rid,'taxonomy':'ENVIRONMENT_FAILURE',"
+        "'stage':'model_load','message':'synthetic preflight failure'},'failure',corr)\n"
+    )
+    result = execute_run_subprocess(
+        plan,
+        runner_name="cpu_toy",
+        worker_argv=_timed_training_worker(plan, actions),
+        silence_timeout_s=0.5,
+        preflight_timeout_s=2,
+    )
+
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy.value == "ENVIRONMENT_FAILURE"
+    assert result.manifest.failure.message == "synthetic preflight failure"
+
+
+def test_repeated_preflight_progress_cannot_extend_the_absolute_deadline():
+    from corpus_studio.platform.runners import demo_training_plan
+
+    plan = demo_training_plan()
+    actions = (
+        "index=0\n"
+        "spam_until=time.monotonic()+0.8\n"
+        "while time.monotonic()<spam_until:\n"
+        " event('dataset_formatting')\n"
+        " heartbeat(index);index+=1;time.sleep(0.02)\n"
+        "time.sleep(2)\n"
+    )
+    start = time.monotonic()
+    result = execute_run_subprocess(
+        plan,
+        runner_name="cpu_toy",
+        worker_argv=_timed_training_worker(plan, actions),
+        silence_timeout_s=0.5,
+        preflight_timeout_s=0.2,
+    )
+    elapsed = time.monotonic() - start
+
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy.value == "TIMEOUT"
+    assert result.manifest.failure.stage.value == "dataset_formatting"
+    assert "non-extendable" in result.manifest.failure.message
+    assert elapsed < 5
+
+
+def test_heartbeat_spam_after_optimizer_creation_cannot_mask_a_stall():
+    from corpus_studio.platform.runners import demo_training_plan
+
+    plan = demo_training_plan()
+    actions = (
+        "event('process_start')\n"
+        "event('optimizer_created')\n"
+        "index=0\n"
+        "while True:\n"
+        " heartbeat(index);index+=1;time.sleep(0.02)\n"
+    )
+    result = execute_run_subprocess(
+        plan,
+        runner_name="cpu_toy",
+        worker_argv=_timed_training_worker(plan, actions),
+        silence_timeout_s=0.15,
+        preflight_timeout_s=1,
+    )
+
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy.value == "KERNEL_STALL"
+    assert result.manifest.failure.stage.value == "optimizer_created"
 
 
 def test_heartbeat_spam_cannot_mask_a_hung_run():

@@ -503,3 +503,17 @@ def test_platform_run_refuses_a_tampered_plan_hash(tmp_path):
     result = runner.invoke(app, ["platform-run", str(path)])
     assert result.exit_code == 2
     assert "plan_hash does not match" in result.output
+
+
+def test_platform_run_help_exposes_the_bounded_preflight_deadline():
+    from typer.main import get_command
+
+    root = get_command(app)
+    platform_run_command = root.commands["platform-run"]
+    option = next(
+        parameter
+        for parameter in platform_run_command.params
+        if "--preflight-timeout" in parameter.opts
+    )
+    assert option.default == 1800.0
+    assert "Non-extendable deadline" in (option.help or "")

@@ -17,6 +17,7 @@ pipes isn't portable to Windows). Dependency-light: stdlib + platform contracts 
 
 from __future__ import annotations
 
+import math
 import queue
 import subprocess
 import sys
@@ -38,7 +39,7 @@ from corpus_studio.platform.contracts import (
     TerminalResultBody,
 )
 from corpus_studio.platform.backends import backend_manifest_digest
-from corpus_studio.platform.enums import FailureTaxonomy
+from corpus_studio.platform.enums import FailureTaxonomy, StageMarker
 from corpus_studio.platform.artifacts import write_artifact_manifest
 from corpus_studio.platform.common import new_uuid7_id
 from corpus_studio.platform.process_control import (
@@ -61,6 +62,28 @@ from corpus_studio.platform.worker_protocol import (
     encode_worker_message,
     parse_worker_body,
 )
+
+
+_PREFLIGHT_STAGES = frozenset(
+    {
+        StageMarker.process_start,
+        StageMarker.dataset_verification,
+        StageMarker.execution_config_verified,
+        StageMarker.env_loaded,
+        StageMarker.cuda_init,
+        StageMarker.tokenizer_load,
+        StageMarker.dataset_formatting,
+        StageMarker.truncation_analysis,
+        StageMarker.attention_policy_applied,
+        StageMarker.model_load,
+        StageMarker.placement_verified,
+        StageMarker.model_loaded,
+        StageMarker.quantized,
+        StageMarker.adapter_attached,
+    }
+)
+_KilledFailure = tuple[FailureTaxonomy, str, StageMarker | None, str]
+
 
 def worker_identity_argv(plan: RunPlan) -> list[str]:
     """Literal argv tokens that bind a worker process to the plan identities it must present."""
@@ -112,6 +135,7 @@ def _failed_manifest(
     started: str,
     finished: str,
     out_dir: str | None,
+    stage: StageMarker | None = None,
     remediation: str | None = None,
     exit_code: int | None = None,
 ) -> RunManifest:
@@ -123,6 +147,7 @@ def _failed_manifest(
     failure = FailureRecord(
         run_id=rid,
         taxonomy=taxonomy,
+        stage=stage,
         message=message,
         exit_code=exit_code,
         detected_at=finished,
@@ -153,6 +178,7 @@ def execute_run_subprocess(
     max_steps: int | None = None,
     sink: RunEventSink | None = None,
     silence_timeout_s: float = 600.0,
+    preflight_timeout_s: float = 1800.0,
     heartbeat_interval_s: int = 30,
     out_dir: str | Path | None = None,
     clock: Callable[[], str] = _now_iso,
@@ -160,21 +186,25 @@ def execute_run_subprocess(
 ) -> SupervisedRun:
     """Run ``plan`` in a supervised child process and return its :class:`SupervisedRun`.
 
-    The child streams ``event`` messages (one per completed step = real progress) that are forwarded to
-    ``sink`` + collected. **If no accepted run/event progress arrives within ``silence_timeout_s``**
-    the child is presumed hung and is terminated + killed → ``KERNEL_STALL``. Heartbeats are parsed but
-    deliberately do not extend that deadline, so an independent liveness thread cannot mask a hung
-    training thread. A child that
-    exits without a ``terminal_result`` → ``ENVIRONMENT_FAILURE`` (a crash). The child inherits stderr
-    so trainer telemetry cannot fill a parent-owned pipe. A try/finally guarantees the child is
-    terminated + reaped on EVERY path — a raising sink or a dispatch BrokenPipe can never orphan a live
-    GPU worker. ``worker_argv`` is injectable for tests.
+    Normal execution requires a genuine RunEvent within ``silence_timeout_s`` or the complete child
+    tree is killed as ``KERNEL_STALL``. Resolved training preflight is different: once the worker emits
+    a recognized, real setup stage, the entire preflight receives one non-extendable
+    ``preflight_timeout_s`` budget. This prevents a large immutable-input check, full-corpus
+    tokenization, or local model load from being mislabeled as a kernel stall while still bounding a
+    genuinely stuck setup operation as ``TIMEOUT``. Repeated stages and heartbeats cannot extend that
+    hard deadline. On ``optimizer_created`` (or the first optimizer metric), the ordinary silence
+    deadline resumes.
 
-    NOTE on the load window: there is no progress signal during the initial model download/load, so set
-    ``silence_timeout_s`` above your cold-cache load time (or pre-fetch the model). A silent load longer
-    than the timeout is honestly indistinguishable from a hang here — and a bare liveness heartbeat is
-    NOT the fix (it keeps ticking on its own thread while the TRAINING thread is hung, defeating the
-    kill)."""
+    A child that exits without a ``terminal_result`` becomes ``ENVIRONMENT_FAILURE``. The child
+    inherits stderr so trainer telemetry cannot fill a parent-owned pipe. A try/finally guarantees the
+    child tree is terminated and reaped on every path. ``worker_argv`` is injectable for tests.
+    """
+    if not math.isfinite(silence_timeout_s) or silence_timeout_s <= 0:
+        raise ValueError("silence_timeout_s must be finite and positive")
+    if not math.isfinite(preflight_timeout_s) or preflight_timeout_s <= 0:
+        raise ValueError("preflight_timeout_s must be finite and positive")
+    if heartbeat_interval_s <= 0:
+        raise ValueError("heartbeat_interval_s must be positive")
     rid = _sanitize_id(run_id or new_uuid7_id("run"))
     out_dir_str = str(out_dir) if out_dir is not None else None
     record_dir = run_record_directory(out_dir_str, rid) if out_dir_str is not None else None
@@ -272,18 +302,57 @@ def execute_run_subprocess(
     terminal_manifest: RunManifest | None = None
     terminal_seen = False
     rejection: dict[str, Any] | None = None
-    killed_reason: str | None = None
+    killed_failure: _KilledFailure | None = None
     protocol_failure: str | None = None
     dispatched = False
     accepted = False
     seen_message_ids: set[str] = set()
     last_event_seq: int | None = None
+    current_stage: StageMarker | None = None
+    preflight_deadline: float | None = None
+    preflight_finished = False
+    resolved_training = plan.resolved_execution is not None
     dispatch_message_id = f"c-{rid}"
     progress_deadline = time.monotonic() + silence_timeout_s
 
-    def _reset_progress_deadline() -> None:
+    def _reset_progress_deadline(now: float | None = None) -> None:
         nonlocal progress_deadline
-        progress_deadline = time.monotonic() + silence_timeout_s
+        progress_deadline = (time.monotonic() if now is None else now) + silence_timeout_s
+
+    def _observe_stage(stage: StageMarker, now: float) -> None:
+        nonlocal current_stage, preflight_deadline, preflight_finished
+        current_stage = stage
+        if resolved_training and not preflight_finished and stage in _PREFLIGHT_STAGES:
+            if preflight_deadline is None:
+                preflight_deadline = now + preflight_timeout_s
+            return
+        if resolved_training:
+            preflight_finished = True
+        preflight_deadline = None
+
+    def _deadline_failure(now: float) -> _KilledFailure | None:
+        if preflight_deadline is not None:
+            if now < preflight_deadline:
+                return None
+            stage_name = current_stage.value if current_stage is not None else "unknown"
+            return (
+                FailureTaxonomy.TIMEOUT,
+                f"training preflight exceeded its non-extendable {preflight_timeout_s:.0f}s "
+                f"deadline during {stage_name!r} and was killed",
+                current_stage,
+                "inspect worker stderr and preflight events; fix the blocked operation or set an "
+                "evidence-based --preflight-timeout",
+            )
+        if now < progress_deadline:
+            return None
+        return (
+            FailureTaxonomy.KERNEL_STALL,
+            f"the worker made no run progress for {silence_timeout_s:.0f}s and was killed "
+            "(a hung run - for example, a fused-attention deadlock)",
+            current_stage,
+            "use a verified attention path, lower sequence_len, or raise --timeout only when the "
+            "observed training operation is expected to be slow",
+        )
 
     def _forward(event: RunEvent) -> None:
         events.append(event)
@@ -291,10 +360,9 @@ def execute_run_subprocess(
             sink(event)
 
     # stderr is INHERITED (not a pipe): the trainer's tqdm/transformers write \r-based progress bars
-    # with no newlines, which would deadlock a line-drained stderr pipe (buffer fills → the child wedges
-    # on write). Inheriting sends telemetry straight to our stderr, and — crucially — with no bogus
-    # liveness heartbeat, a child that DID wedge on stderr makes no progress, emits no events, and is
-    # killed by the silence timeout anyway. So the wedge is handled by the kill, not masked.
+    # with no newlines, which would deadlock a line-drained stderr pipe (buffer fills and the child
+    # wedges on write). Inheriting sends telemetry straight to our stderr. Heartbeats never move either
+    # deadline, and preflight has one absolute budget, so a wedged child remains bounded.
     proc = subprocess.Popen(  # noqa: S603 - argv is our own worker command (or a test injection)
         argv,
         stdin=subprocess.PIPE,
@@ -314,21 +382,17 @@ def execute_run_subprocess(
         ).start()
 
         while True:
-            remaining = progress_deadline - time.monotonic()
-            if remaining <= 0:
-                killed_reason = (
-                    f"the worker made no run progress for {silence_timeout_s:.0f}s and was killed "
-                    "(a hung run - for example, a fused-attention deadlock)"
-                )
+            now = time.monotonic()
+            killed_failure = _deadline_failure(now)
+            if killed_failure is not None:
                 break
+            active_deadline = (
+                preflight_deadline if preflight_deadline is not None else progress_deadline
+            )
             try:
-                kind, payload = lines.get(timeout=remaining)
+                kind, payload = lines.get(timeout=max(0.0, active_deadline - now))
             except queue.Empty:
-                killed_reason = (
-                    f"the worker made no run progress for {silence_timeout_s:.0f}s and was killed "
-                    "(a hung run - for example, a fused-attention deadlock)"
-                )
-                break
+                continue
             if kind == "eof":
                 break
             try:
@@ -387,7 +451,12 @@ def execute_run_subprocess(
                         )
                     last_event_seq = body.seq
                     _forward(body)
-                    _reset_progress_deadline()
+                    now = time.monotonic()
+                    if body.stage is not None:
+                        _observe_stage(body.stage, now)
+                    elif body.event_type == "metric" and body.optimizer_step is not None:
+                        _observe_stage(StageMarker.optimizer_step, now)
+                    _reset_progress_deadline(now)
                 elif message.type == "heartbeat":
                     if not accepted:
                         raise WorkerProtocolError("heartbeat arrived before run_accepted")
@@ -428,7 +497,7 @@ def execute_run_subprocess(
 
     finished = clock()
     manifest = _finalize(
-        plan, rid, runner_name, terminal_manifest, terminal_seen, rejection, killed_reason,
+        plan, rid, runner_name, terminal_manifest, terminal_seen, rejection, killed_failure,
         protocol_failure, proc.returncode, started, finished, out_dir_str,
     )
     if record_dir is not None:
@@ -614,20 +683,21 @@ def _finalize(
     terminal_manifest: RunManifest | None,
     terminal_seen: bool,
     rejection: dict[str, Any] | None,
-    killed_reason: str | None,
+    killed_failure: _KilledFailure | None,
     protocol_failure: str | None,
     returncode: int | None,
     started: str,
     finished: str,
     out_dir: str | None,
 ) -> RunManifest:
-    if killed_reason is not None:
+    if killed_failure is not None:
+        taxonomy, message, stage, remediation = killed_failure
         return _failed_manifest(
-            plan, rid, taxonomy=FailureTaxonomy.KERNEL_STALL, message=killed_reason,
+            plan, rid, taxonomy=taxonomy, message=message,
             target=runner_name, started=started, finished=finished, out_dir=out_dir,
+            stage=stage,
             exit_code=returncode,
-            remediation="use math/eager attention (forced for native-Windows/WDDM sm_120), lower "
-            "sequence_len, pre-fetch the model, or raise --timeout if the load/step is just slow.",
+            remediation=remediation,
         )
     if terminal_manifest is not None:
         return terminal_manifest

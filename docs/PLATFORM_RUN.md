@@ -114,11 +114,19 @@ corpus-studio platform-run ./plan/RunPlan.json --subprocess --out ./run
   See [`BACKEND_WORKER_PROTOCOL.md`](BACKEND_WORKER_PROTOCOL.md).
 - Refuses non-trivial physical execution before importing or invoking a trainer. The current built-in
   runner proves the singleton path only; a representable offload/distributed plan is not support proof.
-- Re-hashes local inputs and verifies pinned package versions, applies exactly one attention-kernel
-  policy and explicit device map, then observes the model attention API and actual loaded placement.
-  Any mismatch refuses the run; `device_map="auto"` and silent semantic trainer-field removal are
-  invalid. Chat-template failure blocks, and truncation analysis covers the complete pinned dataset
-  unless an explicit allow policy was sealed.
+- Revalidates local model/tokenizer inputs and pinned package versions. The dataset file is opened,
+  read, and SHA-256 hashed once; the trainer parses those exact captured bytes rather than reopening
+  the path. It then applies exactly one attention-kernel policy and explicit device map and observes
+  the model attention API and actual loaded placement. Any mismatch refuses the run;
+  `device_map="auto"` and silent semantic trainer-field removal are invalid. Chat-template failure
+  blocks, and truncation analysis covers the complete pinned dataset unless an explicit allow policy
+  was sealed.
+- Gives resolved training setup one absolute `--preflight-timeout` budget (1800 seconds by default).
+  Bounded same-thread byte/row events expose dataset verification, formatting, and tokenization;
+  tokenizer/model-load events mark the real call boundaries. These events and heartbeats cannot
+  extend that absolute deadline. At optimizer creation, the ordinary `--timeout` silence deadline
+  resumes. Setup expiry is `TIMEOUT` at the last stage; ordinary execution silence is
+  `KERNEL_STALL`.
 - Streams **RunEvent** envelopes to **stderr** (ordered `seq`, `stage` / `metric` with per-step loss /
   `artifact_produced` / `terminal`).
 - Mints a fresh UUIDv7 `run_id` for every execution. A resolved run derives its trainer directory from
