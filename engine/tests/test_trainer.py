@@ -45,6 +45,7 @@ from corpus_studio.training.trainer import (
     enforced_attention_training_kernel,
     format_example_text,
     load_run_config_from_file,
+    reassert_trainable_precision,
     resolve_attention_implementation,
     resolve_run_plan,
     run_training,
@@ -1378,6 +1379,97 @@ def test_trainable_precision_enforces_master_weights_and_gradient_contract():
     adapter.grad = good
     with pytest.raises(TrainerError, match="hook identity changed"):
         adapter.post_accumulate_hook(object())
+
+
+def test_trainable_precision_reasserts_qlora_dtype_after_trainer_initialization():
+    torch = _FakeTorch()
+
+    class Data:
+        def __init__(self, owner):
+            self.owner = owner
+
+        def to(self, *, dtype):
+            self.owner.dtype = dtype
+            return self
+
+    class Parameter:
+        requires_grad = True
+        device = "cuda:0"
+        grad = None
+
+        def __init__(self):
+            self.dtype = torch.float16
+            self.data = Data(self)
+            self.post_accumulate_hook = None
+
+        def register_post_accumulate_grad_hook(self, hook):
+            self.post_accumulate_hook = hook
+
+    adapter = Parameter()
+    model = type(
+        "Model",
+        (),
+        {"named_parameters": lambda self: iter([("adapter", adapter)])},
+    )()
+    config = _sealed_config(master_weight_dtype="fp32", gradient_dtype="fp32")
+    tracker = enforce_trainable_precision(model, torch, config)
+    assert tracker is not None and adapter.dtype is torch.float32
+    original_hook = adapter.post_accumulate_hook
+
+    # The pinned TRL SFTTrainer constructor recasts QLoRA trainable state to BF16. CorpusStudio must
+    # restore the sealed FP32 master-weight policy on the same parameter before training begins.
+    adapter.dtype = torch.bfloat16
+    restored = reassert_trainable_precision(model, torch, config, tracker)
+    assert restored == ("adapter",)
+    assert adapter.dtype is torch.float32
+    assert adapter.post_accumulate_hook is original_hook
+
+    adapter.grad = type(
+        "Gradient",
+        (),
+        {"dtype": torch.float32, "device": "cuda:0"},
+    )()
+    assert original_hook(adapter) is None
+    assert tracker.evidence().observed_tensor_names == ["adapter"]
+
+
+def test_trainable_precision_reassertion_fails_closed_on_parameter_replacement():
+    torch = _FakeTorch()
+
+    class Data:
+        def __init__(self, owner):
+            self.owner = owner
+
+        def to(self, *, dtype):
+            self.owner.dtype = dtype
+            return self
+
+    class Parameter:
+        requires_grad = True
+        device = "cuda:0"
+
+        def __init__(self):
+            self.dtype = torch.float16
+            self.data = Data(self)
+
+        def register_post_accumulate_grad_hook(self, hook):
+            self.post_accumulate_hook = hook
+
+    original = Parameter()
+    inventory = [("adapter", original)]
+    model = type("Model", (), {"named_parameters": lambda self: iter(inventory)})()
+    config = _sealed_config(master_weight_dtype="fp32", gradient_dtype="fp32")
+    tracker = enforce_trainable_precision(model, torch, config)
+    assert tracker is not None
+
+    replacement = Parameter()
+    replacement.dtype = torch.bfloat16
+    inventory[:] = [("adapter", replacement)]
+    with pytest.raises(TrainingEvidenceError, match="inventory changed") as failure:
+        reassert_trainable_precision(model, torch, config, tracker)
+    assert failure.value.taxonomy.value == "GRADIENT_FAILURE"
+    assert failure.value.stage.value == "adapter_attached"
+    assert replacement.dtype is torch.bfloat16
 
 
 def test_trainable_precision_refuses_runtime_without_post_accumulation_hooks():

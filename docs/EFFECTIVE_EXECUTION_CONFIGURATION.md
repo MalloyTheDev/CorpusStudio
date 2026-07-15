@@ -108,7 +108,10 @@ training authority. Echo is valid only for an explicit evaluation/demo plan boun
 A resolved training success must contain canonical before/after hashes for the complete trainable
 adapter state with at least one changed tensor, observed materialized-gradient coverage, a verified
 real optimizer, exactly one finite loss for every completed optimizer step, and finite final adapter
-tensors. The exact post-training PEFT export state must equal the independently parsed Safetensors
+tensors. Because the pinned TRL constructor may recast QLoRA trainable state, the worker restores the
+sealed master dtype only on the same identity-bound parameters after trainer construction, then
+re-runs placement, quantization, and precision verification before the first backward pass. The exact
+post-training PEFT export state must equal the independently parsed Safetensors
 tensor state; the complete PEFT config semantics must equal parsed `adapter_config.json`. The runner
 also requires the trainer's reported output and adapter paths to equal the derived run-scoped path and
 rejects symlink/junction descendants, alternate weight payloads, and checkpoints. A readable path

@@ -8,16 +8,19 @@ run lifecycle** re-scope: profile → plan → predict-fit → run → measure-f
 registry, and subprocess reliability. The pre-Phase-9B real GPU workload evidence remains historical
 native Windows/WDDM evidence. The managed native-Linux environments now separately seal the legacy
 minimal hardware tuple, preserved readiness tuples, and separate manager-1.2 research math/flash
-QLoRA tuples. Fresh matched 0.5B sequence-256 attempts both verified model/post-adapter placement,
-forced their intended kernel, and attached QLoRA, then failed before optimizer step 1 because the
-production verifier inspected a BF16 pre-accumulation autograd tensor instead of the sealed FP32
-materialized leaf gradient. The verifier now targets post-accumulation `parameter.grad` and retains
-fail-closed dtype/device checks. Training-success admission now also requires canonical adapter-state
-change, honest gradient coverage, a real optimizer, one finite loss per exact completed step, and all
-output/artifact integrity gates before measured fit becomes proven. Package admission now requires
-complete positive RECORD counts. These corrections have CPU/unit evidence only and have not passed a
-new hardware smoke. No real optimizer step has passed through `platform-run`, and sequence length 4096
-remains unverified. These environment/diagnostic results are not a 7B workload or offload result.
+QLoRA tuples. The preserved manager-1.2 matched 0.5B attempts exposed and then motivated correction of
+the pre- versus post-accumulation gradient-verifier mismatch. A later manager-1.3 v4 math attempt used
+the corrected post-accumulation verifier and accurately found that pinned TRL recast the sealed FP32
+QLoRA parameters to BF16 during `SFTTrainer` construction; it failed before optimizer step 1 with
+`GRADIENT_FAILURE` at `backward`. The paired v4 flash plan was not dispatched. The worker now restores
+the sealed master dtype on the same parameter identities after trainer construction and re-runs the
+complete placement/quantization/precision verification before training. That latest ordering
+correction has CPU/unit evidence only. Training-success admission also requires canonical
+adapter-state change, honest gradient coverage, a real optimizer, one finite loss per exact completed
+step, and all output/artifact integrity gates before measured fit becomes proven. Package admission
+requires complete positive RECORD counts. No real optimizer step has passed through `platform-run`,
+and sequence length 4096 remains unverified. These environment/diagnostic results are not a 7B
+workload or offload result.
 The post-v1.3 additions reconciled below include the **reasoning-traces** data loop, a dataset
 **truncation guardrail** +
 external-trainer **checkpoint retention**, and a dependency-light **storage safe-spill** profiler —
@@ -264,14 +267,14 @@ per-item error isolation, and off-thread document opens.
   `RunPlan.environment_ref` pins the immutable
   lock hash and `platform-run --subprocess` dispatches with that managed interpreter after a live
   health check. Tests use fake installers and bounded synthetic probe evidence. Separately, the current
-  native-Linux host has preserved the legacy/readiness identities and sealed separate manager-1.2
-  research math/flash environments. Fresh matched 0.5B attempts reached verified post-adapter
-  placement but both failed before step 1 on the pre- versus post-accumulation gradient-verifier
-  mismatch; each completed zero optimizer steps and produced no artifact or checkpoint. See
-  [`HOST_STATE.md`](HOST_STATE.md). A later manager-1.2 v3 pair and normalized plan candidates are
-  preserved but were never dispatched; all 84 packages in those locks used the older partial-count
-  meaning of `verified`, so those locks and plans cannot authorize new admission. None of those facts
-  is full-workload or offload proof. See
+  native-Linux host has preserved the legacy/readiness identities and separate manager-1.2 research
+  environments. The v2 matched 0.5B attempts each failed before step 1 on the earlier pre- versus
+  post-accumulation verifier mismatch; the later v3 pair was never dispatched and cannot authorize
+  work under manager-1.3 RECORD semantics. Fresh manager-1.3 v4 environments and normalized-equal
+  plans were then sealed. The v4 math plan ran once and failed before step 1 when the
+  post-accumulation verifier observed TRL's constructor-time BF16 recast of sealed FP32 adapter state;
+  the v4 flash plan was withheld. No attempt produced an artifact or checkpoint. See
+  [`HOST_STATE.md`](HOST_STATE.md). None of those facts is full-workload or offload proof. See
   [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md); the full
   3-layer + MoE-safe forward plan is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) +
   [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md).

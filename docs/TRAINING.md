@@ -267,17 +267,19 @@ native-Windows WDDM driver** — the training step hangs at 100% GPU util but ~5
 pulls 150–250 W). Verified on a real RTX 5070: bitsandbytes 4-bit, the *mem-efficient* SDPA
 kernel, and the *math* path all work — **only the fused flash kernel hangs, and only on native
 Windows**. WSL2 testing on the 5070 showed the same flash kernel running ~1000× faster than the math
-fallback. On the current native-Linux host, separate manager-1.2 research environments verified tiny
-complete math and forced `SDPBackend.FLASH_ATTENTION` BF16/NF4/QLoRA tuples. Fresh matched 0.5B
-sequence-256 attempts both verified model and post-adapter CUDA placement, forced their intended
-attention kernel, and attached QLoRA. Both then failed before optimizer step 1 because production
-checked a BF16 pre-accumulation autograd tensor as if it were the sealed FP32 materialized leaf
-gradient. The verifier now checks post-accumulation `parameter.grad`, but that correction still needs
-a new worker, new locks/plans, and separately approved hardware evidence. The stricter success logic
-above has CPU/unit evidence only; no model load or GPU workload was run for it. No real flash optimizer
-step or sequence-4096 workload has passed. The user's in-progress 500-output corpus and every 7B
-workload remain unavailable until the user marks them ready. WSL evidence must not be reported as a
-native-Linux result.
+fallback. On the current native-Linux host, separate managed research environments verified tiny
+complete math and forced `SDPBackend.FLASH_ATTENTION` BF16/NF4/QLoRA tuples. The preserved
+manager-1.2 matched 0.5B attempts exposed a pre- versus post-accumulation verifier mismatch. A fresh
+manager-1.3 v4 math attempt then verified model/post-adapter placement, forced math, attached QLoRA,
+and observed a real optimizer, but failed before step 1 because pinned TRL recast the sealed FP32
+adapter parameters to BF16 inside `SFTTrainer.__init__`. The post-accumulation verifier correctly
+classified the resulting materialized BF16 gradient as `GRADIENT_FAILURE`; the paired v4 flash plan
+was not dispatched. The worker now restores FP32 on the same trainable parameter identities after
+trainer construction and re-runs full placement/quantization/precision verification before backward.
+That latest ordering correction has CPU/unit evidence only and requires a new wheel, locks, plans, and
+separately authorized hardware attempts. No real flash optimizer step or sequence-4096 workload has
+passed. The user's in-progress 500-output corpus and every 7B workload remain unavailable until the
+user marks them ready. WSL evidence must not be reported as a native-Linux result.
 
 CorpusStudio treats **WSL as its own platform** (`OperatingSystem.wsl`): it has separately measured
 flash evidence but `wddm` memory-residency like Windows (it still spills - see below). A new platform

@@ -1,7 +1,8 @@
 # Host State — Native-Linux RTX 5070 Workstation
 
-**Last verified:** 2026-07-15 (matched manager-1.2 math/flash evidence plus the later preserved,
-unexecuted v3 candidates were audited at the training-success checkpoint; legacy environment, GPU,
+**Last verified:** 2026-07-15 (manager-1.3 v4 math/flash environments and plans were independently
+verified; the single v4 math attempt is a preserved pre-step gradient failure and the v4 flash plan
+was not dispatched. Earlier environment and run evidence remains preserved; legacy environment, GPU,
 and paths were checked 2026-07-14).
 
 This file records the *verified* runtime facts of the machine CorpusStudio currently runs
@@ -247,6 +248,55 @@ rewriting their historical state. Consequently these locks and plans cannot auth
 worker wheel, new immutable environment IDs/locks, and completely fresh RunPlans are required before
 any separately approved smoke.
 
+### Manager-1.3 v4 pair and preserved math failure (do not reuse)
+
+After the training-success and complete-RECORD hardening merged, two new manager-1.3 environments
+were created from one wheel built at repository commit
+`e7875629fc6e046dc2a84a53aa941b3d073c18bd`. They remain separate blue/green identities; no prior
+environment, lock, plan, run, artifact, or evidence was relabeled or mutated.
+
+| Item | Math | Flash |
+|---|---|---|
+| Environment | `backend-corpus-studio-research-math-v4` | `backend-corpus-studio-research-flash-v4` |
+| Lock hash | `14750ec5932765fe544675aba69d0763931e249d598da8a4d9a44549e85a62a8` | `9f599070fcef83e192d1380ab50683a37cd9034a97194cc523fa58915e47fd30` |
+| Bound capability hash | `b260040eb967ab55052320d45805fc7b3056480a1aa2f354791a605157e6e925` | `77e1f5fd57d2b54b7c11d9e4ba14b0656bb96e80e64239298b84d205b1d370a6` |
+| Plan ID | `plan-019f650d-cc5d-7028-9763-9e8dfb66f370` | `plan-019f650e-51eb-7fc6-a444-816593a52552` |
+| Plan hash | `3bc3f230293c2ccc4eeac0fab63f03f503dfce36e7f10dad49f0feec76163065` | `cb750f36e79d8a119b24a71f95e787faaf8222940524e17497c4544580eef6ce` |
+| Execution hash | `4294b8431d1d20076e87b3797185add2fd8c5479db60adb1cc3f1a4c5cd47ea2` | `736ade995bfc6e4fb6d2b0dc6ecd2b717ec8fa53b464144b15299242b662dfe4` |
+| Workload dispatch | Once | Not dispatched |
+
+Both environments use `corpus-studio-engine==1.3.0` wheel SHA-256
+`f8b03634148c41c2fd44e337c9e562e4a8ce1f0b3f11cd980a7accd0a2a12a92` (METADATA SHA-256
+`098220cd2ae18eb38b780cae349a4434ad678f85b9522eaea86fb69752f07dea`). Each lock has 84 installed
+packages under `record_count_semantics="all_record_rows_v2"`; every installed package has positive
+`record_entries == record_verified_entries == installed_file_count` and zero failed RECORD rows. The
+normalized plan comparison found no shared semantic difference after accounting only for the sealed
+environment/capability, attention tuple, fresh document identity, and environment-root-bound package
+digests.
+
+The sequence-256 math plan was dispatched once as run
+`run-019f6518-3927-7d73-b106-15f385b61415`. It verified exact plan/execution/lock identities, forced
+`torch_sdpa_math`, model and post-adapter singleton CUDA placement, NF4 preparation, QLoRA insertion,
+and a real optimizer at `on_train_begin`. It then failed before optimizer step 1 with taxonomy
+`GRADIENT_FAILURE` at stage `backward`: the materialized gradient for
+`base_model.model.model.layers.23.mlp.down_proj.lora_B.default.weight` was BF16 while the sealed
+gradient dtype was FP32. The terminal fit remained `NATIVE_UNPROVEN`; there were zero loss records,
+artifacts, and checkpoints, and the run-scoped output root was never created. Post-run health remained
+`HARDWARE_VERIFIED` with drift false, and the GPU returned to 10 MiB with no compute process. The
+attempt is preserved under
+`/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v4/20260715T090840Z/runs/math-20260715T092243Z/`;
+its `SHA256SUMS` file hashes all 19 evidence files. The paired flash plan was withheld rather than
+consuming a known-common failure path.
+
+The exact pinned TRL source explains the failure: during `SFTTrainer` construction its QLoRA branch
+recasts all trainable parameters to BF16 after CorpusStudio registered post-accumulation hooks and
+enforced FP32. The post-accumulation verifier therefore reported the actual materialized gradient
+honestly. The repository correction restores the sealed master dtype on the same parameter identities
+after trainer construction and re-runs complete placement, quantization, and precision verification
+before training. That correction currently has CPU/unit evidence only. Because worker behavior
+changed, the v4 wheel, environments, locks, and plans must remain preserved and cannot authorize a
+retry; any later attempt requires a new wheel, new environment IDs/locks, and completely fresh plans.
+
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 
 `HARDWARE_VERIFIED` is the **Environment Manager** evidence level, not a training-run result.
@@ -269,10 +319,11 @@ must not be claimed from this state alone:
   `backend-corpus-studio` reference exists.
 - **Real offload fit, PCIe/NVMe throughput, sustained-write endurance** — the NVMe has not been
   benchmarked (`platform-storage` is non-destructive and reads no SMART data).
-- **Bare-Linux flash for a real optimizer step or sequence 4096** — the matched manager-1.2
-  environments verified separate tiny math and forced-`torch_sdpa_flash` tuples. The matched real
-  0.5B attempts reached adapter insertion but both stopped before optimizer step 1 on the common
-  materialized-gradient-verifier mismatch. Neither
+- **Bare-Linux flash for a real optimizer step or sequence 4096** — matched managed environments
+  verified separate tiny math and forced-`torch_sdpa_flash` tuples. The manager-1.2 real 0.5B
+  attempts stopped before step 1 on the earlier verifier mismatch; the manager-1.3 v4 math attempt
+  stopped before step 1 on TRL's constructor-time adapter recast, and its paired flash plan was not
+  dispatched. Neither
   environment is the same identity as Transformers `flash_attention_2` or an external `flash-attn`
   package, and neither is full-sequence 7B proof.
 - **MoE runtime capability** — static inspection only (Phase 8); no MoE execution.
