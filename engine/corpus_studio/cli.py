@@ -537,6 +537,7 @@ def platform_run(
             raise typer.Exit(2) from exc
 
     managed_worker_argv = None
+    managed_lease = contextlib.ExitStack()
     managed_environment = (
         plan.resolved_execution.environment_binding == "managed_lock"
         if plan.resolved_execution is not None
@@ -552,6 +553,12 @@ def platform_run(
 
         try:
             manager = EnvironmentManager(manager_root)
+            managed_lease.enter_context(
+                manager.environment_lease(
+                    plan.environment_ref.id,
+                    operation="managed platform run",
+                )
+            )
             # A live health check catches package/source/CUDA drift before dispatch or resume.
             health = manager.health(plan.environment_ref.id)
             descriptor = manager.load_descriptor(plan.environment_ref.id)
@@ -586,29 +593,36 @@ def platform_run(
 
             managed_worker_argv += worker_identity_argv(plan)
         except EnvironmentManagerError as exc:
+            managed_lease.close()
             typer.echo(exc.failure.model_dump_json(indent=2), err=True)
             raise typer.Exit(2) from exc
+        except Exception:
+            managed_lease.close()
+            raise
 
-    if subprocess_mode:
-        from corpus_studio.platform.subprocess_supervisor import execute_run_subprocess
+    try:
+        if subprocess_mode:
+            from corpus_studio.platform.subprocess_supervisor import execute_run_subprocess
 
-        result = execute_run_subprocess(
-            plan,
-            runner_name=runner_name,
-            max_steps=max_steps,
-            silence_timeout_s=silence_timeout,
-            preflight_timeout_s=preflight_timeout,
-            out_dir=out_dir,
-            worker_argv=managed_worker_argv,
-        )
-    else:
-        if runner_name == "echo":
-            runner: Runner = EchoRunner()
+            result = execute_run_subprocess(
+                plan,
+                runner_name=runner_name,
+                max_steps=max_steps,
+                silence_timeout_s=silence_timeout,
+                preflight_timeout_s=preflight_timeout,
+                out_dir=out_dir,
+                worker_argv=managed_worker_argv,
+            )
         else:
-            from corpus_studio.platform.runners import TrainingRunner
+            if runner_name == "echo":
+                runner: Runner = EchoRunner()
+            else:
+                from corpus_studio.platform.runners import TrainingRunner
 
-            runner = TrainingRunner(cpu_toy=(runner_name == "cpu_toy"), max_steps=max_steps)
-        result = execute_run(plan, runner, out_dir=out_dir)
+                runner = TrainingRunner(cpu_toy=(runner_name == "cpu_toy"), max_steps=max_steps)
+            result = execute_run(plan, runner, out_dir=out_dir)
+    finally:
+        managed_lease.close()
     for event in result.events:
         typer.echo(event.model_dump_json(), err=True)
     if out_dir is not None and result.artifacts:
@@ -792,9 +806,13 @@ def platform_plan(
 
         try:
             manager = EnvironmentManager(manager_root)
-            profile, report = manager.capability_snapshot(environment_id)
-            descriptor = manager.load_descriptor(environment_id)
-            lock = manager.load_lock(environment_id)
+            with manager.environment_lease(
+                environment_id,
+                operation="managed platform planning",
+            ):
+                profile, report = manager.capability_snapshot(environment_id)
+                descriptor = manager.load_descriptor(environment_id)
+                lock = manager.load_lock(environment_id)
             from corpus_studio.platform.environments import get_recipe
 
             managed_recipe = get_recipe(descriptor.recipe_ref.id)
@@ -1643,13 +1661,14 @@ def env_status(
                     f"{descriptor.env_id}  {descriptor.state.value}  {descriptor.root_path}"
                 )
             return
-        descriptor = manager.load_descriptor(env_id)
-        health = manager.health(env_id) if refresh else None
-        if health is None:
-            try:
-                health = manager.load_health(env_id)
-            except Exception:
-                health = None
+        with manager.environment_lease(env_id, operation="environment status"):
+            descriptor = manager.load_descriptor(env_id)
+            health = manager.health(env_id) if refresh else None
+            if health is None:
+                try:
+                    health = manager.load_health(env_id)
+                except Exception:
+                    health = None
     except Exception as exc:
         _environment_cli_error(exc)
     payload = {
@@ -1741,7 +1760,7 @@ def env_recreate(
     ),
     json_out: bool = typer.Option(False, "--json", help="Emit lifecycle records as JSON."),
 ):
-    """Explicitly remove an owned environment and recreate it from a newly reviewed plan."""
+    """Recover an unsealed failed environment; sealed replacements require a new ID."""
     target_env_id = env_id or recipe_id
     try:
         manager, resolution = _build_environment_resolution(

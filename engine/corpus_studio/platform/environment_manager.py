@@ -12,11 +12,13 @@ previewed, but they do not become "supported" merely because the resolver can re
 from __future__ import annotations
 
 import base64
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.parser import Parser
+import errno
 import hashlib
 import io
 import json
@@ -28,11 +30,17 @@ import shutil
 import stat
 import subprocess
 import sys
+import threading
 import time
-from typing import cast, Literal, Protocol
+from typing import BinaryIO, cast, Literal, Protocol
 from urllib.parse import unquote, urlparse, urlsplit, urlunsplit
 import uuid
 import zipfile
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 from .backends import backend_manifest_digest, get_worker_backend
 from .common import HashRef, PackageLock, PackageSource, Ref
@@ -91,6 +99,9 @@ _MAX_WORKER_WHEEL_EXPANDED_BYTES = 512 * 1024 * 1024
 _MAX_WORKER_ARCHIVE_MEMBERS = 10_000
 _MAX_DISTRIBUTION_METADATA_BYTES = 4 * 1024 * 1024
 _MAX_DISTRIBUTION_RECORD_BYTES = 16 * 1024 * 1024
+_DEFAULT_LOCK_TIMEOUT_SECONDS = 5.0
+_LOCK_POLL_SECONDS = 0.05
+_LOCKS_DIRNAME = ".locks"
 _ENVIRONMENT_ALLOWLIST = frozenset(
     {
         "APPDATA",
@@ -112,6 +123,10 @@ _ENVIRONMENT_ALLOWLIST = frozenset(
         "WINDIR",
     }
 )
+
+_PROCESS_LOCKS_GUARD = threading.Lock()
+_PROCESS_LOCKS: dict[str, threading.RLock] = {}
+_THREAD_LOCK_STATE = threading.local()
 
 EnvironmentCommandPhase = Literal[
     "create_venv",
@@ -824,6 +839,143 @@ class EnvironmentManagerError(RuntimeError):
             message=message,
         )
         self.installation = installation
+
+
+def _lock_timeout(scope: str, operation: str) -> EnvironmentManagerError:
+    message = f"managed {scope} is busy; could not start {operation} within the lock timeout"
+    return EnvironmentManagerError(
+        message,
+        FailureRecord(
+            taxonomy=FailureTaxonomy.TIMEOUT,
+            message=message,
+            remediation=(
+                "Wait for the active managed-environment operation to finish; do not remove lock "
+                "files or start a competing lifecycle command."
+            ),
+        ),
+    )
+
+
+def _process_lock_for(key: str) -> threading.RLock:
+    with _PROCESS_LOCKS_GUARD:
+        return _PROCESS_LOCKS.setdefault(key, threading.RLock())
+
+
+def _thread_held_locks() -> set[str]:
+    held = getattr(_THREAD_LOCK_STATE, "held", None)
+    if held is None:
+        held = set()
+        _THREAD_LOCK_STATE.held = held
+    return cast(set[str], held)
+
+
+def _open_lock_stream(path: Path) -> BinaryIO:
+    """Open one owned regular lock file without following a final-component symlink."""
+
+    lock_dir = path.parent
+    try:
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        if lock_dir.is_symlink():
+            raise EnvironmentManagerError("managed lock directory cannot be a symbolic link")
+        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags, 0o600)
+    except EnvironmentManagerError:
+        raise
+    except OSError as exc:
+        raise EnvironmentManagerError(f"managed lock file is unavailable: {exc}") from exc
+    try:
+        opened = os.fstat(descriptor)
+        linked = path.lstat()
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or (opened.st_dev, opened.st_ino) != (linked.st_dev, linked.st_ino)
+        ):
+            raise EnvironmentManagerError(
+                "managed lock file must be one singly linked regular file"
+            )
+        if hasattr(os, "getuid") and opened.st_uid != os.getuid():
+            raise EnvironmentManagerError("managed lock file is owned by another user")
+        if os.name != "nt":
+            os.fchmod(descriptor, 0o600)
+        if opened.st_size == 0:
+            os.write(descriptor, b"\0")
+            os.fsync(descriptor)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        return os.fdopen(descriptor, "r+b", buffering=0)
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _try_os_lock(stream: BinaryIO) -> bool:
+    try:
+        stream.seek(0)
+        if sys.platform == "win32":
+            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError as exc:
+        if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+            raise
+        return False
+
+
+def _unlock_os_lock(stream: BinaryIO) -> None:
+    stream.seek(0)
+    if sys.platform == "win32":
+        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def _exclusive_file_lock(
+    path: Path,
+    *,
+    timeout_seconds: float,
+    scope: str,
+    operation: str,
+) -> Iterator[None]:
+    """Bounded cross-process lock with same-thread reentrancy and process-local exclusion."""
+
+    key = str(path.resolve(strict=False))
+    deadline = time.monotonic() + timeout_seconds
+    process_lock = _process_lock_for(key)
+    if not process_lock.acquire(timeout=timeout_seconds):
+        raise _lock_timeout(scope, operation)
+    held = _thread_held_locks()
+    if key in held:
+        try:
+            yield
+        finally:
+            process_lock.release()
+        return
+
+    stream: BinaryIO | None = None
+    os_locked = False
+    try:
+        stream = _open_lock_stream(path)
+        while not (os_locked := _try_os_lock(stream)):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise _lock_timeout(scope, operation)
+            time.sleep(min(_LOCK_POLL_SECONDS, remaining))
+        held.add(key)
+        yield
+    finally:
+        held.discard(key)
+        if stream is not None:
+            if os_locked:
+                try:
+                    _unlock_os_lock(stream)
+                except OSError:
+                    # Closing the descriptor releases the OS lock even if an explicit unlock fails.
+                    pass
+            stream.close()
+        process_lock.release()
 
 
 @dataclass(frozen=True)
@@ -1724,13 +1876,17 @@ class EnvironmentManager:
         runtime_probe: RuntimeProbe | None = None,
         now: Callable[[], datetime] = _utcnow,
         engine_source: str | Path | None = None,
+        lock_timeout_seconds: float = _DEFAULT_LOCK_TIMEOUT_SECONDS,
     ) -> None:
+        if not math.isfinite(lock_timeout_seconds) or lock_timeout_seconds <= 0:
+            raise ValueError("lock_timeout_seconds must be finite and positive")
         self.root = Path(root) if root is not None else default_manager_root()
         self.environments_root = self.root / "environments"
         self.registry_root = self.root / "registry"
         self.runner = runner or SubprocessCommandRunner()
         self.runtime_probe = runtime_probe or _default_runtime_probe
         self.now = now
+        self.lock_timeout_seconds = float(lock_timeout_seconds)
         self.engine_source = (
             Path(engine_source)
             if engine_source is not None
@@ -1744,6 +1900,39 @@ class EnvironmentManager:
         if root.parent != parent or root == parent:
             raise EnvironmentManagerError("environment path escapes the managed root")
         return root
+
+    def _lock_path(self, name: str) -> Path:
+        lock_dir = self.root / _LOCKS_DIRNAME
+        manager_root = self.root.resolve(strict=False)
+        resolved_dir = lock_dir.resolve(strict=False)
+        if resolved_dir.parent != manager_root or resolved_dir == manager_root:
+            raise EnvironmentManagerError("managed lock path escapes the manager root")
+        return lock_dir / name
+
+    @contextmanager
+    def _mutation_guard(self, env_id: str, operation: str) -> Iterator[None]:
+        self._validate_env_id(env_id)
+        with _exclusive_file_lock(
+            self._lock_path("manager.lock"),
+            timeout_seconds=self.lock_timeout_seconds,
+            scope="environment manager",
+            operation=operation,
+        ):
+            with self.environment_lease(env_id, operation=operation):
+                yield
+
+    @contextmanager
+    def environment_lease(self, env_id: str, *, operation: str = "environment use") -> Iterator[None]:
+        """Prevent mutation of one managed environment for the full caller-owned operation."""
+
+        self._validate_env_id(env_id)
+        with _exclusive_file_lock(
+            self._lock_path(f"environment-{env_id}.lock"),
+            timeout_seconds=self.lock_timeout_seconds,
+            scope=f"environment '{env_id}'",
+            operation=operation,
+        ):
+            yield
 
     def preview(
         self,
@@ -1922,6 +2111,27 @@ class EnvironmentManager:
         confirmed_resolution_hash: str,
         cancel: CancellationToken | None = None,
     ) -> EnvironmentCreationResult:
+        if resolution.environment_ref is None:
+            raise EnvironmentManagerError("resolution has no environment identity")
+        env_id = resolution.environment_ref.id
+        # Invalid or stale authorization must remain wholly non-mutating, including lock files.
+        # Validate again under the locks in _create_unlocked to close the validation/acquisition race.
+        self._validate_creation(resolution, confirmed_resolution_hash)
+        with self._mutation_guard(env_id, "environment creation"):
+            return self._create_unlocked(
+                resolution,
+                confirmed_resolution_hash=confirmed_resolution_hash,
+                cancel=cancel,
+            )
+
+    def _create_unlocked(
+        self,
+        resolution: DependencyResolution,
+        *,
+        confirmed_resolution_hash: str,
+        cancel: CancellationToken | None = None,
+        allow_recorded_env_id: bool = False,
+    ) -> EnvironmentCreationResult:
         """Execute one sealed reference-backend plan and persist every transition/evidence record."""
         recipe, env_id, env_root = self._validate_creation(
             resolution, confirmed_resolution_hash
@@ -1930,7 +2140,15 @@ class EnvironmentManager:
         assert resolution_hash is not None  # narrowed by _validate_creation
         if env_root.exists():
             raise EnvironmentManagerError(
-                f"environment '{env_id}' already exists; use env-recreate after inspecting it"
+                f"environment '{env_id}' already exists; inspect it, create sealed replacements "
+                "under a new environment id, or use env-recreate only for an unsealed failed "
+                "attempt"
+            )
+        if not allow_recorded_env_id and self._registry_dir(env_id).exists():
+            raise EnvironmentManagerError(
+                f"environment identity '{env_id}' is already recorded; create a replacement "
+                "under a new environment id, or use env-recreate only for an unsealed failed "
+                "attempt"
             )
 
         created_at = _timestamp(self.now)
@@ -2115,7 +2333,10 @@ class EnvironmentManager:
                     drift_detected=True,
                     probe_results=probe_results,
                     probe_evidence=probe_evidence,
-                    remediation="Recreate from a newly reviewed plan; probing changed the environment.",
+                    remediation=self._recovery_remediation(
+                        sealed=False,
+                        problem="Probing changed the unsealed environment",
+                    ),
                 )
                 self._write_health(env_id, health)
                 return EnvironmentCreationResult(descriptor, None, health, installation)
@@ -2169,7 +2390,14 @@ class EnvironmentManager:
                 drift_detected=bool(drifted or changed_sources),
                 probe_results=probe_results,
                 probe_evidence=probe_evidence,
-                remediation=self._probe_remediation(final_state),
+                remediation=(
+                    self._recovery_remediation(
+                        sealed=True,
+                        problem="The sealed post-probe inventory drifted",
+                    )
+                    if final_state == EnvironmentState.drifted
+                    else self._probe_remediation(final_state)
+                ),
             )
             self._write_health(env_id, health)
             return EnvironmentCreationResult(descriptor, lock, health, installation)
@@ -2200,7 +2428,10 @@ class EnvironmentManager:
                 state=EnvironmentState.broken,
                 checked_at=failed_at,
                 failure=failure,
-                remediation="Inspect command stderr, then use env-recreate with a newly reviewed plan.",
+                remediation=self._recovery_remediation(
+                    sealed=descriptor.lock_ref is not None,
+                    problem="Inspect the command stderr and installation journal",
+                ),
             )
             self._write_health(env_id, health)
             if isinstance(exc, EnvironmentManagerError):
@@ -2208,6 +2439,12 @@ class EnvironmentManager:
             raise EnvironmentManagerError(failure.message, failure) from exc
 
     def health(
+        self, env_id: str, *, cancel: CancellationToken | None = None
+    ) -> EnvironmentHealthReport:
+        with self.environment_lease(env_id, operation="environment health probe"):
+            return self._health_unlocked(env_id, cancel=cancel)
+
+    def _health_unlocked(
         self, env_id: str, *, cancel: CancellationToken | None = None
     ) -> EnvironmentHealthReport:
         """Re-probe imports/functionality and compare the live package set to the sealed lock."""
@@ -2225,7 +2462,10 @@ class EnvironmentManager:
                 else EnvironmentState.broken,
                 checked_at=checked_at,
                 environment_missing=not deliberately_removed,
-                remediation="Recreate this managed environment from a reviewed plan."
+                remediation=self._recovery_remediation(
+                    sealed=descriptor.lock_ref is not None,
+                    problem="The managed environment root is missing",
+                )
                 if not deliberately_removed
                 else None,
             )
@@ -2264,7 +2504,10 @@ class EnvironmentManager:
                     taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
                     message="managed environment interpreter is missing",
                 ),
-                remediation="Recreate the managed environment; do not repair arbitrary files in place.",
+                remediation=self._recovery_remediation(
+                    sealed=descriptor.lock_ref is not None,
+                    problem="The managed interpreter is missing; do not repair arbitrary files in place",
+                ),
             )
             self._write_health(env_id, report)
             self._update_descriptor(descriptor, state=EnvironmentState.broken)
@@ -2281,7 +2524,10 @@ class EnvironmentManager:
                 checked_at=checked_at,
                 lock_mismatch=True,
                 failure=exc.failure,
-                remediation="Recreate from a reviewed plan; the recorded lock is unavailable.",
+                remediation=self._recovery_remediation(
+                    sealed=descriptor.lock_ref is not None,
+                    problem="The recorded lock is unavailable",
+                ),
             )
             self._write_health(env_id, report)
             self._update_descriptor(descriptor, state=EnvironmentState.broken)
@@ -2302,7 +2548,10 @@ class EnvironmentManager:
                 state=EnvironmentState.broken,
                 checked_at=checked_at,
                 failure=exc.failure,
-                remediation="Inspect health-probe logs, then recreate if the interpreter is broken.",
+                remediation=self._recovery_remediation(
+                    sealed=True,
+                    problem="Inspect the health-probe logs; the sealed interpreter is broken",
+                ),
             )
             self._write_health(env_id, report)
             self._update_descriptor(descriptor, state=EnvironmentState.broken)
@@ -2371,9 +2620,9 @@ class EnvironmentManager:
                     probe_results=probe_results,
                     probe_evidence=probe_evidence,
                     failure=exc.failure,
-                    remediation=(
-                        "A post-probe inventory failed; inspect health logs and recreate from a "
-                        "reviewed plan."
+                    remediation=self._recovery_remediation(
+                        sealed=True,
+                        problem="The post-probe inventory failed; inspect the health logs",
                     ),
                 )
                 self._write_health(env_id, report)
@@ -2422,9 +2671,15 @@ class EnvironmentManager:
             cuda_mismatch=cuda_mismatch,
             probe_results=probe_results,
             probe_evidence=probe_evidence,
-            remediation="Recreate from a newly reviewed plan; the live environment no longer matches its lock."
+            remediation=self._recovery_remediation(
+                sealed=True,
+                problem="The live environment no longer matches its lock",
+            )
             if drift
-            else self._probe_remediation(probe_state),
+            else self._probe_remediation(
+                probe_state,
+                sealed=descriptor.lock_ref is not None,
+            ),
         )
         self._write_health(env_id, report)
         if descriptor.state != state:
@@ -2432,6 +2687,15 @@ class EnvironmentManager:
         return report
 
     def list_descriptors(self) -> list[EnvironmentDescriptor]:
+        with _exclusive_file_lock(
+            self._lock_path("manager.lock"),
+            timeout_seconds=self.lock_timeout_seconds,
+            scope="environment manager",
+            operation="environment listing",
+        ):
+            return self._list_descriptors_unlocked()
+
+    def _list_descriptors_unlocked(self) -> list[EnvironmentDescriptor]:
         if not self.registry_root.is_dir():
             return []
         descriptors: list[EnvironmentDescriptor] = []
@@ -2447,8 +2711,14 @@ class EnvironmentManager:
     def capability_snapshot(
         self, env_id: str, *, cancel: CancellationToken | None = None
     ) -> tuple[EnvironmentProfile, CapabilityReport]:
+        with self.environment_lease(env_id, operation="capability snapshot"):
+            return self._capability_snapshot_unlocked(env_id, cancel=cancel)
+
+    def _capability_snapshot_unlocked(
+        self, env_id: str, *, cancel: CancellationToken | None = None
+    ) -> tuple[EnvironmentProfile, CapabilityReport]:
         """Profile and prove capabilities inside the managed interpreter, never the control plane."""
-        health = self.health(env_id, cancel=cancel)
+        health = self._health_unlocked(env_id, cancel=cancel)
         if health.state not in {
             EnvironmentState.functional_probe_passed,
             EnvironmentState.hardware_verified,
@@ -2513,11 +2783,16 @@ class EnvironmentManager:
             drifted.append(worker_drift)
         if drifted or changed_sources or self.load_lock(env_id) != lock:
             raise EnvironmentManagerError(
-                "managed capability probing changed the sealed environment; recreate it"
+                "managed capability probing changed the sealed environment; create its "
+                "replacement under a new environment id"
             )
         return profile, report
 
     def load_descriptor(self, env_id: str) -> EnvironmentDescriptor:
+        with self.environment_lease(env_id, operation="descriptor read"):
+            return self._load_descriptor_unlocked(env_id)
+
+    def _load_descriptor_unlocked(self, env_id: str) -> EnvironmentDescriptor:
         path = self._registry_dir(env_id) / _DESCRIPTOR_FILENAME
         try:
             return EnvironmentDescriptor.model_validate_json(path.read_text(encoding="utf-8"))
@@ -2529,7 +2804,11 @@ class EnvironmentManager:
             ) from exc
 
     def load_lock(self, env_id: str) -> EnvironmentLock:
-        descriptor = self.load_descriptor(env_id)
+        with self.environment_lease(env_id, operation="lock read"):
+            return self._load_lock_unlocked(env_id)
+
+    def _load_lock_unlocked(self, env_id: str) -> EnvironmentLock:
+        descriptor = self._load_descriptor_unlocked(env_id)
         if descriptor.lock_ref is None:
             raise EnvironmentManagerError(f"environment '{env_id}' has no lock")
         path = self._registry_dir(env_id) / "locks" / f"{descriptor.lock_ref.id}.json"
@@ -2541,6 +2820,10 @@ class EnvironmentManager:
             ) from exc
 
     def load_health(self, env_id: str) -> EnvironmentHealthReport:
+        with self.environment_lease(env_id, operation="health record read"):
+            return self._load_health_unlocked(env_id)
+
+    def _load_health_unlocked(self, env_id: str) -> EnvironmentHealthReport:
         path = self._registry_dir(env_id) / _HEALTH_FILENAME
         try:
             return EnvironmentHealthReport.model_validate_json(path.read_text(encoding="utf-8"))
@@ -2550,6 +2833,16 @@ class EnvironmentManager:
             ) from exc
 
     def remove(self, env_id: str, *, confirmed_env_id: str) -> EnvironmentDescriptor:
+        if confirmed_env_id != env_id:
+            raise EnvironmentManagerError(
+                f"removal requires the exact environment id confirmation '{env_id}'"
+            )
+        with self._mutation_guard(env_id, "environment removal"):
+            return self._remove_unlocked(env_id, confirmed_env_id=confirmed_env_id)
+
+    def _remove_unlocked(
+        self, env_id: str, *, confirmed_env_id: str
+    ) -> EnvironmentDescriptor:
         """Delete only an owned, contained environment; registry evidence is retained."""
         if confirmed_env_id != env_id:
             raise EnvironmentManagerError(
@@ -2590,19 +2883,34 @@ class EnvironmentManager:
     ) -> EnvironmentCreationResult:
         if resolution.environment_ref is None:
             raise EnvironmentManagerError("resolution has no environment identity")
-        # Validate the complete new seal before destructive removal. The create call validates again
-        # after removal, but this first pass guarantees a typo/tampered/blocked plan preserves the
-        # currently working environment.
+        env_id = resolution.environment_ref.id
+        if confirmed_remove_env_id != env_id:
+            raise EnvironmentManagerError(
+                f"removal requires the exact environment id confirmation '{env_id}'"
+            )
+        # Preserve the current environment and avoid even lock-file mutation for an invalid plan.
         self._validate_creation(resolution, confirmed_resolution_hash)
-        self.remove(
-            resolution.environment_ref.id,
-            confirmed_env_id=confirmed_remove_env_id,
-        )
-        return self.create(
-            resolution,
-            confirmed_resolution_hash=confirmed_resolution_hash,
-            cancel=cancel,
-        )
+        with self._mutation_guard(env_id, "environment recreation"):
+            # Validate the complete new seal before destructive removal. A sealed identity is
+            # immutable even after explicit removal; its replacement must use a new ID so the old
+            # lock remains an unambiguous rollback/evidence identity.
+            self._validate_creation(resolution, confirmed_resolution_hash)
+            descriptor = self._load_descriptor_unlocked(env_id)
+            if descriptor.lock_ref is not None:
+                raise EnvironmentManagerError(
+                    f"refusing in-place recreation of sealed environment '{env_id}'; create the "
+                    "replacement under a new environment id and preserve this lock identity"
+                )
+            self._remove_unlocked(
+                env_id,
+                confirmed_env_id=confirmed_remove_env_id,
+            )
+            return self._create_unlocked(
+                resolution,
+                confirmed_resolution_hash=confirmed_resolution_hash,
+                cancel=cancel,
+                allow_recorded_env_id=True,
+            )
 
     def _validate_creation(
         self, resolution: DependencyResolution, confirmed_hash: str
@@ -4606,11 +4914,32 @@ class EnvironmentManager:
         return str(env_root / "bin" / "python")
 
     @staticmethod
-    def _probe_remediation(state: EnvironmentState) -> str | None:
+    def _recovery_remediation(*, sealed: bool, problem: str) -> str:
+        problem = problem.rstrip(".")
+        if sealed:
+            return (
+                f"{problem}. Create a replacement under a new environment id from a reviewed "
+                "plan and preserve this sealed identity."
+            )
+        return (
+            f"{problem}. Recover this unsealed attempt with env-recreate and a newly reviewed "
+            "plan."
+        )
+
+    @classmethod
+    def _probe_remediation(
+        cls,
+        state: EnvironmentState,
+        *,
+        sealed: bool = False,
+    ) -> str | None:
         if state == EnvironmentState.functional_probe_passed:
             return "CPU functionality passed; run env-probe on a CUDA host for hardware verification."
         if state in {EnvironmentState.degraded, EnvironmentState.incompatible}:
-            return "Inspect probe evidence and recreate from a compatible, newly reviewed plan."
+            return cls._recovery_remediation(
+                sealed=sealed,
+                problem="Inspect the incompatible or degraded probe evidence",
+            )
         return None
 
     @staticmethod

@@ -16,7 +16,7 @@ import py_compile
 import shutil
 import subprocess
 import sys
-from threading import Event
+from threading import Event, Thread
 import time
 from typing import Any
 import zipfile
@@ -963,6 +963,8 @@ def test_failed_flash_tuple_never_seals_readiness_flash_v1(tmp_path):
     assert result.lock is None
     assert result.health.probe_results[-1].probe == "cuda_qlora_sdpa_flash_execution"
     assert result.installation.retry_requires_recreate is True
+    assert result.health.remediation is not None
+    assert "env-recreate" in result.health.remediation
 
 
 def test_complete_probe_configuration_is_bound_to_the_required_tuple(tmp_path):
@@ -1161,6 +1163,187 @@ def test_confirmation_and_resolution_seal_block_all_mutation(tmp_path):
     assert not manager.root.exists()
 
 
+@pytest.mark.parametrize("timeout", [0.0, -1.0, float("nan"), float("inf")])
+def test_environment_lock_timeout_must_be_finite_and_positive(tmp_path, timeout):
+    with pytest.raises(ValueError, match="finite and positive"):
+        EnvironmentManager(tmp_path / "manager", lock_timeout_seconds=timeout)
+
+
+def test_environment_lock_directory_cannot_redirect_through_a_symlink(tmp_path):
+    manager = EnvironmentManager(tmp_path / "manager", lock_timeout_seconds=0.05)
+    manager.root.mkdir(parents=True)
+    outside = tmp_path / "outside-locks"
+    outside.mkdir()
+    try:
+        (manager.root / ".locks").symlink_to(outside, target_is_directory=True)
+    except OSError as exc:  # pragma: no cover - Windows may deny symlink creation.
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    with pytest.raises(EnvironmentManagerError, match="lock path escapes|symbolic link"):
+        with manager.environment_lease("safe-env"):
+            pass
+
+
+def test_environment_lease_is_cross_process_bounded_and_released(tmp_path):
+    root = tmp_path / "manager"
+    ready = tmp_path / "child-ready"
+    release = tmp_path / "child-release"
+    script = "\n".join(
+        [
+            "import pathlib, sys, time",
+            "from corpus_studio.platform.environment_manager import EnvironmentManager",
+            "root, ready, release = map(pathlib.Path, sys.argv[1:])",
+            "manager = EnvironmentManager(root, lock_timeout_seconds=5.0)",
+            "with manager.environment_lease('shared-env', operation='child lease'):",
+            "    ready.write_text('ready', encoding='utf-8')",
+            "    while not release.exists():",
+            "        time.sleep(0.01)",
+        ]
+    )
+    process = subprocess.Popen(  # noqa: S603 - fixed test interpreter and local literal script.
+        [sys.executable, "-c", script, str(root), str(ready), str(release)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready.exists(), process.communicate(timeout=1)
+
+        contender = EnvironmentManager(root, lock_timeout_seconds=0.05)
+        with pytest.raises(EnvironmentManagerError, match="is busy") as captured:
+            with contender.environment_lease("shared-env", operation="competing lease"):
+                pass
+        assert captured.value.failure.taxonomy == FailureTaxonomy.TIMEOUT
+    finally:
+        release.write_text("release", encoding="utf-8")
+        stdout, stderr = process.communicate(timeout=5)
+        assert process.returncode == 0, (stdout, stderr)
+
+    # The OS lock and process-local guard both release on context exit.
+    with EnvironmentManager(root, lock_timeout_seconds=0.2).environment_lease("shared-env"):
+        pass
+
+
+def test_competing_creator_cannot_corrupt_the_winning_installation(tmp_path):
+    fake = FakeEnvironmentRunner()
+    manager, resolution = _manager_and_resolution(tmp_path, fake, "race-env")
+    manager.lock_timeout_seconds = 2.0
+    started = Event()
+    release = Event()
+    original_runner = manager.runner
+
+    def blocking_runner(argv, **kwargs):
+        if fake._phase(argv) == "create_venv":
+            started.set()
+            assert release.wait(timeout=3)
+        return original_runner(argv, **kwargs)
+
+    manager.runner = blocking_runner
+    contender = EnvironmentManager(
+        manager.root,
+        runner=blocking_runner,
+        runtime_probe=manager.runtime_probe,
+        engine_source=manager.engine_source,
+        lock_timeout_seconds=0.05,
+    )
+    completed: list[Any] = []
+    failures: list[BaseException] = []
+
+    def create_winner() -> None:
+        try:
+            completed.append(
+                manager.create(
+                    resolution,
+                    confirmed_resolution_hash=resolution.resolution_hash or "",
+                )
+            )
+        except BaseException as exc:  # pragma: no cover - assertion reports the captured failure.
+            failures.append(exc)
+
+    thread = Thread(target=create_winner)
+    thread.start()
+    assert started.wait(timeout=2)
+    try:
+        with pytest.raises(EnvironmentManagerError, match="is busy") as captured:
+            contender.create(
+                resolution,
+                confirmed_resolution_hash=resolution.resolution_hash or "",
+            )
+        assert captured.value.failure.taxonomy == FailureTaxonomy.TIMEOUT
+    finally:
+        release.set()
+        thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert failures == []
+    assert len(completed) == 1
+    assert completed[0].descriptor.state == EnvironmentState.functional_probe_passed
+    assert manager.load_descriptor("race-env") == completed[0].descriptor
+    installations = list((manager.registry_root / "race-env" / "installations").glob("*.json"))
+    assert len(installations) == 1
+
+
+def test_manager_lock_serializes_distinct_environment_mutations(tmp_path):
+    fake = FakeEnvironmentRunner()
+    manager, first = _manager_and_resolution(tmp_path, fake, "first-env")
+    assert first.runtime is not None
+    second = manager.preview(
+        "backend-corpus-studio",
+        env_id="second-env",
+        runtime_executable=first.runtime.executable,
+        accelerator_tag=first.accelerator_tag,
+    )
+    started = Event()
+    release = Event()
+    original_runner = manager.runner
+
+    def blocking_runner(argv, **kwargs):
+        if fake._phase(argv) == "create_venv":
+            started.set()
+            assert release.wait(timeout=3)
+        return original_runner(argv, **kwargs)
+
+    manager.runner = blocking_runner
+    contender = EnvironmentManager(
+        manager.root,
+        runner=blocking_runner,
+        runtime_probe=manager.runtime_probe,
+        engine_source=manager.engine_source,
+        lock_timeout_seconds=0.05,
+    )
+    failures: list[BaseException] = []
+
+    def create_first() -> None:
+        try:
+            manager.create(first, confirmed_resolution_hash=first.resolution_hash or "")
+        except BaseException as exc:  # pragma: no cover - assertion reports the captured failure.
+            failures.append(exc)
+
+    thread = Thread(target=create_first)
+    thread.start()
+    assert started.wait(timeout=2)
+    try:
+        with pytest.raises(EnvironmentManagerError, match="environment manager is busy"):
+            contender.create(second, confirmed_resolution_hash=second.resolution_hash or "")
+        assert not contender.environment_root("second-env").exists()
+        assert not (contender.registry_root / "second-env").exists()
+    finally:
+        release.set()
+        thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert failures == []
+
+
+def test_environment_lease_is_reentrant_for_one_complete_health_transaction(tmp_path):
+    manager, _, result = _create(tmp_path, FakeEnvironmentRunner(), "lease-env")
+    with manager.environment_lease("lease-env", operation="outer transaction"):
+        assert manager.load_descriptor("lease-env") == result.descriptor
+        assert manager.load_lock("lease-env") == result.lock
+        assert manager.health("lease-env").state == EnvironmentState.functional_probe_passed
+
+
 def test_actionable_preview_is_concrete_explicit_and_does_not_mutate(tmp_path, monkeypatch):
     monkeypatch.setenv("CORPUS_STUDIO_TEST_SECRET", "must-not-leak")
     engine_source = tmp_path / "engine-source"
@@ -1303,7 +1486,7 @@ def test_failed_timeout_and_cancelled_installs_are_recoverable_broken_states(
 
 
 def test_safe_removal_requires_exact_confirmation_marker_and_containment(tmp_path):
-    manager, _, result = _create(tmp_path, FakeEnvironmentRunner())
+    manager, resolution, result = _create(tmp_path, FakeEnvironmentRunner())
     env_root = Path(result.descriptor.root_path)
     marker_path = env_root / ".corpusstudio-owner.json"
     marker = marker_path.read_text(encoding="utf-8")
@@ -1332,13 +1515,19 @@ def test_safe_removal_requires_exact_confirmation_marker_and_containment(tmp_pat
     health = manager.health("ref-env")
     assert health.state == EnvironmentState.not_installed
     assert health.environment_missing is False
+    with pytest.raises(EnvironmentManagerError, match="identity 'ref-env' is already recorded"):
+        manager.create(
+            resolution,
+            confirmed_resolution_hash=resolution.resolution_hash or "",
+        )
+    assert manager.load_descriptor("ref-env") == removed
 
     for unsafe in ("../escape", "..", "bad/name"):
         with pytest.raises(EnvironmentManagerError):
             manager.environment_root(unsafe)
 
 
-def test_recreate_requires_both_deletion_and_new_plan_confirmations(tmp_path):
+def test_recreate_requires_confirmations_and_refuses_sealed_identity_reuse(tmp_path):
     fake = FakeEnvironmentRunner()
     manager, resolution, first = _create(tmp_path, fake)
     with pytest.raises(EnvironmentManagerError, match="exact environment id"):
@@ -1355,13 +1544,37 @@ def test_recreate_requires_both_deletion_and_new_plan_confirmations(tmp_path):
             confirmed_remove_env_id="ref-env",
         )
     assert Path(first.descriptor.root_path).exists()
-    second = manager.recreate(
+    with pytest.raises(EnvironmentManagerError, match="sealed environment.*new environment id"):
+        manager.recreate(
+            resolution,
+            confirmed_resolution_hash=resolution.resolution_hash or "",
+            confirmed_remove_env_id="ref-env",
+        )
+    assert manager.load_descriptor("ref-env") == first.descriptor
+    assert Path(first.descriptor.root_path).exists()
+
+
+def test_recreate_recovers_an_unsealed_failed_attempt(tmp_path):
+    fake = FakeEnvironmentRunner()
+    fake.timeout_phase = "install"
+    manager, resolution = _manager_and_resolution(tmp_path, fake)
+    with pytest.raises(EnvironmentManagerError) as captured:
+        manager.create(
+            resolution,
+            confirmed_resolution_hash=resolution.resolution_hash or "",
+        )
+    assert captured.value.failure.taxonomy == FailureTaxonomy.TIMEOUT
+    failed = manager.load_descriptor("ref-env")
+    assert failed.lock_ref is None
+
+    fake.timeout_phase = None
+    recovered = manager.recreate(
         resolution,
         confirmed_resolution_hash=resolution.resolution_hash or "",
         confirmed_remove_env_id="ref-env",
     )
-    assert second.descriptor.state == EnvironmentState.functional_probe_passed
-    assert second.installation.installation_id != first.installation.installation_id
+    assert recovered.descriptor.state == EnvironmentState.functional_probe_passed
+    assert recovered.installation.installation_id != failed.installation_ref.id
 
 
 def test_live_health_detects_version_source_hash_recipe_lock_and_hardware_drift(
@@ -1397,6 +1610,9 @@ def test_live_health_detects_version_source_hash_recipe_lock_and_hardware_drift(
     assert any("torch" in item for item in report.changed_package_sources)
     assert any("datasets" in item and "missing" in item for item in report.drifted_packages)
     assert any("unexpected-package" in item for item in report.drifted_packages)
+    assert report.remediation is not None
+    assert "new environment id" in report.remediation
+    assert "env-recreate" not in report.remediation
     assert manager.load_descriptor("ref-env").state == EnvironmentState.drifted
     assert result.lock.lock_hash
 
@@ -2747,8 +2963,9 @@ def test_lifecycle_cli_surfaces_status_lock_and_safe_remove(tmp_path, monkeypatc
             "cli-env",
         ],
     )
-    assert recreated.exit_code == 0, recreated.output
-    assert "FUNCTIONAL_PROBE_PASSED" in recreated.stdout
+    assert recreated.exit_code == 2
+    assert "sealed environment" in recreated.output
+    assert "new environment id" in recreated.output
 
     refused = cli.invoke(
         app,
@@ -2864,6 +3081,29 @@ def test_platform_run_verifies_lock_and_dispatches_with_managed_interpreter(
 
     def fake_subprocess(run_plan, **kwargs):
         captured["worker_argv"] = kwargs["worker_argv"]
+        lease_probe = "\n".join(
+            [
+                "import pathlib, sys",
+                "from corpus_studio.platform.environment_manager import (",
+                "    EnvironmentManager, EnvironmentManagerError",
+                ")",
+                "manager = EnvironmentManager(pathlib.Path(sys.argv[1]), lock_timeout_seconds=0.05)",
+                "try:",
+                "    with manager.environment_lease(sys.argv[2], operation='competing run'):",
+                "        raise SystemExit(0)",
+                "except EnvironmentManagerError as exc:",
+                "    print(exc.failure.taxonomy.value)",
+                "    raise SystemExit(7)",
+            ]
+        )
+        probe = subprocess.run(  # noqa: S603 - fixed test interpreter and local literal script.
+            [sys.executable, "-c", lease_probe, str(manager.root), "run-env"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        captured["lease_probe"] = probe
         return execute_run(demo_run_plan(), EchoRunner())
 
     monkeypatch.setattr(subprocess_module, "execute_run_subprocess", fake_subprocess)
@@ -2877,6 +3117,8 @@ def test_platform_run_verifies_lock_and_dispatches_with_managed_interpreter(
     assert worker_argv[worker_argv.index("--backend-id") + 1] == "corpus_studio"
     assert worker_argv[worker_argv.index("--environment-id") + 1] == "run-env"
     assert worker_argv[worker_argv.index("--environment-hash") + 1] == result.lock.lock_hash
+    assert captured["lease_probe"].returncode == 7
+    assert captured["lease_probe"].stdout.strip() == FailureTaxonomy.TIMEOUT.value
 
     shutil.rmtree(result.descriptor.root_path)
     missing = cli.invoke(

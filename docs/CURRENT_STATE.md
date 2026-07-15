@@ -231,8 +231,12 @@ per-item error isolation, and off-thread document opens.
   TRL/PEFT QLoRA training, plus scoped GPU allocator, `nvidia-smi` process-memory, host-RSS, phase
   timing, and optional temperature/power evidence. Flash readiness is Linux-only; independent probes
   cannot be unioned across either complete tuple. The math readiness-v2 environment is the preserved
-  safety/rollback baseline and must not be mutated by flash work. The manager detects worker/dependency drift and safely removes or recreates
-  only contained owned paths.
+  safety/rollback baseline and must not be mutated by flash work. Bounded manager and
+  per-environment inter-process locks serialize lifecycle mutations; health/planning transactions
+  take a consistent lease, and a managed run holds that lease until its worker exits. The manager
+  detects worker/dependency drift and removes only contained owned paths. Sealed environment IDs are
+  immutable evidence identities: replacement is blue/green under a new ID, while `env-recreate` is
+  limited to an unsealed failed attempt.
   `RunPlan.environment_ref` pins the immutable
   lock hash and `platform-run --subprocess` dispatches with that managed interpreter after a live
   health check. Tests use fake installers and bounded synthetic probe evidence. Separately, the current
