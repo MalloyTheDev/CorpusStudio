@@ -1,8 +1,10 @@
 # CorpusStudio — Session Handoff
 
-**Last updated:** 2026-07-15 (manager-1.3 v4 math failure, preserved flash non-dispatch, and the
-post-trainer sealed-precision correction - see [`docs/HOST_STATE.md`](docs/HOST_STATE.md); previous
-snapshot 2026-07-14). This is a snapshot for the
+**Last updated:** 2026-07-15 (post-#444 audit fixes #445-#447, research amendment 0002 -> matrix
+1.2.0 #448 + v5 runbook #449, the Section 11 measurement harness #450, the #440 checkpoint/resume
+design #452, and the corpus-studio skill #451 - all merged; next gates need human GPU/data
+authorization. Earlier: manager-1.3 v4 math failure + sealed-precision correction - see
+[`docs/HOST_STATE.md`](docs/HOST_STATE.md); previous snapshot 2026-07-14). This is a snapshot for the
 next agent session (Claude Code or Codex).
 For the authoritative *feature* state see [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md); for the
 forward plan see [`docs/ROADMAP.md`](docs/ROADMAP.md) + [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
@@ -179,16 +181,35 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
 - **The first-party checkpoint boundary is now fail-closed:** new plans seal
   `save_strategy="no"` with no cadence or retention, both sealed and explicitly unsealed trainer paths
   refuse legacy step-checkpoint execution before loading data or weights, and the runner rejects any
-  unexpected checkpoint result. Final adapter output remains run-scoped. Exact sealed resume is still
-  unimplemented, so short benchmark trials are checkpoint-free and runs expected to exceed 30 minutes
-  remain blocked pending the exact resume-lineage design tracked by
-  [#440](https://github.com/MalloyTheDev/CorpusStudio/issues/440).
+  unexpected checkpoint result. Final adapter output remains run-scoped. The control-plane design +
+  verifier for exact resume ([#440](https://github.com/MalloyTheDev/CorpusStudio/issues/440), #452)
+  now exists - a hash-sealed `CheckpointManifest` with an atomic complete marker + per-file byte
+  integrity, `checkpoint.py` fail-closed verification (missing/malformed/incomplete/hash_mismatch/
+  external_change), `verify_resumable_into` (incompatible unless every plan-derivable bound identity
+  matches), `admit_resume` + `RunManifest.resume_lineage`, and `corpus-studio checkpoint-verify`. See
+  [`docs/CHECKPOINT_RESUME.md`](docs/CHECKPOINT_RESUME.md). It does NOT enable automatic resume:
+  intermediate checkpoints stay disabled and runs expected to exceed 30 minutes remain blocked until a
+  separately reviewed trainer change consumes a `CheckpointResumeRequest`.
 - **Managed-environment concurrency is fail-closed:** bounded manager/per-environment inter-process
   locks serialize create/recreate/remove, evidence-producing health and planning operations take a
   consistent environment lease, and `platform-run` holds that lease through worker termination.
   Sealed environment IDs cannot be recreated or silently reused after removal; use a new blue/green
   ID so the previous lock remains an unambiguous rollback and evidence identity. Same-ID
   `env-recreate` remains available only for an unsealed failed attempt.
+- **Post-#444 audit + readiness program (2026-07-15), all merged:** #445 accepts torch's CPU-resident
+  0-dim AdamW step counter and stops the attention-cleanup masking a real GRADIENT/OPTIMIZER failure;
+  #446 fixes the Google/Gemini provenance under-classification (issue #422); #447 pins codecov-action
+  to an immutable SHA (issue #426). #448 landed prospective research **amendment 0002 -> effective
+  matrix 1.2.0** (v5 blue/green identities, worker source bound to `df86db5`, `RESERVED_IDENTITIES.v2`
+  reserving all v4); #449 the [`v5 bring-up runbook`](research/ieee-linux-training/RUNBOOK_v5_bringup.md)
+  (Sections 5-8). #450 added the **Section 11 measurement harness** (`platform/telemetry.py`: raw
+  `TelemetrySample` + derived `RunTelemetrySummary`, wired in-path, `platform-run --telemetry` +
+  `telemetry-summarize`; [`docs/MEASUREMENT_HARNESS.md`](docs/MEASUREMENT_HARNESS.md)). #452 added the
+  #440 checkpoint/resume design (above). #451 committed the project-scoped `corpus-studio` Claude skill
+  (`.claude/skills/corpus-studio/`). **Next gates (all require separate human authorization): freeze
+  the ~500-output corpus; then GPU v5 bring-up (build wheel x2 -> create v5 envs -> matched 0.5B
+  smokes) per the runbook; then the 7B sequence ladder; then full 500-output runs.** Unload Ollama
+  before any GPU op; one GPU op at a time; never conflate WSL and native Linux.
 
 ## 3. The architecture North Star + binding directives
 
