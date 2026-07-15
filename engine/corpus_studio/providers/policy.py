@@ -132,12 +132,25 @@ DEFAULT_PROVIDER_POLICIES: dict[str, ProviderPolicy] = {
         default_policy_source="builtin",
         **_EVALUATOR_ONLY,
     ),
+    "google": ProviderPolicy(
+        provider_id="google",
+        provider_kind="hosted",
+        display_name="Google Gemini / PaLM",
+        requires_api_key=True,
+        license_or_terms_note=(
+            "Google-hosted Gemini/PaLM output is evaluator-only under CorpusStudio's "
+            "fail-closed default provenance policy; explicitly authorize provenance before "
+            "using it as trainable data."
+        ),
+        default_policy_source="builtin",
+        **_EVALUATOR_ONLY,
+    ),
     "openrouter": ProviderPolicy(
         provider_id="openrouter",
         provider_kind="router",
         display_name="OpenRouter",
         requires_api_key=True,
-        safety_notes="Route-aware: routes to OpenAI/Anthropic inherit their restrictions.",
+        safety_notes="Route-aware: routes to OpenAI/Anthropic/Google inherit their restrictions.",
         default_policy_source="builtin",
         # Base is evaluator-only; a specific approved non-frontier route may
         # upgrade to generation via resolve_policy + overrides.
@@ -166,7 +179,7 @@ DEFAULT_PROVIDER_POLICIES: dict[str, ProviderPolicy] = {
     ),
 }
 
-_FRONTIER_ROUTE_PARENTS = {"openai", "anthropic"}
+_FRONTIER_ROUTE_PARENTS = {"openai", "anthropic", "google"}
 
 
 def route_parent(route_id: str) -> str:

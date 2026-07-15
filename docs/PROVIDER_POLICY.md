@@ -21,7 +21,8 @@ Evaluator actions: `review`, `suggest-tags`, `judge-preference-strength`.
 |---|---|---|
 | **OpenAI** | **Blocked** (evaluator-only) | The generator role is on `blocked_roles`; a user override cannot re-enable it. |
 | **Anthropic** | **Blocked** (evaluator-only) | Same as OpenAI. |
-| **OpenRouter** | **Route-aware** | Routes to `openai/*` and `anthropic/*` inherit the block; other routes may generate only when that exact route is approved. |
+| **Google Gemini / PaLM** | **Blocked** (evaluator-only) | Fail-closed default; a user override cannot re-enable generation. Dataset provenance can be explicitly authorized only through the separate provenance allowlist. |
+| **OpenRouter** | **Route-aware** | Routes to `openai/*`, `anthropic/*`, and `google/*` inherit the block; other routes may generate only when that exact route is approved. |
 | **Ollama** (local) | **Off until approved** | Approve a specific model (`outputs_trainable` + `user_approved_generation`). |
 | **Local OpenAI-compatible** | **Off until *explicitly acknowledged*** | Host-inferred, so unverifiable (could be a local model OR a proxy fronting a frontier API). Generation approval requires `acknowledge_untrusted_endpoint` **in addition to** `outputs_trainable` + `user_approved_generation`. |
 | Unknown provider | Blocked (evaluator-only) | Safest fallback. |
@@ -36,7 +37,7 @@ Evaluator-only output never enters trainable fields through the normal save flow
 `resolve_policy(provider_id, model_id, route_id, overrides)`:
 0. Normalize provider identity to a lowercase canonical ID; blank IDs are invalid.
 1. Start from the built-in default for `provider_id` (evaluator-only fallback if unknown).
-2. For OpenRouter, apply route inheritance (`openai/*`, `anthropic/*` → blocked; others → generator role allowed but still needs approval).
+2. For OpenRouter, apply route inheritance (`openai/*`, `anthropic/*`, `google/*` → blocked; others → generator role allowed but still needs approval).
 3. Apply the most-specific project override (`provider/route:…`, `provider/model:…`, or `provider`).
 
 Provider identity is inferred from the transport backend + `base_url` by exact
@@ -50,7 +51,7 @@ cannot be identified from the host alone).
   `user_approved_generation`, `acknowledge_untrusted_endpoint`, notes, display
   name). Role and blocking fields are **not** overridable, and the frontier block
   is re-asserted last — so no override can re-enable generation for
-  OpenAI/Anthropic/frontier routes.
+  OpenAI/Anthropic/Google/frontier routes.
 - A host-inferred `openai_compatible` endpoint can't generate trainable rows on
   `user_approved_generation` alone — it also needs `acknowledge_untrusted_endpoint`
   (a conscious "this is a trusted local model, not a frontier proxy"), so a local

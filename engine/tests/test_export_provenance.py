@@ -5,6 +5,7 @@ you can't train on (the licensing counterpart to the PII export gate)."""
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from corpus_studio.cli import app
@@ -26,9 +27,10 @@ def _instruction(output: str, teacher: str | None = None) -> dict:
     return row
 
 
-def test_check_provenance_blocks_on_restricted_teacher(tmp_path: Path):
+@pytest.mark.parametrize("teacher", ["claude-opus-4-8", "gemini-2.5-pro"])
+def test_check_provenance_blocks_on_restricted_teacher(tmp_path: Path, teacher: str):
     src = tmp_path / "rows.jsonl"
-    _write(src, [_instruction("A.", teacher="claude-opus-4-8")])
+    _write(src, [_instruction("A.", teacher=teacher)])
     out = tmp_path / "export.jsonl"
 
     result = runner.invoke(

@@ -112,7 +112,7 @@ faking a pass.
 `provenance-gate <path> [--teacher-field meta.teacher] [--strict] [--allow-teacher <name>] [--project-dir <p>]`
 reads each row's declared **teacher** — the model/provider that *generated* the row — and
 buckets it: **quarantined** (a known restricted provider whose terms forbid training on its
-outputs, e.g. Anthropic/OpenAI), **pass** (a recognized open/local provider, or a teacher the
+outputs, e.g. Anthropic/OpenAI/Google Gemini or PaLM), **pass** (a recognized open/local provider, or a teacher the
 user allow-listed), or **unknown** (untagged / unrecognized → *quarantine-until-verified*). The
 verdict **blocks** on any quarantined row (and, under `--strict`, any unknown); unknown rows
 otherwise **warn**. It reuses the provider policy (`resolve_policy`) — the licensing counterpart

@@ -38,6 +38,28 @@ def test_frontier_teachers_are_quarantined():
         assert note  # carries the license/terms reason
 
 
+def test_google_gemini_palm_and_vertex_teachers_are_quarantined():
+    teachers = (
+        "gemini-2.5-pro",
+        "palm-2",
+        "google/gemini-2.5-pro",
+        "gemini/gemini-2.0-flash",
+        "palm/text-bison",
+        "vertex-ai/gemini-1.5-pro",
+        "vertexai/gemini-1.5-flash",
+    )
+    for teacher in teachers:
+        status, provider, note = classify_teacher(teacher)
+        assert status is TeacherStatus.QUARANTINED, teacher
+        assert provider == "google"
+        assert "evaluator-only" in note
+
+    report = run_provenance_gate([_row(teacher) for teacher in teachers])
+    assert report.overall_status is GateStatus.BLOCK
+    assert report.quarantined_rows == len(teachers)
+    assert report.unknown_rows == 0
+
+
 def test_untagged_is_unknown_not_quarantined_or_pass():
     for teacher in (None, "", "   "):
         status, provider, _ = classify_teacher(teacher)
