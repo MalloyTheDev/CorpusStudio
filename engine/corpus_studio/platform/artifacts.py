@@ -56,6 +56,14 @@ _LORA_TENSOR = re.compile(
 _WEIGHT_SUFFIXES = frozenset(
     {".bin", ".ckpt", ".gguf", ".onnx", ".pt", ".pth", ".safetensors"}
 )
+# Explicitly classified, benign trainer metadata permitted in the sealed adapter directory. TRL /
+# transformers Trainer.save_model writes ``training_args.bin`` (a serialized ``TrainingArguments``) next
+# to the adapter; its ``.bin`` suffix is NOT a model-weight payload. It is admitted ONLY at the artifact
+# root, by exact basename, as a bounded single-hard-link regular file, and is NEVER deserialized here
+# (it is not a source of training truth); its bytes are covered by the artifact content hash like every
+# other file. Every OTHER ``.bin`` (and every real weight payload) stays fail-closed.
+_ROOT_AUXILIARY_METADATA_FILES = frozenset({"training_args.bin"})
+_MAX_AUXILIARY_METADATA_BYTES = 1 << 20  # 1 MiB; a real training_args.bin is a few KiB.
 
 
 def _semantic_json_value(value: object, *, field_name: str | None = None) -> object:
@@ -118,8 +126,30 @@ def _stable_bounded_file_bytes(path: Path, *, limit: int) -> bytes:
     return payload
 
 
+def _validate_root_auxiliary_metadata(path: Path) -> None:
+    """Fail-closed structural checks for an explicitly permitted root auxiliary metadata file.
+
+    It must be a bounded, single-hard-link regular file (never a symlink, hard link, or special file).
+    It is NEVER opened for deserialization here - only its link status and size are inspected; its bytes
+    are covered by the artifact content hash (which detects any later tamper)."""
+
+    info = path.lstat()
+    if path.is_symlink() or not stat.S_ISREG(info.st_mode):
+        raise ValueError("adapter artifact auxiliary metadata is not a regular file")
+    if info.st_nlink != 1:
+        raise ValueError("adapter artifact auxiliary metadata is hard-linked")
+    if info.st_size > _MAX_AUXILIARY_METADATA_BYTES:
+        raise ValueError("adapter artifact auxiliary metadata exceeds the permitted size")
+
+
 def _validate_adapter_tree(root: Path) -> None:
-    """Reject links, checkpoint payloads, and any second model-weight format recursively."""
+    """Reject links, checkpoint payloads, and any second model-weight format recursively.
+
+    A file is classified by NAME, not by extension alone: an explicitly permitted root auxiliary
+    metadata file (``training_args.bin``) is admitted under the narrow policy in
+    :func:`_validate_root_auxiliary_metadata`; every other weight-suffixed or model-weight-named file
+    (a second ``.safetensors``, ``pytorch_model*``, ``model*.bin``, ``optimizer.pt``, a nested/arbitrary
+    ``.bin``, ...) stays fail-closed."""
 
     try:
         root_stat = root.lstat()
@@ -144,13 +174,18 @@ def _validate_adapter_tree(root: Path) -> None:
                     raise ValueError("adapter artifact contains a linked or irregular file")
                 candidate.resolve(strict=True).relative_to(resolved_root)
                 relative = candidate.relative_to(root).as_posix()
+                if relative == "adapter_model.safetensors":
+                    continue
+                if relative in _ROOT_AUXILIARY_METADATA_FILES:
+                    # Explicitly classified benign metadata at the artifact ROOT only (``relative`` has
+                    # no path separator). A nested ``dir/training_args.bin`` is not in the set and falls
+                    # through to the weight-payload rejection below.
+                    _validate_root_auxiliary_metadata(candidate)
+                    continue
                 if (
-                    relative != "adapter_model.safetensors"
-                    and (
-                        candidate.suffix.lower() in _WEIGHT_SUFFIXES
-                        or name.startswith("adapter_model.")
-                        or name.startswith("pytorch_model")
-                    )
+                    candidate.suffix.lower() in _WEIGHT_SUFFIXES
+                    or name.startswith("adapter_model.")
+                    or name.startswith("pytorch_model")
                 ):
                     raise ValueError(
                         "adapter artifact contains an alternate or nested model-weight payload"

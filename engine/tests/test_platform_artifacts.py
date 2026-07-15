@@ -5,6 +5,7 @@ live re-check (ok / modified / missing). Also covers execute_run surfacing + wri
 from enum import Enum
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import struct
@@ -13,6 +14,7 @@ import pytest
 
 import corpus_studio.platform as P
 from corpus_studio.platform.artifacts import (
+    _MAX_AUXILIARY_METADATA_BYTES,
     _stable_bounded_file_bytes,
     _validate_adapter_tree,
     build_artifact_manifest,
@@ -219,6 +221,104 @@ def test_adapter_tree_normalizes_unexpected_resolution_failures(tmp_path, monkey
 
     monkeypatch.setattr(Path, "resolve", fail_for_child)
     with pytest.raises(ValueError, match="tree is unsafe"):
+        _validate_adapter_tree(root)
+
+
+# ---- training_args.bin auxiliary-metadata admission (precise, fail-closed) --------------------------
+# Regression for the observed ARTIFACT_FAILURE: TRL Trainer.save_model writes a benign training_args.bin
+# next to the adapter, and the blanket ".bin == weight" rule rejected it. The adapter itself was clean.
+
+
+def _canonical_adapter(root: Path) -> Path:
+    """A realistic PEFT/TRL adapter output tree (the shape our worker actually writes)."""
+    root.mkdir(parents=True)
+    (root / "adapter_model.safetensors").write_bytes(b"safetensors-bytes")
+    (root / "adapter_config.json").write_text("{}", encoding="utf-8")
+    return root
+
+
+def test_adapter_tree_accepts_training_args_bin_and_normal_metadata(tmp_path):
+    root = _canonical_adapter(tmp_path / "adapter")
+    # exactly what TRL Trainer.save_model emits alongside the adapter
+    (root / "training_args.bin").write_bytes(b"\x80\x04}\x94.")  # arbitrary bytes; NEVER unpickled
+    (root / "tokenizer.json").write_text("{}", encoding="utf-8")
+    (root / "tokenizer_config.json").write_text("{}", encoding="utf-8")
+    (root / "chat_template.jinja").write_text("{{ x }}", encoding="utf-8")
+    (root / "README.md").write_text("card", encoding="utf-8")
+    (root / "MODEL_CARD.md").write_text("card", encoding="utf-8")
+    _validate_adapter_tree(root)  # must not raise
+
+
+def test_adapter_tree_never_deserializes_training_args_bin(tmp_path):
+    # Bytes that would raise if unpickled; validation must still pass (it only stats, never parses).
+    root = _canonical_adapter(tmp_path / "adapter")
+    (root / "training_args.bin").write_bytes(b"\x80\x05\x95GARBAGE-NOT-A-VALID-PICKLE\xff\xff")
+    _validate_adapter_tree(root)
+
+
+@pytest.mark.parametrize(
+    "weight_name",
+    [
+        "adapter_model.bin",
+        "pytorch_model.bin",
+        "pytorch_model-00001-of-00002.bin",
+        "model.bin",
+        "model-00001-of-00002.bin",
+        "arbitrary.bin",
+        "optimizer.pt",
+        "scheduler.pt",
+        "extra.safetensors",
+        "second_model.safetensors",
+        "weights.gguf",
+        "model.onnx",
+        "state.ckpt",
+    ],
+)
+def test_adapter_tree_still_rejects_weight_payloads(tmp_path, weight_name):
+    root = _canonical_adapter(tmp_path / f"adapter-{weight_name.replace('.', '_')}")
+    (root / weight_name).write_bytes(b"x")
+    with pytest.raises(ValueError, match="alternate or nested"):
+        _validate_adapter_tree(root)
+
+
+def test_adapter_tree_rejects_nested_training_args_bin(tmp_path):
+    # training_args.bin is permitted ONLY at the artifact root; a nested copy is a weight payload.
+    root = _canonical_adapter(tmp_path / "adapter")
+    (root / "sub").mkdir()
+    (root / "sub" / "training_args.bin").write_bytes(b"x")
+    with pytest.raises(ValueError, match="alternate or nested"):
+        _validate_adapter_tree(root)
+
+
+def test_adapter_tree_rejects_checkpoint_directory(tmp_path):
+    root = _canonical_adapter(tmp_path / "adapter")
+    (root / "checkpoint-100").mkdir()
+    with pytest.raises(ValueError, match="intermediate checkpoint"):
+        _validate_adapter_tree(root)
+
+
+def test_adapter_tree_rejects_oversized_training_args_bin(tmp_path):
+    root = _canonical_adapter(tmp_path / "adapter")
+    (root / "training_args.bin").write_bytes(b"x" * (_MAX_AUXILIARY_METADATA_BYTES + 1))
+    with pytest.raises(ValueError, match="exceeds the permitted size"):
+        _validate_adapter_tree(root)
+
+
+def test_adapter_tree_rejects_hardlinked_training_args_bin(tmp_path):
+    root = _canonical_adapter(tmp_path / "adapter")
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(b"x")
+    os.link(outside, root / "training_args.bin")  # a hard link can alias content outside the tree
+    with pytest.raises(ValueError, match="hard-linked"):
+        _validate_adapter_tree(root)
+
+
+def test_adapter_tree_rejects_symlinked_training_args_bin(tmp_path):
+    root = _canonical_adapter(tmp_path / "adapter")
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(b"x")
+    (root / "training_args.bin").symlink_to(outside)
+    with pytest.raises(ValueError, match="linked or irregular file"):
         _validate_adapter_tree(root)
 
 
