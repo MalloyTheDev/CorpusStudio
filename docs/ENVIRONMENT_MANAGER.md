@@ -80,6 +80,15 @@ Pip runs with `--isolated`, `--no-input`, an explicit `PIP_CONFIG_FILE` null dev
 indexes. Host pip configuration cannot add a source, and the manager never silently retries from a
 different source.
 
+For the exact torch 2.11.0+cu128 readiness plans, five known-compatible runtime prerequisites are
+first exact-pinned and installed with `--no-deps` from PyPI: `cuda-pathfinder`, `setuptools`,
+`typing-extensions`, `jinja2`, and `markupsafe`. The PyTorch cu128 mirror republishes those wheels
+without index-link hashes, so pip 26.1.2 cannot place an artifact SHA-256 in its report when it
+selects the mirror copies. Preinstalling the hash-backed PyPI wheels lets the later CUDA-torch step
+remain isolated to the reviewed PyTorch index without weakening artifact verification, adding a
+fallback, or changing the sealed package versions. The prerequisite argv, index, versions, and pip
+report path are all covered by the resolution hash.
+
 Example review flow on the current native-Linux host:
 
 ```bash
@@ -184,7 +193,8 @@ The sealed `EnvironmentLock` contains:
 
 - Python executable/version/implementation/platform/architecture;
 - normalized package names, exact versions, sanitized index/direct/VCS evidence, artifact filenames
-  and hashes where pip can prove them, plus an explicit reason when the source remains unknown;
+  and mandatory hashes for archive installs, plus an explicit reason when an otherwise hash-backed
+  artifact host cannot be attributed to exactly one configured index;
 - installed `RECORD` metadata hashes, verification of every SHA-256-bearing installed file, a
   manager-computed tree digest over every regular file named by `RECORD` (including generated,
   unhashed bytecode), and dependency metadata. Every site-package file must be owned by one such

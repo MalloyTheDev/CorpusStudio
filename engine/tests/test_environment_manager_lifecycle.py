@@ -47,7 +47,7 @@ from corpus_studio.platform.environment_manager import (
 )
 from corpus_studio.platform.process_control import terminate_process_tree
 from corpus_studio.platform.enums import EnvironmentState, FailureTaxonomy, OperatingSystem
-from corpus_studio.platform.environments import get_recipe, resolution_digest
+from corpus_studio.platform.environments import PYPI_INDEX_URL, get_recipe, resolution_digest
 
 
 def _host_os() -> OperatingSystem:
@@ -225,8 +225,21 @@ class FakeEnvironmentRunner:
         if "--report" not in argv:
             return
         path = Path(argv[argv.index("--report") + 1])
+        pytorch_prerequisites = {
+            "cuda-pathfinder",
+            "jinja2",
+            "markupsafe",
+            "setuptools",
+            "typing-extensions",
+        }
         if "upgrade-pip" in path.name:
             selected = [item for item in self.packages if item["name"].lower() == "pip"]
+        elif "install-pytorch-prerequisites" in path.name:
+            selected = [
+                item
+                for item in self.packages
+                if item["normalized_name"] in pytorch_prerequisites
+            ]
         elif "install-torch" in path.name:
             selected = [item for item in self.packages if item["name"].lower() == "torch"]
         elif "install-worker" in path.name:
@@ -241,6 +254,7 @@ class FakeEnvironmentRunner:
                 for item in self.packages
                 if item["name"].lower() not in {"pip", "torch"}
                 and item["normalized_name"] != "corpus-studio-engine"
+                and item["normalized_name"] not in pytorch_prerequisites
             ]
         installs = []
         for item in selected:
@@ -563,6 +577,11 @@ def _worker_wheel(
 def _readiness_packages() -> list[dict[str, Any]]:
     versions = {
         "pip": "26.1.2",
+        "cuda-pathfinder": "1.2.2",
+        "setuptools": "78.1.0",
+        "typing-extensions": "4.15.0",
+        "jinja2": "3.1.6",
+        "markupsafe": "3.0.3",
         "pydantic": "2.13.4",
         "typer": "0.26.8",
         "orjson": "3.11.9",
@@ -706,6 +725,46 @@ def test_readiness_v2_plan_is_stable_hash_bound_and_plan_only(tmp_path):
     with pytest.raises(EnvironmentManagerError, match="canonical plan|worker wheel changed"):
         manager.create(first, confirmed_resolution_hash=original_hash or "")
     assert not manager.root.exists()
+
+
+def test_readiness_install_records_hash_backed_pytorch_prerequisites_before_torch(tmp_path):
+    manager, resolution, _, _ = _manager_and_readiness_resolution(tmp_path)
+    result = manager.create(
+        resolution, confirmed_resolution_hash=resolution.resolution_hash or ""
+    )
+    prerequisite_command = next(
+        command
+        for command in result.installation.commands
+        if any(
+            token.endswith("install-pytorch-prerequisites.json")
+            for token in command.argv
+        )
+    )
+    torch_command = next(
+        command
+        for command in result.installation.commands
+        if any(token.endswith("install-torch.json") for token in command.argv)
+    )
+    assert result.installation.commands.index(
+        prerequisite_command
+    ) < result.installation.commands.index(torch_command)
+    assert "--no-deps" in prerequisite_command.argv
+
+    by_name = {
+        item.normalized_name: item
+        for item in result.installation.package_install_evidence
+    }
+    for name in (
+        "cuda-pathfinder",
+        "setuptools",
+        "typing-extensions",
+        "jinja2",
+        "markupsafe",
+    ):
+        evidence = by_name[name]
+        assert evidence.source == "pypi"
+        assert evidence.source_index_url == PYPI_INDEX_URL
+        assert evidence.artifact_hash is not None
 
 
 def test_readiness_worker_wheel_inside_replacement_target_is_blocked(tmp_path):
