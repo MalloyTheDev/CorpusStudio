@@ -841,6 +841,86 @@ class EnvironmentManagerError(RuntimeError):
         self.installation = installation
 
 
+def _bind_capability_package_integrity(
+    profile: EnvironmentProfile,
+    report: CapabilityReport,
+    sealed_packages: Sequence[PackageLock],
+) -> tuple[EnvironmentProfile, CapabilityReport]:
+    """Join a managed capability snapshot to the already-verified sealed inventory.
+
+    The dependency-light profiler intentionally records only presence and version.  A managed
+    environment has stronger evidence: creation and every capability snapshot verify the live
+    inventory against the immutable lock.  Do not discard that evidence before the planner seals
+    the required trainer packages into a RunPlan.
+
+    The join is deliberately limited to package identities the profile/probe already observed.  It
+    does not add packages, combine independent functional probes, or change the stable environment
+    signature's name/version projection.
+    """
+
+    sealed_by_name = {
+        item.normalized_name or _normalized_package_name(item.name): item
+        for item in sealed_packages
+    }
+
+    def bind(item: PackageLock, *, allow_missing: bool) -> PackageLock:
+        normalized_name = item.normalized_name or _normalized_package_name(item.name)
+        if item.version is None:
+            if not allow_missing:
+                raise EnvironmentManagerError(
+                    "managed capability report labels an installed package as absent"
+                )
+            return item.model_copy(
+                update={
+                    "normalized_name": normalized_name,
+                    "record_integrity": "missing",
+                    "record_entries": 0,
+                    "record_verified_entries": 0,
+                    "installed_file_count": 0,
+                }
+            )
+
+        sealed = sealed_by_name.get(normalized_name)
+        if sealed is None or sealed.version != item.version:
+            raise EnvironmentManagerError(
+                "managed capability package identity does not match the sealed lock: "
+                f"{normalized_name}"
+            )
+        if (
+            sealed.record_integrity != "verified"
+            or sealed.record_entries is None
+            or sealed.record_verified_entries is None
+            or sealed.record_failed_entries
+            or sealed.hash is None
+            or sealed.hash.value is None
+            or sealed.installed_files_hash is None
+            or sealed.installed_files_hash.value is None
+            or sealed.installed_file_count is None
+            or sealed.artifact_hash is None
+            or sealed.artifact_hash.value is None
+        ):
+            raise EnvironmentManagerError(
+                "managed capability package lacks sealed artifact, RECORD, or installed-file "
+                f"integrity evidence: {normalized_name}"
+            )
+        return sealed
+
+    bound_profile_packages = [bind(item, allow_missing=True) for item in profile.packages]
+    if [
+        (item.name, item.version) for item in bound_profile_packages
+    ] != [(item.name, item.version) for item in profile.packages]:
+        raise EnvironmentManagerError(
+            "managed capability integrity binding changed the environment signature projection"
+        )
+    bound_report_packages = [
+        bind(item, allow_missing=False) for item in report.installed_packages
+    ]
+    return (
+        profile.model_copy(update={"packages": bound_profile_packages}),
+        report.model_copy(update={"installed_packages": bound_report_packages}),
+    )
+
+
 def _lock_timeout(scope: str, operation: str) -> EnvironmentManagerError:
     message = f"managed {scope} is busy; could not start {operation} within the lock timeout"
     return EnvironmentManagerError(
@@ -2786,7 +2866,7 @@ class EnvironmentManager:
                 "managed capability probing changed the sealed environment; create its "
                 "replacement under a new environment id"
             )
-        return profile, report
+        return _bind_capability_package_integrity(profile, report, lock.packages)
 
     def load_descriptor(self, env_id: str) -> EnvironmentDescriptor:
         with self.environment_lease(env_id, operation="descriptor read"):

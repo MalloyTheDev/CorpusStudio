@@ -66,7 +66,9 @@ Before model loading, the execution path:
 2. Re-hashes local model/tokenizer inputs and rejects changed or unstable bytes, linked paths, and
    root escapes. The dataset is read and hashed once by the trainer, then parsed from those exact
    stabilized bytes rather than reopened or rehashed.
-3. Verifies the sealed package versions and formatter/chat-template identity.
+3. Verifies the sealed package versions and formatter/chat-template identity. Managed planning also
+   requires every trainer package copied into the configuration to retain its sealed artifact,
+   RECORD, and installed-tree integrity evidence; version-only unknown integrity is refused.
 4. Applies the exact Flash, memory-efficient, and math SDPA toggles and checks the observed global
    state; SDPA paths run a tiny forward/backward with only the required kernel enabled.
 5. Loads the model with the immutable revision, `trust_remote_code=False`, safetensors-only policy,

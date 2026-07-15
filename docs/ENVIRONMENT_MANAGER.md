@@ -289,6 +289,15 @@ depends on the mutable venv path. When `--environment` is selected, `platform-pl
 EnvironmentProfile and CapabilityReport inside that managed interpreter, so a lightweight control
 plane does not need the training stack installed merely to plan for its isolated worker.
 
+The in-environment profiler deliberately discovers only package presence and version. After the
+capability probe, the manager re-verifies the live installed inventory against the sealed lock and
+joins the matching lock records back into the profile and capability report. Required trainer
+packages therefore carry artifact hashes, verified RECORD counts, and installed-tree hashes into a
+new managed `RunPlan`; version-only or `record_integrity=unknown` package evidence is refused for
+managed planning. Packages explicitly found absent by the profiler are recorded as `missing` with
+zero RECORD entries rather than ambiguous unknown integrity. This integrity join does not add
+packages or combine independent functional probes.
+
 ```bash
 cd /mnt/training-nvme/repos/CorpusStudio
 engine/.venv/bin/corpus-studio platform-plan ... --environment backend-corpus-studio

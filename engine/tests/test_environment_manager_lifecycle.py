@@ -1162,14 +1162,61 @@ def test_readiness_v2_worker_artifact_and_dependency_drift_are_detected(tmp_path
     assert any("torch" in item.lower() for item in report.drifted_packages)
 
 
-def test_capability_snapshot_is_proved_inside_the_managed_interpreter(tmp_path):
+def test_capability_snapshot_is_proved_inside_the_managed_interpreter(
+    tmp_path, monkeypatch
+):
     fake = FakeEnvironmentRunner(cuda=True)
     manager, _, result = _create(tmp_path, fake)
+    raw_payload = fake._capability_payload
+
+    def version_only_payload():
+        payload = raw_payload()
+        payload["profile"]["packages"] = [
+            {"name": "torch", "version": "2.7.1+cu128"},
+            {"name": "liger-kernel", "version": None},
+        ]
+        payload["capability_report"]["installed_packages"] = [
+            {"name": "torch", "version": "2.7.1+cu128"}
+        ]
+        return payload
+
+    monkeypatch.setattr(fake, "_capability_payload", version_only_payload)
     profile, report = manager.capability_snapshot("ref-env")
     assert profile.environment_signature == "c" * 64
     assert report.readiness == "ready"
+    sealed_torch = next(item for item in result.lock.packages if item.name == "torch")
+    assert profile.packages[0] == sealed_torch
+    assert report.installed_packages == [sealed_torch]
+    assert profile.packages[1].version is None
+    assert profile.packages[1].record_integrity == "missing"
+    assert profile.packages[1].record_entries == 0
     call = next(call for call in reversed(fake.calls) if call["phase"] == "capability_probe")
     assert call["argv"][0] == result.descriptor.python_executable
+
+
+def test_capability_snapshot_rejects_version_only_identity_outside_the_sealed_lock(
+    tmp_path, monkeypatch
+):
+    fake = FakeEnvironmentRunner(cuda=True)
+    manager, _, _ = _create(tmp_path, fake)
+    raw_payload = fake._capability_payload
+
+    def mismatched_payload():
+        payload = raw_payload()
+        payload["profile"]["packages"] = [
+            {"name": "torch", "version": "0.0"}
+        ]
+        payload["capability_report"]["installed_packages"] = [
+            {"name": "torch", "version": "0.0"}
+        ]
+        return payload
+
+    monkeypatch.setattr(fake, "_capability_payload", mismatched_payload)
+    with pytest.raises(
+        EnvironmentManagerError,
+        match="package identity does not match the sealed lock: torch",
+    ):
+        manager.capability_snapshot("ref-env")
 
 
 @pytest.mark.parametrize(

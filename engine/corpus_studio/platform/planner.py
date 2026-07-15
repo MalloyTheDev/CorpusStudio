@@ -624,6 +624,25 @@ def _resolved_execution_inputs(
     return ExecutionInputs(dataset=dataset, model=model, tokenizer=tokenizer)
 
 
+def _has_verified_package_integrity(package: PackageLock) -> bool:
+    record_hash = package.hash
+    artifact_hash = package.artifact_hash
+    installed_files_hash = package.installed_files_hash
+    return (
+        package.record_integrity == "verified"
+        and package.record_entries is not None
+        and package.record_verified_entries is not None
+        and not package.record_failed_entries
+        and record_hash is not None
+        and record_hash.value is not None
+        and installed_files_hash is not None
+        and installed_files_hash.value is not None
+        and package.installed_file_count is not None
+        and artifact_hash is not None
+        and artifact_hash.value is not None
+    )
+
+
 def _trainer_interface(
     capabilities: CapabilityReport,
     *,
@@ -631,6 +650,7 @@ def _trainer_interface(
     quantized: bool,
     use_liger: bool,
     use_max_steps: bool,
+    require_package_integrity: bool,
     external_attention_package: PackageLock | None,
 ) -> TrainerInterfacePolicy:
     effective = capabilities.effective_capabilities
@@ -710,6 +730,17 @@ def _trainer_interface(
             "the capability report lacks exact trainer package versions: "
             + ", ".join(missing_packages)
         )
+    if require_package_integrity:
+        unverified_packages = sorted(
+            name
+            for name in required_packages
+            if not _has_verified_package_integrity(installed[name])
+        )
+        if unverified_packages:
+            raise PlannerError(
+                "managed trainer packages lack verified artifact, RECORD, or installed-file "
+                "integrity evidence: " + ", ".join(unverified_packages)
+            )
     return TrainerInterfacePolicy.model_validate(
         {
             "package_versions": [
@@ -1086,6 +1117,7 @@ def build_run_plan(
         quantized=quantization != "none",
         use_liger=constraints.use_liger,
         use_max_steps=schedule.max_steps is not None,
+        require_package_integrity=environment_ref is not None,
         external_attention_package=attention_policy.flash_attention_package,
     )
     missing_manifest_fields = sorted(

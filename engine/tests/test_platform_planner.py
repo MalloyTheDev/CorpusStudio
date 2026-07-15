@@ -185,7 +185,19 @@ def _report(
         bitsandbytes_ok=bnb, effective_capabilities=eff, missing_packages=list(missing),
         probe_results=probe_results,
         installed_packages=[
-            P.PackageLock(name=name, version="1.0")
+            P.PackageLock(
+                name=name,
+                normalized_name=name,
+                version="1.0",
+                hash=P.HashRef(value="1" * 64),
+                artifact=f"{name}-1.0-py3-none-any.whl",
+                artifact_hash=P.HashRef(value="2" * 64),
+                record_integrity="verified",
+                record_entries=1,
+                record_verified_entries=1,
+                installed_files_hash=P.HashRef(value="3" * 64),
+                installed_file_count=1,
+            )
             for name in [
                 "accelerate",
                 "bitsandbytes",
@@ -431,6 +443,46 @@ def test_managed_environment_lock_reference_is_sealed_into_plan():
         now=_NOW,
     )
     assert plan.environment_ref == environment_ref
+
+
+def test_managed_environment_refuses_version_only_trainer_package_evidence():
+    environment_ref = Ref(id="managed-env", hash=P.HashRef(value="b" * 64))
+    report = _report()
+    downgraded = [
+        item.model_copy(
+            update={
+                "hash": None,
+                "artifact_hash": None,
+                "record_integrity": "unknown",
+                "record_entries": None,
+                "record_verified_entries": None,
+                "installed_files_hash": None,
+                "installed_file_count": None,
+            }
+        )
+        if item.name == "torch"
+        else item
+        for item in report.installed_packages
+    ]
+    with pytest.raises(
+        PlannerError,
+        match="managed trainer packages lack verified artifact, RECORD, or installed-file "
+        "integrity evidence: torch",
+    ):
+        build_run_plan(
+            profile=_profile(cc_major=8),
+            capabilities=report.model_copy(update={"installed_packages": downgraded}),
+            dataset_ref=Ref(id="ds-1", hash=P.HashRef(value="d" * 64)),
+            constraints=PlannerConstraints(
+                base_model="Qwen/Qwen2.5-7B-Instruct",
+                model_revision="1" * 40,
+                dataset_path="data/examples.jsonl",
+                dataset_content_sha256="d" * 64,
+            ),
+            plan_id="p-managed",
+            environment_ref=environment_ref,
+            now=_NOW,
+        )
 
 
 def test_new_plans_seal_an_explicit_single_rank_physical_execution():
