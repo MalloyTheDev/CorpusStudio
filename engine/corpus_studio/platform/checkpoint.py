@@ -22,7 +22,9 @@ from typing import Any
 
 from corpus_studio.platform.contracts import (
     CheckpointBoundIdentities,
+    CheckpointFileEntry,
     CheckpointManifest,
+    CheckpointResumeRequest,
     ResumeLineage,
     RunPlan,
 )
@@ -155,11 +157,46 @@ def _sha256_file(path: Path) -> tuple[str, int]:
     return digest.hexdigest(), size
 
 
+def _safe_member_path(directory: Path, entry: CheckpointFileEntry) -> Path:
+    """Resolve ``entry.path`` inside ``directory`` and refuse anything a resume must never load: a
+    symlink, a hard-linked file, or a path that escapes the checkpoint directory. The contract already
+    forbids ``..``/absolute/``.`` components in the stored string; this defends the ON-DISK reality (a
+    symlink whose target happens to hash-match, or a hard link that shares bytes with an external file)
+    so integrity is proven over a real, contained, single-linked regular file - never a redirect."""
+
+    root = directory.resolve()
+    file_path = directory / entry.path
+    # A symlink anywhere in the member (including the leaf) is refused before any stat/read follows it.
+    if file_path.is_symlink():
+        raise CheckpointError(
+            f"checkpoint file is a symlink, which a resume never follows: {entry.path}",
+            reason="unsafe_path",
+        )
+    resolved = file_path.resolve()
+    if resolved != root and root not in resolved.parents:
+        raise CheckpointError(
+            f"checkpoint file resolves outside the checkpoint directory: {entry.path}",
+            reason="unsafe_path",
+        )
+    if not file_path.is_file() or file_path.is_symlink():
+        raise CheckpointError(
+            f"checkpoint file is missing: {entry.path}",
+            reason="missing_file",
+        )
+    if file_path.stat().st_nlink > 1:
+        raise CheckpointError(
+            f"checkpoint file is hard-linked, so its bytes are not exclusively owned: {entry.path}",
+            reason="unsafe_path",
+        )
+    return file_path
+
+
 def verify_checkpoint_integrity(checkpoint_dir: str | Path) -> CheckpointManifest:
     """Load and fully verify the checkpoint under ``checkpoint_dir``. Fails closed on: a missing or
     malformed manifest; an unsealed (``complete=False``) manifest; a manifest-hash mismatch (tamper);
-    a missing required file; or any file whose bytes/size no longer match the sealed entry (external
-    change). Returns the verified manifest only when every check passes."""
+    a missing required file; an unsafe member (symlink / hard link / path escaping the directory); or
+    any file whose bytes/size no longer match the sealed entry (external change). Returns the verified
+    manifest only when every check passes."""
 
     directory = Path(checkpoint_dir)
     manifest = load_checkpoint_manifest(directory)
@@ -174,12 +211,7 @@ def verify_checkpoint_integrity(checkpoint_dir: str | Path) -> CheckpointManifes
             reason="hash_mismatch",
         )
     for entry in manifest.files:
-        file_path = directory / entry.path
-        if not file_path.is_file():
-            raise CheckpointError(
-                f"checkpoint file is missing: {entry.path}",
-                reason="missing_file",
-            )
+        file_path = _safe_member_path(directory, entry)
         actual_hash, actual_size = _sha256_file(file_path)
         if actual_size != entry.size_bytes or actual_hash != entry.sha256:
             raise CheckpointError(
@@ -187,6 +219,25 @@ def verify_checkpoint_integrity(checkpoint_dir: str | Path) -> CheckpointManifes
                 reason="external_change",
             )
     return manifest
+
+
+def verify_matches_request(
+    manifest: CheckpointManifest, request: CheckpointResumeRequest
+) -> None:
+    """Fail closed unless the on-disk checkpoint is EXACTLY the one the resume request names: the
+    checkpoint id and the sealed manifest hash must both match. This defends against a checkpoint that
+    is individually valid but is not the one the dispatch pinned (a swapped-but-sealed directory)."""
+
+    if manifest.checkpoint_id != request.checkpoint_id:
+        raise CheckpointError(
+            "on-disk checkpoint id does not match the resume request",
+            reason="incompatible",
+        )
+    if manifest.checkpoint_manifest_hash != request.checkpoint_manifest_hash:
+        raise CheckpointError(
+            "on-disk checkpoint manifest hash does not match the resume request",
+            reason="incompatible",
+        )
 
 
 # --------------------------------------------------------------------------------------------------

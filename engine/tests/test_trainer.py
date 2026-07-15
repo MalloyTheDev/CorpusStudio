@@ -345,10 +345,12 @@ def test_legacy_step_checkpoint_config_parses_but_cannot_execute():
         save_steps=200,
         save_total_limit=1,
     )
-    with pytest.raises(TrainerError, match="resume compatibility"):
+    # The in-process SFTTrainer body stays checkpoint-free; exact-lineage checkpointing runs through
+    # corpus_studio.training.checkpoint_io, so the SFTTrainer guard refuses an intermediate save here.
+    with pytest.raises(TrainerError, match="checkpoint_io"):
         build_training_kwargs(cfg)
     # The execution guard runs before dataset access or any heavy training-stack import.
-    with pytest.raises(TrainerError, match="resume compatibility"):
+    with pytest.raises(TrainerError, match="checkpoint_io"):
         run_training(cfg)
 
 
@@ -356,9 +358,9 @@ def test_checkpoint_execution_guard_rejects_unvalidated_model_copy():
     config = TrainRunConfig(base_model="m", dataset_path="d").model_copy(
         update={"save_steps": 1}
     )
-    with pytest.raises(TrainerError, match="resume compatibility"):
+    with pytest.raises(TrainerError, match="checkpoint_io"):
         build_training_kwargs(config)
-    with pytest.raises(TrainerError, match="resume compatibility"):
+    with pytest.raises(TrainerError, match="checkpoint_io"):
         run_training(config)
 
 

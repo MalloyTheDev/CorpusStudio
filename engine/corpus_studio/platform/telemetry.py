@@ -625,6 +625,12 @@ def identity_from_plan(
     does not carry. Overlay values win only where they are set."""
 
     base = TelemetryIdentity(run_id=manifest.run_id)
+    if manifest.resume_lineage is not None:
+        # A resumed trial is marked so paper aggregation never averages it in with an uninterrupted
+        # one; the parent run and continued-from step come straight from the manifest's lineage.
+        base.resumed = True
+        base.parent_run_id = manifest.resume_lineage.parent_run_id
+        base.resumed_from_global_step = manifest.resume_lineage.resumed_from_global_step
     if plan is not None:
         base.plan_id = plan.plan_id
         base.plan_hash = plan.plan_hash
