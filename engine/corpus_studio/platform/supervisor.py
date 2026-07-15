@@ -139,6 +139,28 @@ class ProducedArtifact:
 RunEventSink = Callable[[RunEvent], None]
 
 
+class TelemetryControl(Protocol):
+    """The narrow control surface the supervisor drives on an attached measurement sampler: it marks
+    the warm-up/measured boundary from the authoritative event stream. The supervisor never samples;
+    it only tells the sampler which phase/step the run is in. Kept as a Protocol so the supervisor
+    imports nothing from :mod:`corpus_studio.platform.telemetry` (both stay dependency-light)."""
+
+    def set_phase(self, phase: str) -> None: ...
+
+    def mark_step(self, optimizer_step: int | None, phase: str | None = None) -> None: ...
+
+
+RUN_EVENTS_FILENAME = "RunEvents.jsonl"
+
+
+def _append_event_line(handle: Any, event: RunEvent) -> None:
+    """Append one RunEvent as a JSON line and flush, so the durable raw event stream is crash-safe to
+    at most a lost trailing line — never a torn record."""
+
+    handle.write(event.model_dump_json() + "\n")
+    handle.flush()
+
+
 class RunContext:
     """Handed to a :class:`Runner`. The runner emits telemetry with the ``emit_*`` helpers (the
     ``seq`` + timestamp are assembled here, never by the runner) and polls :attr:`cancelled`."""
@@ -463,6 +485,8 @@ def execute_run(
     cancel: CancelToken | None = None,
     out_dir: str | Path | None = None,
     clock: Callable[[], str] = _now_iso,
+    telemetry: TelemetryControl | None = None,
+    warmup_steps: int = 2,
 ) -> SupervisedRun:
     """Execute ``plan`` through ``runner``, collecting the ``RunEvent`` stream and returning the
     terminal :class:`RunManifest`. Terminal classification is total: :class:`RunCancelled` →
@@ -476,9 +500,41 @@ def execute_run(
     events: list[RunEvent] = []
     sink_errors: list[str] = []
     record_dir = run_record_directory(out_dir, rid) if out_dir is not None else None
+    events_handle: Any = None
+    if record_dir is not None:
+        record_dir.mkdir(parents=True, exist_ok=True)
+        events_handle = (record_dir / RUN_EVENTS_FILENAME).open("w", encoding="utf-8")  # noqa: SIM115
+
+    def _drive_telemetry(event: RunEvent) -> None:
+        # Bind the sampler's warm-up/measured phase to the authoritative event stream, never to a
+        # wall-clock guess. A telemetry-marking failure must never rewrite run truth.
+        if telemetry is None:
+            return
+        try:
+            if event.event_type == "stage" and event.stage == StageMarker.process_start:
+                telemetry.set_phase("setup")
+            elif (
+                event.event_type == "metric"
+                and event.optimizer_step is not None
+                and event.optimizer_step > 0
+            ):
+                phase = "warmup" if event.optimizer_step <= warmup_steps else "measured"
+                telemetry.mark_step(event.optimizer_step, phase=phase)
+            elif event.event_type == "terminal":
+                telemetry.set_phase("teardown")
+        except Exception:  # noqa: BLE001 - an observer cannot rewrite run truth.
+            pass
 
     def _collect(event: RunEvent) -> None:
         events.append(event)
+        if events_handle is not None:
+            try:
+                _append_event_line(events_handle, event)
+            except Exception as exc:  # noqa: BLE001 - a durable-log write cannot rewrite run truth.
+                label = f"event_log:{type(exc).__name__}"
+                if label not in sink_errors:
+                    sink_errors.append(label)
+        _drive_telemetry(event)
         if sink is not None:
             try:
                 sink(event)
@@ -744,6 +800,11 @@ def execute_run(
                     write_run_manifest(manifest, record_dir)
                 except Exception:  # noqa: BLE001 - observer notes are not execution truth.
                     pass
+    if events_handle is not None:
+        try:
+            events_handle.close()
+        except Exception:  # noqa: BLE001 - the durable stream is already flushed per line.
+            pass
     return SupervisedRun(manifest=manifest, events=events, artifacts=artifact_manifests)
 
 

@@ -156,6 +156,21 @@ corpus-studio platform-run ./plan/RunPlan.json --subprocess --out ./run
   `<run-id>-adapter-<content-hash-prefix>`. The platform never moves your weights; it only references
   and re-checks them.
 
+### Capture measurement telemetry
+
+```bash
+corpus-studio platform-run ./plan/RunPlan.json --subprocess --out ./run \
+  --telemetry --telemetry-interval-ms 200
+corpus-studio telemetry-summarize ./run/runs/<run-id> --plan ./plan/RunPlan.json --table
+```
+
+`--telemetry` samples raw GPU/host telemetry into the run directory and, after the run, derives a
+`RunTelemetrySummary` purely from the durable raw records (`RunManifest` + `RunEvents.jsonl` +
+`TelemetrySamples.jsonl`). Raw is authoritative and is written before the summary; CSV, tables, and
+plot series all render from the one derived object. A telemetry gap never converts a workload success
+into paper data - a successful run can still report `scientifically_complete=false`. See
+[`MEASUREMENT_HARNESS.md`](MEASUREMENT_HARNESS.md).
+
 ### Smoke-test the pipeline without a GPU
 
 ```bash

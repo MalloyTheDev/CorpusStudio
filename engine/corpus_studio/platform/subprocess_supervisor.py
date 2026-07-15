@@ -25,6 +25,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from corpus_studio.platform.contracts import (
     ArtifactManifest,
@@ -48,10 +49,13 @@ from corpus_studio.platform.process_control import (
     terminate_process_tree,
 )
 from corpus_studio.platform.supervisor import (
+    RUN_EVENTS_FILENAME,
     ProducedArtifact,
     RunnerFailure,
     RunEventSink,
     SupervisedRun,
+    TelemetryControl,
+    _append_event_line,
     _now_iso,
     _sanitize_id,
     run_record_directory,
@@ -229,6 +233,8 @@ def execute_run_subprocess(
     out_dir: str | Path | None = None,
     clock: Callable[[], str] = _now_iso,
     worker_argv: list[str] | None = None,
+    telemetry: TelemetryControl | None = None,
+    warmup_steps: int = 2,
 ) -> SupervisedRun:
     """Run ``plan`` in a supervised child process and return its :class:`SupervisedRun`.
 
@@ -344,6 +350,10 @@ def execute_run_subprocess(
     argv = worker_argv or _default_worker_argv(plan, runner_name)
 
     events: list[RunEvent] = []
+    events_handle: Any = None
+    if record_dir is not None:
+        record_dir.mkdir(parents=True, exist_ok=True)
+        events_handle = (record_dir / RUN_EVENTS_FILENAME).open("w", encoding="utf-8")  # noqa: SIM115
     artifacts: list[ArtifactManifest] = []
     terminal_manifest: RunManifest | None = None
     deferred_terminal: RunEvent | None = None
@@ -403,8 +413,34 @@ def execute_run_subprocess(
             "observed training operation is expected to be slow",
         )
 
+    def _drive_telemetry(event: RunEvent) -> None:
+        if telemetry is None:
+            return
+        try:
+            if event.event_type == "stage" and event.stage == StageMarker.process_start:
+                telemetry.set_phase("setup")
+            elif (
+                event.event_type == "metric"
+                and event.optimizer_step is not None
+                and event.optimizer_step > 0
+            ):
+                phase = "warmup" if event.optimizer_step <= warmup_steps else "measured"
+                telemetry.mark_step(event.optimizer_step, phase=phase)
+            elif event.event_type == "terminal":
+                telemetry.set_phase("teardown")
+        except Exception:  # noqa: BLE001 - an observer cannot rewrite run truth.
+            pass
+
     def _forward(event: RunEvent) -> None:
         events.append(event)
+        if events_handle is not None:
+            try:
+                _append_event_line(events_handle, event)
+            except Exception as exc:  # noqa: BLE001 - a durable-log write cannot rewrite run truth.
+                label = f"event_log:{type(exc).__name__}"
+                if label not in sink_errors:
+                    sink_errors.append(label)
+        _drive_telemetry(event)
         if sink is not None:
             try:
                 sink(event)
@@ -427,6 +463,10 @@ def execute_run_subprocess(
         creationflags=process_group_creation_flags(),
         start_new_session=start_new_process_session(),
     )
+    # In subprocess mode the WORKER child does the GPU/host work, so root an attached sampler's
+    # process-tree probe at the child, not the control-plane parent.
+    if telemetry is not None and hasattr(telemetry, "set_root_pid"):
+        telemetry.set_root_pid(proc.pid)  # type: ignore[attr-defined]
     try:
         # Reader thread → a queue, so the main loop can read WITH A TIMEOUT (a silent child never
         # enqueues → queue.get(timeout) trips → we kill it).
@@ -681,6 +721,11 @@ def execute_run_subprocess(
                     write_run_manifest(manifest, record_dir)
                 except Exception:  # noqa: BLE001 - observer notes are not execution truth.
                     pass
+    if events_handle is not None:
+        try:
+            events_handle.close()
+        except Exception:  # noqa: BLE001 - the durable stream is already flushed per line.
+            pass
     return SupervisedRun(manifest=manifest, events=events, artifacts=artifacts)
 
 

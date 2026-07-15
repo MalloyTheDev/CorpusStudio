@@ -4676,6 +4676,319 @@ class RunManifest(ContractModel):
 
 
 # --------------------------------------------------------------------------------------------------
+# Measurement harness (Section 11) — raw telemetry samples + the derived, paper-facing summary.
+#
+# Two rules govern this block. (1) Raw is authoritative: a ``TelemetrySample`` line and the durable
+# ``RunEvent`` stream are the collected truth; every ``RunTelemetrySummary`` field is DERIVED from
+# those raw records and binds them by sha256 (``RawRecordBinding``) so a summary can never silently
+# diverge from its source. (2) A telemetry gap never manufactures paper data: missing driver fields
+# stay ``null`` (never zero-filled), and a run can be a genuine workload success while
+# ``scientifically_complete`` is False because a required paper field was not captured.
+# --------------------------------------------------------------------------------------------------
+class GpuTelemetrySample(ContractModel):
+    """One raw GPU environmental reading bound to an exact device index + UUID. Every field is
+    optional: a driver that does not expose a field leaves it ``null`` and names the probe on the
+    parent sample's ``probe_unavailable`` list. Values are never zero-filled. GPU/host *memory* lives
+    in the sample's shared :class:`MemoryMetrics`, not here."""
+
+    device_index: int | None = Field(default=None, ge=0)
+    device_uuid: str | None = None
+    utilization_percent: float | None = Field(default=None, ge=0, le=100)
+    memory_controller_utilization_percent: float | None = Field(default=None, ge=0, le=100)
+    power_watts: float | None = Field(default=None, ge=0)
+    temperature_c: float | None = None
+    graphics_clock_mhz: float | None = Field(default=None, ge=0)
+    memory_clock_mhz: float | None = Field(default=None, ge=0)
+    performance_state: str | None = None
+    throttle_reasons: list[str] = Field(default_factory=list)
+
+
+class HostTelemetrySample(ContractModel):
+    """One raw host environmental reading. ``process_tree_rss_bytes`` is the worker *process tree*
+    RSS (distinct from the single-process ``MemoryMetrics.process_rss_bytes``). Disk counters are
+    cumulative byte totals; the aggregator differences them across the window."""
+
+    process_tree_rss_bytes: int | None = Field(default=None, ge=0)
+    system_ram_used_bytes: int | None = Field(default=None, ge=0)
+    system_ram_available_bytes: int | None = Field(default=None, ge=0)
+    swap_used_bytes: int | None = Field(default=None, ge=0)
+    # A multi-core aggregate may exceed 100 (e.g. 380 across 4 busy cores); only a floor is enforced.
+    cpu_utilization_percent: float | None = Field(default=None, ge=0)
+    disk_read_bytes: int | None = Field(default=None, ge=0)
+    disk_write_bytes: int | None = Field(default=None, ge=0)
+
+
+class TelemetrySample(ContractModel):
+    """One raw environmental sample (the harness's per-tick record). Written append-only, one JSON
+    object per line, to ``<run-dir>/TelemetrySamples.jsonl`` as it is taken - the authoritative raw
+    series the summary is derived from. ``monotonic_ns`` drives interval math; ``wall_utc`` is
+    lineage only. ``sample_source`` keeps native-Linux, WSL, and Windows samples DISTINCT and is
+    never collapsed into one category."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    run_id: str = Field(min_length=1)
+    # Monotonic per-run sequence so a consumer can order/dedupe a reordered or resumed stream.
+    sample_seq: int = Field(ge=0)
+    monotonic_ns: int = Field(ge=0)
+    wall_utc: str
+    phase: Literal["baseline", "setup", "warmup", "measured", "teardown"]
+    sample_source: OperatingSystem
+    # The optimizer step in progress when the sample was taken (null before the first step).
+    optimizer_step: int | None = Field(default=None, ge=0)
+    gpu: GpuTelemetrySample | None = None
+    host: HostTelemetrySample | None = None
+    memory: MemoryMetrics | None = None
+    # Fail-soft: probes that could not produce data for THIS sample (never zero-filled downstream).
+    probe_unavailable: list[str] = Field(default_factory=list)
+
+
+class TelemetryIdentity(ContractModel):
+    """The complete lineage a metric record must link to be paper-valid (research ``METRICS.md``).
+    All fields are optional strings; the harness fills what the plan/manifest expose, and
+    :class:`ScientificCompleteness` decides whether the required subset is present."""
+
+    study_id: str | None = None
+    protocol_version: str | None = None
+    amendment_id: str | None = None
+    effective_matrix_sha256: str | None = None
+    cell_id: str | None = None
+    trial_id: str | None = None
+    repository_commit: str | None = None
+    worker_wheel_sha256: str | None = None
+    environment_lock_hash: str | None = None
+    capability_report_hash: str | None = None
+    execution_probe_hash: str | None = None
+    plan_id: str | None = None
+    plan_hash: str | None = None
+    execution_configuration_hash: str | None = None
+    model_ref: str | None = None
+    tokenizer_ref: str | None = None
+    chat_template_sha256: str | None = None
+    dataset_fingerprint: str | None = None
+    run_id: str | None = None
+    sequence_view: int | None = Field(default=None, ge=0)
+
+
+class MetricSummary(ContractModel):
+    """Descriptive statistics for one metric over a value set (measured steps/samples for a single
+    run, or trial values for a cross-trial set). ``sample_standard_deviation`` uses the ``n-1``
+    denominator and is null for ``count < 2``. Inputs are always the unrounded raw values."""
+
+    unit: str
+    count: int = Field(ge=0)
+    mean: float | None = None
+    median: float | None = None
+    sample_standard_deviation: float | None = Field(default=None, ge=0)
+    minimum: float | None = None
+    maximum: float | None = None
+
+
+class TrialConfidenceInterval(ContractModel):
+    """A two-sided 95% Student-t interval for a per-trial mean (research ``METRICS.md``): for the
+    ``n=3`` planned-trial design ``t_(0.975,2) = 4.3026527299``. Absent below three successful
+    trials - reported as null, never fabricated."""
+
+    unit: str
+    trial_count: int = Field(ge=0)
+    mean: float | None = None
+    sample_standard_deviation: float | None = Field(default=None, ge=0)
+    t_multiplier: float | None = Field(default=None, ge=0)
+    half_width: float | None = Field(default=None, ge=0)
+    lower: float | None = None
+    upper: float | None = None
+    reported: bool = False
+
+
+class EnergyIntegration(ContractModel):
+    """GPU energy from the trapezoidal rule over adjacent power samples
+    ``E = sum(0.5*(P_i+P_{i+1})*(t_{i+1}-t_i))`` (research ``METRICS.md``). Intervals crossing the
+    measured-window boundary are linearly clipped. All power in watts, time from the monotonic clock;
+    joules are null when no power sample exists (never zero)."""
+
+    method: Literal["trapezoidal-power-over-monotonic-time-v1"] = (
+        "trapezoidal-power-over-monotonic-time-v1"
+    )
+    run_joules: float | None = Field(default=None, ge=0)
+    measured_window_joules: float | None = Field(default=None, ge=0)
+    joules_per_measured_optimizer_step: float | None = Field(default=None, ge=0)
+    energy_per_1000_nonpadding_tokens: float | None = Field(default=None, ge=0)
+    power_sample_count: int = Field(default=0, ge=0)
+    time_weighted_mean_power_watts: float | None = Field(default=None, ge=0)
+    median_measured_power_watts: float | None = Field(default=None, ge=0)
+    max_power_watts: float | None = Field(default=None, ge=0)
+    # Fraction of the measured window covered by at least one power-sample interval.
+    coverage_fraction: float | None = Field(default=None, ge=0, le=1)
+    boundary_clipped: bool = False
+
+
+class SamplingCadence(ContractModel):
+    """The observed inter-sample cadence, so a claimed 200 ms rate is checked against reality and no
+    precision beyond the true cadence is invented."""
+
+    requested_interval_ms: float | None = Field(default=None, ge=0)
+    sample_count: int = Field(default=0, ge=0)
+    observed_median_interval_ms: float | None = Field(default=None, ge=0)
+    observed_min_interval_ms: float | None = Field(default=None, ge=0)
+    observed_max_interval_ms: float | None = Field(default=None, ge=0)
+    source: OperatingSystem | None = None
+
+
+class MeasurementOverhead(ContractModel):
+    """The sampler's own cost, so telemetry overhead is quantified rather than assumed negligible."""
+
+    method: Literal["cumulative-sampler-busy-time-v1"] = "cumulative-sampler-busy-time-v1"
+    total_sampler_seconds: float | None = Field(default=None, ge=0)
+    per_sample_mean_seconds: float | None = Field(default=None, ge=0)
+    wall_seconds: float | None = Field(default=None, ge=0)
+    overhead_fraction_of_wall: float | None = Field(default=None, ge=0)
+
+
+class ScientificCompleteness(ContractModel):
+    """Whether the run captured every field the paper requires. A telemetry gap NEVER converts a
+    workload success into paper data: ``scientifically_complete`` may be False even when the run
+    succeeded, and it does not alter the run's terminal state."""
+
+    scientifically_complete: bool
+    missing_required_paper_fields: list[str] = Field(default_factory=list)
+    telemetry_degraded: bool = False
+    degraded_sample_count: int = Field(default=0, ge=0)
+    reason: str = ""
+
+    @field_validator("missing_required_paper_fields")
+    @classmethod
+    def _sorted_unique_missing(cls, values: list[str]) -> list[str]:
+        if values != sorted(set(values)):
+            raise ValueError("missing_required_paper_fields must be sorted and unique")
+        return values
+
+
+class RawRecordBinding(ContractModel):
+    """The exact raw file a summary was derived from - path, sha256, and line count - so a summary is
+    provably a function of its raw source and cannot silently drift from it."""
+
+    record_kind: Literal["run_events", "telemetry_samples", "run_manifest"]
+    path: str
+    sha256: str = Field(pattern=SHA256_PATTERN)
+    line_count: int = Field(ge=0)
+
+
+class MemoryWindowSummary(ContractModel):
+    """Baseline, measured-window maximum, and whole-run maximum of the memory signature, kept
+    separate so a model-load peak is never confused with steady-state residency (``METRICS.md``)."""
+
+    baseline: MemoryMetrics | None = None
+    measured_window_max: MemoryMetrics | None = None
+    whole_run_max: MemoryMetrics | None = None
+
+
+class GpuTelemetrySummary(ContractModel):
+    """Derived GPU aggregates over the MEASURED window (plus explicit whole-run temperature bounds)."""
+
+    device_index: int | None = Field(default=None, ge=0)
+    device_uuid: str | None = None
+    utilization_percent: MetricSummary | None = None
+    memory_controller_utilization_percent: MetricSummary | None = None
+    power_watts: MetricSummary | None = None
+    temperature_c: MetricSummary | None = None
+    starting_temperature_c: float | None = None
+    max_run_temperature_c: float | None = None
+    graphics_clock_mhz: MetricSummary | None = None
+    memory_clock_mhz: MetricSummary | None = None
+    observed_performance_states: list[str] = Field(default_factory=list)
+    observed_throttle_reasons: list[str] = Field(default_factory=list)
+    memory: MemoryWindowSummary | None = None
+
+
+class HostTelemetrySummary(ContractModel):
+    """Derived host aggregates over the MEASURED window. Disk deltas are end-minus-start of the
+    cumulative counters across the run interval."""
+
+    process_tree_rss: MemoryWindowSummary | None = None
+    process_tree_rss_bytes: MetricSummary | None = None
+    system_ram_used_bytes: MetricSummary | None = None
+    swap_used_bytes: MetricSummary | None = None
+    swap_used_delta_bytes: int | None = None
+    cpu_utilization_percent: MetricSummary | None = None
+    disk_read_delta_bytes: int | None = Field(default=None, ge=0)
+    disk_write_delta_bytes: int | None = Field(default=None, ge=0)
+
+
+class StepTelemetrySummary(ContractModel):
+    """Derived per-step training aggregates. Warm-up (steps 1-2) and measured (steps 3-12) are kept
+    partitioned; loss is recorded for EVERY completed step, warm-up included."""
+
+    completed_optimizer_steps: int = Field(default=0, ge=0)
+    warmup_optimizer_steps: list[int] = Field(default_factory=list)
+    measured_optimizer_steps: list[int] = Field(default_factory=list)
+    step_losses: list[OptimizerStepLossEvidence] = Field(default_factory=list)
+    first_loss: float | None = None
+    last_loss: float | None = None
+    min_loss: float | None = None
+    step_time_seconds: MetricSummary | None = None
+    nonpadding_tokens_per_second: MetricSummary | None = None
+    supervised_tokens_per_second: MetricSummary | None = None
+    samples_per_second: MetricSummary | None = None
+    optimizer_steps_per_minute: float | None = Field(default=None, ge=0)
+    gradient_observed_tensor_count: int | None = Field(default=None, ge=0)
+    changed_adapter_tensor_count: int | None = Field(default=None, ge=0)
+    trainable_state_before_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    trainable_state_after_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def _ordered_step_partitions(self) -> StepTelemetrySummary:
+        for name, values in (
+            ("warmup_optimizer_steps", self.warmup_optimizer_steps),
+            ("measured_optimizer_steps", self.measured_optimizer_steps),
+        ):
+            if values != sorted(set(values)):
+                raise ValueError(f"{name} must be sorted and unique")
+        if set(self.warmup_optimizer_steps) & set(self.measured_optimizer_steps):
+            raise ValueError("warm-up and measured optimizer steps must be disjoint")
+        return self
+
+
+class RunOutcomeSummary(ContractModel):
+    """The terminal outcome, copied verbatim from the authoritative RunManifest - never re-derived so
+    a summary can never disagree with the run's own terminal truth."""
+
+    state: Literal["prepared", "running", "succeeded", "failed", "cancelled", "interrupted"]
+    training_success: bool = False
+    failure_taxonomy: FailureTaxonomy | None = None
+    failure_stage: StageMarker | None = None
+    measured_fit: FitClassification | None = None
+
+
+class RunTelemetrySummary(ContractModel):
+    """The single, paper-facing summary of one run's measurement. Every field is DERIVED from the raw
+    records named in ``raw_records`` (durable ``RunEvent`` stream + ``TelemetrySample`` series +
+    ``RunManifest``); CSV, tables, and plot series all render from this same derived object so they
+    can never disagree with each other or with the raw source."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    schema_kind: Literal["run-telemetry-summary-v1"] = "run-telemetry-summary-v1"
+    run_id: str = Field(min_length=1)
+    generated_at: str
+    identity: TelemetryIdentity
+    outcome: RunOutcomeSummary
+    step: StepTelemetrySummary
+    gpu: GpuTelemetrySummary | None = None
+    host: HostTelemetrySummary | None = None
+    energy: EnergyIntegration
+    sampling: SamplingCadence
+    overhead: MeasurementOverhead
+    completeness: ScientificCompleteness
+    raw_records: list[RawRecordBinding] = Field(default_factory=list)
+
+    @field_validator("raw_records")
+    @classmethod
+    def _one_binding_per_kind(cls, values: list[RawRecordBinding]) -> list[RawRecordBinding]:
+        kinds = [item.record_kind for item in values]
+        if len(kinds) != len(set(kinds)):
+            raise ValueError("raw_records must bind each record kind at most once")
+        return values
+
+
+# --------------------------------------------------------------------------------------------------
 # WorkerProtocol — the versioned core↔worker message envelope (NEW).
 # --------------------------------------------------------------------------------------------------
 class HelloBody(ContractModel):

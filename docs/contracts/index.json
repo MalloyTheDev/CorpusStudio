@@ -94,6 +94,14 @@
       "file": "RunEvent.schema.json"
     },
     {
+      "contract": "TelemetrySample",
+      "file": "TelemetrySample.schema.json"
+    },
+    {
+      "contract": "RunTelemetrySummary",
+      "file": "RunTelemetrySummary.schema.json"
+    },
+    {
       "contract": "ArtifactManifest",
       "file": "ArtifactManifest.schema.json"
     },
