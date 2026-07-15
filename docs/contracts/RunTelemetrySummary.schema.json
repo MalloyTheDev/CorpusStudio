@@ -1,0 +1,1634 @@
+{
+  "$defs": {
+    "AttentionImpl": {
+      "description": "``math``/``eager`` is forced on native-Windows/WDDM Blackwell sm_120 because the fused flash\nkernel deadlocks there. Other platforms require their own functional capability result; WSL\nevidence is not bare-Linux proof.",
+      "enum": [
+        "math",
+        "eager",
+        "sdpa",
+        "flash_attention_2",
+        "flash_attention_3",
+        "mem_efficient",
+        "xformers"
+      ],
+      "title": "AttentionImpl",
+      "type": "string"
+    },
+    "EnergyIntegration": {
+      "additionalProperties": false,
+      "description": "GPU energy from the trapezoidal rule over adjacent power samples\n``E = sum(0.5*(P_i+P_{i+1})*(t_{i+1}-t_i))`` (research ``METRICS.md``). Intervals crossing the\nmeasured-window boundary are linearly clipped. All power in watts, time from the monotonic clock;\njoules are null when no power sample exists (never zero).",
+      "properties": {
+        "boundary_clipped": {
+          "default": false,
+          "title": "Boundary Clipped",
+          "type": "boolean"
+        },
+        "coverage_fraction": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Coverage Fraction"
+        },
+        "energy_per_1000_nonpadding_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Energy Per 1000 Nonpadding Tokens"
+        },
+        "joules_per_measured_optimizer_step": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Joules Per Measured Optimizer Step"
+        },
+        "max_power_watts": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Power Watts"
+        },
+        "measured_window_joules": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Measured Window Joules"
+        },
+        "median_measured_power_watts": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Median Measured Power Watts"
+        },
+        "method": {
+          "const": "trapezoidal-power-over-monotonic-time-v1",
+          "default": "trapezoidal-power-over-monotonic-time-v1",
+          "title": "Method",
+          "type": "string"
+        },
+        "power_sample_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Power Sample Count",
+          "type": "integer"
+        },
+        "run_joules": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Joules"
+        },
+        "time_weighted_mean_power_watts": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time Weighted Mean Power Watts"
+        }
+      },
+      "title": "EnergyIntegration",
+      "type": "object"
+    },
+    "FailureTaxonomy": {
+      "description": "Terminal outcome category. ``PASS`` is included so the same enum classifies a completed\nprobe/run, not only failures. Grounded in the exact hazards the engine documents: the sm_120\nfused-attention deadlock (KERNEL_STALL), the WDDM silent spill (ACCIDENTAL_SPILL vs a clean\nOOM), and env/dependency mismatches (ENVIRONMENT_FAILURE).",
+      "enum": [
+        "PASS",
+        "FAIL",
+        "OOM",
+        "TIMEOUT",
+        "KERNEL_STALL",
+        "NUMERICAL_FAILURE",
+        "GRADIENT_FAILURE",
+        "LOSS_EVIDENCE_FAILURE",
+        "OPTIMIZER_FAILURE",
+        "UPDATE_FAILURE",
+        "ARTIFACT_FAILURE",
+        "CHECKPOINT_FAILURE",
+        "ENVIRONMENT_FAILURE",
+        "UNSUPPORTED_CONFIGURATION",
+        "ACCIDENTAL_SPILL",
+        "CONTROLLED_OFFLOAD"
+      ],
+      "title": "FailureTaxonomy",
+      "type": "string"
+    },
+    "FitClass": {
+      "description": "The fit verdict. ``NATIVE_*`` = fully resident. ``CONTROLLED_*`` = a deliberate, planned\noffload (acceptable, slower). ``ACCIDENTAL_*`` / ``THRASHING`` = an unplanned spill the platform\ndid silently (the failure mode the engine warns about). ``FAIL`` = will not run.",
+      "enum": [
+        "PLANNED_UNPROVEN",
+        "NATIVE_SAFE",
+        "NATIVE_TIGHT",
+        "NATIVE_UNPROVEN",
+        "MARGINAL",
+        "CONTROLLED_ACTIVATION_OFFLOAD",
+        "CONTROLLED_OPTIMIZER_OFFLOAD",
+        "CONTROLLED_PARAMETER_OFFLOAD",
+        "ACCIDENTAL_UNIFIED_MEMORY_PAGING",
+        "ACCIDENTAL_WDDM_SPILL",
+        "THRASHING",
+        "FAIL"
+      ],
+      "title": "FitClass",
+      "type": "string"
+    },
+    "FitClassification": {
+      "additionalProperties": false,
+      "description": "The planner/calibrator verdict on whether a resolved RunPlan fits the target environment, and\nHOW: a native fit, a deliberately-offloaded fit, or an ACCIDENTAL spill (the silent WDDM/unified\npaging that looks frozen but crawls at 10-25x). NEW \u2014 the engine emits only a coarse warn/pass\nVRAM band (preflight.gpu_memory, _VRAM_SAFETY_MARGIN_GB).",
+      "properties": {
+        "attention_path": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttentionImpl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "classification": {
+          "$ref": "#/$defs/FitClass"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "device_capacity_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Capacity Bytes"
+        },
+        "estimated_peak_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimated Peak Bytes"
+        },
+        "headroom_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Headroom Bytes"
+        },
+        "rationale": {
+          "default": "",
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "classification"
+      ],
+      "title": "FitClassification",
+      "type": "object"
+    },
+    "GpuTelemetrySummary": {
+      "additionalProperties": false,
+      "description": "Derived GPU aggregates over the MEASURED window (plus explicit whole-run temperature bounds).",
+      "properties": {
+        "device_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Index"
+        },
+        "device_uuid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Uuid"
+        },
+        "graphics_clock_mhz": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "max_run_temperature_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Run Temperature C"
+        },
+        "memory": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryWindowSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "memory_clock_mhz": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "memory_controller_utilization_percent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "observed_performance_states": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Observed Performance States",
+          "type": "array"
+        },
+        "observed_throttle_reasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Observed Throttle Reasons",
+          "type": "array"
+        },
+        "power_watts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "starting_temperature_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Starting Temperature C"
+        },
+        "temperature_c": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "utilization_percent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "GpuTelemetrySummary",
+      "type": "object"
+    },
+    "HostTelemetrySummary": {
+      "additionalProperties": false,
+      "description": "Derived host aggregates over the MEASURED window. Disk deltas are end-minus-start of the\ncumulative counters across the run interval.",
+      "properties": {
+        "cpu_utilization_percent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "disk_read_delta_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disk Read Delta Bytes"
+        },
+        "disk_write_delta_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disk Write Delta Bytes"
+        },
+        "process_tree_rss": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryWindowSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "process_tree_rss_bytes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "swap_used_bytes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "swap_used_delta_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Swap Used Delta Bytes"
+        },
+        "system_ram_used_bytes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "HostTelemetrySummary",
+      "type": "object"
+    },
+    "MeasurementOverhead": {
+      "additionalProperties": false,
+      "description": "The sampler's own cost, so telemetry overhead is quantified rather than assumed negligible.",
+      "properties": {
+        "method": {
+          "const": "cumulative-sampler-busy-time-v1",
+          "default": "cumulative-sampler-busy-time-v1",
+          "title": "Method",
+          "type": "string"
+        },
+        "overhead_fraction_of_wall": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Overhead Fraction Of Wall"
+        },
+        "per_sample_mean_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Per Sample Mean Seconds"
+        },
+        "total_sampler_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Sampler Seconds"
+        },
+        "wall_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wall Seconds"
+        }
+      },
+      "title": "MeasurementOverhead",
+      "type": "object"
+    },
+    "MemoryMetrics": {
+      "additionalProperties": false,
+      "description": "The full memory-signature block sampled during a run. Distinguishes PyTorch's allocator view,\nraw CUDA device memory, and OS-level residency (``dedicated`` vs ``shared`` GPU memory) so a\nWindows/WDDM spill to shared memory is VISIBLE rather than hidden inside 'used VRAM'. Grounded in\ngpu_probe.GpuMemory + the estimators note that torch.max_memory_allocated counts the WDDM spill.",
+      "properties": {
+        "cuda_device_free_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cuda Device Free Bytes"
+        },
+        "cuda_device_used_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cuda Device Used Bytes"
+        },
+        "dedicated_gpu_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dedicated Gpu Bytes"
+        },
+        "process_rss_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Process Rss Bytes"
+        },
+        "shared_gpu_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shared Gpu Bytes"
+        },
+        "system_ram_used_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "System Ram Used Bytes"
+        },
+        "torch_allocated_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Allocated Bytes"
+        },
+        "torch_peak_allocated_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Peak Allocated Bytes"
+        },
+        "torch_peak_reserved_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Peak Reserved Bytes"
+        },
+        "torch_reserved_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Reserved Bytes"
+        }
+      },
+      "title": "MemoryMetrics",
+      "type": "object"
+    },
+    "MemoryWindowSummary": {
+      "additionalProperties": false,
+      "description": "Baseline, measured-window maximum, and whole-run maximum of the memory signature, kept\nseparate so a model-load peak is never confused with steady-state residency (``METRICS.md``).",
+      "properties": {
+        "baseline": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "measured_window_max": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "whole_run_max": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "MemoryWindowSummary",
+      "type": "object"
+    },
+    "MetricSummary": {
+      "additionalProperties": false,
+      "description": "Descriptive statistics for one metric over a value set (measured steps/samples for a single\nrun, or trial values for a cross-trial set). ``sample_standard_deviation`` uses the ``n-1``\ndenominator and is null for ``count < 2``. Inputs are always the unrounded raw values.",
+      "properties": {
+        "count": {
+          "minimum": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maximum"
+        },
+        "mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mean"
+        },
+        "median": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Median"
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Minimum"
+        },
+        "sample_standard_deviation": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sample Standard Deviation"
+        },
+        "unit": {
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "unit",
+        "count"
+      ],
+      "title": "MetricSummary",
+      "type": "object"
+    },
+    "OperatingSystem": {
+      "enum": [
+        "windows",
+        "wsl",
+        "linux",
+        "macos",
+        "unknown"
+      ],
+      "title": "OperatingSystem",
+      "type": "string"
+    },
+    "OptimizerStepLossEvidence": {
+      "additionalProperties": false,
+      "description": "One finite loss bound to exactly one completed optimizer step.",
+      "properties": {
+        "loss": {
+          "title": "Loss",
+          "type": "number"
+        },
+        "optimizer_step": {
+          "minimum": 1,
+          "title": "Optimizer Step",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "optimizer_step",
+        "loss"
+      ],
+      "title": "OptimizerStepLossEvidence",
+      "type": "object"
+    },
+    "RawRecordBinding": {
+      "additionalProperties": false,
+      "description": "The exact raw file a summary was derived from - path, sha256, and line count - so a summary is\nprovably a function of its raw source and cannot silently drift from it.",
+      "properties": {
+        "line_count": {
+          "minimum": 0,
+          "title": "Line Count",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "record_kind": {
+          "enum": [
+            "run_events",
+            "telemetry_samples",
+            "run_manifest"
+          ],
+          "title": "Record Kind",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "record_kind",
+        "path",
+        "sha256",
+        "line_count"
+      ],
+      "title": "RawRecordBinding",
+      "type": "object"
+    },
+    "RunOutcomeSummary": {
+      "additionalProperties": false,
+      "description": "The terminal outcome, copied verbatim from the authoritative RunManifest - never re-derived so\na summary can never disagree with the run's own terminal truth.",
+      "properties": {
+        "failure_stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageMarker"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "failure_taxonomy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureTaxonomy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "measured_fit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FitClassification"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "state": {
+          "enum": [
+            "prepared",
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "training_success": {
+          "default": false,
+          "title": "Training Success",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "RunOutcomeSummary",
+      "type": "object"
+    },
+    "SamplingCadence": {
+      "additionalProperties": false,
+      "description": "The observed inter-sample cadence, so a claimed 200 ms rate is checked against reality and no\nprecision beyond the true cadence is invented.",
+      "properties": {
+        "observed_max_interval_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed Max Interval Ms"
+        },
+        "observed_median_interval_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed Median Interval Ms"
+        },
+        "observed_min_interval_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed Min Interval Ms"
+        },
+        "requested_interval_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested Interval Ms"
+        },
+        "sample_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Sample Count",
+          "type": "integer"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OperatingSystem"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "SamplingCadence",
+      "type": "object"
+    },
+    "ScientificCompleteness": {
+      "additionalProperties": false,
+      "description": "Whether the run captured every field the paper requires. A telemetry gap NEVER converts a\nworkload success into paper data: ``scientifically_complete`` may be False even when the run\nsucceeded, and it does not alter the run's terminal state.",
+      "properties": {
+        "degraded_sample_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Degraded Sample Count",
+          "type": "integer"
+        },
+        "missing_required_paper_fields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Missing Required Paper Fields",
+          "type": "array"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        },
+        "scientifically_complete": {
+          "title": "Scientifically Complete",
+          "type": "boolean"
+        },
+        "telemetry_degraded": {
+          "default": false,
+          "title": "Telemetry Degraded",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "scientifically_complete"
+      ],
+      "title": "ScientificCompleteness",
+      "type": "object"
+    },
+    "StageMarker": {
+      "description": "Ordered lifecycle stage of a run, launch \u2192 export. A RunEvent carries the stage it belongs to\nso a consumer can render a precise progress spine and localize a failure to the exact stage.",
+      "enum": [
+        "process_start",
+        "dataset_verification",
+        "execution_config_verified",
+        "env_loaded",
+        "cuda_init",
+        "tokenizer_load",
+        "dataset_formatting",
+        "truncation_analysis",
+        "attention_policy_applied",
+        "model_load",
+        "placement_verified",
+        "placement_deviation",
+        "model_loaded",
+        "quantized",
+        "adapter_attached",
+        "optimizer_created",
+        "batch_materialized",
+        "forward",
+        "loss",
+        "backward",
+        "optimizer_step",
+        "checkpoint",
+        "reload",
+        "evaluation",
+        "export"
+      ],
+      "title": "StageMarker",
+      "type": "string"
+    },
+    "StepTelemetrySummary": {
+      "additionalProperties": false,
+      "description": "Derived per-step training aggregates. Warm-up (steps 1-2) and measured (steps 3-12) are kept\npartitioned; loss is recorded for EVERY completed step, warm-up included.",
+      "properties": {
+        "changed_adapter_tensor_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Changed Adapter Tensor Count"
+        },
+        "completed_optimizer_steps": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Completed Optimizer Steps",
+          "type": "integer"
+        },
+        "first_loss": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "First Loss"
+        },
+        "gradient_observed_tensor_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gradient Observed Tensor Count"
+        },
+        "last_loss": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Loss"
+        },
+        "measured_optimizer_steps": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Measured Optimizer Steps",
+          "type": "array"
+        },
+        "min_loss": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Loss"
+        },
+        "nonpadding_tokens_per_second": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "optimizer_steps_per_minute": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Optimizer Steps Per Minute"
+        },
+        "samples_per_second": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "step_losses": {
+          "items": {
+            "$ref": "#/$defs/OptimizerStepLossEvidence"
+          },
+          "title": "Step Losses",
+          "type": "array"
+        },
+        "step_time_seconds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "supervised_tokens_per_second": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "trainable_state_after_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trainable State After Sha256"
+        },
+        "trainable_state_before_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trainable State Before Sha256"
+        },
+        "warmup_optimizer_steps": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Warmup Optimizer Steps",
+          "type": "array"
+        }
+      },
+      "title": "StepTelemetrySummary",
+      "type": "object"
+    },
+    "TelemetryIdentity": {
+      "additionalProperties": false,
+      "description": "The complete lineage a metric record must link to be paper-valid (research ``METRICS.md``).\nAll fields are optional strings; the harness fills what the plan/manifest expose, and\n:class:`ScientificCompleteness` decides whether the required subset is present.",
+      "properties": {
+        "amendment_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Amendment Id"
+        },
+        "capability_report_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capability Report Hash"
+        },
+        "cell_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cell Id"
+        },
+        "chat_template_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chat Template Sha256"
+        },
+        "dataset_fingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dataset Fingerprint"
+        },
+        "effective_matrix_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effective Matrix Sha256"
+        },
+        "environment_lock_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Environment Lock Hash"
+        },
+        "execution_configuration_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Execution Configuration Hash"
+        },
+        "execution_probe_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Execution Probe Hash"
+        },
+        "model_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Ref"
+        },
+        "plan_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plan Hash"
+        },
+        "plan_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plan Id"
+        },
+        "protocol_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Protocol Version"
+        },
+        "repository_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repository Commit"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "sequence_view": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence View"
+        },
+        "study_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Study Id"
+        },
+        "tokenizer_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokenizer Ref"
+        },
+        "trial_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trial Id"
+        },
+        "worker_wheel_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Worker Wheel Sha256"
+        }
+      },
+      "title": "TelemetryIdentity",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The single, paper-facing summary of one run's measurement. Every field is DERIVED from the raw\nrecords named in ``raw_records`` (durable ``RunEvent`` stream + ``TelemetrySample`` series +\n``RunManifest``); CSV, tables, and plot series all render from this same derived object so they\ncan never disagree with each other or with the raw source.",
+  "properties": {
+    "completeness": {
+      "$ref": "#/$defs/ScientificCompleteness"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "energy": {
+      "$ref": "#/$defs/EnergyIntegration"
+    },
+    "generated_at": {
+      "title": "Generated At",
+      "type": "string"
+    },
+    "gpu": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GpuTelemetrySummary"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "host": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HostTelemetrySummary"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "identity": {
+      "$ref": "#/$defs/TelemetryIdentity"
+    },
+    "outcome": {
+      "$ref": "#/$defs/RunOutcomeSummary"
+    },
+    "overhead": {
+      "$ref": "#/$defs/MeasurementOverhead"
+    },
+    "raw_records": {
+      "items": {
+        "$ref": "#/$defs/RawRecordBinding"
+      },
+      "title": "Raw Records",
+      "type": "array"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "sampling": {
+      "$ref": "#/$defs/SamplingCadence"
+    },
+    "schema_kind": {
+      "const": "run-telemetry-summary-v1",
+      "default": "run-telemetry-summary-v1",
+      "title": "Schema Kind",
+      "type": "string"
+    },
+    "step": {
+      "$ref": "#/$defs/StepTelemetrySummary"
+    }
+  },
+  "required": [
+    "run_id",
+    "generated_at",
+    "identity",
+    "outcome",
+    "step",
+    "energy",
+    "sampling",
+    "overhead",
+    "completeness"
+  ],
+  "title": "RunTelemetrySummary",
+  "type": "object"
+}

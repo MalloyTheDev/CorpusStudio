@@ -485,6 +485,17 @@ def platform_run(
         "--manager-root",
         help="Environment Manager state root for a plan pinned to a managed lock.",
     ),
+    telemetry: bool = typer.Option(
+        False,
+        "--telemetry",
+        help="Sample raw GPU/host telemetry into the run directory and derive a RunTelemetrySummary "
+        "from the durable raw records (requires --out).",
+    ),
+    telemetry_interval_ms: float = typer.Option(
+        200.0,
+        "--telemetry-interval-ms",
+        help="[--telemetry] Requested sampler cadence in milliseconds (observed cadence is measured).",
+    ),
 ):
     """Execute a RunPlan through the headless run supervisor: stream RunEvents to stderr and produce
     a RunManifest on stdout. 'echo' is a dependency-light no-op that proves the supervisor without a
@@ -600,18 +611,43 @@ def platform_run(
             managed_lease.close()
             raise
 
+    sampler = None
+    run_identity: Optional[str] = None
+    record_dir = None
+    overhead = None
+    if telemetry:
+        if out_dir is None:
+            managed_lease.close()
+            typer.echo(
+                "--telemetry requires --out: raw telemetry is written into the run directory.",
+                err=True,
+            )
+            raise typer.Exit(2)
+        from corpus_studio.platform.common import new_uuid7_id
+        from corpus_studio.platform.supervisor import run_record_directory
+        from corpus_studio.platform.telemetry import TelemetrySampler
+
+        run_identity = new_uuid7_id("run")
+        record_dir = run_record_directory(out_dir, run_identity)
+        sampler = TelemetrySampler(
+            run_identity, record_dir, interval_ms=telemetry_interval_ms
+        )
+        sampler.start()
+
     try:
         if subprocess_mode:
             from corpus_studio.platform.subprocess_supervisor import execute_run_subprocess
 
             result = execute_run_subprocess(
                 plan,
+                run_id=run_identity,
                 runner_name=runner_name,
                 max_steps=max_steps,
                 silence_timeout_s=silence_timeout,
                 preflight_timeout_s=preflight_timeout,
                 out_dir=out_dir,
                 worker_argv=managed_worker_argv,
+                telemetry=sampler,
             )
         else:
             if runner_name == "echo":
@@ -620,18 +656,102 @@ def platform_run(
                 from corpus_studio.platform.runners import TrainingRunner
 
                 runner = TrainingRunner(cpu_toy=(runner_name == "cpu_toy"), max_steps=max_steps)
-            result = execute_run(plan, runner, out_dir=out_dir)
+            result = execute_run(
+                plan, runner, run_id=run_identity, out_dir=out_dir, telemetry=sampler
+            )
     finally:
         managed_lease.close()
+        if sampler is not None:
+            overhead = sampler.stop()
     for event in result.events:
         typer.echo(event.model_dump_json(), err=True)
     if out_dir is not None and result.artifacts:
         typer.echo(
             f"wrote {len(result.artifacts)} artifact manifest(s) to {out_dir}/artifacts/", err=True
         )
+    if telemetry and record_dir is not None:
+        from corpus_studio.platform.telemetry import summarize_run_telemetry, write_summary
+
+        summary = summarize_run_telemetry(
+            record_dir,
+            plan=plan,
+            requested_interval_ms=telemetry_interval_ms,
+            overhead=overhead,
+        )
+        summary_path = write_summary(summary, record_dir)
+        typer.echo(
+            f"wrote telemetry summary to {summary_path} "
+            f"(scientifically_complete={summary.completeness.scientifically_complete})",
+            err=True,
+        )
     typer.echo(result.manifest.model_dump_json(indent=2))
     if result.manifest.state != "succeeded":
         raise typer.Exit(1)
+
+
+@app.command("telemetry-summarize")
+def telemetry_summarize(
+    run_dir: Path = typer.Argument(
+        ...,
+        help="A run record directory containing RunManifest.json (and, when present, "
+        "RunEvents.jsonl / TelemetrySamples.jsonl).",
+    ),
+    plan_path: Optional[Path] = typer.Option(
+        None, "--plan", help="The RunPlan JSON, to fill lineage identity in the summary."
+    ),
+    as_csv: bool = typer.Option(
+        False, "--csv", help="Print the flat, full-precision metric CSV to stdout."
+    ),
+    as_table: bool = typer.Option(
+        False, "--table", help="Print the rounded Markdown table to stdout."
+    ),
+    write: bool = typer.Option(
+        True,
+        "--write/--no-write",
+        help="Write RunTelemetrySummary.json into the run directory (atomic).",
+    ),
+):
+    """Derive the RunTelemetrySummary for a completed run purely from its durable raw records
+    (RunManifest + RunEvents + TelemetrySamples). CSV, table, and JSON all render from that one
+    derived object, so they cannot disagree with each other or with the raw source. A run can be a
+    workload success yet not scientifically complete for the paper; that is reported, never hidden."""
+    from corpus_studio.platform.contracts import RunPlan
+    from corpus_studio.platform.telemetry import (
+        summarize_run_telemetry,
+        summary_to_csv,
+        summary_to_table,
+        write_summary,
+    )
+
+    if not (run_dir / "RunManifest.json").is_file():
+        typer.echo(f"No RunManifest.json under {run_dir}.", err=True)
+        raise typer.Exit(2)
+    plan = None
+    if plan_path is not None:
+        try:
+            plan = RunPlan.model_validate_json(plan_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, ValidationError) as exc:
+            typer.echo(f"Invalid RunPlan: {exc}", err=True)
+            raise typer.Exit(2) from exc
+    try:
+        summary = summarize_run_telemetry(run_dir, plan=plan)
+    except (OSError, ValueError, ValidationError) as exc:
+        typer.echo(f"Could not derive telemetry summary: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    if write:
+        summary_path = write_summary(summary, run_dir)
+        typer.echo(f"wrote {summary_path}", err=True)
+    if as_csv:
+        typer.echo(summary_to_csv(summary))
+    elif as_table:
+        typer.echo(summary_to_table(summary))
+    else:
+        typer.echo(summary.model_dump_json(indent=2))
+    if not summary.completeness.scientifically_complete:
+        typer.echo(
+            "NOTE: run is not scientifically complete for the paper - " + summary.completeness.reason,
+            err=True,
+        )
 
 
 @app.command("platform-plan")

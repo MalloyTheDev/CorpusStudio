@@ -1,0 +1,489 @@
+{
+  "$defs": {
+    "GpuTelemetrySample": {
+      "additionalProperties": false,
+      "description": "One raw GPU environmental reading bound to an exact device index + UUID. Every field is\noptional: a driver that does not expose a field leaves it ``null`` and names the probe on the\nparent sample's ``probe_unavailable`` list. Values are never zero-filled. GPU/host *memory* lives\nin the sample's shared :class:`MemoryMetrics`, not here.",
+      "properties": {
+        "device_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Index"
+        },
+        "device_uuid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Uuid"
+        },
+        "graphics_clock_mhz": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Graphics Clock Mhz"
+        },
+        "memory_clock_mhz": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Clock Mhz"
+        },
+        "memory_controller_utilization_percent": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Controller Utilization Percent"
+        },
+        "performance_state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Performance State"
+        },
+        "power_watts": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Power Watts"
+        },
+        "temperature_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature C"
+        },
+        "throttle_reasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Throttle Reasons",
+          "type": "array"
+        },
+        "utilization_percent": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Utilization Percent"
+        }
+      },
+      "title": "GpuTelemetrySample",
+      "type": "object"
+    },
+    "HostTelemetrySample": {
+      "additionalProperties": false,
+      "description": "One raw host environmental reading. ``process_tree_rss_bytes`` is the worker *process tree*\nRSS (distinct from the single-process ``MemoryMetrics.process_rss_bytes``). Disk counters are\ncumulative byte totals; the aggregator differences them across the window.",
+      "properties": {
+        "cpu_utilization_percent": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cpu Utilization Percent"
+        },
+        "disk_read_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disk Read Bytes"
+        },
+        "disk_write_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disk Write Bytes"
+        },
+        "process_tree_rss_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Process Tree Rss Bytes"
+        },
+        "swap_used_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Swap Used Bytes"
+        },
+        "system_ram_available_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "System Ram Available Bytes"
+        },
+        "system_ram_used_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "System Ram Used Bytes"
+        }
+      },
+      "title": "HostTelemetrySample",
+      "type": "object"
+    },
+    "MemoryMetrics": {
+      "additionalProperties": false,
+      "description": "The full memory-signature block sampled during a run. Distinguishes PyTorch's allocator view,\nraw CUDA device memory, and OS-level residency (``dedicated`` vs ``shared`` GPU memory) so a\nWindows/WDDM spill to shared memory is VISIBLE rather than hidden inside 'used VRAM'. Grounded in\ngpu_probe.GpuMemory + the estimators note that torch.max_memory_allocated counts the WDDM spill.",
+      "properties": {
+        "cuda_device_free_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cuda Device Free Bytes"
+        },
+        "cuda_device_used_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cuda Device Used Bytes"
+        },
+        "dedicated_gpu_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dedicated Gpu Bytes"
+        },
+        "process_rss_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Process Rss Bytes"
+        },
+        "shared_gpu_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shared Gpu Bytes"
+        },
+        "system_ram_used_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "System Ram Used Bytes"
+        },
+        "torch_allocated_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Allocated Bytes"
+        },
+        "torch_peak_allocated_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Peak Allocated Bytes"
+        },
+        "torch_peak_reserved_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Peak Reserved Bytes"
+        },
+        "torch_reserved_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Torch Reserved Bytes"
+        }
+      },
+      "title": "MemoryMetrics",
+      "type": "object"
+    },
+    "OperatingSystem": {
+      "enum": [
+        "windows",
+        "wsl",
+        "linux",
+        "macos",
+        "unknown"
+      ],
+      "title": "OperatingSystem",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One raw environmental sample (the harness's per-tick record). Written append-only, one JSON\nobject per line, to ``<run-dir>/TelemetrySamples.jsonl`` as it is taken - the authoritative raw\nseries the summary is derived from. ``monotonic_ns`` drives interval math; ``wall_utc`` is\nlineage only. ``sample_source`` keeps native-Linux, WSL, and Windows samples DISTINCT and is\nnever collapsed into one category.",
+  "properties": {
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "gpu": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GpuTelemetrySample"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "host": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HostTelemetrySample"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "memory": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MemoryMetrics"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "monotonic_ns": {
+      "minimum": 0,
+      "title": "Monotonic Ns",
+      "type": "integer"
+    },
+    "optimizer_step": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Optimizer Step"
+    },
+    "phase": {
+      "enum": [
+        "baseline",
+        "setup",
+        "warmup",
+        "measured",
+        "teardown"
+      ],
+      "title": "Phase",
+      "type": "string"
+    },
+    "probe_unavailable": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Probe Unavailable",
+      "type": "array"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "sample_seq": {
+      "minimum": 0,
+      "title": "Sample Seq",
+      "type": "integer"
+    },
+    "sample_source": {
+      "$ref": "#/$defs/OperatingSystem"
+    },
+    "wall_utc": {
+      "title": "Wall Utc",
+      "type": "string"
+    }
+  },
+  "required": [
+    "run_id",
+    "sample_seq",
+    "monotonic_ns",
+    "wall_utc",
+    "phase",
+    "sample_source"
+  ],
+  "title": "TelemetrySample",
+  "type": "object"
+}

@@ -22,7 +22,9 @@ export type { ResolvedExecutionConfiguration } from "./ResolvedExecutionConfigur
 export type { RunEvent } from "./RunEvent";
 export type { RunManifest } from "./RunManifest";
 export type { RunPlan } from "./RunPlan";
+export type { RunTelemetrySummary } from "./RunTelemetrySummary";
 export type { StorageProfile } from "./StorageProfile";
+export type { TelemetrySample } from "./TelemetrySample";
 export type { TokenizerDescriptor } from "./TokenizerDescriptor";
 export type { TraceRecord } from "./TraceRecord";
 export type { TrainingObjective } from "./TrainingObjective";
