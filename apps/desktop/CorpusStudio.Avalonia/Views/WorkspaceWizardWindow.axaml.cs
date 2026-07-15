@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Markup.Xaml;
 using CorpusStudio.Avalonia.Services;
 using CorpusStudio.Desktop.Models;
 using CorpusStudio.Desktop.Services;
@@ -25,7 +26,7 @@ public partial class WorkspaceWizardWindow : Window
 
     public WorkspaceWizardWindow(IReadOnlyList<DatasetSchema> schemas)
     {
-        InitializeComponent();
+        AvaloniaXamlLoader.Load(this);
         ViewModel = new WorkspaceWizardViewModel(schemas);
         DataContext = ViewModel;
     }

@@ -423,7 +423,7 @@ public sealed class PreferenceReviewViewModel : ViewModelBase, IPreferenceReview
         return value
             .ToLowerInvariant()
             .Split(
-                [' ', '\r', '\n', '\t', '.', ',', ';', ':', '!', '?', '"', '\'', '(', ')', '[', ']'],
+                new[] { ' ', '\r', '\n', '\t', '.', ',', ';', ':', '!', '?', '"', '\'', '(', ')', '[', ']' },
                 StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
             )
             .Where(token => token.Length > 1);
