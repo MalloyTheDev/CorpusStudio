@@ -203,6 +203,8 @@ $ENGINE platform-plan \
   --base-model <qwen2.5-0.5b-local-snapshot> \
   --dataset <bring-up-smoke.jsonl> \
   --sequence-len 256 \
+  --micro-batch-size 1 \
+  --gradient-accumulation-steps 1 \
   --max-steps 12 \
   --backend corpus_studio \
   --optim adamw_torch \
@@ -211,6 +213,13 @@ $ENGINE platform-plan \
   --out /mnt/training-nvme/corpusstudio/runs/ieee-linux-training/phase3-qwen25-05b-matched-v5
 ```
 
+- `--micro-batch-size 1 --gradient-accumulation-steps 1` are **mandatory** for the bring-up smoke: the
+  effective matrix 1.2.0 seals `micro_batch_size = 1` and `gradient_accumulation_steps = 1`, and both
+  values are consumed verbatim by the worker. Omitting `--gradient-accumulation-steps` defaults it to 8
+  (the product-wide default), which would change the effective batch size, microstep count, timing,
+  energy, throughput, and comparison semantics - a `PLANNING_SPEC_MISMATCH_GRADIENT_ACCUMULATION`, not
+  an acceptable deviation. Confirm both values in the sealed `resolved_execution.batching`
+  (`micro_batch_size == 1`, `fallback_grad_accumulation_steps == 1`) before the disjointness gate.
 - `--optim adamw_torch` is the only sealed optimizer; do not request `paged_adamw_8bit`/Liger for the
   bring-up smoke.
 - The 12-step count is a bring-up smoke, not a paper cell. Sequence length starts at 256; sequence

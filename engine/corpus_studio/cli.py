@@ -838,6 +838,18 @@ def platform_plan(
     num_train_epochs: float = typer.Option(
         1.0, "--epochs", help="Sealed epoch stop condition when --max-steps is absent."
     ),
+    micro_batch_size: int = typer.Option(
+        1,
+        "--micro-batch-size",
+        min=1,
+        help="Per-device microbatch size sealed into the plan (must be positive).",
+    ),
+    gradient_accumulation_steps: int = typer.Option(
+        8,
+        "--gradient-accumulation-steps",
+        min=1,
+        help="Fixed gradient-accumulation microstep count sealed into the plan (must be positive).",
+    ),
     allow_truncation: bool = typer.Option(
         False,
         "--allow-truncation",
@@ -937,6 +949,8 @@ def platform_plan(
         sequence_len=sequence_len,
         max_steps=max_steps,
         num_train_epochs=num_train_epochs,
+        micro_batch_size=micro_batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
         truncation_allowed=allow_truncation,
         chat_template_sha256=chat_template_sha256,
         backend=backend,

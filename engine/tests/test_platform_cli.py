@@ -5,6 +5,7 @@ selection flows through the CLI (incl. the honest Unsloth-on-Blackwell refusal).
 
 import json
 
+import pytest
 from typer.testing import CliRunner
 
 from corpus_studio.cli import app
@@ -517,3 +518,84 @@ def test_platform_run_help_exposes_the_bounded_preflight_deadline():
     )
     assert option.default == 1800.0
     assert "Non-extendable deadline" in (option.help or "")
+
+
+# ---- batching flags: --micro-batch-size / --gradient-accumulation-steps -------
+# The planner defaults (micro_batch_size=1, gradient_accumulation_steps=8) are product-wide behavior;
+# these opt-in flags let a caller seal an EXACT batching tuple (e.g. a preregistered research cell that
+# mandates gradient accumulation 1) without changing what omitting the flags produces. The sealed value
+# is consumed verbatim by the worker (train_config_from_resolved), so it must survive plan -> resolved
+# execution -> trainer config with no post-seal override.
+
+
+def _resolved_batching(run_plan: dict) -> tuple[int, int]:
+    from corpus_studio.platform.contracts import ResolvedExecutionConfiguration
+    from corpus_studio.training.trainer import train_config_from_resolved
+
+    resolved = run_plan["resolved_execution"]
+    execution = ResolvedExecutionConfiguration.model_validate(resolved)
+    cfg = train_config_from_resolved(execution)
+    return cfg.micro_batch_size, cfg.gradient_accumulation_steps
+
+
+@pytest.mark.parametrize("flag", ["--micro-batch-size", "--gradient-accumulation-steps"])
+def test_platform_plan_batching_flags_appear_in_help(flag):
+    from typer.main import get_command
+
+    root = get_command(app)
+    platform_plan_command = root.commands["platform-plan"]
+    option = next(
+        parameter for parameter in platform_plan_command.params if flag in parameter.opts
+    )
+    # the option is exposed with help text and a positivity floor (click range min=1)
+    assert (option.help or "").strip()
+    assert getattr(option.type, "min", None) == 1
+
+
+@pytest.mark.parametrize("flag", ["--micro-batch-size", "--gradient-accumulation-steps"])
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_platform_plan_rejects_nonpositive_batching(tmp_path, flag, value):
+    # Range validation happens at the click layer, before host profiling, so no ready host is needed:
+    # a zero or negative microstep count can never seal a plan.
+    result = runner.invoke(app, [*_platform_plan_args(tmp_path), flag, value, "--json"])
+    assert result.exit_code != 0
+
+
+def test_platform_plan_sealed_batching_flows_to_plan_resolved_and_trainer(monkeypatch, tmp_path):
+    _ready_host(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            *_platform_plan_args(tmp_path),
+            "--micro-batch-size",
+            "1",
+            "--gradient-accumulation-steps",
+            "1",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0
+    run_plan = json.loads(result.stdout)["run_plan"]
+    # micro-batch=1 and grad-accum=1 reach the sealed RunPlan (top-level batching)
+    assert run_plan["batching"]["micro_batch_size"] == 1
+    assert run_plan["batching"]["fallback_grad_accumulation_steps"] == 1
+    # both values reach the ResolvedExecutionConfiguration
+    resolved = run_plan["resolved_execution"]["batching"]
+    assert resolved["micro_batch_size"] == 1
+    assert resolved["fallback_grad_accumulation_steps"] == 1
+    # and the trainer receives the exact sealed values (no post-seal override)
+    assert _resolved_batching(run_plan) == (1, 1)
+
+
+def test_platform_plan_omitted_batching_flags_preserve_existing_defaults(monkeypatch, tmp_path):
+    _ready_host(monkeypatch)
+    result = runner.invoke(app, [*_platform_plan_args(tmp_path), "--json"])
+    assert result.exit_code == 0
+    run_plan = json.loads(result.stdout)["run_plan"]
+    # omitting the flags preserves the product-wide defaults: micro_batch_size=1, grad-accum=8
+    assert run_plan["batching"]["micro_batch_size"] == 1
+    assert run_plan["batching"]["fallback_grad_accumulation_steps"] == 8
+    resolved = run_plan["resolved_execution"]["batching"]
+    assert resolved["micro_batch_size"] == 1
+    assert resolved["fallback_grad_accumulation_steps"] == 8
+    assert _resolved_batching(run_plan) == (1, 8)
