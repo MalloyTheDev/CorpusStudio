@@ -8,7 +8,7 @@ from pathlib import Path
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _VALIDATOR = _REPOSITORY_ROOT / "research/ieee-linux-training/validate_protocol.py"
-_EFFECTIVE_HASH = "731101c9ee81bd93f9acabb0433788180b86bcec3d78a7af03892df7af41f4f9"
+_EFFECTIVE_HASH = "168189145150c0ed13ce70151a065c9490d9e70052ca30569aac709e718f9e12"
 
 
 def _run_validator(*args: str) -> subprocess.CompletedProcess[str]:
@@ -26,26 +26,26 @@ def _fresh_candidate(**updates: object) -> dict[str, object]:
         "schema_version": "1.0.0",
         "stage": "runplan",
         "environment_ids": [
-            "backend-corpus-studio-research-flash-v4",
-            "backend-corpus-studio-research-math-v4",
+            "backend-corpus-studio-research-flash-v5",
+            "backend-corpus-studio-research-math-v5",
         ],
         "environment_lock_hashes": ["1" * 64, "2" * 64],
         "worker_wheel_sha256": ["3" * 64],
-        "plan_ids": ["plan-fresh-flash-v4", "plan-fresh-math-v4"],
+        "plan_ids": ["plan-fresh-flash-v5", "plan-fresh-math-v5"],
         "plan_hashes": ["4" * 64, "5" * 64],
         "execution_configuration_ids": [
-            "plan-fresh-flash-v4-execution",
-            "plan-fresh-math-v4-execution",
+            "plan-fresh-flash-v5-execution",
+            "plan-fresh-math-v5-execution",
         ],
         "execution_configuration_hashes": ["6" * 64, "7" * 64],
         "run_ids": [],
         "output_paths": [
             "/mnt/training-nvme/corpusstudio/runs/ieee-linux-training/"
-            "phase3-qwen25-05b-matched-v4"
+            "phase3-qwen25-05b-matched-v5"
         ],
         "artifact_ids": [],
         "evidence_roots": [
-            "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v4"
+            "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v5"
         ],
     }
     candidate.update(updates)
