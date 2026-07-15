@@ -1,7 +1,7 @@
 # Host State — Native-Linux RTX 5070 Workstation
 
-**Last verified:** 2026-07-14 (latest preserved flash-environment health report `checked_at`
-2026-07-14T20:27:18Z; legacy environment, GPU, and paths were checked earlier the same day).
+**Last verified:** 2026-07-15 (matched manager-1.2 math/flash environment health and bounded
+production-path smoke evidence; legacy environment, GPU, and paths were checked 2026-07-14).
 
 This file records the *verified* runtime facts of the machine CorpusStudio currently runs
 on. It supersedes the Windows `C:`/`F:` host descriptions in older docs for **"where you
@@ -122,7 +122,8 @@ recreated from commit `f15f1bfeec0b54c4c863b78f03f2b1c3032bd768`. Its preserved 
 `drift_detected=false`. Math readiness-v2 was not mutated. Manager 1.2 preserves those lock/evidence
 digests as historical evidence but does not grandfather flash across the new adapter-state equality
 requirement; the flash environment needs an audited-wheel replacement before a new manager-1.2 health
-claim. No such recreation occurred during the audit.
+claim. Readiness-flash-v1 itself was not recreated during the audit; the later manager-1.2 evidence
+uses the separate blue/green research-flash-v2 identity documented below.
 
 | Item | Value |
 |---|---|
@@ -172,6 +173,46 @@ optimizer step has yet passed through `platform-run`, and sequence length 4096 r
 If the flash environment is recreated with a new worker wheel, its new lock hash invalidates this old
 RunPlan; generate a new plan against the replacement lock before any later smoke.
 
+### Matched manager-1.2 research environments and bounded smokes
+
+Two blue/green manager-1.2 environments were subsequently sealed from the same worker wheel and
+package artifact set. They preserve the older readiness environments rather than mutating them:
+
+| Item | Math | Flash |
+|---|---|---|
+| Environment | `backend-corpus-studio-research-math-v2` | `backend-corpus-studio-research-flash-v2` |
+| Lock hash | `7ffa59ea68a243331cf16f6ab5a16f0c47d3d1e6ae415692d42260cba36decf4` | `256acc9c437897bb02c6ff1cb6d45cf42470612d88e78a4977647b7f27c30416` |
+| Required tuple | `cuda_qlora_sdpa_math_execution` | `cuda_qlora_sdpa_flash_execution` |
+| State after smoke | `HARDWARE_VERIFIED`, drift `false` | `HARDWARE_VERIFIED`, drift `false` |
+
+Both use worker wheel SHA-256
+`eb4cbde415cadda523bb316c11919ba5c8083fccbcecd0d9e04aaa1a65539d3b` from source commit
+`a222a82f20dd8a04b7e0994a0deb778c08a0a1f0`. Their matched environment and plan evidence is under
+`/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-research-matched-v2/` and
+`/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v2/20260715T034634Z/`.
+
+Fresh sequence-256, three-step RunPlans were generated after package RECORD/tree evidence was bound
+into managed capability snapshots. A field-by-field audit found only environment/capability and
+attention-kernel/toggle differences; the normalized plans and all rendered examples were identical.
+Each plan was dispatched exactly once, math first and flash second:
+
+| Item | Math | Flash |
+|---|---|---|
+| Run ID | `run-019f640f-a587-7f79-9bf1-2a36c05854fd` | `run-019f6413-c34b-7570-a5b4-ea69caa0579b` |
+| Forced kernel observed | `torch_sdpa_math` | `torch_sdpa_flash` |
+| Boundary reached | Model and post-adapter placement verified; QLoRA attached; trainer/optimizer created | Same |
+| Terminal result | Failed before step 1: incoming autograd hook tensor for one `lora_B` weight was BF16 while the sealed materialized-gradient policy is FP32 | Same |
+| Optimizer steps / artifacts / checkpoints | `0` / none / none | `0` / none / none |
+| Final GPU state | 10 MiB, no compute process | 10 MiB, no compute process |
+
+The common failure exposed a production-verifier mismatch: readiness checks the materialized leaf
+`parameter.grad`, while the worker checked the earlier pre-accumulation hook tensor. The repository
+correction uses a post-accumulation hook and remains fail-closed for missing, wrong-dtype, or
+wrong-device materialized gradients. That code correction is unit evidence only until a new wheel,
+new immutable environments/locks, fresh RunPlans, and separately approved smokes are produced. The
+two failed plans and runs are preserved and must not be retried or reused. No real optimizer step has
+yet passed through `platform-run`, and sequence length 4096 remains unverified.
+
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 
 `HARDWARE_VERIFIED` is the **Environment Manager** evidence level, not a training-run result.
@@ -194,9 +235,10 @@ must not be claimed from this state alone:
   `backend-corpus-studio` reference exists.
 - **Real offload fit, PCIe/NVMe throughput, sustained-write endurance** — the NVMe has not been
   benchmarked (`platform-storage` is non-destructive and reads no SMART data).
-- **Bare-Linux flash for a real optimizer step or sequence 4096** — readiness-v2 verified the math
-  tuple and the separate readiness-flash-v1 environment verified only its tiny forced
-  `torch_sdpa_flash` tuple. The first real 0.5B smoke stopped before adapter insertion. Neither
+- **Bare-Linux flash for a real optimizer step or sequence 4096** — the matched manager-1.2
+  environments verified separate tiny math and forced-`torch_sdpa_flash` tuples. The matched real
+  0.5B attempts reached adapter insertion but both stopped before optimizer step 1 on the common
+  materialized-gradient-verifier mismatch. Neither
   environment is the same identity as Transformers `flash_attention_2` or an external `flash-attn`
   package, and neither is full-sequence 7B proof.
 - **MoE runtime capability** — static inspection only (Phase 8); no MoE execution.

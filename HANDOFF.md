@@ -1,7 +1,7 @@
 # CorpusStudio — Session Handoff
 
-**Last updated:** 2026-07-14 (native-Linux flash readiness and first bounded smoke - see
-[`docs/HOST_STATE.md`](docs/HOST_STATE.md); previous snapshot 2026-07-13). This is a snapshot for the
+**Last updated:** 2026-07-15 (matched manager-1.2 math/flash environments and bounded smokes - see
+[`docs/HOST_STATE.md`](docs/HOST_STATE.md); previous snapshot 2026-07-14). This is a snapshot for the
 next agent session (Claude Code or Codex).
 For the authoritative *feature* state see [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md); for the
 forward plan see [`docs/ROADMAP.md`](docs/ROADMAP.md) + [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
@@ -17,11 +17,11 @@ forward plan see [`docs/ROADMAP.md`](docs/ROADMAP.md) + [`docs/IMPLEMENTATION_PL
 - Engine virtualenv: **`/mnt/training-nvme/repos/CorpusStudio/engine/.venv`** (CPython 3.12.3,
   dependency-light core + `[dev]`, torch-free).
 - The GPU **training** runtime is managed by the Environment Manager. The legacy
-  **`backend-corpus-studio`**, math rollback **`backend-corpus-studio-readiness-v2`**, and forced-flash
-  **`backend-corpus-studio-readiness-flash-v1`** environments have separate preserved
-  `HARDWARE_VERIFIED` evidence for their exact environment-level tuples. Manager 1.2 preserves the
-  math rollback but requires replacement of the manager-1.1 flash instance before a new health claim.
-  They supersede the old standalone `cs-train-venv`; none is a real-workload success claim. See
+  **`backend-corpus-studio`**, readiness environments, and blue/green manager-1.2 research
+  **`backend-corpus-studio-research-math-v2`** / **`backend-corpus-studio-research-flash-v2`**
+  environments have separate preserved `HARDWARE_VERIFIED` evidence for their exact
+  environment-level tuples. They supersede the old standalone `cs-train-venv`; none is a completed
+  real-workload claim. See
   [`docs/HOST_STATE.md`](docs/HOST_STATE.md) and
   [`docs/ENVIRONMENT_MANAGER.md`](docs/ENVIRONMENT_MANAGER.md).
 - **History (mounted, do not work from):** this repo previously lived on Windows `F:` (USB) then `C:`
@@ -119,6 +119,20 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   diagnostic then found all 290 parameters and both buffers resident on `cuda:0`. That diagnostic is
   evidence about that load only, not a completed `platform-run`, optimizer step, or sequence-4096
   result. Preserved evidence is indexed in [`docs/HOST_STATE.md`](docs/HOST_STATE.md).
+- **#434 through #437 closed the checkpoint/liveness and managed-integrity prerequisites:** sealed
+  production execution is checkpoint-free, manager operations use bounded inter-process leases and
+  immutable blue/green environment IDs, PyTorch prerequisite artifacts are hash-bound, and managed
+  planning retains verified package artifact/RECORD/installed-tree evidence. The matched research
+  environments use the same worker wheel and package artifacts with separate math/flash locks.
+- **The first matched manager-1.2 0.5B attempts are preserved failures, not retries or paper data.**
+  Fresh normalized-equal plans ran once each (math then flash). Both verified the exact execution
+  hash, intended kernel/toggles, model and post-adapter CUDA placement, QLoRA insertion, and trainer
+  creation, then failed before optimizer step 1 because a pre-accumulation BF16 autograd tensor was
+  treated as the sealed FP32 materialized gradient. No artifact or checkpoint was written; both
+  environments remained `HARDWARE_VERIFIED`, drift false, and VRAM returned to 10 MiB. The repository
+  verifier now uses post-accumulation leaf-gradient evidence, but that code has only unit evidence:
+  build a new wheel, create new environment IDs/locks, generate new plans, and obtain separate smoke
+  approval before claiming the correction on hardware. See [`docs/HOST_STATE.md`](docs/HOST_STATE.md).
 - **The first-party checkpoint boundary is now fail-closed:** new plans seal
   `save_strategy="no"` with no cadence or retention, both sealed and explicitly unsealed trainer paths
   refuse legacy step-checkpoint execution before loading data or weights, and the runner rejects any
@@ -215,9 +229,10 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 - **Blackwell / sm_120**: the **math** attention path is the verified-safe default — the fused flash-SDPA
   kernel **deadlocks on the first backward under native-Windows WDDM** (high GPU util, low power). WSL
   flash was measured separately. On the native-Linux host, readiness-v2 verified the environment-level
-  **math** tuple and readiness-flash-v1 separately verified the tiny forced **flash** tuple. The first
-  real 0.5B smoke stopped at placement verification before adapter insertion, so bare-Linux flash for
-  a real optimizer step or the sequence-4096 workload is still not claimed. Unsloth is
+  **math** tuple and the research flash environment separately verified the tiny forced **flash**
+  tuple. The matched real 0.5B attempts reached verified adapter insertion but stopped before step 1
+  on their common gradient-verifier mismatch, so bare-Linux flash for a real optimizer step or the
+  sequence-4096 workload is still not claimed. Unsloth is
   honestly **refused on native-Windows/WDDM Blackwell** (it declares no math path) and routed to
   `backend-corpus-studio`. Other hosts still need their own exact functional evidence.
 - **Dependency-light boundary**: `import corpus_studio.platform` pulls **no torch**; all heavy imports
@@ -287,8 +302,10 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   readiness-v2 is the preserved
   baseline/rollback; the manager-1.1 flash readiness-v1 lock remains preserved historical evidence for
   its tiny forced-flash tuple, but manager 1.2 does not grandfather its missing adapter-state equality
-  observation. It requires replacement before a new health claim. Its first real 0.5B smoke did not
-  reach adapter insertion or an optimizer step. The legacy
+  observation. It requires replacement before a new health claim. Blue/green research-math-v2 and
+  research-flash-v2 now provide the manager-1.2 identities; their matched 0.5B attempts reached
+  adapter insertion but failed before step 1 on the common materialized-gradient-verifier mismatch.
+  The legacy
   `backend-corpus-studio` environment also remains available.
 - **Model/Tokenizer foundation** (Phase 3): `platform/model_inspector.py` + the `ModelDescriptor` /
   `TokenizerDescriptor` roots. `model-inspect` inventories local snapshots without network access,
