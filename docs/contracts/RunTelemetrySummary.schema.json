@@ -1417,6 +1417,18 @@
           "default": null,
           "title": "Model Ref"
         },
+        "parent_run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Run Id"
+        },
         "plan_hash": {
           "anyOf": [
             {
@@ -1464,6 +1476,24 @@
           ],
           "default": null,
           "title": "Repository Commit"
+        },
+        "resumed": {
+          "default": false,
+          "title": "Resumed",
+          "type": "boolean"
+        },
+        "resumed_from_global_step": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resumed From Global Step"
         },
         "run_id": {
           "anyOf": [

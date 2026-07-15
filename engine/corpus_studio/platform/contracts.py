@@ -4770,6 +4770,12 @@ class TelemetryIdentity(ContractModel):
     dataset_fingerprint: str | None = None
     run_id: str | None = None
     sequence_view: int | None = Field(default=None, ge=0)
+    # Resume lineage so a resumed trial is never conflated with an uninterrupted one in paper evidence.
+    # ``resumed`` is False for an ordinary from-scratch run; when True the parent run and the exact
+    # continued-from optimizer step are recorded (mirrors RunManifest.resume_lineage).
+    resumed: bool = False
+    parent_run_id: str | None = None
+    resumed_from_global_step: int | None = Field(default=None, ge=1)
 
 
 class MetricSummary(ContractModel):

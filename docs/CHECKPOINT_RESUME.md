@@ -1,15 +1,32 @@
 # Exact checkpoint + resume lineage (#440)
 
-A long first-party run must be resumable with **exact** lineage or not at all. This is the
-control-plane, torch-free design and its verifier: a hash-sealed `CheckpointManifest`, byte-integrity
-verification that fails closed, and a resume admission that only proceeds against a byte-identical,
-fully compatible target `RunPlan`.
+A long first-party run must be resumable with **exact** lineage or not at all. Two halves realize this:
 
-**This does not enable automatic resume.** Intermediate checkpoints stay disabled in the trainer and
-execution stays checkpoint-free. First-party runs expected to exceed 30 minutes remain blocked until a
-**separately reviewed trainer change** consumes a `CheckpointResumeRequest` and restores the sealed
-state. Until then this is the reviewed design plus its verifier - no checkpoint is written or reused
-automatically, and no run's checkpoint-free behavior changes.
+- **Control plane, torch-free (`platform/checkpoint.py`)** - a hash-sealed `CheckpointManifest`,
+  byte-integrity verification that fails closed (including symlink / hard-link / traversal defense), an
+  exact resume-request pin, and a resume admission that only proceeds against a byte-identical, fully
+  compatible target `RunPlan`.
+- **Execution engine, torch-lazy (`training/checkpoint_io.py`)** - the worker half that serializes the
+  full resumable state into a run-scoped temp directory, seals a complete manifest, atomically publishes
+  the directory, and on resume verifies everything BEFORE loading any tensor, restores the adapter
+  weights onto the live parameters, and rebuilds the optimizer over those live parameters.
+
+**Equivalence level (proven).** A real-torch CPU integration
+(`tests/test_training_checkpoint_integration.py`) runs N uninterrupted steps, then K steps + checkpoint
++ a **fresh-process** resume of the remaining N-K steps, in three separate processes. Under a controlled
+deterministic configuration (fixed seed, single intra-op thread, `use_deterministic_algorithms(True)`,
+and full RNG-stream restore) the resumed run reproduces the uninterrupted run **bitwise** - identical
+final parameters and identical per-step losses for the shared step numbers, with the first resumed
+optimizer step continuing from exactly K+1. This is the strongest defensible level for this
+configuration; it demonstrates exact state restoration and is **not** a claim of bitwise equivalence on
+GPU, where non-deterministic reductions can perturb the low bits even with correct state restored.
+
+**What stays checkpoint-free.** A short run and the in-process SFTTrainer body remain checkpoint-free
+and byte-identical to before - checkpoints are written only under a sealed checkpoint-enabled policy
+(`save_strategy="steps"` with a positive optimizer-step cadence), resolved by
+`resolve_checkpoint_execution_policy`. Binding the engine into the worker's long-run SFTTrainer step /
+sampler / optimizer resume is the first-authorized-GPU-run integration; the engine itself is fully
+proven above.
 
 ## The sealed checkpoint manifest
 
@@ -45,14 +62,18 @@ record of one checkpoint:
 | `malformed` | the manifest is not valid JSON / not a valid `CheckpointManifest` |
 | `incomplete` | the manifest is not marked `complete` (the write did not finish) |
 | `hash_mismatch` | the manifest body no longer matches its sealed hash (tamper) |
+| `unsafe_path` | a member is a symlink, a hard link, or resolves outside the checkpoint directory |
 | `external_change` | a file's bytes or size changed since it was sealed |
 
-`verify_resumable_into(manifest, plan)` then fails closed (`reason="incompatible"`) unless every
-plan-derivable bound identity - plan hash, execution-configuration hash, environment lock,
-model/tokenizer/dataset, objective, seeds, and backend - matches the target run exactly. The manifest's
-worker-only fields (worker wheel, formatter/chat-template bytes) are re-verified by the worker when it
-restores the bytes. `admit_resume(plan, dir, resumed_run_id=...)` runs both checks and returns the
-`ResumeLineage` a **fresh** resumed run records; it refuses to reuse the source run's id.
+`verify_matches_request(manifest, request)` pins the on-disk checkpoint to the exact id + sealed hash
+the dispatch named, so an individually-valid but swapped checkpoint is refused. `verify_resumable_into(
+manifest, plan)` then fails closed (`reason="incompatible"`) unless every plan-derivable bound identity
+- plan hash, execution-configuration hash, environment lock, model/tokenizer/dataset, objective, seeds,
+and backend - matches the target run exactly. The engine additionally re-verifies the worker-only
+identities (worker wheel, formatter, chat template) it can derive, and asserts the resumed optimizer
+owns exactly the model's live trainable parameters. `admit_resume(plan, dir, resumed_run_id=...)` runs
+the integrity + compatibility checks and returns the `ResumeLineage` a **fresh** resumed run records;
+it refuses to reuse the source run's id.
 
 ## Lineage
 
@@ -71,5 +92,7 @@ corpus-studio checkpoint-verify <checkpoint-dir>
 corpus-studio checkpoint-verify <checkpoint-dir> --plan ./plan/RunPlan.json
 ```
 
-`checkpoint-verify` never resumes or executes anything - it only verifies. Resume remains blocked
-until the separately reviewed trainer change lands.
+`checkpoint-verify` never resumes or executes anything - it only verifies. The execution engine
+(`training/checkpoint_io.py`) is what writes and restores checkpoints; a resumed trial is also marked
+on `TelemetryIdentity` (`resumed`, `parent_run_id`, `resumed_from_global_step`) so paper aggregation
+never conflates it with an uninterrupted one.

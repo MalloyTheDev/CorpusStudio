@@ -202,7 +202,10 @@ class TrainResult(BaseModel):
 
 
 def _require_checkpoint_free_execution(config: TrainRunConfig) -> None:
-    """Refuse every intermediate-checkpoint spelling, including unvalidated model copies."""
+    """Refuse every intermediate-checkpoint spelling on the in-process SFTTrainer path, including
+    unvalidated model copies. The SFTTrainer body stays checkpoint-free; exact-lineage checkpoint
+    writing/resume runs through :mod:`corpus_studio.training.checkpoint_io` (the reviewed engine proven
+    by the real-torch fresh-process equivalence test), which a long run binds on first authorization."""
 
     if (
         config.save_strategy != "no"
@@ -210,9 +213,39 @@ def _require_checkpoint_free_execution(config: TrainRunConfig) -> None:
         or config.save_total_limit is not None
     ):
         raise TrainerError(
-            "intermediate checkpoints are unsupported until resume compatibility and checkpoint "
-            "lineage are implemented"
+            "intermediate checkpoints on the SFTTrainer path are unsupported; exact-lineage "
+            "checkpointing runs through corpus_studio.training.checkpoint_io"
         )
+
+
+@dataclass(frozen=True)
+class CheckpointExecutionPolicy:
+    """The resolved checkpoint policy for one run: ``enabled=False`` is the checkpoint-free policy a
+    short run keeps (byte-identical to a no-checkpoint run); ``enabled=True`` writes exact-lineage
+    checkpoints every ``cadence_optimizer_steps`` and keeps at most ``keep_last`` of them."""
+
+    enabled: bool
+    cadence_optimizer_steps: int | None = None
+    keep_last: int | None = None
+
+
+def resolve_checkpoint_execution_policy(config: TrainRunConfig) -> CheckpointExecutionPolicy:
+    """Classify a run's checkpoint policy from its sealed save settings. ``save_strategy="no"`` is the
+    checkpoint-free policy (short runs, unchanged behavior); ``save_strategy="steps"`` is the sealed
+    checkpoint-enabled policy that requires a positive optimizer-step cadence. Fails closed on any
+    inconsistent spelling so a run can never half-enable checkpoints."""
+
+    if config.save_strategy == "no":
+        if config.save_steps is not None or config.save_total_limit is not None:
+            raise TrainerError("disabled checkpointing cannot carry save cadence or retention")
+        return CheckpointExecutionPolicy(enabled=False)
+    if config.save_steps is None or config.save_steps < 1:
+        raise TrainerError("step checkpointing requires a positive save_steps cadence")
+    return CheckpointExecutionPolicy(
+        enabled=True,
+        cadence_optimizer_steps=config.save_steps,
+        keep_last=config.save_total_limit,
+    )
 
 
 def train_config_from_resolved(execution: Any) -> TrainRunConfig:
