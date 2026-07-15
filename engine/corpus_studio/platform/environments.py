@@ -53,6 +53,22 @@ READINESS_FLASH_V1_RECIPE_ID = "backend-corpus-studio-readiness-flash-v1"
 # CUDA build is wanted).
 _TORCH_DISTRIBUTIONS: frozenset[str] = frozenset({"torch", "torchvision", "torchaudio"})
 
+# PyTorch's cu128 index currently republishes these torch 2.11 runtime dependencies without
+# artifact hashes in the index links. Pip consequently emits ``archive_info: {}`` for them even
+# though the wheel install succeeds. Readiness locks must not waive archive identity, so the exact
+# known-compatible wheels are installed first, without dependency resolution, from PyPI (whose
+# links carry SHA-256 fragments). The resulting argv and source are part of the resolution hash;
+# this is not an index fallback or a retry policy.
+_HASHED_PYTORCH_BOOTSTRAP_REQUIREMENTS: dict[str, tuple[str, ...]] = {
+    "torch==2.11.0+cu128": (
+        "cuda-pathfinder==1.2.2",
+        "setuptools==78.1.0",
+        "typing-extensions==4.15.0",
+        "jinja2==3.1.6",
+        "markupsafe==3.0.3",
+    )
+}
+
 # Rough, EXPLICITLY-HEURISTIC download sizes in MB. torch dominates and depends on the accelerator, so
 # it is special-cased below; everything else uses this table (unknown → a conservative default).
 _DOWNLOAD_MB: dict[str, int] = {
@@ -618,6 +634,13 @@ def _build_install_steps(
     reqs = recipe.dependency_requirements
     torch_reqs = [r for r in reqs if r.name in _TORCH_DISTRIBUTIONS]
     other_reqs = [r for r in reqs if r.name not in _TORCH_DISTRIBUTIONS]
+    torch_bootstrap_reqs = tuple(
+        requirement
+        for torch_requirement in torch_reqs
+        for requirement in _HASHED_PYTORCH_BOOTSTRAP_REQUIREMENTS.get(
+            _requirement_string(torch_requirement), ()
+        )
+    )
 
     if recipe.layer == DependencyLayer.backend_worker:
         env_py = _env_python_path(os_value)
@@ -660,6 +683,33 @@ def _build_install_steps(
                 configured_index_urls=[package_index],
             ),
         ]
+        if torch_bootstrap_reqs:
+            steps.append(
+                InstallStep(
+                    phase="install",
+                    description="Install hash-backed PyTorch prerequisites from PyPI",
+                    argv=[
+                        env_py,
+                        "-m",
+                        "pip",
+                        "--isolated",
+                        "install",
+                        "--disable-pip-version-check",
+                        "--no-input",
+                        "--no-deps",
+                        "--index-url",
+                        package_index,
+                        "--report",
+                        f"{evidence_root}/install-pytorch-prerequisites.json",
+                    ]
+                    + list(torch_bootstrap_reqs),
+                    environment={"PIP_NO_INPUT": "1", "PYTHONUTF8": "1"},
+                    timeout_seconds=900,
+                    network_required=True,
+                    evidence_path=f"{evidence_root}/install-pytorch-prerequisites.json",
+                    configured_index_urls=[package_index],
+                )
+            )
         if torch_reqs and torch_index:
             steps.append(
                 InstallStep(

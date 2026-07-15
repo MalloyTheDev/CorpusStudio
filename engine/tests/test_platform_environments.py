@@ -143,12 +143,69 @@ def test_readiness_flash_v1_is_exact_forced_flash_and_independent_of_math():
     )
     assert math_resolution.recipe_ref.hash != flash_resolution.recipe_ref.hash
     assert math_resolution.resolution_hash != flash_resolution.resolution_hash
-    # Math baseline digest must remain stable for the existing managed environment.
+    # Existing math and flash evidence retain their recipe identities; the concrete new install
+    # step is bound by the resolution hash instead.
     from corpus_studio.platform.environments import recipe_digest
 
     assert (
         recipe_digest(math_recipe)
         == "4c0cb365b596cfe2b1371afd5f95130a40e41c7e5b27df833b0c914bd492289c"
+    )
+    assert (
+        recipe_digest(flash_recipe)
+        == "52016adedd5011328efb05e089d54c8edd5c9308e0a38409897cd0f554240fb7"
+    )
+
+
+@pytest.mark.parametrize(
+    "recipe_id",
+    ["backend-corpus-studio-readiness-v2", "backend-corpus-studio-readiness-flash-v1"],
+)
+def test_readiness_pins_hash_backed_pytorch_prerequisites_before_cuda_torch(recipe_id):
+    recipe = get_recipe(recipe_id)
+    assert recipe is not None
+    resolution = resolve_dependencies(
+        recipe,
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+    )
+    prerequisite_step = next(
+        step
+        for step in resolution.install_steps
+        if step.evidence_path
+        and step.evidence_path.endswith("install-pytorch-prerequisites.json")
+    )
+    torch_step = _torch_install_step(resolution)
+
+    assert resolution.install_steps.index(prerequisite_step) < resolution.install_steps.index(
+        torch_step
+    )
+    assert prerequisite_step.configured_index_urls == [PYPI_INDEX_URL]
+    assert prerequisite_step.argv[prerequisite_step.argv.index("--index-url") + 1] == PYPI_INDEX_URL
+    assert "--no-deps" in prerequisite_step.argv
+    assert prerequisite_step.argv[-5:] == [
+        "cuda-pathfinder==1.2.2",
+        "setuptools==78.1.0",
+        "typing-extensions==4.15.0",
+        "jinja2==3.1.6",
+        "markupsafe==3.0.3",
+    ]
+    assert torch_step.configured_index_urls == [PYTORCH_INDEX_URLS["cu128"]]
+    assert all(requirement not in torch_step.argv for requirement in prerequisite_step.argv[-5:])
+
+
+def test_unpinned_backend_does_not_invent_version_specific_torch_prerequisites():
+    resolution = resolve_dependencies(
+        _corpus_studio(),
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+    )
+    assert all(
+        not step.evidence_path
+        or not step.evidence_path.endswith("install-pytorch-prerequisites.json")
+        for step in resolution.install_steps
     )
 
 
