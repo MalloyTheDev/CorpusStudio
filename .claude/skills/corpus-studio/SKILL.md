@@ -137,6 +137,10 @@ From `engine/` with the venv (`engine/.venv`, CPython 3.12.3, torch-free core + 
 
 The active thread is bringing CorpusStudio to full 7B training/research readiness. Amendment 0002 ->
 effective matrix 1.2.0 is merged (v5 identities allocated, v4 reserved). The Section-11 measurement
-harness is in review. Next non-GPU slices: exact resume + checkpoint lineage (#440), then the 500-output
-corpus freeze - all gated before any GPU/7B/corpus work, which needs separate human authorization. The
-live detail always lives in `HANDOFF.md` + `docs/HOST_STATE.md`; trust those over this paragraph.
+harness and the exact checkpoint/resume execution engine (#440) are merged and CI-green - resume is
+proven by a real-torch fresh-process bitwise-equivalence test, and short/checkpoint-free runs are
+unchanged. Remaining gates, each needing separate human authorization: freeze the ~500-output corpus,
+then the v5 0.5B GPU bring-up (`research/ieee-linux-training/RUNBOOK_v5_bringup.md`; the worker source
+must have `df86db5` as a git ancestor, not equal it), then the 7B sequence ladder, then full runs. This
+paragraph goes stale fast: the authoritative, volatile identity + readiness detail always lives in
+`HANDOFF.md` + `docs/HOST_STATE.md` - trust those over this paragraph.
