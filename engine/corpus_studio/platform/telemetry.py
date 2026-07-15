@@ -18,6 +18,7 @@ WSL, and Windows samples carry a distinct ``sample_source`` and are never collap
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import statistics
 import subprocess  # noqa: S404 - fixed nvidia-smi argv, never a shell string.
@@ -52,6 +53,7 @@ from corpus_studio.platform.contracts import (
     TelemetryIdentity,
     TelemetrySample,
     TrialConfidenceInterval,
+    WorkerArtifactIdentity,
 )
 from corpus_studio.platform.enums import OperatingSystem
 from corpus_studio.platform.host_platform import detect_operating_system
@@ -178,7 +180,10 @@ def probe_gpu() -> SampleReading:
         "clocks.gr",
         "clocks.mem",
         "pstate",
+        "memory.used",
+        "memory.total",
     ]
+    device_memory: MemoryMetrics | None = None
     row = _run_nvidia_smi(query)
     if row is not None and len(row) == len(query):
         index = None
@@ -197,20 +202,61 @@ def probe_gpu() -> SampleReading:
             memory_clock_mhz=_float_or_none(row[7]),
             performance_state=_str_or_none(row[8]),
         )
+        device_memory = _nvidia_smi_device_memory(row[9], row[10])
     else:
         reading.unavailable.append("nvidia_smi_gpu")
 
+    # Worker-owned torch allocator memory (allocated/reserved/peak) is only visible in the CUDA-owning
+    # child; in the torch-free control-plane sampler ``sample_gpu_memory`` returns None. The driver's
+    # device used/free from nvidia-smi is real in this process, so it fills the gap: the sample carries
+    # memory whenever EITHER source produced a value, and is null (never zero-filled) only when both
+    # are unavailable.
     try:
         from corpus_studio.platform.watchdog import sample_gpu_memory  # noqa: PLC0415
 
-        memory = sample_gpu_memory()
+        allocator_memory = sample_gpu_memory()
     except Exception:  # noqa: BLE001 - a memory-probe failure must not break sampling.
-        memory = None
+        allocator_memory = None
+    memory = _combine_memory(allocator_memory, device_memory)
     if memory is not None:
         reading.memory = memory
     else:
         reading.unavailable.append("gpu_memory")
     return reading
+
+
+def _nvidia_smi_device_memory(used_mib: str, total_mib: str) -> MemoryMetrics | None:
+    """Build the driver-side device memory (used + free) from nvidia-smi's ``memory.used`` /
+    ``memory.total`` (reported in MiB under ``nounits``). Null when either value is missing."""
+
+    used = _float_or_none(used_mib)
+    total = _float_or_none(total_mib)
+    if used is None or total is None:
+        return None
+    used_bytes = int(used * 1024 * 1024)
+    total_bytes = int(total * 1024 * 1024)
+    return MemoryMetrics(
+        cuda_device_used_bytes=used_bytes,
+        cuda_device_free_bytes=max(0, total_bytes - used_bytes),
+    )
+
+
+def _combine_memory(
+    allocator: MemoryMetrics | None, device: MemoryMetrics | None
+) -> MemoryMetrics | None:
+    """Overlay the driver device used/free onto the torch allocator sample (or use whichever exists).
+    The allocator sample owns the torch/process fields; the device sample owns the driver used/free."""
+
+    if allocator is None:
+        return device
+    if device is None:
+        return allocator
+    return allocator.model_copy(
+        update={
+            "cuda_device_used_bytes": device.cuda_device_used_bytes,
+            "cuda_device_free_bytes": device.cuda_device_free_bytes,
+        }
+    )
 
 
 def _read_meminfo() -> dict[str, int]:
@@ -637,6 +683,13 @@ def _max_memory(samples: Sequence[MemoryMetrics]) -> MemoryMetrics | None:
 # --------------------------------------------------------------------------------------------------
 # Identity extraction
 # --------------------------------------------------------------------------------------------------
+# Resume lineage is reconstructed from the manifest and must never be supplied (or defaulted) by an
+# identity overlay.
+_MANIFEST_OWNED_IDENTITY_FIELDS: frozenset[str] = frozenset(
+    {"resumed", "parent_run_id", "resumed_from_global_step"}
+)
+
+
 def identity_from_plan(
     plan: RunPlan | None,
     manifest: RunManifest,
@@ -663,14 +716,51 @@ def identity_from_plan(
             base.environment_lock_hash = plan.environment_ref.hash.value
         execution = plan.resolved_execution
         if execution is not None:
-            base.execution_configuration_hash = getattr(
-                execution, "execution_configuration_hash", None
-            )
+            # The sealed hash lives on the resolved config as ``configuration_hash`` (a prior version
+            # read the non-existent ``execution_configuration_hash`` attribute, so this was always
+            # null). ``verify_execution_configuration_hash`` proves the sealed value equals a fresh
+            # canonical recomputation, so reading the sealed field is authoritative.
+            base.execution_configuration_hash = execution.configuration_hash
             base.sequence_view = plan.sequence.max_sequence_len
     if overlay is not None:
+        # The overlay carries study/protocol/commit/wheel/lock/capability/probe lineage. Resume
+        # lineage is manifest-authoritative (derived above from ``resume_lineage``), so it is never
+        # taken from the overlay - otherwise an overlay's default ``resumed=False`` (a non-None value
+        # that survives ``exclude_none``) would silently clobber a genuinely-resumed trial's lineage.
         for name, value in overlay.model_dump(exclude_none=True).items():
+            if name in _MANIFEST_OWNED_IDENTITY_FIELDS:
+                continue
             setattr(base, name, value)
     return base
+
+
+def _build_provenance_source_commit(wheel_path: str | None) -> str | None:
+    """Read the worker source commit from the wheel's ``BUILD_PROVENANCE.json`` sidecar (written next
+    to the sealed wheel in the artifact store). Best-effort: null - never fabricated - if the sidecar
+    is absent, unreadable, or lacks a string ``source_commit``."""
+
+    if not wheel_path:
+        return None
+    provenance = Path(wheel_path).parent / "BUILD_PROVENANCE.json"
+    try:
+        data = json.loads(provenance.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    commit = data.get("source_commit") if isinstance(data, dict) else None
+    return commit if isinstance(commit, str) and commit else None
+
+
+def worker_identity_overlay(worker_artifact: WorkerArtifactIdentity) -> TelemetryIdentity:
+    """Build the lineage overlay the plan cannot carry - the worker wheel sha256 and the worker source
+    repository commit - from the sealed backend worker artifact. The wheel hash is the sealed artifact
+    content hash; the commit is read best-effort from the wheel's build-provenance sidecar. Each field
+    is null when its source is unavailable (never zero-filled or fabricated)."""
+
+    wheel_sha = worker_artifact.content_hash.value if worker_artifact.content_hash else None
+    return TelemetryIdentity(
+        worker_wheel_sha256=wheel_sha,
+        repository_commit=_build_provenance_source_commit(worker_artifact.path),
+    )
 
 
 # --------------------------------------------------------------------------------------------------

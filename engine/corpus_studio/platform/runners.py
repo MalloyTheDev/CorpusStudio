@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import re
 import sys
+import time
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
-from corpus_studio.platform.contracts import RunPlan
+from corpus_studio.platform.common import MemoryMetrics
+from corpus_studio.platform.contracts import EventMetrics, RunPlan
 from corpus_studio.platform.enums import FailureTaxonomy, StageMarker
 from corpus_studio.platform.gpu_health import classify_gpu_health
 from corpus_studio.platform.supervisor import (
@@ -213,6 +215,26 @@ class TrainingRunner:
         )
 
         last_stage = StageMarker.process_start
+        # Per-step evidence measured on the WORKER side (this closure runs in the managed child that
+        # owns CUDA). ``last_step_monotonic`` is the previous optimizer-step boundary; the delta to the
+        # current callback is that step's wall time. ``pending_tokens`` holds the trainer's per-step
+        # token counts (emitted just before the loss log for the same step) so one metric record
+        # carries loss + timing + tokens + allocator memory together.
+        last_step_monotonic: list[float | None] = [None]
+        pending_tokens: dict[int, tuple[int, int]] = {}
+
+        def _token_counts(step: int, nonpadding_tokens: int, supervised_tokens: int) -> None:
+            # Best-effort, worker-sourced; the trainer never lets a counting fault reach here, but this
+            # sink still tolerates any step (it is read by ``_progress`` for the matching step only).
+            pending_tokens[step] = (nonpadding_tokens, supervised_tokens)
+
+        def _worker_gpu_memory() -> MemoryMetrics | None:
+            # The child owns CUDA, so its torch allocator view (allocated/reserved/peak) is real here;
+            # a probe fault must never fail training, so it degrades to null (never zero-filled).
+            try:
+                return self.memory_sampler()
+            except Exception:  # noqa: BLE001 - observability only; a probe fault is not a run failure
+                return None
 
         def _progress(step: int, total: int, loss: float | None) -> None:
             nonlocal last_stage
@@ -220,7 +242,29 @@ class TrainingRunner:
                 raise _CancelTraining
             watchdog.beat()
             watchdog.sample()  # per-step peak capture (the thread also samples between steps)
-            ctx.emit_metric(optimizer_step=step, loss=loss, message=f"[{step}/{total}] step")
+            now = time.monotonic()
+            previous = last_step_monotonic[0]
+            step_time = (now - previous) if previous is not None else None
+            last_step_monotonic[0] = now
+            nonpadding, supervised = pending_tokens.pop(step, (None, None))
+            tokens_per_sec = (
+                nonpadding / step_time
+                if nonpadding is not None and step_time and step_time > 0
+                else None
+            )
+            supervised_per_sec = (
+                supervised / step_time
+                if supervised is not None and step_time and step_time > 0
+                else None
+            )
+            metrics = EventMetrics(
+                loss=loss,
+                step_time_seconds=step_time,
+                memory=_worker_gpu_memory(),
+                tokens_per_sec=tokens_per_sec,
+                supervised_tokens_per_sec=supervised_per_sec,
+            )
+            ctx.emit_metric(optimizer_step=step, metrics=metrics, message=f"[{step}/{total}] step")
             last_stage = StageMarker.loss
 
         def _stage(name: str, message: str) -> None:
@@ -239,7 +283,12 @@ class TrainingRunner:
 
         try:
             with watchdog:
-                result = trainer_fn(config, progress_callback=_progress, stage_callback=_stage)
+                result = trainer_fn(
+                    config,
+                    progress_callback=_progress,
+                    stage_callback=_stage,
+                    token_callback=_token_counts,
+                )
         except _CancelTraining:
             raise RunCancelled from None
         except ExecutionPlacementDeviation as exc:
