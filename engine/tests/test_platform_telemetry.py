@@ -465,6 +465,50 @@ def test_proc_readers_execute_on_linux() -> None:
     assert read_bytes is None or read_bytes >= 0
 
 
+def test_summary_without_any_samples_has_null_env_blocks(tmp_path: Path) -> None:
+    tmp_path.mkdir(exist_ok=True)
+    _write_manifest(tmp_path)
+    _write_jsonl(tmp_path / "RunEvents.jsonl", [_metric_event(1, 1, loss=0.5)])
+    # No TelemetrySamples.jsonl at all.
+    summary = T.summarize_run_telemetry(tmp_path)
+    assert summary.gpu is None and summary.host is None
+    assert summary.energy.run_joules is None and summary.energy.power_sample_count == 0
+    assert summary.sampling.sample_count == 0 and summary.sampling.observed_median_interval_ms is None
+    # The table still renders (no GPU section) and only binds the two present raw kinds.
+    table = T.summary_to_table(summary)
+    assert "Run telemetry summary" in table
+    assert {r.record_kind for r in summary.raw_records} == {"run_manifest", "run_events"}
+
+
+def test_sampler_start_twice_raises_and_overhead_without_samples(tmp_path: Path) -> None:
+    sampler = T.TelemetrySampler("run-2", tmp_path, probe=lambda: T.SampleReading(), interval_ms=50.0)
+    assert sampler.overhead().per_sample_mean_seconds is None  # no samples yet
+    sampler.start()
+    try:
+        import pytest
+
+        with pytest.raises(RuntimeError):
+            sampler.start()
+    finally:
+        sampler.stop()
+
+
+def test_probe_gpu_tolerates_nonint_device_index(monkeypatch) -> None:
+    monkeypatch.setattr(
+        T, "_run_nvidia_smi",
+        lambda query: ["n/a", "GPU-z", "10", "5", "90.0", "50", "2000", "7000", "P0"],
+    )
+    monkeypatch.setattr("corpus_studio.platform.watchdog.sample_gpu_memory", lambda: None)
+    reading = T.probe_gpu()
+    assert reading.gpu is not None and reading.gpu.device_index is None  # unparsable index -> null
+    assert reading.gpu.power_watts == 90.0
+
+
+def test_combine_trials_empty_is_zero_count() -> None:
+    summary, ci = T.combine_trial_values([], "seconds")
+    assert summary.count == 0 and ci.reported is False and ci.trial_count == 0
+
+
 def test_max_memory_takes_field_wise_maximum() -> None:
     merged = T._max_memory(
         [

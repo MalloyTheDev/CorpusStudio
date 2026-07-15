@@ -195,7 +195,7 @@ def _read_meminfo() -> dict[str, int]:
     values: dict[str, int] = {}
     try:
         text = Path("/proc/meminfo").read_text(encoding="utf-8")
-    except OSError:
+    except OSError:  # pragma: no cover - /proc/meminfo absent; non-Linux host, validated off-CI.
         return values
     for line in text.splitlines():
         key, _, rest = line.partition(":")
@@ -211,32 +211,32 @@ def _read_process_tree_rss(root_pid: int) -> int | None:
     None when ``/proc`` is unavailable (non-Linux) or unreadable."""
 
     proc = Path("/proc")
-    if not proc.is_dir():
+    if not proc.is_dir():  # pragma: no cover - non-Linux host; validated only off-CI.
         return None
     page_size = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
     children: dict[int, list[int]] = {}
     rss_pages: dict[int, int] = {}
     try:
         pids = [int(entry.name) for entry in proc.iterdir() if entry.name.isdigit()]
-    except OSError:
+    except OSError:  # pragma: no cover - /proc iteration race; defensive only.
         return None
     for pid in pids:
         try:
             stat = (proc / str(pid) / "stat").read_text(encoding="utf-8")
             statm = (proc / str(pid) / "statm").read_text(encoding="utf-8")
-        except OSError:
+        except OSError:  # pragma: no cover - the pid vanished between listing and read (race).
             continue
         # ppid is field 4 of stat, but comm (field 2) can contain spaces/parens; split after ')'.
         close = stat.rfind(")")
-        if close == -1:
+        if close == -1:  # pragma: no cover - malformed /proc stat; defensive only.
             continue
         after = stat[close + 2 :].split()
-        if len(after) < 2:
+        if len(after) < 2:  # pragma: no cover - malformed /proc stat; defensive only.
             continue
         try:
             ppid = int(after[1])
             resident_pages = int(statm.split()[1])
-        except (ValueError, IndexError):
+        except (ValueError, IndexError):  # pragma: no cover - malformed /proc entry; defensive only.
             continue
         children.setdefault(ppid, []).append(pid)
         rss_pages[pid] = resident_pages
@@ -247,7 +247,7 @@ def _read_process_tree_rss(root_pid: int) -> int | None:
     seen: set[int] = set()
     while stack:
         pid = stack.pop()
-        if pid in seen:
+        if pid in seen:  # pragma: no cover - only a pathological /proc ppid cycle reaches this.
             continue
         seen.add(pid)
         total_pages += rss_pages.get(pid, 0)
@@ -258,7 +258,7 @@ def _read_process_tree_rss(root_pid: int) -> int | None:
 def _read_self_io() -> tuple[int | None, int | None]:
     try:
         text = Path("/proc/self/io").read_text(encoding="utf-8")
-    except OSError:
+    except OSError:  # pragma: no cover - /proc/self/io absent or restricted; non-Linux/off-CI.
         return None, None
     read_bytes = write_bytes = None
     for line in text.splitlines():
