@@ -1279,8 +1279,11 @@
       "type": "string"
     },
     "save_strategy": {
-      "const": "steps",
       "default": "steps",
+      "enum": [
+        "no",
+        "steps"
+      ],
       "title": "Save Strategy",
       "type": "string"
     },

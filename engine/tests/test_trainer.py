@@ -316,40 +316,69 @@ def test_load_config_reads_optim_and_liger(tmp_path):
     assert base.optim == "adamw_torch" and base.use_liger is False
 
 
-# ---- checkpoint retention ----------------------------------------------------
+# ---- checkpoint policy -------------------------------------------------------
 
 
-def test_build_kwargs_default_checkpoint_retention():
-    # A default run caps accumulation: checkpoint every 50 steps, keep the 3 most recent — so a
-    # long run cannot fill the disk with an unbounded chain of checkpoints.
+def test_build_kwargs_disables_intermediate_checkpoints_by_default():
     kwargs = build_training_kwargs(TrainRunConfig(base_model="m", dataset_path="d"))
-    assert kwargs["save_steps"] == 50
-    assert kwargs["save_total_limit"] == 3
+    assert kwargs["save_strategy"] == "no"
+    assert "save_steps" not in kwargs
+    assert "save_total_limit" not in kwargs
 
 
-def test_build_kwargs_configurable_checkpoint_retention():
-    cfg = TrainRunConfig(base_model="m", dataset_path="d", save_steps=200, save_total_limit=1)
-    kwargs = build_training_kwargs(cfg)
-    assert kwargs["save_steps"] == 200
-    assert kwargs["save_total_limit"] == 1
+def test_legacy_step_checkpoint_config_parses_but_cannot_execute():
+    cfg = TrainRunConfig(
+        base_model="m",
+        dataset_path="d",
+        save_strategy="steps",
+        save_steps=200,
+        save_total_limit=1,
+    )
+    with pytest.raises(TrainerError, match="resume compatibility"):
+        build_training_kwargs(cfg)
+    # The execution guard runs before dataset access or any heavy training-stack import.
+    with pytest.raises(TrainerError, match="resume compatibility"):
+        run_training(cfg)
 
 
-def test_build_kwargs_save_total_limit_none_keeps_all_checkpoints():
-    # Opt back into the old behavior — no cap, every checkpoint retained.
-    cfg = TrainRunConfig(base_model="m", dataset_path="d", save_total_limit=None)
-    kwargs = build_training_kwargs(cfg)
-    assert kwargs["save_total_limit"] is None
+def test_checkpoint_execution_guard_rejects_unvalidated_model_copy():
+    config = TrainRunConfig(base_model="m", dataset_path="d").model_copy(
+        update={"save_steps": 1}
+    )
+    with pytest.raises(TrainerError, match="resume compatibility"):
+        build_training_kwargs(config)
+    with pytest.raises(TrainerError, match="resume compatibility"):
+        run_training(config)
 
 
-def test_load_config_reads_checkpoint_retention(tmp_path):
-    cfg = load_run_config_from_file(_config(tmp_path, save_steps=100, save_total_limit=5))
-    assert cfg.save_steps == 100 and cfg.save_total_limit == 5
-    # A config can null the limit to keep every checkpoint.
-    keep_all = load_run_config_from_file(_config(tmp_path, save_total_limit=None))
-    assert keep_all.save_total_limit is None
-    # Sensible defaults when the keys are absent.
+@pytest.mark.parametrize(
+    "overrides, message",
+    [
+        ({"save_strategy": "no", "save_steps": 1}, "disabled checkpointing"),
+        ({"save_strategy": "no", "save_total_limit": 1}, "disabled checkpointing"),
+        ({"save_strategy": "steps"}, "requires save_steps"),
+    ],
+)
+def test_checkpoint_policy_rejects_inconsistent_fields(overrides, message):
+    with pytest.raises(ValueError, match=message):
+        TrainRunConfig(base_model="m", dataset_path="d", **overrides)
+
+
+def test_load_config_defaults_checkpoint_free_and_parses_legacy_steps(tmp_path):
     base = load_run_config_from_file(_config(tmp_path))
-    assert base.save_steps == 50 and base.save_total_limit == 3
+    assert base.save_strategy == "no"
+    assert base.save_steps is None and base.save_total_limit is None
+
+    legacy = load_run_config_from_file(
+        _config(
+            tmp_path,
+            save_strategy="steps",
+            save_steps=100,
+            save_total_limit=5,
+        )
+    )
+    assert legacy.save_strategy == "steps"
+    assert legacy.save_steps == 100 and legacy.save_total_limit == 5
 
 
 def test_resolve_attention_native_windows_blackwell_disables_flash_sdpa():

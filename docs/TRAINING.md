@@ -179,8 +179,8 @@ train. All heavy imports are lazy — importing the engine never pulls torch.
 | `train-check [--json]` | Preflight: which deps are present, the CUDA GPU + VRAM, and whether a real 4-bit QLoRA run — or only the CPU toy path — is possible. |
 | `model-fetch <repo> [--local-dir …]` | Resumably download a base model from the HF Hub and report its **license** (read from the downloaded card). Prefer MIT/Apache/permissive models. |
 | `platform-plan … --out <plan-dir>` | Resolve immutable inputs, capability/backend/environment evidence, trainer semantics, placement, and output policy into a hash-sealed `RunPlan`. |
-| `platform-run <RunPlan.json> --subprocess --out <record-root>` | Dispatch the one runner authorized by the pinned backend. Each execution gets a fresh run ID and isolated adapter/checkpoint path. Setup has one absolute `--preflight-timeout`; optimizer execution uses the ordinary `--timeout` silence rule. |
-| `train-run <config> --allow-unsealed-direct-execution …` | **Development-only compatibility escape hatch.** It refuses by default and labels an explicitly allowed result `UNSEALED_DIRECT_EXECUTION`, `NON_REPRODUCIBLE`, and `NO_PLATFORM_LINEAGE`. Shipping clients never invoke it. |
+| `platform-run <RunPlan.json> --subprocess --out <record-root>` | Dispatch the one runner authorized by the pinned backend. Each execution gets a fresh run ID and isolated final-adapter path. New first-party plans disable intermediate checkpoints. Setup has one absolute `--preflight-timeout`; optimizer execution uses the ordinary `--timeout` silence rule. |
+| `train-run <config> --allow-unsealed-direct-execution …` | **Development-only compatibility escape hatch.** It refuses by default and labels an explicitly allowed result `UNSEALED_DIRECT_EXECUTION`, `NON_REPRODUCIBLE`, and `NO_PLATFORM_LINEAGE`. Intermediate checkpoint options are refused until exact resume exists. Shipping clients never invoke it. |
 | `train-merge <adapter> [--strategy auto\|gpu\|cpu\|adapter-only]` | Merge the adapter into the base. A 7B fp16 merge (~14 GB) won't fit 12 GB, so `auto` walks GPU → CPU-offload → adapter-only. |
 | `model-card <adapter> [--base-model … --config … --output …]` | (Re)render the adapter's Markdown model card - base model, the reminder that its license governs the result, LoRA hyperparameters, training settings, and honesty notes. |
 
@@ -189,6 +189,20 @@ select immutable dataset/model/tokenizer/objective evidence -> `platform-plan` -
 review `RunPlan.json` -> `platform-run --subprocess` -> `train-merge <adapter>`.
 The generated `RunManifest` and content-bound `ArtifactManifest` carry the run
 lineage. See [`PLATFORM_RUN.md`](PLATFORM_RUN.md).
+
+### First-party checkpoint and resume boundary
+
+The first-party trainer does not yet implement exact resume semantics. New sealed plans therefore
+bind `save_strategy="no"`, leave checkpoint cadence and retention unset, and omit unused TRL
+`save_steps` / `save_total_limit` fields. Legacy step-checkpoint configurations remain parseable for
+inspection, but both the runner and trainer refuse them before dataset or model work. If a worker
+nevertheless reports an intermediate checkpoint, the run fails closed and preserves that failed-run
+evidence. The final PEFT adapter remains the only planned training output.
+
+This limitation is separate from checkpoint discovery and resume commands for supported external
+trainers. Short first-party benchmark trials are checkpoint-free. Do not approve a first-party run
+expected to exceed 30 minutes until checkpoint compatibility, source-run/checkpoint lineage, and exact
+sealed resume semantics are implemented.
 
 ### Reasoning trace approval gate
 

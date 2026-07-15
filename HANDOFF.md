@@ -119,6 +119,12 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   diagnostic then found all 290 parameters and both buffers resident on `cuda:0`. That diagnostic is
   evidence about that load only, not a completed `platform-run`, optimizer step, or sequence-4096
   result. Preserved evidence is indexed in [`docs/HOST_STATE.md`](docs/HOST_STATE.md).
+- **The first-party checkpoint boundary is now fail-closed:** new plans seal
+  `save_strategy="no"` with no cadence or retention, both sealed and explicitly unsealed trainer paths
+  refuse legacy step-checkpoint execution before loading data or weights, and the runner rejects any
+  unexpected checkpoint result. Final adapter output remains run-scoped. Exact sealed resume is still
+  unimplemented, so short benchmark trials are checkpoint-free and runs expected to exceed 30 minutes
+  remain blocked pending a separate resume-lineage design.
 
 ## 3. The architecture North Star + binding directives
 

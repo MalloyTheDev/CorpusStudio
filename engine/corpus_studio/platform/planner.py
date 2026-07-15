@@ -163,8 +163,10 @@ class PlannerConstraints:
     use_liger: bool = False
     max_steps: int | None = None
     num_train_epochs: float = 1.0
-    checkpoint_steps: int = 50
-    checkpoint_keep_last: int = 3
+    # Intermediate first-party checkpoints remain disabled until a future execution contract can
+    # seal compatible resume lineage. Non-null values are refused rather than written unusably.
+    checkpoint_steps: int | None = None
+    checkpoint_keep_last: int | None = None
     truncation_allowed: bool = False
     chat_template_sha256: str | None = None
     allow_cpu_toy: bool = False
@@ -671,9 +673,7 @@ def _trainer_interface(
         "packing",
         "per_device_train_batch_size",
         "report_to",
-        "save_steps",
         "save_strategy",
-        "save_total_limit",
         "seed",
         "warmup_ratio",
         "weight_decay",
@@ -1058,10 +1058,18 @@ def build_run_plan(
         "supervised_token_accumulation_target": token_target,
         "fallback_grad_accumulation_steps": constraints.gradient_accumulation_steps,
     }
+    if (
+        constraints.checkpoint_steps is not None
+        or constraints.checkpoint_keep_last is not None
+    ):
+        raise PlannerError(
+            "the first-party sealed runner cannot write intermediate checkpoints until exact "
+            "resume compatibility and lineage are implemented"
+        )
     checkpoint_policy = {
         "impl": checkpoint_impl,
-        "cadence_optimizer_steps": constraints.checkpoint_steps,
-        "keep_last": constraints.checkpoint_keep_last,
+        "cadence_optimizer_steps": None,
+        "keep_last": None,
         "reload_verify": False,
     }
     schedule = TrainingSchedule(
@@ -1146,7 +1154,7 @@ def build_run_plan(
             "use_safetensors": True,
             "bnb_4bit_use_double_quant": quantization != "none",
             "adapter_task_type": "CAUSAL_LM",
-            "save_strategy": "steps",
+            "save_strategy": "no",
             "gradient_checkpointing": True,
             "output_dir": constraints.output_dir,
             "output_layout": "run_scoped_v1",

@@ -3583,7 +3583,7 @@ class ResolvedExecutionConfiguration(ContractModel):
     use_safetensors: Literal[True] = True
     bnb_4bit_use_double_quant: bool
     adapter_task_type: Literal["CAUSAL_LM"] = "CAUSAL_LM"
-    save_strategy: Literal["steps"] = "steps"
+    save_strategy: Literal["no", "steps"] = "steps"
     gradient_checkpointing: bool = True
     output_dir: str = Field(min_length=1)
     # The sealed path is a ROOT, not the final trainer directory. Every execution derives its own
@@ -3679,16 +3679,23 @@ class ResolvedExecutionConfiguration(ContractModel):
                 self.optimizer.weight_decay,
                 self.optimizer.lr_scheduler,
                 self.optimizer.warmup_ratio,
-                self.checkpoint_policy.cadence_optimizer_steps,
             )
         ):
-            raise ValueError("the first-party trainer requires all optimizer/checkpoint defaults")
+            raise ValueError("the first-party trainer requires all optimizer defaults")
         if self.checkpoint_policy.cadence_seconds is not None:
             raise ValueError("the first-party trainer does not implement time-based checkpoints")
         if self.checkpoint_policy.reload_verify:
             raise ValueError("the first-party trainer does not implement checkpoint reload verification")
         if self.checkpoint_policy.impl != CheckpointImpl.adapter_only:
             raise ValueError("the first-party trainer implements adapter-only checkpoints")
+        if self.save_strategy == "steps":
+            if self.checkpoint_policy.cadence_optimizer_steps is None:
+                raise ValueError("step checkpointing requires an optimizer-step cadence")
+        elif (
+            self.checkpoint_policy.cadence_optimizer_steps is not None
+            or self.checkpoint_policy.keep_last is not None
+        ):
+            raise ValueError("disabled checkpointing cannot carry cadence or retention settings")
         quantized = self.precision.quantized_storage_format != QuantizationMode.none
         if not quantized and self.bnb_4bit_use_double_quant:
             raise ValueError("double quantization is invalid for unquantized execution")
