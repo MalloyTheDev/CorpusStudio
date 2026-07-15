@@ -96,6 +96,42 @@ From `engine/` with the venv (`engine/.venv`, CPython 3.12.3, torch-free core + 
   measured 3-12; trapezoidal energy; n=3 t=4.3026527299). Any measurement code must implement them
   exactly, not approximately.
 
+## Research plan pre-dispatch semantic gate
+
+Before ANY research GPU dispatch, prove the sealed plan is not merely schema-valid but semantically
+executable. **A syntactically valid RunPlan is not necessarily a semantically executable RunPlan.**
+GPU time must never be spent discovering a defect a CPU-only planning preflight can reject.
+
+1. **No trusted product defaults for matrix-bearing values.** Every one is explicitly supplied or
+   compared against the effective matrix: dataset format; model + tokenizer revisions; chat-template
+   hash; sequence length; microbatch; gradient accumulation; max steps; optimizer; precision;
+   quantization; adapter config; attention path; checkpoint policy; truncation and packing. A product
+   default is not a research choice.
+2. **Dataset structure must match the selected formatter.** `platform-plan` runs a torch-free
+   structural conformance preflight (`platform/dataset_conformance.py`) that refuses a plan with zero
+   structurally compatible rows before any id is minted - but you still select the correct
+   `--dataset-format` explicitly; the preflight is a backstop, not the decision.
+3. **For chat training:** the tokenizer exposes a non-empty chat template; its exact raw-template
+   SHA-256 (`sha256(tokenizer.chat_template.encode("utf-8"))`, no normalization) matches the plan; all
+   expected rows render non-empty; tokenization yields non-empty examples; the assistant/trainable
+   region exists.
+4. **CPU rejects before GPU allocates.** Render + tokenize with the exact immutable tokenizer on the CPU
+   first; never let GPU work discover a defect a planning/preflight step could have rejected.
+5. **The pre-dispatch review reports** (all of): source / compatible / rendered / tokenized row counts;
+   dataset hash; rendered-example hash; tokenizer + chat-template hashes; batching tuple;
+   sequence/truncation policy; the normalized math/flash plan diff; the candidate-identity disjointness
+   result.
+6. **Rejected or superseded plans are preserved, never edited or reused** - their identities are burned.
+7. **Schema validity != semantic executability.** Prove the selected formatter can consume the EXACT
+   immutable dataset before any GPU allocation.
+
+**Lessons already learned (do not relearn on the GPU):** product default **GA=8** vs research **GA=1**
+(a matrix-bearing value silently defaulted); a **chat** fixture planned as **instruction** (zero usable
+rows, discovered only after model load); an environment **probe** (`HARDWARE_VERIFIED`) is NOT workload
+evidence; a **completed step is not a proven fit** (predicted fit is never `NATIVE_SAFE`). Keep volatile
+commit ids, lock hashes, plan ids, and run ids OUT of this file - `HANDOFF.md` + `docs/HOST_STATE.md`
+own those.
+
 ## Never do (project policy)
 
 - **No multi-agent workflow fan-outs** for CorpusStudio work (cost) - verify inline, one Claude process.

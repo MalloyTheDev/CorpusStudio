@@ -935,6 +935,23 @@ def platform_plan(
     except ExecutionConfigurationError as exc:
         typer.echo(f"invalid immutable execution input: {exc}", err=True)
         raise typer.Exit(2) from exc
+    # Structural dataset-format conformance: refuse to seal a plan whose selected dataset_format cannot
+    # render a single usable row from the immutable dataset. Without this, a chat dataset planned as
+    # instruction (or vice versa) renders zero rows and only fails AFTER GPU model allocation. This is a
+    # torch-free CPU preflight run before any plan id is minted; it never mutates or reinterprets data.
+    from corpus_studio.platform.dataset_conformance import (
+        DatasetConformanceError,
+        assess_dataset_file_conformance,
+    )
+
+    try:
+        dataset_conformance = assess_dataset_file_conformance(dataset_path, dataset_format)
+    except DatasetConformanceError as exc:
+        typer.echo(f"dataset conformance preflight failed: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    if not dataset_conformance.is_conformant:
+        typer.echo(dataset_conformance.describe_refusal(dataset_path), err=True)
+        raise typer.Exit(2)
     constraints = PlannerConstraints(
         base_model=base_model,
         model_revision=model_revision,
