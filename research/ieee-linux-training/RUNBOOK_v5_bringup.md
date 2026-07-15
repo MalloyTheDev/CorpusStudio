@@ -6,8 +6,10 @@ environments and their first-party 0.5B bring-up smokes. It is written so a late
 authorized GPU session can execute it without re-deriving any decision.
 
 It stops at the first real optimizer step through `platform-run`. It does **not** cover the 7B
-feasibility ladder, the ~500-output full-training arm, the measurement harness, or exact resume; those
-are later phases with their own gates.
+feasibility ladder or the ~500-output full-training arm; those are later phases with their own gates.
+The measurement harness and the exact checkpoint/resume execution engine are now implemented in the
+engine, but these bring-up smokes remain **checkpoint-free** and short - they do not exercise resume,
+and capturing telemetry (`platform-run --telemetry`) during them is optional and additive.
 
 ## 0. Authorization gate (do not start without all of these)
 
@@ -16,15 +18,57 @@ rules, a human must explicitly authorize the GPU/resource commitment before Sect
 line before the first command:
 
 - [ ] Amendment **0002** is merged to `main`; the effective protocol version is **1.2.0**.
-- [ ] `main` HEAD is a descendant of `df86db53e294a6e15b724c586f7016a1c9fdac00` (the bound worker
-      source) and of `c1322b5d82854dfc76408d2a550b32366ea7d14d` (#445, the required-ancestor fix), and
-      its `engine/` bytes are identical to `df86db5` (the 0002 merge adds only `research/` files).
-- [ ] The validator is green from a clean checkout:
+- [ ] The worker source commit (the current `main` HEAD you build the wheel from) has
+      `df86db53e294a6e15b724c586f7016a1c9fdac00` as a git **ancestor** - amendment 0002 binds
+      `worker_success_admission.required_git_ancestor` (an ancestor rule, not byte-equality), so a
+      **descendant** commit is admitted as long as the df86db5 audit-fix floor is in its history.
+      `main` also descends from `c1322b5d82854dfc76408d2a550b32366ea7d14d` (#445, the AdamW step fix).
+      Prove both and record the exact source commit:
+      ```bash
+      cd /mnt/training-nvme/repos/CorpusStudio
+      git merge-base --is-ancestor df86db53e294a6e15b724c586f7016a1c9fdac00 HEAD && echo "df86db5 ancestor: OK"
+      git merge-base --is-ancestor c1322b5d82854dfc76408d2a550b32366ea7d14d HEAD && echo "c1322b5d ancestor: OK"
+      git rev-parse HEAD   # record this exact commit into the wheel evidence (per-environment + per-trial)
+      ```
+      Do NOT require `engine/` bytes to equal `df86db5`: the post-audit engine has advanced (measurement
+      harness, checkpoint/resume engine), and the amendment records the **exact** final source commit and
+      wheel sha256 in evidence rather than pinning bytes to df86db5. See section 0a.
+- [ ] The validator is green from a clean checkout (the effective matrix is byte-frozen and unaffected
+      by engine changes):
       `engine/.venv/bin/python research/ieee-linux-training/validate_protocol.py --verify-host-evidence`
       prints `status: valid` with effective-matrix sha256
       `168189145150c0ed13ce70151a065c9490d9e70052ca30569aac709e718f9e12`.
 - [ ] A human has authorized building the v5 wheel, creating the v5 environments, and dispatching the
       0.5B smokes.
+
+## 0a. Amendment 0002 reconciliation (why v5 identities remain valid)
+
+The engine changed after `df86db5` (measurement harness, checkpoint/resume engine). This does **not**
+invalidate the prospective v5 identities. Classification: **V5_IDENTITIES_REMAIN_VALID**. Evidence:
+
+- Amendment 0002's manifest binds `worker_success_admission.required_git_ancestor =
+  df86db53e294a6e15b724c586f7016a1c9fdac00` - an **ancestor** rule. The choice of "ancestor" (not an
+  exact-commit pin) explicitly admits descendant worker source, provided the df86db5 audit-fix floor
+  stays in history. Its `immutable_binding_additions.worker_source_commit` is
+  `required-per-environment-and-trial` (record the exact commit) and
+  `exact_source_commit_required_in_wheel_evidence` / `exact_wheel_sha256_required_in_environment_and_trial`
+  bind the exact **final** source + wheel - not a specific df86db5 wheel.
+- `historical_worker_wheel_reuse_authorized = false`: the v5 wheel is built **fresh** from the final
+  commit (Section 5), so no historical wheel is reused.
+- No v5 identity has been **instantiated** yet (no v5 environment, wheel, lock, plan, or run exists -
+  `preserved_v4_evidence` shows only v4 bring-up attempts). The v5 environment ids are *allocated* by
+  0002 but unused, so nothing is reused incorrectly.
+- The bring-up smokes are **checkpoint-free** and short; the post-`df86db5` engine additions
+  (checkpoint/resume behind a sealed policy the smokes do not set; additive telemetry) leave the sealed
+  smoke execution behavior unchanged. Scientific semantics are preserved.
+- `validate_protocol.py` binds the exact **wheel** (candidate identities: exactly one shared worker
+  wheel, disjoint from `RESERVED_IDENTITIES.v2.json`); the git-**ancestry** of the source commit is a
+  procedural gate (the `git merge-base --is-ancestor` check above), exactly as before - the validator
+  never enforced git ancestry.
+
+Therefore no new amendment, effective-matrix version, or fresh environment identity is required. The
+recommended environment ids remain `backend-corpus-studio-research-math-v5` /
+`backend-corpus-studio-research-flash-v5`; every other v5 identity is minted fresh in this runbook.
 
 ## 1. Non-negotiable guardrails (apply to every step)
 
@@ -64,8 +108,9 @@ sections). None of these fresh values may collide with `RESERVED_IDENTITIES.v2.j
 
 ## 3. Section 5 - build the v5 worker wheel twice and hash-compare
 
-Goal: a single, reproducible `corpus_studio_engine` wheel built from the merged 1.2.0 `main`, whose
-`engine/` bytes equal `df86db5`. Build it **twice** in independent clean trees and require identical
+Goal: a single, reproducible `corpus_studio_engine` wheel built from the current merged 1.2.0 `main`
+HEAD (which descends from `df86db5`, the required-ancestor floor - see section 0a; do NOT require
+`engine/` bytes to equal `df86db5`). Build it **twice** in independent clean trees and require identical
 SHA-256; a mismatch means the build is not reproducible and blocks the environments.
 
 ```bash
