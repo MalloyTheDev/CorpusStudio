@@ -57,20 +57,29 @@ parent rejects:
 stdout is reserved for one `WorkerMessage` JSON object per line. Worker diagnostics belong on stderr;
 non-JSON stdout is a protocol failure, not ignored telemetry.
 
-The parent resets its hang deadline only for the handshake, acceptance, and real `RunEvent` progress.
-It validates heartbeats but does not let them extend the deadline, so a heartbeat thread cannot make a
-hung training thread look healthy.
+Outside training setup, the parent resets its ordinary hang deadline only for the handshake,
+acceptance, and real `RunEvent` progress. It validates heartbeats but does not let them extend any
+deadline, so a heartbeat thread cannot make a hung training thread look healthy.
+
+A resolved training run enters preflight when its first recognized setup stage arrives. The entire
+preflight gets one absolute, non-extendable deadline (`--preflight-timeout`, 1800 seconds by default)
+covering sealed-input checks, tokenizer loading, full-corpus formatting/tokenization, attention
+policy, model loading, placement verification, quantization, and adapter insertion. Same-thread byte
+and row events report bounded real progress, and model/tokenizer load events mark their actual
+boundaries, but neither those events nor repeated stages move the absolute deadline. `optimizer_created`
+or the first optimizer metric permanently returns the run to the ordinary `--timeout` silence rule.
 
 ## Failure behavior
 
 A protocol or identity mismatch becomes an `ENVIRONMENT_FAILURE` manifest and the worker process tree
 is terminated and the direct child reaped. Workers are launched in a dedicated POSIX session or
 Windows process group; timeout/cancellation reaches compiler, data-loader, launcher, or rank
-descendants rather than killing only the direct child. A silent child still reaches the existing
-timeout and is killed as `KERNEL_STALL`. A child that exits before a terminal result remains an
-isolated environment/crash failure. No mismatch can be converted into success. Both public execution
-entry points verify the RunPlan seal before invoking or spawning a runner, and the worker verifies it
-again before constructing the runner.
+descendants rather than killing only the direct child. A child silent before preflight or after
+optimizer creation reaches the ordinary timeout and is killed as `KERNEL_STALL`; a setup operation
+that reaches the absolute preflight deadline is killed as `TIMEOUT`, with its last observed stage.
+A child that exits before a terminal result remains an isolated environment/crash failure. No
+mismatch can be converted into success. Both public execution entry points verify the RunPlan seal
+before invoking or spawning a runner, and the worker verifies it again before constructing the runner.
 
 ## Compatibility
 

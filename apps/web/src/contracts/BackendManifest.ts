@@ -159,10 +159,15 @@ export type Metrics = string[];
  */
 export type StageMarker =
   | "process_start"
+  | "dataset_verification"
+  | "execution_config_verified"
   | "env_loaded"
   | "cuda_init"
-  | "execution_config_verified"
+  | "tokenizer_load"
+  | "dataset_formatting"
+  | "truncation_analysis"
   | "attention_policy_applied"
+  | "model_load"
   | "placement_verified"
   | "placement_deviation"
   | "model_loaded"

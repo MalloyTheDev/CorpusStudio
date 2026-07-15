@@ -80,6 +80,45 @@ def test_demo_training_plan_is_valid_and_carries_resolved_execution():
     assert plan.training_config_snapshot == {}
 
 
+def test_training_runner_leaves_dataset_hash_and_capture_to_the_trainer(monkeypatch):
+    plan = demo_training_plan()
+
+    def unexpected_dataset_read(_path):
+        raise AssertionError("runner must not rehash the trainer-owned dataset")
+
+    monkeypatch.setattr(
+        "corpus_studio.platform.execution_config.stable_file_sha256",
+        unexpected_dataset_read,
+    )
+    monkeypatch.setattr(
+        "corpus_studio.training.trainer.run_training",
+        _fake_run_training(1),
+    )
+
+    result = execute_run(plan, TrainingRunner(cpu_toy=True), clock=_CLOCK)
+
+    assert result.manifest.state == "succeeded"
+
+
+def test_training_runner_starts_preflight_before_input_revalidation(monkeypatch):
+    from corpus_studio.platform.execution_config import ExecutionConfigurationError
+
+    def fail_validation(_execution):
+        raise ExecutionConfigurationError("synthetic input drift")
+
+    monkeypatch.setattr(
+        "corpus_studio.platform.execution_config.verify_execution_non_dataset_inputs",
+        fail_validation,
+    )
+
+    result = execute_run(demo_training_plan(), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+
+    assert result.manifest.state == "failed"
+    assert result.events[0].event_type == "stage"
+    assert result.events[0].stage == StageMarker.process_start
+    assert "validating sealed execution inputs" in (result.events[0].message or "")
+
+
 def test_resolved_training_plan_cannot_succeed_through_echo_runner():
     from corpus_studio.platform.supervisor import EchoRunner
 

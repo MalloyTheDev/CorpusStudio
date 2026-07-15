@@ -47,6 +47,7 @@ from corpus_studio.training.trainer import (
     verify_optimizer_state_precision,
     verify_completed_step_count,
     _list_checkpoints,
+    _prepare_training_texts,
 )
 
 
@@ -236,6 +237,71 @@ def test_analyze_truncation_the_wbg_bug():
     assert report.pct_truncated == 100.0
     assert report.seq_len_for_zero_truncation == 3445
     assert "1536" in (truncation_warning(report) or "") and "3445" in (truncation_warning(report) or "")
+
+
+def test_full_dataset_preflight_emits_bounded_same_thread_progress():
+    class Tokenizer:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, text):
+            self.calls += 1
+            return {"input_ids": text.split()}
+
+    tokenizer = Tokenizer()
+    rows = [
+        {"instruction": f"question {index}", "output": f"answer {index}"}
+        for index in range(100)
+    ]
+    events: list[tuple[str, str]] = []
+
+    texts, report = _prepare_training_texts(
+        rows,
+        _cfg(dataset_format="instruction", sequence_len=128),
+        tokenizer,
+        stage_callback=lambda stage, message: events.append((stage, message)),
+    )
+
+    assert len(texts) == 100
+    assert tokenizer.calls == 100
+    assert report.n_examples == 100 and report.n_truncated == 0
+    formatting = [message for stage, message in events if stage == "dataset_formatting"]
+    tokenization = [message for stage, message in events if stage == "truncation_analysis"]
+    assert 2 <= len(formatting) <= 22
+    assert 2 <= len(tokenization) <= 22
+    assert formatting[0].startswith("formatting 100")
+    assert formatting[-1].startswith("formatted all 100")
+    assert tokenization[0].startswith("tokenizing all 100")
+    assert tokenization[-1].startswith("verified 100")
+
+
+def test_full_dataset_preflight_does_not_emit_fake_completion_after_tokenizer_failure():
+    class BrokenTokenizer:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, _text):
+            self.calls += 1
+            if self.calls == 3:
+                raise RuntimeError("tokenizer wedged")
+            return {"input_ids": [1]}
+
+    events: list[tuple[str, str]] = []
+    with pytest.raises(TrainerError, match="full-dataset truncation analysis failed"):
+        _prepare_training_texts(
+            [{"instruction": str(index), "output": "answer"} for index in range(5)],
+            _cfg(dataset_format="instruction"),
+            BrokenTokenizer(),
+            stage_callback=lambda stage, message: events.append((stage, message)),
+        )
+
+    tokenization = [message for stage, message in events if stage == "truncation_analysis"]
+    assert tokenization == [
+        "tokenizing all 5 rendered rows for truncation analysis",
+        "tokenized 1/5 rendered rows",
+        "tokenized 2/5 rendered rows",
+    ]
+    assert not any(message.startswith("verified") for message in tokenization)
 
 
 def test_load_config_reads_optim_and_liger(tmp_path):
@@ -1088,7 +1154,7 @@ def test_sealed_runtime_refuses_dataset_byte_drift(tmp_path):
         dataset_sha256=stable_file_sha256(dataset),
         package_versions={},
     )
-    verify_sealed_runtime(cfg)
+    assert verify_sealed_runtime(cfg) == dataset.read_bytes()
     dataset.write_text('{"instruction":"changed","output":"b"}\n', encoding="utf-8")
     with pytest.raises(TrainerError, match="dataset bytes changed"):
         verify_sealed_runtime(cfg)

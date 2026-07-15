@@ -44,6 +44,7 @@ ProgressCallback = Callable[[int, int, float | None], None]
 # (stage_name, message) — platform-agnostic strings so the trainer stays decoupled from the platform
 # enums. Fires at setup milestones so a supervisor sees progress during the long silent model-load.
 StageCallback = Callable[[str, str], None]
+_MAX_PREFLIGHT_PROGRESS_EVENTS = 20
 
 
 class TrainerError(Exception):
@@ -334,11 +335,20 @@ def load_run_config_from_file(
     )
 
 
-def verify_sealed_runtime(config: TrainRunConfig) -> None:
-    """Fail closed when the live package or pinned dataset bytes differ from the sealed config."""
+def verify_sealed_runtime(
+    config: TrainRunConfig,
+    *,
+    dataset_progress_callback: Callable[[int, int], None] | None = None,
+) -> bytes | None:
+    """Fail closed on package or dataset drift and return the exact stable dataset bytes.
+
+    A sealed caller parses these returned bytes instead of reopening the path. This preserves the
+    before/open/after file-identity checks while eliminating the prior second full read and hash.
+    Unsealed compatibility execution has no pinned dataset identity and returns ``None``.
+    """
 
     if config.execution_configuration_hash is None:
-        return
+        return None
     for package, expected in sorted(config.package_versions.items()):
         try:
             observed = importlib.metadata.version(package)
@@ -352,15 +362,19 @@ def verify_sealed_runtime(config: TrainRunConfig) -> None:
         raise TrainerError("sealed execution omitted the dataset content digest")
     from corpus_studio.platform.execution_config import (  # noqa: PLC0415
         ExecutionConfigurationError,
-        stable_file_sha256,
+        stable_file_bytes,
     )
 
     try:
-        observed_dataset = stable_file_sha256(config.dataset_path)
+        dataset_bytes, observed_dataset = stable_file_bytes(
+            config.dataset_path,
+            progress_callback=dataset_progress_callback,
+        )
     except ExecutionConfigurationError as exc:
         raise TrainerError(str(exc)) from exc
     if observed_dataset != config.dataset_sha256:
         raise TrainerError("dataset bytes changed after the execution configuration was sealed")
+    return dataset_bytes
 
 
 def verify_local_inputs_after_load(config: TrainRunConfig) -> None:
@@ -1334,6 +1348,79 @@ def truncation_warning(report: TruncationReport) -> str | None:
     )
 
 
+def _prepare_training_texts(
+    rows: list[dict[str, Any]],
+    config: TrainRunConfig,
+    tokenizer: Any,
+    *,
+    stage_callback: StageCallback | None = None,
+) -> tuple[list[str], TruncationReport]:
+    """Format and tokenize every row with bounded, same-thread progress events.
+
+    A callback fires only after actual rows complete. At most
+    ``_MAX_PREFLIGHT_PROGRESS_EVENTS`` progress events are emitted per phase, so a hung formatter or
+    tokenizer cannot be concealed by an independent liveness loop or unbounded event spam.
+    """
+
+    def _stage(name: str, message: str) -> None:
+        if stage_callback is not None:
+            stage_callback(name, message)
+
+    def _interval(total: int) -> int:
+        return max(
+            1,
+            (total + _MAX_PREFLIGHT_PROGRESS_EVENTS - 1)
+            // _MAX_PREFLIGHT_PROGRESS_EVENTS,
+        )
+
+    total_rows = len(rows)
+    formatting_interval = _interval(total_rows)
+    texts: list[str] = []
+    _stage("dataset_formatting", f"formatting {total_rows} sealed dataset rows")
+    try:
+        for index, row in enumerate(rows, start=1):
+            texts.append(format_example_text(row, config.dataset_format, tokenizer))
+            if index % formatting_interval == 0 or index == total_rows:
+                _stage("dataset_formatting", f"formatted {index}/{total_rows} dataset rows")
+    except TrainerError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - normalize formatter failures.
+        raise TrainerError(f"full-dataset formatting failed: {exc}") from exc
+    _stage("dataset_formatting", f"formatted all {total_rows} dataset rows")
+
+    rendered = [text for text in texts if text]
+    rendered_count = len(rendered)
+    truncation_interval = _interval(rendered_count)
+    lengths: list[int] = []
+    _stage(
+        "truncation_analysis",
+        f"tokenizing all {rendered_count} rendered rows for truncation analysis",
+    )
+    try:
+        for index, text in enumerate(rendered, start=1):
+            lengths.append(len(tokenizer(text)["input_ids"]))
+            if index % truncation_interval == 0 or index == rendered_count:
+                _stage(
+                    "truncation_analysis",
+                    f"tokenized {index}/{rendered_count} rendered rows",
+                )
+        report = analyze_truncation(lengths, config.sequence_len)
+        warning = truncation_warning(report)
+        if warning:
+            if not config.truncation_allowed:
+                raise TrainerError(warning.removeprefix("[WARNING] "))
+            print(warning, file=sys.stderr)
+    except TrainerError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - normalize tokenizer failures.
+        raise TrainerError(f"full-dataset truncation analysis failed: {exc}") from exc
+    _stage(
+        "truncation_analysis",
+        f"verified {rendered_count} rendered rows; maximum {report.max_tokens} tokens",
+    )
+    return texts, report
+
+
 def resolve_run_plan(config: TrainRunConfig, report: Any) -> dict[str, Any]:
     """Decide device + quantization from the runtime report, or raise a clean :class:`TrainerError`.
 
@@ -1409,25 +1496,61 @@ def run_training(  # pragma: no cover - optional training-stack integration
 ) -> TrainResult:
     """Run the training. Lazy-imports the heavy stack; verified via the CPU toy path (a real GPU QLoRA
     can only be user-smoke-tested). Raises :class:`TrainerError` if the runtime can't run the request.
-    ``stage_callback(name, message)`` fires at setup milestones (model_loaded / quantized /
-    adapter_attached / optimizer_created) so the long SILENT model-load window emits real progress a
-    supervisor can see — the honest alternative to a liveness heartbeat."""
-    verify_sealed_runtime(config)
+    ``stage_callback(name, message)`` fires for stable dataset verification, formatting, full-corpus
+    tokenization, tokenizer/model-load boundaries, and later setup milestones. Row and byte progress
+    is emitted synchronously by the work thread. Model loading has true start/end events and a bounded
+    supervisor deadline; no independent heartbeat can make a stuck load look healthy.
+    """
+
+    def _stage(name: str, message: str) -> None:
+        if stage_callback is not None:
+            stage_callback(name, message)
+
+    dataset_progress_bucket = 0
+
+    def _dataset_progress(completed: int, total: int) -> None:
+        nonlocal dataset_progress_bucket
+        if total <= 0:
+            return
+        bucket = min(
+            _MAX_PREFLIGHT_PROGRESS_EVENTS,
+            max(1, completed * _MAX_PREFLIGHT_PROGRESS_EVENTS // total),
+        )
+        if bucket <= dataset_progress_bucket:
+            return
+        dataset_progress_bucket = bucket
+        _stage(
+            "dataset_verification",
+            f"read and hashed {completed}/{total} sealed dataset bytes",
+        )
+
+    if config.execution_configuration_hash is not None:
+        _stage("dataset_verification", "reading and hashing the sealed dataset once")
+    dataset_bytes = verify_sealed_runtime(
+        config,
+        dataset_progress_callback=(
+            _dataset_progress if config.execution_configuration_hash is not None else None
+        ),
+    )
     if config.execution_configuration_hash is not None and config.export_format != "adapter_peft":
         raise TrainerError("the first-party resolved executor can emit only a PEFT adapter")
     if config.execution_configuration_hash is not None:
-        from corpus_studio.platform.execution_config import (  # noqa: PLC0415
-            ExecutionConfigurationError,
-            stable_file_bytes,
-        )
-
+        if dataset_bytes is None:  # pragma: no cover - sealed verification always returns bytes.
+            raise TrainerError("sealed dataset verification returned no stable bytes")
         try:
-            dataset_bytes, observed_digest = stable_file_bytes(config.dataset_path)
-        except ExecutionConfigurationError as exc:
-            raise TrainerError(str(exc)) from exc
-        if observed_digest != config.dataset_sha256:
-            raise TrainerError("dataset bytes changed after the execution configuration was sealed")
-        rows = list(read_jsonl_bytes(dataset_bytes))
+            rows = list(read_jsonl_bytes(dataset_bytes))
+        except ValueError as exc:
+            raise TrainerError(f"sealed dataset is invalid: {exc}") from exc
+        finally:
+            del dataset_bytes
+        _stage(
+            "dataset_verification",
+            f"verified and parsed {len(rows)} sealed dataset rows",
+        )
+        _stage(
+            "execution_config_verified",
+            f"verified resolved execution {config.execution_configuration_hash}",
+        )
     else:
         rows = list(read_jsonl(Path(config.dataset_path)))
     if config.dataset_format == "trace":
@@ -1468,10 +1591,6 @@ def run_training(  # pragma: no cover - optional training-stack integration
         plan = resolve_run_plan(config, runtime_report)
         quantize = bool(plan["quantize"])
 
-    def _stage(name: str, message: str) -> None:
-        if stage_callback is not None:
-            stage_callback(name, message)
-
     import torch  # noqa: PLC0415 - intentionally lazy heavy imports.
     from datasets import Dataset  # noqa: PLC0415
     from peft import LoraConfig, get_peft_model  # noqa: PLC0415
@@ -1484,12 +1603,8 @@ def run_training(  # pragma: no cover - optional training-stack integration
     )
     from trl import SFTConfig, SFTTrainer  # noqa: PLC0415
 
+    _stage("env_loaded", "loaded the optional training runtime")
     set_seed(config.seed)
-    if config.execution_configuration_hash is not None:
-        _stage(
-            "execution_config_verified",
-            f"verified resolved execution {config.execution_configuration_hash}",
-        )
 
     # SECURITY: never execute a downloaded model repo's custom code. trust_remote_code defaults False,
     # but we set it explicitly (defence-in-depth; guards against a future default change). A model that
@@ -1498,6 +1613,7 @@ def run_training(  # pragma: no cover - optional training-stack integration
     tokenizer_kwargs: dict[str, Any] = {"trust_remote_code": config.trust_remote_code}
     if config.tokenizer_revision is not None:
         tokenizer_kwargs["revision"] = config.tokenizer_revision
+    _stage("tokenizer_load", "loading the sealed tokenizer")
     tokenizer = AutoTokenizer.from_pretrained(
         config.tokenizer_location or config.base_model, **tokenizer_kwargs
     )
@@ -1518,28 +1634,24 @@ def run_training(  # pragma: no cover - optional training-stack integration
             observed_template_hash = hashlib.sha256(template.encode("utf-8")).hexdigest()
             if observed_template_hash != config.chat_template_sha256:
                 raise TrainerError("the tokenizer chat template changed after planning")
+    _stage("tokenizer_load", "loaded and verified the sealed tokenizer")
 
     # Complete formatting and truncation analysis before allocating model weights. A sealed refusing
     # policy never spends GPU memory before this preflight has passed for every pinned row.
-    texts = [format_example_text(row, config.dataset_format, tokenizer) for row in rows]
-    try:
-        rendered = [text for text in texts if text]
-        lengths = [len(tokenizer(text)["input_ids"]) for text in rendered]
-        warning = truncation_warning(analyze_truncation(lengths, config.sequence_len))
-        if warning:
-            if not config.truncation_allowed:
-                raise TrainerError(warning.removeprefix("[WARNING] "))
-            print(warning, file=sys.stderr)
-    except TrainerError:
-        raise
-    except Exception as exc:  # noqa: BLE001 - normalize tokenizer failures.
-        raise TrainerError(f"full-dataset truncation analysis failed: {exc}") from exc
+    texts, _truncation_report = _prepare_training_texts(
+        rows,
+        config,
+        tokenizer,
+        stage_callback=_stage,
+    )
+    del rows
 
     effective_kernel: str | None = None
     if config.execution_configuration_hash is not None:
         effective_kernel = apply_attention_execution_policy(torch, config)
         probe_effective_attention_kernel(torch, config)
 
+    _stage("model_load", "loading the sealed model weights")
     if config.cpu_toy:
         # Build from config (random weights) — no weights download, so the smoke test runs offline.
         model_config_kwargs = dict(tokenizer_kwargs)
@@ -1593,6 +1705,7 @@ def run_training(  # pragma: no cover - optional training-stack integration
             model_kwargs["attn_implementation"] = attn_impl
 
         model = AutoModelForCausalLM.from_pretrained(config.base_model, **model_kwargs)
+    _stage("model_load", "materialized the sealed model weights")
     if config.execution_configuration_hash is not None:
         verify_local_inputs_after_load(config)
         try:
@@ -1630,6 +1743,7 @@ def run_training(  # pragma: no cover - optional training-stack integration
     _stage("adapter_attached", "LoRA adapter attached")
 
     dataset = Dataset.from_list([{"text": text} for text in texts if text])
+    del texts
     if len(dataset) == 0:
         raise TrainerError("The dataset produced no usable training rows.")
 

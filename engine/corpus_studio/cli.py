@@ -475,6 +475,11 @@ def platform_run(
     silence_timeout: float = typer.Option(
         600.0, "--timeout", help="[--subprocess] Kill the worker after this many seconds of silence."
     ),
+    preflight_timeout: float = typer.Option(
+        1800.0,
+        "--preflight-timeout",
+        help="[--subprocess] Non-extendable deadline for sealed dataset, tokenizer, and model setup.",
+    ),
     manager_root: Optional[Path] = typer.Option(
         None,
         "--manager-root",
@@ -592,6 +597,7 @@ def platform_run(
             runner_name=runner_name,
             max_steps=max_steps,
             silence_timeout_s=silence_timeout,
+            preflight_timeout_s=preflight_timeout,
             out_dir=out_dir,
             worker_argv=managed_worker_argv,
         )
