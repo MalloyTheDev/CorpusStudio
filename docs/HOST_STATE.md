@@ -297,6 +297,23 @@ before training. That correction currently has CPU/unit evidence only. Because w
 changed, the v4 wheel, environments, locks, and plans must remain preserved and cannot authorize a
 retry; any later attempt requires a new wheel, new environment IDs/locks, and completely fresh plans.
 
+**Post-#444 audit correction (2026-07-15, CPU/unit evidence only).** A read-only hardening audit found
+the next blocker sitting immediately behind the #444 fix: `verify_optimizer_state_precision` compared
+*every* materialized optimizer tensor's device against the sealed `cuda:0`, but torch's default
+`adamw_torch` (non-fused, non-capturable) keeps the per-parameter `step` as a 0-dim scalar counter on
+CPU by design (`torch.optim.adam._init_group`). That would have failed optimizer step 1 of every real
+run with an `OPTIMIZER_FAILURE` placement deviation before any success could be recorded. The verifier
+now allows a 0-dim scalar counter on the expected device or CPU while still rejecting a CPU-offloaded
+(non-scalar) moment tensor. Separately, the enforced attention-kernel context's cleanup seal
+reassertion could raise and replace a real `GRADIENT_FAILURE`/`OPTIMIZER_FAILURE` with an environment
+error; it now subordinates a restoration error while a workload failure is already propagating. These
+change the worker execution bytes again, so the eventual next environment pair is a fresh **v5**
+identity (e.g. `backend-corpus-studio-research-math-v5` / `backend-corpus-studio-research-flash-v5`),
+built from the corrected commit under a new research amendment (0002 -> effective matrix 1.2.0) whose
+reserved-identity set (`RESERVED_IDENTITIES.v2.json`) additionally enumerates the now-historical v4
+identities. Do not build the wheel, create v5, or dispatch a GPU smoke until that amendment is
+reviewed and separately approved.
+
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 
 `HARDWARE_VERIFIED` is the **Environment Manager** evidence level, not a training-run result.

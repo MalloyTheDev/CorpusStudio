@@ -613,12 +613,24 @@ def enforced_attention_training_kernel(
         yield
         verify_attention_execution_policy(torch_module, config)
     finally:
+        # If the training body already raised, that workload failure is the primary truth. A cleanup
+        # or seal-restoration error must not replace its taxonomy/stage, so subordinate any exception
+        # raised while a workload failure is already propagating (torch's SDPA host-side toggles do
+        # not normally fail, but a masked GRADIENT/OPTIMIZER failure would be reported as an
+        # environment error). On a clean run, a restoration failure still surfaces.
+        primary_failure = sys.exc_info()[1]
         try:
             stack.close()
-        finally:
+        except Exception:  # noqa: BLE001 - normalize SDPA context-exit failures.
+            if primary_failure is None:
+                raise
+        try:
             # sdpa_kernel restores the prior process-global state. Reassert the seal so later export
             # and any subsequent operation cannot inherit an unsealed fallback policy.
             apply_attention_execution_policy(torch_module, config)
+        except Exception:  # noqa: BLE001 - a restoration failure must not mask the workload failure.
+            if primary_failure is None:
+                raise
 
 
 def probe_effective_attention_kernel(torch_module: Any, config: TrainRunConfig) -> None:
@@ -1770,13 +1782,26 @@ def verify_optimizer_state_precision(
                     taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
                     stage=StageMarker.optimizer_step,
                 )
-            if hasattr(value, "device") and _normalized_device(value.device) != expected_device:
-                raise TrainingEvidenceError(
-                    f"PLACEMENT_DEVIATION: optimizer state {name} is on {value.device}, "
-                    f"expected {expected_device}",
-                    taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
-                    stage=StageMarker.optimizer_step,
-                )
+            if hasattr(value, "device"):
+                observed_device = _normalized_device(value.device)
+                # AdamW keeps its per-parameter ``step`` as a 0-dim scalar counter that, on the
+                # default non-fused/non-capturable path, torch deliberately places on CPU even when
+                # the parameters live on CUDA (torch.optim.adam._init_group: torch.tensor(0.0) with
+                # no device). That bookkeeping counter is not numeric optimizer state, so it may sit
+                # on the expected device OR on CPU. The real moment tensors (exp_avg/exp_avg_sq) are
+                # never scalar, so a CPU-offloaded moment tensor is still rejected below.
+                # torch.Size([]) (a 0-dim tensor's shape) compares equal to the empty tuple; a
+                # missing or non-empty shape is treated as a real state tensor that must stay on the
+                # expected device.
+                is_scalar_counter = getattr(value, "shape", None) == ()
+                permitted = {expected_device, "cpu"} if is_scalar_counter else {expected_device}
+                if observed_device not in permitted:
+                    raise TrainingEvidenceError(
+                        f"PLACEMENT_DEVIATION: optimizer state {name} is on {value.device}, "
+                        f"expected {expected_device}",
+                        taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                        stage=StageMarker.optimizer_step,
+                    )
 
 
 def verify_completed_step_count(config: TrainRunConfig, steps: int) -> None:
