@@ -593,6 +593,117 @@ def test_training_attention_context_detects_mutation_and_restores_the_seal():
     assert torch.backends.cuda.math_sdp_enabled() is True
 
 
+def test_training_attention_context_preserves_primary_failure_over_cleanup_error():
+    # A workload failure inside train() must keep its taxonomy even if the finally-block seal
+    # reassertion then fails: the primary GRADIENT/OPTIMIZER failure must not be rewritten as an
+    # environment error by best-effort attention-kernel restoration.
+    class _CleanupRaisingBackend(_FakeSdpBackend):
+        def __init__(self):
+            super().__init__()
+            self.fail = False
+
+        def enable_flash_sdp(self, value):
+            if self.fail:
+                raise RuntimeError("driver toggle failed during cleanup")
+            super().enable_flash_sdp(value)
+
+    backend = _CleanupRaisingBackend()
+    torch = _FakeTorch(backend)
+
+    @contextlib.contextmanager
+    def kernel_context(backends):
+        yield
+
+    class _PrimaryWorkloadFailure(Exception):
+        pass
+
+    with pytest.raises(_PrimaryWorkloadFailure):
+        with enforced_attention_training_kernel(
+            torch,
+            _sealed_config(),
+            kernel_context_factory=kernel_context,
+            backend_values={"torch_sdpa_math": "math"},
+        ):
+            backend.fail = True  # make the finally seal reassertion raise
+            raise _PrimaryWorkloadFailure("gradient failure at backward")
+
+
+def test_training_attention_context_preserves_primary_over_context_exit_error():
+    # If closing the exclusive SDPA context itself raises while a workload failure is propagating,
+    # the primary failure must still win.
+    torch = _FakeTorch()
+
+    @contextlib.contextmanager
+    def kernel_context(backends):
+        try:
+            yield
+        finally:
+            raise RuntimeError("sdpa context exit failed")
+
+    class _PrimaryWorkloadFailure(Exception):
+        pass
+
+    with pytest.raises(_PrimaryWorkloadFailure):
+        with enforced_attention_training_kernel(
+            torch,
+            _sealed_config(),
+            kernel_context_factory=kernel_context,
+            backend_values={"torch_sdpa_math": "math"},
+        ):
+            raise _PrimaryWorkloadFailure("gradient failure at backward")
+
+
+def test_training_attention_context_surfaces_context_exit_error_on_a_clean_run():
+    # On a clean run a failure while closing the exclusive SDPA context must surface, not be swallowed.
+    torch = _FakeTorch()
+
+    @contextlib.contextmanager
+    def kernel_context(backends):
+        try:
+            yield
+        finally:
+            raise RuntimeError("sdpa context exit failed")
+
+    with pytest.raises(RuntimeError, match="sdpa context exit failed"):
+        with enforced_attention_training_kernel(
+            torch,
+            _sealed_config(),
+            kernel_context_factory=kernel_context,
+            backend_values={"torch_sdpa_math": "math"},
+        ):
+            pass
+
+
+def test_training_attention_context_surfaces_cleanup_error_on_a_clean_run():
+    # On a clean run there is no primary failure to protect, so a restoration failure must surface
+    # rather than be silently swallowed.
+    class _CleanupRaisingBackend(_FakeSdpBackend):
+        def __init__(self):
+            super().__init__()
+            self.fail = False
+
+        def enable_flash_sdp(self, value):
+            if self.fail:
+                raise RuntimeError("driver toggle failed during cleanup")
+            super().enable_flash_sdp(value)
+
+    backend = _CleanupRaisingBackend()
+    torch = _FakeTorch(backend)
+
+    @contextlib.contextmanager
+    def kernel_context(backends):
+        yield
+
+    with pytest.raises(TrainerEnvironmentError, match="could not be applied or observed"):
+        with enforced_attention_training_kernel(
+            torch,
+            _sealed_config(),
+            kernel_context_factory=kernel_context,
+            backend_values={"torch_sdpa_math": "math"},
+        ):
+            backend.fail = True  # clean body, but restoration then fails
+
+
 def test_model_load_kwargs_pin_quantization_dtype_revision_and_device_map():
     class FakeBitsAndBytesConfig:
         def __init__(self, **kwargs):
@@ -1165,6 +1276,49 @@ def test_optimizer_state_precision_recurses_into_nested_materialized_tensors():
     )()
     with pytest.raises(TrainerError, match=r"optimizer_state\.nested\[0\]\.exp_avg"):
         verify_optimizer_state_precision(optimizer, torch, _sealed_config())
+
+
+def test_optimizer_state_precision_allows_scalar_cpu_step_but_rejects_offloaded_moment():
+    # torch's default (non-fused, non-capturable) adamw_torch keeps the per-parameter ``step`` as a
+    # 0-dim scalar tensor on CPU even when the model is on cuda:0 (verified against the pinned torch
+    # 2.11 source). The moment tensors (exp_avg/exp_avg_sq) stay on cuda:0. The sealed verifier must
+    # accept that shape without weakening the placement contract for the real moment tensors.
+    torch = _FakeTorch()
+
+    def tensor(dtype, device, shape):
+        return type("Tensor", (), {"dtype": dtype, "device": device, "shape": shape})()
+
+    healthy = type(
+        "Optimizer",
+        (),
+        {
+            "state": {
+                "parameter": {
+                    "step": tensor(torch.float32, "cpu", ()),
+                    "exp_avg": tensor(torch.float32, "cuda:0", (8, 16)),
+                    "exp_avg_sq": tensor(torch.float32, "cuda:0", (8, 16)),
+                }
+            }
+        },
+    )()
+    # Would raise before the fix because the CPU scalar step tripped the device check.
+    verify_optimizer_state_precision(healthy, torch, _sealed_config())
+
+    # A full moment tensor on CPU is a genuine offload deviation and must still fail closed.
+    offloaded = type(
+        "Optimizer",
+        (),
+        {
+            "state": {
+                "parameter": {
+                    "step": tensor(torch.float32, "cpu", ()),
+                    "exp_avg": tensor(torch.float32, "cpu", (8, 16)),
+                }
+            }
+        },
+    )()
+    with pytest.raises(TrainerError, match="PLACEMENT_DEVIATION"):
+        verify_optimizer_state_precision(offloaded, torch, _sealed_config())
 
 
 def test_sealed_max_steps_must_match_the_completed_global_step():
