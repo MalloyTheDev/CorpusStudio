@@ -1,0 +1,197 @@
+{
+  "schema_version": "1.0.0",
+  "amendment_id": "cs-ieee-linux-training-amendment-0001",
+  "study_id": "cs-ieee-linux-training-v1",
+  "base_protocol_version": "1.0.0",
+  "effective_protocol_version": "1.1.0",
+  "authored_at": "2026-07-15T08:05:34Z",
+  "author": "CorpusStudio maintainers",
+  "status": "prospective",
+  "analysis_role": "primary",
+  "reason_codes": [
+    "worker-success-evidence-hardened",
+    "manager-1.3-complete-record-count-admission",
+    "immutable-blue-green-environment-replacement"
+  ],
+  "compatibility_impact": {
+    "prior_protocol_and_evidence_preserved": true,
+    "prior_environment_lock_admission": "historical-only",
+    "fresh_worker_wheel_required": true,
+    "fresh_environment_locks_required": true,
+    "fresh_runplans_required": true,
+    "primary_analysis_version": "1.1.0"
+  },
+  "files": {
+    "base_protocol_sha256": "b7a029bdd4a91ba9efbfe34c81d734b5dfafac13fbd81df545f9f694440ef34d",
+    "base_matrix_sha256": "77b820df6c0ebda9ec5410f9c538a58a23c36e7dc0bc91d37c0f50370c1b2907",
+    "effective_matrix_sha256": "731101c9ee81bd93f9acabb0433788180b86bcec3d78a7af03892df7af41f4f9",
+    "narrative_sha256": "e20e564fa3292247ed6d5f937be1d074dee4541263aefae9655a54ccd34d8dea",
+    "reserved_identities_sha256": "e369690412919b30563bcaa715198a45576bb0b79d366b2dcf997486b25e1e41",
+    "validator_sha256": "fcfed847fce1d40a1d418f04272acca33d1898a32a3fe1b2b4a8bfe4dda80a3b"
+  },
+  "validation_contract": {
+    "identity_algorithm": "sha256-raw-file-v1",
+    "duplicate_mapping_keys": "refuse",
+    "base_hash_match_required": true,
+    "selector_match_count_exact": 1,
+    "old_value_match_required": true,
+    "unknown_effective_change_policy": "refuse",
+    "reserved_identity_set_disjointness_required": true,
+    "candidate_stage_completeness_required": true,
+    "lowercase_sha256_identity_required": true,
+    "canonical_absolute_posix_paths_required": true,
+    "host_evidence_rehash_available": true
+  },
+  "direct_changes": {
+    "schema_version": {
+      "old_value": "1.0.0",
+      "new_value": "1.1.0"
+    },
+    "protocol_version": {
+      "old_value": "1.0.0",
+      "new_value": "1.1.0"
+    }
+  },
+  "changes": [
+    {
+      "selector": {
+        "collection": "first_party_execution_paths",
+        "id": "first-party-math",
+        "field": "environment_id"
+      },
+      "old_value": "backend-corpus-studio-research-math-v1",
+      "new_value": "backend-corpus-studio-research-math-v4"
+    },
+    {
+      "selector": {
+        "collection": "first_party_execution_paths",
+        "id": "first-party-flash",
+        "field": "environment_id"
+      },
+      "old_value": "backend-corpus-studio-research-flash-v1",
+      "new_value": "backend-corpus-studio-research-flash-v4"
+    }
+  ],
+  "immutable_binding_additions": {
+    "effective_matrix_sha256": "required-per-environment-plan-and-trial",
+    "reserved_identities_sha256": "required-before-new-identity-allocation",
+    "worker_source_commit": "required-per-environment-and-trial"
+  },
+  "added_top_level_fields": {
+    "amendment": {
+      "amendment_id": "cs-ieee-linux-training-amendment-0001",
+      "base_protocol_version": "1.0.0",
+      "authored_at": "2026-07-15T08:05:34Z",
+      "status": "prospective",
+      "narrative_path": "research/ieee-linux-training/amendments/0001-2026-07-15-manager-1.3-blue-green-identities.md",
+      "manifest_path": "research/ieee-linux-training/amendments/0001-2026-07-15-manager-1.3-blue-green-identities.manifest.json"
+    },
+    "effective_specification": {
+      "identity_algorithm": "sha256-raw-file-v1",
+      "canonical_path": "research/ieee-linux-training/EXPERIMENT_MATRIX.v1.1.0.json",
+      "serialization": "committed-utf8-json-with-one-trailing-lf",
+      "unknown_or_extra_field_policy": "refuse-by-exact-content-hash",
+      "exact_hash_required_before_environment_plan": true,
+      "exact_hash_required_in_every_plan_evidence_bundle_and_trial": true
+    },
+    "environment_admission": {
+      "manager_version_exact": "1.3.0",
+      "sealed_environment_ids": {
+        "math": "backend-corpus-studio-research-math-v4",
+        "flash": "backend-corpus-studio-research-flash-v4"
+      },
+      "same_worker_wheel_bytes_required": true,
+      "matched_package_artifacts_required": true,
+      "separately_sealed_execution_tuples_required": true,
+      "package_lock": {
+        "record_integrity_exact": "verified",
+        "record_count_semantics_exact": "all_record_rows_v2",
+        "record_entries_minimum": 1,
+        "record_verified_entries_minimum": 1,
+        "installed_file_count_minimum": 1,
+        "required_count_equality": "record_verified_entries == record_entries == installed_file_count",
+        "record_failed_entries_exact": 0,
+        "installed_record_sha256_required": true,
+        "installed_tree_sha256_required": true,
+        "package_source_evidence_required": true
+      },
+      "historical_manager_locks_authorized_for_new_admission": false
+    },
+    "worker_success_admission": {
+      "required_git_ancestor": "e6ca61ccfb3afb667ecbe6546524e98e46384108",
+      "exact_source_commit_required_in_wheel_evidence": true,
+      "exact_wheel_sha256_required_in_environment_and_trial": true,
+      "historical_worker_wheel_reuse_authorized": false,
+      "run_manifest_contract_version": "1.0.0",
+      "trainable_state_hash_algorithm": "sha256-trainable-state-v1",
+      "adapter_export_state_hash_algorithm": "sha256-safetensors-tensor-state-v1",
+      "materialized_gradient_observation_minimum": 1,
+      "optimizer_created_from_real_optimizer_required": true,
+      "exact_finite_loss_per_completed_optimizer_step_required": true,
+      "logging_strategy": "steps",
+      "logging_steps": 1,
+      "logging_nan_inf_filter": false,
+      "output_path_adapter_bytes_artifact_integrity_required": true,
+      "proven_measured_fit_requires_complete_success_evidence": true,
+      "failed_run_native_unproven_unless_spill_measured": true
+    },
+    "historical_identity_non_reuse": {
+      "manifest_path": "research/ieee-linux-training/amendments/RESERVED_IDENTITIES.v1.json",
+      "manifest_sha256": "e369690412919b30563bcaa715198a45576bb0b79d366b2dcf997486b25e1e41",
+      "exact_set_disjointness_required_before_plan_generation": true,
+      "identity_classes": [
+        "environment_ids",
+        "environment_lock_hashes",
+        "worker_wheel_sha256",
+        "plan_ids",
+        "plan_hashes",
+        "execution_configuration_ids",
+        "execution_configuration_hashes",
+        "run_ids",
+        "output_paths",
+        "artifact_ids",
+        "evidence_roots"
+      ]
+    },
+    "affected_scope_snapshot": {
+      "captured_at": "2026-07-15T08:05:34Z",
+      "completed_primary_cells": 0,
+      "completed_secondary_cells": 0,
+      "visible_non_paper_bring_up_attempts": 2,
+      "first_party_bring_up_path_ids": [
+        "first-party-math",
+        "first-party-flash"
+      ],
+      "primary_cells": {
+        "selector": "primary_matrix.execution_path_ids in [first-party-math, first-party-flash]",
+        "expected_affected_cell_count": 30
+      },
+      "secondary_cells": {
+        "selector": "secondary_adapter_matrix.execution_path_ids in [first-party-math, first-party-flash]",
+        "expected_affected_cell_count": 16
+      },
+      "adaptive_follow_up": "affected-when-a-first-party-path-is-used",
+      "unsloth_cells_affected_by_environment_identity_change": false
+    }
+  },
+  "affected_scope": {
+    "first_party_bring_up_paths": 2,
+    "primary_cells": 30,
+    "secondary_first_party_cells": 16,
+    "adaptive_first_party_follow_up": "affected-if-run",
+    "unsloth_cells": "unchanged",
+    "completed_primary_cells_at_authorship": 0,
+    "completed_secondary_cells_at_authorship": 0
+  },
+  "visible_evidence_before_amendment": {
+    "v2_sequence_256_math_dispatched_once": true,
+    "v2_sequence_256_flash_dispatched_once": true,
+    "v2_completed_optimizer_steps_each": 0,
+    "v2_classification": "non-paper-bring-up",
+    "v3_environments_and_runplans_created": true,
+    "v3_platform_run_invoked": false,
+    "v3_manager_1_3_admissible": false,
+    "real_optimizer_step_passed_platform_run": false,
+    "sequence_length_4096_verified": false
+  }
+}
