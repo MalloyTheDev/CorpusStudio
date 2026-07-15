@@ -113,8 +113,13 @@ trials.
   images: the control plane stays dependency-light and a downstream tool renders the image from the
   same raw records the energy integral uses.
 - **Subprocess-mode host process-tree RSS** roots the sampler's default probe at the worker child pid
-  (`set_root_pid`). GPU and global host metrics are captured directly; the child-tree RSS rooting is
-  validated on the first live GPU smoke, not fabricated here.
-- **The default GPU/host probes are only smoke-tested off-GPU** (they are fail-soft and must not
-  raise); their driver-parsing accuracy is confirmed on a live run. All aggregation, energy, statistics,
-  completeness, and rendering logic is covered by deterministic synthetic-fixture tests.
+  (`set_root_pid`). The RSS tree walk is validated against a real synthetic parent -> child ->
+  grandchild process tree (`test_telemetry_driver_parsing.py`), proving depth-2 descendants are summed;
+  the subprocess-mode rooting under a real worker is confirmed on the first live GPU smoke.
+- **The nvidia-smi parser is validated pre-live against captured RTX 5070 driver output** (driver
+  595.71.05): every supported query field parses, a bracketed sentinel (`[N/A]`, `[Not Supported]`,
+  `[Requested functionality has been deprecated]`) is preserved as null (never a literal string or a
+  fabricated zero), stray units/spacing are tolerated, and partial/failed driver output degrades the
+  GPU reading rather than crashing. A read-only live query runs where a GPU is present. This reduces
+  wasted first-smoke runs; it does not replace first-smoke validation. All aggregation, energy,
+  statistics, completeness, and rendering logic is covered by deterministic synthetic-fixture tests.

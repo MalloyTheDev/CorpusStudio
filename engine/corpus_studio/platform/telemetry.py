@@ -134,9 +134,31 @@ def _run_nvidia_smi(query: Sequence[str]) -> list[str] | None:
 
 
 def _float_or_none(cell: str) -> float | None:
+    """Parse a numeric driver cell to float, or None. Tolerates a stray trailing unit the driver can
+    emit even under ``--nounits`` (e.g. ``6.47 W`` -> 6.47, ``180 MHz`` -> 180) and preserves any
+    ``[N/A]``-style sentinel or otherwise-unparseable value as null - never a fabricated zero."""
+
+    text = cell.strip()
     try:
-        value = float(cell)
+        return float(text)
     except (TypeError, ValueError):
+        pass
+    head = text.split()
+    if head:
+        try:
+            return float(head[0])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _str_or_none(cell: str) -> str | None:
+    """A driver string field, or None for an empty cell or a bracketed not-available sentinel (e.g.
+    ``[N/A]``, ``[Not Supported]``, ``[Requested functionality has been deprecated]``). A missing value
+    is preserved as null, never surfaced as a literal sentinel string."""
+
+    value = cell.strip()
+    if not value or (value.startswith("[") and value.endswith("]")):
         return None
     return value
 
@@ -166,14 +188,14 @@ def probe_gpu() -> SampleReading:
             index = None
         reading.gpu = GpuTelemetrySample(
             device_index=index if index is not None and index >= 0 else None,
-            device_uuid=row[1] or None,
+            device_uuid=_str_or_none(row[1]),
             utilization_percent=_float_or_none(row[2]),
             memory_controller_utilization_percent=_float_or_none(row[3]),
             power_watts=_float_or_none(row[4]),
             temperature_c=_float_or_none(row[5]),
             graphics_clock_mhz=_float_or_none(row[6]),
             memory_clock_mhz=_float_or_none(row[7]),
-            performance_state=row[8] or None,
+            performance_state=_str_or_none(row[8]),
         )
     else:
         reading.unavailable.append("nvidia_smi_gpu")
