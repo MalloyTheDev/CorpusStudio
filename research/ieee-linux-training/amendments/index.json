@@ -1,0 +1,97 @@
+{
+  "schema_version": "1.0.0",
+  "study_id": "cs-ieee-linux-training-v1",
+  "base_protocol_version": "1.0.0",
+  "effective_protocol_version": "1.0.1",
+  "base_files": [
+    {
+      "path": "README.md",
+      "sha256": "6e60cab8d985218069608d8f708ff69011544ca0d37d0c894cdb3f358642e060"
+    },
+    {
+      "path": "PROTOCOL.md",
+      "sha256": "b7a029bdd4a91ba9efbfe34c81d734b5dfafac13fbd81df545f9f694440ef34d"
+    },
+    {
+      "path": "HYPOTHESES.md",
+      "sha256": "fa1cdf06dda8155126ddb481b7674cfd2c44763bdc4f1bb11e44afa6cd6d237f"
+    },
+    {
+      "path": "EXPERIMENT_MATRIX.yaml",
+      "sha256": "77b820df6c0ebda9ec5410f9c538a58a23c36e7dc0bc91d37c0f50370c1b2907"
+    },
+    {
+      "path": "METRICS.md",
+      "sha256": "3c6888f8622db5ee73f46dfda08117b82b8f9aa4ae1e2aba1b0eb0529cd8db99"
+    },
+    {
+      "path": "FAILURE_TAXONOMY.md",
+      "sha256": "78efda0a2c959c010279e3adcdec8bd3ded1e73275e2917e74d690d2c6ccb9f3"
+    },
+    {
+      "path": "REPRODUCIBILITY.md",
+      "sha256": "f78a4fa0e583b880953eeaf0e7eaeaa812af1e79e9ca8c757e3a9905d20a8c73"
+    }
+  ],
+  "amendments": [
+    {
+      "sequence": 1,
+      "amendment_id": "cs-ieee-linux-training-v1-amendment-0001",
+      "path": "amendments/0001-2026-07-15-corrected-v3-smoke-bindings.md",
+      "sha256": "91153e3f2c1a6a4d6ef2915be8338188194ce6a28aabdc4cb6037a96586c59de",
+      "previous_protocol_version": "1.0.0",
+      "effective_protocol_version": "1.0.1",
+      "recorded_at": "2026-07-15T05:56:57Z",
+      "status": "prospective",
+      "scope": "phase3-production-path-smoke-pair",
+      "paper_matrix_result": false,
+      "execution_authorized": false,
+      "repository_commit_policy": "final-merged-amendment-commit-per-runplan",
+      "worker": {
+        "source_commit": "16ef6e95722ec3988ee8826b45333c9356ef76f9",
+        "distribution": "corpus-studio-engine",
+        "version": "1.3.0",
+        "wheel_sha256": "6ecc82595af761142b723017a31b980241fe6ef4afebf0a2223f90b8bcef724d",
+        "metadata_sha256": "c8eb3e03d457da4495545bc0bb355131a02d3d48f397bc4a9c07fe1cff9704fe",
+        "manager_version": "1.2.0"
+      },
+      "input_scope": {
+        "model_repository": "Qwen/Qwen2.5-0.5B-Instruct",
+        "model_revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+        "dataset_id": "pipeline-smoke-fixture-v2",
+        "dataset_sha256": "a322b1059709a30c4f927b087e0e655724d6e2a06873175b71d03073a17fa289",
+        "dataset_rows": 8,
+        "user_500_output_corpus_available": false,
+        "seven_billion_parameter_workloads_available": false
+      },
+      "execution_paths": {
+        "first-party-math": {
+          "environment_id": "backend-corpus-studio-research-math-v3",
+          "lock_id": "lock-cd86808ce8e96533b6d6",
+          "lock_hash": "cd86808ce8e96533b6d6d3a0b4c0472e2e6e27ecf8d25bad916a9a08d4e6887d",
+          "required_probe": "cuda_qlora_math_execution",
+          "repeat_probe_evidence_hash": "89b460d9c19a90a3b56078e48c7735d492c57b918a62f954adf3ff353a956338",
+          "attention_kernel": "torch_sdpa_math",
+          "flash_sdp_enabled": false,
+          "memory_efficient_sdp_enabled": false,
+          "math_sdp_enabled": true
+        },
+        "first-party-flash": {
+          "environment_id": "backend-corpus-studio-research-flash-v3",
+          "lock_id": "lock-a2b839b160e4676d968c",
+          "lock_hash": "a2b839b160e4676d968cdd006040dde6cce756c30f51a2c92ef2b1442132aa2a",
+          "required_probe": "cuda_qlora_sdpa_flash_execution",
+          "repeat_probe_evidence_hash": "ac5f19485ff508e0583542ba2ae02400718128c8d4af9b264f3970a154bddc8e",
+          "attention_kernel": "torch_sdpa_flash",
+          "flash_sdp_enabled": true,
+          "memory_efficient_sdp_enabled": false,
+          "math_sdp_enabled": false
+        }
+      },
+      "matched_environment_result": "MATCHED_FOR_ATTENTION_KERNEL_STUDY",
+      "superseded_unexecuted_evidence_root": "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v3/20260715T052743Z/",
+      "environment_evidence_root": "/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-research-matched-v3/",
+      "historical_failed_evidence_root": "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v2/20260715T034634Z/"
+    }
+  ]
+}
