@@ -219,6 +219,24 @@ def test_rng_descriptor_none_when_empty() -> None:
     assert cio.rng_algorithm_descriptor({}) == "none"
 
 
+def test_restore_rng_state_round_trips_cpu_and_cuda() -> None:
+    torch = _Torch(cuda=_Cuda(available=True))
+    torch._rng = b"cpu-A"
+    torch.cuda._rng = [b"cuda-A"]
+    snapshot = cio.capture_rng_state(torch)
+    # Advance both streams, then restore and confirm the snapshot values come back.
+    torch._rng = b"cpu-B"
+    torch.cuda._rng = [b"cuda-B"]
+    cio.restore_rng_state(snapshot, torch)
+    assert torch._rng == b"cpu-A"
+    assert torch.cuda._rng == [b"cuda-A"]
+    # A CUDA state in the snapshot is skipped (not restored) when CUDA is unavailable at resume.
+    offline = _Torch(cuda=_Cuda(available=False))
+    offline._rng = b"cpu-Z"
+    cio.restore_rng_state(snapshot, offline)  # must not raise despite snapshot["cuda"] present
+    assert offline._rng == b"cpu-A"
+
+
 # --------------------------------------------------------------------------------------------------
 # Restore: verify-before-load, request pin, identities, live parameters
 # --------------------------------------------------------------------------------------------------

@@ -1,9 +1,15 @@
 # CorpusStudio — Session Handoff
 
-**Last updated:** 2026-07-15 (post-#444 audit fixes #445-#447, research amendment 0002 -> matrix
-1.2.0 #448 + v5 runbook #449, the Section 11 measurement harness #450, the #440 checkpoint/resume
-design #452, and the corpus-studio skill #451 - all merged; next gates need human GPU/data
-authorization. Earlier: manager-1.3 v4 math failure + sealed-precision correction - see
+**Last updated:** 2026-07-15 (pre-GPU finalization: the exact checkpoint/resume **execution engine**
+#454 - torch worker that writes + restores sealed checkpoints, proven by a real-torch fresh-process
+**bitwise-equivalence** test; amendment-0002 reconciliation #455 - classification
+**V5_IDENTITIES_REMAIN_VALID**, the `df86db5` admission rule is an ANCESTOR rule so a descendant worker
+source is admitted, only the runbook's byte-equality preconditions were stale; pre-live nvidia-smi
+parser validation #456; corpus-studio skill refresh #457 - all merged. Earlier this day: post-#444
+audit fixes #445-#447, amendment 0002 -> matrix 1.2.0 #448 + v5 runbook #449, Section 11 measurement
+harness #450, #440 checkpoint/resume design #452, corpus-studio skill #451. Next gates (corpus freeze,
+v5 0.5B GPU bring-up, 7B ladder, full runs) still need human GPU/data authorization. Earlier:
+manager-1.3 v4 math failure + sealed-precision correction - see
 [`docs/HOST_STATE.md`](docs/HOST_STATE.md); previous snapshot 2026-07-14). This is a snapshot for the
 next agent session (Claude Code or Codex).
 For the authoritative *feature* state see [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md); for the
