@@ -202,6 +202,8 @@ environment/attention tuple identical across the pair so the comparison is clean
 $ENGINE platform-plan \
   --base-model <qwen2.5-0.5b-local-snapshot> \
   --dataset <bring-up-smoke.jsonl> \
+  --dataset-format chat \
+  --chat-template-sha256 <exact-tokenizer-chat-template-sha256> \
   --sequence-len 256 \
   --micro-batch-size 1 \
   --gradient-accumulation-steps 1 \
@@ -213,6 +215,25 @@ $ENGINE platform-plan \
   --out /mnt/training-nvme/corpusstudio/runs/ieee-linux-training/phase3-qwen25-05b-matched-v5
 ```
 
+- `--dataset-format chat --chat-template-sha256 <hash>` are **mandatory**: the bring-up fixture
+  `pipeline_smoke_fixture_v2.jsonl` is chat-format (a `messages` list of system/user/assistant turns).
+  Planning it as the default `instruction` format renders **zero** usable rows and fails only after GPU
+  model allocation (`UNSUPPORTED_CONFIGURATION` / "The dataset produced no usable training rows.") - a
+  `PLANNING_SPEC_MISMATCH_DATASET_FORMAT`. `platform-plan` now runs a CPU structural conformance
+  preflight that refuses such a plan before any plan id is minted, but you must still select the correct
+  format explicitly. The `<hash>` is the **SHA-256 over the exact UTF-8 bytes of the immutable
+  tokenizer's raw `chat_template` string** - no whitespace normalization, no line-ending rewrite, no
+  rendered-example substitution. It is exactly what the worker recomputes and verifies
+  (`hashlib.sha256(tokenizer.chat_template.encode("utf-8")).hexdigest()`); a mismatch is a hard failure.
+  Compute it with the pinned tokenizer inside the sealed environment interpreter:
+  ```bash
+  "$MROOT/environments/backend-corpus-studio-research-math-v5/venv/bin/python" - <<'PY'
+  import hashlib
+  from transformers import AutoTokenizer
+  tok = AutoTokenizer.from_pretrained("<qwen2.5-0.5b-local-snapshot>")
+  print(hashlib.sha256(tok.chat_template.encode("utf-8")).hexdigest())
+  PY
+  ```
 - `--micro-batch-size 1 --gradient-accumulation-steps 1` are **mandatory** for the bring-up smoke: the
   effective matrix 1.2.0 seals `micro_batch_size = 1` and `gradient_accumulation_steps = 1`, and both
   values are consumed verbatim by the worker. Omitting `--gradient-accumulation-steps` defaults it to 8
@@ -225,6 +246,24 @@ $ENGINE platform-plan \
 - The 12-step count is a bring-up smoke, not a paper cell. Sequence length starts at 256; sequence
   4096 is a later explicit attempted cell.
 - Predicted fit will not be `NATIVE_SAFE`; that is expected and correct pre-run.
+
+**Mandatory pre-dispatch dataset section (a zero-row or format mismatch is a hard PLANNING stop, never
+a post-model-allocation discovery).** Before the disjointness gate, run a CPU-only render/tokenization
+preflight with the exact immutable tokenizer and record, for BOTH arms (they must be identical):
+
+- immutable dataset SHA-256;
+- exactly **eight** source rows (this fixture);
+- requested `dataset_format = chat`;
+- structurally compatible row count (the `platform-plan` conformance preflight; must equal 8);
+- rendered non-empty row count (must equal 8);
+- tokenized non-empty row count (must equal 8);
+- every row carries a supervised assistant/trainable region;
+- rendered-example aggregate SHA-256;
+- chat-template SHA-256 (as above);
+- no truncation at sequence length 256;
+- the same dataset, chat template, and rendered examples across math and flash.
+
+If any count is not eight, **stop before GPU dispatch** - do not generate or dispatch either plan.
 
 **Disjointness gate (mandatory before dispatch).** Assemble a candidate-identity JSON for the matched
 pair (`stage: "runplan"`, both v5 environment ids, both fresh lock hashes, the one shared wheel hash,

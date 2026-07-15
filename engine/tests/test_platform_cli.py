@@ -260,13 +260,20 @@ def test_platform_plan_json_bundles_plan_and_fit(monkeypatch, tmp_path):
 
 
 def test_platform_plan_dataset_format_flows_through_the_cli(monkeypatch, tmp_path):
-    # A chat dataset (messages) must not be planned as instruction (Alpaca). The resolved execution
-    # data policy is the exact formatter contract consumed by the worker.
+    # A chat dataset (messages) planned as chat: the resolved execution data policy is the exact
+    # formatter contract consumed by the worker. The dataset MUST be structurally chat (the new
+    # conformance preflight refuses a chat plan over an instruction-shaped dataset).
     _ready_host(monkeypatch)
     result = runner.invoke(
         app,
         [
-            *_platform_plan_args(tmp_path),
+            "platform-plan",
+            "--base-model",
+            "m",
+            "--model-revision",
+            _MODEL_REVISION,
+            "--dataset",
+            str(_chat_dataset(tmp_path)),
             "--dataset-format",
             "chat",
             "--chat-template-sha256",
@@ -599,3 +606,92 @@ def test_platform_plan_omitted_batching_flags_preserve_existing_defaults(monkeyp
     assert resolved["micro_batch_size"] == 1
     assert resolved["fallback_grad_accumulation_steps"] == 8
     assert _resolved_batching(run_plan) == (1, 8)
+
+
+# ---- dataset-format structural conformance (refuse before sealing a plan) -----
+# Regression for the observed UNSUPPORTED_CONFIGURATION / "no usable training rows" failure: a chat
+# dataset planned as instruction rendered zero rows and only failed AFTER GPU model allocation. The
+# planner must now refuse such a plan on the CPU, before any plan id/hash is minted.
+
+
+def _chat_dataset(tmp_path):
+    # mirrors pipeline_smoke_fixture_v2.jsonl: a messages list of system/user/assistant turns
+    ds = tmp_path / "chat.jsonl"
+    ds.write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {"role": "system", "content": "Be concise."},
+                    {"role": "user", "content": "Write the lowercase form of ALPHA."},
+                    {"role": "assistant", "content": "alpha"},
+                ]
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return ds
+
+
+def test_platform_plan_refuses_chat_dataset_planned_as_instruction(monkeypatch, tmp_path):
+    from corpus_studio.platform.execution_config import stable_file_sha256
+
+    _ready_host(monkeypatch)
+    ds = _chat_dataset(tmp_path)
+    digest_before = stable_file_sha256(str(ds))
+    out = tmp_path / "out"
+    result = runner.invoke(
+        app,
+        [
+            "platform-plan",
+            "--base-model",
+            "m",
+            "--model-revision",
+            _MODEL_REVISION,
+            "--dataset",
+            str(ds),
+            "--dataset-format",
+            "instruction",
+            "--out",
+            str(out),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "structurally incompatible" in result.output
+    # no plan id or plan hash is minted for a refused plan
+    assert not out.exists() or not list(out.rglob("RunPlan.json"))
+    # the dataset bytes are unchanged (read-only preflight, no auto-switch/repair)
+    assert stable_file_sha256(str(ds)) == digest_before
+
+
+def test_platform_plan_accepts_chat_dataset_planned_as_chat(monkeypatch, tmp_path):
+    _ready_host(monkeypatch)
+    ds = _chat_dataset(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "platform-plan",
+            "--base-model",
+            "m",
+            "--model-revision",
+            _MODEL_REVISION,
+            "--dataset",
+            str(ds),
+            "--dataset-format",
+            "chat",
+            "--chat-template-sha256",
+            "c" * 64,
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)["run_plan"]["resolved_execution"]["data"]
+    assert data["dataset_format"] == "chat"
+
+
+def test_platform_plan_instruction_dataset_remains_compatible(monkeypatch, tmp_path):
+    # existing instruction callers + the instruction default keep passing the new preflight
+    _ready_host(monkeypatch)
+    result = runner.invoke(app, [*_platform_plan_args(tmp_path), "--json"])
+    assert result.exit_code == 0
