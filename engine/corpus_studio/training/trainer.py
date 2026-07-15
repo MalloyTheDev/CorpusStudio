@@ -26,9 +26,9 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal, cast
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from corpus_studio.importers.jsonl_importer import read_jsonl, read_jsonl_bytes
 from corpus_studio.training.environment import INSTALL_HINT, probe_training_runtime
@@ -126,15 +126,12 @@ class TrainRunConfig(BaseModel):
     # this option if the installed trainer cannot honor it. Blackwell support is not verified here.
     use_liger: bool = False
     gradient_checkpointing: bool = True
-    # --- checkpoint retention (disk-control) ---
-    # How often to checkpoint (was hardcoded to 50). Each checkpoint is the adapter + resume state
-    # (optimizer/RNG) — hundreds of MB for QLoRA, not a full base model — but with no cap they
-    # accumulate indefinitely over a long run.
-    save_steps: int = Field(default=50, gt=0)
-    # Keep only the N most recent checkpoints (passed to TRL's SFTConfig). Default 3 keeps resume
-    # capability while preventing unbounded checkpoint growth; None keeps every checkpoint.
-    save_total_limit: int | None = Field(default=3, ge=1)
-    save_strategy: str = "steps"
+    # Intermediate checkpoints are disabled because the first-party trainer has no compatible
+    # resume lineage yet. ``steps`` remains parseable only for legacy document compatibility and is
+    # refused before execution.
+    save_steps: int | None = Field(default=None, gt=0)
+    save_total_limit: int | None = Field(default=None, ge=1)
+    save_strategy: Literal["no", "steps"] = "no"
     logging_steps: int = Field(default=1, ge=1)
     report_to: list[str] = Field(default_factory=list)
     dataset_text_field: str = "text"
@@ -149,6 +146,15 @@ class TrainRunConfig(BaseModel):
     sequence_length_field: str = "auto"
     tokenizer_parameter: str = "auto"
 
+    @model_validator(mode="after")
+    def _validate_checkpoint_settings(self) -> TrainRunConfig:
+        if self.save_strategy == "no":
+            if self.save_steps is not None or self.save_total_limit is not None:
+                raise ValueError("disabled checkpointing cannot carry save cadence or retention")
+        elif self.save_steps is None:
+            raise ValueError("step checkpointing requires save_steps")
+        return self
+
 
 class TrainResult(BaseModel):
     output_dir: str
@@ -158,6 +164,20 @@ class TrainResult(BaseModel):
     steps: int = 0
     final_loss: float | None = None
     checkpoints: list[str] = Field(default_factory=list)
+
+
+def _require_checkpoint_free_execution(config: TrainRunConfig) -> None:
+    """Refuse every intermediate-checkpoint spelling, including unvalidated model copies."""
+
+    if (
+        config.save_strategy != "no"
+        or config.save_steps is not None
+        or config.save_total_limit is not None
+    ):
+        raise TrainerError(
+            "intermediate checkpoints are unsupported until resume compatibility and checkpoint "
+            "lineage are implemented"
+        )
 
 
 def train_config_from_resolved(execution: Any) -> TrainRunConfig:
@@ -330,8 +350,9 @@ def load_run_config_from_file(
         attn_implementation=attn_implementation or data.get("attn_implementation"),
         optim=optim or str(data.get("optim", "adamw_torch")),
         use_liger=use_liger if use_liger is not None else bool(data.get("use_liger", False)),
-        save_steps=int(data.get("save_steps", 50)),
-        save_total_limit=data.get("save_total_limit", 3),  # int or null (keep all)
+        save_steps=data.get("save_steps"),
+        save_total_limit=data.get("save_total_limit"),
+        save_strategy=cast(Literal["no", "steps"], data.get("save_strategy", "no")),
     )
 
 
@@ -1244,8 +1265,8 @@ def build_lora_kwargs(config: TrainRunConfig) -> dict[str, Any]:
 
 
 def build_training_kwargs(config: TrainRunConfig) -> dict[str, Any]:
-    """TRL ``SFTConfig`` kwargs from the run config. No W&B (``report_to=[]``); logs every step so the
-    progress callback fires; saves by steps so checkpoints appear for the launcher."""
+    """TRL ``SFTConfig`` kwargs from the run config, including the exact sealed save policy."""
+    _require_checkpoint_free_execution(config)
     kwargs: dict[str, Any] = {
         "output_dir": config.output_dir,
         "per_device_train_batch_size": config.micro_batch_size,
@@ -1262,8 +1283,6 @@ def build_training_kwargs(config: TrainRunConfig) -> dict[str, Any]:
         "warmup_ratio": config.warmup_ratio,
         "logging_steps": config.logging_steps,
         "save_strategy": config.save_strategy,
-        "save_steps": config.save_steps,
-        "save_total_limit": config.save_total_limit,  # cap checkpoint accumulation (None = keep all)
         "report_to": config.report_to,
         "dataset_text_field": config.dataset_text_field,
         "disable_tqdm": config.disable_tqdm,
@@ -1505,6 +1524,8 @@ def run_training(  # pragma: no cover - optional training-stack integration
     def _stage(name: str, message: str) -> None:
         if stage_callback is not None:
             stage_callback(name, message)
+
+    _require_checkpoint_free_execution(config)
 
     dataset_progress_bucket = 0
 

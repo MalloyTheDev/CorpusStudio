@@ -626,6 +626,30 @@ def test_default_optim_and_no_liger():
     assert plan.training_config_snapshot == {}
 
 
+def test_new_plans_explicitly_disable_unresumable_intermediate_checkpoints():
+    plan = _plan(_profile(cc_major=8), _report())
+    execution = plan.resolved_execution
+    assert execution is not None
+    assert execution.save_strategy == "no"
+    assert execution.checkpoint_policy.cadence_optimizer_steps is None
+    assert execution.checkpoint_policy.keep_last is None
+    assert "save_strategy" in execution.trainer_interface.required_sft_config_fields
+    assert "save_steps" not in execution.trainer_interface.required_sft_config_fields
+    assert "save_total_limit" not in execution.trainer_interface.required_sft_config_fields
+    cfg = train_config_from_resolved(execution)
+    assert cfg.save_strategy == "no"
+    assert cfg.save_steps is None and cfg.save_total_limit is None
+
+
+@pytest.mark.parametrize(
+    "checkpoint_overrides",
+    [{"checkpoint_steps": 50}, {"checkpoint_keep_last": 3}],
+)
+def test_planner_refuses_checkpoint_requests_without_resume_lineage(checkpoint_overrides):
+    with pytest.raises(PlannerError, match="resume compatibility and lineage"):
+        _plan(_profile(cc_major=8), _report(), **checkpoint_overrides)
+
+
 def test_invalid_optim_is_rejected():
     # optim is sealed as an Optimizer enum; a bogus value → a clean PlannerError, not a raw pydantic error.
     with pytest.raises(PlannerError, match="unsupported optimizer"):

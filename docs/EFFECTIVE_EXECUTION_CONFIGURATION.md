@@ -109,7 +109,11 @@ The sealed `output_dir` is an output **root** with `output_layout=run_scoped_v1`
 <output-root>/runs/<run-id>/artifacts/adapter
 ```
 
-Checkpoints and the final adapter therefore cannot collide across executions. The adapter artifact ID
+New first-party plans explicitly seal `save_strategy="no"` with null checkpoint cadence and retention,
+so the trainer writes no intermediate checkpoint directories. Legacy step-checkpoint documents remain
+parseable but are refused before training because there is no exact resume lineage. A worker reporting
+an intermediate checkpoint under the disabled policy fails the run. The final adapter cannot collide
+across executions; its artifact ID
 contains the run ID, `adapter` role, and weight-content-hash prefix. `platform-run --out RECORD_ROOT`
 persists the terminal records under `RECORD_ROOT/runs/<run-id>/`.
 

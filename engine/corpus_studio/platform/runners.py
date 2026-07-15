@@ -213,7 +213,9 @@ class TrainingRunner:
         try:
             with watchdog:
                 result = trainer_fn(config, progress_callback=_progress, stage_callback=_stage)
-            succeeded = True
+            # A worker that violates the disabled checkpoint policy did not complete this sealed
+            # execution, even if its optimizer loop returned. Preserve its measurements as unproven.
+            succeeded = not result.checkpoints
         except _CancelTraining:
             raise RunCancelled from None
         except ExecutionPlacementDeviation as exc:
@@ -257,8 +259,13 @@ class TrainingRunner:
                     "step or a stall, likely a WDDM spill) — see the stderr watchdog note."
                 )
 
-        for checkpoint in result.checkpoints:
-            ctx.emit_log(f"checkpoint: {checkpoint}")
+        if result.checkpoints:
+            raise RunnerFailure(
+                "trainer produced intermediate checkpoints despite the sealed disabled save policy",
+                taxonomy=FailureTaxonomy.CHECKPOINT_FAILURE,
+                stage=StageMarker.export,
+                remediation="preserve the failed-run evidence and repair the first-party worker",
+            )
         expected_output = Path(config.output_dir).resolve(strict=False)
         observed_output = Path(result.output_dir).resolve(strict=False)
         observed_adapter = Path(result.adapter_path).resolve(strict=False)
@@ -379,6 +386,19 @@ class TrainingRunner:
                 taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                 stage=StageMarker.env_loaded,
                 remediation="create a derived RunPlan with a new execution hash",
+            )
+        if (
+            execution.save_strategy != "no"
+            or execution.checkpoint_policy.cadence_optimizer_steps is not None
+            or execution.checkpoint_policy.keep_last is not None
+        ):
+            raise RunnerFailure(
+                "sealed intermediate checkpoints are unsupported until exact resume compatibility "
+                "and checkpoint lineage are implemented",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.process_start,
+                remediation="regenerate a checkpoint-free RunPlan; do not approve a long run until "
+                "sealed resume support exists",
             )
         try:
             # The trainer owns one stable read/hash/capture of the dataset and parses those exact

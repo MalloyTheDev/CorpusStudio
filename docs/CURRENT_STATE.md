@@ -14,7 +14,7 @@ on `cuda:0`. No real optimizer step has passed through `platform-run`, and seque
 unverified. These environment/diagnostic results are not a 7B workload or offload result.
 The post-v1.3 additions reconciled below include the **reasoning-traces** data loop, a dataset
 **truncation guardrail** +
-configurable **checkpoint retention**, and a dependency-light **storage safe-spill** profiler —
+external-trainer **checkpoint retention**, and a dependency-light **storage safe-spill** profiler —
 plus the sealed **Environment Manager** reference lifecycle, the static MoE-safe
 **ModelDescriptor / TokenizerDescriptor** foundation with allowlisted **MoE topology inspection**,
 the backend-independent **TrainingObjective registry**, and the identity-bound **backend worker
@@ -168,10 +168,12 @@ per-item error isolation, and off-thread document opens.
   answer). New platform plans render and tokenize the complete hash-pinned JSONL with the exact pinned
   tokenizer/template; over-length rows fail closed unless `allow_truncation` is explicit in the seal.
   The standalone report retains a documented heuristic when the tokenizer extra is absent.
-- **Resolved checkpoint/output policy**: cadence and retention are explicit in the effective execution
-  seal, and each run writes beneath `<output-root>/runs/<run-id>/`. The trainer saves the **LoRA
-  adapter** + tokenizer + model card, not a full base copy. Atomic checkpoint promotion and exact-resume
-  verification remain future integrity work and are not claimed by this slice.
+- **Resolved checkpoint/output policy**: new first-party plans explicitly seal checkpointing off
+  (`save_strategy="no"`, null cadence/retention) and each run writes beneath
+  `<output-root>/runs/<run-id>/`. Legacy step-checkpoint documents remain readable but the runner and
+  trainer refuse them before training; an unexpected worker checkpoint fails the run. The trainer
+  saves the **LoRA adapter** + tokenizer + model card, not a full base copy. Exact sealed resume and
+  checkpoint lineage remain future work; first-party runs expected to exceed 30 minutes are blocked.
 - **Versioned reasoning/tool trace foundation** — the language-neutral, hash-sealed `TraceRecord`
   preserves exact source-row lineage, ordered role context, reasoning/action/tool/result/final-answer
   boundaries, producer/model/prompt/request/response evidence, typed validation findings, and a
@@ -328,7 +330,8 @@ per-item error isolation, and off-thread document opens.
   errors block and truncation analysis covers the complete pinned JSONL unless the plan explicitly
   permits truncation. Runner selection derives from the pinned backend manifest, successful training
   requires optimizer-step and adapter-byte evidence, every execution gets a fresh UUIDv7 run ID, and
-  adapter/checkpoint output is isolated under `<output-root>/runs/<run-id>/`. Adapter IDs include the
+  final-adapter output is isolated under `<output-root>/runs/<run-id>/`; intermediate checkpoints are
+  disabled until exact sealed resume exists. Adapter IDs include the
   run, role, and weight-content hash; persisted manifests live under `<record-root>/runs/<run-id>/`.
   Legacy plans remain readable but are not executable by the training runner; regenerate them. See
   [`EFFECTIVE_EXECUTION_CONFIGURATION.md`](EFFECTIVE_EXECUTION_CONFIGURATION.md).

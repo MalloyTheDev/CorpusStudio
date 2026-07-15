@@ -9,6 +9,7 @@ import pytest
 
 import corpus_studio.platform as P
 from corpus_studio.platform.enums import FailureTaxonomy, StageMarker
+from corpus_studio.platform.execution_config import execution_configuration_hash_for
 from corpus_studio.platform.planner import compute_plan_hash, run_plan_hash_payload
 from corpus_studio.platform.runners import (
     TrainingRunner,
@@ -44,7 +45,7 @@ def _reseal(body: dict) -> P.RunPlan:
     return draft.model_copy(update={"plan_hash": compute_plan_hash(run_plan_hash_payload(draft))})
 
 
-def _fake_run_training(steps, *, loss_by_step=None, capture=None):
+def _fake_run_training(steps, *, loss_by_step=None, capture=None, checkpoints=False):
     """Build a stand-in for run_training that drives the progress callback `steps` times then returns
     a TrainResult — no torch, no model, no dataset."""
 
@@ -63,7 +64,7 @@ def _fake_run_training(steps, *, loss_by_step=None, capture=None):
             cpu_toy=config.cpu_toy,
             steps=steps,
             final_loss=(loss_by_step or {}).get(steps),
-            checkpoints=[f"{config.output_dir}/checkpoint-{steps}"],
+            checkpoints=[f"{config.output_dir}/checkpoint-{steps}"] if checkpoints else [],
         )
 
     return _run
@@ -181,8 +182,23 @@ def test_training_runner_success_adapts_progress_and_produces_the_adapter(monkey
         "kind": "adapter",
         "path": str(adapter_path),
     }
-    # A checkpoint log line was emitted.
-    assert any(e.event_type == "log" and "checkpoint-3" in (e.message or "") for e in result.events)
+    assert not any("checkpoint-" in (e.message or "") for e in result.events)
+
+
+def test_training_runner_refuses_unexpected_intermediate_checkpoint_output(monkeypatch):
+    monkeypatch.setattr(
+        "corpus_studio.training.trainer.run_training",
+        _fake_run_training(1, checkpoints=True),
+    )
+    result = execute_run(
+        demo_training_plan(), TrainingRunner(cpu_toy=True), run_id="run-checkpoint", clock=_CLOCK
+    )
+
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.CHECKPOINT_FAILURE
+    assert "disabled save policy" in result.manifest.failure.message
+    assert result.manifest.artifact_ids == []
 
 
 def test_training_runner_refuses_a_readable_adapter_outside_the_run_scope(monkeypatch):
@@ -249,6 +265,91 @@ def test_max_steps_override_is_refused_without_calling_the_trainer(monkeypatch):
     assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
     assert "cannot override" in result.manifest.failure.message
     assert "config" not in capture
+
+
+def test_training_runner_refuses_legacy_sealed_step_checkpoint_plan(monkeypatch):
+    called = []
+    monkeypatch.setattr(
+        "corpus_studio.training.trainer.run_training",
+        lambda *_args, **_kwargs: called.append(True),
+    )
+    plan = demo_training_plan()
+    execution_body = plan.resolved_execution.model_dump(mode="json")
+    execution_body["configuration_hash"] = "0" * 64
+    execution_body["save_strategy"] = "steps"
+    execution_body["checkpoint_policy"]["cadence_optimizer_steps"] = 1
+    execution_body["checkpoint_policy"]["keep_last"] = 1
+    execution = P.ResolvedExecutionConfiguration.model_validate(execution_body)
+    execution = execution.model_copy(
+        update={"configuration_hash": execution_configuration_hash_for(execution)}
+    )
+    body = plan.model_dump(mode="json")
+    body["resolved_execution"] = execution.model_dump(mode="json")
+    body["checkpoint_policy"] = execution.checkpoint_policy.model_dump(mode="json")
+
+    result = execute_run(_reseal(body), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert result.manifest.failure.stage == StageMarker.process_start
+    assert "resume compatibility" in result.manifest.failure.message
+    assert called == []
+
+
+def test_training_runner_rejects_unvalidated_disabled_policy_fields(monkeypatch):
+    called = []
+    monkeypatch.setattr(
+        "corpus_studio.training.trainer.run_training",
+        lambda *_args, **_kwargs: called.append(True),
+    )
+    plan = demo_training_plan()
+    execution = plan.resolved_execution
+    assert execution is not None
+    policy = execution.checkpoint_policy.model_copy(update={"keep_last": 1})
+    execution = execution.model_copy(
+        update={"checkpoint_policy": policy, "configuration_hash": "0" * 64}
+    )
+    execution = execution.model_copy(
+        update={"configuration_hash": execution_configuration_hash_for(execution)}
+    )
+    tampered = plan.model_copy(
+        update={"checkpoint_policy": policy, "resolved_execution": execution}
+    )
+    tampered = tampered.model_copy(
+        update={"plan_hash": compute_plan_hash(run_plan_hash_payload(tampered))}
+    )
+
+    result = execute_run(tampered, TrainingRunner(cpu_toy=True), clock=_CLOCK)
+
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert "resume compatibility" in result.manifest.failure.message
+    assert called == []
+
+
+@pytest.mark.parametrize(
+    "save_strategy, cadence, keep_last, message",
+    [
+        ("no", 1, None, "disabled checkpointing"),
+        ("no", None, 1, "disabled checkpointing"),
+        ("steps", None, None, "requires an optimizer-step cadence"),
+    ],
+)
+def test_resolved_execution_rejects_inconsistent_checkpoint_policy(
+    save_strategy, cadence, keep_last, message
+):
+    plan = demo_training_plan()
+    execution = plan.resolved_execution
+    assert execution is not None
+    body = execution.model_dump(mode="json")
+    body["save_strategy"] = save_strategy
+    body["checkpoint_policy"]["cadence_optimizer_steps"] = cadence
+    body["checkpoint_policy"]["keep_last"] = keep_last
+
+    with pytest.raises(ValueError, match=message):
+        P.ResolvedExecutionConfiguration.model_validate(body)
 
 
 def test_training_runner_name_reflects_cpu_toy_flag():

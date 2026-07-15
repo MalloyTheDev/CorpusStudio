@@ -3869,12 +3869,21 @@ def train_run(
     optim: Optional[str] = typer.Option(None, "--optim", help="Optimizer (e.g. adamw_torch | paged_adamw_8bit). 'paged_adamw_8bit' pages optimizer state to host RAM under pressure — spike-safe on a tight GPU."),
     use_liger: bool = typer.Option(False, "--use-liger", help="Fuse the cross-entropy loss (Liger) to drop the full-vocab logits memory spike at long sequence_len. Needs the 'liger-kernel' package; Blackwell support unverified."),
     memory_efficient: bool = typer.Option(False, "--memory-efficient", help="Shortcut for a tight GPU: enable the memory-saving levers (paged optimizer + fused Liger loss). Explicit --optim / --use-liger override it."),
-    save_steps: Optional[int] = typer.Option(None, "--save-steps", help="Checkpoint every N optimizer steps (default 50)."),
-    save_total_limit: Optional[int] = typer.Option(None, "--save-total-limit", help="Keep only the N most recent checkpoints (default 3; pass 0 to keep ALL — old behavior)."),
+    save_steps: Optional[int] = typer.Option(
+        None,
+        "--save-steps",
+        help="Legacy option; currently refused because exact checkpoint resume is unsupported.",
+    ),
+    save_total_limit: Optional[int] = typer.Option(
+        None,
+        "--save-total-limit",
+        help="Legacy option; currently refused because exact checkpoint resume is unsupported.",
+    ),
 ):
     """Development-only direct trainer entry point (opt-in [train] extra): read a CorpusStudio
     training config + dataset, build a TRL SFTTrainer with peft LoRA (4-bit QLoRA on GPU), train, and
-    save the adapter + tokenizer + checkpoints. Preflighted by train-check — refuses with an install
+    save the final adapter + tokenizer. Intermediate checkpoints are refused until exact resume
+    lineage is implemented. Preflighted by train-check - refuses with an install
     hint if the runtime is missing. Progress ('[step/total]') goes to stderr; the JSON result to stdout.
 
     A real GPU QLoRA cannot be run without a CUDA GPU + bitsandbytes; --cpu-toy proves the pipeline on
@@ -3921,15 +3930,13 @@ def train_run(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
 
-    # CLI overrides for checkpoint retention (None = leave the config/default). `--save-total-limit 0`
-    # is the escape hatch for "keep ALL checkpoints" (maps to None, since the field requires >= 1).
-    retention_updates: dict[str, object] = {}
-    if save_steps is not None:
-        retention_updates["save_steps"] = save_steps
-    if save_total_limit is not None:
-        retention_updates["save_total_limit"] = None if save_total_limit == 0 else save_total_limit
-    if retention_updates:
-        run_config = run_config.model_copy(update=retention_updates)
+    if save_steps is not None or save_total_limit is not None:
+        typer.echo(
+            "Intermediate checkpoints are unsupported until exact resume compatibility and "
+            "checkpoint lineage are implemented.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
 
     def _progress(step: int, total: int, loss: Optional[float]) -> None:
         line = f"[{step}/{total}] step" + (f" loss={loss:.4f}" if loss is not None else "")

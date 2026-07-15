@@ -66,6 +66,10 @@ against what PROVED to work on this host:
   identities, per-state precision, exact attention API/kernel/toggles, explicit device map, all
   semantic LoRA/trainer/checkpoint/data defaults, and the exact installed trainer interface. See
   [`EFFECTIVE_EXECUTION_CONFIGURATION.md`](EFFECTIVE_EXECUTION_CONFIGURATION.md).
+- **intermediate checkpoints** → disabled for every new first-party plan (`save_strategy="no"`, no
+  cadence or retention). Step-checkpoint plans are refused before training until exact sealed resume
+  compatibility and checkpoint lineage exist. The environment probe's adapter save/reload round trip
+  is capability evidence for final adapter serialization, not mid-run optimizer-checkpoint resume.
 
 **Pick your framework.** `corpus-studio platform-backends` lists registered backend manifests; pass
 `--backend <id>` to resolve against one. A backend is executable only when it declares the complete
@@ -131,7 +135,8 @@ corpus-studio platform-run ./plan/RunPlan.json --subprocess --out ./run
   `artifact_produced` / `terminal`).
 - Mints a fresh UUIDv7 `run_id` for every execution. A resolved run derives its trainer directory from
   the sealed output-root policy as `<output-root>/runs/<run-id>/artifacts/adapter`, so rerunning one
-  plan cannot mix adapters or checkpoints.
+  plan cannot mix adapters. Intermediate checkpoints are disabled; an unexpected one is a failed-run
+  deviation and remains preserved as evidence.
 - Writes the terminal **RunManifest** to stdout (and `./run/runs/<run-id>/RunManifest.json`), classifying the
   terminal state — `succeeded / failed / cancelled` — with a **FailureRecord taxonomy** on abnormal
   termination (`OOM`, `NUMERICAL_FAILURE`, `ENVIRONMENT_FAILURE`, …).

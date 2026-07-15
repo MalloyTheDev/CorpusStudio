@@ -83,6 +83,27 @@ def test_direct_train_run_refuses_without_explicit_unsealed_acknowledgement(tmp_
     assert "platform-plan" in result.output
 
 
+def test_direct_train_run_refuses_legacy_intermediate_checkpoint_options(tmp_path: Path):
+    config = tmp_path / "config.json"
+    config.write_text(
+        json.dumps({"base_model": "model", "dataset_path": "dataset.jsonl"}),
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        [
+            "train-run",
+            str(config),
+            "--allow-unsealed-direct-execution",
+            "--save-steps",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "resume compatibility" in result.output
+
+
 def test_unknown_target_raises():
     with pytest.raises(ValueError):
         build_launch_plan("nope", "c.yaml")
