@@ -3,15 +3,18 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-07-14 (through **v1.3** — Evaluation Suites & Chat Gates — plus the **platform
+Last reconciled: 2026-07-15 (through **v1.3** — Evaluation Suites & Chat Gates — plus the **platform
 run lifecycle** re-scope: profile → plan → predict-fit → run → measure-fit → artifacts, a multi-backend
 registry, and subprocess reliability. The pre-Phase-9B real GPU workload evidence remains historical
 native Windows/WDDM evidence. The managed native-Linux environments now separately seal the legacy
-minimal hardware tuple, the readiness-v2 complete math QLoRA tuple, and the readiness-flash-v1 tiny
-forced-flash QLoRA tuple. The first real 0.5B bounded flash smoke loaded the model but failed placement
-verification before adapter insertion; a placement-only diagnostic found every parameter and buffer
-on `cuda:0`. No real optimizer step has passed through `platform-run`, and sequence length 4096 remains
-unverified. These environment/diagnostic results are not a 7B workload or offload result.
+minimal hardware tuple, preserved readiness tuples, and separate manager-1.2 research math/flash
+QLoRA tuples. Fresh matched 0.5B sequence-256 attempts both verified model/post-adapter placement,
+forced their intended kernel, and attached QLoRA, then failed before optimizer step 1 because the
+production verifier inspected a BF16 pre-accumulation autograd tensor instead of the sealed FP32
+materialized leaf gradient. The verifier now targets post-accumulation `parameter.grad` and retains
+fail-closed dtype/device checks, but that correction has not yet passed a new hardware smoke. No real
+optimizer step has passed through `platform-run`, and sequence length 4096 remains unverified. These
+environment/diagnostic results are not a 7B workload or offload result.
 The post-v1.3 additions reconciled below include the **reasoning-traces** data loop, a dataset
 **truncation guardrail** +
 external-trainer **checkpoint retention**, and a dependency-light **storage safe-spill** profiler —
@@ -240,9 +243,10 @@ per-item error isolation, and off-thread document opens.
   `RunPlan.environment_ref` pins the immutable
   lock hash and `platform-run --subprocess` dispatches with that managed interpreter after a live
   health check. Tests use fake installers and bounded synthetic probe evidence. Separately, the current
-  native-Linux host has preserved seals for all three distinct tuples (the manager-1.1 flash instance
-  now requires replacement before a manager-1.2 health claim);
-  the first real 0.5B smoke failed before adapter insertion and completed zero optimizer steps. See
+  native-Linux host has preserved the legacy/readiness identities and sealed separate manager-1.2
+  research math/flash environments. Fresh matched 0.5B attempts reached verified post-adapter
+  placement but both failed before step 1 on the pre- versus post-accumulation gradient-verifier
+  mismatch; each completed zero optimizer steps and produced no artifact or checkpoint. See
   [`HOST_STATE.md`](HOST_STATE.md); none of those facts is full-workload or offload proof. See
   [`ENVIRONMENT_MANAGER.md`](ENVIRONMENT_MANAGER.md); the full
   3-layer + MoE-safe forward plan is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) +

@@ -1279,10 +1279,14 @@ def test_trainable_precision_enforces_master_weights_and_gradient_contract():
             self.dtype = torch.float16
             self.device = "cuda:0"
             self.data = Data(self)
-            self.hook = None
+            self.grad = None
+            self.post_accumulate_hook = None
+
+        def register_post_accumulate_grad_hook(self, hook):
+            self.post_accumulate_hook = hook
 
         def register_hook(self, hook):
-            self.hook = hook
+            raise AssertionError("pre-accumulation gradient hooks are not sealed evidence")
 
     frozen = Parameter(trainable=False)
     adapter = Parameter(trainable=True)
@@ -1293,16 +1297,62 @@ def test_trainable_precision_enforces_master_weights_and_gradient_contract():
     )()
     cfg = _sealed_config(master_weight_dtype="fp32", gradient_dtype="fp32")
     enforce_trainable_precision(model, torch, cfg)
-    assert adapter.dtype is torch.float32 and adapter.hook is not None
+    assert adapter.dtype is torch.float32 and adapter.post_accumulate_hook is not None
 
+    # The sealed contract describes the materialized leaf gradient, not an earlier autocast edge
+    # tensor. Real BF16 PEFT execution may deliver BF16 to a pre-accumulation hook while
+    # AccumulateGrad materializes the FP32 gradient that the optimizer consumes.
     good = type("Gradient", (), {"dtype": torch.float32, "device": "cuda:0"})()
-    assert adapter.hook(good) is good
+    adapter.grad = good
+    assert adapter.post_accumulate_hook(adapter) is None
     bad_dtype = type("Gradient", (), {"dtype": torch.float16, "device": "cuda:0"})()
+    adapter.grad = bad_dtype
     with pytest.raises(TrainerError, match="gradient dtype deviation"):
-        adapter.hook(bad_dtype)
+        adapter.post_accumulate_hook(adapter)
     bad_device = type("Gradient", (), {"dtype": torch.float32, "device": "cpu"})()
+    adapter.grad = bad_device
     with pytest.raises(ExecutionPlacementDeviation, match="gradient adapter"):
-        adapter.hook(bad_device)
+        adapter.post_accumulate_hook(adapter)
+    adapter.grad = None
+    with pytest.raises(TrainerError, match="materialized gradient is missing"):
+        adapter.post_accumulate_hook(adapter)
+    adapter.grad = good
+    with pytest.raises(TrainerError, match="hook identity changed"):
+        adapter.post_accumulate_hook(object())
+
+
+def test_trainable_precision_refuses_runtime_without_post_accumulation_hooks():
+    torch = _FakeTorch()
+
+    class Data:
+        def __init__(self, owner):
+            self.owner = owner
+
+        def to(self, *, dtype):
+            self.owner.dtype = dtype
+            return self
+
+    parameter = type(
+        "LegacyParameter",
+        (),
+        {
+            "requires_grad": True,
+            "dtype": torch.float16,
+            "device": "cuda:0",
+        },
+    )()
+    parameter.data = Data(parameter)
+    model = type(
+        "Model",
+        (),
+        {"named_parameters": lambda self: iter([("adapter", parameter)])},
+    )()
+    with pytest.raises(TrainerError, match="cannot verify materialized adapter gradients"):
+        enforce_trainable_precision(
+            model,
+            torch,
+            _sealed_config(master_weight_dtype="fp32", gradient_dtype="fp32"),
+        )
 
 
 def test_trainable_precision_refuses_missing_or_empty_adapter_state():

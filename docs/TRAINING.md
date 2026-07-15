@@ -242,11 +242,14 @@ native-Windows WDDM driver** — the training step hangs at 100% GPU util but ~5
 pulls 150–250 W). Verified on a real RTX 5070: bitsandbytes 4-bit, the *mem-efficient* SDPA
 kernel, and the *math* path all work — **only the fused flash kernel hangs, and only on native
 Windows**. WSL2 testing on the 5070 showed the same flash kernel running ~1000× faster than the math
-fallback. On the current native-Linux host, readiness-v2 separately verified the tiny complete math
-tuple and readiness-flash-v1 verified a tiny forced `SDPBackend.FLASH_ATTENTION` BF16/NF4/QLoRA tuple.
-The first real 0.5B flash smoke loaded the model but failed placement verification before adapter
-insertion, so no real flash optimizer step or sequence-4096 workload has passed. WSL evidence must not
-be reported as a native-Linux result.
+fallback. On the current native-Linux host, separate manager-1.2 research environments verified tiny
+complete math and forced `SDPBackend.FLASH_ATTENTION` BF16/NF4/QLoRA tuples. Fresh matched 0.5B
+sequence-256 attempts both verified model and post-adapter CUDA placement, forced their intended
+attention kernel, and attached QLoRA. Both then failed before optimizer step 1 because production
+checked a BF16 pre-accumulation autograd tensor as if it were the sealed FP32 materialized leaf
+gradient. The verifier now checks post-accumulation `parameter.grad`, but that correction still needs
+a new worker, new locks/plans, and separately approved hardware evidence. No real flash optimizer
+step or sequence-4096 workload has passed. WSL evidence must not be reported as a native-Linux result.
 
 CorpusStudio treats **WSL as its own platform** (`OperatingSystem.wsl`): it has separately measured
 flash evidence but `wddm` memory-residency like Windows (it still spills - see below). A new platform

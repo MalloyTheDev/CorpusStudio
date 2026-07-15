@@ -76,9 +76,10 @@ Before model loading, the execution path:
 6. Observes the model attention API and initial placement, then re-hashes local model/tokenizer roots
    after third-party loading.
 7. After PEFT attachment, observes every parameter device, base storage/NF4 identity,
-   dequantization dtype, and trainable master dtype; gradient and optimizer-state dtype/device guards
-   run when those tensors materialize. A mismatch becomes a structured `placement_deviation` or
-   unsupported-configuration failure.
+   dequantization dtype, and trainable master dtype; a post-accumulation hook verifies each
+   materialized leaf gradient (not an earlier autocast edge tensor), and optimizer-state dtype/device
+   guards run when those tensors materialize. A mismatch becomes a structured `placement_deviation`
+   or unsupported-configuration failure.
 8. Requires the exact sealed TRL configuration surface; semantic fields are never silently removed.
 
 For subprocess runs, protocol 2.0 includes the execution-configuration hash in `run_accepted`. The

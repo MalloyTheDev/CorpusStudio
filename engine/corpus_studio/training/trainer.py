@@ -987,7 +987,7 @@ def verify_loaded_model_execution(model: Any, config: TrainRunConfig) -> None:
 
 
 def enforce_trainable_precision(model: Any, torch_module: Any, config: TrainRunConfig) -> None:
-    """Put trainable adapter weights in the sealed master dtype and guard every gradient dtype."""
+    """Put adapter weights in the sealed master dtype and guard materialized gradients."""
 
     if config.execution_configuration_hash is None:
         return
@@ -1005,7 +1005,30 @@ def enforce_trainable_precision(model: Any, torch_module: Any, config: TrainRunC
         if parameter.dtype != master_dtype:
             raise TrainerError(f"could not enforce master-weight dtype for {name}")
 
-        def _verify_gradient(gradient: Any, *, parameter_name: str = name) -> Any:
+        register_post_accumulate = getattr(
+            parameter, "register_post_accumulate_grad_hook", None
+        )
+        if not callable(register_post_accumulate):
+            raise TrainerError(
+                "the training runtime cannot verify materialized adapter gradients after "
+                f"accumulation: {name}"
+            )
+
+        def _verify_gradient(
+            materialized_parameter: Any,
+            *,
+            parameter_name: str = name,
+            expected_parameter: Any = parameter,
+        ) -> None:
+            if materialized_parameter is not expected_parameter:
+                raise TrainerError(
+                    f"post-accumulation gradient hook identity changed for {parameter_name}"
+                )
+            gradient = getattr(expected_parameter, "grad", None)
+            if gradient is None:
+                raise TrainerError(
+                    f"materialized gradient is missing for {parameter_name}"
+                )
             if gradient.dtype != gradient_dtype:
                 raise TrainerError(
                     f"gradient dtype deviation for {parameter_name}: "
@@ -1016,9 +1039,8 @@ def enforce_trainable_precision(model: Any, torch_module: Any, config: TrainRunC
                     f"PLACEMENT_DEVIATION: gradient {parameter_name} is on {gradient.device}, "
                     f"expected {expected_device}"
                 )
-            return gradient
 
-        parameter.register_hook(_verify_gradient)
+        register_post_accumulate(_verify_gradient)
         trainable.append(name)
     if not trainable:
         raise TrainerError("the sealed adapter configuration produced no trainable parameters")
