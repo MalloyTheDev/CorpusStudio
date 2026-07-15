@@ -307,12 +307,16 @@ now allows a 0-dim scalar counter on the expected device or CPU while still reje
 (non-scalar) moment tensor. Separately, the enforced attention-kernel context's cleanup seal
 reassertion could raise and replace a real `GRADIENT_FAILURE`/`OPTIMIZER_FAILURE` with an environment
 error; it now subordinates a restoration error while a workload failure is already propagating. These
-change the worker execution bytes again, so the eventual next environment pair is a fresh **v5**
-identity (e.g. `backend-corpus-studio-research-math-v5` / `backend-corpus-studio-research-flash-v5`),
-built from the corrected commit under a new research amendment (0002 -> effective matrix 1.2.0) whose
-reserved-identity set (`RESERVED_IDENTITIES.v2.json`) additionally enumerates the now-historical v4
-identities. Do not build the wheel, create v5, or dispatch a GPU smoke until that amendment is
-reviewed and separately approved.
+change the worker execution bytes again, so the next environment pair is a fresh **v5**
+identity (`backend-corpus-studio-research-math-v5` / `backend-corpus-studio-research-flash-v5`),
+built from the corrected commit. Research amendment **0002 -> effective matrix 1.2.0** is now merged
+(#448, effective-matrix sha256 `168189145150c0ed13ce70151a065c9490d9e70052ca30569aac709e718f9e12`);
+it allocates the v5 identities, binds the audited worker source `df86db5`, and its reserved-identity
+set (`RESERVED_IDENTITIES.v2.json`) enumerates every now-historical v4 identity as non-reusable. The
+amendment is prospective and does not itself authorize GPU work: building the v5 wheel, creating the
+v5 environments, and dispatching the 0.5B smokes remain gated on a separate human GPU/resource
+authorization. When that authorization is given, execute the exact ordered procedure in
+[`research/ieee-linux-training/RUNBOOK_v5_bringup.md`](../research/ieee-linux-training/RUNBOOK_v5_bringup.md).
 
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 

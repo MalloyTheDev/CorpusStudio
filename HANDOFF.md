@@ -298,9 +298,12 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
    fix), and the enforced attention-kernel cleanup could rewrite a real GRADIENT/OPTIMIZER failure as
    an environment error. Both are corrected with CPU/unit evidence only. Because worker execution
    bytes changed once more, the next wheel and next environment IDs/locks must be built from this
-   corrected commit; the eventual environment pair is a fresh **v5** identity (see the manager-1.3 v4 section of
-   `docs/HOST_STATE.md`) and requires a new research amendment (0002 -> effective matrix 1.2.0) that
-   also reserves the now-historical v4 identities before any GPU smoke.
+   corrected commit; the environment pair is a fresh **v5** identity (see the manager-1.3 v4 section of
+   `docs/HOST_STATE.md`). Research amendment **0002 -> effective matrix 1.2.0 is now merged** (#448,
+   effective sha256 `168189145...b9c`): it allocates the v5 identities, binds the audited worker source
+   `df86db5`, and reserves every now-historical v4 identity (`RESERVED_IDENTITIES.v2.json`). The
+   amendment is prospective; the wheel/env/smoke steps are gated only on a separate GPU authorization.
+   The exact ordered procedure is [`research/ieee-linux-training/RUNBOOK_v5_bringup.md`](research/ieee-linux-training/RUNBOOK_v5_bringup.md).
 2. **Continue hardware-independent work alongside the measured workload bring-up:** bounded event
    journaling, prepared-dataset/transactional row-store groundwork, TraceRecord identity/governance,
    and remaining desktop/web contracts. Keep non-trivial placement/offload execution unimplemented
