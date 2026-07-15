@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Markup.Xaml;
 using Avalonia.Styling;
 using CorpusStudio.Avalonia.Services;
 using CorpusStudio.Desktop.Models;
@@ -25,7 +26,7 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
-        InitializeComponent();
+        AvaloniaXamlLoader.Load(this);
         // The Settings → Appearance segmented toggle reflects the ACTUAL applied variant (which is
         // always Light or Dark, even when the app follows the OS via Default). Keep it in sync whenever
         // the resolved variant changes; also seed it once the visual tree is up.

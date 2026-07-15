@@ -81,7 +81,7 @@ public sealed class ArenaViewModel : ViewModelBase, IArenaViewModel
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var models = new List<string>();
         foreach (var token in (text ?? string.Empty).Split(
-                     [',', '\n', '\r'],
+                     new[] { ',', '\n', '\r' },
                      StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             if (seen.Add(token))
@@ -284,7 +284,8 @@ public sealed class ArenaViewModel : ViewModelBase, IArenaViewModel
     private static string SingleLine(string text)
     {
         return string.Join(" ", (text ?? string.Empty).Split(
-            ['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            new[] { '\r', '\n' },
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     }
 
     private static string IndentBlock(string text)
