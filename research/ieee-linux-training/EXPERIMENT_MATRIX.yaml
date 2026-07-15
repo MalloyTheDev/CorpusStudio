@@ -1,0 +1,291 @@
+schema_version: "1.0.0"
+protocol_version: "1.0.0"
+study_id: "cs-ieee-linux-training-v1"
+preregistered_date: "2026-07-14"
+immutable_after_first_result: true
+
+host_binding:
+  operating_system: "ubuntu-24.04-native-linux"
+  gpu_name: "NVIDIA GeForce RTX 5070"
+  gpu_vram_mib: 12227
+  compute_capability: "12.0"
+  gpu_architecture: "sm_120"
+  driver_version_at_preregistration: "595.71.05"
+  host_mem_total_kib_at_preregistration: 32656660
+  swap_total_kib_at_preregistration: 8388604
+  exact_profile_required_at_execution: true
+
+immutable_bindings:
+  repository_commit: "required-per-trial"
+  worker_wheel_sha256: "required-per-environment-and-trial"
+  environment_lock_hash: "required-per-trial"
+  capability_report_hash: "required-per-trial"
+  execution_probe_hash: "required-per-trial"
+  run_plan_hash: "required-per-trial"
+  resolved_execution_configuration_hash: "required-per-trial"
+  model_content_sha256: "required-before-planning"
+  tokenizer_content_sha256: "required-before-planning"
+  chat_template_sha256: "required-before-planning"
+  dataset_content_sha256: "required-before-planning"
+
+models:
+  - id: "qwen2.5-0.5b-instruct"
+    source_repository: "Qwen/Qwen2.5-0.5B-Instruct"
+    nominal_parameters_billion: 0.5
+    order_index: 0
+    local_immutable_snapshot_required: true
+    trust_remote_code: false
+  - id: "qwen2.5-3b-instruct"
+    source_repository: "Qwen/Qwen2.5-3B-Instruct"
+    nominal_parameters_billion: 3.0
+    order_index: 1
+    local_immutable_snapshot_required: true
+    trust_remote_code: false
+  - id: "qwen2.5-7b-instruct"
+    source_repository: "Qwen/Qwen2.5-7B-Instruct"
+    nominal_parameters_billion: 7.0
+    order_index: 2
+    local_immutable_snapshot_required: true
+    trust_remote_code: false
+
+dataset:
+  id: "cs-ieee-linux-sft-v1"
+  source: "immutable-local-license-cleared-corpus"
+  source_content_sha256: "bind-before-first-new-result"
+  sequence_view_binding_key: "model-tokenizer-sha256-and-sequence-length"
+  sequence_view_content_sha256: "required-before-planning"
+  sequence_view_rendered_examples_sha256: "required-before-planning"
+  exact_non_padding_input_length: "declared-sequence-length"
+  same_view_required_across_execution_paths: true
+  same_view_required_across_adapter_methods: true
+  fixed_row_order: true
+  packing: false
+  truncation_allowed: false
+  license_evidence_required: true
+
+first_party_execution_paths:
+  - id: "first-party-math"
+    backend_id: "corpus_studio"
+    environment_id: "backend-corpus-studio-research-math-v1"
+    attention_api: "sdpa"
+    effective_backend_required: "torch_sdpa_math"
+    flash_sdp_enabled: false
+    mem_efficient_sdp_enabled: false
+    math_sdp_enabled: true
+    external_flash_attention: false
+    fallback_policy: "refuse"
+    order_index: 0
+  - id: "first-party-flash"
+    backend_id: "corpus_studio"
+    environment_id: "backend-corpus-studio-research-flash-v1"
+    attention_api: "sdpa"
+    effective_backend_required: "torch_sdpa_flash"
+    flash_sdp_enabled: true
+    mem_efficient_sdp_enabled: false
+    math_sdp_enabled: false
+    external_flash_attention: false
+    fallback_policy: "refuse"
+    order_index: 1
+
+primary_training_configuration:
+  task_type: "sft"
+  adapter:
+    method: "qlora"
+    rank: 16
+    alpha: 32
+    dropout: 0.05
+    bias: "none"
+    target_modules:
+      - "all-linear"
+  precision:
+    forward_autocast: "bf16"
+    quantization_compute: "bf16"
+    adapter_weights: "fp32"
+    adapter_gradients: "fp32"
+  quantization:
+    method: "nf4"
+    bits: 4
+    double_quantization: true
+  optimizer:
+    implementation: "adamw_torch"
+    learning_rate: 0.0002
+    weight_decay: 0.0
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 0.00000001
+    max_gradient_norm: 1.0
+    scheduler: "linear"
+    warmup_ratio: 0.0
+  loss: "cross_entropy"
+  microbatch_size: 1
+  gradient_accumulation_steps: 1
+  gradient_checkpointing: true
+  packing: false
+  truncation_allowed: false
+  offload_strategy: "none"
+  compile_mode: "none"
+  checkpoint_strategy: "no"
+  intermediate_checkpoints: false
+  evaluation:
+    before_run: false
+    during_run: false
+    after_run: false
+  data_shuffle: true
+  data_order_seeded: true
+  trust_remote_code: false
+  use_safetensors: true
+
+primary_matrix:
+  expansion: "cartesian-product"
+  model_ids:
+    - "qwen2.5-0.5b-instruct"
+    - "qwen2.5-3b-instruct"
+    - "qwen2.5-7b-instruct"
+  sequence_lengths:
+    - 512
+    - 1024
+    - 2048
+    - 3072
+    - 4096
+  execution_path_ids:
+    - "first-party-math"
+    - "first-party-flash"
+  adapter_methods:
+    - "qlora"
+  expected_cell_count: 30
+  sequence_4096_attempt_required: true
+  batch_change_between_paths_allowed: false
+
+feasibility_smoke:
+  required_before_characterization: true
+  optimizer_steps: 3
+  warmup_steps_excluded: 0
+  repeat_count: 1
+  seed: 41999
+  data_seed: 51999
+  exact_step_count_required: true
+  finite_loss_required: true
+  terminal_success_required: true
+  adapter_and_manifest_hashes_required: true
+  clean_post_environment_health_required: true
+
+characterization_trials:
+  total_optimizer_steps: 12
+  warmup_optimizer_steps: 2
+  measured_optimizer_steps: 10
+  repeat_count: 3
+  trial_seeds:
+    - 42001
+    - 42002
+    - 42003
+  data_seeds:
+    - 52001
+    - 52002
+    - 52003
+  trial_is_replication_unit: true
+  no_intermediate_checkpoints: true
+
+execution_order:
+  model_order: "ascending-order-index"
+  sequence_order: "ascending"
+  kernel_pairing: "matched-by-model-sequence-trial-index"
+  kernel_counterbalance_rule: "even(model_index + sequence_index + trial_index)=math-first; odd=flash-first"
+  feasibility_trial_index: 0
+  cooldown_start_temperature_max_c: 45
+  cooldown_timeout_seconds: 600
+  require_no_unrelated_gpu_process: true
+  stop_loaded_ollama_models: true
+
+telemetry:
+  nvidia_smi_interval_ms: 200
+  record_raw_step_events: true
+  record_cuda_allocated: true
+  record_cuda_reserved: true
+  record_process_gpu_memory: true
+  record_host_rss: true
+  record_swap: true
+  record_gpu_utilization: true
+  record_memory_controller_utilization_when_available: true
+  record_power: true
+  record_temperature: true
+  record_clocks_when_available: true
+  energy_integration: "trapezoidal"
+
+safety_limits:
+  gpu_temperature_stop_c: 85
+  host_rss_absolute_stop_gib: 56
+  host_rss_fraction_of_physical_stop: 0.90
+  effective_host_rss_stop: "lower-of-absolute-and-fractional-limits"
+  swap_growth_stop_mib: 256
+  swap_growth_sustained_seconds: 30
+  gpu_unresponsive_consecutive_polls: 3
+  optimizer_step_wall_time_stop_seconds: 900
+  trial_wall_time_stop_seconds: 3600
+  maximum_measured_optimizer_steps: 10
+  one_gpu_workload_at_a_time: true
+  automatic_workload_retry_count: 0
+  maximum_infrastructure_retry_count: 1
+
+statistics:
+  unit_of_replication: "trial"
+  summaries:
+    - "individual-values"
+    - "mean"
+    - "median"
+    - "sample-standard-deviation"
+    - "minimum"
+    - "maximum"
+    - "sample-count"
+    - "two-sided-95-percent-student-t-confidence-interval"
+  paired_kernel_differences: true
+  paired_kernel_ratios: true
+  failure_imputation: "none"
+  outlier_exclusion: "none"
+
+secondary_adapter_matrix:
+  status: "gated-until-primary-stable"
+  model_ids:
+    - "qwen2.5-0.5b-instruct"
+    - "qwen2.5-3b-instruct"
+  sequence_lengths:
+    - 1024
+    - 4096
+  adapter_methods:
+    - "lora"
+    - "qlora"
+  execution_path_ids:
+    - "first-party-math"
+    - "first-party-flash"
+    - "unsloth-when-independently-verified"
+  match_adapter_hyperparameters: true
+  qlora_quantization: "nf4-double-quant-bf16-compute"
+  lora_quantization: "none"
+  seven_b_lora_policy: "predicted-fit-first; attempt-only-if-exact-sealed-plan-is-viable"
+
+adaptive_follow_up:
+  part_of_primary_matrix: false
+  allowed_only_after_fixed_ladder: true
+  candidate_sequence_lengths:
+    - 1280
+    - 1536
+    - 2560
+    - 3584
+
+claim_boundaries:
+  model_quality_claims: false
+  full_convergence_claims: false
+  long_duration_stability_claims: false
+  windows_claims: false
+  wsl_claims: false
+  macos_claims: false
+  external_flash_attention_claims: false
+  offload_claims: false
+  moe_runtime_claims: false
+  other_gpu_claims: false
+
+amendment_policy:
+  directory: "amendments"
+  version_increment_required: true
+  preserve_prior_versions: true
+  disclose_results_visible_before_change: true
+  primary_matrix_cells_may_not_be_replaced: true
