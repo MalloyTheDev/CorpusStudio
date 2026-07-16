@@ -79,6 +79,7 @@ from corpus_studio.reporting.dataset_card import (
 )
 from corpus_studio.evaluation.reports import EvaluationReport
 from corpus_studio.suites.models import SuiteCase
+from corpus_studio.platform.app_paths import corpusstudio_data_home
 from corpus_studio.schemas.registry import list_builtin_schemas, load_builtin_schema, repository_root
 from corpus_studio.splitters.leakage import detect_split_leakage
 from corpus_studio.splitters.random_splitter import random_split
@@ -118,6 +119,48 @@ def _repo_relative_path(env_name: str, fallback: Path) -> Path:
     if not path.is_absolute():
         path = repository_root() / path
     return path
+
+
+class OutputContainmentError(ValueError):
+    """A requested output root resolves inside the repository checkout (containment finding F5)."""
+
+
+def _default_output_root() -> str:
+    """Sealed output root used when --output-dir is omitted: application-data, never the checkout.
+
+    Derives from the shared CorpusStudio application-data base (LOCALAPPDATA on Windows, XDG_DATA_HOME
+    otherwise), the same base as the Environment Manager root, so runtime run trees + adapters land
+    under a stable per-user location OUTSIDE any source tree (containment finding F5)."""
+
+    return os.path.abspath(corpusstudio_data_home() / "runs")
+
+
+def _resolve_sealed_output_root(output_dir: Optional[str]) -> str:
+    """Resolve, canonicalize, and CONTAIN the sealed output root (containment finding F5).
+
+    Absolutizing alone is not containment: ``os.path.abspath("output")`` invoked from the checkout still
+    yields ``<repo>/output``. So this instead:
+    - defaults to the CorpusStudio application-data runs root (OUTSIDE any checkout) when --output-dir
+      is omitted, so a plan dispatched from the repository never writes into the tree;
+    - expands ``~`` and canonicalizes with ``realpath`` so the sealed root is absolute and
+      CWD-independent, collapsing ``..`` traversal and resolving symlinks to their real target;
+    - refuses any root that resolves INTO the repository checkout - the repo root itself or any
+      descendant (``.git``, ``engine``, ``apps``, ``docs``, ``research``, ``examples``, ``tests``, ...).
+      A single "is the repo root an ancestor" test covers all of them, and because realpath ran first it
+      also catches ``..`` re-entry and symlinks whose real target is in the repo.
+    External absolute roots (a user ``/mnt/...`` path, the v7 runs root) are not repo descendants and
+    pass through canonicalized unchanged."""
+
+    raw = output_dir if output_dir is not None else _default_output_root()
+    resolved = Path(os.path.realpath(os.path.expanduser(raw)))
+    repo = Path(os.path.realpath(repository_root()))
+    if resolved == repo or repo in resolved.parents:
+        raise OutputContainmentError(
+            f"output root resolves inside the repository checkout: {resolved} is within {repo}. "
+            "Runtime output must live outside the source tree; omit --output-dir to use the "
+            "CorpusStudio application-data directory, or pass an external absolute path."
+        )
+    return str(resolved)
 
 
 def _index_enabled() -> bool:
@@ -831,12 +874,14 @@ def platform_plan(
     dataset_ref: str = typer.Option("dataset", "--dataset-ref", help="Stable id for the dataset the plan references."),
     task_type: str = typer.Option("sft", "--task-type", help="Training task type (sft / preference / …)."),
     dataset_format: str = typer.Option("instruction", "--dataset-format", help="Row format: instruction (Alpaca) or chat (messages)."),
-    output_dir: str = typer.Option(
-        "output",
+    output_dir: Optional[str] = typer.Option(
+        None,
         "--output-dir",
         help=(
-            "Sealed output root. Each execution writes beneath "
-            "<root>/runs/<run-id>/artifacts/adapter."
+            "Sealed output root; each execution writes beneath "
+            "<root>/runs/<run-id>/artifacts/adapter. Omit to use the CorpusStudio "
+            "application-data directory (outside the source tree). A path that resolves "
+            "inside the repository checkout is refused."
         ),
     ),
     sequence_len: int = typer.Option(4096, "--sequence-len", help="Max sequence length (flows into the plan verbatim)."),
@@ -960,6 +1005,14 @@ def platform_plan(
     if not dataset_conformance.is_conformant:
         typer.echo(dataset_conformance.describe_refusal(dataset_path), err=True)
         raise typer.Exit(2)
+    # Resolve, canonicalize, and CONTAIN the sealed output root so a plan's write location is
+    # CWD-independent and can never land inside the checkout (containment finding F5). Omission defaults
+    # to the application-data runs root; an in-repo path is refused fail-closed before any plan id mints.
+    try:
+        output_dir = _resolve_sealed_output_root(output_dir)
+    except OutputContainmentError as exc:
+        typer.echo(f"invalid output root: {exc}", err=True)
+        raise typer.Exit(2) from exc
     constraints = PlannerConstraints(
         base_model=base_model,
         model_revision=model_revision,

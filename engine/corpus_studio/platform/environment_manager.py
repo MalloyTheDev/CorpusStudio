@@ -42,6 +42,7 @@ if sys.platform == "win32":
 else:
     import fcntl
 
+from .app_paths import corpusstudio_data_home
 from .backends import backend_manifest_digest, get_worker_backend
 from .common import HashRef, PackageLock, PackageSource, Ref
 from .contracts import (
@@ -574,12 +575,11 @@ def _atomic_model(path: Path, model: object) -> None:
 
 
 def default_manager_root() -> Path:
-    """User-owned manager state; on Windows this is the internal system drive by default."""
-    if os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-        return base / "CorpusStudio" / "environment-manager"
-    data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-    return data_home / "corpusstudio" / "environment-manager"
+    """User-owned manager state; on Windows this is the internal system drive by default.
+
+    Derives from the shared CorpusStudio application-data base so the manager root and the default run
+    output root cannot diverge (both live outside any source checkout)."""
+    return corpusstudio_data_home() / "environment-manager"
 
 
 def _operating_system(system: str, release: str = "") -> OperatingSystem:

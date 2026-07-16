@@ -71,3 +71,12 @@ coverage.xml
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 engine/.pytest_tmp*/
+
+# Generated run output (containment finding F5): HISTORICAL DEFENSE-IN-DEPTH ONLY. Primary protection
+# is now the plan-time containment guard in cli.py (_resolve_sealed_output_root), which defaults the
+# sealed output root to the CorpusStudio application-data dir and refuses any root resolving inside the
+# checkout. These anchors remain to swallow any legacy/stray in-checkout write, and are anchored to the
+# repo root ONLY so a legitimate tracked artifact (e.g.
+# examples/wbg/adapter-seq1536-baseline/adapter_model.safetensors) is never hidden.
+/output/
+/engine/output/
