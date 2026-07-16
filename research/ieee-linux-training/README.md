@@ -9,10 +9,11 @@ Files:
 - [PROTOCOL.md](PROTOCOL.md) defines the design, controls, execution order, stopping rules, exclusions, and claim boundaries.
 - [HYPOTHESES.md](HYPOTHESES.md) separates confirmatory hypotheses from exploratory analyses.
 - [EXPERIMENT_MATRIX.yaml](EXPERIMENT_MATRIX.yaml) is the immutable, machine-readable factor and trial specification.
-- [EXPERIMENT_MATRIX.v1.2.0.json](EXPERIMENT_MATRIX.v1.2.0.json) is the complete, hash-sealed
-  **current** effective matrix (after amendment 0002).
-  [EXPERIMENT_MATRIX.v1.1.0.json](EXPERIMENT_MATRIX.v1.1.0.json) (amendment 0001) is retained as a
-  frozen historical document.
+- [EXPERIMENT_MATRIX.v1.3.0.json](EXPERIMENT_MATRIX.v1.3.0.json) is the complete, hash-sealed
+  **current** effective matrix (after amendment 0003).
+  [EXPERIMENT_MATRIX.v1.2.0.json](EXPERIMENT_MATRIX.v1.2.0.json) (amendment 0002) and
+  [EXPERIMENT_MATRIX.v1.1.0.json](EXPERIMENT_MATRIX.v1.1.0.json) (amendment 0001) are retained as
+  frozen historical documents.
 - [METRICS.md](METRICS.md) defines measurement windows, formulas, units, and summaries.
 - [FAILURE_TAXONOMY.md](FAILURE_TAXONOMY.md) defines success and terminal classifications.
 - [REPRODUCIBILITY.md](REPRODUCIBILITY.md) defines the identity chain, evidence layout, and replay requirements.
@@ -37,6 +38,20 @@ defines the ~500-output full-training phase separately from feasibility. The val
 append-only reservation and hash-binds the frozen 0001 amendment. The complete versioned JSON matrix
 is the effective study specification; no prior environment, RunPlan, failed run, or result is
 relabeled.
+
+Amendment [0003](amendments/0003-2026-07-16-v6-worker-lineage-telemetry-and-artifact-corrections.md)
+supersedes 0002 with effective protocol version **1.3.0**: the v5 bring-up produced the study's first
+real GPU training then failed at export, and the two worker-child corrections #461 (narrow
+`training_args.bin` admission) and #462 (complete paper telemetry) changed worker execution bytes, so a
+fresh **v6** blue/green lineage is required. 1.3.0 replaces the v5 environment IDs with
+`backend-corpus-studio-research-{math,flash}-v6`, requires the worker source to descend from `af28be9`,
+and extends the reserved-identity registry to
+[v3](amendments/RESERVED_IDENTITIES.v3.json) (append-only over v2, reserving every fully instantiated
+v5 identity). The scientific tuple (Qwen2.5-0.5B, chat, seq 256, mb 1, ga 1, 12 steps, QLoRA
+r16/alpha32) is unchanged. **Result (2026-07-16):** both matched v6 0.5B smokes SUCCEEDED -
+`V6_MATH_AND_FLASH_BRINGUP_PASS` (12 steps each, adapter admitted, measured `NATIVE_SAFE`,
+`scientifically_complete=True`); one honestly-recorded non-blocking token-throughput observer gap
+(`tokens/sec = 0.0`, a future v7 fix). See [`docs/HOST_STATE.md`](../../docs/HOST_STATE.md) v6 section.
 
 ## Evidence boundary at preregistration
 
