@@ -1,6 +1,19 @@
 # CorpusStudio — Session Handoff
 
-**Last updated:** 2026-07-16 (**v6 0.5B GPU bring-up PASSED - `V6_MATH_AND_FLASH_BRINGUP_PASS`**). After
+**Last updated:** 2026-07-16 (**v7 0.5B GPU bring-up PASSED - `V7_MATH_AND_FLASH_THROUGHPUT_PASS`**: the
+v6 token-throughput observer gap is fixed (PR #466, merge `25c901ec`; amendment 0004 -> matrix 1.4.0;
+reproducible v7 wheel `090f879b...` from source `21aa81d9`; matched `research-{math,flash}-v7`
+environments) and **validated on both arms** - positive non-padding AND supervised counts with
+`observed_microbatches=1` on every measured step, rates equal to observed tokens / duration,
+`scientific_throughput_complete=True` as-dispatched; runs `run-019f6956...` (math, `torch_sdpa_math`) /
+`run-019f6966...` (flash, `torch_sdpa_flash`), 12 steps each, 336/336 adapter tensors, adapter admitted,
+measured `NATIVE_SAFE`, under `.../runs/ieee-linux-training/v7-smoke-21aa81d9/`; sealed evidence
+`.../evidence/v7-smoke-21aa81d9/`. One non-scientific caveat (resolved, follow-up filed): the v7 build
+tooling wrote the source commit under `audited_commit` not the telemetry reader's canonical
+`source_commit`, so the auto summary lacked `identity.repository_commit`
+(`scientific_resource_complete=false`); re-deriving from the preserved raw records with the authentic
+sealed commit yields `paper_performance_complete=true` with zero measurement change. Prior milestone
+below: **`V6_MATH_AND_FLASH_BRINGUP_PASS`**.) After
 the v5 bring-up hit its first real GPU training then failed at export, the worker-child corrections #461
 (narrow `training_args.bin` admission) and #462 (complete paper telemetry) forced a fresh **v6** lineage:
 research amendment **0003 -> effective matrix 1.3.0** (reserves all v1-v5 identities), a reproducible v6
@@ -21,9 +34,10 @@ stack. **Fix now landed on the source side** (branch `fix/token-throughput-accou
 `observed_microbatches`, and gate `scientific_throughput_complete` / `paper_performance_complete`
 separately from resource completeness; proven on the real pinned stack (`INTEGRATION_PASS`, counts
 40/39/42 per step, collate-wrap fired 0). Because the observer runs in the worker child it changes
-worker bytes -> the **v7** lineage (amendment 0004, math/flash-v7) is the next step. Still a 0.5B
+worker bytes -> the **v7** lineage (amendment 0004, math/flash-v7). **That v7 lineage is now COMPLETE
+and PASSED** (`V7_MATH_AND_FLASH_THROUGHPUT_PASS`, see the lead paragraph above). Still a 0.5B
 feasibility bring-up, NOT a 7B or full-training claim. Details in
-[`docs/HOST_STATE.md`](docs/HOST_STATE.md) (v6 section). Earlier (2026-07-15,
+[`docs/HOST_STATE.md`](docs/HOST_STATE.md) (v6 + v7 sections). Earlier (2026-07-15,
 pre-GPU finalization): the exact checkpoint/resume **execution engine**
 #454 - torch worker that writes + restores sealed checkpoints, proven by a real-torch fresh-process
 **bitwise-equivalence** test; amendment-0002 reconciliation #455 - classification

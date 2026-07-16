@@ -67,7 +67,18 @@ and extends the reserved-identity registry to
 [v4](amendments/RESERVED_IDENTITIES.v4.json) (append-only over v3, reserving every fully instantiated
 v6 identity). The scientific tuple is unchanged; a v7 pass now additionally requires valid token
 accounting (positive non-padding and supervised counts every measured step, rates equal to observed
-tokens / duration, `paper_performance_complete=true`).
+tokens / duration, `paper_performance_complete=true`). **Result (2026-07-16):** both matched v7 0.5B
+smokes SUCCEEDED - `V7_MATH_AND_FLASH_THROUGHPUT_PASS`. Worker wheel
+`090f879b...606479b2` (source `21aa81d9`); runs `run-019f6956...` (math, `torch_sdpa_math`) and
+`run-019f6966...` (flash, `torch_sdpa_flash`); each 12 steps, decreasing loss, adapter admitted (336/336),
+measured `NATIVE_SAFE`. The v6 observer gap is fixed and validated: positive non-padding AND supervised
+counts with `observed_microbatches=1` on every measured step, rates equal to observed tokens / duration,
+`scientific_throughput_complete=True` as-dispatched. One non-scientific caveat (resolved): the v7 build
+tooling wrote the source commit under `audited_commit` rather than the telemetry reader's canonical
+`source_commit`, so the auto summary lacked `identity.repository_commit`
+(`scientific_resource_complete=false`); re-deriving from the preserved raw records with the authentic
+sealed commit yields `paper_performance_complete=true` with no measurement change. See
+[`docs/HOST_STATE.md`](../../docs/HOST_STATE.md) v7 section.
 
 ## Evidence boundary at preregistration
 

@@ -75,9 +75,9 @@ From `engine/` with the venv (`engine/.venv`, CPython 3.12.3, torch-free core + 
    integrity, failure taxonomy, or provenance rule to obtain a passing run.
 5. **Blackwell / sm_120.** The **math** SDPA attention path is the verified-safe default (fused
    flash-SDPA deadlocks on native Windows/WDDM). Unsloth is refused on Windows/WDDM. Bare-Linux
-   forced-`torch_sdpa_flash` is VERIFIED only at the bounded 0.5B / seq-256 / 12-step tuple (v6); it is
-   NOT claimed for the real 7B / full-corpus workload, nor for `flash_attention_2` / external
-   `flash-attn` / seq 4096 / Windows-WDDM.
+   forced-`torch_sdpa_flash` is VERIFIED only at the bounded 0.5B / seq-256 / 12-step tuple (v6, and
+   re-validated with valid per-step token throughput in v7); it is NOT claimed for the real 7B /
+   full-corpus workload, nor for `flash_attention_2` / external `flash-attn` / seq 4096 / Windows-WDDM.
 6. **ASCII in CLI-facing strings** (Windows console UTF-8): use `-`, not the em dash; no non-ASCII in
    `typer` help, `raise ...Error(...)` messages, or anything printed to a console.
 7. **One training authority.** Shipping clients use `platform-plan` -> `platform-run`; never the
@@ -240,18 +240,26 @@ A run can be a workload success yet not paper-usable. `RunTelemetrySummary.compl
 
 ## Where the current program stands (update this as it moves)
 
-The active thread is bringing CorpusStudio to full 7B training/research readiness. The **v6 0.5B GPU
-bring-up PASSED (`V6_MATH_AND_FLASH_BRINGUP_PASS`, 2026-07-16)**: after the v5 bring-up produced the
-first real training (12 QLoRA steps) but failed at export, the worker-child corrections #461 (narrow
-`training_args.bin` admission) and #462 (paper-telemetry completeness) forced a fresh v6 lineage -
-amendment 0003 -> effective matrix **1.3.0** -> `RESERVED_IDENTITIES.v3` -> reproducible v6 wheel
-`bdc32196...` (source `73b756c`) -> `-math-v6`/`-flash-v6` environments (both `HARDWARE_VERIFIED`,
-forced `torch_sdpa_math`/`torch_sdpa_flash`) -> fresh matched chat plans -> **both smokes succeeded**
-(runs `run-019f688c...` / `run-019f6892...`; 12 steps, loss ~5.43->~0.38, adapter admitted, measured
-`NATIVE_SAFE`, `scientifically_complete=True`). One honestly-recorded non-blocking gap:
-`nonpadding/supervised_tokens_per_second = 0.0` (a runner-side token-observer gap under
-trl 1.8.0/transformers 5.13.1; not a required paper field; a future **v7** worker fix). This is a 0.5B
-feasibility result, NOT a 7B or full-training claim. Remaining gates each need separate human
-authorization: the corpus freeze, then the 7B sequence ladder and full runs. This paragraph goes stale
-fast: the authoritative, volatile identity + readiness detail always lives in `HANDOFF.md` +
-`docs/HOST_STATE.md` - trust those over this paragraph.
+The active thread is bringing CorpusStudio to full 7B training/research readiness. The **v7 0.5B GPU
+bring-up PASSED (`V7_MATH_AND_FLASH_THROUGHPUT_PASS`, 2026-07-16)**: the v6 token-throughput observer gap
+(`tokens/sec = 0.0`, UNAVAILABLE not zero) was fixed in the worker child by PR **#466** (merge
+`25c901ec`) - observe `inputs` at `SFTTrainer.training_step` (the trainer's un-bypassable consumption
+boundary), emit raw per-step counts, and gate `scientific_throughput_complete` /
+`paper_performance_complete` separately from resource completeness. That worker-byte change forced a
+fresh v7 lineage: amendment 0004 -> effective matrix **1.4.0** -> `RESERVED_IDENTITIES.v4` (reserves all
+v1-v6) -> reproducible v7 wheel `090f879b...` (source `21aa81d9`) -> `-math-v7`/`-flash-v7` environments
+-> fresh matched chat plans (A7 normalized comparison UNEXPECTED=0) -> **both smokes succeeded** (runs
+`run-019f6956...` / `run-019f6966...`; 12 steps, loss ~5.43->~0.38, adapter admitted 336/336, measured
+`NATIVE_SAFE`), with the token observer now firing on **every** step (positive non-padding + supervised,
+`observed_microbatches=1`, rates == observed tokens / duration, `scientific_throughput_complete=True`
+as-dispatched). **Lesson (build-provenance):** the shipped telemetry reader
+(`_build_provenance_source_commit`) reads key **`source_commit`** from the wheel's `BUILD_PROVENANCE.json`
+to populate `identity.repository_commit`; a build-provenance generator that writes the commit under a
+different key (v7 used `audited_commit`) leaves the auto summary `scientific_resource_complete=false`.
+The commit is authentic and recoverable, so re-deriving the summary from the PRESERVED raw records with
+the sealed commit via the identity overlay restores `paper_performance_complete=true` with zero
+measurement change - but future wheel builds must emit `source_commit`. This is a 0.5B feasibility result,
+NOT a 7B or full-training claim. Remaining gates each need separate human authorization: the corpus
+freeze, then the 7B sequence ladder and full runs. This paragraph goes stale fast: the authoritative,
+volatile identity + readiness detail always lives in `HANDOFF.md` + `docs/HOST_STATE.md` - trust those
+over this paragraph.

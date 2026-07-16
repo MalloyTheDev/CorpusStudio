@@ -1,9 +1,10 @@
 # Host State — Native-Linux RTX 5070 Workstation
 
-**Last verified:** 2026-07-16 (manager-1.3 **v6** math/flash environments created, probed, and
-dispatched: both 0.5B smokes succeeded - `V6_MATH_AND_FLASH_BRINGUP_PASS`; see the v6 section below.
-Earlier v1-v5 environment, plan, and run evidence remains preserved and non-reusable; legacy
-environment, GPU, and paths were checked 2026-07-14).
+**Last verified:** 2026-07-16 (manager-1.3 **v7** math/flash environments created, probed, and
+dispatched: both 0.5B smokes succeeded AND the v6 token-throughput observer gap is fixed and validated -
+`V7_MATH_AND_FLASH_THROUGHPUT_PASS`; see the v7 section below. The v6 pair
+(`V6_MATH_AND_FLASH_BRINGUP_PASS`) remains preserved as history. Earlier v1-v6 environment, plan, and run
+evidence remains preserved and non-reusable; legacy environment, GPU, and paths were checked 2026-07-14).
 
 This file records the *verified* runtime facts of the machine CorpusStudio currently runs
 on. It supersedes the Windows `C:`/`F:` host descriptions in older docs for **"where you
@@ -374,6 +375,63 @@ claim. The fix observes `inputs` at `training_step` (the trainer's own consumpti
 throughput-validity gate + separable `scientific_throughput_complete` / `paper_performance_complete`
 completeness; because the observer runs in the worker child it changes worker bytes -> the **v7**
 lineage. This remains a 0.5B feasibility bring-up, NOT a 7B or full-training result.
+
+### Manager-1.3 v7 pair - token-throughput observer validated (math + flash), 2026-07-16
+
+The v6 token-throughput `0.0` was reclassified UNAVAILABLE (above). PR **#466** (merge `25c901ec`) moved
+token accounting to observe `inputs` at `SFTTrainer.training_step` (the trainer's own un-bypassable
+consumption boundary) and added a throughput-validity gate + separable
+`scientific_resource_complete` / `scientific_throughput_complete` / `paper_performance_complete`
+completeness. Because that observer runs in the worker child it changes worker bytes, so research amendment
+**0004 -> effective matrix 1.4.0** (effective-matrix sha256
+`0ce1fbd425e0401824c3f75f430b72bc4cc51b74e592399cd503a7084c4e593e`, `RESERVED_IDENTITIES.v4.json` sha256
+`f0c78fa77ad8f3d93035d58e4cd6b8781d095873e6bdd8c5e41a8ea970c4c27b`) reserves every v1-v6 identity,
+allocates the v7 environment ids, and requires the worker source to descend from `25c901ec`. A fresh
+reproducible v7 wheel `corpus_studio_engine-1.3.0-py3-none-any.whl` sha256
+`090f879b46d52e8c33c96fad8aeb61a41c320d44c20bd189dabfd5be606479b2` was built twice byte-identically from
+source commit `21aa81d97ff752709fd4d03791288c1bb76a2339`.
+
+| Item | Math (blue) | Flash (green) |
+|---|---|---|
+| Environment id | `backend-corpus-studio-research-math-v7` | `backend-corpus-studio-research-flash-v7` |
+| Lock hash | `35d1daf1...28907438` | `0409a632...9284dca8` |
+| Forced kernel | `torch_sdpa_math` | `torch_sdpa_flash` |
+| Plan id / hash | `plan-019f6944...` / `d960cf0e...` | `plan-019f6948...` / `089dda03...` |
+| Run id | `run-019f6956-d55c-7684-8c7a-9ebb7bad7a04` | `run-019f6966-1c87-71e4-8c30-6fc5fa085caf` |
+| Terminal state | `succeeded` | `succeeded` |
+| Steps / losses | 12 / 5.4336 -> 0.3937 | 12 / 5.4319 -> 0.3774 |
+| Per-step token counts | positive nonpadding+supervised, obs=1 every step | positive nonpadding+supervised, obs=1 every step |
+| Measured throughput (steps 3-12) | ~104 tok/s | ~108 tok/s |
+| `scientific_throughput_complete` | `True` (as-dispatched) | `True` (as-dispatched) |
+| Changed adapter tensors | 336 / 336 | 336 / 336 |
+| Adapter safetensors sha256 | `4efe3ec1...59e6d7de` | `845cdeb1...8431f000` |
+| Measured fit | `NATIVE_SAFE` (peak ~1.4 GB / 12.34 GB) | `NATIVE_SAFE` |
+| GPU temp max / energy-per-1k-nonpad-tok | 41 C / 486.85 J | 42 C / 487.79 J |
+| Post-run env state | `HARDWARE_VERIFIED`, drift `false` | `HARDWARE_VERIFIED`, drift `false` |
+
+**The v6 token-throughput gap is fixed and validated on both arms:** positive nonpadding AND supervised
+token counts with `observed_microbatches=1` on every one of the 12 optimizer steps, every measured step's
+rate equal to observed tokens / duration, `scientific_throughput_complete=True` as-dispatched. Both ran
+one at a time (Ollama unloaded, GPU idle-confirmed, supervised subprocess, 600 s silence timeout, 200 ms
+telemetry, 1 Hz temp watchdog), peaked 41-42 C with zero swap growth, and released the GPU to 10 MiB. Run
++ telemetry evidence: `/mnt/training-nvme/corpusstudio/runs/ieee-linux-training/v7-smoke-21aa81d9/{math,flash}/`;
+plans: `.../v7-bringup-21aa81d9/plans-chat/{math-v7,flash-v7}/`; sealed evidence:
+`.../evidence/v7-smoke-21aa81d9/` (`SHA256SUMS`). **Verdict: `V7_MATH_AND_FLASH_THROUGHPUT_PASS`.**
+
+*Honestly-recorded non-scientific caveat (resolved; follow-up filed):* as-dispatched, both summaries
+reported `scientific_resource_complete=false` / `paper_performance_complete=false` with
+`missing_required_paper_fields=["identity.repository_commit"]`. Every scientific MEASUREMENT was complete;
+the only gap was a provenance identity field: the shipped telemetry reader reads key `source_commit` from
+the wheel's `BUILD_PROVENANCE.json`, but the v7 build tooling recorded the authentic commit under
+`audited_commit` and omitted `source_commit`. Both summaries were re-derived from the PRESERVED raw records
+with `repository_commit` taken from the sealed sidecar's own `audited_commit`
+(`21aa81d9...`) -> `scientific_resource_complete` / `scientific_throughput_complete` /
+`paper_performance_complete` / `scientifically_complete` all `true`; a field-by-field diff shows ONLY the
+provenance field, the completeness flags it drives, and `generated_at` changed (zero measurement changes).
+Originals preserved; corrected files are `RunTelemetrySummary.rederived-authentic-commit.json` per run.
+Follow-up (does NOT block v7): the worker build-provenance generator must emit `source_commit`; SHA256SUMS
+seals the A4 sidecar so it is not mutated retroactively - the fix applies to future wheel builds. This
+remains a 0.5B feasibility bring-up, NOT a 7B or full-training result.
 
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 
