@@ -22,6 +22,7 @@ from corpus_studio.platform.contracts import HashRef, WorkerArtifactIdentity
 from corpus_studio.platform.telemetry import worker_identity_overlay
 
 _GOOD = "21aa81d97ff752709fd4d03791288c1bb76a2339"  # exact 40-char lowercase hex
+_FLOOR = "1234567890abcdef1234567890abcdef12345678"  # canonical required_git_ancestor for fixtures
 _DIST_INFO = "corpus_studio_engine-1.3.0.dist-info/"
 
 
@@ -67,11 +68,15 @@ def _minimal_wheel(path: Path, *, members: dict[str, bytes] | None = None) -> Pa
 
 
 def _stamped_wheel(path: Path, *, commit: str = _GOOD, external_copy: bool = False) -> Path:
-    """A minimal wheel with canonical provenance embedded (and sealed in RECORD)."""
+    """A minimal wheel with canonical provenance embedded (source_commit + floor, sealed in RECORD)."""
 
     _minimal_wheel(path)
     bp.stamp_wheel_with_provenance(
-        path, bp.build_provenance_document(source_commit=commit), external_copy=external_copy
+        path,
+        bp.build_provenance_document(
+            source_commit=commit, extra={"required_git_ancestor": _FLOOR}
+        ),
+        external_copy=external_copy,
     )
     return path
 
@@ -274,6 +279,35 @@ def _embed_raw(wheel: Path, document: dict) -> None:
     with zipfile.ZipFile(wheel, "w") as archive:
         for name, data in members.items():
             archive.writestr(name, data)
+
+
+_MISSING_FLOOR = object()
+
+
+@pytest.mark.parametrize(
+    "floor",
+    [
+        _MISSING_FLOOR,  # source-commit-only wheel: no required_git_ancestor key at all
+        None,  # null floor
+        1234,  # non-string floor
+        "21aa81d9",  # abbreviated
+        _GOOD.upper(),  # uppercase
+        "z" * 40,  # malformed (non-hex)
+        "",  # empty
+        _GOOD[:-1],  # 39 chars
+    ],
+)
+def test_admission_requires_canonical_embedded_floor(tmp_path: Path, floor: object) -> None:
+    # Admission ALWAYS requires a canonical embedded required_git_ancestor - even with no expected floor
+    # and no repo. A source-commit-only or malformed-floor wheel is refused (this is exactly the shape
+    # the Environment Manager gate sees, since it supplies neither optional argument).
+    wheel = _minimal_wheel(tmp_path / "w.whl")
+    extra = None if floor is _MISSING_FLOOR else {"required_git_ancestor": floor}
+    bp.stamp_wheel_with_provenance(
+        wheel, bp.build_provenance_document(source_commit=_GOOD, extra=extra), external_copy=False
+    )
+    with pytest.raises(bp.BuildProvenanceError, match="required_git_ancestor is"):
+        bp.validate_wheel_provenance_for_scientific_admission(str(wheel))
 
 
 # ---- repository validation (real tmp git repo) ---------------------------------------------------

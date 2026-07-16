@@ -219,17 +219,23 @@ def validate_wheel_provenance_for_scientific_admission(
        (exact 40-char lowercase hex). A wheel with only an external sidecar, only a prohibited alias
        such as ``audited_commit``, or no provenance at all - the v7 defect shape - is refused here,
        never patched post-hoc.
-    2. The embedded provenance is SEALED by the wheel RECORD (its listed sha256 matches the bytes), so
+    2. The embedded provenance ALSO carries a canonical ``required_git_ancestor`` (exact 40-char
+       lowercase hex). This is ALWAYS required - even when no ``expected_required_git_ancestor`` and no
+       ``repo_root`` are supplied - so a ``source_commit``-only wheel (a floor absent, null, non-string,
+       abbreviated, uppercase, or otherwise malformed) is refused here. This is what makes admission's
+       "canonical embedded floor" guarantee true rather than conditional.
+    3. The embedded provenance is SEALED by the wheel RECORD (its listed sha256 matches the bytes), so
        it is a first-class wheel member covered by the wheel ``content_hash`` identity, not a stray
        file dropped into the zip.
-    3. If an external ``BUILD_PROVENANCE.json`` copy sits next to the wheel, it must byte-match the
+    4. If an external ``BUILD_PROVENANCE.json`` copy sits next to the wheel, it must byte-match the
        embedded copy (no divergent provenance stories).
 
     IMPORTANT honesty boundary - what admission does and does NOT prove about the protocol floor:
-    admission verifies the wheel's own EMBEDDED SELF-ASSERTION (integrity, presence, canonical form,
-    RECORD-seal, external-match). It does NOT, on its own, verify that the embedded ``required_git_
-    ancestor`` is the CORRECT reviewed protocol floor, nor that ``source_commit`` actually descends from
-    it - those are git facts that need the repository. Two optional inputs let a caller add real checks:
+    admission verifies the wheel's own EMBEDDED SELF-ASSERTION (integrity, presence, canonical
+    ``source_commit`` AND canonical ``required_git_ancestor``, RECORD-seal, external-match). It does NOT,
+    on its own, verify that the embedded floor is the CORRECT reviewed protocol floor, nor that
+    ``source_commit`` actually descends from it - those are facts that need more than the wheel. Two
+    optional inputs let a caller add real checks:
     - ``repo_root`` (build-time, repo present): re-validate ``source_commit`` against the repository -
       existence, clean worktree, and ``required_git_ancestor`` descent.
     - ``expected_required_git_ancestor``: a reviewed floor the CALLER already trusts (e.g. from a plan or
@@ -261,16 +267,26 @@ def validate_wheel_provenance_for_scientific_admission(
             f"embedded {PROVENANCE_FILENAME} source_commit is {detail}{hint}"
         )
     assert isinstance(commit, str)  # narrowed by is_canonical_source_commit
+    # The embedded research floor is ALWAYS required and must be canonical - independent of whether an
+    # expected floor or a repository is supplied. A source-commit-only wheel is refused here.
+    embedded_floor = data.get("required_git_ancestor")
+    if not is_canonical_source_commit(embedded_floor):
+        detail = "absent" if embedded_floor is None else f"non-canonical ({embedded_floor!r})"
+        raise BuildProvenanceError(
+            f"embedded {PROVENANCE_FILENAME} required_git_ancestor is {detail}"
+        )
+    assert isinstance(embedded_floor, str)  # narrowed by is_canonical_source_commit
     verify_embedded_provenance_record_integrity(wheel_path)
     _assert_external_matches_embedded(wheel_path)
-    if expected_required_git_ancestor is not None:
-        embedded_floor = data.get("required_git_ancestor")
-        if embedded_floor != expected_required_git_ancestor:
-            raise BuildProvenanceError(
-                "embedded required_git_ancestor "
-                f"{embedded_floor!r} does not match the reviewed floor "
-                f"{expected_required_git_ancestor!r}"
-            )
+    if (
+        expected_required_git_ancestor is not None
+        and embedded_floor != expected_required_git_ancestor
+    ):
+        raise BuildProvenanceError(
+            "embedded required_git_ancestor "
+            f"{embedded_floor!r} does not match the reviewed floor "
+            f"{expected_required_git_ancestor!r}"
+        )
     if repo_root is not None:
         validate_source_commit_against_repo(
             commit,
