@@ -4,7 +4,7 @@
   "study_id": "cs-ieee-linux-training-v1",
   "base_protocol_version": "1.0.0",
   "effective_protocol_version": "1.4.0",
-  "authored_at": "2026-07-16T12:00:00Z",
+  "authored_at": "2026-07-16T03:53:36Z",
   "author": "CorpusStudio maintainers",
   "status": "prospective",
   "analysis_role": "primary",
@@ -34,10 +34,10 @@
   "files": {
     "base_protocol_sha256": "b7a029bdd4a91ba9efbfe34c81d734b5dfafac13fbd81df545f9f694440ef34d",
     "base_matrix_sha256": "77b820df6c0ebda9ec5410f9c538a58a23c36e7dc0bc91d37c0f50370c1b2907",
-    "effective_matrix_sha256": "ed79f6cb65432eb25cb6e4b051c9173afad0a8f18a15af342505528385fb4d2f",
+    "effective_matrix_sha256": "0ce1fbd425e0401824c3f75f430b72bc4cc51b74e592399cd503a7084c4e593e",
     "narrative_sha256": "d77d59a8398b317cc05168499dd85313d63d2a1e7c4c0a8e8e5bf8e070ec964d",
-    "reserved_identities_sha256": "c230697458bcb01dc30b9324ab074ebf84deee00083f4e0ba0840a954c338cec",
-    "validator_sha256": "b96b609c2da7e749ffba0282e6a0e98677a51159268c91e6275a7f3796b40259"
+    "reserved_identities_sha256": "f0c78fa77ad8f3d93035d58e4cd6b8781d095873e6bdd8c5e41a8ea970c4c27b",
+    "validator_sha256": "d8f653c57b4ec67683f41df3d40ac9deeeb61c5afb7ee79d86203d3c0aed51e6"
   },
   "validation_contract": {
     "identity_algorithm": "sha256-raw-file-v1",
@@ -94,7 +94,7 @@
       "amendment_id": "cs-ieee-linux-training-amendment-0004",
       "base_protocol_version": "1.0.0",
       "supersedes_effective_protocol_version": "1.3.0",
-      "authored_at": "2026-07-16T12:00:00Z",
+      "authored_at": "2026-07-16T03:53:36Z",
       "status": "prospective",
       "narrative_path": "research/ieee-linux-training/amendments/0004-2026-07-16-v7-worker-lineage-token-throughput-observer.md",
       "manifest_path": "research/ieee-linux-training/amendments/0004-2026-07-16-v7-worker-lineage-token-throughput-observer.manifest.json"
@@ -108,7 +108,7 @@
       "exact_hash_required_in_every_plan_evidence_bundle_and_trial": true
     },
     "environment_admission": {
-      "manager_version_exact": "1.4.0",
+      "manager_version_exact": "1.3.0",
       "sealed_environment_ids": {
         "math": "backend-corpus-studio-research-math-v7",
         "flash": "backend-corpus-studio-research-flash-v7"
@@ -167,10 +167,10 @@
         "identity.plan_hash",
         "identity.execution_configuration_hash",
         "identity.run_id",
-        "step.nonpadding_tokens",
-        "step.supervised_tokens",
-        "throughput.scientific_throughput_complete",
-        "throughput.paper_performance_complete"
+        "step.nonpadding_tokens_per_second",
+        "step.supervised_tokens_per_second",
+        "completeness.scientific_throughput_complete",
+        "completeness.paper_performance_complete"
       ],
       "scientific_completeness_required_for_paper_promotion": true,
       "proven_measured_fit_requires_complete_success_evidence": true,
@@ -182,11 +182,20 @@
       "token_counts_null_when_observer_missed_not_zero": true,
       "throughput_rate_must_equal_observed_tokens_over_duration": true,
       "token_throughput_validity_required_for_paper_performance": true,
-      "paper_performance_complete_required_for_paper_promotion": true
+      "paper_performance_complete_required_for_paper_promotion": true,
+      "required_paper_event_metrics_fields": [
+        "nonpadding_tokens",
+        "observed_microbatches",
+        "supervised_tokens"
+      ],
+      "evidence_path_namespaces": {
+        "summary_paths_resolve_against": "docs/contracts/RunTelemetrySummary.schema.json",
+        "event_metrics_fields_resolve_against": "docs/contracts/RunEvent.schema.json#/$defs/EventMetrics"
+      }
     },
     "historical_identity_non_reuse": {
       "manifest_path": "research/ieee-linux-training/amendments/RESERVED_IDENTITIES.v4.json",
-      "manifest_sha256": "c230697458bcb01dc30b9324ab074ebf84deee00083f4e0ba0840a954c338cec",
+      "manifest_sha256": "f0c78fa77ad8f3d93035d58e4cd6b8781d095873e6bdd8c5e41a8ea970c4c27b",
       "supersedes_manifest_path": "research/ieee-linux-training/amendments/RESERVED_IDENTITIES.v3.json",
       "supersedes_manifest_sha256": "414d23862e7a835f88b0c454c6fb0a930bc3904cca08bac8d793d5de1db10d40",
       "append_only_required": true,
@@ -274,7 +283,7 @@
       "adapter_lineage_and_base_model_license_required_before_promotion": true
     },
     "affected_scope_snapshot": {
-      "captured_at": "2026-07-16T12:00:00Z",
+      "captured_at": "2026-07-16T03:53:36Z",
       "completed_primary_cells": 0,
       "completed_secondary_cells": 0,
       "visible_non_paper_bring_up_attempts": 6,

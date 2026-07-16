@@ -8,10 +8,16 @@ import hashlib
 import json
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
+
+# A prospective amendment must record an actual authoring instant, never a future one. A modest skew
+# tolerance keeps CI green across machines whose clocks differ by seconds/minutes, without allowing a
+# convenient future timestamp.
+_AUTHORED_AT_FUTURE_TOLERANCE = timedelta(hours=1)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -288,6 +294,25 @@ def _validate_supersession(manifest: dict[str, Any]) -> None:
         _require_hash(_sha256(path), supersedes.get(field), f"superseded {field}")
 
 
+def _validate_authored_at(manifest: dict[str, Any], now: datetime | None = None) -> None:
+    """A prospective amendment must record a real authoring instant, not a future one. Rejects a
+    missing/malformed ``authored_at`` and any value later than the current UTC time plus a small
+    clock-skew tolerance."""
+
+    raw = manifest.get("authored_at")
+    if not isinstance(raw, str):
+        raise ProtocolValidationError("amendment authored_at is missing")
+    try:
+        authored = datetime.strptime(raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError as exc:
+        raise ProtocolValidationError(
+            f"amendment authored_at is not an ISO-8601 UTC instant (YYYY-MM-DDTHH:MM:SSZ): {raw}"
+        ) from exc
+    current = now or datetime.now(timezone.utc)
+    if authored > current + _AUTHORED_AT_FUTURE_TOLERANCE:
+        raise ProtocolValidationError(f"amendment authored_at is in the future: {raw}")
+
+
 def _validate_affected_counts(effective: dict[str, Any]) -> None:
     snapshot = effective.get("affected_scope_snapshot")
     primary = effective.get("primary_matrix")
@@ -480,6 +505,7 @@ def validate(
     _validate_reserved(reserved)
     _validate_reserved_superset(reserved)
     _validate_supersession(manifest)
+    _validate_authored_at(manifest)
     _validate_affected_counts(effective)
 
     non_reuse = effective.get("historical_identity_non_reuse")
