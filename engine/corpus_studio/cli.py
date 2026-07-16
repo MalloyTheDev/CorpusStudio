@@ -1199,7 +1199,7 @@ def build_worker_wheel(
     )
 
     repo_root = repository_root()
-    head = subprocess.run(
+    head = subprocess.run(  # noqa: S603 - fixed git argv, no shell, repository-owned args.
         ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
         check=False,
         capture_output=True,
@@ -1231,7 +1231,7 @@ def build_worker_wheel(
         if source_wheel.resolve() != wheel.resolve():
             shutil.copy2(source_wheel, wheel)
     else:
-        committer_date = subprocess.run(
+        committer_date = subprocess.run(  # noqa: S603 - fixed git argv, no shell, repo-owned args.
             ["git", "-C", str(repo_root), "show", "-s", "--format=%ct", source_commit],
             check=False,
             capture_output=True,
@@ -1241,7 +1241,7 @@ def build_worker_wheel(
         if committer_date.returncode == 0 and committer_date.stdout.strip().isdigit():
             # Pin the source date so the setuptools build normalizes archive timestamps.
             build_env["SOURCE_DATE_EPOCH"] = committer_date.stdout.strip()
-        build = subprocess.run(
+        build = subprocess.run(  # noqa: S603 - control-plane python + fixed build argv, no shell.
             [
                 sys.executable,
                 "-m",
