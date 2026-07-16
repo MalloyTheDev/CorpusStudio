@@ -100,6 +100,25 @@ STAGE_REQUIRED_EMPTY = {
     "trial": set(),
 }
 
+# The separate, non-paper 7B feasibility ladder is a preregistered top-level field of the effective
+# matrix. These bind its semantics unambiguously so the sealed spec cannot be read two ways.
+SEVEN_B_LADDER_KEY = "seven_b_native_linux_feasibility_ladder"
+LINEAGE_CLASSIFICATION_KEY = "lineage_change_classification"
+FIXTURE_SHA_SENTINEL = "required-before-planning"
+# A feasibility rung counts as a success only under this exact, ordered set of conditions - nothing
+# weaker, and sequence length 4096 is held to the identical set.
+RUNG_SUCCESS_CRITERIA = (
+    "exactly_12_optimizer_steps",
+    "finite_loss_at_every_step",
+    "forced_declared_kernel_no_fallback",
+    "positive_token_evidence",
+    "changed_adapter_state",
+    "admitted_artifact",
+    "complete_telemetry",
+    "measured_fit",
+    "clean_gpu_release",
+)
+
 
 class ProtocolValidationError(ValueError):
     """The committed study specification is ambiguous, stale, or identity-inconsistent."""
@@ -346,6 +365,158 @@ def _validate_affected_counts(effective: dict[str, Any]) -> None:
         raise ProtocolValidationError("secondary affected-cell count is stale")
 
 
+def _validate_lineage_change_classification(effective: dict[str, Any]) -> None:
+    """A superseding lineage amendment must state, honestly and separately, whether it forces a fresh
+    wheel/environment lineage and whether it changed the worker execution closure. The two claims are
+    independent: a change to the wheel's build-provenance content or the manager lock generation changes
+    the wheel/environment identity WITHOUT changing the worker execution bytes. This guard keeps the two
+    reason codes distinct and refuses a matrix that omits the classification, while leaving the
+    worker-execution flag free to be true for an amendment that genuinely changes the closure."""
+
+    classification = effective.get(LINEAGE_CLASSIFICATION_KEY)
+    if not isinstance(classification, dict):
+        raise ProtocolValidationError("effective matrix omits the lineage-change classification")
+    new_wheel = classification.get("NEW_WHEEL_AND_ENVIRONMENT_LINEAGE_REQUIRED")
+    worker_execution = classification.get("WORKER_EXECUTION_CHANGE_REQUIRED")
+    if not isinstance(new_wheel, bool) or not isinstance(worker_execution, bool):
+        raise ProtocolValidationError(
+            "lineage-change classification flags must be booleans "
+            "(NEW_WHEEL_AND_ENVIRONMENT_LINEAGE_REQUIRED, WORKER_EXECUTION_CHANGE_REQUIRED)"
+        )
+    if not new_wheel:
+        raise ProtocolValidationError(
+            "a superseding lineage amendment must require a new wheel/environment lineage"
+        )
+    reason_code = classification.get("reason_code")
+    if not isinstance(reason_code, str) or not reason_code:
+        raise ProtocolValidationError("lineage-change classification must carry a reason code")
+    if not worker_execution and "worker-execution" in reason_code:
+        raise ProtocolValidationError(
+            "reason code claims a worker-execution change while the classification denies one"
+        )
+
+
+def _validate_seven_b_feasibility_ladder(effective: dict[str, Any]) -> None:
+    """The 7B feasibility ladder is a separate, non-paper arm. This binds its four ambiguities shut:
+    (1) the model reference must resolve to exactly one ``models[].id`` and match its repository (a
+    repository-shaped id is refused); (2) the feasibility fixture carries its own identity contract and
+    is explicitly not the primary private corpus; (3) the per-kernel run count is unambiguous (one run
+    per kernel per rung, math required, flash only after math success, cap two, zero automatic retries);
+    (4) a rung success is held to the exact ordered criteria, with sequence length 4096 no weaker."""
+
+    ladder = effective.get(SEVEN_B_LADDER_KEY)
+    if not isinstance(ladder, dict):
+        raise ProtocolValidationError("seven-B feasibility ladder is missing or malformed")
+
+    # (0) non-paper / primary-matrix separation.
+    if ladder.get("classification") != "non-paper-feasibility":
+        raise ProtocolValidationError("feasibility ladder must be classified non-paper-feasibility")
+    if ladder.get("is_primary_paper_cell") is not False:
+        raise ProtocolValidationError("feasibility ladder must not be a primary paper cell")
+    if ladder.get("satisfies_three_trial_characterization_matrix") is not False:
+        raise ProtocolValidationError(
+            "feasibility ladder must not satisfy the three-trial characterization matrix"
+        )
+
+    # (1) model reference resolution.
+    model_id = ladder.get("model_id")
+    if not isinstance(model_id, str) or not model_id:
+        raise ProtocolValidationError("feasibility ladder model_id is missing")
+    if "/" in model_id:
+        raise ProtocolValidationError(
+            f"feasibility ladder model_id must be a models[].id, not a repository path: {model_id}"
+        )
+    models = effective.get("models")
+    if not isinstance(models, list):
+        raise ProtocolValidationError("effective matrix models list is malformed")
+    resolved = [item for item in models if isinstance(item, dict) and item.get("id") == model_id]
+    if len(resolved) != 1:
+        raise ProtocolValidationError(
+            f"feasibility ladder model_id must resolve to exactly one models[].id: {model_id}"
+        )
+    if ladder.get("model_source_repository") != resolved[0].get("source_repository"):
+        raise ProtocolValidationError(
+            "feasibility ladder model_source_repository does not match the resolved model"
+        )
+
+    # (2) feasibility fixture identity contract (distinct from the primary private corpus).
+    fixture = ladder.get("feasibility_fixture")
+    if not isinstance(fixture, dict):
+        raise ProtocolValidationError("feasibility fixture identity contract is missing")
+    if not isinstance(fixture.get("fixture_id"), str) or not fixture.get("fixture_id"):
+        raise ProtocolValidationError("feasibility fixture must declare a fixture_id")
+    if fixture.get("is_primary_private_corpus") is not False:
+        raise ProtocolValidationError(
+            "feasibility fixture must be explicitly distinct from the primary private corpus"
+        )
+    for sha_field in (
+        "content_sha256",
+        "rendered_examples_sha256",
+        "tokenizer_content_sha256",
+        "chat_template_sha256",
+    ):
+        value = fixture.get(sha_field)
+        if value != FIXTURE_SHA_SENTINEL and not (
+            isinstance(value, str) and SHA256_RE.fullmatch(value)
+        ):
+            raise ProtocolValidationError(
+                f"feasibility fixture {sha_field} must be '{FIXTURE_SHA_SENTINEL}' or a SHA-256"
+            )
+    if fixture.get("license_evidence_required") is not True:
+        raise ProtocolValidationError("feasibility fixture must require license evidence")
+    if fixture.get("fixed_row_order") is not True:
+        raise ProtocolValidationError("feasibility fixture must fix row order")
+    if fixture.get("packing") is not False:
+        raise ProtocolValidationError("feasibility fixture must disable packing")
+    if fixture.get("truncation") is not False:
+        raise ProtocolValidationError("feasibility fixture must disable truncation")
+
+    # (3) unambiguous per-kernel run count.
+    per_rung = ladder.get("per_rung")
+    if not isinstance(per_rung, dict):
+        raise ProtocolValidationError("feasibility ladder per_rung is malformed")
+    if "runs_per_rung" in per_rung:
+        raise ProtocolValidationError(
+            "feasibility ladder must not use the ambiguous runs_per_rung; declare per-kernel semantics"
+        )
+    if per_rung.get("runs_per_kernel_per_rung") != 1:
+        raise ProtocolValidationError(
+            "feasibility ladder must run exactly one run per kernel per rung"
+        )
+    if per_rung.get("math_required") is not True:
+        raise ProtocolValidationError("feasibility ladder must require the math kernel at each rung")
+    if per_rung.get("flash_condition") != "run-only-after-math-success-at-the-same-rung":
+        raise ProtocolValidationError("feasibility ladder flash condition is not the required rule")
+    if per_rung.get("maximum_kernel_runs_per_rung") != 2:
+        raise ProtocolValidationError("feasibility ladder must cap kernel runs per rung at 2")
+    if per_rung.get("automatic_workload_retry_count") != 0:
+        raise ProtocolValidationError("feasibility ladder must forbid automatic workload retries")
+    if per_rung.get("unexecuted_flash_status") != "NOT_RUN":
+        raise ProtocolValidationError("feasibility ladder unexecuted flash must remain NOT_RUN")
+
+    # failure semantics without imputation.
+    failure = ladder.get("failure_semantics")
+    if not isinstance(failure, dict):
+        raise ProtocolValidationError("feasibility ladder failure semantics are missing")
+    if failure.get("imputation") != "none":
+        raise ProtocolValidationError("feasibility ladder must not impute failures")
+    for condition in ("shared_path_failure", "oom", "timeout", "flash_withheld"):
+        if not isinstance(failure.get(condition), str) or not failure.get(condition):
+            raise ProtocolValidationError(
+                f"feasibility ladder must define {condition} behavior without imputation"
+            )
+
+    # (4) exact success criteria; sequence length 4096 no weaker.
+    if list(ladder.get("rung_success_requires") or []) != list(RUNG_SUCCESS_CRITERIA):
+        raise ProtocolValidationError(
+            "feasibility ladder rung_success_requires is not the exact required criteria set"
+        )
+    if list(ladder.get("sequence_length_4096_success_requires") or []) != list(RUNG_SUCCESS_CRITERIA):
+        raise ProtocolValidationError(
+            "sequence-length-4096 success criteria must be no weaker than the rung criteria"
+        )
+
+
 def validate_candidate_identities(
     candidate_path: Path,
     reserved: dict[str, Any],
@@ -507,6 +678,8 @@ def validate(
     _validate_supersession(manifest)
     _validate_authored_at(manifest)
     _validate_affected_counts(effective)
+    _validate_lineage_change_classification(effective)
+    _validate_seven_b_feasibility_ladder(effective)
 
     non_reuse = effective.get("historical_identity_non_reuse")
     if not isinstance(non_reuse, dict):

@@ -96,9 +96,17 @@ worker source to descend from `4bab1de`, and extends the reserved-identity regis
 **v7** identity: the v7 wheel/source, math-v7/flash-v7 environments and lock hashes, both v7 plans and
 execution configs, both v7 runs, both admitted v7 adapters, and the v7 output/evidence roots). The
 scientific tuple and all 1.4.0 throughput gates are unchanged. 0005 also preregisters the separate
-non-paper `seven_b_native_linux_feasibility_ladder` (Qwen2.5-7B-Instruct; rungs 512/1024/2048/3072/4096;
-one bounded 12-step run/rung; mb=1, ga=1; math-first, flash-conditional; not primary paper cells). No v8
-wheel, environment, plan, or run exists yet; this amendment is preregistration only.
+non-paper `seven_b_native_linux_feasibility_ladder`: model `qwen2.5-7b-instruct` (a resolvable
+`models[].id`, repository `Qwen/Qwen2.5-7B-Instruct`) against its own license-clear feasibility fixture
+(distinct from the private corpus, no fixture content read here); rungs 512/1024/2048/3072/4096; mb=1,
+ga=1; one bounded 12-step run per kernel per rung (math required, flash only after same-rung math
+success, max two kernel runs, zero automatic retries, unexecuted flash `NOT_RUN`); no imputation; exact
+per-rung success criteria (12 steps, finite loss, forced kernel, positive tokens, changed adapter,
+admitted artifact, complete telemetry, measured fit, clean GPU release) with seq-4096 held no weaker; not
+primary paper cells. The validator now semantically checks this ladder and the wheel-identity-vs-worker-
+execution lineage classification (v8 requires a fresh wheel/environment lineage but is not a
+worker-execution change). No v8 wheel, environment, plan, or run exists yet; this amendment is
+preregistration only.
 
 ## Evidence boundary at preregistration
 

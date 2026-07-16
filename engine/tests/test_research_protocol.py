@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import subprocess
@@ -18,7 +19,7 @@ _CONTRACTS = _REPOSITORY_ROOT / "docs/contracts"
 # Amendment 0005 -> effective matrix 1.5.0 (v8 worker lineage; Environment Manager 1.4.0 + exact
 # per-lineage floor binding). Reconstructed byte-deterministically from the base matrix plus the 0005
 # manifest.
-_EFFECTIVE_HASH = "8e2202ec377eede4711f1bde25ae436a3c21a340c03d21070c33eab2bc889b72"
+_EFFECTIVE_HASH = "7d3ebbaf93d7138e82a7a00e3e61c3cb228cd89a5d60dc4e16acb0bcb20b7ef0"
 
 
 def _load_validator_module():
@@ -298,3 +299,217 @@ def test_effective_matrix_reconstruction_is_byte_deterministic() -> None:
     # And the committed file matches the reconstruction byte-for-byte (plus one trailing LF).
     committed = _EFFECTIVE_MATRIX.read_bytes()
     assert committed == (first + "\n").encode("utf-8")
+
+
+# ---- amendment 0005 semantic corrections: the 7B feasibility ladder is unambiguous ----------------
+#
+# These guard the four preregistration ambiguities the 0005 semantic correction closed: the model
+# reference must resolve (not be a repository path), the feasibility fixture carries its own identity
+# contract distinct from the private corpus, the per-kernel run count is explicit, and the rung success
+# criteria are exact. Each mutates the committed effective matrix and asserts the validator rejects it,
+# so none of the gates is vacuous.
+
+
+def _effective_matrix() -> dict:
+    return json.loads(_EFFECTIVE_MATRIX.read_text(encoding="utf-8"))
+
+
+def _ladder(effective: dict) -> dict:
+    return effective["seven_b_native_linux_feasibility_ladder"]
+
+
+def test_committed_effective_matrix_passes_the_ladder_and_lineage_gates() -> None:
+    vp = _load_validator_module()
+    effective = _effective_matrix()
+    # The committed matrix passes both new semantic gates unmodified.
+    vp._validate_seven_b_feasibility_ladder(effective)
+    vp._validate_lineage_change_classification(effective)
+
+
+def test_feasibility_model_reference_resolves_and_rejects_ambiguity() -> None:
+    vp = _load_validator_module()
+    effective = _effective_matrix()
+    ladder = _ladder(effective)
+    # It binds a resolvable short id (not a repository path) whose repository matches models[].
+    assert ladder["model_id"] == "qwen2.5-7b-instruct"
+    assert ladder["model_source_repository"] == "Qwen/Qwen2.5-7B-Instruct"
+    resolved = [m for m in effective["models"] if m["id"] == ladder["model_id"]]
+    assert len(resolved) == 1
+    assert resolved[0]["source_repository"] == ladder["model_source_repository"]
+
+    # A repository-shaped model_id is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["model_id"] = "Qwen/Qwen2.5-7B-Instruct"
+    with pytest.raises(vp.ProtocolValidationError, match="not a repository path"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+    # An unknown model_id is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["model_id"] = "qwen2.5-99b-instruct"
+    with pytest.raises(vp.ProtocolValidationError, match="resolve to exactly one"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+    # A mismatched source repository is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["model_source_repository"] = "Qwen/Qwen2.5-7B"
+    with pytest.raises(vp.ProtocolValidationError, match="does not match the resolved model"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+
+def test_feasibility_fixture_identity_is_bound_and_distinct_from_private_corpus() -> None:
+    vp = _load_validator_module()
+    effective = _effective_matrix()
+    fixture = _ladder(effective)["feasibility_fixture"]
+    # The fixture is explicitly not the primary private corpus and requires its identity before planning.
+    assert fixture["is_primary_private_corpus"] is False
+    assert fixture["distinct_from_primary_private_corpus"] is True
+    assert fixture["content_read_or_frozen_in_this_amendment"] is False
+    for sha_field in (
+        "content_sha256",
+        "rendered_examples_sha256",
+        "tokenizer_content_sha256",
+        "chat_template_sha256",
+    ):
+        assert fixture[sha_field] == "required-before-planning"
+    assert fixture["license_evidence_required"] is True
+    assert fixture["fixed_row_order"] is True
+    assert fixture["packing"] is False
+    assert fixture["truncation"] is False
+
+    # Marking the fixture as the private corpus is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["feasibility_fixture"]["is_primary_private_corpus"] = True
+    with pytest.raises(vp.ProtocolValidationError, match="distinct from the primary private corpus"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+    # Enabling truncation or packing on the fixture is refused.
+    for field, message in (("truncation", "disable truncation"), ("packing", "disable packing")):
+        bad = copy.deepcopy(effective)
+        _ladder(bad)["feasibility_fixture"][field] = True
+        with pytest.raises(vp.ProtocolValidationError, match=message):
+            vp._validate_seven_b_feasibility_ladder(bad)
+
+    # A non-sentinel, non-SHA fixture content hash is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["feasibility_fixture"]["content_sha256"] = "tbd"
+    with pytest.raises(vp.ProtocolValidationError, match="required-before-planning.*or a SHA-256"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+
+def test_feasibility_per_kernel_run_count_is_unambiguous() -> None:
+    vp = _load_validator_module()
+    effective = _effective_matrix()
+    per_rung = _ladder(effective)["per_rung"]
+    # The ambiguous runs_per_rung is gone; per-kernel semantics are explicit.
+    assert "runs_per_rung" not in per_rung
+    assert per_rung["runs_per_kernel_per_rung"] == 1
+    assert per_rung["math_required"] is True
+    assert per_rung["flash_condition"] == "run-only-after-math-success-at-the-same-rung"
+    assert per_rung["maximum_kernel_runs_per_rung"] == 2
+    assert per_rung["automatic_workload_retry_count"] == 0
+    assert per_rung["unexecuted_flash_status"] == "NOT_RUN"
+    # Failure semantics are declared without imputation.
+    failure = _ladder(effective)["failure_semantics"]
+    assert failure["imputation"] == "none"
+    for condition in ("shared_path_failure", "oom", "timeout", "flash_withheld"):
+        assert isinstance(failure[condition], str) and failure[condition]
+
+    # Reintroducing the ambiguous runs_per_rung is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["per_rung"]["runs_per_rung"] = 1
+    with pytest.raises(vp.ProtocolValidationError, match="ambiguous runs_per_rung"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+    # An imputing failure policy is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["failure_semantics"]["imputation"] = "nearest-rung"
+    with pytest.raises(vp.ProtocolValidationError, match="must not impute failures"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+
+def test_feasibility_rung_success_criteria_are_exact_and_4096_no_weaker() -> None:
+    vp = _load_validator_module()
+    effective = _effective_matrix()
+    ladder = _ladder(effective)
+    expected = list(vp.RUNG_SUCCESS_CRITERIA)
+    assert ladder["rung_success_requires"] == expected
+    assert ladder["sequence_length_4096_success_requires"] == expected
+    # Every directive-named success condition is present.
+    for required in (
+        "exactly_12_optimizer_steps",
+        "finite_loss_at_every_step",
+        "forced_declared_kernel_no_fallback",
+        "positive_token_evidence",
+        "changed_adapter_state",
+        "admitted_artifact",
+        "complete_telemetry",
+        "measured_fit",
+        "clean_gpu_release",
+    ):
+        assert required in expected
+
+    # Weakening the rung criteria is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["rung_success_requires"] = ["measured_fit"]
+    with pytest.raises(vp.ProtocolValidationError, match="exact required criteria set"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+    # Weakening seq-4096 below the rung criteria is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["sequence_length_4096_success_requires"] = expected[:-1]
+    with pytest.raises(vp.ProtocolValidationError, match="no weaker than the rung criteria"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+
+def test_feasibility_ladder_is_separated_from_the_primary_paper_matrix() -> None:
+    vp = _load_validator_module()
+    effective = _effective_matrix()
+    ladder = _ladder(effective)
+    assert ladder["classification"] == "non-paper-feasibility"
+    assert ladder["is_primary_paper_cell"] is False
+    assert ladder["satisfies_three_trial_characterization_matrix"] is False
+    # The private corpus 7B primary cells remain their own, separate arm.
+    assert "qwen2.5-7b-instruct" in effective["primary_matrix"]["model_ids"]
+
+    # Claiming the ladder is a primary paper cell is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["is_primary_paper_cell"] = True
+    with pytest.raises(vp.ProtocolValidationError, match="not be a primary paper cell"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+    # Claiming it satisfies the three-trial matrix is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["satisfies_three_trial_characterization_matrix"] = True
+    with pytest.raises(vp.ProtocolValidationError, match="three-trial characterization matrix"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+
+def test_lineage_classification_separates_wheel_identity_from_worker_execution() -> None:
+    vp = _load_validator_module()
+    effective = _effective_matrix()
+    classification = effective["lineage_change_classification"]
+    # v8 requires a fresh wheel/environment lineage but is NOT a worker-execution change.
+    assert classification["NEW_WHEEL_AND_ENVIRONMENT_LINEAGE_REQUIRED"] is True
+    assert classification["WORKER_EXECUTION_CHANGE_REQUIRED"] is False
+    assert classification["reason_code"] == (
+        "worker-artifact-identity-and-manager-lock-generation-changed-fresh-v8-required"
+    )
+    # The manifest reason codes carry the corrected, non-overclaiming code and not the old one.
+    manifest = json.loads(
+        (_STUDY / "amendments"
+         / "0005-2026-07-16-v8-manager-1.4-floor-binding-lineage.manifest.json").read_text()
+    )
+    assert (
+        "worker-artifact-identity-and-manager-lock-generation-changed-fresh-v8-required"
+        in manifest["reason_codes"]
+    )
+    assert (
+        "worker-execution-and-wheel-identity-changed-fresh-v8-required"
+        not in manifest["reason_codes"]
+    )
+
+    # A reason code that claims a worker-execution change while the flag denies one is refused.
+    bad = copy.deepcopy(effective)
+    bad["lineage_change_classification"]["reason_code"] = "worker-execution-changed-fresh-v8"
+    with pytest.raises(vp.ProtocolValidationError, match="worker-execution change while"):
+        vp._validate_lineage_change_classification(bad)

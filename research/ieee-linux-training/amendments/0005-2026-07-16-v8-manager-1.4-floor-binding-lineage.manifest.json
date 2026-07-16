@@ -4,7 +4,7 @@
   "study_id": "cs-ieee-linux-training-v1",
   "base_protocol_version": "1.0.0",
   "effective_protocol_version": "1.5.0",
-  "authored_at": "2026-07-16T21:12:37Z",
+  "authored_at": "2026-07-16T23:28:00Z",
   "author": "CorpusStudio maintainers",
   "status": "prospective",
   "analysis_role": "primary",
@@ -12,7 +12,7 @@
     "environment-manager-additive-lock-generation-warrants-1.4.0-minor-bump",
     "exact-per-lineage-required-git-ancestor-floor-binding-admission",
     "build-provenance-source-commit-emission-changes-wheel-identity",
-    "worker-execution-and-wheel-identity-changed-fresh-v8-required",
+    "worker-artifact-identity-and-manager-lock-generation-changed-fresh-v8-required",
     "seven-b-native-linux-feasibility-ladder-preregistration"
   ],
   "supersedes": {
@@ -34,10 +34,10 @@
   "files": {
     "base_protocol_sha256": "b7a029bdd4a91ba9efbfe34c81d734b5dfafac13fbd81df545f9f694440ef34d",
     "base_matrix_sha256": "77b820df6c0ebda9ec5410f9c538a58a23c36e7dc0bc91d37c0f50370c1b2907",
-    "effective_matrix_sha256": "8e2202ec377eede4711f1bde25ae436a3c21a340c03d21070c33eab2bc889b72",
-    "narrative_sha256": "351041e8bf175f638f8ffd89c8e2bfa7fa50a152d44d7a2217c9f7a1fc8a9617",
-    "reserved_identities_sha256": "eb4214425edfa624aa69df993f7924769956b3e89091abb14174ca36b80ebe37",
-    "validator_sha256": "ff0c9e77dc4f91d034a19b27128a53c262f09a8496d1676eac342b96d0df25c6"
+    "effective_matrix_sha256": "7d3ebbaf93d7138e82a7a00e3e61c3cb228cd89a5d60dc4e16acb0bcb20b7ef0",
+    "narrative_sha256": "a8e0a3b545daa9eb3c31d1d8ee38bfa905a95ebd117f4c9e0004ad2c92fbf8f4",
+    "reserved_identities_sha256": "229709a991ab6b6bd66b3417a6ef96d40b1630643d719775f8ee07050d309775",
+    "validator_sha256": "5a66fb0075a7ed1d1d3e2d06b3983ab5284c83b668de0a5e57dbcd5a97db0a91"
   },
   "validation_contract": {
     "identity_algorithm": "sha256-raw-file-v1",
@@ -94,7 +94,7 @@
       "amendment_id": "cs-ieee-linux-training-amendment-0005",
       "base_protocol_version": "1.0.0",
       "supersedes_effective_protocol_version": "1.4.0",
-      "authored_at": "2026-07-16T21:12:37Z",
+      "authored_at": "2026-07-16T23:28:00Z",
       "status": "prospective",
       "narrative_path": "research/ieee-linux-training/amendments/0005-2026-07-16-v8-manager-1.4-floor-binding-lineage.md",
       "manifest_path": "research/ieee-linux-training/amendments/0005-2026-07-16-v8-manager-1.4-floor-binding-lineage.manifest.json"
@@ -199,7 +199,7 @@
     },
     "historical_identity_non_reuse": {
       "manifest_path": "research/ieee-linux-training/amendments/RESERVED_IDENTITIES.v5.json",
-      "manifest_sha256": "eb4214425edfa624aa69df993f7924769956b3e89091abb14174ca36b80ebe37",
+      "manifest_sha256": "229709a991ab6b6bd66b3417a6ef96d40b1630643d719775f8ee07050d309775",
       "supersedes_manifest_path": "research/ieee-linux-training/amendments/RESERVED_IDENTITIES.v4.json",
       "supersedes_manifest_sha256": "f0c78fa77ad8f3d93035d58e4cd6b8781d095873e6bdd8c5e41a8ea970c4c27b",
       "append_only_required": true,
@@ -295,7 +295,7 @@
       "adapter_lineage_and_base_model_license_required_before_promotion": true
     },
     "affected_scope_snapshot": {
-      "captured_at": "2026-07-16T21:12:37Z",
+      "captured_at": "2026-07-16T23:28:00Z",
       "completed_primary_cells": 0,
       "completed_secondary_cells": 0,
       "visible_non_paper_bring_up_attempts": 8,
@@ -357,15 +357,34 @@
       "paper_matrix_cells_executed": 0,
       "sequence_length_4096_verified": false
     },
+    "lineage_change_classification": {
+      "NEW_WHEEL_AND_ENVIRONMENT_LINEAGE_REQUIRED": true,
+      "WORKER_EXECUTION_CHANGE_REQUIRED": false,
+      "reason_code": "worker-artifact-identity-and-manager-lock-generation-changed-fresh-v8-required",
+      "explanation": "PR 471 changed control-plane admission (environment_manager.py, environments.py, cli.py) and bumped the Environment Manager lock generation from 1.3.0 to 1.4.0 (a new additive EnvironmentLock field), and the worker build-provenance generator now emits the canonical source_commit key; all of these change the v8 wheel content hash and the sealed environment lineage. NONE of them changes the worker execution closure (the worker/supervisor/artifacts/runners/trainer runtime bytes that execute optimizer steps); the only closure-adjacent change is an additive optional contract field that defaults to null with no runtime behavior change. A fresh v8 wheel and environment pair is therefore required because the wheel artifact identity and manager lock generation changed, not because worker execution changed - unlike the v6->v7 transition, which was a genuine worker-execution change (the training_step token observer in training/trainer.py).",
+      "contrast_v6_to_v7": "WORKER_EXECUTION_CHANGE_REQUIRED was true (trainer.py token observer)"
+    },
     "seven_b_native_linux_feasibility_ladder": {
       "classification": "non-paper-feasibility",
       "is_primary_paper_cell": false,
       "satisfies_three_trial_characterization_matrix": false,
-      "model_id": "Qwen/Qwen2.5-7B-Instruct",
-      "dataset": {
+      "model_id": "qwen2.5-7b-instruct",
+      "model_source_repository": "Qwen/Qwen2.5-7B-Instruct",
+      "feasibility_fixture": {
+        "fixture_id": "cs-ieee-linux-7b-feasibility-chat-fixture-v1",
+        "belongs_to": "seven_b_native_linux_feasibility_ladder",
+        "is_primary_private_corpus": false,
+        "distinct_from_primary_private_corpus": true,
         "kind": "immutable-small-license-clear-chat-fixture",
-        "private_corpus_untouched": true,
-        "no_truncation": true
+        "content_sha256": "required-before-planning",
+        "rendered_examples_sha256": "required-before-planning",
+        "tokenizer_content_sha256": "required-before-planning",
+        "chat_template_sha256": "required-before-planning",
+        "license_evidence_required": true,
+        "fixed_row_order": true,
+        "packing": false,
+        "truncation": false,
+        "content_read_or_frozen_in_this_amendment": false
       },
       "sequence_length_rungs": [
         512,
@@ -378,21 +397,46 @@
         "microbatch": 1,
         "gradient_accumulation": 1,
         "bounded_optimizer_steps": 12,
-        "runs_per_rung": 1,
+        "runs_per_kernel_per_rung": 1,
+        "math_required": true,
+        "flash_condition": "run-only-after-math-success-at-the-same-rung",
+        "maximum_kernel_runs_per_rung": 2,
+        "automatic_workload_retry_count": 0,
         "kernel_order": "math-first-flash-conditional",
         "unexecuted_flash_status": "NOT_RUN",
         "offload": "none",
         "failure_retained_honestly": true
       },
-      "sequence_length_4096_success_requires": [
-        "real_completed_run",
+      "failure_semantics": {
+        "imputation": "none",
+        "shared_path_failure": "a rung whose shared preparation (model load, tokenizer, fixture render, or environment probe) fails is recorded as a shared-path failure for that rung; it is neither a math nor a flash result, is not imputed, and does not advance the ladder",
+        "oom": "an out-of-memory termination is recorded under the terminal OOM taxonomy for the exact kernel and rung that produced it, retained honestly, and never imputed to the other kernel or a longer rung",
+        "timeout": "a wall-time or step-time stop is recorded under the terminal timeout taxonomy for that exact kernel and rung, retained honestly, and never imputed",
+        "flash_withheld": "when math does not succeed at a rung, flash is withheld at that rung and recorded NOT_RUN; a withheld or unexecuted flash rung is never a pass, a fail, or an imputed value"
+      },
+      "rung_success_requires": [
+        "exactly_12_optimizer_steps",
+        "finite_loss_at_every_step",
+        "forced_declared_kernel_no_fallback",
         "positive_token_evidence",
         "changed_adapter_state",
         "admitted_artifact",
         "complete_telemetry",
-        "measured_fit"
+        "measured_fit",
+        "clean_gpu_release"
       ],
-      "authorization": "preregistration-only-no-download-no-execution-in-this-amendment"
+      "sequence_length_4096_success_requires": [
+        "exactly_12_optimizer_steps",
+        "finite_loss_at_every_step",
+        "forced_declared_kernel_no_fallback",
+        "positive_token_evidence",
+        "changed_adapter_state",
+        "admitted_artifact",
+        "complete_telemetry",
+        "measured_fit",
+        "clean_gpu_release"
+      ],
+      "authorization": "preregistration-only-no-download-no-fixture-read-no-execution-in-this-amendment"
     }
   },
   "affected_scope": {

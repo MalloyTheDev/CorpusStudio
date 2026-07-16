@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "captured_at": "2026-07-16T21:12:37Z",
+  "captured_at": "2026-07-16T23:28:00Z",
   "supersedes_reserved_version": "RESERVED_IDENTITIES.v4.json",
   "classification": "PRESERVED_HISTORICAL_IDENTITIES_NOT_AUTHORIZED_FOR_REUSE",
   "source_manifests": [
@@ -301,7 +301,7 @@
       "measured_fit": "NATIVE_SAFE",
       "scientific_throughput_complete": true
     },
-    "v7_token_throughput": "VALID: both arms recorded positive non-padding and supervised token counts on every measured optimizer step (math ~104 tok/s, flash ~108 tok/s); scientific_throughput_complete=true. The v7 wheel embedded source_commit only under a prohibited alias, corrected forward; v8 embeds the canonical source_commit and the exact per-lineage floor, changing worker/wheel identity.",
+    "v7_token_throughput": "VALID: both arms recorded positive non-padding and supervised token counts on every measured optimizer step (math ~104 tok/s, flash ~108 tok/s); scientific_throughput_complete=true. The v7 wheel embedded source_commit only under a prohibited alias, corrected forward; v8 embeds the canonical source_commit and the exact per-lineage floor, changing the wheel/artifact identity (not the worker execution closure).",
     "v7_paper_matrix_cells_executed": 0,
     "v7_sequence_length_4096_verified": false
   },
