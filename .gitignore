@@ -71,3 +71,11 @@ coverage.xml
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 engine/.pytest_tmp*/
+
+# Generated run output (containment finding F5): a relative sealed output root or a repository-root
+# dispatch lands the trainer's run tree + adapter here. Anchored to the repo root ONLY so a legitimate
+# tracked artifact (e.g. examples/wbg/adapter-seq1536-baseline/adapter_model.safetensors) is never
+# hidden. Runtime models/adapters/checkpoints belong outside the source tree; these rules stop an
+# accidental in-checkout write from ever entering a tracked area.
+/output/
+/engine/output/

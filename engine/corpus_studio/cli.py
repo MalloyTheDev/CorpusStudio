@@ -120,6 +120,19 @@ def _repo_relative_path(env_name: str, fallback: Path) -> Path:
     return path
 
 
+def _absolute_output_root(output_dir: str) -> str:
+    """Absolutize the sealed output root so a plan's write location is CWD-independent.
+
+    A relative output root (the historical ``"output"`` default) is resolved by
+    ``run_scoped_training_output`` against the process CWD AT RUN TIME, so dispatching a plan from the
+    repository checkout writes the run tree (and its adapter) into the working tree. Absolutizing here
+    pins the sealed root at plan time (against the plan-time CWD for a relative value, expanding ``~``),
+    removing the run-time-CWD surprise. Already-absolute roots (e.g. the v7 plans) pass through
+    normalized. Defense in depth: the historical relative default landing spots are also git-ignored."""
+
+    return os.path.abspath(os.path.expanduser(output_dir))
+
+
 def _index_enabled() -> bool:
     """Whether the optional SQLite project index should be kept in sync on writes."""
     return os.environ.get("CORPUS_STUDIO_USE_INDEX", "").strip().lower() in {
@@ -960,6 +973,9 @@ def platform_plan(
     if not dataset_conformance.is_conformant:
         typer.echo(dataset_conformance.describe_refusal(dataset_path), err=True)
         raise typer.Exit(2)
+    # Seal an absolute output root so the plan's write location is CWD-independent and never lands in
+    # the checkout by accident when dispatched from the repository root (containment finding F5).
+    output_dir = _absolute_output_root(output_dir)
     constraints = PlannerConstraints(
         base_model=base_model,
         model_revision=model_revision,
