@@ -25,6 +25,7 @@ import pytest
 from typer.testing import CliRunner
 
 import corpus_studio.cli as cli_module
+import corpus_studio.platform.build_provenance as build_provenance
 import corpus_studio.platform.environment_manager as manager_module
 from corpus_studio.cli import app
 from corpus_studio.platform.common import HashRef, Ref
@@ -545,11 +546,23 @@ def _manager_and_resolution(tmp_path: Path, runner: FakeEnvironmentRunner, env_i
     return manager, resolution
 
 
+# Fixed, canonical (40-char lowercase hex) synthetic identities for fixture wheels. The env-manager
+# admission gate requires EMBEDDED canonical build provenance carrying BOTH a source_commit and a
+# required_git_ancestor floor; fixtures embed both so they exercise the real gate rather than bypassing
+# it. `with_provenance=False` builds the no-provenance shape; `provenance_ancestor=None` builds the
+# inadmissible source-commit-only shape.
+_FIXTURE_SOURCE_COMMIT = "b17e57ed0b17e57ed0b17e57ed0b17e57ed0b17e"
+_FIXTURE_REQUIRED_ANCESTOR = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+
+
 def _worker_wheel(
     tmp_path: Path,
     *,
     marker: str = "worker-v1",
     entry_points: str | None = None,
+    with_provenance: bool = True,
+    provenance_commit: str = _FIXTURE_SOURCE_COMMIT,
+    provenance_ancestor: str | None = _FIXTURE_REQUIRED_ANCESTOR,
 ) -> Path:
     path = tmp_path / "corpus_studio_engine-1.3.0-py3-none-any.whl"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -572,6 +585,19 @@ def _worker_wheel(
     with zipfile.ZipFile(path, "w") as archive:
         for member_name, member_bytes in members.items():
             archive.writestr(member_name, member_bytes)
+    if with_provenance:
+        extra = (
+            {"required_git_ancestor": provenance_ancestor}
+            if provenance_ancestor is not None
+            else None
+        )
+        build_provenance.stamp_wheel_with_provenance(
+            path,
+            build_provenance.build_provenance_document(
+                source_commit=provenance_commit, extra=extra
+            ),
+            external_copy=False,
+        )
     return path
 
 
@@ -698,6 +724,91 @@ def test_cuda_hardware_probe_earns_hardware_verified_only_after_math_path(tmp_pa
     assert hardware.measured["attention_backend"] == "math"
     assert result.lock.cuda_runtime_version == "12.8"
     assert result.lock.compute_capability == "12.0"
+
+
+def test_scientific_admission_accepts_wheel_with_embedded_provenance(tmp_path):
+    # End-to-end: a worker wheel carrying EMBEDDED canonical provenance is admitted through the real
+    # create() path, and its identity overlay (built from the same sealed artifact) carries the commit -
+    # no post-hoc overlay. This exercises build (stamp) -> artifact admission -> environment admission ->
+    # telemetry identity in one path.
+    from corpus_studio.platform.telemetry import worker_identity_overlay
+
+    manager, resolution, _, wheel = _manager_and_readiness_resolution(tmp_path)
+    result = manager.create(
+        resolution, confirmed_resolution_hash=resolution.resolution_hash or ""
+    )
+    assert result.descriptor.state in {
+        EnvironmentState.hardware_verified,
+        EnvironmentState.functional_probe_passed,
+    }
+    assert resolution.worker_artifact is not None
+    overlay = worker_identity_overlay(resolution.worker_artifact)
+    assert overlay.repository_commit == _FIXTURE_SOURCE_COMMIT
+
+
+def _assert_create_refuses_inadmissible_wheel(tmp_path: Path, wheel: Path) -> None:
+    # Drive the real create() path and assert admission refuses BEFORE any mutation (no env root, no
+    # registry entry, no lock file created).
+    packages = _readiness_packages()
+    worker_package = next(
+        item for item in packages if item["normalized_name"] == "corpus-studio-engine"
+    )
+    worker_package["direct_url"] = {
+        "url": wheel.resolve().as_uri(),
+        "archive_info": {"hashes": {"sha256": manager_module._hash_file(wheel)}},
+    }
+    worker_identity = manager_module._worker_artifact_identity(wheel)
+    assert worker_identity.metadata_hash is not None
+    worker_package["metadata_sha256"] = worker_identity.metadata_hash.value
+    worker_package["installed_file_manifest"] = [
+        [path, digest]
+        for path, digest in sorted(
+            manager_module._worker_wheel_payload_manifest(worker_identity).items()
+        )
+    ]
+    runner = FakeEnvironmentRunner(cuda=True, packages=packages)
+    runtime = PythonRuntime(
+        runtime_id="python-readiness",
+        executable=str(tmp_path / "base-python"),
+        version="3.12.10",
+        implementation="CPython",
+        architecture="64-bit",
+        platform="test-platform",
+        os=OperatingSystem.linux,
+        venv_available=True,
+        compatible=True,
+    )
+    manager = EnvironmentManager(
+        tmp_path / "manager",
+        runner=runner,
+        runtime_probe=lambda executable, requirement: runtime,
+    )
+    resolution = manager.preview(
+        "backend-corpus-studio-readiness-v2",
+        env_id="backend-corpus-studio-readiness-v2",
+        runtime_executable=runtime.executable,
+        accelerator_tag="cu128",
+        worker_wheel=wheel,
+    )
+    with pytest.raises(manager_module.EnvironmentManagerError, match="inadmissible build provenance"):
+        manager.create(resolution, confirmed_resolution_hash=resolution.resolution_hash or "")
+    # Non-mutating: no environment root and no lock were created by the refused admission.
+    assert not manager.environment_root("backend-corpus-studio-readiness-v2").exists()
+
+
+def test_scientific_admission_refuses_wheel_without_embedded_provenance(tmp_path):
+    # The v7 defect shape (no embedded provenance at all) is refused at admission, non-mutatingly.
+    _assert_create_refuses_inadmissible_wheel(
+        tmp_path, _worker_wheel(tmp_path / "artifacts", with_provenance=False)
+    )
+
+
+def test_scientific_admission_refuses_source_commit_only_wheel(tmp_path):
+    # A wheel embedding source_commit but NO required_git_ancestor (the exact shape the manager gate
+    # sees, since it supplies neither an expected floor nor a repo) is refused BEFORE any mutation.
+    _assert_create_refuses_inadmissible_wheel(
+        tmp_path, _worker_wheel(tmp_path / "artifacts", provenance_ancestor=None)
+    )
 
 
 def test_readiness_v2_plan_is_stable_hash_bound_and_plan_only(tmp_path):
