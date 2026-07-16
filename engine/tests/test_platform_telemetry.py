@@ -68,7 +68,26 @@ def _sample(seq: int, *, phase: str, mono_ns: int, power: float | None, step: in
 
 
 def _metric_event(seq: int, step: int, *, loss: float, step_time: float | None = 0.5,
-                  tokens_per_sec: float | None = 1000.0) -> RunEvent:
+                  nonpadding_tokens: int | None = 500, supervised_tokens: int | None = 500,
+                  observed_microbatches: int | None = 1,
+                  rate_override: float | None = None) -> RunEvent:
+    # Rates are DERIVED from the raw observed counts (count / step_time) so a metric record is always
+    # internally consistent - exactly what the throughput-validity gate checks. At the default
+    # step_time=0.5 the 500-token count reproduces the historical 1000 tokens/sec. ``rate_override``
+    # deliberately desynchronizes the rate from the counts to exercise the fabrication guard.
+    rate = (
+        nonpadding_tokens / step_time
+        if step_time and nonpadding_tokens is not None
+        else None
+    )
+    sup_rate = (
+        supervised_tokens / step_time
+        if step_time and supervised_tokens is not None
+        else None
+    )
+    if rate_override is not None:
+        rate = rate_override
+        sup_rate = rate_override
     return RunEvent(
         event_type="metric",
         run_id="run-t",
@@ -76,8 +95,10 @@ def _metric_event(seq: int, step: int, *, loss: float, step_time: float | None =
         emitted_at="2026-07-15T00:00:00+00:00",
         optimizer_step=step,
         metrics=EventMetrics(
-            loss=loss, step_time_seconds=step_time, tokens_per_sec=tokens_per_sec,
-            supervised_tokens_per_sec=tokens_per_sec,
+            loss=loss, step_time_seconds=step_time,
+            nonpadding_tokens=nonpadding_tokens, supervised_tokens=supervised_tokens,
+            observed_microbatches=observed_microbatches,
+            tokens_per_sec=rate, supervised_tokens_per_sec=sup_rate,
         ),
     )
 
@@ -101,8 +122,13 @@ def _write_jsonl(path: Path, objs: list) -> None:
     path.write_text("".join(o.model_dump_json() + "\n" for o in objs), encoding="utf-8")
 
 
-def _full_run(directory: Path, *, step_time: float | None = 0.5) -> None:
-    """A complete, paper-shaped raw run: 12 steps, ramping power, all identity present via overlay."""
+def _full_run(directory: Path, *, step_time: float | None = 0.5,
+              token_kwargs: dict | None = None) -> None:
+    """A complete, paper-shaped raw run: 12 steps, ramping power, all identity present via overlay.
+
+    ``token_kwargs`` is splatted into every metric event so a test can model an observer that never
+    fired (``observed_microbatches=None`` + null counts) or a degenerate observation (zero supervised
+    tokens) without touching the resource fields."""
     directory.mkdir(parents=True, exist_ok=True)
     _write_manifest(directory)
     events = [
@@ -110,7 +136,8 @@ def _full_run(directory: Path, *, step_time: float | None = 0.5) -> None:
                  stage=StageMarker.process_start),
     ]
     events += [
-        _metric_event(i + 1, i + 1, loss=round(1.0 / (i + 1), 4), step_time=step_time)
+        _metric_event(i + 1, i + 1, loss=round(1.0 / (i + 1), 4), step_time=step_time,
+                      **(token_kwargs or {}))
         for i in range(12)
     ]
     _write_jsonl(directory / "RunEvents.jsonl", events)
@@ -241,6 +268,66 @@ def test_full_run_is_scientifically_complete(tmp_path: Path) -> None:
     summary = T.summarize_run_telemetry(tmp_path, identity_overlay=_FULL_IDENTITY)
     assert summary.completeness.scientifically_complete is True
     assert summary.completeness.missing_required_paper_fields == []
+
+
+# --------------------------------------------------------------------------------------------------
+# Throughput validity + separable completeness (the v6 token-observer lesson)
+# --------------------------------------------------------------------------------------------------
+def test_full_run_with_valid_tokens_is_throughput_and_performance_complete(tmp_path: Path) -> None:
+    # Every measured step has a real observed count and a rate equal to count / step_time.
+    _full_run(tmp_path)
+    summary = T.summarize_run_telemetry(tmp_path, identity_overlay=_FULL_IDENTITY)
+    c = summary.completeness
+    assert c.scientific_resource_complete is True
+    assert c.scientific_throughput_complete is True
+    assert c.paper_performance_complete is True
+    assert "valid for every measured optimizer step" in c.throughput_validity_reason
+    # Real observed non-padding tokens drive energy-per-token (500/step x 10 measured = 5000).
+    assert summary.energy.energy_per_1000_nonpadding_tokens is not None
+
+
+def test_observer_that_never_fired_is_throughput_incomplete_but_resource_complete(tmp_path: Path) -> None:
+    # The exact v6 shape modeled honestly: the observer never saw a batch, so the counts are UNAVAILABLE
+    # (null) - NOT a measured zero. Resource telemetry is whole and the workload succeeded, but the run
+    # is not paper-performance-usable and energy-per-token stays null.
+    _full_run(
+        tmp_path,
+        token_kwargs={
+            "observed_microbatches": None,
+            "nonpadding_tokens": None,
+            "supervised_tokens": None,
+        },
+    )
+    summary = T.summarize_run_telemetry(tmp_path, identity_overlay=_FULL_IDENTITY)
+    c = summary.completeness
+    assert summary.outcome.state == "succeeded"  # workload success is orthogonal
+    assert c.scientific_resource_complete is True  # every resource field is present
+    assert c.scientifically_complete is True  # backward-compat alias tracks the resource dimension
+    assert c.scientific_throughput_complete is False
+    assert c.paper_performance_complete is False
+    assert "unavailable" in c.throughput_validity_reason
+    assert summary.energy.energy_per_1000_nonpadding_tokens is None  # null, never estimated from a gap
+
+
+def test_zero_supervised_tokens_on_a_completed_step_fails_throughput(tmp_path: Path) -> None:
+    # A count that WAS observed but is zero supervised on a completed step is a real, invalid
+    # observation for supervised training - it is reported as such, never silently accepted.
+    _full_run(tmp_path, token_kwargs={"supervised_tokens": 0, "nonpadding_tokens": 500})
+    summary = T.summarize_run_telemetry(tmp_path, identity_overlay=_FULL_IDENTITY)
+    c = summary.completeness
+    assert c.scientific_throughput_complete is False
+    assert c.paper_performance_complete is False
+    assert "zero supervised tokens" in c.throughput_validity_reason
+
+
+def test_fabricated_rate_not_matching_counts_fails_throughput(tmp_path: Path) -> None:
+    # Every measured step reports a rate that does not equal observed tokens / duration; the gate
+    # rejects any rate the raw counts do not justify (no sequence-length fabrication).
+    _full_run(tmp_path, token_kwargs={"rate_override": 999999.0})
+    summary = T.summarize_run_telemetry(tmp_path, identity_overlay=_FULL_IDENTITY)
+    assert summary.completeness.scientific_resource_complete is True  # resource fields untouched
+    assert summary.completeness.scientific_throughput_complete is False
+    assert "does not equal observed tokens" in summary.completeness.throughput_validity_reason
 
 
 def test_full_run_is_scientifically_complete_from_plan_and_worker_overlay(tmp_path: Path) -> None:

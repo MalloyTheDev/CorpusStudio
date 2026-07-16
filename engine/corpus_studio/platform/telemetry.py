@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import statistics
 import subprocess  # noqa: S404 - fixed nvidia-smi argv, never a shell string.
@@ -773,6 +774,9 @@ class _StepRow:
     step_time_seconds: float | None
     tokens_per_sec: float | None
     supervised_tokens_per_sec: float | None
+    nonpadding_tokens: int | None
+    supervised_tokens: int | None
+    observed_microbatches: int | None
 
 
 def _step_rows(events: Sequence[RunEvent]) -> list[_StepRow]:
@@ -787,6 +791,9 @@ def _step_rows(events: Sequence[RunEvent]) -> list[_StepRow]:
             step_time_seconds=metrics.step_time_seconds if metrics else None,
             tokens_per_sec=metrics.tokens_per_sec if metrics else None,
             supervised_tokens_per_sec=metrics.supervised_tokens_per_sec if metrics else None,
+            nonpadding_tokens=metrics.nonpadding_tokens if metrics else None,
+            supervised_tokens=metrics.supervised_tokens if metrics else None,
+            observed_microbatches=metrics.observed_microbatches if metrics else None,
         )
     return [rows[key] for key in sorted(rows)]
 
@@ -1080,23 +1087,70 @@ def _present(summary: RunTelemetrySummary, field_path: str) -> bool:
     return checks.get(field_path, False)
 
 
+def _throughput_validity(measured_rows: Sequence[_StepRow]) -> tuple[bool, str]:
+    """Whether observed token throughput is VALID for every measured optimizer step.
+
+    Enforces the honesty invariants: a real observation (``observed_microbatches > 0``) with present,
+    positive non-padding AND supervised token counts; a positive step duration; and a finite, positive
+    rate that equals ``observed tokens / observed duration`` (no NaN/Inf, no negatives, no sequence-length
+    fabrication, no averaging a missing step as zero). ``completed step with zero supervised tokens`` is a
+    real but invalid observation for supervised training and fails here."""
+
+    if not measured_rows:
+        return False, "no measured optimizer steps to validate token throughput"
+    for row in measured_rows:
+        step = row.optimizer_step
+        if row.observed_microbatches is None or row.observed_microbatches <= 0:
+            return False, f"step {step}: token observer never fired (counts unavailable, not zero)"
+        if row.nonpadding_tokens is None or row.supervised_tokens is None:
+            return False, f"step {step}: token counts unavailable"
+        if row.supervised_tokens <= 0:
+            return False, f"step {step}: zero supervised tokens on a completed step (invalid for SFT)"
+        if row.nonpadding_tokens <= 0:
+            return False, f"step {step}: zero non-padding tokens on a completed step"
+        if row.step_time_seconds is None or not (row.step_time_seconds > 0):
+            return False, f"step {step}: non-positive step duration; cannot form a rate"
+        for label, rate, count in (
+            ("non-padding", row.tokens_per_sec, row.nonpadding_tokens),
+            ("supervised", row.supervised_tokens_per_sec, row.supervised_tokens),
+        ):
+            if rate is None or not math.isfinite(rate) or rate <= 0:
+                return False, f"step {step}: {label} token rate is missing, non-finite, or non-positive"
+            expected = count / row.step_time_seconds
+            if abs(rate - expected) > 1e-6 * max(1.0, expected):
+                return False, (
+                    f"step {step}: {label} rate {rate!r} does not equal observed tokens / duration "
+                    f"{expected!r}"
+                )
+    return True, "token throughput valid for every measured optimizer step"
+
+
 def _completeness(
     summary: RunTelemetrySummary,
     degraded_sample_count: int,
+    throughput_complete: bool,
+    throughput_reason: str,
 ) -> ScientificCompleteness:
     missing = sorted(f for f in REQUIRED_PAPER_FIELDS if not _present(summary, f))
-    complete = not missing
+    resource_complete = not missing
+    paper_performance_complete = resource_complete and throughput_complete
     reason = (
         "all required paper telemetry present"
-        if complete
+        if resource_complete
         else "missing required paper telemetry: " + ", ".join(missing)
     )
     return ScientificCompleteness(
-        scientifically_complete=complete,
+        # Backward-compatible: the historical ``scientifically_complete`` is exactly the RESOURCE
+        # dimension (the declared REQUIRED_PAPER_FIELDS set), so results under matrix 1.3.0 are unchanged.
+        scientifically_complete=resource_complete,
         missing_required_paper_fields=missing,
         telemetry_degraded=degraded_sample_count > 0,
         degraded_sample_count=degraded_sample_count,
         reason=reason,
+        scientific_resource_complete=resource_complete,
+        scientific_throughput_complete=throughput_complete,
+        paper_performance_complete=paper_performance_complete,
+        throughput_validity_reason=throughput_reason,
     )
 
 
@@ -1134,12 +1188,17 @@ def summarize_run_telemetry(
     step = _step_summary(events, manifest, warmup_steps)
     gpu = _gpu_summary(samples, measured)
     host = _host_summary(samples, measured)
-    tokens = step.nonpadding_tokens_per_second
-    measured_nonpadding = None
-    if tokens is not None and tokens.mean is not None and step.step_time_seconds is not None:
-        # tokens/sec * measured seconds; best-effort measured non-padding token total.
-        measured_seconds = (step.step_time_seconds.mean or 0) * len(step.measured_optimizer_steps)
-        measured_nonpadding = tokens.mean * measured_seconds if measured_seconds else None
+    # Token throughput validity over the measured window drives the throughput completeness dimension
+    # AND energy-per-token: the latter uses REAL observed non-padding counts, and is left null (never
+    # estimated from a rate) unless throughput is valid for every measured step.
+    measured_step_set = set(step.measured_optimizer_steps)
+    measured_step_rows = [r for r in _step_rows(events) if r.optimizer_step in measured_step_set]
+    throughput_complete, throughput_reason = _throughput_validity(measured_step_rows)
+    measured_nonpadding = (
+        float(sum(r.nonpadding_tokens or 0 for r in measured_step_rows))
+        if throughput_complete
+        else None
+    )
     energy = _energy(samples, measured, origin_ns, len(step.measured_optimizer_steps), measured_nonpadding)
     sampling = _cadence(samples, requested_interval_ms, source)
 
@@ -1184,7 +1243,7 @@ def summarize_run_telemetry(
         completeness=ScientificCompleteness(scientifically_complete=False),
         raw_records=raw_records,
     )
-    summary.completeness = _completeness(summary, degraded)
+    summary.completeness = _completeness(summary, degraded, throughput_complete, throughput_reason)
     return summary
 
 

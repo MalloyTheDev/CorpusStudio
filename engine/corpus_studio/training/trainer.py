@@ -52,11 +52,13 @@ from corpus_studio.training.quantization import find_linear4bit_modules
 TINY_TOY_MODEL = "hf-internal-testing/tiny-random-LlamaForCausalLM"
 
 ProgressCallback = Callable[[int, int, float | None], None]
-# (optimizer_step, nonpadding_tokens, supervised_tokens) — the real token counts the trainer consumed
-# for one completed optimizer step (summed across its accumulation microbatches). Kept separate from
-# ProgressCallback so the loss path is untouched; token accounting is pure observation and never
-# influences training.
-TokenCallback = Callable[[int, int, int], None]
+# (optimizer_step, nonpadding_tokens, supervised_tokens, observed_microbatches) — the real token counts
+# the trainer consumed for one completed optimizer step (summed across its accumulation microbatches),
+# plus HOW MANY microbatches were actually observed. ``observed_microbatches == 0`` means the observer
+# never saw a batch (the count is UNAVAILABLE, not a measured zero); a downstream sink must map that to
+# null, never 0.0. Kept separate from ProgressCallback so the loss path is untouched; token accounting is
+# pure observation and never influences training.
+TokenCallback = Callable[[int, int, int, int], None]
 # (stage_name, message) — platform-agnostic strings so the trainer stays decoupled from the platform
 # enums. Fires at setup milestones so a supervisor sees progress during the long silent model-load.
 StageCallback = Callable[[str, str], None]
@@ -78,37 +80,73 @@ def _flatten_ints(value: Any) -> Iterator[int]:
         yield int(value)
 
 
+def _count_ne(value: Any, sentinel: int) -> int:
+    """Number of scalar elements of ``value`` not equal to ``sentinel``.
+
+    Prefers a vectorized, non-materializing path for objects with tensor/ndarray semantics
+    (``value != sentinel`` -> boolean tensor -> ``.sum()`` -> scalar), which does NOT move the input off
+    its device, change its dtype, or retain it. Falls back to flattening for python lists/tuples. Purely
+    observational and read-only."""
+
+    if not isinstance(value, (list, tuple)) and hasattr(value, "sum"):
+        try:
+            comparison = value != sentinel
+            total = comparison.sum()
+            item = getattr(total, "item", None)
+            return int(item() if callable(item) else total)
+        except Exception:  # noqa: BLE001 - fall back to the framework-agnostic path
+            pass
+    return sum(1 for element in _flatten_ints(value) if element != sentinel)
+
+
+def _count_all(value: Any) -> int:
+    """Total scalar element count of a tensor/ndarray/nested list (non-materializing when possible)."""
+
+    numel = getattr(value, "numel", None)  # torch tensor
+    if callable(numel):
+        try:
+            return int(numel())
+        except Exception:  # noqa: BLE001
+            pass
+    size = getattr(value, "size", None)  # numpy ndarray exposes an int ``size`` attribute
+    if isinstance(size, int):
+        return size
+    return sum(1 for _ in _flatten_ints(value))
+
+
 def count_batch_tokens(batch: Mapping[str, Any]) -> tuple[int, int]:
     """Count ``(nonpadding, supervised)`` tokens in one collated microbatch. Non-padding = attention
     mask ones (or, absent a mask, every ``input_ids`` position); supervised = label positions not equal
     to the ``-100`` cross-entropy ignore index. Framework-agnostic (torch tensor / numpy / nested list)
     and purely observational, so it is unit-testable without the training stack and can never change a
-    training byte."""
+    training byte. Reads a tensor's counts with vectorized ops - it never moves, mutates, or retains it."""
 
     mask = batch.get("attention_mask")
     input_ids = batch.get("input_ids")
     labels = batch.get("labels")
     if mask is not None:
-        nonpadding = sum(1 for token in _flatten_ints(mask) if token != 0)
+        nonpadding = _count_ne(mask, 0)
     elif input_ids is not None:
-        nonpadding = sum(1 for _ in _flatten_ints(input_ids))
+        nonpadding = _count_all(input_ids)
     else:
         nonpadding = 0
-    supervised = (
-        sum(1 for label in _flatten_ints(labels) if label != -100) if labels is not None else 0
-    )
+    supervised = _count_ne(labels, -100) if labels is not None else 0
     return nonpadding, supervised
 
 
 class _TokenAccumulator:
-    """Sums per-microbatch token counts into a per-optimizer-step total, flushed and reset at each
-    step boundary. With the sealed single-worker dataloader (no background prefetch) every microbatch
-    for step N is collated before step N's boundary fires, so the flush attributes exactly step N's
-    tokens. Fully observational: a counting fault is swallowed so training is never disturbed."""
+    """Sums per-microbatch token counts into a per-optimizer-step total, and counts HOW MANY microbatches
+    it actually observed, flushed and reset at each step boundary. With the sealed single-worker
+    dataloader (no background prefetch) every microbatch for step N is consumed by ``training_step``
+    before step N's boundary fires, so the flush attributes exactly step N's tokens. Fully observational:
+    a counting fault is swallowed (and NOT counted as an observed microbatch) so training is never
+    disturbed and an observer failure surfaces downstream as ``observed == 0`` (unavailable), never as a
+    measured zero."""
 
     def __init__(self) -> None:
         self._nonpadding = 0
         self._supervised = 0
+        self._observed = 0
 
     def observe(self, batch: Mapping[str, Any]) -> None:
         try:
@@ -117,11 +155,13 @@ class _TokenAccumulator:
             return
         self._nonpadding += nonpadding
         self._supervised += supervised
+        self._observed += 1
 
-    def flush(self) -> tuple[int, int]:
-        totals = (self._nonpadding, self._supervised)
+    def flush(self) -> tuple[int, int, int]:
+        totals = (self._nonpadding, self._supervised, self._observed)
         self._nonpadding = 0
         self._supervised = 0
+        self._observed = 0
         return totals
 
 
@@ -2798,9 +2838,9 @@ def run_training(  # pragma: no cover - optional training-stack integration
             elif optimizer is not None:
                 verify_optimizer_state_precision(optimizer, torch, config)
             if token_accumulator is not None and token_callback is not None:
-                nonpadding, supervised = token_accumulator.flush()
+                nonpadding, supervised, observed = token_accumulator.flush()
                 try:
-                    token_callback(int(state.global_step), nonpadding, supervised)
+                    token_callback(int(state.global_step), nonpadding, supervised, observed)
                 except Exception:  # noqa: BLE001 - token accounting must never affect training
                     pass
 
@@ -2843,28 +2883,22 @@ def run_training(  # pragma: no cover - optional training-stack integration
         trainer_kwargs["tokenizer"] = tokenizer
 
     class _TokenObservingSFTTrainer(SFTTrainer):  # type: ignore[misc,valid-type]
-        """SFTTrainer that observes the real collated batches for token accounting without altering
-        them. It wraps the configured dataloader's ``collate_fn`` in a strict pass-through: the inner
-        collator's exact output object is returned unchanged, and only a copy-free read feeds the
-        accumulator. When there is no accumulator it is byte-identical to ``SFTTrainer``; any wiring or
-        counting fault degrades to no token evidence and never disturbs the training dataloader."""
+        """SFTTrainer that observes the exact collated batch each optimizer microstep consumes, for
+        token accounting, without altering it. It reads ``inputs`` at ``training_step`` - the trainer's
+        own consumption boundary - because the accelerate-prepared dataloader (``accelerator.prepare``)
+        does NOT honor a ``collate_fn`` reassignment on the returned shard, so a dataloader-level wrap is
+        silently bypassed on this pinned stack (trl 1.8.0 / transformers 5.13.1 / accelerate 1.14.0) and
+        was the cause of the v6 token-throughput=0.0 gap. The observation is a pure read that forwards
+        every training object unchanged; when there is no accumulator it is byte-identical to
+        ``SFTTrainer``; any counting fault degrades to no token evidence and never disturbs training."""
 
-        def get_train_dataloader(self) -> Any:
-            loader = super().get_train_dataloader()
-            if token_accumulator is None:
-                return loader
-            try:
-                inner_collate = loader.collate_fn
-
-                def _observing_collate(features: Any, _inner: Any = inner_collate) -> Any:
-                    batch = _inner(features)
-                    token_accumulator.observe(batch)
-                    return batch
-
-                loader.collate_fn = _observing_collate
-            except Exception:  # noqa: BLE001 - instrumentation is optional; training must proceed
-                return loader
-            return loader
+        def training_step(self, *args: Any, **kwargs: Any) -> Any:
+            if token_accumulator is not None:
+                # inputs is the collated, device-placed batch: positionally args[1], else kwargs.
+                inputs = args[1] if len(args) > 1 else kwargs.get("inputs")
+                if isinstance(inputs, Mapping):
+                    token_accumulator.observe(inputs)
+            return super().training_step(*args, **kwargs)
 
     trainer = _TokenObservingSFTTrainer(**trainer_kwargs)
     evidence_model = getattr(trainer, "model", model)

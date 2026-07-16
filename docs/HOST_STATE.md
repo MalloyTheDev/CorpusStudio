@@ -359,12 +359,21 @@ swap growth and no shared-GPU-memory spill, and released the GPU to 10 MiB. Run 
 
 *Honestly-recorded gap (non-blocking, kernel-independent):* `nonpadding_tokens_per_second` and
 `supervised_tokens_per_second` read `0.0` on both runs. Real training occurred (loss fell; 336 tensors
-changed; TRL built labels for all 8 rows), so this is a runner-side token-observer instrumentation gap in
-the deployed v6 worker (the #462 collate-fn observer did not capture batch token counts under trl 1.8.0 /
-transformers 5.13.1), not a workload failure. tokens/sec is not a required paper field, so
-`scientifically_complete=True` holds; the field is reported as measured (0.0), no gate was weakened. Fixing
-it changes worker bytes -> a future **v7** lineage. This remains a 0.5B feasibility bring-up, NOT a 7B or
-full-training result.
+changed; TRL built labels for all 8 rows), so a supervised step necessarily processed tokens: **the
+recorded `0.0` must be read as UNAVAILABLE (null), NOT a measured zero.** Root cause: the deployed v6
+worker's #462 collate-fn observer never fired, because on the pinned stack (trl 1.8.0 / transformers
+5.13.1 / accelerate 1.14.0) `Trainer._get_dataloader` returns an accelerate-prepared `DataLoaderShard`
+whose base loader captured `collate_fn` at `accelerator.prepare` time, so reassigning `.collate_fn` on
+the returned shard is silently bypassed. The raw v6 records are **preserved unchanged**; the durable
+classification `TOKEN_THROUGHPUT_UNAVAILABLE_OBSERVER_MISSED_BATCHES` and the list of v6 metrics thereby
+unusable (token throughput and every token-normalized metric, incl. energy-per-token) live in the
+sidecar `.../evidence/v6-smoke-73b756c/TOKEN_THROUGHPUT_UNAVAILABLE_OBSERVER_MISSED_BATCHES.md`.
+`scientifically_complete=True` holds **only as historical resource-completeness under effective matrix
+1.3.0** (tokens/sec was not a required paper field there); it is NOT a throughput or paper-performance
+claim. The fix observes `inputs` at `training_step` (the trainer's own consumption boundary) and adds a
+throughput-validity gate + separable `scientific_throughput_complete` / `paper_performance_complete`
+completeness; because the observer runs in the worker child it changes worker bytes -> the **v7**
+lineage. This remains a 0.5B feasibility bring-up, NOT a 7B or full-training result.
 
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 
@@ -388,13 +397,13 @@ must not be claimed from this state alone:
   `backend-corpus-studio` reference exists.
 - **Real offload fit, PCIe/NVMe throughput, sustained-write endurance** — the NVMe has not been
   benchmarked (`platform-storage` is non-destructive and reads no SMART data).
-- **Bare-Linux flash for a real optimizer step or sequence 4096** — matched managed environments
-  verified separate tiny math and forced-`torch_sdpa_flash` tuples. The manager-1.2 real 0.5B
-  attempts stopped before step 1 on the earlier verifier mismatch; the manager-1.3 v4 math attempt
-  stopped before step 1 on TRL's constructor-time adapter recast, and its paired flash plan was not
-  dispatched. Neither
-  environment is the same identity as Transformers `flash_attention_2` or an external `flash-attn`
-  package, and neither is full-sequence 7B proof.
+- **Bare-Linux flash BEYOND the bounded 0.5B tuple** — the manager-1.3 **v6** green run executed
+  **12 real optimizer steps** of the 0.5B, sequence-256, QLoRA tuple under forced `torch_sdpa_flash`
+  on native Linux (adapter admitted, predicted-fit `NATIVE_SAFE`; see the v6 section above), so
+  forced-SDPA-flash **at that exact bounded scale is now VERIFIED** — this supersedes the older
+  "stopped before step 1" wording. It does **NOT** extend to any of: Transformers
+  `flash_attention_2`, an external `flash-attn` package, sequence 4096, the full corpus, 7B flash,
+  or any Windows/WDDM flash path — all still unverified and refused-on-Windows where applicable.
 - **MoE runtime capability** — static inspection only (Phase 8); no MoE execution.
 
 "Installed ≠ supported" and "a completed step ≠ proven fit" both still hold: a passing

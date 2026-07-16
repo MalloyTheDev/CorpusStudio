@@ -221,12 +221,16 @@ class TrainingRunner:
         # token counts (emitted just before the loss log for the same step) so one metric record
         # carries loss + timing + tokens + allocator memory together.
         last_step_monotonic: list[float | None] = [None]
-        pending_tokens: dict[int, tuple[int, int]] = {}
+        pending_tokens: dict[int, tuple[int, int, int]] = {}
 
-        def _token_counts(step: int, nonpadding_tokens: int, supervised_tokens: int) -> None:
+        def _token_counts(
+            step: int, nonpadding_tokens: int, supervised_tokens: int, observed_microbatches: int
+        ) -> None:
             # Best-effort, worker-sourced; the trainer never lets a counting fault reach here, but this
             # sink still tolerates any step (it is read by ``_progress`` for the matching step only).
-            pending_tokens[step] = (nonpadding_tokens, supervised_tokens)
+            # ``observed_microbatches`` distinguishes an unavailable count (observer never fired -> map to
+            # null) from a real observation, so a missed observer never becomes a fabricated 0.0 rate.
+            pending_tokens[step] = (nonpadding_tokens, supervised_tokens, observed_microbatches)
 
         def _worker_gpu_memory() -> MemoryMetrics | None:
             # The child owns CUDA, so its torch allocator view (allocated/reserved/peak) is real here;
@@ -246,21 +250,30 @@ class TrainingRunner:
             previous = last_step_monotonic[0]
             step_time = (now - previous) if previous is not None else None
             last_step_monotonic[0] = now
-            nonpadding, supervised = pending_tokens.pop(step, (None, None))
+            nonpadding, supervised, observed = pending_tokens.pop(step, (None, None, None))
+            # An observer that never fired (observed == 0 or missing) yields UNAVAILABLE counts (null),
+            # never a measured zero. Only a real observation contributes counts and derived rates; the
+            # raw counts travel alongside the rates so the summary can validate rate == count / step_time.
+            observed_ok = observed is not None and observed > 0
+            nonpadding_tokens = nonpadding if observed_ok else None
+            supervised_tokens = supervised if observed_ok else None
             tokens_per_sec = (
-                nonpadding / step_time
-                if nonpadding is not None and step_time and step_time > 0
+                nonpadding_tokens / step_time
+                if nonpadding_tokens is not None and step_time and step_time > 0
                 else None
             )
             supervised_per_sec = (
-                supervised / step_time
-                if supervised is not None and step_time and step_time > 0
+                supervised_tokens / step_time
+                if supervised_tokens is not None and step_time and step_time > 0
                 else None
             )
             metrics = EventMetrics(
                 loss=loss,
                 step_time_seconds=step_time,
                 memory=_worker_gpu_memory(),
+                nonpadding_tokens=nonpadding_tokens,
+                supervised_tokens=supervised_tokens,
+                observed_microbatches=observed,
                 tokens_per_sec=tokens_per_sec,
                 supervised_tokens_per_sec=supervised_per_sec,
             )

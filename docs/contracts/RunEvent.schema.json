@@ -107,6 +107,32 @@
           "default": null,
           "title": "Memory Controller Utilization"
         },
+        "nonpadding_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nonpadding Tokens"
+        },
+        "observed_microbatches": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed Microbatches"
+        },
         "parameter_observations": {
           "items": {
             "$ref": "#/$defs/ParameterObservation"
@@ -165,6 +191,19 @@
           ],
           "default": null,
           "title": "Step Time Seconds"
+        },
+        "supervised_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supervised Tokens"
         },
         "supervised_tokens_per_sec": {
           "anyOf": [

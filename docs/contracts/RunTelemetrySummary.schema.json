@@ -1045,7 +1045,7 @@
     },
     "ScientificCompleteness": {
       "additionalProperties": false,
-      "description": "Whether the run captured every field the paper requires. A telemetry gap NEVER converts a\nworkload success into paper data: ``scientifically_complete`` may be False even when the run\nsucceeded, and it does not alter the run's terminal state.",
+      "description": "Whether the run captured every field the paper requires. A telemetry gap NEVER converts a\nworkload success into paper data: ``scientifically_complete`` may be False even when the run\nsucceeded, and it does not alter the run's terminal state.\n\nCompleteness is reported in three separable dimensions so a workload success with incomplete\ninstrumentation is never conflated with a paper-ready measurement (the v6 lesson: token throughput\nread 0.0 because an observer missed batches, yet the run itself succeeded):\n\n- ``scientific_resource_complete`` - every required RESOURCE paper field (loss, step time, GPU power,\n  GPU memory, energy, host RSS, and the identity chain) is present. This is exactly the historical\n  ``scientifically_complete`` set and is kept equal to it for backward compatibility.\n- ``scientific_throughput_complete`` - token accounting is VALID for every measured optimizer step:\n  a positive supervised-token count actually observed, a positive step duration, and a token rate\n  that equals observed tokens / observed duration (no NaN/Inf, no negative, no sequence-length\n  fabrication, no averaging a missing step as zero).\n- ``paper_performance_complete`` - both of the above; required for any paper PERFORMANCE cell.\n\n``workload_success`` is orthogonal and lives on the RunManifest terminal state - an observer failure\nmarks telemetry incomplete here without failing the workload.",
       "properties": {
         "degraded_sample_count": {
           "default": 0,
@@ -1060,10 +1060,25 @@
           "title": "Missing Required Paper Fields",
           "type": "array"
         },
+        "paper_performance_complete": {
+          "default": false,
+          "title": "Paper Performance Complete",
+          "type": "boolean"
+        },
         "reason": {
           "default": "",
           "title": "Reason",
           "type": "string"
+        },
+        "scientific_resource_complete": {
+          "default": false,
+          "title": "Scientific Resource Complete",
+          "type": "boolean"
+        },
+        "scientific_throughput_complete": {
+          "default": false,
+          "title": "Scientific Throughput Complete",
+          "type": "boolean"
         },
         "scientifically_complete": {
           "title": "Scientifically Complete",
@@ -1073,6 +1088,11 @@
           "default": false,
           "title": "Telemetry Degraded",
           "type": "boolean"
+        },
+        "throughput_validity_reason": {
+          "default": "",
+          "title": "Throughput Validity Reason",
+          "type": "string"
         }
       },
       "required": [
