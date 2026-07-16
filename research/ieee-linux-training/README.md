@@ -9,8 +9,9 @@ Files:
 - [PROTOCOL.md](PROTOCOL.md) defines the design, controls, execution order, stopping rules, exclusions, and claim boundaries.
 - [HYPOTHESES.md](HYPOTHESES.md) separates confirmatory hypotheses from exploratory analyses.
 - [EXPERIMENT_MATRIX.yaml](EXPERIMENT_MATRIX.yaml) is the immutable, machine-readable factor and trial specification.
-- [EXPERIMENT_MATRIX.v1.3.0.json](EXPERIMENT_MATRIX.v1.3.0.json) is the complete, hash-sealed
-  **current** effective matrix (after amendment 0003).
+- [EXPERIMENT_MATRIX.v1.4.0.json](EXPERIMENT_MATRIX.v1.4.0.json) is the complete, hash-sealed
+  **current** effective matrix (after amendment 0004).
+  [EXPERIMENT_MATRIX.v1.3.0.json](EXPERIMENT_MATRIX.v1.3.0.json) (amendment 0003),
   [EXPERIMENT_MATRIX.v1.2.0.json](EXPERIMENT_MATRIX.v1.2.0.json) (amendment 0002) and
   [EXPERIMENT_MATRIX.v1.1.0.json](EXPERIMENT_MATRIX.v1.1.0.json) (amendment 0001) are retained as
   frozen historical documents.
@@ -51,7 +52,22 @@ v5 identity). The scientific tuple (Qwen2.5-0.5B, chat, seq 256, mb 1, ga 1, 12 
 r16/alpha32) is unchanged. **Result (2026-07-16):** both matched v6 0.5B smokes SUCCEEDED -
 `V6_MATH_AND_FLASH_BRINGUP_PASS` (12 steps each, adapter admitted, measured `NATIVE_SAFE`,
 `scientifically_complete=True`); one honestly-recorded non-blocking token-throughput observer gap
-(`tokens/sec = 0.0`, a future v7 fix). See [`docs/HOST_STATE.md`](../../docs/HOST_STATE.md) v6 section.
+(`tokens/sec = 0.0`). See [`docs/HOST_STATE.md`](../../docs/HOST_STATE.md) v6 section.
+
+Amendment [0004](amendments/0004-2026-07-16-v7-worker-lineage-token-throughput-observer.md)
+supersedes 0003 with effective protocol version **1.4.0**: the v6 token-throughput `0.0` is
+reclassified as **UNAVAILABLE (null), not a measured zero** - the #462 collate-fn observer never fired
+because the accelerate-prepared `DataLoaderShard` bypasses a `.collate_fn` reassignment on the pinned
+stack. The fix (PR #466, merge `25c901ec`) observes `inputs` at `training_step`, emits raw per-step
+token counts, and gates `scientific_throughput_complete` / `paper_performance_complete` separately from
+resource completeness. Because that observer runs in the worker child it changes worker execution bytes,
+so a fresh **v7** blue/green lineage is required. 1.4.0 replaces the v6 environment IDs with
+`backend-corpus-studio-research-{math,flash}-v7`, requires the worker source to descend from `25c901ec`,
+and extends the reserved-identity registry to
+[v4](amendments/RESERVED_IDENTITIES.v4.json) (append-only over v3, reserving every fully instantiated
+v6 identity). The scientific tuple is unchanged; a v7 pass now additionally requires valid token
+accounting (positive non-padding and supervised counts every measured step, rates equal to observed
+tokens / duration, `paper_performance_complete=true`).
 
 ## Evidence boundary at preregistration
 

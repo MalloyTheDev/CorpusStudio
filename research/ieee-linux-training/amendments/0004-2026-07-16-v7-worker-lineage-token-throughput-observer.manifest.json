@@ -1,0 +1,347 @@
+{
+  "schema_version": "1.0.0",
+  "amendment_id": "cs-ieee-linux-training-amendment-0004",
+  "study_id": "cs-ieee-linux-training-v1",
+  "base_protocol_version": "1.0.0",
+  "effective_protocol_version": "1.4.0",
+  "authored_at": "2026-07-16T03:53:36Z",
+  "author": "CorpusStudio maintainers",
+  "status": "prospective",
+  "analysis_role": "primary",
+  "reason_codes": [
+    "worker-token-observation-moved-to-training-step-boundary",
+    "token-throughput-null-when-observer-missed-not-measured-zero",
+    "throughput-validity-and-separable-paper-performance-completeness-added",
+    "worker-execution-bytes-changed-fresh-v7-required",
+    "immutable-blue-green-environment-replacement"
+  ],
+  "supersedes": {
+    "amendment_id": "cs-ieee-linux-training-amendment-0003",
+    "effective_protocol_version": "1.3.0",
+    "prior_amendment_manifest_sha256": "3a8aab300c8685edf9de1db0dbc98d3f43f29dae19279d573ab7a211a77bdf75",
+    "prior_narrative_sha256": "6b4c22f16fb5605a9e9294e0c32e8be721dc057e009111ee270ec6f005f6f93b",
+    "prior_effective_matrix_sha256": "e7b95d47aa23a87b4aed0ddac6dabf5fc070dc77e4d7ec710129fb690a7c4587",
+    "prior_reserved_identities_sha256": "414d23862e7a835f88b0c454c6fb0a930bc3904cca08bac8d793d5de1db10d40"
+  },
+  "compatibility_impact": {
+    "prior_protocol_and_evidence_preserved": true,
+    "prior_environment_lock_admission": "historical-only",
+    "fresh_worker_wheel_required": true,
+    "fresh_environment_locks_required": true,
+    "fresh_runplans_required": true,
+    "primary_analysis_version": "1.4.0"
+  },
+  "files": {
+    "base_protocol_sha256": "b7a029bdd4a91ba9efbfe34c81d734b5dfafac13fbd81df545f9f694440ef34d",
+    "base_matrix_sha256": "77b820df6c0ebda9ec5410f9c538a58a23c36e7dc0bc91d37c0f50370c1b2907",
+    "effective_matrix_sha256": "0ce1fbd425e0401824c3f75f430b72bc4cc51b74e592399cd503a7084c4e593e",
+    "narrative_sha256": "d77d59a8398b317cc05168499dd85313d63d2a1e7c4c0a8e8e5bf8e070ec964d",
+    "reserved_identities_sha256": "f0c78fa77ad8f3d93035d58e4cd6b8781d095873e6bdd8c5e41a8ea970c4c27b",
+    "validator_sha256": "d8f653c57b4ec67683f41df3d40ac9deeeb61c5afb7ee79d86203d3c0aed51e6"
+  },
+  "validation_contract": {
+    "identity_algorithm": "sha256-raw-file-v1",
+    "duplicate_mapping_keys": "refuse",
+    "base_hash_match_required": true,
+    "selector_match_count_exact": 1,
+    "old_value_match_required": true,
+    "unknown_effective_change_policy": "refuse",
+    "reserved_identity_set_disjointness_required": true,
+    "reserved_registry_append_only_required": true,
+    "prior_amendment_supersession_hash_required": true,
+    "candidate_stage_completeness_required": true,
+    "lowercase_sha256_identity_required": true,
+    "canonical_absolute_posix_paths_required": true,
+    "host_evidence_rehash_available": true
+  },
+  "direct_changes": {
+    "schema_version": {
+      "old_value": "1.0.0",
+      "new_value": "1.4.0"
+    },
+    "protocol_version": {
+      "old_value": "1.0.0",
+      "new_value": "1.4.0"
+    }
+  },
+  "changes": [
+    {
+      "selector": {
+        "collection": "first_party_execution_paths",
+        "id": "first-party-math",
+        "field": "environment_id"
+      },
+      "old_value": "backend-corpus-studio-research-math-v1",
+      "new_value": "backend-corpus-studio-research-math-v7"
+    },
+    {
+      "selector": {
+        "collection": "first_party_execution_paths",
+        "id": "first-party-flash",
+        "field": "environment_id"
+      },
+      "old_value": "backend-corpus-studio-research-flash-v1",
+      "new_value": "backend-corpus-studio-research-flash-v7"
+    }
+  ],
+  "immutable_binding_additions": {
+    "effective_matrix_sha256": "required-per-environment-plan-and-trial",
+    "reserved_identities_sha256": "required-before-new-identity-allocation",
+    "worker_source_commit": "required-per-environment-and-trial"
+  },
+  "added_top_level_fields": {
+    "amendment": {
+      "amendment_id": "cs-ieee-linux-training-amendment-0004",
+      "base_protocol_version": "1.0.0",
+      "supersedes_effective_protocol_version": "1.3.0",
+      "authored_at": "2026-07-16T03:53:36Z",
+      "status": "prospective",
+      "narrative_path": "research/ieee-linux-training/amendments/0004-2026-07-16-v7-worker-lineage-token-throughput-observer.md",
+      "manifest_path": "research/ieee-linux-training/amendments/0004-2026-07-16-v7-worker-lineage-token-throughput-observer.manifest.json"
+    },
+    "effective_specification": {
+      "identity_algorithm": "sha256-raw-file-v1",
+      "canonical_path": "research/ieee-linux-training/EXPERIMENT_MATRIX.v1.4.0.json",
+      "serialization": "committed-utf8-json-with-one-trailing-lf",
+      "unknown_or_extra_field_policy": "refuse-by-exact-content-hash",
+      "exact_hash_required_before_environment_plan": true,
+      "exact_hash_required_in_every_plan_evidence_bundle_and_trial": true
+    },
+    "environment_admission": {
+      "manager_version_exact": "1.3.0",
+      "sealed_environment_ids": {
+        "math": "backend-corpus-studio-research-math-v7",
+        "flash": "backend-corpus-studio-research-flash-v7"
+      },
+      "same_worker_wheel_bytes_required": true,
+      "matched_package_artifacts_required": true,
+      "separately_sealed_execution_tuples_required": true,
+      "package_lock": {
+        "record_integrity_exact": "verified",
+        "record_count_semantics_exact": "all_record_rows_v2",
+        "record_entries_minimum": 1,
+        "record_verified_entries_minimum": 1,
+        "installed_file_count_minimum": 1,
+        "required_count_equality": "record_verified_entries == record_entries == installed_file_count",
+        "record_failed_entries_exact": 0,
+        "installed_record_sha256_required": true,
+        "installed_tree_sha256_required": true,
+        "package_source_evidence_required": true
+      },
+      "historical_manager_locks_authorized_for_new_admission": false
+    },
+    "worker_success_admission": {
+      "required_git_ancestor": "25c901ec85fd6f6303eff6c3dd81938afe328a2b",
+      "required_git_ancestor_rationale": "the final v7 wheel source must descend from 25c901ec (the merged token-observer fix PR 466), which descends from the v6 floor 73b756c, the 0003 floor af28be9, and the df86db5 worker-source floor; the exact final post-amendment source commit is recorded in the wheel evidence, not pinned here",
+      "worker_artifact_correction_commit": "4078825a82309223b3b39d1192cc08f8c26afc85",
+      "worker_telemetry_correction_commit": "9a15b5c095accd451fbb57e887bf4b2c1ad0a7e7",
+      "exact_source_commit_required_in_wheel_evidence": true,
+      "exact_wheel_sha256_required_in_environment_and_trial": true,
+      "historical_worker_wheel_reuse_authorized": false,
+      "run_manifest_contract_version": "1.0.0",
+      "trainable_state_hash_algorithm": "sha256-trainable-state-v1",
+      "adapter_export_state_hash_algorithm": "sha256-safetensors-tensor-state-v1",
+      "materialized_gradient_observation_minimum": 1,
+      "optimizer_created_from_real_optimizer_required": true,
+      "cpu_scalar_adamw_step_accepted": true,
+      "optimizer_moment_tensors_on_expected_device_required": true,
+      "exact_finite_loss_per_completed_optimizer_step_required": true,
+      "logging_strategy": "steps",
+      "logging_steps": 1,
+      "logging_nan_inf_filter": false,
+      "adapter_root_auxiliary_metadata_allowlist": [
+        "training_args.bin"
+      ],
+      "adapter_root_auxiliary_metadata_never_deserialized": true,
+      "output_path_adapter_bytes_artifact_integrity_required": true,
+      "required_paper_telemetry_fields": [
+        "step.step_losses",
+        "step.step_time_seconds",
+        "gpu.power_watts",
+        "gpu.memory",
+        "energy.run_joules",
+        "host.process_tree_rss",
+        "identity.repository_commit",
+        "identity.worker_wheel_sha256",
+        "identity.environment_lock_hash",
+        "identity.plan_hash",
+        "identity.execution_configuration_hash",
+        "identity.run_id",
+        "step.nonpadding_tokens_per_second",
+        "step.supervised_tokens_per_second",
+        "completeness.scientific_throughput_complete",
+        "completeness.paper_performance_complete"
+      ],
+      "scientific_completeness_required_for_paper_promotion": true,
+      "proven_measured_fit_requires_complete_success_evidence": true,
+      "failed_run_native_unproven_unless_spill_measured": true,
+      "worker_token_throughput_correction_pr": 466,
+      "worker_token_throughput_correction_commit": "25c901ec85fd6f6303eff6c3dd81938afe328a2b",
+      "token_observation_boundary": "training_step_inputs",
+      "token_observation_pure_read_required": true,
+      "token_counts_null_when_observer_missed_not_zero": true,
+      "throughput_rate_must_equal_observed_tokens_over_duration": true,
+      "token_throughput_validity_required_for_paper_performance": true,
+      "paper_performance_complete_required_for_paper_promotion": true,
+      "required_paper_event_metrics_fields": [
+        "nonpadding_tokens",
+        "observed_microbatches",
+        "supervised_tokens"
+      ],
+      "evidence_path_namespaces": {
+        "summary_paths_resolve_against": "docs/contracts/RunTelemetrySummary.schema.json",
+        "event_metrics_fields_resolve_against": "docs/contracts/RunEvent.schema.json#/$defs/EventMetrics"
+      }
+    },
+    "historical_identity_non_reuse": {
+      "manifest_path": "research/ieee-linux-training/amendments/RESERVED_IDENTITIES.v4.json",
+      "manifest_sha256": "f0c78fa77ad8f3d93035d58e4cd6b8781d095873e6bdd8c5e41a8ea970c4c27b",
+      "supersedes_manifest_path": "research/ieee-linux-training/amendments/RESERVED_IDENTITIES.v3.json",
+      "supersedes_manifest_sha256": "414d23862e7a835f88b0c454c6fb0a930bc3904cca08bac8d793d5de1db10d40",
+      "append_only_required": true,
+      "exact_set_disjointness_required_before_plan_generation": true,
+      "identity_classes": [
+        "environment_ids",
+        "environment_lock_hashes",
+        "worker_wheel_sha256",
+        "plan_ids",
+        "plan_hashes",
+        "execution_configuration_ids",
+        "execution_configuration_hashes",
+        "run_ids",
+        "output_paths",
+        "artifact_ids",
+        "evidence_roots"
+      ]
+    },
+    "prior_amendments": [
+      {
+        "amendment_id": "cs-ieee-linux-training-amendment-0001",
+        "effective_protocol_version": "1.1.0",
+        "manifest_sha256": "c33ea08601791884667f51314810246a84c7bffe579489175ac2889b09264bd4",
+        "narrative_sha256": "e20e564fa3292247ed6d5f937be1d074dee4541263aefae9655a54ccd34d8dea",
+        "effective_matrix_sha256": "731101c9ee81bd93f9acabb0433788180b86bcec3d78a7af03892df7af41f4f9",
+        "reserved_identities_sha256": "e369690412919b30563bcaa715198a45576bb0b79d366b2dcf997486b25e1e41"
+      },
+      {
+        "amendment_id": "cs-ieee-linux-training-amendment-0002",
+        "effective_protocol_version": "1.2.0",
+        "manifest_sha256": "d3a45d5ff2bd617a28dfe64c498dc821e0912332147fbd66bacdd53bacbb7fb9",
+        "narrative_sha256": "d39197ec92b0fa87525c48909de8a0e8acd4f300fcdbccb4da286b5a4cc33112",
+        "effective_matrix_sha256": "168189145150c0ed13ce70151a065c9490d9e70052ca30569aac709e718f9e12",
+        "reserved_identities_sha256": "0f9b9a32a16a54fcb3f49e91aa215eb86c2b0c6bdf92bdf4f1d2702ae671859c"
+      },
+      {
+        "amendment_id": "cs-ieee-linux-training-amendment-0003",
+        "effective_protocol_version": "1.3.0",
+        "manifest_sha256": "3a8aab300c8685edf9de1db0dbc98d3f43f29dae19279d573ab7a211a77bdf75",
+        "narrative_sha256": "6b4c22f16fb5605a9e9294e0c32e8be721dc057e009111ee270ec6f005f6f93b",
+        "effective_matrix_sha256": "e7b95d47aa23a87b4aed0ddac6dabf5fc070dc77e4d7ec710129fb690a7c4587",
+        "reserved_identities_sha256": "414d23862e7a835f88b0c454c6fb0a930bc3904cca08bac8d793d5de1db10d40"
+      }
+    ],
+    "preserved_v4_evidence": {
+      "classification": "non-paper-bring-up",
+      "math_run_id": "run-019f6518-3927-7d73-b106-15f385b61415",
+      "math_terminal_taxonomy": "GRADIENT_FAILURE",
+      "math_terminal_stage": "backward",
+      "math_completed_optimizer_steps": 0,
+      "math_artifacts_written": 0,
+      "flash_dispatched": false,
+      "real_optimizer_step_passed_platform_run": false,
+      "sequence_length_4096_verified": false
+    },
+    "preserved_v5_evidence": {
+      "classification": "non-paper-bring-up",
+      "worker_wheel_sha256": "271447bf0b82ab14ddb4848bd0d47cc0f2f5ad8ff378f291f04cff65be2fc895",
+      "worker_source_commit": "713fde14c8a6bae1888c43851fa6a487a031a242",
+      "math_first_real_training": true,
+      "math_completed_optimizer_steps": 12,
+      "math_loss_decreased": true,
+      "math_run_id": "run-019f67e6-8d14-782a-8b10-ecdb4e74a6e0",
+      "math_terminal_taxonomy": "ARTIFACT_FAILURE",
+      "math_terminal_stage": "export",
+      "math_terminal_cause": "training_args.bin falsely classified as alternate model weights",
+      "math_measured_fit": "NATIVE_UNPROVEN",
+      "math_scientifically_complete": false,
+      "rejected_ga8_instruction_math_run_id": "run-019f67ac-275f-7405-ac92-f407c91be70f",
+      "rejected_ga8_instruction_math_taxonomy": "UNSUPPORTED_CONFIGURATION",
+      "flash_dispatched": false,
+      "artifact_admission_corrected_by_pr": 461,
+      "telemetry_population_corrected_by_pr": 462,
+      "corrections_change_worker_bytes": true,
+      "real_optimizer_step_passed_platform_run": true,
+      "paper_matrix_cells_executed": 0
+    },
+    "full_training_phase": {
+      "status": "gated-until-feasibility-config-identified",
+      "separate_from_feasibility_characterization": true,
+      "corpus": "approximately-500-output-immutable-license-cleared-corpus",
+      "preregistration_required_before_run": true,
+      "distinct_from_feasibility_smoke_and_characterization_trials": true,
+      "quality_and_systems_outcomes_both_required": true,
+      "adapter_lineage_and_base_model_license_required_before_promotion": true
+    },
+    "affected_scope_snapshot": {
+      "captured_at": "2026-07-16T03:53:36Z",
+      "completed_primary_cells": 0,
+      "completed_secondary_cells": 0,
+      "visible_non_paper_bring_up_attempts": 6,
+      "first_party_bring_up_path_ids": [
+        "first-party-math",
+        "first-party-flash"
+      ],
+      "primary_cells": {
+        "selector": "primary_matrix.execution_path_ids in [first-party-math, first-party-flash]",
+        "expected_affected_cell_count": 30
+      },
+      "secondary_cells": {
+        "selector": "secondary_adapter_matrix.execution_path_ids in [first-party-math, first-party-flash]",
+        "expected_affected_cell_count": 16
+      },
+      "adaptive_follow_up": "affected-when-a-first-party-path-is-used",
+      "unsloth_cells_affected_by_environment_identity_change": false
+    },
+    "preserved_v6_evidence": {
+      "classification": "non-paper-bring-up",
+      "verdict": "V6_MATH_AND_FLASH_BRINGUP_PASS",
+      "worker_source_commit": "73b756c49da0f03203ebd05dfb5528805b0fd280",
+      "worker_wheel_sha256": "bdc32196203539cbeb9078ce2317fb41d2a30abe68f7e94bc0fa290a97f414d4",
+      "math_run_id": "run-019f688c-67c0-77cf-82e2-477f52fab76f",
+      "flash_run_id": "run-019f6892-3a54-7922-8e10-d138ee7e77ce",
+      "math_completed_optimizer_steps": 12,
+      "flash_completed_optimizer_steps": 12,
+      "both_arms_loss_decreased": true,
+      "both_arms_adapter_admitted": true,
+      "both_arms_measured_fit": "NATIVE_SAFE",
+      "first_fully_admitted_end_to_end_success": true,
+      "token_throughput_status": "UNAVAILABLE_OBSERVER_MISSED_BATCHES",
+      "token_throughput_recorded_zero_is_not_measured_zero": true,
+      "token_observer_root_cause": "accelerate-prepared DataLoaderShard bypassed the collate-fn observer",
+      "token_fix_pr": 466,
+      "token_fix_changes_worker_bytes": true,
+      "paper_matrix_cells_executed": 0,
+      "sequence_length_4096_verified": false
+    }
+  },
+  "affected_scope": {
+    "first_party_bring_up_paths": 2,
+    "primary_cells": 30,
+    "secondary_first_party_cells": 16,
+    "adaptive_first_party_follow_up": "affected-if-run",
+    "unsloth_cells": "unchanged",
+    "completed_primary_cells_at_authorship": 0,
+    "completed_secondary_cells_at_authorship": 0
+  },
+  "visible_evidence_before_amendment": {
+    "v6_math_and_flash_completed_12_optimizer_steps_each": true,
+    "v6_both_arms_adapter_admitted_and_native_safe": true,
+    "v6_verdict": "V6_MATH_AND_FLASH_BRINGUP_PASS",
+    "v6_token_throughput_unavailable_observer_missed_batches": true,
+    "v6_token_recorded_zero_is_not_measured_zero": true,
+    "token_observer_fix_merged_pr": 466,
+    "real_optimizer_step_passed_platform_run": true,
+    "paper_matrix_cells_executed": 0,
+    "sequence_length_4096_verified": false
+  }
+}
