@@ -8,9 +8,9 @@ from pathlib import Path
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _VALIDATOR = _REPOSITORY_ROOT / "research/ieee-linux-training/validate_protocol.py"
-# Amendment 0003 -> effective matrix 1.3.0 (v6 worker lineage). Reconstructed byte-deterministically
-# from the base matrix plus the 0003 manifest.
-_EFFECTIVE_HASH = "e7b95d47aa23a87b4aed0ddac6dabf5fc070dc77e4d7ec710129fb690a7c4587"
+# Amendment 0004 -> effective matrix 1.4.0 (v7 worker lineage). Reconstructed byte-deterministically
+# from the base matrix plus the 0004 manifest.
+_EFFECTIVE_HASH = "ed79f6cb65432eb25cb6e4b051c9173afad0a8f18a15af342505528385fb4d2f"
 
 
 def _run_validator(*args: str) -> subprocess.CompletedProcess[str]:
@@ -24,33 +24,33 @@ def _run_validator(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _fresh_candidate(**updates: object) -> dict[str, object]:
-    # Under effective 1.3.0 the sealed environment ids are the fresh v6 pair, and every v5 identity is
-    # reserved, so a valid fresh runplan candidate binds the exact math-v6/flash-v6 environments and
+    # Under effective 1.4.0 the sealed environment ids are the fresh v7 pair, and every v6 identity is
+    # reserved, so a valid fresh runplan candidate binds the exact math-v7/flash-v7 environments and
     # otherwise-unallocated identities.
     candidate: dict[str, object] = {
         "schema_version": "1.0.0",
         "stage": "runplan",
         "environment_ids": [
-            "backend-corpus-studio-research-flash-v6",
-            "backend-corpus-studio-research-math-v6",
+            "backend-corpus-studio-research-flash-v7",
+            "backend-corpus-studio-research-math-v7",
         ],
         "environment_lock_hashes": ["1" * 64, "2" * 64],
         "worker_wheel_sha256": ["3" * 64],
-        "plan_ids": ["plan-fresh-flash-v6", "plan-fresh-math-v6"],
+        "plan_ids": ["plan-fresh-flash-v7", "plan-fresh-math-v7"],
         "plan_hashes": ["4" * 64, "5" * 64],
         "execution_configuration_ids": [
-            "plan-fresh-flash-v6-execution",
-            "plan-fresh-math-v6-execution",
+            "plan-fresh-flash-v7-execution",
+            "plan-fresh-math-v7-execution",
         ],
         "execution_configuration_hashes": ["6" * 64, "7" * 64],
         "run_ids": [],
         "output_paths": [
             "/mnt/training-nvme/corpusstudio/runs/ieee-linux-training/"
-            "phase3-qwen25-05b-matched-v6"
+            "phase3-qwen25-05b-matched-v7"
         ],
         "artifact_ids": [],
         "evidence_roots": [
-            "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v6"
+            "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v7"
         ],
     }
     candidate.update(updates)

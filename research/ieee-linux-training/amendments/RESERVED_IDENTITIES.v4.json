@@ -1,0 +1,273 @@
+{
+  "schema_version": "1.0.0",
+  "captured_at": "2026-07-16T12:00:00Z",
+  "supersedes_reserved_version": "RESERVED_IDENTITIES.v3.json",
+  "classification": "PRESERVED_HISTORICAL_IDENTITIES_NOT_AUTHORIZED_FOR_REUSE",
+  "source_manifests": [
+    {
+      "path": "/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-research-matched-v2/SHA256SUMS",
+      "sha256": "c38f39dde5b12d4802b72acd76882a8929cea735012e78ffe0faf1ec3f3d3695"
+    },
+    {
+      "path": "/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-research-matched-v3/SHA256SUMS",
+      "sha256": "78e55c3b0daee7cedf468ed261f46ad7df62a3a77efcf99038f95e96ed844a7b"
+    },
+    {
+      "path": "/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-research-matched-v4/SHA256SUMS",
+      "sha256": "d62688dbc29f80a5e96c13e7d3bf1702fb562073978601b65da0a5c9f07b0c26"
+    },
+    {
+      "path": "/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-research-plan-v4/SHA256SUMS",
+      "sha256": "834c15c3fa06c7b739e7f7eaba69d81f6a47b1d6505c1411b31c0c6bd2791e16"
+    },
+    {
+      "path": "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v2/20260715T034634Z/post-execution-SHA256SUMS",
+      "sha256": "98fafc7e01793add52351b14a4662ab9f24aa3303c6fae4c22f97cb568616e32"
+    },
+    {
+      "path": "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v3/20260715T052743Z/SHA256SUMS",
+      "sha256": "c07a6cc6956f24492b4d39515c069a42c0d14a391cfd47176f4242c39172fa64"
+    },
+    {
+      "path": "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v3/20260715T052743Z/forbidden-identities.json",
+      "sha256": "516fc3ab29a7c1a5f265536c5bfa80cd7d5517fc15e5faa83b6260c527f9a6d3"
+    },
+    {
+      "path": "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v4/20260715T090840Z/runs/math-20260715T092243Z/SHA256SUMS",
+      "sha256": "c61e4dd70191dc0382cafe487f922f91c0c8275f959940de8c6899682f10d63d"
+    }
+  ],
+  "environment_ids": [
+    "backend-corpus-studio",
+    "backend-corpus-studio-readiness-flash-v1",
+    "backend-corpus-studio-readiness-v2",
+    "backend-corpus-studio-research-flash-v2",
+    "backend-corpus-studio-research-flash-v3",
+    "backend-corpus-studio-research-flash-v4",
+    "backend-corpus-studio-research-flash-v5",
+    "backend-corpus-studio-research-flash-v6",
+    "backend-corpus-studio-research-math-v1",
+    "backend-corpus-studio-research-math-v2",
+    "backend-corpus-studio-research-math-v3",
+    "backend-corpus-studio-research-math-v4",
+    "backend-corpus-studio-research-math-v5",
+    "backend-corpus-studio-research-math-v6"
+  ],
+  "environment_lock_hashes": [
+    "14750ec5932765fe544675aba69d0763931e249d598da8a4d9a44549e85a62a8",
+    "21dd38cbadd11fbf42f8f4de9f87a5c29642b139baefc13008dffe26d0751c13",
+    "256acc9c437897bb02c6ff1cb6d45cf42470612d88e78a4977647b7f27c30416",
+    "7ffa59ea68a243331cf16f6ab5a16f0c47d3d1e6ae415692d42260cba36decf4",
+    "8a988a716c68beacfa8c8fb46925987ea7c9aca198537340471e1fd08f9c75fe",
+    "9f599070fcef83e192d1380ab50683a37cd9034a97194cc523fa58915e47fd30",
+    "a2b839b160e4676d968cdd006040dde6cce756c30f51a2c92ef2b1442132aa2a",
+    "a70bb3d8ea99f818ea5affd628972a657d82cbc9f983577acc8296f8b3d39564",
+    "cd86808ce8e96533b6d6d3a0b4c0472e2e6e27ecf8d25bad916a9a08d4e6887d",
+    "db8d3dea1315904cb7d518a789b46e01b35101436ef0dfc2db675319a669d825",
+    "dbc528f0167a2ec0ccfa42d46ce86c9061be126e02aa557ae5ef5741788a8045",
+    "f4ffe5738a66ba0c81714e45867dfef55f07bc854050f742f5125656fde50ff6",
+    "fb104a9b7055479e8c104ff3296dcb05f81d8674a30575a35d215d3df243a8d5"
+  ],
+  "worker_wheel_sha256": [
+    "271447bf0b82ab14ddb4848bd0d47cc0f2f5ad8ff378f291f04cff65be2fc895",
+    "6ecc82595af761142b723017a31b980241fe6ef4afebf0a2223f90b8bcef724d",
+    "bdc32196203539cbeb9078ce2317fb41d2a30abe68f7e94bc0fa290a97f414d4",
+    "cb5c05b7d4d8e640d06a4d845ae638930b9e9f3769f937c87365f0e7e445d5f5",
+    "de747839c300bc4f7bc3288963d6814b204a95402efba3f1787fa6e6462e135f",
+    "eb4cbde415cadda523bb316c11919ba5c8083fccbcecd0d9e04aaa1a65539d3b",
+    "f8b03634148c41c2fd44e337c9e562e4a8ce1f0b3f11cd980a7accd0a2a12a92"
+  ],
+  "plan_ids": [
+    "plan-019f6216-46cf-7e22-b319-5c1cace048bc",
+    "plan-019f63e5-f299-7656-b50c-3b49dfa125d8",
+    "plan-019f63e8-203d-76db-95f7-c8572ac60878",
+    "plan-019f63fb-d351-7d67-ab30-7405b569b70e",
+    "plan-019f63fd-a3d1-7116-8b57-c5714b1155c4",
+    "plan-019f644b-a3c2-7373-abc0-39a0f7d753eb",
+    "plan-019f644c-511c-7008-a21b-24586c6b4637",
+    "plan-019f650d-cc5d-7028-9763-9e8dfb66f370",
+    "plan-019f650e-51eb-7fc6-a444-816593a52552",
+    "plan-019f6756-a2a6-71a1-bcae-0193345dd115",
+    "plan-019f6758-a666-709c-a9d8-c92496acb867",
+    "plan-019f6789-4135-74f9-a88d-49978a438a96",
+    "plan-019f678b-1182-7cc2-85d3-5f726174e2ee",
+    "plan-019f67e0-c69d-7e35-afee-d6a278656d07",
+    "plan-019f67e3-3c3f-7957-9bb9-a6b89ce41915",
+    "plan-019f687d-a95c-7fd5-a232-b2bdc3cf9618",
+    "plan-019f687f-b39e-7822-ac93-d05e6e17cf7b"
+  ],
+  "plan_hashes": [
+    "22a135923ed3572633b8718ad54976a56bca2b543f83f42694c65f02cbfc730e",
+    "3bc3f230293c2ccc4eeac0fab63f03f503dfce36e7f10dad49f0feec76163065",
+    "490d0aae35a64baca8d4c408d41e1e1b5f3a84d14021523fe6fcab23f540ad10",
+    "4eb33fc15c3f7357c6629593f0bf431e2c639c96e33d853dfe72d320536fb6b4",
+    "60b390c3e7fa0d0dd6276854be4266c67f29e71b630653ebd1b7a75eeaa2506a",
+    "7d4202ce3611f31f1cc27acd304747c5a6ef14de3498017bbf9bebbbfa4d2e6b",
+    "8250cb223be0a60df7528bcfb0d4bddad9bef76dc31fc03c69cac9a0d858e036",
+    "8ee25b2dc14b6192dd0da6d0ad4f2c6aa5a3222c82a45e78285da91d32c2ed8b",
+    "9856855439723301c1e792656776becf35e1ad2a0841ebd6f0ca62e489cc331d",
+    "9eb729883ff71a911f41f45895e70a335b12bd55c2426c300572af2bb811bee0",
+    "a7bb87729aa8a5dea92529d5d22d86c29615e638aa01ce2eb749d1cbd9807891",
+    "ab0ccce0ce26e2d21d7f4e9704a11839839f1df981f4915a75960d87782b4baa",
+    "cb750f36e79d8a119b24a71f95e787faaf8222940524e17497c4544580eef6ce",
+    "cc4856f75f251b8d26cb86e50af7874c21abce1fde2708f183ff9a3ab2a47ed7",
+    "d9f2763f69df5b7a32b2b2b8fdd2b9f5c965ac8a8848cd30950c4e485c62e41e",
+    "e1524e9c00f9cb599f6be8449b1a142967eda6cbd0c64a4c8a95e3af4f24c23c",
+    "e7fb9f49ec818727dd0c095a685383cd716b9bd26733bf639f696c7b37441c48"
+  ],
+  "execution_configuration_ids": [
+    "plan-019f6216-46cf-7e22-b319-5c1cace048bc-execution",
+    "plan-019f63e5-f299-7656-b50c-3b49dfa125d8-execution",
+    "plan-019f63e8-203d-76db-95f7-c8572ac60878-execution",
+    "plan-019f63fb-d351-7d67-ab30-7405b569b70e-execution",
+    "plan-019f63fd-a3d1-7116-8b57-c5714b1155c4-execution",
+    "plan-019f644b-a3c2-7373-abc0-39a0f7d753eb-execution",
+    "plan-019f644c-511c-7008-a21b-24586c6b4637-execution",
+    "plan-019f650d-cc5d-7028-9763-9e8dfb66f370-execution",
+    "plan-019f650e-51eb-7fc6-a444-816593a52552-execution",
+    "plan-019f6756-a2a6-71a1-bcae-0193345dd115-execution",
+    "plan-019f6758-a666-709c-a9d8-c92496acb867-execution",
+    "plan-019f6789-4135-74f9-a88d-49978a438a96-execution",
+    "plan-019f678b-1182-7cc2-85d3-5f726174e2ee-execution",
+    "plan-019f67e0-c69d-7e35-afee-d6a278656d07-execution",
+    "plan-019f67e3-3c3f-7957-9bb9-a6b89ce41915-execution",
+    "plan-019f687d-a95c-7fd5-a232-b2bdc3cf9618-execution",
+    "plan-019f687f-b39e-7822-ac93-d05e6e17cf7b-execution"
+  ],
+  "execution_configuration_hashes": [
+    "0f8fec9aac845dd0fdbee99b2b68f2c004967f2b1682cbcb964d772b78ae5617",
+    "3edd545993dcec677a0cf0d22a3a6e825dbcf739cd350524aff0d1d77f5b05de",
+    "4294b8431d1d20076e87b3797185add2fd8c5479db60adb1cc3f1a4c5cd47ea2",
+    "4453d60d23ecd7bcd3811a616a1381b51e68e6d941bfcaa673c9895b79a854c5",
+    "6255b05ec60f75bb4d91383965f6d11a5f00092fb0fbe92b21a01003f8543872",
+    "66bb64038481c0b855eff2aa8d957fc0ad59b15d3ed833c351623dc8c091530f",
+    "6a8e1134e6f43119625b64a55b75c0cf3bb39d90cac772033b15c64aca40aed5",
+    "736ade995bfc6e4fb6d2b0dc6ecd2b717ec8fa53b464144b15299242b662dfe4",
+    "846d0ac61199b3eaa08c1556ca98481b335da3662ee80f858c4c7f2e8792f687",
+    "8c76ef736c079f589c66f4c4d6ad1d4de54a646e6adea1d368cd34b888a165c4",
+    "9b58a9703d1355649af997ae3c87aac51bb95bcced870e6d1be2c16dcb6d8e1b",
+    "a143e15e6a99eeeb69453fe7a011cfdac2c2853da9ed99b2ae34421051385303",
+    "b34661a2ef46017da475e1310a6afcab91f274eda697a997212a62bd4dd8e168",
+    "e0b046d217d2960454a441794d0f1ea93e10ff082b9c5921581a2414697fc783",
+    "eb04ab3a16c2052f6177c26728f6a1ea65f52313169a9090654f980609dadbb5",
+    "ee925e9b9dcce96004cb42dafedd8dc5df2dea2fb4d21c01e1f458d72d61fa28",
+    "fe2d99cea56a35a14da71e1352d0b977282d6865a73dbc41861d496ceec6fa53"
+  ],
+  "run_ids": [
+    "run-019f6229-9fda-7067-a20b-80fbf6c1c709",
+    "run-019f640f-a587-7f79-9bf1-2a36c05854fd",
+    "run-019f6413-c34b-7570-a5b4-ea69caa0579b",
+    "run-019f6518-3927-7d73-b106-15f385b61415",
+    "run-019f67ac-275f-7405-ac92-f407c91be70f",
+    "run-019f67e6-8d14-782a-8b10-ecdb4e74a6e0",
+    "run-019f688c-67c0-77cf-82e2-477f52fab76f",
+    "run-019f6892-3a54-7922-8e10-d138ee7e77ce"
+  ],
+  "output_paths": [
+    "/mnt/training-nvme/corpusstudio/runs/ieee-linux-training/phase3-qwen25-05b-matched-v2",
+    "/mnt/training-nvme/corpusstudio/runs/ieee-linux-training/phase3-qwen25-05b-matched-v3",
+    "/mnt/training-nvme/corpusstudio/runs/ieee-linux-training/phase3-qwen25-05b-matched-v4",
+    "/mnt/training-nvme/corpusstudio/runs/ieee-linux-training/v5-bringup-713fde1/out-math-chat",
+    "/mnt/training-nvme/corpusstudio/runs/ieee-linux-training/v5-bringup-713fde1/plans-ga1-cp588b1ab/out-math-ga1",
+    "/mnt/training-nvme/corpusstudio/runs/ieee-linux-training/v6-smoke-73b756c",
+    "/mnt/training-nvme/runs/corpusstudio/qwen25-05b-flash-pipeline-smoke"
+  ],
+  "artifact_ids": [
+    "run-019f67e6-8d14-782a-8b10-ecdb4e74a6e0-adapter-9e1e7eec698b",
+    "run-019f688c-67c0-77cf-82e2-477f52fab76f-adapter-5be35511ed98",
+    "run-019f6892-3a54-7922-8e10-d138ee7e77ce-adapter-8a346e32a87b"
+  ],
+  "evidence_roots": [
+    "/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-research-flash-v4",
+    "/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-research-matched-v2",
+    "/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-research-matched-v3",
+    "/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-research-matched-v4",
+    "/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-research-math-v4",
+    "/mnt/training-nvme/corpusstudio/evidence/backend-corpus-studio-research-plan-v4",
+    "/mnt/training-nvme/corpusstudio/evidence/bounded-flash-smoke/20260714T194401Z",
+    "/mnt/training-nvme/corpusstudio/evidence/flash-smoke-plan",
+    "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v2/20260715T034634Z",
+    "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v3/20260715T052743Z",
+    "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v4/20260715T090840Z",
+    "/mnt/training-nvme/corpusstudio/evidence/v6-smoke-73b756c",
+    "/mnt/training-nvme/corpusstudio/runs/ieee-linux-training/v5-bringup-713fde1"
+  ],
+  "superseded_environment_evidence": {
+    "note": "v1-v4 identities are historical and non-reusable. Capability/probe reuse is additionally prevented by the reserved lock+wheel sets and the per-trial capability_report_hash / execution_probe_hash bindings in the base immutable_bindings.",
+    "v4_capability_report_hashes": {
+      "backend-corpus-studio-research-math-v4": "b260040eb967ab55052320d45805fc7b3056480a1aa2f354791a605157e6e925",
+      "backend-corpus-studio-research-flash-v4": "77e1f5fd57d2b54b7c11d9e4ba14b0656bb96e80e64239298b84d205b1d370a6"
+    },
+    "v4_math_run": {
+      "run_id": "run-019f6518-3927-7d73-b106-15f385b61415",
+      "terminal_taxonomy": "GRADIENT_FAILURE",
+      "terminal_stage": "backward",
+      "completed_optimizer_steps": 0,
+      "artifacts_written": 0
+    },
+    "v4_flash_dispatched": false,
+    "v5_worker_source_commit": "713fde14c8a6bae1888c43851fa6a487a031a242",
+    "v5_worker_wheel_sha256": "271447bf0b82ab14ddb4848bd0d47cc0f2f5ad8ff378f291f04cff65be2fc895",
+    "v5_capability_report_hashes": {
+      "backend-corpus-studio-research-math-v5": "b0d95935b396ecaedf089cde8b5d144dc7f00f698cb81727466a1496012346bf",
+      "backend-corpus-studio-research-flash-v5": "bab7b6b0f6406732260fcdbc3797c0b05a61a99bb2ca121f774f875bc77d2652"
+    },
+    "v5_execution_probe_evidence_hashes": {
+      "backend-corpus-studio-research-math-v5": "37881aa6e50485220221628add9f60ceac7a43f0d412024240feba97d0e1cf7e",
+      "backend-corpus-studio-research-flash-v5": "cc0126514826dd1b0ae17c1b60f56232627fd86039ee53da192ac8659d8d983a"
+    },
+    "v5_math_chat_run": {
+      "run_id": "run-019f67e6-8d14-782a-8b10-ecdb4e74a6e0",
+      "terminal_taxonomy": "ARTIFACT_FAILURE",
+      "terminal_stage": "export",
+      "completed_optimizer_steps": 12,
+      "cause": "training_args.bin falsely classified as alternate model weights; fixed by PR #461",
+      "measured_fit": "NATIVE_UNPROVEN",
+      "scientifically_complete": false
+    },
+    "v5_math_ga1_instruction_run": {
+      "run_id": "run-019f67ac-275f-7405-ac92-f407c91be70f",
+      "terminal_taxonomy": "UNSUPPORTED_CONFIGURATION",
+      "terminal_stage": "adapter_attached",
+      "completed_optimizer_steps": 0,
+      "cause": "chat fixture planned as instruction -> 0 usable rows; fixed by PR #460 preflight"
+    },
+    "v5_flash_dispatched": false,
+    "v6_worker_source_commit": "73b756c49da0f03203ebd05dfb5528805b0fd280",
+    "v6_worker_wheel_sha256": "bdc32196203539cbeb9078ce2317fb41d2a30abe68f7e94bc0fa290a97f414d4",
+    "v6_math_run": {
+      "run_id": "run-019f688c-67c0-77cf-82e2-477f52fab76f",
+      "environment_id": "backend-corpus-studio-research-math-v6",
+      "forced_kernel": "torch_sdpa_math",
+      "completed_optimizer_steps": 12,
+      "loss_decreased": true,
+      "adapter_admitted": true,
+      "measured_fit": "NATIVE_SAFE"
+    },
+    "v6_flash_run": {
+      "run_id": "run-019f6892-3a54-7922-8e10-d138ee7e77ce",
+      "environment_id": "backend-corpus-studio-research-flash-v6",
+      "forced_kernel": "torch_sdpa_flash",
+      "completed_optimizer_steps": 12,
+      "loss_decreased": true,
+      "adapter_admitted": true,
+      "measured_fit": "NATIVE_SAFE"
+    },
+    "v6_verdict": "V6_MATH_AND_FLASH_BRINGUP_PASS",
+    "v6_token_throughput": "UNAVAILABLE_OBSERVER_MISSED_BATCHES: nonpadding/supervised tokens_per_sec recorded 0.0 but a real supervised step processed tokens, so the value is null/unavailable, NOT a measured zero. Root cause: the accelerate-prepared DataLoaderShard bypassed the #462 collate-fn observer. Fixed source-side by PR 466 (observe inputs at training_step); the observer runs in the worker child, so it changes worker bytes and requires this v7 lineage."
+  },
+  "disjointness_required_for_new_evidence": [
+    "environment_ids",
+    "environment_lock_hashes",
+    "worker_wheel_sha256",
+    "plan_ids",
+    "plan_hashes",
+    "execution_configuration_ids",
+    "execution_configuration_hashes",
+    "run_ids",
+    "output_paths",
+    "artifact_ids",
+    "evidence_roots"
+  ],
+  "reuse_authorized": false
+}

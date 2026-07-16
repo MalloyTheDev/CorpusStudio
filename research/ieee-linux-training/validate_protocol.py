@@ -18,23 +18,25 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 STUDY_ROOT = Path(__file__).resolve().parent
 BASE_PROTOCOL = STUDY_ROOT / "PROTOCOL.md"
 BASE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.yaml"
-# Current (newest) amendment: 0003 -> effective matrix 1.3.0, reserved-identity registry v3.
-EFFECTIVE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.v1.3.0.json"
+# Current (newest) amendment: 0004 -> effective matrix 1.4.0, reserved-identity registry v4.
+EFFECTIVE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.v1.4.0.json"
 AMENDMENT = STUDY_ROOT / (
-    "amendments/0003-2026-07-16-v6-worker-lineage-telemetry-and-artifact-corrections.md"
+    "amendments/0004-2026-07-16-v7-worker-lineage-token-throughput-observer.md"
 )
 AMENDMENT_MANIFEST = STUDY_ROOT / (
+    "amendments/0004-2026-07-16-v7-worker-lineage-token-throughput-observer.manifest.json"
+)
+RESERVED_IDENTITIES = STUDY_ROOT / "amendments/RESERVED_IDENTITIES.v4.json"
+# Frozen prior amendment (0003 -> effective matrix 1.3.0). The current amendment supersedes it; the
+# chain is verified below so 0003 stays byte-frozen and the amendment ordering is provable.
+PRIOR_AMENDMENT = STUDY_ROOT / (
+    "amendments/0003-2026-07-16-v6-worker-lineage-telemetry-and-artifact-corrections.md"
+)
+PRIOR_AMENDMENT_MANIFEST = STUDY_ROOT / (
     "amendments/0003-2026-07-16-v6-worker-lineage-telemetry-and-artifact-corrections.manifest.json"
 )
-RESERVED_IDENTITIES = STUDY_ROOT / "amendments/RESERVED_IDENTITIES.v3.json"
-# Frozen prior amendment (0002 -> effective matrix 1.2.0). The current amendment supersedes it; the
-# chain is verified below so 0002 stays byte-frozen and the amendment ordering is provable.
-PRIOR_AMENDMENT = STUDY_ROOT / "amendments/0002-2026-07-15-post-audit-v5-identities.md"
-PRIOR_AMENDMENT_MANIFEST = STUDY_ROOT / (
-    "amendments/0002-2026-07-15-post-audit-v5-identities.manifest.json"
-)
-PRIOR_EFFECTIVE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.v1.2.0.json"
-PRIOR_RESERVED_IDENTITIES = STUDY_ROOT / "amendments/RESERVED_IDENTITIES.v2.json"
+PRIOR_EFFECTIVE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.v1.3.0.json"
+PRIOR_RESERVED_IDENTITIES = STUDY_ROOT / "amendments/RESERVED_IDENTITIES.v3.json"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 HASH_IDENTITY_FIELDS = {
@@ -267,15 +269,15 @@ def _validate_reserved_superset(reserved: dict[str, Any]) -> None:
 
 
 def _validate_supersession(manifest: dict[str, Any]) -> None:
-    """Bind the frozen prior amendment by exact hash so the amendment chain is ordered and 0001 is
-    provably unmodified. A superseding amendment records the prior effective version and the raw-byte
-    hashes of the prior manifest, narrative, effective matrix, and reserved-identity set."""
+    """Bind the frozen prior amendment by exact hash so the amendment chain is ordered and each prior
+    amendment stays byte-frozen. A superseding amendment records the prior effective version and the
+    raw-byte hashes of the prior manifest, narrative, effective matrix, and reserved-identity set."""
 
     supersedes = manifest.get("supersedes")
     if not isinstance(supersedes, dict):
         raise ProtocolValidationError("amendment must record the superseded prior amendment")
-    if supersedes.get("effective_protocol_version") != "1.2.0":
-        raise ProtocolValidationError("amendment must supersede exactly effective version 1.2.0")
+    if supersedes.get("effective_protocol_version") != "1.3.0":
+        raise ProtocolValidationError("amendment must supersede exactly effective version 1.3.0")
     prior_files = {
         "prior_amendment_manifest_sha256": PRIOR_AMENDMENT_MANIFEST,
         "prior_narrative_sha256": PRIOR_AMENDMENT,
