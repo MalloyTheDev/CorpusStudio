@@ -12,8 +12,16 @@ artifact / telemetry / disjointness gates green, and **both 0.5B smokes SUCCEEDE
 `scientifically_complete=True`, GPU released, post-run `HARDWARE_VERIFIED`). Runs
 `run-019f688c...` (math) / `run-019f6892...` (flash) under
 `/mnt/training-nvme/corpusstudio/runs/ieee-linux-training/v6-smoke-73b756c/`. Honestly-recorded
-non-blocking gap: `nonpadding/supervised_tokens_per_second` read `0.0` (a runner-side token-observer
-gap under trl 1.8.0 / transformers 5.13.1; not a required paper field; a future **v7** fix). Still a 0.5B
+non-blocking gap: `nonpadding/supervised_tokens_per_second` read `0.0` - now reclassified as
+**UNAVAILABLE (null), not a measured zero** (`TOKEN_THROUGHPUT_UNAVAILABLE_OBSERVER_MISSED_BATCHES`;
+sidecar under `.../evidence/v6-smoke-73b756c/`). Root cause: the #462 collate-fn observer never fired
+because the accelerate-prepared `DataLoaderShard` ignores a `.collate_fn` reassignment on the pinned
+stack. **Fix now landed on the source side** (branch `fix/token-throughput-accounting`): observe
+`inputs` at `training_step`, emit raw per-step `nonpadding_tokens` / `supervised_tokens` /
+`observed_microbatches`, and gate `scientific_throughput_complete` / `paper_performance_complete`
+separately from resource completeness; proven on the real pinned stack (`INTEGRATION_PASS`, counts
+40/39/42 per step, collate-wrap fired 0). Because the observer runs in the worker child it changes
+worker bytes -> the **v7** lineage (amendment 0004, math/flash-v7) is the next step. Still a 0.5B
 feasibility bring-up, NOT a 7B or full-training claim. Details in
 [`docs/HOST_STATE.md`](docs/HOST_STATE.md) (v6 section). Earlier (2026-07-15,
 pre-GPU finalization): the exact checkpoint/resume **execution engine**

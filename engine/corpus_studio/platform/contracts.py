@@ -4364,6 +4364,15 @@ class EventMetrics(ContractModel):
     tokens_per_sec: float | None = Field(default=None, ge=0)
     # The honest training rate that ignores padding, paired with the plan's supervised-token target.
     supervised_tokens_per_sec: float | None = Field(default=None, ge=0)
+    # Raw per-optimizer-step token counts actually observed by the trainer (summed over the step's
+    # accumulation microbatches), and how many microbatches were observed. These are the source of truth
+    # the rates are derived from, so a rate can be validated against ``count / step_time``.
+    # ``observed_microbatches == 0`` means the observer never saw a batch: the counts are UNAVAILABLE
+    # (null), never a measured zero. A present count of 0 supervised tokens on a completed step is a real
+    # (and, for supervised training, invalid) observation - it is NOT silently coerced away.
+    nonpadding_tokens: int | None = Field(default=None, ge=0)
+    supervised_tokens: int | None = Field(default=None, ge=0)
+    observed_microbatches: int | None = Field(default=None, ge=0)
     loss: float | None = None
     grad_norm: float | None = Field(default=None, ge=0)
     learning_rate: float | None = Field(default=None, ge=0)
@@ -4855,13 +4864,34 @@ class MeasurementOverhead(ContractModel):
 class ScientificCompleteness(ContractModel):
     """Whether the run captured every field the paper requires. A telemetry gap NEVER converts a
     workload success into paper data: ``scientifically_complete`` may be False even when the run
-    succeeded, and it does not alter the run's terminal state."""
+    succeeded, and it does not alter the run's terminal state.
+
+    Completeness is reported in three separable dimensions so a workload success with incomplete
+    instrumentation is never conflated with a paper-ready measurement (the v6 lesson: token throughput
+    read 0.0 because an observer missed batches, yet the run itself succeeded):
+
+    - ``scientific_resource_complete`` - every required RESOURCE paper field (loss, step time, GPU power,
+      GPU memory, energy, host RSS, and the identity chain) is present. This is exactly the historical
+      ``scientifically_complete`` set and is kept equal to it for backward compatibility.
+    - ``scientific_throughput_complete`` - token accounting is VALID for every measured optimizer step:
+      a positive supervised-token count actually observed, a positive step duration, and a token rate
+      that equals observed tokens / observed duration (no NaN/Inf, no negative, no sequence-length
+      fabrication, no averaging a missing step as zero).
+    - ``paper_performance_complete`` - both of the above; required for any paper PERFORMANCE cell.
+
+    ``workload_success`` is orthogonal and lives on the RunManifest terminal state - an observer failure
+    marks telemetry incomplete here without failing the workload."""
 
     scientifically_complete: bool
     missing_required_paper_fields: list[str] = Field(default_factory=list)
     telemetry_degraded: bool = False
     degraded_sample_count: int = Field(default=0, ge=0)
     reason: str = ""
+    # Separable completeness dimensions (default False so older summaries deserialize unchanged).
+    scientific_resource_complete: bool = False
+    scientific_throughput_complete: bool = False
+    paper_performance_complete: bool = False
+    throughput_validity_reason: str = ""
 
     @field_validator("missing_required_paper_fields")
     @classmethod

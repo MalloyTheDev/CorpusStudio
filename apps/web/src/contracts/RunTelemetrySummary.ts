@@ -2,9 +2,13 @@
 
 export type DegradedSampleCount = number;
 export type MissingRequiredPaperFields = string[];
+export type PaperPerformanceComplete = boolean;
 export type Reason = string;
+export type ScientificResourceComplete = boolean;
+export type ScientificThroughputComplete = boolean;
 export type ScientificallyComplete = boolean;
 export type TelemetryDegraded = boolean;
+export type ThroughputValidityReason = string;
 export type ContractVersion = "1.0.0";
 export type BoundaryClipped = boolean;
 export type CoverageFraction = number | null;
@@ -211,13 +215,33 @@ export interface RunTelemetrySummary {
  * Whether the run captured every field the paper requires. A telemetry gap NEVER converts a
  * workload success into paper data: ``scientifically_complete`` may be False even when the run
  * succeeded, and it does not alter the run's terminal state.
+ *
+ * Completeness is reported in three separable dimensions so a workload success with incomplete
+ * instrumentation is never conflated with a paper-ready measurement (the v6 lesson: token throughput
+ * read 0.0 because an observer missed batches, yet the run itself succeeded):
+ *
+ * - ``scientific_resource_complete`` - every required RESOURCE paper field (loss, step time, GPU power,
+ *   GPU memory, energy, host RSS, and the identity chain) is present. This is exactly the historical
+ *   ``scientifically_complete`` set and is kept equal to it for backward compatibility.
+ * - ``scientific_throughput_complete`` - token accounting is VALID for every measured optimizer step:
+ *   a positive supervised-token count actually observed, a positive step duration, and a token rate
+ *   that equals observed tokens / observed duration (no NaN/Inf, no negative, no sequence-length
+ *   fabrication, no averaging a missing step as zero).
+ * - ``paper_performance_complete`` - both of the above; required for any paper PERFORMANCE cell.
+ *
+ * ``workload_success`` is orthogonal and lives on the RunManifest terminal state - an observer failure
+ * marks telemetry incomplete here without failing the workload.
  */
 export interface ScientificCompleteness {
   degraded_sample_count?: DegradedSampleCount;
   missing_required_paper_fields?: MissingRequiredPaperFields;
+  paper_performance_complete?: PaperPerformanceComplete;
   reason?: Reason;
+  scientific_resource_complete?: ScientificResourceComplete;
+  scientific_throughput_complete?: ScientificThroughputComplete;
   scientifically_complete: ScientificallyComplete;
   telemetry_degraded?: TelemetryDegraded;
+  throughput_validity_reason?: ThroughputValidityReason;
 }
 /**
  * GPU energy from the trapezoidal rule over adjacent power samples

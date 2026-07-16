@@ -250,7 +250,8 @@ def test_progress_emits_step_time_worker_memory_and_token_rates(monkeypatch):
         losses = {1: 1.0, 2: 0.5}
         for step in range(1, 3):  # the demo plan seals a 2-step schedule
             if token_callback is not None:
-                token_callback(step, 100 * step, 40 * step)  # nonpadding, supervised
+                # nonpadding, supervised, observed_microbatches (one microbatch observed per step).
+                token_callback(step, 100 * step, 40 * step, 1)
             if progress_callback is not None:
                 progress_callback(step, 2, losses[step])
         adapter_path = _write_fake_adapter(config.output_dir)
@@ -281,6 +282,11 @@ def test_progress_emits_step_time_worker_memory_and_token_rates(monkeypatch):
     # Worker allocator memory rides on every step's metric record (persisted into RunEvents.jsonl).
     assert metrics[1].memory is not None and metrics[1].memory.torch_allocated_bytes == 42
     assert metrics[1].loss == 1.0
+    # Raw observed counts ride on every step (the source of truth the rates are validated against),
+    # regardless of whether a wall time exists yet to form a rate.
+    assert metrics[1].observed_microbatches == 1
+    assert metrics[1].nonpadding_tokens == 100 and metrics[1].supervised_tokens == 40
+    assert metrics[2].nonpadding_tokens == 200 and metrics[2].supervised_tokens == 80
     # Step 1 has no prior boundary, so it carries no wall time and thus no derived token rate.
     assert metrics[1].step_time_seconds is None
     assert metrics[1].tokens_per_sec is None
@@ -288,6 +294,9 @@ def test_progress_emits_step_time_worker_memory_and_token_rates(monkeypatch):
     assert metrics[2].step_time_seconds is not None and metrics[2].step_time_seconds > 0
     assert metrics[2].tokens_per_sec is not None and metrics[2].tokens_per_sec > 0
     assert metrics[2].supervised_tokens_per_sec is not None
+    # Each derived rate equals observed tokens / observed duration (no fabrication).
+    assert metrics[2].tokens_per_sec == 200 / metrics[2].step_time_seconds
+    assert metrics[2].supervised_tokens_per_sec == 80 / metrics[2].step_time_seconds
 
 
 def test_progress_step_time_is_null_without_token_or_time_data(monkeypatch):

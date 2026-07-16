@@ -65,12 +65,19 @@ From `engine/` with the venv (`engine/.venv`, CPython 3.12.3, torch-free core + 
 3. **No-shell execution.** Installers and trainer launches are `argv` lists, never shell strings.
 4. **Honesty invariants.** License fail-closed; provenance gate blocks frontier teachers; "a completed
    step != proven fit"; "installed != supported"; no silent target truncation; predicted fit is never
-   `NATIVE_SAFE` (only a measured run is); single-writer `examples.jsonl`. Never weaken an evidence
-   contract, precision requirement, kernel enforcement, artifact integrity, failure taxonomy, or
-   provenance rule to obtain a passing run.
+   `NATIVE_SAFE` (only a measured run is); single-writer `examples.jsonl`. **An unavailable metric must
+   be null with a typed reason, never a plausible-looking zero** - the v6 lesson: token throughput read
+   `0.0` because the observer captured no batches, but a real supervised step processed tokens, so the
+   honest value is unavailable, not measured-zero. Capture at the lowest un-bypassable boundary the
+   trainer actually consumes (observe `inputs` at `training_step`, not a collate wrapper the
+   accelerate-prepared dataloader silently bypasses), and gate throughput separately from resource
+   completeness. Never weaken an evidence contract, precision requirement, kernel enforcement, artifact
+   integrity, failure taxonomy, or provenance rule to obtain a passing run.
 5. **Blackwell / sm_120.** The **math** SDPA attention path is the verified-safe default (fused
-   flash-SDPA deadlocks on native Windows/WDDM). Unsloth is refused on Windows/WDDM. Bare-Linux flash
-   for the real workload is not yet claimed.
+   flash-SDPA deadlocks on native Windows/WDDM). Unsloth is refused on Windows/WDDM. Bare-Linux
+   forced-`torch_sdpa_flash` is VERIFIED only at the bounded 0.5B / seq-256 / 12-step tuple (v6); it is
+   NOT claimed for the real 7B / full-corpus workload, nor for `flash_attention_2` / external
+   `flash-attn` / seq 4096 / Windows-WDDM.
 6. **ASCII in CLI-facing strings** (Windows console UTF-8): use `-`, not the em dash; no non-ASCII in
    `typer` help, `raise ...Error(...)` messages, or anything printed to a console.
 7. **One training authority.** Shipping clients use `platform-plan` -> `platform-run`; never the
