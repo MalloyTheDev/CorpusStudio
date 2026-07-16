@@ -1,0 +1,507 @@
+{
+  "schema_version": "1.3.0",
+  "protocol_version": "1.3.0",
+  "study_id": "cs-ieee-linux-training-v1",
+  "preregistered_date": "2026-07-14",
+  "immutable_after_first_result": true,
+  "host_binding": {
+    "operating_system": "ubuntu-24.04-native-linux",
+    "gpu_name": "NVIDIA GeForce RTX 5070",
+    "gpu_vram_mib": 12227,
+    "compute_capability": "12.0",
+    "gpu_architecture": "sm_120",
+    "driver_version_at_preregistration": "595.71.05",
+    "host_mem_total_kib_at_preregistration": 32656660,
+    "swap_total_kib_at_preregistration": 8388604,
+    "exact_profile_required_at_execution": true
+  },
+  "immutable_bindings": {
+    "repository_commit": "required-per-trial",
+    "worker_wheel_sha256": "required-per-environment-and-trial",
+    "environment_lock_hash": "required-per-trial",
+    "capability_report_hash": "required-per-trial",
+    "execution_probe_hash": "required-per-trial",
+    "run_plan_hash": "required-per-trial",
+    "resolved_execution_configuration_hash": "required-per-trial",
+    "model_content_sha256": "required-before-planning",
+    "tokenizer_content_sha256": "required-before-planning",
+    "chat_template_sha256": "required-before-planning",
+    "dataset_content_sha256": "required-before-planning",
+    "effective_matrix_sha256": "required-per-environment-plan-and-trial",
+    "reserved_identities_sha256": "required-before-new-identity-allocation",
+    "worker_source_commit": "required-per-environment-and-trial"
+  },
+  "models": [
+    {
+      "id": "qwen2.5-0.5b-instruct",
+      "source_repository": "Qwen/Qwen2.5-0.5B-Instruct",
+      "nominal_parameters_billion": 0.5,
+      "order_index": 0,
+      "local_immutable_snapshot_required": true,
+      "trust_remote_code": false
+    },
+    {
+      "id": "qwen2.5-3b-instruct",
+      "source_repository": "Qwen/Qwen2.5-3B-Instruct",
+      "nominal_parameters_billion": 3.0,
+      "order_index": 1,
+      "local_immutable_snapshot_required": true,
+      "trust_remote_code": false
+    },
+    {
+      "id": "qwen2.5-7b-instruct",
+      "source_repository": "Qwen/Qwen2.5-7B-Instruct",
+      "nominal_parameters_billion": 7.0,
+      "order_index": 2,
+      "local_immutable_snapshot_required": true,
+      "trust_remote_code": false
+    }
+  ],
+  "dataset": {
+    "id": "cs-ieee-linux-sft-v1",
+    "source": "immutable-local-license-cleared-corpus",
+    "source_content_sha256": "bind-before-first-new-result",
+    "sequence_view_binding_key": "model-tokenizer-sha256-and-sequence-length",
+    "sequence_view_content_sha256": "required-before-planning",
+    "sequence_view_rendered_examples_sha256": "required-before-planning",
+    "exact_non_padding_input_length": "declared-sequence-length",
+    "same_view_required_across_execution_paths": true,
+    "same_view_required_across_adapter_methods": true,
+    "fixed_row_order": true,
+    "packing": false,
+    "truncation_allowed": false,
+    "license_evidence_required": true
+  },
+  "first_party_execution_paths": [
+    {
+      "id": "first-party-math",
+      "backend_id": "corpus_studio",
+      "environment_id": "backend-corpus-studio-research-math-v6",
+      "attention_api": "sdpa",
+      "effective_backend_required": "torch_sdpa_math",
+      "flash_sdp_enabled": false,
+      "mem_efficient_sdp_enabled": false,
+      "math_sdp_enabled": true,
+      "external_flash_attention": false,
+      "fallback_policy": "refuse",
+      "order_index": 0
+    },
+    {
+      "id": "first-party-flash",
+      "backend_id": "corpus_studio",
+      "environment_id": "backend-corpus-studio-research-flash-v6",
+      "attention_api": "sdpa",
+      "effective_backend_required": "torch_sdpa_flash",
+      "flash_sdp_enabled": true,
+      "mem_efficient_sdp_enabled": false,
+      "math_sdp_enabled": false,
+      "external_flash_attention": false,
+      "fallback_policy": "refuse",
+      "order_index": 1
+    }
+  ],
+  "primary_training_configuration": {
+    "task_type": "sft",
+    "adapter": {
+      "method": "qlora",
+      "rank": 16,
+      "alpha": 32,
+      "dropout": 0.05,
+      "bias": "none",
+      "target_modules": [
+        "all-linear"
+      ]
+    },
+    "precision": {
+      "forward_autocast": "bf16",
+      "quantization_compute": "bf16",
+      "adapter_weights": "fp32",
+      "adapter_gradients": "fp32"
+    },
+    "quantization": {
+      "method": "nf4",
+      "bits": 4,
+      "double_quantization": true
+    },
+    "optimizer": {
+      "implementation": "adamw_torch",
+      "learning_rate": 0.0002,
+      "weight_decay": 0.0,
+      "beta1": 0.9,
+      "beta2": 0.999,
+      "epsilon": 1e-08,
+      "max_gradient_norm": 1.0,
+      "scheduler": "linear",
+      "warmup_ratio": 0.0
+    },
+    "loss": "cross_entropy",
+    "microbatch_size": 1,
+    "gradient_accumulation_steps": 1,
+    "gradient_checkpointing": true,
+    "packing": false,
+    "truncation_allowed": false,
+    "offload_strategy": "none",
+    "compile_mode": "none",
+    "checkpoint_strategy": "no",
+    "intermediate_checkpoints": false,
+    "evaluation": {
+      "before_run": false,
+      "during_run": false,
+      "after_run": false
+    },
+    "data_shuffle": true,
+    "data_order_seeded": true,
+    "trust_remote_code": false,
+    "use_safetensors": true
+  },
+  "primary_matrix": {
+    "expansion": "cartesian-product",
+    "model_ids": [
+      "qwen2.5-0.5b-instruct",
+      "qwen2.5-3b-instruct",
+      "qwen2.5-7b-instruct"
+    ],
+    "sequence_lengths": [
+      512,
+      1024,
+      2048,
+      3072,
+      4096
+    ],
+    "execution_path_ids": [
+      "first-party-math",
+      "first-party-flash"
+    ],
+    "adapter_methods": [
+      "qlora"
+    ],
+    "expected_cell_count": 30,
+    "sequence_4096_attempt_required": true,
+    "batch_change_between_paths_allowed": false
+  },
+  "feasibility_smoke": {
+    "required_before_characterization": true,
+    "optimizer_steps": 3,
+    "warmup_steps_excluded": 0,
+    "repeat_count": 1,
+    "seed": 41999,
+    "data_seed": 51999,
+    "exact_step_count_required": true,
+    "finite_loss_required": true,
+    "terminal_success_required": true,
+    "adapter_and_manifest_hashes_required": true,
+    "clean_post_environment_health_required": true
+  },
+  "characterization_trials": {
+    "total_optimizer_steps": 12,
+    "warmup_optimizer_steps": 2,
+    "measured_optimizer_steps": 10,
+    "repeat_count": 3,
+    "trial_seeds": [
+      42001,
+      42002,
+      42003
+    ],
+    "data_seeds": [
+      52001,
+      52002,
+      52003
+    ],
+    "trial_is_replication_unit": true,
+    "no_intermediate_checkpoints": true
+  },
+  "execution_order": {
+    "model_order": "ascending-order-index",
+    "sequence_order": "ascending",
+    "kernel_pairing": "matched-by-model-sequence-trial-index",
+    "kernel_counterbalance_rule": "even(model_index + sequence_index + trial_index)=math-first; odd=flash-first",
+    "feasibility_trial_index": 0,
+    "cooldown_start_temperature_max_c": 45,
+    "cooldown_timeout_seconds": 600,
+    "require_no_unrelated_gpu_process": true,
+    "stop_loaded_ollama_models": true
+  },
+  "telemetry": {
+    "nvidia_smi_interval_ms": 200,
+    "record_raw_step_events": true,
+    "record_cuda_allocated": true,
+    "record_cuda_reserved": true,
+    "record_process_gpu_memory": true,
+    "record_host_rss": true,
+    "record_swap": true,
+    "record_gpu_utilization": true,
+    "record_memory_controller_utilization_when_available": true,
+    "record_power": true,
+    "record_temperature": true,
+    "record_clocks_when_available": true,
+    "energy_integration": "trapezoidal"
+  },
+  "safety_limits": {
+    "gpu_temperature_stop_c": 85,
+    "host_rss_absolute_stop_gib": 56,
+    "host_rss_fraction_of_physical_stop": 0.9,
+    "effective_host_rss_stop": "lower-of-absolute-and-fractional-limits",
+    "swap_growth_stop_mib": 256,
+    "swap_growth_sustained_seconds": 30,
+    "gpu_unresponsive_consecutive_polls": 3,
+    "optimizer_step_wall_time_stop_seconds": 900,
+    "trial_wall_time_stop_seconds": 3600,
+    "maximum_measured_optimizer_steps": 10,
+    "one_gpu_workload_at_a_time": true,
+    "automatic_workload_retry_count": 0,
+    "maximum_infrastructure_retry_count": 1
+  },
+  "statistics": {
+    "unit_of_replication": "trial",
+    "summaries": [
+      "individual-values",
+      "mean",
+      "median",
+      "sample-standard-deviation",
+      "minimum",
+      "maximum",
+      "sample-count",
+      "two-sided-95-percent-student-t-confidence-interval"
+    ],
+    "paired_kernel_differences": true,
+    "paired_kernel_ratios": true,
+    "failure_imputation": "none",
+    "outlier_exclusion": "none"
+  },
+  "secondary_adapter_matrix": {
+    "status": "gated-until-primary-stable",
+    "model_ids": [
+      "qwen2.5-0.5b-instruct",
+      "qwen2.5-3b-instruct"
+    ],
+    "sequence_lengths": [
+      1024,
+      4096
+    ],
+    "adapter_methods": [
+      "lora",
+      "qlora"
+    ],
+    "execution_path_ids": [
+      "first-party-math",
+      "first-party-flash",
+      "unsloth-when-independently-verified"
+    ],
+    "match_adapter_hyperparameters": true,
+    "qlora_quantization": "nf4-double-quant-bf16-compute",
+    "lora_quantization": "none",
+    "seven_b_lora_policy": "predicted-fit-first; attempt-only-if-exact-sealed-plan-is-viable"
+  },
+  "adaptive_follow_up": {
+    "part_of_primary_matrix": false,
+    "allowed_only_after_fixed_ladder": true,
+    "candidate_sequence_lengths": [
+      1280,
+      1536,
+      2560,
+      3584
+    ]
+  },
+  "claim_boundaries": {
+    "model_quality_claims": false,
+    "full_convergence_claims": false,
+    "long_duration_stability_claims": false,
+    "windows_claims": false,
+    "wsl_claims": false,
+    "macos_claims": false,
+    "external_flash_attention_claims": false,
+    "offload_claims": false,
+    "moe_runtime_claims": false,
+    "other_gpu_claims": false
+  },
+  "amendment_policy": {
+    "directory": "amendments",
+    "version_increment_required": true,
+    "preserve_prior_versions": true,
+    "disclose_results_visible_before_change": true,
+    "primary_matrix_cells_may_not_be_replaced": true
+  },
+  "amendment": {
+    "amendment_id": "cs-ieee-linux-training-amendment-0003",
+    "base_protocol_version": "1.0.0",
+    "supersedes_effective_protocol_version": "1.2.0",
+    "authored_at": "2026-07-16T00:00:00Z",
+    "status": "prospective",
+    "narrative_path": "research/ieee-linux-training/amendments/0003-2026-07-16-v6-worker-lineage-telemetry-and-artifact-corrections.md",
+    "manifest_path": "research/ieee-linux-training/amendments/0003-2026-07-16-v6-worker-lineage-telemetry-and-artifact-corrections.manifest.json"
+  },
+  "effective_specification": {
+    "identity_algorithm": "sha256-raw-file-v1",
+    "canonical_path": "research/ieee-linux-training/EXPERIMENT_MATRIX.v1.3.0.json",
+    "serialization": "committed-utf8-json-with-one-trailing-lf",
+    "unknown_or_extra_field_policy": "refuse-by-exact-content-hash",
+    "exact_hash_required_before_environment_plan": true,
+    "exact_hash_required_in_every_plan_evidence_bundle_and_trial": true
+  },
+  "environment_admission": {
+    "manager_version_exact": "1.3.0",
+    "sealed_environment_ids": {
+      "math": "backend-corpus-studio-research-math-v6",
+      "flash": "backend-corpus-studio-research-flash-v6"
+    },
+    "same_worker_wheel_bytes_required": true,
+    "matched_package_artifacts_required": true,
+    "separately_sealed_execution_tuples_required": true,
+    "package_lock": {
+      "record_integrity_exact": "verified",
+      "record_count_semantics_exact": "all_record_rows_v2",
+      "record_entries_minimum": 1,
+      "record_verified_entries_minimum": 1,
+      "installed_file_count_minimum": 1,
+      "required_count_equality": "record_verified_entries == record_entries == installed_file_count",
+      "record_failed_entries_exact": 0,
+      "installed_record_sha256_required": true,
+      "installed_tree_sha256_required": true,
+      "package_source_evidence_required": true
+    },
+    "historical_manager_locks_authorized_for_new_admission": false
+  },
+  "worker_success_admission": {
+    "required_git_ancestor": "af28be9b42e0b91d72eaf7e9f24462ef3f2a189d",
+    "required_git_ancestor_rationale": "the final v6 wheel source must descend from af28be9 (which itself descends from the df86db5 floor and the worker-affecting corrections 4078825 and 9a15b5c); the exact final post-amendment source commit is recorded in the wheel evidence, not pinned here",
+    "worker_artifact_correction_commit": "4078825a82309223b3b39d1192cc08f8c26afc85",
+    "worker_telemetry_correction_commit": "9a15b5c095accd451fbb57e887bf4b2c1ad0a7e7",
+    "exact_source_commit_required_in_wheel_evidence": true,
+    "exact_wheel_sha256_required_in_environment_and_trial": true,
+    "historical_worker_wheel_reuse_authorized": false,
+    "run_manifest_contract_version": "1.0.0",
+    "trainable_state_hash_algorithm": "sha256-trainable-state-v1",
+    "adapter_export_state_hash_algorithm": "sha256-safetensors-tensor-state-v1",
+    "materialized_gradient_observation_minimum": 1,
+    "optimizer_created_from_real_optimizer_required": true,
+    "cpu_scalar_adamw_step_accepted": true,
+    "optimizer_moment_tensors_on_expected_device_required": true,
+    "exact_finite_loss_per_completed_optimizer_step_required": true,
+    "logging_strategy": "steps",
+    "logging_steps": 1,
+    "logging_nan_inf_filter": false,
+    "adapter_root_auxiliary_metadata_allowlist": [
+      "training_args.bin"
+    ],
+    "adapter_root_auxiliary_metadata_never_deserialized": true,
+    "output_path_adapter_bytes_artifact_integrity_required": true,
+    "required_paper_telemetry_fields": [
+      "step.step_losses",
+      "step.step_time_seconds",
+      "gpu.power_watts",
+      "gpu.memory",
+      "energy.run_joules",
+      "host.process_tree_rss",
+      "identity.repository_commit",
+      "identity.worker_wheel_sha256",
+      "identity.environment_lock_hash",
+      "identity.plan_hash",
+      "identity.execution_configuration_hash",
+      "identity.run_id"
+    ],
+    "scientific_completeness_required_for_paper_promotion": true,
+    "proven_measured_fit_requires_complete_success_evidence": true,
+    "failed_run_native_unproven_unless_spill_measured": true
+  },
+  "historical_identity_non_reuse": {
+    "manifest_path": "research/ieee-linux-training/amendments/RESERVED_IDENTITIES.v3.json",
+    "manifest_sha256": "414d23862e7a835f88b0c454c6fb0a930bc3904cca08bac8d793d5de1db10d40",
+    "supersedes_manifest_path": "research/ieee-linux-training/amendments/RESERVED_IDENTITIES.v2.json",
+    "supersedes_manifest_sha256": "0f9b9a32a16a54fcb3f49e91aa215eb86c2b0c6bdf92bdf4f1d2702ae671859c",
+    "append_only_required": true,
+    "exact_set_disjointness_required_before_plan_generation": true,
+    "identity_classes": [
+      "environment_ids",
+      "environment_lock_hashes",
+      "worker_wheel_sha256",
+      "plan_ids",
+      "plan_hashes",
+      "execution_configuration_ids",
+      "execution_configuration_hashes",
+      "run_ids",
+      "output_paths",
+      "artifact_ids",
+      "evidence_roots"
+    ]
+  },
+  "prior_amendments": [
+    {
+      "amendment_id": "cs-ieee-linux-training-amendment-0001",
+      "effective_protocol_version": "1.1.0",
+      "manifest_sha256": "c33ea08601791884667f51314810246a84c7bffe579489175ac2889b09264bd4",
+      "narrative_sha256": "e20e564fa3292247ed6d5f937be1d074dee4541263aefae9655a54ccd34d8dea",
+      "effective_matrix_sha256": "731101c9ee81bd93f9acabb0433788180b86bcec3d78a7af03892df7af41f4f9",
+      "reserved_identities_sha256": "e369690412919b30563bcaa715198a45576bb0b79d366b2dcf997486b25e1e41"
+    },
+    {
+      "amendment_id": "cs-ieee-linux-training-amendment-0002",
+      "effective_protocol_version": "1.2.0",
+      "manifest_sha256": "d3a45d5ff2bd617a28dfe64c498dc821e0912332147fbd66bacdd53bacbb7fb9",
+      "narrative_sha256": "d39197ec92b0fa87525c48909de8a0e8acd4f300fcdbccb4da286b5a4cc33112",
+      "effective_matrix_sha256": "168189145150c0ed13ce70151a065c9490d9e70052ca30569aac709e718f9e12",
+      "reserved_identities_sha256": "0f9b9a32a16a54fcb3f49e91aa215eb86c2b0c6bdf92bdf4f1d2702ae671859c"
+    }
+  ],
+  "preserved_v4_evidence": {
+    "classification": "non-paper-bring-up",
+    "math_run_id": "run-019f6518-3927-7d73-b106-15f385b61415",
+    "math_terminal_taxonomy": "GRADIENT_FAILURE",
+    "math_terminal_stage": "backward",
+    "math_completed_optimizer_steps": 0,
+    "math_artifacts_written": 0,
+    "flash_dispatched": false,
+    "real_optimizer_step_passed_platform_run": false,
+    "sequence_length_4096_verified": false
+  },
+  "preserved_v5_evidence": {
+    "classification": "non-paper-bring-up",
+    "worker_wheel_sha256": "271447bf0b82ab14ddb4848bd0d47cc0f2f5ad8ff378f291f04cff65be2fc895",
+    "worker_source_commit": "713fde14c8a6bae1888c43851fa6a487a031a242",
+    "math_first_real_training": true,
+    "math_completed_optimizer_steps": 12,
+    "math_loss_decreased": true,
+    "math_run_id": "run-019f67e6-8d14-782a-8b10-ecdb4e74a6e0",
+    "math_terminal_taxonomy": "ARTIFACT_FAILURE",
+    "math_terminal_stage": "export",
+    "math_terminal_cause": "training_args.bin falsely classified as alternate model weights",
+    "math_measured_fit": "NATIVE_UNPROVEN",
+    "math_scientifically_complete": false,
+    "rejected_ga8_instruction_math_run_id": "run-019f67ac-275f-7405-ac92-f407c91be70f",
+    "rejected_ga8_instruction_math_taxonomy": "UNSUPPORTED_CONFIGURATION",
+    "flash_dispatched": false,
+    "artifact_admission_corrected_by_pr": 461,
+    "telemetry_population_corrected_by_pr": 462,
+    "corrections_change_worker_bytes": true,
+    "real_optimizer_step_passed_platform_run": true,
+    "paper_matrix_cells_executed": 0
+  },
+  "full_training_phase": {
+    "status": "gated-until-feasibility-config-identified",
+    "separate_from_feasibility_characterization": true,
+    "corpus": "approximately-500-output-immutable-license-cleared-corpus",
+    "preregistration_required_before_run": true,
+    "distinct_from_feasibility_smoke_and_characterization_trials": true,
+    "quality_and_systems_outcomes_both_required": true,
+    "adapter_lineage_and_base_model_license_required_before_promotion": true
+  },
+  "affected_scope_snapshot": {
+    "captured_at": "2026-07-16T00:00:00Z",
+    "completed_primary_cells": 0,
+    "completed_secondary_cells": 0,
+    "visible_non_paper_bring_up_attempts": 5,
+    "first_party_bring_up_path_ids": [
+      "first-party-math",
+      "first-party-flash"
+    ],
+    "primary_cells": {
+      "selector": "primary_matrix.execution_path_ids in [first-party-math, first-party-flash]",
+      "expected_affected_cell_count": 30
+    },
+    "secondary_cells": {
+      "selector": "secondary_adapter_matrix.execution_path_ids in [first-party-math, first-party-flash]",
+      "expected_affected_cell_count": 16
+    },
+    "adaptive_follow_up": "affected-when-a-first-party-path-is-used",
+    "unsloth_cells_affected_by_environment_identity_change": false
+  }
+}
