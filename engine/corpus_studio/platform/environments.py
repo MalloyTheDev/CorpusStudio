@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 
 from .common import HashRef, Ref
 from .contracts import (
@@ -48,6 +49,14 @@ PYTORCH_INDEX_URLS: dict[str, str] = {
 PYPI_INDEX_URL = "https://pypi.org/simple"
 READINESS_V2_RECIPE_ID = "backend-corpus-studio-readiness-v2"
 READINESS_FLASH_V1_RECIPE_ID = "backend-corpus-studio-readiness-flash-v1"
+
+# The exact reviewed per-lineage source floor is NOT baked into a recipe or a module constant: it is a
+# changing per-amendment value supplied at plan time (env-plan --required-git-ancestor) and sealed into
+# the DependencyResolution. Overloading one constant with both "the permanent historical minimum" and
+# "this lineage's exact floor" is exactly the conflation this design removes. A separate, broad
+# historical-minimum check (if ever needed) must use a distinct name and never be string-equated to an
+# exact lineage floor.
+_CANONICAL_GIT_SHA1 = re.compile(r"[0-9a-f]{40}\Z")
 
 # The distributions PyTorch ships from its own index (so they must NOT be requested from PyPI when a
 # CUDA build is wanted).
@@ -472,8 +481,13 @@ def recipe_digest(recipe: EnvironmentRecipe) -> str:
 
 def resolution_digest(resolution: DependencyResolution) -> str:
     """Stable sha256 over the reviewed resolution, excluding its own seal."""
+    body = resolution.model_dump(mode="json", exclude={"resolution_hash"})
+    # Additive floor field: only worker-wheel plans carry a per-lineage floor. Pop it when None so a
+    # non-worker plan's resolution/confirmation hash is byte-identical to before the field existed.
+    if resolution.required_git_ancestor is None:
+        body.pop("required_git_ancestor", None)
     payload = json.dumps(
-        resolution.model_dump(mode="json", exclude={"resolution_hash"}),
+        body,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=True,
@@ -531,6 +545,7 @@ def resolve_dependencies(
     environment_id: str | None = None,
     environment_root: str | None = None,
     manager_version: str = "",
+    required_git_ancestor: str | None = None,
 ) -> DependencyResolution:
     """Render the argv-structured install PREVIEW for provisioning ``recipe`` on this host — the exact
     steps, the CUDA-aware wheel index, and rough disk/network cost — WITHOUT installing anything.
@@ -539,9 +554,31 @@ def resolve_dependencies(
     installs into the existing control-plane interpreter (it augments the core process). ``resolvable``
     is False (with reasons) when the host can't satisfy the recipe — unmet python floor, unsupported
     OS, or a CUDA-required recipe on a host with no CUDA accelerator.
+
+    ``required_git_ancestor`` is the exact reviewed per-lineage source floor for a worker-wheel plan,
+    supplied here (never taken from the recipe or a global constant). A worker-wheel recipe REQUIRES a
+    canonical (40-char lowercase-hex) value - omission or a malformed value makes the plan unresolvable;
+    a non-worker recipe must not carry one.
     """
     blocking: list[str] = []
     warnings: list[str] = []
+
+    # --- reviewed per-lineage source floor (sealed into the resolution, never from the recipe) ---
+    sealed_floor: str | None = None
+    if recipe.requires_worker_wheel:
+        if required_git_ancestor is None:
+            blocking.append(
+                "this worker-wheel recipe requires an exact reviewed --required-git-ancestor "
+                "(40-char lowercase-hex source floor)"
+            )
+        elif not _CANONICAL_GIT_SHA1.match(required_git_ancestor):
+            blocking.append(
+                "--required-git-ancestor must be an exact 40-character lowercase-hex commit"
+            )
+        else:
+            sealed_floor = required_git_ancestor
+    elif required_git_ancestor is not None:
+        blocking.append("a non-worker recipe does not accept a --required-git-ancestor floor")
 
     # --- feasibility ---
     if recipe.supported_os and os_value not in recipe.supported_os:
@@ -612,6 +649,10 @@ def resolve_dependencies(
         resolved_index_urls=resolved_indexes,
         install_steps=steps,
         required_execution_probe=recipe.required_execution_probe,
+        # Seal the exact reviewed per-lineage floor supplied at plan time (never from the recipe), so it
+        # is bound into the resolution/confirmation hash and reaches env-create through the confirmed
+        # plan. None (and popped from the digest) for non-worker plans.
+        required_git_ancestor=sealed_floor,
         estimated_download_bytes=download_mb * _MB,
         estimated_disk_bytes=disk_mb * _MB,
         resolvable=not blocking,

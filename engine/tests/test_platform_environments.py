@@ -35,10 +35,17 @@ from corpus_studio.platform.environments import (
     _python_tuple,
     builtin_recipes,
     get_recipe,
+    recipe_digest,
     recipes_for_layer,
     resolve_dependencies,
     select_accelerator_tag,
 )
+
+# Exact reviewed per-lineage source floors used as env-plan input in these tests. These are supplied at
+# plan time (never baked into a recipe). The v7 exact floor and the broad historical minimum are
+# DISTINCT and must never be treated as interchangeable (see the dedicated regression test).
+_V7_EXACT_FLOOR = "25c901ec85fd6f6303eff6c3dd81938afe328a2b"
+_HISTORICAL_MINIMUM = "df86db53e294a6e15b724c586f7016a1c9fdac00"
 
 runner = CliRunner()
 
@@ -77,6 +84,8 @@ def test_readiness_v2_recipe_is_exact_and_probe_changes_reseal_the_plan():
     recipe = get_recipe("backend-corpus-studio-readiness-v2")
     assert recipe is not None and recipe.required_execution_probe is not None
     assert recipe.requires_worker_wheel is True
+    # The recipe DECLARES a worker wheel is required, but does NOT carry the changing floor VALUE.
+    assert not hasattr(recipe, "required_git_ancestor")
     assert recipe.verification == RecipeVerification.declared
     assert all(
         requirement.specifier and requirement.specifier.startswith("==")
@@ -87,6 +96,7 @@ def test_readiness_v2_recipe_is_exact_and_probe_changes_reseal_the_plan():
         os_value=OperatingSystem.linux,
         accelerator_tag="cu128",
         python_version="3.12",
+        required_git_ancestor=_V7_EXACT_FLOOR,
     )
     changed_probe = recipe.required_execution_probe.model_copy(
         update={
@@ -103,6 +113,7 @@ def test_readiness_v2_recipe_is_exact_and_probe_changes_reseal_the_plan():
         os_value=OperatingSystem.linux,
         accelerator_tag="cu128",
         python_version="3.12",
+        required_git_ancestor=_V7_EXACT_FLOOR,
     )
     assert first.recipe_ref.hash != second.recipe_ref.hash
     assert first.resolution_hash != second.resolution_hash
@@ -114,6 +125,7 @@ def test_readiness_flash_v1_is_exact_forced_flash_and_independent_of_math():
     assert math_recipe is not None and flash_recipe is not None
     assert flash_recipe.required_execution_probe is not None
     assert flash_recipe.requires_worker_wheel is True
+    assert not hasattr(flash_recipe, "required_git_ancestor")
     assert flash_recipe.verification == RecipeVerification.declared
     assert flash_recipe.required_execution_probe.probe == "cuda_qlora_sdpa_flash_execution"
     assert flash_recipe.required_execution_probe.flash_sdp_enabled is True
@@ -134,19 +146,19 @@ def test_readiness_flash_v1_is_exact_forced_flash_and_independent_of_math():
         os_value=OperatingSystem.linux,
         accelerator_tag="cu128",
         python_version="3.12",
+        required_git_ancestor=_V7_EXACT_FLOOR,
     )
     flash_resolution = resolve_dependencies(
         flash_recipe,
         os_value=OperatingSystem.linux,
         accelerator_tag="cu128",
         python_version="3.12",
+        required_git_ancestor=_V7_EXACT_FLOOR,
     )
     assert math_resolution.recipe_ref.hash != flash_resolution.recipe_ref.hash
     assert math_resolution.resolution_hash != flash_resolution.resolution_hash
-    # Existing math and flash evidence retain their recipe identities; the concrete new install
-    # step is bound by the resolution hash instead.
-    from corpus_studio.platform.environments import recipe_digest
-
+    # The recipe no longer carries the floor, so the recipe digests are UNCHANGED from pre-#471
+    # (the floor moved entirely to the plan input); math and flash keep DISTINCT recipe identities.
     assert (
         recipe_digest(math_recipe)
         == "4c0cb365b596cfe2b1371afd5f95130a40e41c7e5b27df833b0c914bd492289c"
@@ -155,6 +167,116 @@ def test_readiness_flash_v1_is_exact_forced_flash_and_independent_of_math():
         recipe_digest(flash_recipe)
         == "52016adedd5011328efb05e089d54c8edd5c9308e0a38409897cd0f554240fb7"
     )
+
+
+def test_supplied_plan_floor_changes_resolution_and_confirmation_hash():
+    # The exact reviewed floor is a per-lineage PLAN INPUT: supplying a different floor reseals the
+    # resolution and its confirmation hash, so a stale resolution cannot be replayed after the floor
+    # changes. The recipe digest (recipe_ref.hash) is unchanged because the recipe does not carry it.
+    recipe = get_recipe("backend-corpus-studio-readiness-v2")
+    assert recipe is not None
+    base = resolve_dependencies(
+        recipe,
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+        required_git_ancestor=_V7_EXACT_FLOOR,
+    )
+    assert base.required_git_ancestor == _V7_EXACT_FLOOR
+    assert base.resolvable is True
+    moved = resolve_dependencies(
+        recipe,
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+        required_git_ancestor=_HISTORICAL_MINIMUM,
+    )
+    assert moved.required_git_ancestor == _HISTORICAL_MINIMUM
+    assert moved.recipe_ref.hash == base.recipe_ref.hash  # recipe identity unchanged
+    assert moved.resolution_hash != base.resolution_hash  # confirmation hash reseals on floor change
+
+
+def test_worker_recipe_refuses_missing_or_malformed_plan_floor():
+    # A worker-wheel recipe REQUIRES an exact reviewed floor at plan time. Omission, a non-hex value,
+    # and an uppercase value each make the plan unresolvable (refused), never silently accepted.
+    recipe = get_recipe("backend-corpus-studio-readiness-v2")
+    assert recipe is not None
+    missing = resolve_dependencies(
+        recipe, os_value=OperatingSystem.linux, accelerator_tag="cu128", python_version="3.12"
+    )
+    assert missing.resolvable is False
+    assert any("requires an exact reviewed" in reason for reason in missing.blocking_reasons)
+    assert missing.required_git_ancestor is None
+    for bad in ("NOT-A-CANONICAL-SHA", _V7_EXACT_FLOOR.upper(), "abc123"):
+        rejected = resolve_dependencies(
+            recipe,
+            os_value=OperatingSystem.linux,
+            accelerator_tag="cu128",
+            python_version="3.12",
+            required_git_ancestor=bad,
+        )
+        assert rejected.resolvable is False
+        assert any(
+            "exact 40-character lowercase-hex" in reason for reason in rejected.blocking_reasons
+        )
+        assert rejected.required_git_ancestor is None
+
+
+def test_non_worker_recipe_unaffected_by_floor():
+    # Non-worker recipes declare no floor; their recipe digest is byte-identical to pre-#471, their
+    # resolution carries a null floor (popped from the confirmation hash), and supplying a floor to a
+    # non-worker recipe is refused (the field has ONE meaning: a per-worker-lineage plan input).
+    recipe = get_recipe("backend-corpus-studio")
+    assert recipe is not None
+    assert recipe.requires_worker_wheel is False
+    assert not hasattr(recipe, "required_git_ancestor")
+    assert (
+        recipe_digest(recipe)
+        == "7fd0c05d0eb5083b41230201a509e8dddf317884f1caefbbf2e76e6fe0ca94c4"
+    )
+    resolution = resolve_dependencies(
+        recipe,
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+    )
+    assert resolution.required_git_ancestor is None
+    refused = resolve_dependencies(
+        recipe,
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+        required_git_ancestor=_V7_EXACT_FLOOR,
+    )
+    assert refused.resolvable is False
+    assert any("does not accept" in reason for reason in refused.blocking_reasons)
+
+
+def test_historical_minimum_and_exact_lineage_floor_are_not_interchangeable():
+    # Regression for the corrected semantics: the broad historical minimum (df86db5) and the v7 exact
+    # lineage floor (25c901e) are DISTINCT values. A plan sealing one produces a different confirmation
+    # hash and a different sealed floor than a plan sealing the other; equality never conflates them.
+    assert _HISTORICAL_MINIMUM != _V7_EXACT_FLOOR
+    recipe = get_recipe("backend-corpus-studio-readiness-v2")
+    assert recipe is not None
+    minimum_plan = resolve_dependencies(
+        recipe,
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+        required_git_ancestor=_HISTORICAL_MINIMUM,
+    )
+    exact_plan = resolve_dependencies(
+        recipe,
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+        required_git_ancestor=_V7_EXACT_FLOOR,
+    )
+    assert minimum_plan.required_git_ancestor == _HISTORICAL_MINIMUM
+    assert exact_plan.required_git_ancestor == _V7_EXACT_FLOOR
+    assert minimum_plan.required_git_ancestor != exact_plan.required_git_ancestor
+    assert minimum_plan.resolution_hash != exact_plan.resolution_hash
 
 
 @pytest.mark.parametrize(
@@ -590,6 +712,27 @@ def test_env_plan_cli_unresolvable_exits_1():
     result = runner.invoke(app, ["env-plan", "backend-unsloth", "--accelerator", "cpu", "--python", "3.12"])
     assert result.exit_code == 1
     assert "BLOCKED" in result.stdout
+
+
+def test_env_plan_cli_threads_required_git_ancestor_to_resolver():
+    # The --required-git-ancestor option reaches the resolver end to end: a NON-worker recipe does not
+    # accept a floor (it is a per-worker-lineage plan input), so supplying one makes the plan
+    # unresolvable and env-plan exits 1 - proving the CLI wiring, not just the resolver.
+    result = runner.invoke(
+        app,
+        [
+            "env-plan",
+            "backend-corpus-studio",
+            "--accelerator",
+            "cu128",
+            "--runtime",
+            sys.executable,
+            "--required-git-ancestor",
+            "25c901ec85fd6f6303eff6c3dd81938afe328a2b",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "does not accept" in result.stdout
 
 
 # ---- contract round-trips ----------------------------------------------------

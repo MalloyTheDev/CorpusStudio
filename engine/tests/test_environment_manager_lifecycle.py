@@ -48,7 +48,11 @@ from corpus_studio.platform.environment_manager import (
 )
 from corpus_studio.platform.process_control import terminate_process_tree
 from corpus_studio.platform.enums import EnvironmentState, FailureTaxonomy, OperatingSystem
-from corpus_studio.platform.environments import PYPI_INDEX_URL, get_recipe, resolution_digest
+from corpus_studio.platform.environments import (
+    PYPI_INDEX_URL,
+    get_recipe,
+    resolution_digest,
+)
 
 
 def _host_os() -> OperatingSystem:
@@ -548,11 +552,14 @@ def _manager_and_resolution(tmp_path: Path, runner: FakeEnvironmentRunner, env_i
 
 # Fixed, canonical (40-char lowercase hex) synthetic identities for fixture wheels. The env-manager
 # admission gate requires EMBEDDED canonical build provenance carrying BOTH a source_commit and a
-# required_git_ancestor floor; fixtures embed both so they exercise the real gate rather than bypassing
-# it. `with_provenance=False` builds the no-provenance shape; `provenance_ancestor=None` builds the
-# inadmissible source-commit-only shape.
+# required_git_ancestor floor, AND that the embedded floor byte-equals THIS PLAN's exact reviewed floor
+# (the per-lineage ``--required-git-ancestor`` supplied to env-plan and sealed into the resolution). So
+# the accepted-fixture floor equals the plan floor the readiness helper supplies; a wheel embedding any
+# OTHER canonical floor is refused as a mismatch. `with_provenance=False` builds the no-provenance
+# shape; `provenance_ancestor=None` builds the inadmissible source-commit-only shape.
 _FIXTURE_SOURCE_COMMIT = "b17e57ed0b17e57ed0b17e57ed0b17e57ed0b17e"
-_FIXTURE_REQUIRED_ANCESTOR = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+# The exact reviewed per-lineage floor these fixtures plan against (v7 exact floor from the protocol).
+_FIXTURE_REQUIRED_ANCESTOR = "25c901ec85fd6f6303eff6c3dd81938afe328a2b"
 
 
 def _worker_wheel(
@@ -679,6 +686,9 @@ def _manager_and_readiness_resolution(
         runtime_executable=runtime.executable,
         accelerator_tag="cu128",
         worker_wheel=wheel,
+        # Exact reviewed per-lineage floor supplied at plan time; equals the fixture wheel's EMBEDDED
+        # floor so admission (embedded == plan floor) passes.
+        required_git_ancestor=_FIXTURE_REQUIRED_ANCESTOR,
     )
     assert resolution.resolvable and resolution.resolution_hash
     return manager, resolution, runner, wheel
@@ -744,9 +754,15 @@ def test_scientific_admission_accepts_wheel_with_embedded_provenance(tmp_path):
     assert resolution.worker_artifact is not None
     overlay = worker_identity_overlay(resolution.worker_artifact)
     assert overlay.repository_commit == _FIXTURE_SOURCE_COMMIT
+    # The admitted floor is recoverable from both the resolution and the sealed lock (no silent drop):
+    # it is exactly THIS PLAN's reviewed per-lineage floor, and the lock binds it under lock_hash.
+    assert resolution.required_git_ancestor == _FIXTURE_REQUIRED_ANCESTOR
+    assert result.lock.required_git_ancestor == _FIXTURE_REQUIRED_ANCESTOR
 
 
-def _assert_create_refuses_inadmissible_wheel(tmp_path: Path, wheel: Path) -> None:
+def _assert_create_refuses_inadmissible_wheel(
+    tmp_path: Path, wheel: Path, *, match: str = "inadmissible build provenance"
+) -> None:
     # Drive the real create() path and assert admission refuses BEFORE any mutation (no env root, no
     # registry entry, no lock file created).
     packages = _readiness_packages()
@@ -789,8 +805,12 @@ def _assert_create_refuses_inadmissible_wheel(tmp_path: Path, wheel: Path) -> No
         runtime_executable=runtime.executable,
         accelerator_tag="cu128",
         worker_wheel=wheel,
+        # A valid plan floor so the resolution is resolvable; the refusal must come from the WHEEL's
+        # provenance defect at admission, not from a blocked/missing-floor plan.
+        required_git_ancestor=_FIXTURE_REQUIRED_ANCESTOR,
     )
-    with pytest.raises(manager_module.EnvironmentManagerError, match="inadmissible build provenance"):
+    assert resolution.resolvable, resolution.blocking_reasons
+    with pytest.raises(manager_module.EnvironmentManagerError, match=match):
         manager.create(resolution, confirmed_resolution_hash=resolution.resolution_hash or "")
     # Non-mutating: no environment root and no lock were created by the refused admission.
     assert not manager.environment_root("backend-corpus-studio-readiness-v2").exists()
@@ -811,6 +831,60 @@ def test_scientific_admission_refuses_source_commit_only_wheel(tmp_path):
     )
 
 
+def test_scientific_admission_refuses_wheel_floor_mismatch(tmp_path):
+    # A wheel whose EMBEDDED required_git_ancestor is canonical but is NOT THIS PLAN's exact reviewed
+    # floor is refused at admission (byte-equality), BEFORE any mutation - there is no fallback to the
+    # wheel's self-asserted floor. This is the floor-binding contract's core check.
+    mismatched = _worker_wheel(
+        tmp_path / "artifacts",
+        provenance_ancestor="c1c2c3c4c5c6c1c2c3c4c5c6c1c2c3c4c5c6c1c2",
+    )
+    _assert_create_refuses_inadmissible_wheel(
+        tmp_path, mismatched, match="does not match the reviewed floor"
+    )
+
+
+def test_scientific_admission_refuses_wheel_embedding_historical_minimum_when_plan_pins_exact(
+    tmp_path,
+):
+    # The corrected semantics in one test: the fixtures plan against the v7 EXACT floor
+    # (_FIXTURE_REQUIRED_ANCESTOR = 25c901e). A wheel that embeds only the broad HISTORICAL MINIMUM
+    # (df86db5) is refused - the exact lineage floor and the historical minimum are NOT interchangeable.
+    historical_minimum = "df86db53e294a6e15b724c586f7016a1c9fdac00"
+    assert historical_minimum != _FIXTURE_REQUIRED_ANCESTOR
+    wheel = _worker_wheel(tmp_path / "artifacts", provenance_ancestor=historical_minimum)
+    _assert_create_refuses_inadmissible_wheel(
+        tmp_path, wheel, match="does not match the reviewed floor"
+    )
+
+
+def test_scientific_create_refuses_stale_or_tampered_plan_floor(tmp_path):
+    # The sealed floor is bound by the resolution/confirmation hash: a stale confirmation (from a
+    # plan with a DIFFERENT floor) or an edited floor can never create an environment - both refuse
+    # wholly non-mutatingly, so env-create always admits against the exact CONFIRMED floor.
+    manager, resolution, _, wheel = _manager_and_readiness_resolution(tmp_path)
+    other_floor = "df86db53e294a6e15b724c586f7016a1c9fdac00"
+    assert resolution.required_git_ancestor != other_floor
+    # (a) Editing the sealed floor without resealing breaks resolution_digest == resolution_hash.
+    tampered = resolution.model_copy(update={"required_git_ancestor": other_floor})
+    with pytest.raises(EnvironmentManagerError, match="modified after review"):
+        manager.create(tampered, confirmed_resolution_hash=resolution.resolution_hash or "")
+    assert not manager.environment_root("backend-corpus-studio-readiness-v2").exists()
+    # (b) A confirmation hash taken from a plan pinning a DIFFERENT floor cannot confirm this plan.
+    other = manager.preview(
+        "backend-corpus-studio-readiness-v2",
+        env_id="backend-corpus-studio-readiness-v2",
+        runtime_executable=resolution.runtime.executable if resolution.runtime else "python",
+        accelerator_tag="cu128",
+        worker_wheel=wheel,
+        required_git_ancestor=other_floor,
+    )
+    assert other.resolution_hash != resolution.resolution_hash
+    with pytest.raises(EnvironmentManagerError, match="exact resolution hash"):
+        manager.create(resolution, confirmed_resolution_hash=other.resolution_hash or "")
+    assert not manager.environment_root("backend-corpus-studio-readiness-v2").exists()
+
+
 def test_readiness_v2_plan_is_stable_hash_bound_and_plan_only(tmp_path):
     manager, first, _, wheel = _manager_and_readiness_resolution(tmp_path)
     second = manager.preview(
@@ -819,6 +893,7 @@ def test_readiness_v2_plan_is_stable_hash_bound_and_plan_only(tmp_path):
         runtime_executable=first.runtime.executable if first.runtime else "python",
         accelerator_tag="cu128",
         worker_wheel=wheel,
+        required_git_ancestor=_FIXTURE_REQUIRED_ANCESTOR,
     )
     assert first == second
     assert first.worker_artifact and first.worker_artifact.content_hash.value
@@ -832,6 +907,7 @@ def test_readiness_v2_plan_is_stable_hash_bound_and_plan_only(tmp_path):
         runtime_executable=first.runtime.executable if first.runtime else "python",
         accelerator_tag="cu128",
         worker_wheel=wheel,
+        required_git_ancestor=_FIXTURE_REQUIRED_ANCESTOR,
     )
     assert changed.resolution_hash != original_hash
     with pytest.raises(EnvironmentManagerError, match="canonical plan|worker wheel changed"):
@@ -2897,6 +2973,9 @@ def test_legacy_environment_lock_digest_remains_compatible(tmp_path):
         "resolution_ref",
         "package_install_evidence",
         "worker_artifact",
+        # A legacy lock predates the manager-1.3 admitted-floor field; its original seal never saw it,
+        # so the pop-when-None carve-out drops it and reproduces the historical digest byte-for-byte.
+        "required_git_ancestor",
         "probe_evidence",
     ):
         body.pop(field_name)

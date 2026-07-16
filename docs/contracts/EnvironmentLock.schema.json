@@ -1481,6 +1481,19 @@
     "recipe_ref": {
       "$ref": "#/$defs/Ref"
     },
+    "required_git_ancestor": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Required Git Ancestor"
+    },
     "resolution_ref": {
       "anyOf": [
         {
