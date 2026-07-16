@@ -18,7 +18,6 @@ WSL, and Windows samples carry a distinct ``sample_source`` and are never collap
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 import os
 import statistics
@@ -31,6 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TextIO, Literal, cast
 
+from corpus_studio.platform.build_provenance import read_source_commit
 from corpus_studio.platform.common import MemoryMetrics
 from corpus_studio.platform.contracts import (
     EnergyIntegration,
@@ -737,18 +737,13 @@ def identity_from_plan(
 
 def _build_provenance_source_commit(wheel_path: str | None) -> str | None:
     """Read the worker source commit from the wheel's ``BUILD_PROVENANCE.json`` sidecar (written next
-    to the sealed wheel in the artifact store). Best-effort: null - never fabricated - if the sidecar
-    is absent, unreadable, or lacks a string ``source_commit``."""
+    to the sealed wheel in the artifact store) through the canonical build-provenance contract.
+    Best-effort: null - never fabricated - if the sidecar is absent, unreadable, or lacks a *canonical*
+    ``source_commit`` (exact 40-char lowercase hex; a prohibited alias such as ``audited_commit`` is
+    never substituted). The strict contract lives in ``build_provenance`` so the reader and the
+    build-time admission gate agree on exactly one key and one format."""
 
-    if not wheel_path:
-        return None
-    provenance = Path(wheel_path).parent / "BUILD_PROVENANCE.json"
-    try:
-        data = json.loads(provenance.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    commit = data.get("source_commit") if isinstance(data, dict) else None
-    return commit if isinstance(commit, str) and commit else None
+    return read_source_commit(wheel_path)
 
 
 def worker_identity_overlay(worker_artifact: WorkerArtifactIdentity) -> TelemetryIdentity:
