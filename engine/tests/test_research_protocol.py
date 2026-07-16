@@ -13,11 +13,12 @@ import pytest
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _STUDY = _REPOSITORY_ROOT / "research/ieee-linux-training"
 _VALIDATOR = _STUDY / "validate_protocol.py"
-_EFFECTIVE_MATRIX = _STUDY / "EXPERIMENT_MATRIX.v1.4.0.json"
+_EFFECTIVE_MATRIX = _STUDY / "EXPERIMENT_MATRIX.v1.5.0.json"
 _CONTRACTS = _REPOSITORY_ROOT / "docs/contracts"
-# Amendment 0004 -> effective matrix 1.4.0 (v7 worker lineage). Reconstructed byte-deterministically
-# from the base matrix plus the 0004 manifest.
-_EFFECTIVE_HASH = "0ce1fbd425e0401824c3f75f430b72bc4cc51b74e592399cd503a7084c4e593e"
+# Amendment 0005 -> effective matrix 1.5.0 (v8 worker lineage; Environment Manager 1.4.0 + exact
+# per-lineage floor binding). Reconstructed byte-deterministically from the base matrix plus the 0005
+# manifest.
+_EFFECTIVE_HASH = "8e2202ec377eede4711f1bde25ae436a3c21a340c03d21070c33eab2bc889b72"
 
 
 def _load_validator_module():
@@ -38,33 +39,33 @@ def _run_validator(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _fresh_candidate(**updates: object) -> dict[str, object]:
-    # Under effective 1.4.0 the sealed environment ids are the fresh v7 pair, and every v6 identity is
-    # reserved, so a valid fresh runplan candidate binds the exact math-v7/flash-v7 environments and
+    # Under effective 1.5.0 the sealed environment ids are the fresh v8 pair, and every v1-v7 identity
+    # is reserved, so a valid fresh runplan candidate binds the exact math-v8/flash-v8 environments and
     # otherwise-unallocated identities.
     candidate: dict[str, object] = {
         "schema_version": "1.0.0",
         "stage": "runplan",
         "environment_ids": [
-            "backend-corpus-studio-research-flash-v7",
-            "backend-corpus-studio-research-math-v7",
+            "backend-corpus-studio-research-flash-v8",
+            "backend-corpus-studio-research-math-v8",
         ],
         "environment_lock_hashes": ["1" * 64, "2" * 64],
         "worker_wheel_sha256": ["3" * 64],
-        "plan_ids": ["plan-fresh-flash-v7", "plan-fresh-math-v7"],
+        "plan_ids": ["plan-fresh-flash-v8", "plan-fresh-math-v8"],
         "plan_hashes": ["4" * 64, "5" * 64],
         "execution_configuration_ids": [
-            "plan-fresh-flash-v7-execution",
-            "plan-fresh-math-v7-execution",
+            "plan-fresh-flash-v8-execution",
+            "plan-fresh-math-v8-execution",
         ],
         "execution_configuration_hashes": ["6" * 64, "7" * 64],
         "run_ids": [],
         "output_paths": [
             "/mnt/training-nvme/corpusstudio/runs/ieee-linux-training/"
-            "phase3-qwen25-05b-matched-v7"
+            "phase3-qwen25-7b-feasibility-v8"
         ],
         "artifact_ids": [],
         "evidence_roots": [
-            "/mnt/training-nvme/corpusstudio/evidence/production-smoke-matched-v7"
+            "/mnt/training-nvme/corpusstudio/evidence/seven-b-feasibility-v8"
         ],
     }
     candidate.update(updates)
@@ -85,8 +86,9 @@ def test_research_protocol_rejects_reserved_identity_reuse(tmp_path: Path) -> No
         json.dumps(
             _fresh_candidate(
                 plan_ids=[
-                    "plan-019f644b-a3c2-7373-abc0-39a0f7d753eb",
-                    "plan-fresh-math-v4",
+                    # A now-reserved instantiated v7 plan id (added to RESERVED_IDENTITIES.v5).
+                    "plan-019f6944-782a-7658-bc95-672994f9c08a",
+                    "plan-fresh-math-v8",
                 ]
             ),
             indent=2,
@@ -270,7 +272,7 @@ def test_amendment_authored_at_is_not_in_the_future() -> None:
     vp = _load_validator_module()
     manifest = json.loads(
         (_STUDY / "amendments"
-         / "0004-2026-07-16-v7-worker-lineage-token-throughput-observer.manifest.json").read_text()
+         / "0005-2026-07-16-v8-manager-1.4-floor-binding-lineage.manifest.json").read_text()
     )
     # The committed amendment validates against the real clock.
     vp._validate_authored_at(manifest)
@@ -288,7 +290,7 @@ def test_effective_matrix_reconstruction_is_byte_deterministic() -> None:
     base = vp._load_yaml(_STUDY / "EXPERIMENT_MATRIX.yaml")
     manifest = json.loads(
         (_STUDY / "amendments"
-         / "0004-2026-07-16-v7-worker-lineage-token-throughput-observer.manifest.json").read_text()
+         / "0005-2026-07-16-v8-manager-1.4-floor-binding-lineage.manifest.json").read_text()
     )
     first = json.dumps(vp._build_expected_effective(base, manifest), indent=2, ensure_ascii=False)
     second = json.dumps(vp._build_expected_effective(base, manifest), indent=2, ensure_ascii=False)

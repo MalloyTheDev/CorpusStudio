@@ -9,8 +9,9 @@ Files:
 - [PROTOCOL.md](PROTOCOL.md) defines the design, controls, execution order, stopping rules, exclusions, and claim boundaries.
 - [HYPOTHESES.md](HYPOTHESES.md) separates confirmatory hypotheses from exploratory analyses.
 - [EXPERIMENT_MATRIX.yaml](EXPERIMENT_MATRIX.yaml) is the immutable, machine-readable factor and trial specification.
-- [EXPERIMENT_MATRIX.v1.4.0.json](EXPERIMENT_MATRIX.v1.4.0.json) is the complete, hash-sealed
-  **current** effective matrix (after amendment 0004).
+- [EXPERIMENT_MATRIX.v1.5.0.json](EXPERIMENT_MATRIX.v1.5.0.json) is the complete, hash-sealed
+  **current** effective matrix (after amendment 0005).
+  [EXPERIMENT_MATRIX.v1.4.0.json](EXPERIMENT_MATRIX.v1.4.0.json) (amendment 0004),
   [EXPERIMENT_MATRIX.v1.3.0.json](EXPERIMENT_MATRIX.v1.3.0.json) (amendment 0003),
   [EXPERIMENT_MATRIX.v1.2.0.json](EXPERIMENT_MATRIX.v1.2.0.json) (amendment 0002) and
   [EXPERIMENT_MATRIX.v1.1.0.json](EXPERIMENT_MATRIX.v1.1.0.json) (amendment 0001) are retained as
@@ -79,6 +80,25 @@ tooling wrote the source commit under `audited_commit` rather than the telemetry
 (`scientific_resource_complete=false`); re-deriving from the preserved raw records with the authentic
 sealed commit yields `paper_performance_complete=true` with no measurement change. See
 [`docs/HOST_STATE.md`](../../docs/HOST_STATE.md) v7 section.
+
+Amendment [0005](amendments/0005-2026-07-16-v8-manager-1.4-floor-binding-lineage.md) supersedes 0004
+with effective protocol version **1.5.0** (prospective): two merged control-plane corrections force a
+fresh **v8** lineage. (1) Exact per-lineage source-floor binding (PR #471, merge `4bab1de`) makes
+`required_git_ancestor` a plan input sealed through `DependencyResolution` -> confirmation hash ->
+byte-equality admission against the wheel's EMBEDDED floor -> `EnvironmentLock`; the v8 wheel must embed
+this exact floor. (2) The worker build-provenance generator must emit the canonical `source_commit`,
+changing the wheel identity. PR #471 also added an additive `EnvironmentLock` field, which under the
+manager's one-minor-bump-per-additive-lock-generation convention warrants **Environment Manager 1.4.0**;
+1.5.0 declares `manager_version_exact = "1.4.0"` (the tested matrix<->implementation invariant). 1.5.0
+replaces the v7 environment IDs with `backend-corpus-studio-research-{math,flash}-v8`, requires the v8
+worker source to descend from `4bab1de`, and extends the reserved-identity registry to
+[v5](amendments/RESERVED_IDENTITIES.v5.json) (append-only over v4, reserving every fully instantiated
+**v7** identity: the v7 wheel/source, math-v7/flash-v7 environments and lock hashes, both v7 plans and
+execution configs, both v7 runs, both admitted v7 adapters, and the v7 output/evidence roots). The
+scientific tuple and all 1.4.0 throughput gates are unchanged. 0005 also preregisters the separate
+non-paper `seven_b_native_linux_feasibility_ladder` (Qwen2.5-7B-Instruct; rungs 512/1024/2048/3072/4096;
+one bounded 12-step run/rung; mb=1, ga=1; math-first, flash-conditional; not primary paper cells). No v8
+wheel, environment, plan, or run exists yet; this amendment is preregistration only.
 
 ## Evidence boundary at preregistration
 
