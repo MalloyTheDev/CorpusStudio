@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import shutil
 import subprocess
 import zipfile
 from pathlib import Path
@@ -374,61 +375,197 @@ def test_worker_identity_overlay_reads_embedded_provenance_without_external_side
     assert overlay.repository_commit == _GOOD
 
 
-# ---- build-worker-wheel CLI (the authoritative first-party build command) -------------------------
+# ---- admission floor value-comparison hook (unfed by the Environment Manager today) --------------
 
 
-def test_build_worker_wheel_cli_stamps_and_admits(tmp_path: Path, monkeypatch) -> None:
-    # End-to-end through the ACTUAL build command (source-wheel path, avoiding a heavy real compile):
-    # resolve HEAD -> validate clean worktree + required-ancestor descent -> stamp embedded provenance
-    # -> re-verify scientific admission -> the stamped wheel is self-describing for telemetry.
+def test_admission_expected_floor_match_and_mismatch(tmp_path: Path) -> None:
+    floor = "1234567890abcdef1234567890abcdef12345678"
+    wheel = _minimal_wheel(tmp_path / "w.whl")
+    bp.stamp_wheel_with_provenance(
+        wheel,
+        bp.build_provenance_document(source_commit=_GOOD, extra={"required_git_ancestor": floor}),
+        external_copy=False,
+    )
+    # A matching reviewed floor passes; a different reviewed floor is refused (value comparison only,
+    # no repository needed). The Environment Manager passes no expected floor, so this is a hook for a
+    # future plumbed floor, not something admission enforces today.
+    assert (
+        bp.validate_wheel_provenance_for_scientific_admission(
+            str(wheel), expected_required_git_ancestor=floor
+        )
+        == _GOOD
+    )
+    with pytest.raises(bp.BuildProvenanceError, match="does not match the reviewed floor"):
+        bp.validate_wheel_provenance_for_scientific_admission(
+            str(wheel), expected_required_git_ancestor="0" * 40
+        )
+
+
+# ---- build-worker-wheel CLI: the AUTHORITATIVE scientific builder (real source builds) ------------
+#
+# The production-path proof invokes the REAL source build (`python -m build`), never a stamp-an-
+# arbitrary-wheel shortcut (that public path was removed). Refusal tests short-circuit before the build.
+
+
+def _minimal_source_repo(root: Path) -> str:
+    """A minimal but buildable, clean git source tree; returns HEAD (the build source commit)."""
+
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["setuptools>=64"]\nbuild-backend = "setuptools.build_meta"\n\n'
+        '[project]\nname = "corpus-studio-engine"\nversion = "0.0.1"\n\n'
+        '[tool.setuptools.packages.find]\ninclude = ["corpus_studio*"]\n',
+        encoding="utf-8",
+    )
+    pkg = root / "corpus_studio"
+    pkg.mkdir(exist_ok=True)
+    (pkg / "__init__.py").write_text("# worker\n", encoding="utf-8")
+    # Ignore build byproducts so a second build keeps the worktree clean for the reproducibility test.
+    (root / ".gitignore").write_text("build/\ndist/\n*.egg-info/\n", encoding="utf-8")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@e.st")
+    _git(root, "config", "user.name", "t")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "src")
+    return _git(root, "rev-parse", "HEAD")
+
+
+def _invoke_build(cli_module, root: Path, dest: Path, *args: str):
     from typer.testing import CliRunner
 
+    return CliRunner().invoke(
+        cli_module.app, ["build-worker-wheel", "--dest-dir", str(dest), *args]
+    )
+
+
+def test_build_cli_refuses_dirty_tracked_file(tmp_path: Path, monkeypatch) -> None:
     import corpus_studio.cli as cli
 
     root = tmp_path / "repo"
-    head = _init_repo(root)
+    head = _minimal_source_repo(root)
+    (root / "corpus_studio" / "__init__.py").write_text("# changed\n", encoding="utf-8")  # tracked mod
     monkeypatch.setattr(cli, "repository_root", lambda: root)
+    result = _invoke_build(cli, root, tmp_path / "out", "--required-ancestor", head)
+    assert result.exit_code == 2
+    assert "uncommitted changes" in result.output
 
-    source = _minimal_wheel(tmp_path / "corpus_studio_engine-1.3.0-py3-none-any.whl")
-    dest = tmp_path / "out"
-    result = CliRunner().invoke(
-        cli.app,
-        [
-            "build-worker-wheel",
-            "--dest-dir",
-            str(dest),
-            "--source-wheel",
-            str(source),
-            "--required-ancestor",
-            head,  # head is an ancestor of itself -> descent holds
-        ],
+
+def test_build_cli_refuses_untracked_file(tmp_path: Path, monkeypatch) -> None:
+    import corpus_studio.cli as cli
+
+    root = tmp_path / "repo"
+    head = _minimal_source_repo(root)
+    (root / "stray.txt").write_text("untracked", encoding="utf-8")  # untracked, not git-ignored
+    monkeypatch.setattr(cli, "repository_root", lambda: root)
+    result = _invoke_build(cli, root, tmp_path / "out", "--required-ancestor", head)
+    assert result.exit_code == 2
+    assert "uncommitted changes" in result.output
+
+
+def test_build_cli_requires_required_ancestor(tmp_path: Path, monkeypatch) -> None:
+    import corpus_studio.cli as cli
+
+    root = tmp_path / "repo"
+    _minimal_source_repo(root)
+    monkeypatch.setattr(cli, "repository_root", lambda: root)
+    result = _invoke_build(cli, root, tmp_path / "out")  # no --required-ancestor
+    assert result.exit_code != 0  # typer refuses the missing mandatory research floor
+
+
+def test_build_cli_refuses_reversed_ancestry(tmp_path: Path, monkeypatch) -> None:
+    import corpus_studio.cli as cli
+
+    root = tmp_path / "repo"
+    c1 = _minimal_source_repo(root)
+    (root / "corpus_studio" / "mod.py").write_text("x = 1\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "c2")
+    c2 = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", c1)  # detached HEAD at c1 -> source_commit = c1
+    monkeypatch.setattr(cli, "repository_root", lambda: root)
+    # floor = c2 (a DESCENDANT of the source c1) -> c1 does not descend from c2 -> refused.
+    result = _invoke_build(cli, root, tmp_path / "out", "--required-ancestor", c2)
+    assert result.exit_code == 2
+    assert "does not descend from" in result.output
+
+
+def test_build_cli_refuses_unrelated_branch_floor(tmp_path: Path, monkeypatch) -> None:
+    import corpus_studio.cli as cli
+
+    root = tmp_path / "repo"
+    c1 = _minimal_source_repo(root)
+    default_branch = _git(root, "rev-parse", "--abbrev-ref", "HEAD")  # 'master' or 'main'
+    # An unrelated branch off c1 whose tip is not in the default branch's history.
+    _git(root, "checkout", "-q", "-b", "side", c1)
+    (root / "corpus_studio" / "side.py").write_text("y = 2\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "side")
+    side = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", default_branch)
+    # advance the default branch so HEAD != c1 and 'side' is on an unrelated line of history
+    (root / "corpus_studio" / "mainmod.py").write_text("z = 3\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "c2")
+    monkeypatch.setattr(cli, "repository_root", lambda: root)
+    result = _invoke_build(cli, root, tmp_path / "out", "--required-ancestor", side)
+    assert result.exit_code == 2
+    assert "does not descend from" in result.output
+
+
+def test_build_cli_has_no_arbitrary_wheel_relabel_path(tmp_path: Path, monkeypatch) -> None:
+    import corpus_studio.cli as cli
+
+    root = tmp_path / "repo"
+    head = _minimal_source_repo(root)
+    monkeypatch.setattr(cli, "repository_root", lambda: root)
+    prebuilt = _minimal_wheel(tmp_path / "corpus_studio_engine-9.9.9-py3-none-any.whl")
+    # The removed public --source-wheel path is gone: arbitrary prebuilt bytes cannot be relabeled HEAD.
+    result = _invoke_build(
+        cli, root, tmp_path / "out", "--required-ancestor", head, "--source-wheel", str(prebuilt)
     )
+    assert result.exit_code != 0
+    assert "source-wheel" in result.output.lower() or "no such option" in result.output.lower()
+
+
+def test_build_cli_real_source_build_embeds_provenance_and_admits(tmp_path: Path, monkeypatch) -> None:
+    import corpus_studio.cli as cli
+
+    root = tmp_path / "repo"
+    head = _minimal_source_repo(root)
+    monkeypatch.setattr(cli, "repository_root", lambda: root)
+    dest = tmp_path / "out"
+    result = _invoke_build(cli, root, dest, "--required-ancestor", head)
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["source_commit"] == head
-    assert payload["admission_source_commit"] == head
     assert payload["required_git_ancestor"] == head
-    stamped = dest / source.name
-    assert bp.read_embedded_source_commit(str(stamped)) == head
-    assert bp.validate_wheel_provenance_for_scientific_admission(str(stamped)) == head
-    overlay = worker_identity_overlay(_artifact(stamped))
+    wheel = Path(payload["wheel"])
+    assert wheel.exists() and wheel.suffix == ".whl"
+    # Real build -> embedded provenance -> passes Environment Manager admission -> telemetry reads it.
+    assert bp.read_embedded_source_commit(str(wheel)) == head
+    assert bp.validate_wheel_provenance_for_scientific_admission(str(wheel)) == head
+    overlay = worker_identity_overlay(_artifact(wheel))
     assert overlay.repository_commit == head
 
 
-def test_build_worker_wheel_cli_refuses_dirty_worktree(tmp_path: Path, monkeypatch) -> None:
-    from typer.testing import CliRunner
-
+def test_build_cli_two_builds_same_commit_are_byte_identical(tmp_path: Path, monkeypatch) -> None:
     import corpus_studio.cli as cli
 
-    root = tmp_path / "repo"
-    _init_repo(root)
-    (root / "a.txt").write_text("dirtied", encoding="utf-8")  # uncommitted tracked change
-    monkeypatch.setattr(cli, "repository_root", lambda: root)
+    root1 = tmp_path / "repo1"
+    head = _minimal_source_repo(root1)
+    root2 = tmp_path / "repo2"
+    shutil.copytree(root1, root2)  # identical source + .git (same commit) -> same SOURCE_DATE_EPOCH
 
-    source = _minimal_wheel(tmp_path / "corpus_studio_engine-1.3.0-py3-none-any.whl")
-    result = CliRunner().invoke(
-        cli.app,
-        ["build-worker-wheel", "--dest-dir", str(tmp_path / "out"), "--source-wheel", str(source)],
+    monkeypatch.setattr(cli, "repository_root", lambda: root1)
+    r1 = _invoke_build(cli, root1, tmp_path / "out1", "--required-ancestor", head)
+    assert r1.exit_code == 0, r1.output
+    monkeypatch.setattr(cli, "repository_root", lambda: root2)
+    r2 = _invoke_build(cli, root2, tmp_path / "out2", "--required-ancestor", head)
+    assert r2.exit_code == 0, r2.output
+
+    w1 = Path(json.loads(r1.stdout)["wheel"])
+    w2 = Path(json.loads(r2.stdout)["wheel"])
+    assert (
+        hashlib.sha256(w1.read_bytes()).hexdigest()
+        == hashlib.sha256(w2.read_bytes()).hexdigest()
     )
-    assert result.exit_code == 2
-    assert "uncommitted changes" in result.output

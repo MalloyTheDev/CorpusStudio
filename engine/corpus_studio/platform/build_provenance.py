@@ -180,6 +180,11 @@ def validate_source_commit_against_repo(
                 "refusing ambiguous provenance: the build worktree has uncommitted changes"
             )
     if required_git_ancestor is not None:
+        if not is_canonical_source_commit(required_git_ancestor):
+            raise BuildProvenanceError(
+                "required_git_ancestor must be an exact 40-character lowercase hex git sha, got "
+                f"{required_git_ancestor!r}"
+            )
         # required_git_ancestor -> ancestor of source_commit: the floor must be reachable from source.
         exists_floor = _git(root, "cat-file", "-e", f"{required_git_ancestor}^{{commit}}")
         if exists_floor.returncode != 0:
@@ -202,6 +207,7 @@ def validate_wheel_provenance_for_scientific_admission(
     repo_root: str | Path | None = None,
     require_clean_worktree: bool = True,
     required_git_ancestor: str | None = None,
+    expected_required_git_ancestor: str | None = None,
 ) -> str:
     """Gate a worker wheel for admission into a scientific environment; return its ``source_commit``.
 
@@ -219,9 +225,21 @@ def validate_wheel_provenance_for_scientific_admission(
     3. If an external ``BUILD_PROVENANCE.json`` copy sits next to the wheel, it must byte-match the
        embedded copy (no divergent provenance stories).
 
-    When ``repo_root`` is given (build-time, repo present), the commit is additionally validated against
-    the repository: existence, clean worktree, and ``required_git_ancestor`` descent (the floor must be
-    an ancestor of ``source_commit``).
+    IMPORTANT honesty boundary - what admission does and does NOT prove about the protocol floor:
+    admission verifies the wheel's own EMBEDDED SELF-ASSERTION (integrity, presence, canonical form,
+    RECORD-seal, external-match). It does NOT, on its own, verify that the embedded ``required_git_
+    ancestor`` is the CORRECT reviewed protocol floor, nor that ``source_commit`` actually descends from
+    it - those are git facts that need the repository. Two optional inputs let a caller add real checks:
+    - ``repo_root`` (build-time, repo present): re-validate ``source_commit`` against the repository -
+      existence, clean worktree, and ``required_git_ancestor`` descent.
+    - ``expected_required_git_ancestor``: a reviewed floor the CALLER already trusts (e.g. from a plan or
+      recipe). When given, the embedded floor must equal it exactly (a value match, no repo needed).
+    The Environment Manager admission gate currently passes NEITHER, because no reviewed floor and no
+    source repository reach it (see ``EnvironmentRecipe``/``DependencyResolution`` - they carry no
+    git-ancestor requirement). So on a scientific host, admission proves wheel + provenance INTEGRITY and
+    that a canonical floor was embedded - it does NOT prove the floor is the protocol's floor. That
+    correctness is enforced at BUILD time by ``build-worker-wheel`` (against the real repo) and by the
+    research protocol validator; this limitation is reported, not papered over.
     """
 
     data = read_embedded_provenance(wheel_path)
@@ -245,6 +263,14 @@ def validate_wheel_provenance_for_scientific_admission(
     assert isinstance(commit, str)  # narrowed by is_canonical_source_commit
     verify_embedded_provenance_record_integrity(wheel_path)
     _assert_external_matches_embedded(wheel_path)
+    if expected_required_git_ancestor is not None:
+        embedded_floor = data.get("required_git_ancestor")
+        if embedded_floor != expected_required_git_ancestor:
+            raise BuildProvenanceError(
+                "embedded required_git_ancestor "
+                f"{embedded_floor!r} does not match the reviewed floor "
+                f"{expected_required_git_ancestor!r}"
+            )
     if repo_root is not None:
         validate_source_commit_against_repo(
             commit,

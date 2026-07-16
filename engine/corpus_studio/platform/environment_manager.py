@@ -3094,11 +3094,17 @@ class EnvironmentManager:
             # such as ``audited_commit`` (the v7 defect shape) BEFORE any environment directory,
             # installation, lock, capability probe, or GPU operation. This is called from
             # _validate_creation, which runs in create()/recreate() BEFORE the mutation guard acquires
-            # any lock, so an inadmissible wheel is wholly non-mutating. The check is
-            # artifact-self-contained (embedded provenance sealed by the wheel RECORD, hence by the
-            # sealed worker_wheel_sha256 identity); the repository-ancestry and clean-worktree checks are
-            # enforced separately at build time by ``build-worker-wheel``, so no source repository need
-            # be present on a scientific host.
+            # any lock, so an inadmissible wheel is wholly non-mutating.
+            #
+            # SCOPE / honesty boundary: this verifies the wheel's own EMBEDDED SELF-ASSERTION only -
+            # integrity (RECORD-sealed, hence covered by the worker_wheel_sha256 identity), presence,
+            # canonical source_commit, and (when present) a canonical embedded required_git_ancestor.
+            # It does NOT verify that the embedded floor is the correct reviewed PROTOCOL floor, nor that
+            # source_commit descends from it: no reviewed floor and no source repository reach the manager
+            # (EnvironmentRecipe / DependencyResolution carry no git-ancestor requirement to compare
+            # against, so neither ``repo_root`` nor ``expected_required_git_ancestor`` can be supplied).
+            # Protocol-floor correctness is enforced at BUILD time by ``build-worker-wheel`` (against the
+            # real repo) and by the research-protocol validator; admission does not restate that proof.
             try:
                 validate_wheel_provenance_for_scientific_admission(
                     resolution.worker_artifact.path

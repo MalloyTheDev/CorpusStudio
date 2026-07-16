@@ -1156,20 +1156,13 @@ def build_worker_wheel(
     dest_dir: Path = typer.Option(
         ..., "--dest-dir", help="Directory to write the sealed worker wheel + provenance into."
     ),
-    required_ancestor: Optional[str] = typer.Option(
-        None,
+    required_ancestor: str = typer.Option(
+        ...,
         "--required-ancestor",
-        help="A commit that MUST be an ancestor of the build source commit (required-descent floor).",
-    ),
-    source_wheel: Optional[Path] = typer.Option(
-        None,
-        "--source-wheel",
-        help="Stamp this already-built corpus_studio_engine wheel instead of building a fresh one.",
-    ),
-    allow_dirty: bool = typer.Option(
-        False,
-        "--allow-dirty",
-        help="DANGER: skip the clean-worktree provenance check (produces non-reproducible provenance).",
+        help=(
+            "REQUIRED research floor: a canonical 40-char lowercase-hex commit that MUST be an "
+            "ancestor of the build source commit. Embedded into the wheel provenance."
+        ),
     ),
     external_copy: bool = typer.Option(
         True,
@@ -1177,17 +1170,22 @@ def build_worker_wheel(
         help="Also write an external BUILD_PROVENANCE.json next to the wheel (must match the embedded copy).",
     ),
 ):
-    """Build (or stamp) the first-party CorpusStudio worker wheel and EMBED canonical build provenance.
+    """Build the first-party CorpusStudio worker wheel FROM THE CLEAN SOURCE CHECKOUT and EMBED canonical
+    build provenance.
 
-    Resolves the exact 40-char source commit from the repository HEAD; refuses a dirty worktree, an
-    unknown commit, or a broken required-ancestry (the floor must be an ancestor of the source commit);
-    builds the wheel with the installed setuptools backend (no network isolation) or stamps a provided
-    wheel; embeds a canonical BUILD_PROVENANCE.json under the wheel's .dist-info sealed in RECORD (hence
-    inside the wheel sha256 identity that already flows through the artifact/environment/lock/plan/
-    execution/telemetry contracts); and re-verifies the result would pass scientific admission. Every
-    launch is an argv list, never a shell string.
+    This is the authoritative scientific builder, so it makes no false source claim possible:
+    - it always builds from the repository's own HEAD - there is NO path to stamp arbitrary pre-built
+      wheel bytes as if they came from source (a fixture-stamping path is not authentic provenance);
+    - it always refuses ANY worktree change, tracked or untracked (``git status --porcelain``) - there
+      is no dirty/dev override, so a non-clean build is always scientifically inadmissible;
+    - it requires ``--required-ancestor`` (the research floor) and refuses a missing or non-canonical
+      value; it embeds BOTH ``source_commit`` and ``required_git_ancestor`` and enforces that the floor
+      is an ancestor of the source commit.
+    The canonical BUILD_PROVENANCE.json is embedded under the wheel's .dist-info sealed in RECORD (hence
+    inside the wheel sha256 identity that flows through the artifact/environment/lock/plan/execution/
+    telemetry contracts), and the result is re-verified against scientific admission before it returns.
+    Every launch is an argv list, never a shell string.
     """
-    import shutil
     import subprocess
 
     from corpus_studio.platform.build_provenance import (
@@ -1211,10 +1209,12 @@ def build_worker_wheel(
     source_commit = head.stdout.strip()
 
     try:
+        # Always require a clean worktree (tracked AND untracked) and enforce the mandatory research
+        # floor (canonical + ancestor of source). No dirty override exists.
         validate_source_commit_against_repo(
             source_commit,
             repo_root,
-            require_clean_worktree=not allow_dirty,
+            require_clean_worktree=True,
             required_git_ancestor=required_ancestor,
         )
     except BuildProvenanceError as exc:
@@ -1223,52 +1223,45 @@ def build_worker_wheel(
 
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    if source_wheel is not None:
-        if source_wheel.suffix != ".whl" or not source_wheel.is_file():
-            typer.echo(f"--source-wheel is not a wheel file: {source_wheel}", err=True)
-            raise typer.Exit(2)
-        wheel = dest_dir / source_wheel.name
-        if source_wheel.resolve() != wheel.resolve():
-            shutil.copy2(source_wheel, wheel)
-    else:
-        committer_date = subprocess.run(  # noqa: S603 - fixed git argv, no shell, repo-owned args.
-            ["git", "-C", str(repo_root), "show", "-s", "--format=%ct", source_commit],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        build_env = dict(os.environ)
-        if committer_date.returncode == 0 and committer_date.stdout.strip().isdigit():
-            # Pin the source date so the setuptools build normalizes archive timestamps.
-            build_env["SOURCE_DATE_EPOCH"] = committer_date.stdout.strip()
-        build = subprocess.run(  # noqa: S603 - control-plane python + fixed build argv, no shell.
-            [
-                sys.executable,
-                "-m",
-                "build",
-                "--wheel",
-                "--no-isolation",
-                "--outdir",
-                str(dest_dir),
-                str(repo_root),
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            env=build_env,
-        )
-        if build.returncode != 0:
-            typer.echo(f"wheel build failed:\n{build.stderr.strip()}", err=True)
-            raise typer.Exit(2)
-        built = sorted(dest_dir.glob("corpus_studio_engine-*.whl"))
-        if not built:
-            typer.echo("build produced no corpus_studio_engine wheel", err=True)
-            raise typer.Exit(2)
-        wheel = built[-1]
+    committer_date = subprocess.run(  # noqa: S603 - fixed git argv, no shell, repo-owned args.
+        ["git", "-C", str(repo_root), "show", "-s", "--format=%ct", source_commit],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    build_env = dict(os.environ)
+    if committer_date.returncode == 0 and committer_date.stdout.strip().isdigit():
+        # Pin the source date so the setuptools build normalizes archive timestamps (reproducibility).
+        build_env["SOURCE_DATE_EPOCH"] = committer_date.stdout.strip()
+    build = subprocess.run(  # noqa: S603 - control-plane python + fixed build argv, no shell.
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            str(repo_root),
+            "--no-deps",
+            "--no-build-isolation",
+            "--wheel-dir",
+            str(dest_dir),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=build_env,
+    )
+    if build.returncode != 0:
+        typer.echo(f"wheel build failed:\n{build.stderr.strip()}", err=True)
+        raise typer.Exit(2)
+    built = sorted(dest_dir.glob("corpus_studio_engine-*.whl"))
+    if not built:
+        typer.echo("build produced no corpus_studio_engine wheel", err=True)
+        raise typer.Exit(2)
+    wheel = built[-1]
 
     document = build_provenance_document(
         source_commit=source_commit,
-        extra={"required_git_ancestor": required_ancestor} if required_ancestor else None,
+        extra={"required_git_ancestor": required_ancestor},
     )
     try:
         stamp = stamp_wheel_with_provenance(wheel, document, external_copy=external_copy)
