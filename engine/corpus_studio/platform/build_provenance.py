@@ -238,14 +238,18 @@ def validate_wheel_provenance_for_scientific_admission(
     optional inputs let a caller add real checks:
     - ``repo_root`` (build-time, repo present): re-validate ``source_commit`` against the repository -
       existence, clean worktree, and ``required_git_ancestor`` descent.
-    - ``expected_required_git_ancestor``: a reviewed floor the CALLER already trusts (e.g. from a plan or
-      recipe). When given, the embedded floor must equal it exactly (a value match, no repo needed).
-    The Environment Manager admission gate currently passes NEITHER, because no reviewed floor and no
-    source repository reach it (see ``EnvironmentRecipe``/``DependencyResolution`` - they carry no
-    git-ancestor requirement). So on a scientific host, admission proves wheel + provenance INTEGRITY and
-    that a canonical floor was embedded - it does NOT prove the floor is the protocol's floor. That
-    correctness is enforced at BUILD time by ``build-worker-wheel`` (against the real repo) and by the
-    research protocol validator; this limitation is reported, not papered over.
+    - ``expected_required_git_ancestor``: a reviewed floor the CALLER already trusts (e.g. from a plan).
+      When given, the embedded floor must equal it exactly (a value match, no repo needed).
+    The Environment Manager admission gate now passes ``expected_required_git_ancestor``: the exact
+    reviewed per-lineage floor carried on the sealed ``DependencyResolution`` (supplied to
+    ``env-plan --required-git-ancestor`` and bound by the confirmation hash). So admission proves EXACT
+    EQUALITY between the confirmed plan floor and the wheel's embedded floor. The Environment Manager
+    still does NOT pass ``repo_root`` (no source repository reaches a scientific host), so admission does
+    NOT independently prove Git ANCESTRY - it does not prove ``source_commit`` descends from the floor,
+    only that the embedded floor equals the confirmed plan floor. Descent is proven where the repo is
+    present: at BUILD time by the authoritative clean-source ``build-worker-wheel`` (``--required-ancestor``
+    against the real repo) and later by the prospective research-protocol validator. Equality (what this
+    gate proves) and ancestry (what build/validator prove) are SEPARATE claims, not restatements.
     """
 
     data = read_embedded_provenance(wheel_path)

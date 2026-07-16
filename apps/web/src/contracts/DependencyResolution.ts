@@ -83,6 +83,7 @@ export type Quantization = "nf4";
 export type RequireAdapterRoundTrip = true;
 export type RequiredDistributions = string[];
 export type TargetModules = "all-linear";
+export type RequiredGitAncestor = string | null;
 export type ResolutionHash = string | null;
 export type Resolvable = boolean;
 export type ResolvedIndexUrls = string[];
@@ -126,6 +127,7 @@ export interface DependencyResolution {
   python_version?: PythonVersion;
   recipe_ref: Ref;
   required_execution_probe?: QloraExecutionProbeSpec | null;
+  required_git_ancestor?: RequiredGitAncestor;
   resolution_hash?: ResolutionHash;
   resolvable?: Resolvable;
   resolved_index_urls?: ResolvedIndexUrls;

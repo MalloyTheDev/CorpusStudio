@@ -1808,6 +1808,12 @@ def env_plan(
         "--worker-wheel",
         help="Exact CorpusStudio wheel required by readiness recipes; its bytes are hash-bound.",
     ),
+    required_git_ancestor: Optional[str] = typer.Option(
+        None,
+        "--required-git-ancestor",
+        help="Exact 40-char lowercase-hex reviewed source floor for this lineage (required by "
+        "worker-wheel recipes). The worker wheel's embedded floor must equal this exact value.",
+    ),
     out: Optional[Path] = typer.Option(
         None, "--out", help="Write the canonical DependencyResolution JSON to this path."
     ),
@@ -1825,6 +1831,7 @@ def env_plan(
             manager_root=manager_root,
             python_version=python_version,
             worker_wheel=worker_wheel,
+            required_git_ancestor=required_git_ancestor,
         )
     except Exception as exc:  # EnvironmentManagerError plus bounded runtime-probe failures
         _environment_cli_error(exc)
@@ -1859,6 +1866,10 @@ def env_plan(
             f"{resolution.worker_artifact.filename} "
             f"({resolution.worker_artifact.content_hash.value})"
         )
+    if resolution.required_git_ancestor is not None:
+        lines.append(
+            f"  required source floor (reviewed): {resolution.required_git_ancestor}"
+        )
     if out is not None:
         lines.append(f"  plan file: {out}")
     for reason in resolution.blocking_reasons:
@@ -1887,6 +1898,7 @@ def _build_environment_resolution(
     manager_root: Optional[Path],
     python_version: Optional[str] = None,
     worker_wheel: Optional[Path] = None,
+    required_git_ancestor: Optional[str] = None,
 ):
     """Build the same concrete, sealed plan for env-plan/create/recreate."""
     from corpus_studio.platform.environment_manager import EnvironmentManager
@@ -1916,6 +1928,7 @@ def _build_environment_resolution(
         runtime_executable=runtime or Path(sys.executable),
         accelerator_tag=tag,
         worker_wheel=worker_wheel,
+        required_git_ancestor=required_git_ancestor,
     )
     if python_version and not resolution.python_version.startswith(python_version):
         blocked = resolution.model_copy(
@@ -1998,6 +2011,11 @@ def env_create(
     worker_wheel: Optional[Path] = typer.Option(
         None, "--worker-wheel", help="Exact worker wheel used when the reviewed plan was generated."
     ),
+    required_git_ancestor: Optional[str] = typer.Option(
+        None,
+        "--required-git-ancestor",
+        help="Exact reviewed source floor used when the plan was generated (must reproduce --confirm).",
+    ),
     confirmed_hash: str = typer.Option(
         ..., "--confirm", help="Exact resolution hash printed by env-plan."
     ),
@@ -2012,6 +2030,7 @@ def env_create(
             accelerator=accelerator,
             manager_root=manager_root,
             worker_wheel=worker_wheel,
+            required_git_ancestor=required_git_ancestor,
         )
         result = manager.create(
             resolution, confirmed_resolution_hash=confirmed_hash
@@ -2153,6 +2172,11 @@ def env_recreate(
     worker_wheel: Optional[Path] = typer.Option(
         None, "--worker-wheel", help="Exact worker wheel used when the reviewed plan was generated."
     ),
+    required_git_ancestor: Optional[str] = typer.Option(
+        None,
+        "--required-git-ancestor",
+        help="Exact reviewed source floor used when the plan was generated (must reproduce --confirm).",
+    ),
     confirmed_hash: str = typer.Option(..., "--confirm", help="Exact new env-plan resolution hash."),
     confirmed_remove_env_id: str = typer.Option(
         ..., "--confirm-remove", help="Exact existing environment id to remove first."
@@ -2169,6 +2193,7 @@ def env_recreate(
             accelerator=accelerator,
             manager_root=manager_root,
             worker_wheel=worker_wheel,
+            required_git_ancestor=required_git_ancestor,
         )
         result = manager.recreate(
             resolution,

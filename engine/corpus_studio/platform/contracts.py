@@ -108,6 +108,9 @@ from .enums import (
 )
 
 _ID = r"^[A-Za-z0-9._-]+$"
+# Exact full lowercase-hex git object name (the research required_git_ancestor floor). Kept local to
+# avoid importing build_provenance (which imports contracts) - same canonical form both modules enforce.
+GIT_SHA1_PATTERN = r"^[0-9a-f]{40}$"
 _RELATIVE_DESCRIPTOR_PATH = (
     r"^(?:[^/\\:.][^/\\:]*|\.[^./\\:][^/\\:]*)"
     r"(?:/(?:[^/\\:.][^/\\:]*|\.[^./\\:][^/\\:]*))*$"
@@ -3097,6 +3100,11 @@ class EnvironmentRecipe(ContractModel):
     known_conflicts: list[DependencyConflict] = Field(default_factory=list)
     capability_probes: list[str] = Field(default_factory=list)
     required_execution_probe: QloraExecutionProbeSpec | None = None
+    # A worker-wheel recipe DECLARES (via requires_worker_wheel) that an exact reviewed per-lineage
+    # source floor is required at plan time - but the recipe deliberately does NOT carry the floor
+    # VALUE. The changing per-amendment/per-lineage floor is supplied through env-plan's
+    # ``--required-git-ancestor`` and sealed into the DependencyResolution, so one field never conflates
+    # "a floor is required here" with "this exact commit is the floor". See DependencyResolution.
     requires_worker_wheel: bool = False
     bootstrap_pip_version: str | None = None
     verification: RecipeVerification = RecipeVerification.declared
@@ -3142,6 +3150,11 @@ class DependencyResolution(ContractModel):
     install_steps: list[InstallStep] = Field(default_factory=list)
     worker_artifact: WorkerArtifactIdentity | None = None
     required_execution_probe: QloraExecutionProbeSpec | None = None
+    # The exact reviewed per-lineage source floor for THIS environment, supplied at plan time via
+    # env-plan's ``--required-git-ancestor`` (never copied from the recipe or any global constant) and
+    # sealed into the resolution/confirmation hash, so env-create admits the worker wheel by comparing
+    # its EMBEDDED floor against this exact value. Set for worker-wheel plans only; None otherwise.
+    required_git_ancestor: str | None = Field(default=None, pattern=GIT_SHA1_PATTERN)
     # Rough, explicitly-heuristic size estimates (download + on-disk installed footprint).
     estimated_download_bytes: int | None = Field(default=None, ge=0)
     estimated_disk_bytes: int | None = Field(default=None, ge=0)
@@ -3226,6 +3239,9 @@ class EnvironmentLock(ContractModel):
     packages: list[PackageLock] = Field(default_factory=list)
     package_install_evidence: list[PackageInstallEvidence] = Field(default_factory=list)
     worker_artifact: WorkerArtifactIdentity | None = None
+    # The reviewed research floor admitted for this environment, recorded so it is recoverable from the
+    # lock/evidence (worker environments only; else None).
+    required_git_ancestor: str | None = Field(default=None, pattern=GIT_SHA1_PATTERN)
     probe_evidence: EnvironmentProbeEvidence | None = None
     # sha256 over the canonical lock body (runtime, recipe, sources, metadata hashes, and packages).
     lock_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)

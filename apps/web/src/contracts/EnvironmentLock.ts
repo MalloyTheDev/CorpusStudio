@@ -168,6 +168,7 @@ export type FailureTaxonomy =
 export type Probe2 = string;
 export type PythonVersion = string;
 export type Id = string;
+export type RequiredGitAncestor = string | null;
 export type Architecture1 = string;
 export type Compatible = boolean;
 export type ContractVersion2 = "1.0.0";
@@ -212,6 +213,7 @@ export interface EnvironmentLock {
   probe_evidence?: EnvironmentProbeEvidence | null;
   python_version?: PythonVersion;
   recipe_ref: Ref;
+  required_git_ancestor?: RequiredGitAncestor;
   resolution_ref?: Ref | null;
   runtime?: PythonRuntime | null;
   torch_build?: TorchBuild;

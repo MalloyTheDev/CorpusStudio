@@ -87,6 +87,8 @@ from .process_control import (
 )
 
 MANAGER_VERSION = "1.3.0"
+# Exact full lowercase-hex git object name (the confirmed resolution's reviewed per-lineage floor).
+_GIT_SHA1_RE = re.compile(r"[0-9a-f]{40}$")
 REFERENCE_RECIPE_ID = "backend-corpus-studio"
 SUPPORTED_CREATION_RECIPES = frozenset(
     {REFERENCE_RECIPE_ID, READINESS_V2_RECIPE_ID, READINESS_FLASH_V1_RECIPE_ID}
@@ -2027,6 +2029,7 @@ class EnvironmentManager:
         runtime_executable: str | Path,
         accelerator_tag: str = "cpu",
         worker_wheel: str | Path | None = None,
+        required_git_ancestor: str | None = None,
     ) -> DependencyResolution:
         recipe = get_recipe(recipe_id)
         if recipe is None:
@@ -2041,6 +2044,8 @@ class EnvironmentManager:
             environment_id=env_id,
             environment_root=str(self.environment_root(env_id)),
             manager_version=MANAGER_VERSION,
+            # The exact reviewed per-lineage floor supplied to env-plan; sealed into the resolution.
+            required_git_ancestor=required_git_ancestor,
         )
         if recipe.requires_worker_wheel and recipe.layer == DependencyLayer.backend_worker:
             worker_artifact: WorkerArtifactIdentity | None = None
@@ -3090,24 +3095,34 @@ class EnvironmentManager:
                     "the CorpusStudio worker wheel changed after this plan was reviewed"
                 )
             # Build-provenance admission gate (finding F4): refuse a worker wheel whose EMBEDDED
-            # canonical BUILD_PROVENANCE.json is absent, malformed, or carries only a prohibited alias
-            # such as ``audited_commit`` (the v7 defect shape) BEFORE any environment directory,
-            # installation, lock, capability probe, or GPU operation. This is called from
-            # _validate_creation, which runs in create()/recreate() BEFORE the mutation guard acquires
-            # any lock, so an inadmissible wheel is wholly non-mutating.
+            # canonical BUILD_PROVENANCE.json is absent, malformed, carries only a prohibited alias such
+            # as ``audited_commit`` (the v7 defect shape), or whose embedded required_git_ancestor does
+            # not equal THIS PLAN'S exact reviewed floor - BEFORE any environment directory,
+            # installation, lock, capability probe, or GPU operation. This runs in create()/recreate()
+            # BEFORE the mutation guard acquires any lock, so an inadmissible wheel is wholly
+            # non-mutating.
             #
-            # SCOPE / honesty boundary: this verifies the wheel's own EMBEDDED SELF-ASSERTION only -
-            # integrity (RECORD-sealed, hence covered by the worker_wheel_sha256 identity), presence,
-            # canonical source_commit, and (when present) a canonical embedded required_git_ancestor.
-            # It does NOT verify that the embedded floor is the correct reviewed PROTOCOL floor, nor that
-            # source_commit descends from it: no reviewed floor and no source repository reach the manager
-            # (EnvironmentRecipe / DependencyResolution carry no git-ancestor requirement to compare
-            # against, so neither ``repo_root`` nor ``expected_required_git_ancestor`` can be supplied).
-            # Protocol-floor correctness is enforced at BUILD time by ``build-worker-wheel`` (against the
-            # real repo) and by the research-protocol validator; admission does not restate that proof.
+            # The reviewed floor is the exact per-lineage ``required_git_ancestor`` supplied to env-plan
+            # and SEALED INTO THIS RESOLUTION (bound by resolution_hash, already re-verified above), fed
+            # here as ``expected_required_git_ancestor``. So admission proves the wheel's embedded floor
+            # equals THIS PLAN's confirmed floor (a byte match), with NO fallback to the recipe, the
+            # wheel's self-asserted value, a global constant, or the current Git HEAD. The floor is NOT
+            # a permanent historical minimum - it is the exact reviewed lineage floor.
+            #
+            # SCOPE / honesty boundary: admission still does NOT prove the floor is the correct PROTOCOL
+            # floor by DESCENT, nor that source_commit descends from it - that needs the source repo,
+            # which is not present on a scientific host. Descent is enforced at BUILD time by
+            # ``build-worker-wheel`` and by the research-protocol validator; admission proves the wheel's
+            # embedded floor matches THIS PLAN's confirmed floor (equality), not descent.
+            confirmed_floor = resolution.required_git_ancestor
+            if confirmed_floor is None or not _GIT_SHA1_RE.fullmatch(confirmed_floor):
+                raise EnvironmentManagerError(
+                    "the confirmed plan does not carry a canonical reviewed required_git_ancestor floor"
+                )
             try:
                 validate_wheel_provenance_for_scientific_admission(
-                    resolution.worker_artifact.path
+                    resolution.worker_artifact.path,
+                    expected_required_git_ancestor=confirmed_floor,
                 )
             except BuildProvenanceError as exc:
                 raise EnvironmentManagerError(
@@ -3121,6 +3136,9 @@ class EnvironmentManager:
             worker_wheel=resolution.worker_artifact.path
             if resolution.worker_artifact is not None
             else None,
+            # Reproduce the plan from the confirmed floor (already bound by resolution_hash, re-verified
+            # above); expected == resolution then also re-proves the floor was not tampered with.
+            required_git_ancestor=resolution.required_git_ancestor,
         )
         if expected != resolution:
             raise EnvironmentManagerError(
@@ -4053,6 +4071,11 @@ class EnvironmentManager:
             for package in body.get("packages", []):
                 for field_name in package_fields:
                     package.pop(field_name, None)
+        # Manager 1.3 locks record the admitted worker-source floor. Non-worker locks (and every
+        # lock sealed before this field existed) carry None here; pop it so their seals stay
+        # byte-identical - only scientific-worker locks bind a non-null floor.
+        if lock.required_git_ancestor is None:
+            body.pop("required_git_ancestor", None)
         return _canonical_sha256(body)
 
     def _finalize_lock(
@@ -4180,6 +4203,9 @@ class EnvironmentManager:
             packages=inventory.packages,
             package_install_evidence=installation.package_install_evidence,
             worker_artifact=resolution.worker_artifact,
+            # Record the exact reviewed floor admitted for this environment from the CONFIRMED
+            # resolution (not the recipe), so the admitted floor is recoverable from the lock/evidence.
+            required_git_ancestor=resolution.required_git_ancestor,
             probe_evidence=probe_evidence,
         )
         digest = self._lock_digest(draft)
