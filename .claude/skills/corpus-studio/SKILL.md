@@ -233,16 +233,18 @@ A run can be a workload success yet not paper-usable. `RunTelemetrySummary.compl
 
 ## Where the current program stands (update this as it moves)
 
-The active thread is bringing CorpusStudio to full 7B training/research readiness. Amendment 0002 ->
-effective matrix 1.2.0 is merged (v5 identities allocated). The **v5 0.5B GPU bring-up was attempted and
-produced its first real training** (12 genuine QLoRA optimizer steps on the RTX 5070, decreasing loss)
-but terminally failed - first on two planning defects (product GA=8 vs matrix GA=1; a chat fixture
-planned as instruction), then at the export gate on a false-positive artifact rejection of TRL's
-`training_args.bin`. Those are fixed on `main`: the artifact allowlist (#461) and the telemetry
-scientific-completeness closure (#462, step time / tokens / GPU memory / identity). **Both touch the
-worker execution closure, so v5's sealed wheel + environments cannot be reused** - the defensible next
-step is a prospective amendment 0003 -> effective matrix 1.3.0 -> `RESERVED_IDENTITIES.v3` -> a fresh v6
-wheel -> `-math-v6`/`-flash-v6` environments -> fresh v6 plans -> new smokes. Remaining gates each need
-separate human authorization: the corpus freeze, the v6 bring-up, then the 7B sequence ladder and full
-runs. This paragraph goes stale fast: the authoritative, volatile identity + readiness detail always
-lives in `HANDOFF.md` + `docs/HOST_STATE.md` - trust those over this paragraph.
+The active thread is bringing CorpusStudio to full 7B training/research readiness. The **v6 0.5B GPU
+bring-up PASSED (`V6_MATH_AND_FLASH_BRINGUP_PASS`, 2026-07-16)**: after the v5 bring-up produced the
+first real training (12 QLoRA steps) but failed at export, the worker-child corrections #461 (narrow
+`training_args.bin` admission) and #462 (paper-telemetry completeness) forced a fresh v6 lineage -
+amendment 0003 -> effective matrix **1.3.0** -> `RESERVED_IDENTITIES.v3` -> reproducible v6 wheel
+`bdc32196...` (source `73b756c`) -> `-math-v6`/`-flash-v6` environments (both `HARDWARE_VERIFIED`,
+forced `torch_sdpa_math`/`torch_sdpa_flash`) -> fresh matched chat plans -> **both smokes succeeded**
+(runs `run-019f688c...` / `run-019f6892...`; 12 steps, loss ~5.43->~0.38, adapter admitted, measured
+`NATIVE_SAFE`, `scientifically_complete=True`). One honestly-recorded non-blocking gap:
+`nonpadding/supervised_tokens_per_second = 0.0` (a runner-side token-observer gap under
+trl 1.8.0/transformers 5.13.1; not a required paper field; a future **v7** worker fix). This is a 0.5B
+feasibility result, NOT a 7B or full-training claim. Remaining gates each need separate human
+authorization: the corpus freeze, then the 7B sequence ladder and full runs. This paragraph goes stale
+fast: the authoritative, volatile identity + readiness detail always lives in `HANDOFF.md` +
+`docs/HOST_STATE.md` - trust those over this paragraph.

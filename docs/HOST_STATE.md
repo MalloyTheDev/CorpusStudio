@@ -1,9 +1,9 @@
 # Host State — Native-Linux RTX 5070 Workstation
 
-**Last verified:** 2026-07-15 (manager-1.3 v4 math/flash environments and plans were independently
-verified; the single v4 math attempt is a preserved pre-step gradient failure and the v4 flash plan
-was not dispatched. Earlier environment and run evidence remains preserved; legacy environment, GPU,
-and paths were checked 2026-07-14).
+**Last verified:** 2026-07-16 (manager-1.3 **v6** math/flash environments created, probed, and
+dispatched: both 0.5B smokes succeeded - `V6_MATH_AND_FLASH_BRINGUP_PASS`; see the v6 section below.
+Earlier v1-v5 environment, plan, and run evidence remains preserved and non-reusable; legacy
+environment, GPU, and paths were checked 2026-07-14).
 
 This file records the *verified* runtime facts of the machine CorpusStudio currently runs
 on. It supersedes the Windows `C:`/`F:` host descriptions in older docs for **"where you
@@ -317,6 +317,54 @@ amendment is prospective and does not itself authorize GPU work: building the v5
 v5 environments, and dispatching the 0.5B smokes remain gated on a separate human GPU/resource
 authorization. When that authorization is given, execute the exact ordered procedure in
 [`research/ieee-linux-training/RUNBOOK_v5_bringup.md`](../research/ieee-linux-training/RUNBOOK_v5_bringup.md).
+
+### Manager-1.3 v6 pair - first successful 0.5B bring-up (math + flash), 2026-07-16
+
+The v5 bring-up produced the study's first real GPU training (12 QLoRA math steps, loss 5.43 -> 0.39) but
+terminally failed at export: TRL's benign `training_args.bin` was rejected by the sealed adapter validator
+(`ARTIFACT_FAILURE`), and its telemetry was scientifically incomplete. Two corrections landed on `main`
+inside the worker child - **#461** (narrow `training_args.bin` admission, never deserialized) and **#462**
+(populate the required paper telemetry) - which change worker execution bytes, so a fresh **v6** lineage was
+required. Research amendment **0003 -> effective matrix 1.3.0** (effective-matrix sha256
+`e7b95d47aa23a87b4aed0ddac6dabf5fc070dc77e4d7ec710129fb690a7c4587`, `RESERVED_IDENTITIES.v3.json` sha256
+`414d23862e7a835f88b0c454c6fb0a930bc3904cca08bac8d793d5de1db10d40`) reserves every v1-v5 identity, allocates
+the v6 environment ids, and requires the worker source to descend from `af28be9`. A fresh reproducible v6
+wheel `corpus_studio_engine-1.3.0-py3-none-any.whl` sha256
+`bdc32196203539cbeb9078ce2317fb41d2a30abe68f7e94bc0fa290a97f414d4` was built twice byte-identically from
+source commit `73b756c49da0f03203ebd05dfb5528805b0fd280`.
+
+| Item | Math (blue) | Flash (green) |
+|---|---|---|
+| Environment id | `backend-corpus-studio-research-math-v6` | `backend-corpus-studio-research-flash-v6` |
+| Lock hash | `db8d3dea...a669d825` | `fb104a9b...f243a8d5` |
+| Forced kernel | `torch_sdpa_math` (flash+mem-eff disabled) | `torch_sdpa_flash` (math+mem-eff disabled) |
+| Plan id / hash | `plan-019f687d...` / `7d4202ce...` | `plan-019f687f...` / `e7fb9f49...` |
+| Run id | `run-019f688c-67c0-77cf-82e2-477f52fab76f` | `run-019f6892-3a54-7922-8e10-d138ee7e77ce` |
+| Terminal state | `succeeded` | `succeeded` |
+| Steps / losses | 12 / 5.4336 -> 0.3937 | 12 / 5.432 -> 0.377 |
+| Changed adapter tensors | 336 / 336 | 336 / 336 |
+| Adapter safetensors sha256 | `4efe3ec1...59e6d7de` | `845cdeb1...8431f000` |
+| Measured fit | `NATIVE_SAFE` (peak ~1.4 GB / 12.34 GB) | `NATIVE_SAFE` |
+| GPU power / temp max / energy | 43.5 W / 42 C / 495.3 J | 43.9 W / 42 C / 477.4 J |
+| scientifically_complete | `True` | `True` |
+| Post-run env state | `HARDWARE_VERIFIED`, drift `false` | `HARDWARE_VERIFIED`, drift `false` |
+
+Both matched arms completed the full plan -> seal -> run -> admit -> manifest lifecycle with forced math and
+forced flash respectively; the export/artifact-admission path (the v5 blocker) now succeeds, and telemetry
+is `scientifically_complete=True`. Both smokes ran one at a time (Ollama unloaded, GPU idle-confirmed,
+supervised subprocess, 600 s silence timeout, 200 ms internal telemetry), peaked 42 C (<< 85 C) with zero
+swap growth and no shared-GPU-memory spill, and released the GPU to 10 MiB. Run + telemetry evidence:
+`/mnt/training-nvme/corpusstudio/runs/ieee-linux-training/v6-smoke-73b756c/{math,flash}/`; plans:
+`.../v6-bringup-73b756c/plans-chat/{math-v6,flash-v6}/`. **Verdict: `V6_MATH_AND_FLASH_BRINGUP_PASS`.**
+
+*Honestly-recorded gap (non-blocking, kernel-independent):* `nonpadding_tokens_per_second` and
+`supervised_tokens_per_second` read `0.0` on both runs. Real training occurred (loss fell; 336 tensors
+changed; TRL built labels for all 8 rows), so this is a runner-side token-observer instrumentation gap in
+the deployed v6 worker (the #462 collate-fn observer did not capture batch token counts under trl 1.8.0 /
+transformers 5.13.1), not a workload failure. tokens/sec is not a required paper field, so
+`scientifically_complete=True` holds; the field is reported as measured (0.0), no gate was weakened. Fixing
+it changes worker bytes -> a future **v7** lineage. This remains a 0.5B feasibility bring-up, NOT a 7B or
+full-training result.
 
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 

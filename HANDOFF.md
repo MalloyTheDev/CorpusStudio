@@ -1,6 +1,22 @@
 # CorpusStudio — Session Handoff
 
-**Last updated:** 2026-07-15 (pre-GPU finalization: the exact checkpoint/resume **execution engine**
+**Last updated:** 2026-07-16 (**v6 0.5B GPU bring-up PASSED - `V6_MATH_AND_FLASH_BRINGUP_PASS`**). After
+the v5 bring-up hit its first real GPU training then failed at export, the worker-child corrections #461
+(narrow `training_args.bin` admission) and #462 (complete paper telemetry) forced a fresh **v6** lineage:
+research amendment **0003 -> effective matrix 1.3.0** (reserves all v1-v5 identities), a reproducible v6
+wheel `bdc32196...` built twice byte-identically from source `73b756c`, matched
+`backend-corpus-studio-research-{math,flash}-v6` environments (both `HARDWARE_VERIFIED`, drift false;
+forced `torch_sdpa_math` / `torch_sdpa_flash`), fresh matched chat RunPlans, all pre-dispatch fixture /
+artifact / telemetry / disjointness gates green, and **both 0.5B smokes SUCCEEDED** (12 steps each, loss
+~5.43 -> ~0.38, 336/336 adapter tensors changed, adapter admitted, measured `NATIVE_SAFE`,
+`scientifically_complete=True`, GPU released, post-run `HARDWARE_VERIFIED`). Runs
+`run-019f688c...` (math) / `run-019f6892...` (flash) under
+`/mnt/training-nvme/corpusstudio/runs/ieee-linux-training/v6-smoke-73b756c/`. Honestly-recorded
+non-blocking gap: `nonpadding/supervised_tokens_per_second` read `0.0` (a runner-side token-observer
+gap under trl 1.8.0 / transformers 5.13.1; not a required paper field; a future **v7** fix). Still a 0.5B
+feasibility bring-up, NOT a 7B or full-training claim. Details in
+[`docs/HOST_STATE.md`](docs/HOST_STATE.md) (v6 section). Earlier (2026-07-15,
+pre-GPU finalization): the exact checkpoint/resume **execution engine**
 #454 - torch worker that writes + restores sealed checkpoints, proven by a real-torch fresh-process
 **bitwise-equivalence** test; amendment-0002 reconciliation #455 - classification
 **V5_IDENTITIES_REMAIN_VALID**, the `df86db5` admission rule is an ANCESTOR rule so a descendant worker
