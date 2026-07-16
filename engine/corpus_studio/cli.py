@@ -1151,6 +1151,148 @@ def platform_plan(
     typer.echo(plan.model_dump_json(indent=2))
 
 
+@app.command("build-worker-wheel")
+def build_worker_wheel(
+    dest_dir: Path = typer.Option(
+        ..., "--dest-dir", help="Directory to write the sealed worker wheel + provenance into."
+    ),
+    required_ancestor: Optional[str] = typer.Option(
+        None,
+        "--required-ancestor",
+        help="A commit that MUST be an ancestor of the build source commit (required-descent floor).",
+    ),
+    source_wheel: Optional[Path] = typer.Option(
+        None,
+        "--source-wheel",
+        help="Stamp this already-built corpus_studio_engine wheel instead of building a fresh one.",
+    ),
+    allow_dirty: bool = typer.Option(
+        False,
+        "--allow-dirty",
+        help="DANGER: skip the clean-worktree provenance check (produces non-reproducible provenance).",
+    ),
+    external_copy: bool = typer.Option(
+        True,
+        "--external-copy/--no-external-copy",
+        help="Also write an external BUILD_PROVENANCE.json next to the wheel (must match the embedded copy).",
+    ),
+):
+    """Build (or stamp) the first-party CorpusStudio worker wheel and EMBED canonical build provenance.
+
+    Resolves the exact 40-char source commit from the repository HEAD; refuses a dirty worktree, an
+    unknown commit, or a broken required-ancestry (the floor must be an ancestor of the source commit);
+    builds the wheel with the installed setuptools backend (no network isolation) or stamps a provided
+    wheel; embeds a canonical BUILD_PROVENANCE.json under the wheel's .dist-info sealed in RECORD (hence
+    inside the wheel sha256 identity that already flows through the artifact/environment/lock/plan/
+    execution/telemetry contracts); and re-verifies the result would pass scientific admission. Every
+    launch is an argv list, never a shell string.
+    """
+    import shutil
+    import subprocess
+
+    from corpus_studio.platform.build_provenance import (
+        BuildProvenanceError,
+        build_provenance_document,
+        stamp_wheel_with_provenance,
+        validate_source_commit_against_repo,
+        validate_wheel_provenance_for_scientific_admission,
+    )
+
+    repo_root = repository_root()
+    head = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if head.returncode != 0:
+        typer.echo(f"cannot resolve repository HEAD: {head.stderr.strip()}", err=True)
+        raise typer.Exit(2)
+    source_commit = head.stdout.strip()
+
+    try:
+        validate_source_commit_against_repo(
+            source_commit,
+            repo_root,
+            require_clean_worktree=not allow_dirty,
+            required_git_ancestor=required_ancestor,
+        )
+    except BuildProvenanceError as exc:
+        typer.echo(f"refusing to build: {exc}", err=True)
+        raise typer.Exit(2) from exc
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    if source_wheel is not None:
+        if source_wheel.suffix != ".whl" or not source_wheel.is_file():
+            typer.echo(f"--source-wheel is not a wheel file: {source_wheel}", err=True)
+            raise typer.Exit(2)
+        wheel = dest_dir / source_wheel.name
+        if source_wheel.resolve() != wheel.resolve():
+            shutil.copy2(source_wheel, wheel)
+    else:
+        committer_date = subprocess.run(
+            ["git", "-C", str(repo_root), "show", "-s", "--format=%ct", source_commit],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        build_env = dict(os.environ)
+        if committer_date.returncode == 0 and committer_date.stdout.strip().isdigit():
+            # Pin the source date so the setuptools build normalizes archive timestamps.
+            build_env["SOURCE_DATE_EPOCH"] = committer_date.stdout.strip()
+        build = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "build",
+                "--wheel",
+                "--no-isolation",
+                "--outdir",
+                str(dest_dir),
+                str(repo_root),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=build_env,
+        )
+        if build.returncode != 0:
+            typer.echo(f"wheel build failed:\n{build.stderr.strip()}", err=True)
+            raise typer.Exit(2)
+        built = sorted(dest_dir.glob("corpus_studio_engine-*.whl"))
+        if not built:
+            typer.echo("build produced no corpus_studio_engine wheel", err=True)
+            raise typer.Exit(2)
+        wheel = built[-1]
+
+    document = build_provenance_document(
+        source_commit=source_commit,
+        extra={"required_git_ancestor": required_ancestor} if required_ancestor else None,
+    )
+    try:
+        stamp = stamp_wheel_with_provenance(wheel, document, external_copy=external_copy)
+        admission_commit = validate_wheel_provenance_for_scientific_admission(str(wheel))
+    except BuildProvenanceError as exc:
+        typer.echo(f"provenance stamping/verification failed: {exc}", err=True)
+        raise typer.Exit(2) from exc
+
+    typer.echo(
+        json.dumps(
+            {
+                "wheel": str(wheel),
+                "source_commit": stamp.source_commit,
+                "admission_source_commit": admission_commit,
+                "worker_wheel_sha256": stamp.wheel_sha256,
+                "embedded_provenance": stamp.embedded_arcname,
+                "external_copy": str(stamp.external_path) if stamp.external_path else None,
+                "required_git_ancestor": required_ancestor,
+            },
+            indent=2,
+        )
+    )
+
+
 @app.command("platform-backends")
 def platform_backends(
     json_out: bool = typer.Option(False, "--json", help="Emit the full BackendManifests as JSON."),

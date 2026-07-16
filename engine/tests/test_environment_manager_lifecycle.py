@@ -25,6 +25,7 @@ import pytest
 from typer.testing import CliRunner
 
 import corpus_studio.cli as cli_module
+import corpus_studio.platform.build_provenance as build_provenance
 import corpus_studio.platform.environment_manager as manager_module
 from corpus_studio.cli import app
 from corpus_studio.platform.common import HashRef, Ref
@@ -545,11 +546,19 @@ def _manager_and_resolution(tmp_path: Path, runner: FakeEnvironmentRunner, env_i
     return manager, resolution
 
 
+# A fixed, canonical (40-char lowercase hex) synthetic source commit for fixture wheels. The env-manager
+# admission gate now requires EMBEDDED canonical build provenance; fixtures embed this so they exercise
+# the real gate rather than bypassing it. `with_provenance=False` builds the inadmissible v7 shape.
+_FIXTURE_SOURCE_COMMIT = "b17e57ed0b17e57ed0b17e57ed0b17e57ed0b17e"
+
+
 def _worker_wheel(
     tmp_path: Path,
     *,
     marker: str = "worker-v1",
     entry_points: str | None = None,
+    with_provenance: bool = True,
+    provenance_commit: str = _FIXTURE_SOURCE_COMMIT,
 ) -> Path:
     path = tmp_path / "corpus_studio_engine-1.3.0-py3-none-any.whl"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -572,6 +581,12 @@ def _worker_wheel(
     with zipfile.ZipFile(path, "w") as archive:
         for member_name, member_bytes in members.items():
             archive.writestr(member_name, member_bytes)
+    if with_provenance:
+        build_provenance.stamp_wheel_with_provenance(
+            path,
+            build_provenance.build_provenance_document(source_commit=provenance_commit),
+            external_copy=False,
+        )
     return path
 
 
@@ -698,6 +713,78 @@ def test_cuda_hardware_probe_earns_hardware_verified_only_after_math_path(tmp_pa
     assert hardware.measured["attention_backend"] == "math"
     assert result.lock.cuda_runtime_version == "12.8"
     assert result.lock.compute_capability == "12.0"
+
+
+def test_scientific_admission_accepts_wheel_with_embedded_provenance(tmp_path):
+    # End-to-end: a worker wheel carrying EMBEDDED canonical provenance is admitted through the real
+    # create() path, and its identity overlay (built from the same sealed artifact) carries the commit -
+    # no post-hoc overlay. This exercises build (stamp) -> artifact admission -> environment admission ->
+    # telemetry identity in one path.
+    from corpus_studio.platform.telemetry import worker_identity_overlay
+
+    manager, resolution, _, wheel = _manager_and_readiness_resolution(tmp_path)
+    result = manager.create(
+        resolution, confirmed_resolution_hash=resolution.resolution_hash or ""
+    )
+    assert result.descriptor.state in {
+        EnvironmentState.hardware_verified,
+        EnvironmentState.functional_probe_passed,
+    }
+    assert resolution.worker_artifact is not None
+    overlay = worker_identity_overlay(resolution.worker_artifact)
+    assert overlay.repository_commit == _FIXTURE_SOURCE_COMMIT
+
+
+def test_scientific_admission_refuses_wheel_without_embedded_provenance(tmp_path):
+    # The v7 defect shape (no embedded canonical provenance) is refused at admission, BEFORE any
+    # environment directory, install, lock, probe, or GPU op - and wholly non-mutating (no env root,
+    # no registry entry, no lock file created).
+    wheel = _worker_wheel(tmp_path / "artifacts", with_provenance=False)
+    packages = _readiness_packages()
+    worker_package = next(
+        item for item in packages if item["normalized_name"] == "corpus-studio-engine"
+    )
+    worker_package["direct_url"] = {
+        "url": wheel.resolve().as_uri(),
+        "archive_info": {"hashes": {"sha256": manager_module._hash_file(wheel)}},
+    }
+    worker_identity = manager_module._worker_artifact_identity(wheel)
+    assert worker_identity.metadata_hash is not None
+    worker_package["metadata_sha256"] = worker_identity.metadata_hash.value
+    worker_package["installed_file_manifest"] = [
+        [path, digest]
+        for path, digest in sorted(
+            manager_module._worker_wheel_payload_manifest(worker_identity).items()
+        )
+    ]
+    runner = FakeEnvironmentRunner(cuda=True, packages=packages)
+    runtime = PythonRuntime(
+        runtime_id="python-readiness",
+        executable=str(tmp_path / "base-python"),
+        version="3.12.10",
+        implementation="CPython",
+        architecture="64-bit",
+        platform="test-platform",
+        os=OperatingSystem.linux,
+        venv_available=True,
+        compatible=True,
+    )
+    manager = EnvironmentManager(
+        tmp_path / "manager",
+        runner=runner,
+        runtime_probe=lambda executable, requirement: runtime,
+    )
+    resolution = manager.preview(
+        "backend-corpus-studio-readiness-v2",
+        env_id="backend-corpus-studio-readiness-v2",
+        runtime_executable=runtime.executable,
+        accelerator_tag="cu128",
+        worker_wheel=wheel,
+    )
+    with pytest.raises(manager_module.EnvironmentManagerError, match="inadmissible build provenance"):
+        manager.create(resolution, confirmed_resolution_hash=resolution.resolution_hash or "")
+    # Non-mutating: no environment root and no lock were created by the refused admission.
+    assert not manager.environment_root("backend-corpus-studio-readiness-v2").exists()
 
 
 def test_readiness_v2_plan_is_stable_hash_bound_and_plan_only(tmp_path):

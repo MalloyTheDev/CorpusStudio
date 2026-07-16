@@ -19,9 +19,13 @@ for a canonical ``source_commit`` (no silent fallback across ambiguous keys).
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import re
 import subprocess  # noqa: S404 - fixed-argv git only; never a shell string.
+import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -58,15 +62,20 @@ def provenance_path_for_wheel(wheel_path: str | Path | None) -> Path | None:
 
 
 def read_source_commit(wheel_path: str | Path | None) -> str | None:
-    """Best-effort strict read of the canonical ``source_commit`` from the wheel's sidecar.
+    """Best-effort strict read of the canonical ``source_commit`` for a worker wheel.
 
-    Returns the commit ONLY when the sidecar exists, is valid JSON, and carries a canonical
-    ``source_commit`` (exact 40-char lowercase hex). Returns ``None`` - never raises, never fabricates,
-    never falls back to a prohibited alias - when the sidecar is absent/unreadable, the key is missing,
-    or the value is non-canonical (abbreviated, uppercase, empty, or non-string). This is the exact
-    contract the telemetry identity reader relies on.
+    Prefers the provenance EMBEDDED in the wheel (``*.dist-info/BUILD_PROVENANCE.json``, sealed by the
+    wheel RECORD and therefore by the wheel sha256 identity); falls back to the external
+    ``BUILD_PROVENANCE.json`` sidecar next to the wheel (the historical v7 shape). Returns the commit
+    ONLY when a canonical ``source_commit`` (exact 40-char lowercase hex) is found. Returns ``None`` -
+    never raises, never fabricates, never falls back to a prohibited alias - when neither source carries
+    one. This is the exact contract the telemetry identity reader relies on, so telemetry obtains
+    ``repository_commit`` automatically from a self-describing wheel without any post-hoc overlay.
     """
 
+    embedded = read_embedded_source_commit(wheel_path)
+    if embedded is not None:
+        return embedded
     provenance = provenance_path_for_wheel(wheel_path)
     if provenance is None:
         return None
@@ -136,7 +145,7 @@ def validate_source_commit_against_repo(
     repo_root: str | Path,
     *,
     require_clean_worktree: bool = True,
-    must_be_ancestor_of: str | None = None,
+    required_git_ancestor: str | None = None,
 ) -> None:
     """Validate a canonical ``source_commit`` against a Git repository, raising on any failure.
 
@@ -145,8 +154,11 @@ def validate_source_commit_against_repo(
     - the commit object exists in ``repo_root``;
     - ``require_clean_worktree`` (default): the worktree has no tracked modifications (a dirty tree is
       ambiguous provenance and is refused). A detached, clean, reproducible build worktree passes;
-    - ``must_be_ancestor_of`` (when given): ``source_commit`` is an ancestor of, or equal to, that
-      commit (the required-descent rule).
+    - ``required_git_ancestor`` (when given): the required-descent rule, in the direction the research
+      protocol uses - ``required_git_ancestor`` MUST be an ancestor of (or equal to) ``source_commit``.
+      That is, the built source DESCENDS FROM the required floor commit (e.g. the merged
+      build-provenance-fix commit or a prior worker-source floor); the floor is not required to descend
+      from the source. This is the opposite direction from a naive ``source is ancestor of X`` check.
     """
 
     if not is_canonical_source_commit(source_commit):
@@ -167,11 +179,20 @@ def validate_source_commit_against_repo(
             raise BuildProvenanceError(
                 "refusing ambiguous provenance: the build worktree has uncommitted changes"
             )
-    if must_be_ancestor_of is not None:
-        ancestor = _git(root, "merge-base", "--is-ancestor", source_commit, must_be_ancestor_of)
-        if ancestor.returncode != 0:
+    if required_git_ancestor is not None:
+        # required_git_ancestor -> ancestor of source_commit: the floor must be reachable from source.
+        exists_floor = _git(root, "cat-file", "-e", f"{required_git_ancestor}^{{commit}}")
+        if exists_floor.returncode != 0:
             raise BuildProvenanceError(
-                f"source_commit {source_commit} is not an ancestor of {must_be_ancestor_of}"
+                f"required_git_ancestor {required_git_ancestor} does not exist as a commit in {root}"
+            )
+        descends = _git(
+            root, "merge-base", "--is-ancestor", required_git_ancestor, source_commit
+        )
+        if descends.returncode != 0:
+            raise BuildProvenanceError(
+                f"source_commit {source_commit} does not descend from required_git_ancestor "
+                f"{required_git_ancestor}"
             )
 
 
@@ -180,27 +201,35 @@ def validate_wheel_provenance_for_scientific_admission(
     *,
     repo_root: str | Path | None = None,
     require_clean_worktree: bool = True,
-    must_be_ancestor_of: str | None = None,
+    required_git_ancestor: str | None = None,
 ) -> str:
     """Gate a worker wheel for admission into a scientific environment; return its ``source_commit``.
 
-    Raises ``BuildProvenanceError`` if the sidecar is absent, malformed, or lacks a canonical
-    ``source_commit`` (so a wheel that would leave ``identity.repository_commit`` null - the v7 defect -
-    is refused before admission, never patched post-hoc). When ``repo_root`` is given, the commit is
-    additionally validated against the repository (existence, clean worktree, required ancestry).
+    This is the artifact-self-contained check the Environment Manager runs at admission (before any
+    environment directory, installation, lock, capability probe, or GPU operation), so it does NOT
+    require the source repository to be present on the host. It enforces, in order:
+
+    1. The wheel EMBEDS ``*.dist-info/BUILD_PROVENANCE.json`` carrying a canonical ``source_commit``
+       (exact 40-char lowercase hex). A wheel with only an external sidecar, only a prohibited alias
+       such as ``audited_commit``, or no provenance at all - the v7 defect shape - is refused here,
+       never patched post-hoc.
+    2. The embedded provenance is SEALED by the wheel RECORD (its listed sha256 matches the bytes), so
+       it is a first-class wheel member covered by the wheel ``content_hash`` identity, not a stray
+       file dropped into the zip.
+    3. If an external ``BUILD_PROVENANCE.json`` copy sits next to the wheel, it must byte-match the
+       embedded copy (no divergent provenance stories).
+
+    When ``repo_root`` is given (build-time, repo present), the commit is additionally validated against
+    the repository: existence, clean worktree, and ``required_git_ancestor`` descent (the floor must be
+    an ancestor of ``source_commit``).
     """
 
-    provenance = provenance_path_for_wheel(wheel_path)
-    if provenance is None or not provenance.exists():
+    data = read_embedded_provenance(wheel_path)
+    if data is None:
         raise BuildProvenanceError(
-            f"no {PROVENANCE_FILENAME} sidecar next to wheel {wheel_path}"
+            f"worker wheel {wheel_path} has no embedded {PROVENANCE_FILENAME} "
+            "(an external-only or absent sidecar is not admissible)"
         )
-    try:
-        data = json.loads(provenance.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise BuildProvenanceError(f"unreadable {PROVENANCE_FILENAME}: {exc}") from exc
-    if not isinstance(data, dict):
-        raise BuildProvenanceError(f"{PROVENANCE_FILENAME} is not a JSON object")
     commit = data.get(CANONICAL_SOURCE_COMMIT_KEY)
     if not is_canonical_source_commit(commit):
         detail = "absent" if commit is None else f"non-canonical ({commit!r})"
@@ -211,14 +240,223 @@ def validate_wheel_provenance_for_scientific_admission(
             else ""
         )
         raise BuildProvenanceError(
-            f"{PROVENANCE_FILENAME} source_commit is {detail}{hint}"
+            f"embedded {PROVENANCE_FILENAME} source_commit is {detail}{hint}"
         )
     assert isinstance(commit, str)  # narrowed by is_canonical_source_commit
+    verify_embedded_provenance_record_integrity(wheel_path)
+    _assert_external_matches_embedded(wheel_path)
     if repo_root is not None:
         validate_source_commit_against_repo(
             commit,
             repo_root,
             require_clean_worktree=require_clean_worktree,
-            must_be_ancestor_of=must_be_ancestor_of,
+            required_git_ancestor=required_git_ancestor,
         )
     return commit
+
+
+# --------------------------------------------------------------------------------------------------
+# Wheel-embedded provenance: write, read, and RECORD-seal integrity.
+#
+# The wheel is a zip; ``*.dist-info/BUILD_PROVENANCE.json`` is embedded as a first-class member listed
+# in ``*.dist-info/RECORD``. Because RECORD lists it (with its sha256) and the whole wheel's bytes are
+# the sealed ``worker_wheel_sha256`` identity that already flows through the artifact, environment,
+# lock, plan, execution, and telemetry contracts, embedding needs NO new sealed-identity contract - the
+# provenance rides inside the identity that already exists. An optional external copy is defense in
+# depth only and must match the embedded copy byte-for-byte.
+# --------------------------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class WheelProvenanceStamp:
+    """The result of embedding canonical provenance into a worker wheel."""
+
+    source_commit: str
+    wheel_sha256: str
+    embedded_arcname: str
+    external_path: Path | None
+
+
+def _record_field(data: bytes) -> str:
+    """The RECORD hash field for ``data``: ``sha256=<urlsafe-base64-no-padding>``."""
+
+    digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).decode("ascii").rstrip("=")
+    return f"sha256={digest}"
+
+
+def _record_arcname(names: list[str]) -> str:
+    for name in names:
+        if name.endswith(".dist-info/RECORD"):
+            return name
+    raise BuildProvenanceError("wheel has no .dist-info/RECORD member")
+
+
+def _embedded_arcname(names: list[str]) -> str | None:
+    return next(
+        (name for name in names if name.endswith(f".dist-info/{PROVENANCE_FILENAME}")), None
+    )
+
+
+def _provenance_payload(document: dict[str, Any]) -> bytes:
+    """The exact canonical bytes for a provenance document (embedded and external copies share these)."""
+
+    return (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def stamp_wheel_with_provenance(
+    wheel_path: str | Path,
+    document: dict[str, Any],
+    *,
+    external_copy: bool = True,
+) -> WheelProvenanceStamp:
+    """Embed a validated canonical ``BUILD_PROVENANCE.json`` into ``wheel_path`` and re-seal RECORD.
+
+    Rewrites the wheel in place (via a temp file + atomic replace) with the provenance added under the
+    wheel's ``.dist-info/`` and its line inserted into RECORD (so the embedded copy is sealed and the
+    wheel sha256 - the worker identity - covers it). Refuses a document without a canonical
+    ``source_commit``. When ``external_copy`` is set, also writes an identical external sidecar next to
+    the wheel (defense in depth; admission requires it to match the embedded copy). Returns the new
+    wheel sha256 and the embedded arcname.
+    """
+
+    commit = document.get(CANONICAL_SOURCE_COMMIT_KEY)
+    if not is_canonical_source_commit(commit):
+        raise BuildProvenanceError(
+            "refusing to stamp a wheel without a canonical source_commit"
+        )
+    assert isinstance(commit, str)
+    payload = _provenance_payload(document)
+    wheel = Path(wheel_path)
+
+    with zipfile.ZipFile(wheel) as archive:
+        infos = list(archive.infolist())
+        names = [info.filename for info in infos]
+        record_name = _record_arcname(names)
+        dist_info = record_name[: -len("RECORD")]
+        prov_name = f"{dist_info}{PROVENANCE_FILENAME}"
+        member_bytes = {info.filename: archive.read(info.filename) for info in infos}
+
+    # Rebuild RECORD: keep every line except any prior provenance line and RECORD's own line, append the
+    # provenance line, then RECORD's hashless self-line last (per the wheel spec).
+    record_text = member_bytes[record_name].decode("utf-8")
+    kept: list[str] = []
+    for line in record_text.splitlines():
+        if not line.strip():
+            continue
+        first = line.split(",", 1)[0]
+        if first == prov_name or first == record_name:
+            continue
+        kept.append(line)
+    kept.append(f"{prov_name},{_record_field(payload)},{len(payload)}")
+    kept.append(f"{record_name},,")
+    new_record = ("\n".join(kept) + "\n").encode("utf-8")
+
+    fixed_dt = (1980, 1, 1, 0, 0, 0)  # deterministic mtime for stamped members (reproducible stamp)
+    tmp = wheel.with_name(wheel.name + ".provenance.tmp")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as out:
+        for info in infos:
+            if info.filename in (record_name, prov_name):
+                continue  # (re)written below with fresh, deterministic metadata
+            out.writestr(info, member_bytes[info.filename])
+        prov_info = zipfile.ZipInfo(prov_name, date_time=fixed_dt)
+        prov_info.compress_type = zipfile.ZIP_DEFLATED
+        prov_info.external_attr = 0o644 << 16
+        out.writestr(prov_info, payload)
+        record_info = zipfile.ZipInfo(record_name, date_time=fixed_dt)
+        record_info.compress_type = zipfile.ZIP_DEFLATED
+        record_info.external_attr = 0o644 << 16
+        out.writestr(record_info, new_record)
+    tmp.replace(wheel)
+
+    wheel_sha256 = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    external_path: Path | None = None
+    if external_copy:
+        external_path = wheel.parent / PROVENANCE_FILENAME
+        external_path.write_bytes(payload)
+    return WheelProvenanceStamp(
+        source_commit=commit,
+        wheel_sha256=wheel_sha256,
+        embedded_arcname=prov_name,
+        external_path=external_path,
+    )
+
+
+def read_embedded_provenance(wheel_path: str | Path | None) -> dict[str, Any] | None:
+    """Best-effort read of the embedded ``*.dist-info/BUILD_PROVENANCE.json`` as a dict, or ``None``.
+
+    Never raises: a missing wheel, a non-zip file, an absent member, or malformed JSON all yield
+    ``None`` so telemetry stays best-effort.
+    """
+
+    if not wheel_path:
+        return None
+    try:
+        with zipfile.ZipFile(wheel_path) as archive:
+            arcname = _embedded_arcname(archive.namelist())
+            if arcname is None:
+                return None
+            data = json.loads(archive.read(arcname).decode("utf-8"))
+    except (OSError, ValueError, zipfile.BadZipFile):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def read_embedded_source_commit(wheel_path: str | Path | None) -> str | None:
+    """The canonical embedded ``source_commit`` for a wheel, or ``None`` (best-effort, never raises)."""
+
+    data = read_embedded_provenance(wheel_path)
+    if data is None:
+        return None
+    commit = data.get(CANONICAL_SOURCE_COMMIT_KEY)
+    return commit if is_canonical_source_commit(commit) else None
+
+
+def verify_embedded_provenance_record_integrity(wheel_path: str | Path) -> None:
+    """Raise unless the embedded provenance is listed in RECORD with a matching sha256.
+
+    Proves the embedded ``BUILD_PROVENANCE.json`` is a first-class, RECORD-sealed wheel member (covered
+    by the wheel sha256 identity), not a stray file that a repackager could swap without detection.
+    """
+
+    try:
+        with zipfile.ZipFile(wheel_path) as archive:
+            names = archive.namelist()
+            arcname = _embedded_arcname(names)
+            if arcname is None:
+                raise BuildProvenanceError(
+                    f"wheel {wheel_path} has no embedded {PROVENANCE_FILENAME}"
+                )
+            record_name = _record_arcname(names)
+            payload = archive.read(arcname)
+            record_text = archive.read(record_name).decode("utf-8")
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise BuildProvenanceError(f"unreadable wheel {wheel_path}: {exc}") from exc
+    expected = _record_field(payload)
+    for line in record_text.splitlines():
+        fields = line.split(",")
+        if fields and fields[0] == arcname:
+            if len(fields) >= 2 and fields[1] == expected:
+                return
+            raise BuildProvenanceError(
+                f"embedded {PROVENANCE_FILENAME} hash disagrees with RECORD for {wheel_path}"
+            )
+    raise BuildProvenanceError(
+        f"embedded {PROVENANCE_FILENAME} is not listed in RECORD for {wheel_path}"
+    )
+
+
+def _assert_external_matches_embedded(wheel_path: str | Path) -> None:
+    """If an external sidecar exists next to the wheel, require it to match the embedded copy byte for
+    byte. A wheel with no external copy is fine (embedded is authoritative)."""
+
+    external = provenance_path_for_wheel(wheel_path)
+    if external is None or not external.exists():
+        return
+    try:
+        with zipfile.ZipFile(wheel_path) as archive:
+            arcname = _embedded_arcname(archive.namelist())
+            embedded = archive.read(arcname) if arcname is not None else b""
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise BuildProvenanceError(f"unreadable wheel {wheel_path}: {exc}") from exc
+    if external.read_bytes() != embedded:
+        raise BuildProvenanceError(
+            f"external {PROVENANCE_FILENAME} next to {wheel_path} disagrees with the embedded copy"
+        )

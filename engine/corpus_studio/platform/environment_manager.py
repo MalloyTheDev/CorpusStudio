@@ -44,6 +44,10 @@ else:
 
 from .app_paths import corpusstudio_data_home
 from .backends import backend_manifest_digest, get_worker_backend
+from .build_provenance import (
+    BuildProvenanceError,
+    validate_wheel_provenance_for_scientific_admission,
+)
 from .common import HashRef, PackageLock, PackageSource, Ref
 from .contracts import (
     CapabilityReport,
@@ -3085,6 +3089,24 @@ class EnvironmentManager:
                 raise EnvironmentManagerError(
                     "the CorpusStudio worker wheel changed after this plan was reviewed"
                 )
+            # Build-provenance admission gate (finding F4): refuse a worker wheel whose EMBEDDED
+            # canonical BUILD_PROVENANCE.json is absent, malformed, or carries only a prohibited alias
+            # such as ``audited_commit`` (the v7 defect shape) BEFORE any environment directory,
+            # installation, lock, capability probe, or GPU operation. This is called from
+            # _validate_creation, which runs in create()/recreate() BEFORE the mutation guard acquires
+            # any lock, so an inadmissible wheel is wholly non-mutating. The check is
+            # artifact-self-contained (embedded provenance sealed by the wheel RECORD, hence by the
+            # sealed worker_wheel_sha256 identity); the repository-ancestry and clean-worktree checks are
+            # enforced separately at build time by ``build-worker-wheel``, so no source repository need
+            # be present on a scientific host.
+            try:
+                validate_wheel_provenance_for_scientific_admission(
+                    resolution.worker_artifact.path
+                )
+            except BuildProvenanceError as exc:
+                raise EnvironmentManagerError(
+                    f"the CorpusStudio worker wheel has inadmissible build provenance: {exc}"
+                ) from exc
         expected = self.preview(
             recipe.recipe_id,
             env_id=env_id,
