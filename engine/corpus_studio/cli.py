@@ -1186,7 +1186,9 @@ def build_worker_wheel(
     telemetry contracts), and the result is re-verified against scientific admission before it returns.
     Every launch is an argv list, never a shell string.
     """
+    import shutil
     import subprocess
+    import tempfile
 
     from corpus_studio.platform.build_provenance import (
         BuildProvenanceError,
@@ -1243,6 +1245,18 @@ def build_worker_wheel(
         )
         raise typer.Exit(2)
 
+    # Refuse a destination that already holds a corpus_studio_engine wheel: the builder stamps and admits
+    # exactly the wheel IT produces, so a pre-existing (stale or planted) wheel must never be able to
+    # sit in the output and be picked up. A fresh, empty --dest-dir keeps provenance unambiguous.
+    preexisting = sorted(dest_dir.glob("corpus_studio_engine-*.whl"))
+    if preexisting:
+        typer.echo(
+            "refusing to build: --dest-dir already contains a corpus_studio_engine wheel "
+            f"({preexisting[0].name}); use a fresh empty destination so only the built wheel is stamped",
+            err=True,
+        )
+        raise typer.Exit(2)
+
     committer_date = subprocess.run(  # noqa: S603 - fixed git argv, no shell, repo-owned args.
         ["git", "-C", str(repo_root), "show", "-s", "--format=%ct", source_commit],
         check=False,
@@ -1253,31 +1267,57 @@ def build_worker_wheel(
     if committer_date.returncode == 0 and committer_date.stdout.strip().isdigit():
         # Pin the source date so the setuptools build normalizes archive timestamps (reproducibility).
         build_env["SOURCE_DATE_EPOCH"] = committer_date.stdout.strip()
-    build = subprocess.run(  # noqa: S603 - control-plane python + fixed build argv, no shell.
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "wheel",
-            str(project_dir),
-            "--no-deps",
-            "--no-build-isolation",
-            "--wheel-dir",
-            str(dest_dir),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=build_env,
-    )
-    if build.returncode != 0:
-        typer.echo(f"wheel build failed:\n{build.stderr.strip()}", err=True)
-        raise typer.Exit(2)
-    built = sorted(dest_dir.glob("corpus_studio_engine-*.whl"))
-    if not built:
-        typer.echo("build produced no corpus_studio_engine wheel", err=True)
-        raise typer.Exit(2)
-    wheel = built[-1]
+    # Build into a private temporary wheel-dir and take EXACTLY the wheel this build produced, then move
+    # it into dest_dir. This makes wheel selection unambiguous: the stamped/admitted wheel is the one pip
+    # just built, never a lexicographically-later file that happened to share the output directory.
+    with tempfile.TemporaryDirectory(prefix="cs-worker-wheel-build-") as tmp_build:
+        build = subprocess.run(  # noqa: S603 - control-plane python + fixed build argv, no shell.
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "wheel",
+                str(project_dir),
+                "--no-deps",
+                "--no-build-isolation",
+                "--wheel-dir",
+                tmp_build,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=build_env,
+        )
+        if build.returncode != 0:
+            typer.echo(f"wheel build failed:\n{build.stderr.strip()}", err=True)
+            raise typer.Exit(2)
+        produced = sorted(Path(tmp_build).glob("corpus_studio_engine-*.whl"))
+        if len(produced) != 1:
+            typer.echo(
+                "build did not produce exactly one corpus_studio_engine wheel "
+                f"(got {len(produced)}: {[p.name for p in produced]})",
+                err=True,
+            )
+            raise typer.Exit(2)
+        # The source worktree must still be clean of TRACKED changes after the build: a tracked write
+        # landing between the initial clean check and the build would otherwise be baked into the wheel
+        # while provenance asserts a clean HEAD. (Build byproducts are untracked/ignored, so restrict to
+        # tracked changes to avoid false positives.)
+        post = subprocess.run(  # noqa: S603 - fixed git argv, no shell, repo-owned args.
+            ["git", "-C", str(repo_root), "status", "--porcelain", "--untracked-files=no"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if post.returncode != 0 or post.stdout.strip():
+            typer.echo(
+                "refusing ambiguous provenance: the source worktree gained tracked changes during the "
+                "build",
+                err=True,
+            )
+            raise typer.Exit(2)
+        wheel = dest_dir / produced[0].name
+        shutil.move(str(produced[0]), str(wheel))
 
     document = build_provenance_document(
         source_commit=source_commit,

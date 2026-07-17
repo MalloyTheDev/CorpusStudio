@@ -300,11 +300,16 @@ _MISSING_FLOOR = object()
 def test_admission_requires_canonical_embedded_floor(tmp_path: Path, floor: object) -> None:
     # Admission ALWAYS requires a canonical embedded required_git_ancestor - even with no expected floor
     # and no repo. A source-commit-only or malformed-floor wheel is refused (this is exactly the shape
-    # the Environment Manager gate sees, since it supplies neither optional argument).
-    wheel = _minimal_wheel(tmp_path / "w.whl")
-    extra = None if floor is _MISSING_FLOOR else {"required_git_ancestor": floor}
-    bp.stamp_wheel_with_provenance(
-        wheel, bp.build_provenance_document(source_commit=_GOOD, extra=extra), external_copy=False
+    # the Environment Manager gate sees, since it supplies neither optional argument). The provenance is
+    # embedded DIRECTLY (not via the first-party writer, which now rejects a non-canonical floor at
+    # construction) so this exercises admission's own independent guarantee against a hostile wheel.
+    provenance: dict[str, object] = {"source_commit": _GOOD}
+    if floor is not _MISSING_FLOOR:
+        provenance["required_git_ancestor"] = floor
+    provenance_bytes = (json.dumps(provenance, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    wheel = _minimal_wheel(
+        tmp_path / "w.whl",
+        members={f"{_DIST_INFO}BUILD_PROVENANCE.json": provenance_bytes},
     )
     with pytest.raises(bp.BuildProvenanceError, match="required_git_ancestor is"):
         bp.validate_wheel_provenance_for_scientific_admission(str(wheel))
@@ -651,6 +656,52 @@ def test_build_cli_refuses_when_no_buildable_project(tmp_path: Path, monkeypatch
     result = _invoke_build(cli, root, tmp_path / "out", "--required-ancestor", head)
     assert result.exit_code == 2
     assert "no buildable worker project" in result.output
+
+
+def test_build_cli_refuses_preexisting_wheel_in_dest(tmp_path: Path, monkeypatch) -> None:
+    # F2: the builder stamps/admits only the wheel it just produced. A pre-existing (stale or planted)
+    # corpus_studio_engine wheel already sitting in --dest-dir - especially one whose name sorts AFTER
+    # the built 1.3.0 - must be refused fail-closed, never selected via glob()[-1].
+    import corpus_studio.cli as cli
+
+    root = tmp_path / "repo"
+    head = _minimal_source_repo(root)
+    monkeypatch.setattr(cli, "repository_root", lambda: root)
+    dest = tmp_path / "out"
+    dest.mkdir()
+    _minimal_wheel(dest / "corpus_studio_engine-9.9.9-py3-none-any.whl")  # sorts after 1.3.0
+    result = _invoke_build(cli, root, dest, "--required-ancestor", head)
+    assert result.exit_code == 2
+    assert "already contains a corpus_studio_engine wheel" in result.output
+
+
+def test_document_rejects_noncanonical_extra_required_git_ancestor() -> None:
+    # F5: a non-canonical embedded floor supplied via extra is rejected at document construction, so no
+    # first-party path can stamp a wheel with a malformed embedded floor and only fail later at admission.
+    with pytest.raises(bp.BuildProvenanceError, match="required_git_ancestor must be"):
+        bp.build_provenance_document(source_commit=_GOOD, extra={"required_git_ancestor": "not-canon"})
+    doc = bp.build_provenance_document(source_commit=_GOOD, extra={"required_git_ancestor": _FLOOR})
+    assert doc["required_git_ancestor"] == _FLOOR
+
+
+def test_admission_enforces_expected_source_commit(tmp_path: Path, monkeypatch) -> None:
+    # F4 building block: when a reviewed source_commit is supplied, the wheel's embedded source_commit
+    # must equal it exactly - the same value-match discipline the floor already gets.
+    import corpus_studio.cli as cli
+
+    root = tmp_path / "repo"
+    head = _minimal_source_repo(root)
+    monkeypatch.setattr(cli, "repository_root", lambda: root)
+    dest = tmp_path / "out"
+    result = _invoke_build(cli, root, dest, "--required-ancestor", head)
+    assert result.exit_code == 0, result.output
+    wheel = Path(json.loads(result.stdout)["wheel"])
+    assert (
+        bp.validate_wheel_provenance_for_scientific_admission(str(wheel), expected_source_commit=head)
+        == head
+    )
+    with pytest.raises(bp.BuildProvenanceError, match="does not match the reviewed source commit"):
+        bp.validate_wheel_provenance_for_scientific_admission(str(wheel), expected_source_commit=_GOOD)
 
 
 def test_build_cli_two_builds_same_commit_are_byte_identical(tmp_path: Path, monkeypatch) -> None:
