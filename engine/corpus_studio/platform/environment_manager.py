@@ -2030,6 +2030,7 @@ class EnvironmentManager:
         accelerator_tag: str = "cpu",
         worker_wheel: str | Path | None = None,
         required_git_ancestor: str | None = None,
+        worker_source_commit: str | None = None,
     ) -> DependencyResolution:
         recipe = get_recipe(recipe_id)
         if recipe is None:
@@ -2046,6 +2047,8 @@ class EnvironmentManager:
             manager_version=MANAGER_VERSION,
             # The exact reviewed per-lineage floor supplied to env-plan; sealed into the resolution.
             required_git_ancestor=required_git_ancestor,
+            # The optional exact reviewed worker source commit; sealed into the resolution.
+            worker_source_commit=worker_source_commit,
         )
         if recipe.requires_worker_wheel and recipe.layer == DependencyLayer.backend_worker:
             worker_artifact: WorkerArtifactIdentity | None = None
@@ -3119,10 +3122,22 @@ class EnvironmentManager:
                 raise EnvironmentManagerError(
                     "the confirmed plan does not carry a canonical reviewed required_git_ancestor floor"
                 )
+            # Optional reviewed worker source commit sealed into THIS resolution. When present, admission
+            # additionally requires the wheel's EMBEDDED source_commit to equal it exactly - the field
+            # that becomes the recorded scientific provenance gets the same value-match as the floor. A
+            # malformed sealed value is refused (it cannot have been produced by a resolvable plan).
+            confirmed_source_commit = resolution.worker_source_commit
+            if confirmed_source_commit is not None and not _GIT_SHA1_RE.fullmatch(
+                confirmed_source_commit
+            ):
+                raise EnvironmentManagerError(
+                    "the confirmed plan carries a non-canonical reviewed worker_source_commit"
+                )
             try:
                 validate_wheel_provenance_for_scientific_admission(
                     resolution.worker_artifact.path,
                     expected_required_git_ancestor=confirmed_floor,
+                    expected_source_commit=confirmed_source_commit,
                 )
             except BuildProvenanceError as exc:
                 raise EnvironmentManagerError(
@@ -3136,9 +3151,11 @@ class EnvironmentManager:
             worker_wheel=resolution.worker_artifact.path
             if resolution.worker_artifact is not None
             else None,
-            # Reproduce the plan from the confirmed floor (already bound by resolution_hash, re-verified
-            # above); expected == resolution then also re-proves the floor was not tampered with.
+            # Reproduce the plan from the confirmed floor and reviewed source commit (already bound by
+            # resolution_hash, re-verified above); expected == resolution then also re-proves neither was
+            # tampered with.
             required_git_ancestor=resolution.required_git_ancestor,
+            worker_source_commit=resolution.worker_source_commit,
         )
         if expected != resolution:
             raise EnvironmentManagerError(
@@ -4078,6 +4095,11 @@ class EnvironmentManager:
         # byte-identical - only scientific-worker locks bind a non-null floor.
         if lock.required_git_ancestor is None:
             body.pop("required_git_ancestor", None)
+        # Additive optional reviewed worker source commit: pop when None so every lock that did not
+        # review one (all locks before this field existed, and non-worker locks) keeps a byte-identical
+        # seal - only a lock that reviewed a source commit binds a non-null value.
+        if lock.worker_source_commit is None:
+            body.pop("worker_source_commit", None)
         return _canonical_sha256(body)
 
     def _finalize_lock(
@@ -4208,6 +4230,8 @@ class EnvironmentManager:
             # Record the exact reviewed floor admitted for this environment from the CONFIRMED
             # resolution (not the recipe), so the admitted floor is recoverable from the lock/evidence.
             required_git_ancestor=resolution.required_git_ancestor,
+            # Likewise record the reviewed worker source commit admitted here (None when not reviewed).
+            worker_source_commit=resolution.worker_source_commit,
             probe_evidence=probe_evidence,
         )
         digest = self._lock_digest(draft)

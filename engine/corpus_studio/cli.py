@@ -1874,6 +1874,12 @@ def env_plan(
         help="Exact 40-char lowercase-hex reviewed source floor for this lineage (required by "
         "worker-wheel recipes). The worker wheel's embedded floor must equal this exact value.",
     ),
+    worker_source_commit: Optional[str] = typer.Option(
+        None,
+        "--worker-source-commit",
+        help="Optional exact 40-char lowercase-hex reviewed worker source commit. When given, the "
+        "worker wheel's embedded source_commit must equal this exact value at env-create.",
+    ),
     out: Optional[Path] = typer.Option(
         None, "--out", help="Write the canonical DependencyResolution JSON to this path."
     ),
@@ -1892,6 +1898,7 @@ def env_plan(
             python_version=python_version,
             worker_wheel=worker_wheel,
             required_git_ancestor=required_git_ancestor,
+            worker_source_commit=worker_source_commit,
         )
     except Exception as exc:  # EnvironmentManagerError plus bounded runtime-probe failures
         _environment_cli_error(exc)
@@ -1930,6 +1937,10 @@ def env_plan(
         lines.append(
             f"  required source floor (reviewed): {resolution.required_git_ancestor}"
         )
+    if resolution.worker_source_commit is not None:
+        lines.append(
+            f"  reviewed worker source commit: {resolution.worker_source_commit}"
+        )
     if out is not None:
         lines.append(f"  plan file: {out}")
     for reason in resolution.blocking_reasons:
@@ -1959,6 +1970,7 @@ def _build_environment_resolution(
     python_version: Optional[str] = None,
     worker_wheel: Optional[Path] = None,
     required_git_ancestor: Optional[str] = None,
+    worker_source_commit: Optional[str] = None,
 ):
     """Build the same concrete, sealed plan for env-plan/create/recreate."""
     from corpus_studio.platform.environment_manager import EnvironmentManager
@@ -1989,6 +2001,7 @@ def _build_environment_resolution(
         accelerator_tag=tag,
         worker_wheel=worker_wheel,
         required_git_ancestor=required_git_ancestor,
+        worker_source_commit=worker_source_commit,
     )
     if python_version and not resolution.python_version.startswith(python_version):
         blocked = resolution.model_copy(
@@ -2076,6 +2089,12 @@ def env_create(
         "--required-git-ancestor",
         help="Exact reviewed source floor used when the plan was generated (must reproduce --confirm).",
     ),
+    worker_source_commit: Optional[str] = typer.Option(
+        None,
+        "--worker-source-commit",
+        help="Optional reviewed worker source commit used when the plan was generated (must reproduce "
+        "--confirm).",
+    ),
     confirmed_hash: str = typer.Option(
         ..., "--confirm", help="Exact resolution hash printed by env-plan."
     ),
@@ -2091,6 +2110,7 @@ def env_create(
             manager_root=manager_root,
             worker_wheel=worker_wheel,
             required_git_ancestor=required_git_ancestor,
+            worker_source_commit=worker_source_commit,
         )
         result = manager.create(
             resolution, confirmed_resolution_hash=confirmed_hash
@@ -2237,6 +2257,12 @@ def env_recreate(
         "--required-git-ancestor",
         help="Exact reviewed source floor used when the plan was generated (must reproduce --confirm).",
     ),
+    worker_source_commit: Optional[str] = typer.Option(
+        None,
+        "--worker-source-commit",
+        help="Optional reviewed worker source commit used when the plan was generated (must reproduce "
+        "--confirm).",
+    ),
     confirmed_hash: str = typer.Option(..., "--confirm", help="Exact new env-plan resolution hash."),
     confirmed_remove_env_id: str = typer.Option(
         ..., "--confirm-remove", help="Exact existing environment id to remove first."
@@ -2254,6 +2280,7 @@ def env_recreate(
             manager_root=manager_root,
             worker_wheel=worker_wheel,
             required_git_ancestor=required_git_ancestor,
+            worker_source_commit=worker_source_commit,
         )
         result = manager.recreate(
             resolution,

@@ -3155,6 +3155,11 @@ class DependencyResolution(ContractModel):
     # sealed into the resolution/confirmation hash, so env-create admits the worker wheel by comparing
     # its EMBEDDED floor against this exact value. Set for worker-wheel plans only; None otherwise.
     required_git_ancestor: str | None = Field(default=None, pattern=GIT_SHA1_PATTERN)
+    # Optional exact reviewed worker source commit for a worker-wheel plan, sealed into the
+    # resolution/confirmation hash. When set, env-create admits the worker wheel only if its EMBEDDED
+    # source_commit equals this value (the same value-match discipline as required_git_ancestor). None
+    # (and popped from the digest) for non-worker plans or when not reviewed.
+    worker_source_commit: str | None = Field(default=None, pattern=GIT_SHA1_PATTERN)
     # Rough, explicitly-heuristic size estimates (download + on-disk installed footprint).
     estimated_download_bytes: int | None = Field(default=None, ge=0)
     estimated_disk_bytes: int | None = Field(default=None, ge=0)
@@ -3242,6 +3247,9 @@ class EnvironmentLock(ContractModel):
     # The reviewed research floor admitted for this environment, recorded so it is recoverable from the
     # lock/evidence (worker environments only; else None).
     required_git_ancestor: str | None = Field(default=None, pattern=GIT_SHA1_PATTERN)
+    # The reviewed worker source commit admitted for this environment, recorded so it is recoverable
+    # from the lock/evidence (worker environments that reviewed one; else None).
+    worker_source_commit: str | None = Field(default=None, pattern=GIT_SHA1_PATTERN)
     probe_evidence: EnvironmentProbeEvidence | None = None
     # sha256 over the canonical lock body (runtime, recipe, sources, metadata hashes, and packages).
     lock_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)

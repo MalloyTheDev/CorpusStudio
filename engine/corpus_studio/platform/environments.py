@@ -486,6 +486,10 @@ def resolution_digest(resolution: DependencyResolution) -> str:
     # non-worker plan's resolution/confirmation hash is byte-identical to before the field existed.
     if resolution.required_git_ancestor is None:
         body.pop("required_git_ancestor", None)
+    # Additive optional worker source commit: pop it when None so any plan that does not review one
+    # (every plan before this field existed, and non-worker plans) keeps a byte-identical seal.
+    if resolution.worker_source_commit is None:
+        body.pop("worker_source_commit", None)
     payload = json.dumps(
         body,
         sort_keys=True,
@@ -546,6 +550,7 @@ def resolve_dependencies(
     environment_root: str | None = None,
     manager_version: str = "",
     required_git_ancestor: str | None = None,
+    worker_source_commit: str | None = None,
 ) -> DependencyResolution:
     """Render the argv-structured install PREVIEW for provisioning ``recipe`` on this host — the exact
     steps, the CUDA-aware wheel index, and rough disk/network cost — WITHOUT installing anything.
@@ -579,6 +584,18 @@ def resolve_dependencies(
             sealed_floor = required_git_ancestor
     elif required_git_ancestor is not None:
         blocking.append("a non-worker recipe does not accept a --required-git-ancestor floor")
+
+    # --- optional reviewed worker source commit (sealed; equality-checked at admission) ---
+    sealed_source_commit: str | None = None
+    if worker_source_commit is not None:
+        if not recipe.requires_worker_wheel:
+            blocking.append("a non-worker recipe does not accept a --worker-source-commit")
+        elif not _CANONICAL_GIT_SHA1.match(worker_source_commit):
+            blocking.append(
+                "--worker-source-commit must be an exact 40-character lowercase-hex commit"
+            )
+        else:
+            sealed_source_commit = worker_source_commit
 
     # --- feasibility ---
     if recipe.supported_os and os_value not in recipe.supported_os:
@@ -653,6 +670,9 @@ def resolve_dependencies(
         # is bound into the resolution/confirmation hash and reaches env-create through the confirmed
         # plan. None (and popped from the digest) for non-worker plans.
         required_git_ancestor=sealed_floor,
+        # Seal the optional reviewed worker source commit (worker plans only); None (and popped from the
+        # digest) otherwise, so admission can equality-check the wheel's embedded source_commit.
+        worker_source_commit=sealed_source_commit,
         estimated_download_bytes=download_mb * _MB,
         estimated_disk_bytes=disk_mb * _MB,
         resolvable=not blocking,
