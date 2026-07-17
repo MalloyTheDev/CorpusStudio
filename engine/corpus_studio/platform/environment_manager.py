@@ -86,7 +86,7 @@ from .process_control import (
     terminate_process_tree,
 )
 
-MANAGER_VERSION = "1.3.0"
+MANAGER_VERSION = "1.4.0"
 # Exact full lowercase-hex git object name (the confirmed resolution's reviewed per-lineage floor).
 _GIT_SHA1_RE = re.compile(r"[0-9a-f]{40}$")
 REFERENCE_RECIPE_ID = "backend-corpus-studio"
@@ -4071,8 +4071,10 @@ class EnvironmentManager:
             for package in body.get("packages", []):
                 for field_name in package_fields:
                     package.pop(field_name, None)
-        # Manager 1.3 locks record the admitted worker-source floor. Non-worker locks (and every
-        # lock sealed before this field existed) carry None here; pop it so their seals stay
+        # Manager 1.4 locks record the admitted worker-source floor (the additive field this version
+        # mints, matching the 1.1/1.2/1.3 one-minor-bump-per-additive-lock-generation convention; the
+        # matrix 1.5.0 manager_version_exact is bound to it). Non-worker locks (and every lock sealed
+        # before this field existed, i.e. manager 1.0-1.3) carry None here; pop it so their seals stay
         # byte-identical - only scientific-worker locks bind a non-null floor.
         if lock.required_git_ancestor is None:
             body.pop("required_git_ancestor", None)
