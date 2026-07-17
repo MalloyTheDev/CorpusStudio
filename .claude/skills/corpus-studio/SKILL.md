@@ -1,15 +1,24 @@
 ---
 name: corpus-studio
-description: "Project-specific guardrails for editing the CorpusStudio repo (the local-first, hardware-aware AI training platform at /mnt/training-nvme/repos/CorpusStudio: torch-free control plane + isolated [train] QLoRA worker + WPF/Avalonia/Tauri UI + the IEEE native-Linux research protocol). Use for ANY change here - engine/platform contracts, the trainer, the Environment Manager, the CLI, the research amendments, or docs - so every edit keeps the dependency-light boundary, the honesty invariants, the contract-regeneration dance, the append-only research protocol, and the one-coherent-CI-green-PR-per-slice workflow. Pair it with the general existing-repo-engineer skill (that one owns generic repo mechanics; this one owns CorpusStudio's non-negotiable invariants and current program state). Keep trivial questions lightweight; load this whenever files or repository behavior in CorpusStudio actually matter."
+description: "Project-specific guardrails for editing the CorpusStudio repo - a local-first AI dataset and model-development application at /mnt/training-nvme/repos/CorpusStudio (torch-free control plane + isolated [train] QLoRA worker + WPF/Avalonia/Tauri UI). Use for ANY change here - dataset features, the training engine, the Environment Manager, model/tokenizer management, evaluation, the CLI, UI, or docs - so every edit keeps the dependency-light boundary, the honesty invariants, the contract-regeneration dance, and the one-coherent-CI-green-PR-per-slice workflow. The native-Linux 7B research paper (research/ieee-linux-training, docs/paper) is a SEPARATE opt-in overlay that uses CorpusStudio to verify the training engine; its amendments, reserved identities, and sealed-research gates apply only when the task is the paper, and never define normal product behavior. Pair with the general existing-repo-engineer skill (that one owns generic repo mechanics; this one owns CorpusStudio's invariants and program state). Keep trivial questions lightweight; load this whenever files or repository behavior in CorpusStudio actually matter."
 ---
 
 # CorpusStudio
 
-Operate as a senior engineer on **CorpusStudio** - a local-first, hardware-aware AI training platform:
-a dependency-light, torch-free **control plane** (`engine/corpus_studio/platform/`), an opt-in `[train]`
-QLoRA **worker**, WPF/Avalonia/Tauri **UI** clients, and a preregistered **IEEE native-Linux research
-protocol** (`research/ieee-linux-training/`). The bar here is not "it works" - it is "the evidence,
-contracts, and honesty invariants still hold." A passing run obtained by weakening a gate is a defect.
+Operate as a senior engineer on **CorpusStudio** - a **local-first AI dataset and model-development
+application**: a dependency-light, torch-free **control plane** (`engine/corpus_studio/platform/`), an
+opt-in `[train]` QLoRA **worker**, and WPF/Avalonia/Tauri **UI** clients. The product surface is the
+local builder lifecycle - dataset creation / cleaning / validation / versioning, schema support, dataset
+inspection and quality, model + tokenizer selection, local fine-tuning / training, evaluation, and
+export - all hardware-aware. The bar here is not "it works" - it is "the evidence, contracts, and honesty
+invariants still hold." A passing run obtained by weakening a gate is a defect.
+
+The **native-Linux 7B research paper** (`research/ieee-linux-training/`, `docs/paper/`) is a **separate
+project that uses** CorpusStudio to verify the training engine can train a 7B model at seq 4096 on this
+host. Its experiment matrices, amendments, reserved identities, paper-performance gates, and
+sealed-research evidence rules are an **opt-in overlay** (the "Research overlay" sections below) and
+**must not define normal product behavior**. The standard-vs-sealed boundary is
+[`docs/PRODUCT_VS_RESEARCH.md`](../../../docs/PRODUCT_VS_RESEARCH.md).
 
 This skill is the CorpusStudio-specific overlay. It assumes the general **existing-repo-engineer**
 skill for repo mechanics (recon, minimal-diff, verify-before-handoff) and adds the invariants a generic
@@ -33,7 +42,9 @@ Before non-trivial work, ground yourself in the repo's own source of truth (do n
   hardware-adjacent. Where older docs show Windows `C:`/`F:` paths, HOST_STATE supersedes them.
 - [`HANDOFF.md`](../../../HANDOFF.md) - session state + roadmap.
 - [`docs/CURRENT_STATE.md`](../../../docs/CURRENT_STATE.md) - authoritative feature state.
-- [`docs/IMPLEMENTATION_PLAN.md`](../../../docs/IMPLEMENTATION_PLAN.md) / [`docs/MOE_ARCHITECTURE.md`](../../../docs/MOE_ARCHITECTURE.md) - forward plan; foundational contracts must be MoE-safe now.
+- [`docs/IMPLEMENTATION_PLAN.md`](../../../docs/IMPLEMENTATION_PLAN.md) - forward plan;
+  [`docs/PRODUCT_VS_RESEARCH.md`](../../../docs/PRODUCT_VS_RESEARCH.md) - the product vs research boundary.
+  MoE (`docs/MOE_ARCHITECTURE.md`) is a forward research direction, not a product-wide contract mandate.
 
 ## The verify gate (run before you claim a change is done)
 
@@ -87,6 +98,25 @@ From `engine/` with the venv (`engine/.venv`, CPython 3.12.3, torch-free core + 
    `HARDWARE_VERIFIED` (env-manager GPU probe) - that is NOT a workload result. Do not claim
    full-sequence 7B success, DeepSpeed/FSDP/CPU/NVMe offload, real offload fit, PCIe/NVMe throughput,
    bare-Linux FlashAttention for the workload, or MoE runtime capability without a measured run.
+
+## Where the product stands
+
+Product identity, scope, and roadmap are the source of truth for ordinary work: read
+[`docs/PRODUCT_SPEC.md`](../../../docs/PRODUCT_SPEC.md) (who it is for and what it is),
+[`docs/CURRENT_STATE.md`](../../../docs/CURRENT_STATE.md) (what is built today), and
+[`docs/ROADMAP.md`](../../../docs/ROADMAP.md) (milestones). CorpusStudio is a dataset + model-development
+application; the 7B paper is a capability test that lives in the overlay below, not the product's
+identity.
+
+## Research overlay (paper project only)
+
+**The sections from here down to "Never do" apply ONLY when the task is the native-Linux 7B research
+paper** (`research/ieee-linux-training/`, `docs/paper/`). Ordinary product work - dataset features, the
+training engine, the Environment Manager for normal environments, model/tokenizer management, evaluation,
+UI, packaging - does **not** need amendments, reserved identities, sealed-research admission, or paper
+telemetry. The sealed-research provenance gate fires only for `requires_worker_wheel` recipes; the
+standard product training backend (`backend-corpus-studio`) does not. If you are not working on the
+paper, skip to "Never do (project policy)". Boundary detail: [`docs/PRODUCT_VS_RESEARCH.md`](../../../docs/PRODUCT_VS_RESEARCH.md).
 
 ## Research protocol (research/ieee-linux-training/) - append-only
 
@@ -238,9 +268,11 @@ A run can be a workload success yet not paper-usable. `RunTelemetrySummary.compl
 - **Do not commit generated junk:** stray `*.schema.json`/`index.json` exported into `engine/` are
   session artifacts - clean them; the canonical schemas live in `docs/contracts/`.
 
-## Where the current program stands (update this as it moves)
+## Research overlay: where the paper program stands (update this as it moves)
 
-The active thread is bringing CorpusStudio to full 7B training/research readiness. The **v7 0.5B GPU
+*This is the state of the native-Linux 7B **paper** project, not the product roadmap; it is relevant only
+when working on the paper overlay.* The active thread is proving the training engine can train at the 7B
+/ seq-4096 target. The **v7 0.5B GPU
 bring-up PASSED (`V7_MATH_AND_FLASH_THROUGHPUT_PASS`, 2026-07-16)**: the v6 token-throughput observer gap
 (`tokens/sec = 0.0`, UNAVAILABLE not zero) was fixed in the worker child by PR **#466** (merge
 `25c901ec`) - observe `inputs` at `SFTTrainer.training_step` (the trainer's un-bypassable consumption
