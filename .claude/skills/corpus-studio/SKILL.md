@@ -44,7 +44,10 @@ Before non-trivial work, ground yourself in the repo's own source of truth (do n
 - [`docs/CURRENT_STATE.md`](../../../docs/CURRENT_STATE.md) - authoritative feature state.
 - [`docs/IMPLEMENTATION_PLAN.md`](../../../docs/IMPLEMENTATION_PLAN.md) - forward plan;
   [`docs/PRODUCT_VS_RESEARCH.md`](../../../docs/PRODUCT_VS_RESEARCH.md) - the product vs research boundary.
-  MoE (`docs/MOE_ARCHITECTURE.md`) is a forward research direction, not a product-wide contract mandate.
+  MoE must not define product identity, defaults, or workflow, but **no new foundational contract may
+  assume dense execution** - foundational contracts (`ModelDescriptor`, `TrainingObjective`, `RunPlan`,
+  `ArtifactManifest`, checkpoint, telemetry, evaluation) stay dense-safe / MoE-compatible
+  (`docs/IMPLEMENTATION_PLAN.md`, `docs/MOE_ARCHITECTURE.md`).
 
 ## The verify gate (run before you claim a change is done)
 

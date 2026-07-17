@@ -85,14 +85,23 @@ The separation already exists in code, mostly as an implicit toggle rather than 
 - **The sealed-provenance admission gate is conditional.** `EnvironmentManager` runs the build-provenance
   admission (reviewed floor + embedded `BUILD_PROVENANCE.json` + optional `source_commit` match) only
   when `recipe.requires_worker_wheel` is true. The standard product training backend
-  `backend-corpus-studio` has `requires_worker_wheel=false`, so it never reaches that gate.
+  `backend-corpus-studio` has `requires_worker_wheel=false`, so it never reaches that gate. A
+  `requires_worker_wheel` (readiness) recipe is the sealed / verified worker-**packaging** mechanism; it
+  is **not** itself a paper experiment - a paper experiment additionally binds a matrix cell, an
+  amendment, and reserved identities.
 - **Paper telemetry is descriptive, not a gate.** `scientific_resource_complete` /
   `scientific_throughput_complete` are booleans on the run summary; a missing-paper-field note is
   appended to a human-readable report. Nothing blocks or fails a normal run.
 - **Reserved identities, amendments, and experiment matrices live in `research/ieee-linux-training/`**
   (`validate_protocol.py`). The engine package does not import them; the normal `platform-plan` ->
-  `platform-run` path does not enforce them. The only engine touch-point is the `required_git_ancestor`
-  floor plumbing, itself gated on `requires_worker_wheel`.
+  `platform-run` path does not enforce them.
+- **The engine does carry several paper integrations** - the `required_git_ancestor` floor is NOT the
+  only one. They currently include: the `required_git_ancestor` provenance plumbing; `REQUIRED_PAPER_FIELDS`;
+  the scientific / paper completeness calculation; shared telemetry-contract fields; and wheel / source
+  identity injection into run summaries. These integrations are **descriptive or opt-in** - they populate
+  or annotate summaries and gate only sealed-research (`requires_worker_wheel`) recipes. They do **not**
+  make the normal product run path depend on amendments, matrix membership, reserved identities, or paper
+  promotion.
 
 ## Known gaps / planned work (not yet implemented)
 

@@ -28,8 +28,10 @@ project that uses** CorpusStudio to verify the training engine can train a 7B mo
 sealed-research evidence rules are an **opt-in overlay**. **The IEEE 7B paper must not define
 CorpusStudio's product identity, defaults, navigation, or ordinary user workflow** — though CorpusStudio
 may still contain opt-in research and interpretability tools (e.g. a future Behavior Lab). Resource-elastic
-MoE is a forward research direction, not a product-wide mandate. The standard / verified / sealed-research
-boundary is [`docs/PRODUCT_VS_RESEARCH.md`](docs/PRODUCT_VS_RESEARCH.md).
+MoE likewise must not define the product's identity, navigation, defaults, or ordinary workflow — **but
+foundational contracts must stay dense-safe and MoE-compatible: no new foundational contract may assume
+dense execution** (`docs/IMPLEMENTATION_PLAN.md`, `docs/MOE_ARCHITECTURE.md`). The standard / verified /
+sealed-research boundary is [`docs/PRODUCT_VS_RESEARCH.md`](docs/PRODUCT_VS_RESEARCH.md).
 Three surfaces:
 - **Engine** (`engine/corpus_studio/`, Python) — a **dependency-light** core (no torch at import) +
   an opt-in `[train]` QLoRA trainer extra.
@@ -88,5 +90,8 @@ CI runs on **Linux / Python 3.11** with `pytest --cov=corpus_studio --cov-fail-u
 - Branch first (`git checkout -b feat/<slice>`), one coherent CI-green PR per slice.
 - Do NOT spawn multi-agent fan-outs by default (cost); verify inline.
 - Source of truth for features: `docs/CURRENT_STATE.md`. Plan: `docs/IMPLEMENTATION_PLAN.md`.
-  Product vs research boundary: `docs/PRODUCT_VS_RESEARCH.md`. MoE is a forward research direction
-  (`docs/MOE_ARCHITECTURE.md`), not a product-wide contract mandate.
+  Product vs research boundary: `docs/PRODUCT_VS_RESEARCH.md`. MoE must not define product identity,
+  navigation, defaults, or ordinary workflow, but **no new foundational contract may assume dense
+  execution**: `ModelDescriptor`, `TrainingObjective`, `RunPlan`, `ArtifactManifest`, checkpoint,
+  telemetry, and evaluation stay dense-safe / MoE-compatible (`docs/IMPLEMENTATION_PLAN.md`,
+  `docs/MOE_ARCHITECTURE.md`).
