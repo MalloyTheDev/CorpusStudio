@@ -100,10 +100,16 @@ non-paper `seven_b_native_linux_feasibility_ladder`: model `qwen2.5-7b-instruct`
 `models[].id`, repository `Qwen/Qwen2.5-7B-Instruct`) against its own license-clear feasibility fixture
 (distinct from the private corpus, no fixture content read here). Fixed configuration: rungs
 512/1024/2048/3072/4096 ascending; mb=1, ga=1; 12 bounded optimizer steps; offload none; zero automatic
-retries; math first-once, flash at-most-once. Flash eligibility (avoiding a false negative): flash runs
-after math success OR a clean, conclusively math-specific OOM/timeout (all preconditions met), and is
-withheld (`NOT_RUN`) for shared-path/identity/environment/artifact/telemetry/protocol/corruption/
-uncontrolled-health failures. Rung result definitions are separate: kernel success (every per-kernel
+retries; math first-once, flash at-most-once. Flash eligibility is grounded in the real `FailureRecord`
+contract (taxonomy + stage), not invented terminal classes, via the top-level
+`math_terminal_flash_eligibility` mapping: flash runs after math success OR, after a math failure, only
+when the terminal `FailureTaxonomy`/`StageMarker` is `OOM` or `KERNEL_STALL` at `forward`/`backward`
+(confirmed forced-math/no-fallback, all clean-failure preconditions met) - so a survivable math OOM at
+the forward/backward pass is not a false negative. `OOM` at `model_load`/other shared stages, a generic
+`TIMEOUT` (no machine-readable field proves it was within the math attention execution, so it is withheld
+fail-closed), and every other/unknown/unmapped taxonomy-stage combination withhold flash and stop
+(`NOT_RUN`); it is a scheduling decision, not a math-kernel causation claim. Rung result definitions are
+separate: kernel success (every per-kernel
 criterion), rung success (at least one executed kernel succeeds), matched-pair (both succeed), and the
 seq-4096 feasibility claim (at least one kernel at 4096); a flash failure never erases a valid math
 success. Progression advances only after rung success, stops with no kernel success (longer rungs

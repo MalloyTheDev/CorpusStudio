@@ -595,6 +595,87 @@
     "explanation": "PR 471 changed control-plane admission (environment_manager.py, environments.py, cli.py) and bumped the Environment Manager lock generation from 1.3.0 to 1.4.0 (a new additive EnvironmentLock field), and the worker build-provenance generator now emits the canonical source_commit key; all of these change the v8 wheel content hash and the sealed environment lineage. NONE of them changes the worker execution closure (the worker/supervisor/artifacts/runners/trainer runtime bytes that execute optimizer steps); the only closure-adjacent change is an additive optional contract field that defaults to null with no runtime behavior change. A fresh v8 wheel and environment pair is therefore required because the wheel artifact identity and manager lock generation changed, not because worker execution changed - unlike the v6->v7 transition, which was a genuine worker-execution change (the training_step token observer in training/trainer.py).",
     "contrast_v6_to_v7": "WORKER_EXECUTION_CHANGE_REQUIRED was true (trainer.py token observer)"
   },
+  "math_terminal_flash_eligibility": {
+    "grounded_in_contracts": {
+      "failure_record": "corpus_studio.platform.contracts.FailureRecord",
+      "taxonomy_enum": "corpus_studio.platform.enums.FailureTaxonomy",
+      "stage_enum": "corpus_studio.platform.enums.StageMarker",
+      "evidence_fields": [
+        "taxonomy",
+        "stage"
+      ]
+    },
+    "decision_is_scheduling_eligibility_not_math_kernel_causation": true,
+    "requires_confirmed_forced_math_no_fallback": true,
+    "requires_all_clean_failure_preconditions": true,
+    "eligible": [
+      {
+        "taxonomy": "OOM",
+        "stages": [
+          "forward",
+          "backward"
+        ]
+      },
+      {
+        "taxonomy": "KERNEL_STALL",
+        "stages": [
+          "forward",
+          "backward"
+        ]
+      }
+    ],
+    "default_action": "withhold-flash-and-stop",
+    "unmapped_combination_action": "NOT_RUN-stop-fail-closed",
+    "timeout_decision": "withhold",
+    "timeout_evidence_basis": "FailureRecord (corpus_studio.platform.contracts.FailureRecord) localizes a failure only by taxonomy (FailureTaxonomy) and stage (StageMarker); the finest failure stage is the forward/backward pass, and no machine-readable field proves a TIMEOUT occurred within the active math attention execution (there is no attention-kernel or effective-backend field on FailureRecord, and attention_policy_applied is a one-time setup stage, not a per-op execution marker). A generic TIMEOUT is therefore not conclusively kernel-specific and is withheld fail-closed; broadening TIMEOUT eligibility would require a contract change adding a machine-readable math-attention-execution marker.",
+    "known_failure_taxonomy": [
+      "PASS",
+      "FAIL",
+      "OOM",
+      "TIMEOUT",
+      "KERNEL_STALL",
+      "NUMERICAL_FAILURE",
+      "GRADIENT_FAILURE",
+      "LOSS_EVIDENCE_FAILURE",
+      "OPTIMIZER_FAILURE",
+      "UPDATE_FAILURE",
+      "ARTIFACT_FAILURE",
+      "CHECKPOINT_FAILURE",
+      "ENVIRONMENT_FAILURE",
+      "UNSUPPORTED_CONFIGURATION",
+      "ACCIDENTAL_SPILL",
+      "CONTROLLED_OFFLOAD"
+    ],
+    "known_stage_markers": [
+      "process_start",
+      "dataset_verification",
+      "execution_config_verified",
+      "env_loaded",
+      "cuda_init",
+      "tokenizer_load",
+      "dataset_formatting",
+      "truncation_analysis",
+      "attention_policy_applied",
+      "model_load",
+      "placement_verified",
+      "placement_deviation",
+      "model_loaded",
+      "quantized",
+      "adapter_attached",
+      "optimizer_created",
+      "batch_materialized",
+      "forward",
+      "loss",
+      "backward",
+      "optimizer_step",
+      "checkpoint",
+      "reload",
+      "evaluation",
+      "export"
+    ],
+    "no_invented_terminal_classes": true,
+    "notes": "After a math FAILURE, flash stays eligible only for OOM or KERNEL_STALL at forward/backward under confirmed forced-math with no fallback and all clean-failure preconditions; OOM at model_load, optimizer_created, export, or any other shared/non-forward-backward stage, a generic TIMEOUT, and every other taxonomy/stage combination withhold flash and stop; any unknown, missing, or unmapped combination is NOT_RUN and stops fail-closed. This is a scheduling decision about whether flash is worth trying, not proof the math kernel caused the failure."
+  },
   "seven_b_native_linux_feasibility_ladder": {
     "classification": "non-paper-feasibility",
     "is_primary_paper_cell": false,
@@ -635,13 +716,11 @@
       "flash_runs": "at-most-once"
     },
     "flash_eligibility": {
-      "flash_condition": "run-after-math-success-or-clean-math-specific-oom-or-timeout",
+      "flash_condition": "run-after-math-success-or-mapped-clean-math-terminal-taxonomy-and-stage",
       "run_when_math_succeeds": true,
-      "run_when_math_ends_clean_kernel_specific_oom_or_timeout": true,
-      "eligible_math_terminal_classes": [
-        "kernel_specific_oom",
-        "kernel_specific_timeout"
-      ],
+      "run_when_math_failure_matches_mapped_terminal_taxonomy_and_stage": true,
+      "terminal_taxonomy_mapping": "math_terminal_flash_eligibility",
+      "confirmed_forced_math_no_fallback_required": true,
       "clean_math_specific_failure_preconditions": [
         "declared_math_kernel_selected_no_fallback",
         "environment_health_and_drift_checks_passed",
@@ -650,17 +729,8 @@
         "process_terminated_cleanly",
         "shared_preparation_passed"
       ],
-      "withhold_flash_failure_classes": [
-        "artifact",
-        "corruption",
-        "environment",
-        "identity",
-        "protocol",
-        "shared_path",
-        "telemetry",
-        "uncontrolled_health"
-      ],
-      "withheld_flash_status": "NOT_RUN"
+      "withheld_flash_status": "NOT_RUN",
+      "decision_is_scheduling_eligibility_not_math_kernel_causation": true
     },
     "rung_result_definitions": {
       "kernel_success": "one-kernel-satisfies-every-rung_success_requires-condition",

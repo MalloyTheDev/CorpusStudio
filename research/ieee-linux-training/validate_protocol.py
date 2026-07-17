@@ -123,8 +123,7 @@ LADDER_RUNGS = [512, 1024, 2048, 3072, 4096]
 LADDER_RUNG_ORDER = "ascending"
 # Flash runs at most once, only after math succeeds OR after a clean, conclusively math-specific OOM or
 # timeout; it is withheld for any other failure class. The exact controlling values follow.
-FLASH_CONDITION_REQUIRED = "run-after-math-success-or-clean-math-specific-oom-or-timeout"
-ELIGIBLE_MATH_TERMINAL_CLASSES = frozenset({"kernel_specific_oom", "kernel_specific_timeout"})
+FLASH_CONDITION_REQUIRED = "run-after-math-success-or-mapped-clean-math-terminal-taxonomy-and-stage"
 CLEAN_MATH_SPECIFIC_PRECONDITIONS = frozenset(
     {
         "shared_preparation_passed",
@@ -135,18 +134,23 @@ CLEAN_MATH_SPECIFIC_PRECONDITIONS = frozenset(
         "environment_health_and_drift_checks_passed",
     }
 )
-WITHHOLD_FLASH_FAILURE_CLASSES = frozenset(
-    {
-        "shared_path",
-        "identity",
-        "environment",
-        "artifact",
-        "telemetry",
-        "protocol",
-        "corruption",
-        "uncontrolled_health",
-    }
-)
+# Flash eligibility after a MATH FAILURE is bound to the real FailureRecord evidence (taxonomy + stage),
+# not to invented terminal classes. It is a SCHEDULING decision (is flash worth trying?), never proof
+# the math kernel caused the failure. The mapping is fail-closed: only these exact taxonomy/stage
+# combinations keep flash eligible; every other, unknown, missing, or unmapped combination withholds
+# flash and stops.
+MATH_TERMINAL_FLASH_ELIGIBILITY_KEY = "math_terminal_flash_eligibility"
+MATH_TERMINAL_ELIGIBLE_REQUIRED = {
+    "OOM": frozenset({"forward", "backward"}),
+    "KERNEL_STALL": frozenset({"forward", "backward"}),
+}
+MATH_TERMINAL_ELIGIBLE_STAGES = frozenset({"forward", "backward"})
+MATH_TERMINAL_DEFAULT_ACTION = "withhold-flash-and-stop"
+MATH_TERMINAL_UNMAPPED_ACTION = "NOT_RUN-stop-fail-closed"
+# The existing FailureTaxonomy values whose treatment the mapping must make explicit. The engine test
+# suite additionally binds the declared known-taxonomy/known-stage snapshots to the live enums exactly.
+REQUIRED_TAXONOMY_TREATMENTS = frozenset({"OOM", "TIMEOUT", "KERNEL_STALL"})
+FORBIDDEN_INVENTED_TERMINAL_CLASSES = ("kernel_specific_oom", "kernel_specific_timeout")
 KERNEL_SUCCESS_DEFINITION = "one-kernel-satisfies-every-rung_success_requires-condition"
 RUNG_SUCCESS_DEFINITION = "at-least-one-executed-kernel-succeeds"
 MATCHED_PAIR_DEFINITION = "both-math-and-flash-succeed"
@@ -430,6 +434,112 @@ def _validate_lineage_change_classification(effective: dict[str, Any]) -> None:
         )
 
 
+def _validate_math_terminal_flash_eligibility(effective: dict[str, Any]) -> None:
+    """Flash eligibility after a math failure is bound to the actual ``FailureRecord`` evidence -
+    ``taxonomy`` (FailureTaxonomy) and ``stage`` (StageMarker) - not to invented terminal classes. This
+    is a fail-closed SCHEDULING decision (is flash worth trying at this rung?), never a claim that the
+    math kernel caused the failure. Exactly OOM and KERNEL_STALL at forward/backward, under confirmed
+    forced-math/no-fallback and all clean-failure preconditions, keep flash eligible; a generic TIMEOUT
+    is withheld because no machine-readable field proves it occurred within the math attention execution;
+    every other, unknown, missing, or unmapped taxonomy/stage combination withholds flash and stops."""
+
+    mapping = effective.get(MATH_TERMINAL_FLASH_ELIGIBILITY_KEY)
+    if not isinstance(mapping, dict):
+        raise ProtocolValidationError("effective matrix omits math_terminal_flash_eligibility")
+
+    # The declared taxonomy/stage snapshots (bound to the live enums exactly by the engine test suite).
+    known_taxonomy = mapping.get("known_failure_taxonomy")
+    known_stages = mapping.get("known_stage_markers")
+    if not isinstance(known_taxonomy, list) or not all(
+        isinstance(v, str) and v for v in known_taxonomy
+    ):
+        raise ProtocolValidationError("known_failure_taxonomy is malformed")
+    if not isinstance(known_stages, list) or not all(isinstance(v, str) and v for v in known_stages):
+        raise ProtocolValidationError("known_stage_markers is malformed")
+    known_taxonomy_set = set(known_taxonomy)
+    known_stage_set = set(known_stages)
+    # Reject an incomplete mapping of existing FailureTaxonomy: the required core values must be present
+    # (the engine test binds the full snapshot to the live enum for exact completeness).
+    if not REQUIRED_TAXONOMY_TREATMENTS <= known_taxonomy_set:
+        missing = sorted(REQUIRED_TAXONOMY_TREATMENTS - known_taxonomy_set)
+        raise ProtocolValidationError(
+            f"known_failure_taxonomy is incomplete; missing required values: {missing}"
+        )
+    if not MATH_TERMINAL_ELIGIBLE_STAGES <= known_stage_set:
+        raise ProtocolValidationError("known_stage_markers omits the forward/backward stages")
+
+    # Eligible entries: exactly OOM and KERNEL_STALL, each at exactly {forward, backward}.
+    eligible = mapping.get("eligible")
+    if not isinstance(eligible, list):
+        raise ProtocolValidationError("math_terminal_flash_eligibility.eligible must be a list")
+    parsed: dict[str, frozenset[str]] = {}
+    for entry in eligible:
+        if not isinstance(entry, dict) or set(entry) != {"taxonomy", "stages"}:
+            raise ProtocolValidationError(
+                "an eligible entry is malformed (must have exactly taxonomy and stages)"
+            )
+        taxonomy = entry["taxonomy"]
+        stages = entry["stages"]
+        if taxonomy not in known_taxonomy_set:
+            raise ProtocolValidationError(f"eligible entry uses an unknown taxonomy: {taxonomy}")
+        if not isinstance(stages, list) or not stages:
+            raise ProtocolValidationError(f"eligible taxonomy {taxonomy} needs a nonempty stage list")
+        for stage in stages:
+            if stage not in known_stage_set:
+                raise ProtocolValidationError(f"eligible entry uses an unknown stage: {stage}")
+        if taxonomy in parsed:
+            raise ProtocolValidationError(f"eligible taxonomy {taxonomy} appears more than once")
+        parsed[taxonomy] = frozenset(stages)
+    # KERNEL_STALL treatment must be present (precise message before the exact-set check).
+    if "KERNEL_STALL" not in parsed:
+        raise ProtocolValidationError("eligible mapping omits KERNEL_STALL treatment")
+    # OOM at a shared stage (e.g. model_load) must not be eligible.
+    if "model_load" in parsed.get("OOM", frozenset()):
+        raise ProtocolValidationError("OOM at model_load must not be eligible")
+    if parsed != MATH_TERMINAL_ELIGIBLE_REQUIRED:
+        raise ProtocolValidationError(
+            "eligible mapping must be exactly OOM and KERNEL_STALL at {forward, backward}"
+        )
+
+    # Generic TIMEOUT is withheld fail-closed: it must not be eligible and must be explicitly decided.
+    if "TIMEOUT" in parsed:
+        raise ProtocolValidationError(
+            "generic TIMEOUT must not be eligible without machine-readable math-attention-stage evidence"
+        )
+    if mapping.get("timeout_decision") != "withhold":
+        raise ProtocolValidationError("TIMEOUT decision must be 'withhold' (fail-closed)")
+    if not isinstance(mapping.get("timeout_evidence_basis"), str) or not mapping.get(
+        "timeout_evidence_basis"
+    ):
+        raise ProtocolValidationError("TIMEOUT withholding must record its evidence basis")
+
+    # Default and unmapped actions must be fail-closed.
+    if mapping.get("default_action") != MATH_TERMINAL_DEFAULT_ACTION:
+        raise ProtocolValidationError(
+            f"math_terminal_flash_eligibility.default_action must be {MATH_TERMINAL_DEFAULT_ACTION!r}"
+        )
+    if mapping.get("unmapped_combination_action") != MATH_TERMINAL_UNMAPPED_ACTION:
+        raise ProtocolValidationError(
+            f"unmapped combination action must be {MATH_TERMINAL_UNMAPPED_ACTION!r}"
+        )
+
+    # Scheduling decision, not causation; grounded in the real contracts; with required guards.
+    if mapping.get("decision_is_scheduling_eligibility_not_math_kernel_causation") is not True:
+        raise ProtocolValidationError(
+            "the mapping must state it is a scheduling eligibility decision, not math-kernel causation"
+        )
+    if mapping.get("requires_confirmed_forced_math_no_fallback") is not True:
+        raise ProtocolValidationError("eligibility must require confirmed forced-math with no fallback")
+    if mapping.get("requires_all_clean_failure_preconditions") is not True:
+        raise ProtocolValidationError("eligibility must require all clean-failure preconditions")
+
+    # No invented terminal classes may reappear anywhere in the mapping.
+    blob = json.dumps(mapping)
+    for invented in FORBIDDEN_INVENTED_TERMINAL_CLASSES:
+        if invented in blob:
+            raise ProtocolValidationError(f"invented terminal class must not reappear: {invented}")
+
+
 def _validate_seven_b_feasibility_ladder(effective: dict[str, Any]) -> None:
     """The 7B feasibility ladder is a separate, non-paper arm. This binds its semantics shut, by exact
     controlling values (not descriptive prose): (0) non-paper separation; (1) the model reference must
@@ -437,9 +547,11 @@ def _validate_seven_b_feasibility_ladder(effective: dict[str, Any]) -> None:
     (2) the feasibility fixture carries its own identity contract, distinct from the private corpus;
     (3) the fixed ladder configuration (rung list and order, microbatch 1, gradient accumulation 1, 12
     bounded steps, no offload, zero automatic retries, math first-once, flash at-most-once); (4) the
-    flash-eligibility rule (flash runs after math success OR a clean, conclusively math-specific OOM or
-    timeout, and is withheld for every other enumerated failure class - so a math OOM that flash would
-    survive is not a false negative); (5) the separate rung-result definitions (kernel success, rung
+    flash-eligibility rule (flash runs after math success OR when the math FailureRecord taxonomy/stage
+    matches the grounded ``math_terminal_flash_eligibility`` mapping, and is withheld fail-closed
+    otherwise - so a math OOM at forward/backward that flash would survive is not a false negative, while
+    a generic TIMEOUT with no math-attention-stage evidence stays withheld); (5) the separate
+    rung-result definitions (kernel success, rung
     success = at least one executed kernel succeeds, matched-pair = both succeed, seq-4096 claim = at
     least one kernel succeeds at 4096; a flash failure never erases a valid math success); (6) the
     progression and stopping rule (advance only after rung success, stop with no kernel success, longer
@@ -537,7 +649,7 @@ def _validate_seven_b_feasibility_ladder(effective: dict[str, Any]) -> None:
                 f"feasibility ladder fixed configuration {field} must be {expected!r}"
             )
 
-    # (4) flash-eligibility rule - exactly bound (no false negative on a survivable math OOM).
+    # (4) flash-eligibility rule - grounded in the real FailureRecord taxonomy + stage mapping.
     flash = ladder.get("flash_eligibility")
     if not isinstance(flash, dict):
         raise ProtocolValidationError("feasibility ladder flash eligibility is missing")
@@ -547,13 +659,17 @@ def _validate_seven_b_feasibility_ladder(effective: dict[str, Any]) -> None:
         )
     if flash.get("run_when_math_succeeds") is not True:
         raise ProtocolValidationError("flash must run when math succeeds")
-    if flash.get("run_when_math_ends_clean_kernel_specific_oom_or_timeout") is not True:
+    if flash.get("run_when_math_failure_matches_mapped_terminal_taxonomy_and_stage") is not True:
         raise ProtocolValidationError(
-            "flash must run after a clean, conclusively math-specific OOM or timeout"
+            "flash-after-math-failure must be governed by the mapped terminal taxonomy/stage rule"
         )
-    if set(flash.get("eligible_math_terminal_classes") or []) != ELIGIBLE_MATH_TERMINAL_CLASSES:
+    if flash.get("terminal_taxonomy_mapping") != MATH_TERMINAL_FLASH_ELIGIBILITY_KEY:
         raise ProtocolValidationError(
-            "flash eligibility must bind exactly the kernel-specific OOM and timeout terminal classes"
+            "flash eligibility must reference the math_terminal_flash_eligibility mapping"
+        )
+    if flash.get("confirmed_forced_math_no_fallback_required") is not True:
+        raise ProtocolValidationError(
+            "flash eligibility must require confirmed forced-math with no fallback"
         )
     if (
         set(flash.get("clean_math_specific_failure_preconditions") or [])
@@ -562,12 +678,19 @@ def _validate_seven_b_feasibility_ladder(effective: dict[str, Any]) -> None:
         raise ProtocolValidationError(
             "flash eligibility must bind exactly the clean math-specific failure preconditions"
         )
-    if set(flash.get("withhold_flash_failure_classes") or []) != WITHHOLD_FLASH_FAILURE_CLASSES:
-        raise ProtocolValidationError(
-            "flash eligibility must withhold flash for exactly the enumerated failure classes"
-        )
     if flash.get("withheld_flash_status") != "NOT_RUN":
         raise ProtocolValidationError("a withheld flash must be recorded NOT_RUN")
+    if flash.get("decision_is_scheduling_eligibility_not_math_kernel_causation") is not True:
+        raise ProtocolValidationError(
+            "flash eligibility must state it is a scheduling decision, not math-kernel causation"
+        )
+    # No invented terminal classes may reappear anywhere in the ladder.
+    ladder_blob = json.dumps(ladder)
+    for invented in FORBIDDEN_INVENTED_TERMINAL_CLASSES:
+        if invented in ladder_blob:
+            raise ProtocolValidationError(
+                f"invented terminal class must not reappear in the ladder: {invented}"
+            )
 
     # (5) separate rung-result definitions.
     results = ladder.get("rung_result_definitions")
@@ -786,6 +909,7 @@ def validate(
     _validate_authored_at(manifest)
     _validate_affected_counts(effective)
     _validate_lineage_change_classification(effective)
+    _validate_math_terminal_flash_eligibility(effective)
     _validate_seven_b_feasibility_ladder(effective)
 
     non_reuse = effective.get("historical_identity_non_reuse")

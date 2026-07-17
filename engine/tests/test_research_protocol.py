@@ -19,7 +19,7 @@ _CONTRACTS = _REPOSITORY_ROOT / "docs/contracts"
 # Amendment 0005 -> effective matrix 1.5.0 (v8 worker lineage; Environment Manager 1.4.0 + exact
 # per-lineage floor binding). Reconstructed byte-deterministically from the base matrix plus the 0005
 # manifest.
-_EFFECTIVE_HASH = "ed7239caa1747c292d78284e0c7baf000201d341794cb6415e9334d1a7ea81d6"
+_EFFECTIVE_HASH = "2939a8cb78aff658561eed7ad2f2b640bb0c4257b882b6bf5fde753cab010f87"
 
 
 def _load_validator_module():
@@ -321,9 +321,10 @@ def _ladder(effective: dict) -> dict:
 def test_committed_effective_matrix_passes_the_ladder_and_lineage_gates() -> None:
     vp = _load_validator_module()
     effective = _effective_matrix()
-    # The committed matrix passes both new semantic gates unmodified.
+    # The committed matrix passes every semantic gate unmodified.
     vp._validate_seven_b_feasibility_ladder(effective)
     vp._validate_lineage_change_classification(effective)
+    vp._validate_math_terminal_flash_eligibility(effective)
 
 
 def test_feasibility_model_reference_resolves_and_rejects_ambiguity() -> None:
@@ -426,18 +427,25 @@ def test_feasibility_fixed_configuration_is_bound_exactly() -> None:
             vp._validate_seven_b_feasibility_ladder(bad)
 
 
-def test_feasibility_flash_eligibility_avoids_the_math_oom_false_negative() -> None:
+def _mapping(effective: dict) -> dict:
+    return effective["math_terminal_flash_eligibility"]
+
+
+def test_feasibility_flash_eligibility_references_the_grounded_mapping() -> None:
     vp = _load_validator_module()
     effective = _effective_matrix()
     flash = _ladder(effective)["flash_eligibility"]
-    # Flash runs after math success OR a clean, conclusively math-specific OOM/timeout - so a math OOM
-    # that flash would survive is not a false negative.
-    assert flash["flash_condition"] == "run-after-math-success-or-clean-math-specific-oom-or-timeout"
+    # Flash runs after math success OR when the math FailureRecord taxonomy/stage matches the grounded
+    # top-level mapping; it is a scheduling decision, not a math-kernel causation claim.
+    assert flash["flash_condition"] == (
+        "run-after-math-success-or-mapped-clean-math-terminal-taxonomy-and-stage"
+    )
     assert flash["run_when_math_succeeds"] is True
-    assert flash["run_when_math_ends_clean_kernel_specific_oom_or_timeout"] is True
-    assert set(flash["eligible_math_terminal_classes"]) == {
-        "kernel_specific_oom", "kernel_specific_timeout",
-    }
+    assert flash["run_when_math_failure_matches_mapped_terminal_taxonomy_and_stage"] is True
+    assert flash["terminal_taxonomy_mapping"] == "math_terminal_flash_eligibility"
+    assert flash["confirmed_forced_math_no_fallback_required"] is True
+    assert flash["decision_is_scheduling_eligibility_not_math_kernel_causation"] is True
+    assert flash["withheld_flash_status"] == "NOT_RUN"
     assert set(flash["clean_math_specific_failure_preconditions"]) == {
         "shared_preparation_passed",
         "declared_math_kernel_selected_no_fallback",
@@ -446,29 +454,113 @@ def test_feasibility_flash_eligibility_avoids_the_math_oom_false_negative() -> N
         "gpu_memory_released",
         "environment_health_and_drift_checks_passed",
     }
-    assert set(flash["withhold_flash_failure_classes"]) == {
-        "shared_path", "identity", "environment", "artifact",
-        "telemetry", "protocol", "corruption", "uncontrolled_health",
-    }
-    assert flash["withheld_flash_status"] == "NOT_RUN"
+    # The invented terminal classes are gone from the whole ladder.
+    ladder_blob = json.dumps(_ladder(effective))
+    assert "kernel_specific_oom" not in ladder_blob
+    assert "kernel_specific_timeout" not in ladder_blob
 
-    # The old narrow "flash only after math success" rule is now refused (it caused the false negative).
+    # Not referencing the grounded mapping is refused.
     bad = copy.deepcopy(effective)
-    _ladder(bad)["flash_eligibility"]["flash_condition"] = "run-only-after-math-success-at-the-same-rung"
-    with pytest.raises(vp.ProtocolValidationError, match="flash_condition must be"):
+    _ladder(bad)["flash_eligibility"]["terminal_taxonomy_mapping"] = "invented_mapping"
+    with pytest.raises(vp.ProtocolValidationError, match="reference the math_terminal_flash_eligibility"):
         vp._validate_seven_b_feasibility_ladder(bad)
 
-    # Refusing to run flash after a clean math-specific OOM is refused.
+    # Reintroducing an invented terminal class anywhere in the ladder is refused.
     bad = copy.deepcopy(effective)
-    _ladder(bad)["flash_eligibility"]["run_when_math_ends_clean_kernel_specific_oom_or_timeout"] = False
-    with pytest.raises(vp.ProtocolValidationError, match="after a clean, conclusively math-specific"):
+    _ladder(bad)["flash_eligibility"]["note"] = "kernel_specific_oom"
+    with pytest.raises(vp.ProtocolValidationError, match="invented terminal class must not reappear"):
         vp._validate_seven_b_feasibility_ladder(bad)
 
-    # Dropping a withhold class (making flash eligible after a shared-path failure) is refused.
-    bad = copy.deepcopy(effective)
-    _ladder(bad)["flash_eligibility"]["withhold_flash_failure_classes"].remove("shared_path")
-    with pytest.raises(vp.ProtocolValidationError, match="withhold flash for exactly"):
-        vp._validate_seven_b_feasibility_ladder(bad)
+
+def test_math_terminal_flash_eligibility_is_grounded_in_live_contracts() -> None:
+    # The declared taxonomy/stage snapshots must equal the LIVE runtime enums exactly (torch-free
+    # import), so the mapping is grounded in the existing FailureRecord contracts, not invented classes.
+    from corpus_studio.platform.contracts import FailureRecord
+    from corpus_studio.platform.enums import FailureTaxonomy, StageMarker
+
+    effective = _effective_matrix()
+    mapping = _mapping(effective)
+    assert mapping["known_failure_taxonomy"] == [e.value for e in FailureTaxonomy]
+    assert mapping["known_stage_markers"] == [e.value for e in StageMarker]
+    # FailureRecord localizes a failure only by taxonomy + stage (no attention-kernel/execution field),
+    # which is exactly why a generic TIMEOUT cannot be proven math-attention-specific.
+    assert "taxonomy" in FailureRecord.model_fields
+    assert "stage" in FailureRecord.model_fields
+    assert not ({"attention_backend", "effective_backend", "kernel"} & set(FailureRecord.model_fields))
+    assert mapping["grounded_in_contracts"]["evidence_fields"] == ["taxonomy", "stage"]
+
+    # The eligible set is exactly OOM and KERNEL_STALL at the real forward/backward stages.
+    eligible = {e["taxonomy"]: set(e["stages"]) for e in mapping["eligible"]}
+    assert eligible == {"OOM": {"forward", "backward"}, "KERNEL_STALL": {"forward", "backward"}}
+    for taxonomy in ("OOM", "TIMEOUT", "KERNEL_STALL"):
+        assert taxonomy in {e.value for e in FailureTaxonomy}
+    for stage in ("forward", "backward", "model_load"):
+        assert stage in {e.value for e in StageMarker}
+
+    # TIMEOUT is withheld fail-closed, with a recorded evidence basis; defaults are fail-closed.
+    assert mapping["timeout_decision"] == "withhold"
+    assert isinstance(mapping["timeout_evidence_basis"], str) and mapping["timeout_evidence_basis"]
+    assert mapping["default_action"] == "withhold-flash-and-stop"
+    assert mapping["unmapped_combination_action"] == "NOT_RUN-stop-fail-closed"
+    assert mapping["decision_is_scheduling_eligibility_not_math_kernel_causation"] is True
+
+    # The committed mapping passes the validator gate unmodified.
+    vp = _load_validator_module()
+    vp._validate_math_terminal_flash_eligibility(effective)
+
+
+def test_math_terminal_flash_eligibility_rejects_bad_mappings() -> None:
+    vp = _load_validator_module()
+    effective = _effective_matrix()
+
+    def bad(mutate) -> dict:
+        clone = copy.deepcopy(effective)
+        mutate(_mapping(clone))
+        return clone
+
+    # Unknown taxonomy / unknown stage in an eligible entry.
+    with pytest.raises(vp.ProtocolValidationError, match="unknown taxonomy"):
+        vp._validate_math_terminal_flash_eligibility(
+            bad(lambda m: m["eligible"].append({"taxonomy": "BOGUS", "stages": ["forward"]}))
+        )
+    with pytest.raises(vp.ProtocolValidationError, match="unknown stage"):
+        vp._validate_math_terminal_flash_eligibility(
+            bad(lambda m: m["eligible"][0]["stages"].append("not_a_stage"))
+        )
+    # OOM marked eligible at model_load.
+    with pytest.raises(vp.ProtocolValidationError, match="OOM at model_load must not be eligible"):
+        vp._validate_math_terminal_flash_eligibility(
+            bad(lambda m: m["eligible"][0]["stages"].append("model_load"))
+        )
+    # Generic TIMEOUT marked eligible without machine-readable evidence.
+    with pytest.raises(vp.ProtocolValidationError, match="exactly OOM and KERNEL_STALL"):
+        vp._validate_math_terminal_flash_eligibility(
+            bad(lambda m: m["eligible"].append(
+                {"taxonomy": "TIMEOUT", "stages": ["forward", "backward"]}
+            ))
+        )
+    # Missing KERNEL_STALL treatment.
+    with pytest.raises(vp.ProtocolValidationError, match="omits KERNEL_STALL"):
+        vp._validate_math_terminal_flash_eligibility(bad(lambda m: m["eligible"].pop(1)))
+    # Missing / non-fail-closed default action.
+    with pytest.raises(vp.ProtocolValidationError, match="default_action must be"):
+        vp._validate_math_terminal_flash_eligibility(bad(lambda m: m.pop("default_action")))
+    with pytest.raises(vp.ProtocolValidationError, match="default_action must be"):
+        vp._validate_math_terminal_flash_eligibility(
+            bad(lambda m: m.__setitem__("default_action", "run-flash-anyway"))
+        )
+    # Incomplete mapping of existing FailureTaxonomy values.
+    with pytest.raises(vp.ProtocolValidationError, match="known_failure_taxonomy is incomplete"):
+        vp._validate_math_terminal_flash_eligibility(
+            bad(lambda m: m["known_failure_taxonomy"].remove("OOM"))
+        )
+    # Reintroduction of an invented terminal class.
+    with pytest.raises(vp.ProtocolValidationError, match="unknown taxonomy"):
+        vp._validate_math_terminal_flash_eligibility(
+            bad(lambda m: m.__setitem__(
+                "eligible", [{"taxonomy": "kernel_specific_oom", "stages": ["forward"]}]
+            ))
+        )
 
 
 def test_feasibility_rung_aggregation_and_matched_pair_are_separate() -> None:
