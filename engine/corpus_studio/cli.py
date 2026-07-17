@@ -1223,6 +1223,26 @@ def build_worker_wheel(
 
     dest_dir.mkdir(parents=True, exist_ok=True)
 
+    # git operations use the repository root (the source commit and the clean-worktree check are
+    # repository-wide), but pip must target the exact directory that carries the build config: the
+    # worker project (pyproject.toml/setup.py) lives under engine/ in the real repository and at the
+    # root in the minimal test fixture. Prefer engine/, fall back to the root.
+    project_dir = next(
+        (
+            candidate
+            for candidate in (repo_root / "engine", repo_root)
+            if (candidate / "pyproject.toml").exists() or (candidate / "setup.py").exists()
+        ),
+        None,
+    )
+    if project_dir is None:
+        typer.echo(
+            "no buildable worker project (pyproject.toml/setup.py) under "
+            f"{repo_root / 'engine'} or {repo_root}",
+            err=True,
+        )
+        raise typer.Exit(2)
+
     committer_date = subprocess.run(  # noqa: S603 - fixed git argv, no shell, repo-owned args.
         ["git", "-C", str(repo_root), "show", "-s", "--format=%ct", source_commit],
         check=False,
@@ -1239,7 +1259,7 @@ def build_worker_wheel(
             "-m",
             "pip",
             "wheel",
-            str(repo_root),
+            str(project_dir),
             "--no-deps",
             "--no-build-isolation",
             "--wheel-dir",
