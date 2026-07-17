@@ -24,25 +24,25 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 STUDY_ROOT = Path(__file__).resolve().parent
 BASE_PROTOCOL = STUDY_ROOT / "PROTOCOL.md"
 BASE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.yaml"
-# Current (newest) amendment: 0005 -> effective matrix 1.5.0, reserved-identity registry v5.
-EFFECTIVE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.v1.5.0.json"
+# Current (newest) amendment: 0006 -> effective matrix 1.6.0, reserved-identity registry v6.
+EFFECTIVE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.v1.6.0.json"
 AMENDMENT = STUDY_ROOT / (
-    "amendments/0005-2026-07-16-v8-manager-1.4-floor-binding-lineage.md"
+    "amendments/0006-2026-07-17-validator-hardening.md"
 )
 AMENDMENT_MANIFEST = STUDY_ROOT / (
-    "amendments/0005-2026-07-16-v8-manager-1.4-floor-binding-lineage.manifest.json"
+    "amendments/0006-2026-07-17-validator-hardening.manifest.json"
 )
-RESERVED_IDENTITIES = STUDY_ROOT / "amendments/RESERVED_IDENTITIES.v5.json"
-# Frozen prior amendment (0004 -> effective matrix 1.4.0). The current amendment supersedes it; the
-# chain is verified below so 0004 stays byte-frozen and the amendment ordering is provable.
+RESERVED_IDENTITIES = STUDY_ROOT / "amendments/RESERVED_IDENTITIES.v6.json"
+# Frozen prior amendment (0005 -> effective matrix 1.5.0). The current amendment supersedes it; the
+# chain is verified below so 0005 stays byte-frozen and the amendment ordering is provable.
 PRIOR_AMENDMENT = STUDY_ROOT / (
-    "amendments/0004-2026-07-16-v7-worker-lineage-token-throughput-observer.md"
+    "amendments/0005-2026-07-16-v8-manager-1.4-floor-binding-lineage.md"
 )
 PRIOR_AMENDMENT_MANIFEST = STUDY_ROOT / (
-    "amendments/0004-2026-07-16-v7-worker-lineage-token-throughput-observer.manifest.json"
+    "amendments/0005-2026-07-16-v8-manager-1.4-floor-binding-lineage.manifest.json"
 )
-PRIOR_EFFECTIVE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.v1.4.0.json"
-PRIOR_RESERVED_IDENTITIES = STUDY_ROOT / "amendments/RESERVED_IDENTITIES.v4.json"
+PRIOR_EFFECTIVE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.v1.5.0.json"
+PRIOR_RESERVED_IDENTITIES = STUDY_ROOT / "amendments/RESERVED_IDENTITIES.v5.json"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 HASH_IDENTITY_FIELDS = {
@@ -156,6 +156,27 @@ RUNG_SUCCESS_DEFINITION = "at-least-one-executed-kernel-succeeds"
 MATCHED_PAIR_DEFINITION = "both-math-and-flash-succeed"
 SEQ_4096_CLAIM_DEFINITION = "at-least-one-kernel-succeeds-at-rung-4096"
 NOT_RUN_LONGER_STATUS = "NOT_RUN_PRIOR_RUNG_NO_SUCCESS"
+# Execution-implying phrasings a reason code must NOT use when it denies a worker-execution change
+# (a broader denylist than the single "worker-execution" token, so a reworded claim cannot dodge it).
+_WORKER_EXECUTION_CLAIM_TOKENS = (
+    "worker-execution",
+    "worker-runtime",
+    "worker-child",
+    "worker-bytes",
+    "worker-code",
+    "runtime-bytes",
+    "execution-bytes",
+    "execution-change",
+)
+# Map an evidence sub-field (by exact name or ``_``-suffix) to the reserved-identity class it must be a
+# member of, so a completed-run identity documented as history cannot be left reusable at plan time.
+_EVIDENCE_FIELD_RESERVED_CLASS = {
+    "worker_wheel_sha256": "worker_wheel_sha256",
+    "run_id": "run_ids",
+    "environment_id": "environment_ids",
+    "plan_id": "plan_ids",
+    "artifact_id": "artifact_ids",
+}
 
 
 class ProtocolValidationError(ValueError):
@@ -304,12 +325,46 @@ def _validate_reserved(reserved: dict[str, Any]) -> None:
         values = reserved.get(field)
         if not isinstance(field, str) or not isinstance(values, list):
             raise ProtocolValidationError(f"reserved identity class is malformed: {field}")
-        if values != sorted(set(values)):
-            raise ProtocolValidationError(f"reserved identities must be sorted and unique: {field}")
+        # Type-check before the sorted/unique check so a mixed-type reserved file fails as a clean
+        # ProtocolValidationError rather than an unhandled TypeError from sorting mixed types.
         if not all(isinstance(value, str) and value for value in values):
             raise ProtocolValidationError(f"reserved identity values must be nonempty strings: {field}")
+        if values != sorted(set(values)):
+            raise ProtocolValidationError(f"reserved identities must be sorted and unique: {field}")
     if reserved.get("reuse_authorized") is not False:
         raise ProtocolValidationError("historical identity reuse must remain unauthorized")
+
+
+def _validate_preserved_evidence_reserved(
+    effective: dict[str, Any], reserved: dict[str, Any]
+) -> None:
+    """Every completed-run identity the effective matrix documents as history (in a
+    ``preserved_*_evidence`` block) must actually be in the reserved-identity registry. This closes the
+    gap the one-hop append-only superset check does not cover for identities NEW in this version: the
+    newest lineage's real run/wheel/environment ids cannot be recorded as history yet left reusable at
+    plan time."""
+
+    for key, block in effective.items():
+        if not (key.startswith("preserved_") and key.endswith("_evidence")):
+            continue
+        if not isinstance(block, dict):
+            raise ProtocolValidationError(f"{key} must be an object")
+        for sub_key, value in block.items():
+            if not isinstance(value, str):
+                continue
+            reserved_class: str | None = None
+            for suffix, cls in _EVIDENCE_FIELD_RESERVED_CLASS.items():
+                if sub_key == suffix or sub_key.endswith("_" + suffix):
+                    reserved_class = cls
+                    break
+            if reserved_class is None:
+                continue
+            pool = reserved.get(reserved_class)
+            if not isinstance(pool, list) or value not in pool:
+                raise ProtocolValidationError(
+                    f"{key}.{sub_key}={value!r} is documented as history but is not reserved in the "
+                    f"{reserved_class} registry"
+                )
 
 
 def _validate_reserved_superset(reserved: dict[str, Any]) -> None:
@@ -339,8 +394,8 @@ def _validate_supersession(manifest: dict[str, Any]) -> None:
     supersedes = manifest.get("supersedes")
     if not isinstance(supersedes, dict):
         raise ProtocolValidationError("amendment must record the superseded prior amendment")
-    if supersedes.get("effective_protocol_version") != "1.4.0":
-        raise ProtocolValidationError("amendment must supersede exactly effective version 1.4.0")
+    if supersedes.get("effective_protocol_version") != "1.5.0":
+        raise ProtocolValidationError("amendment must supersede exactly effective version 1.5.0")
     prior_files = {
         "prior_amendment_manifest_sha256": PRIOR_AMENDMENT_MANIFEST,
         "prior_narrative_sha256": PRIOR_AMENDMENT,
@@ -428,10 +483,14 @@ def _validate_lineage_change_classification(effective: dict[str, Any]) -> None:
     reason_code = classification.get("reason_code")
     if not isinstance(reason_code, str) or not reason_code:
         raise ProtocolValidationError("lineage-change classification must carry a reason code")
-    if not worker_execution and "worker-execution" in reason_code:
-        raise ProtocolValidationError(
-            "reason code claims a worker-execution change while the classification denies one"
-        )
+    # When the classification denies a worker-execution change, the reason code must not claim one under
+    # any of the known execution-implying phrasings (not just the exact "worker-execution" token).
+    if not worker_execution:
+        folded = reason_code.casefold()
+        if any(token in folded for token in _WORKER_EXECUTION_CLAIM_TOKENS):
+            raise ProtocolValidationError(
+                "reason code claims a worker-execution change while the classification denies one"
+            )
 
 
 def _validate_math_terminal_flash_eligibility(effective: dict[str, Any]) -> None:
@@ -458,8 +517,29 @@ def _validate_math_terminal_flash_eligibility(effective: dict[str, Any]) -> None
         raise ProtocolValidationError("known_stage_markers is malformed")
     known_taxonomy_set = set(known_taxonomy)
     known_stage_set = set(known_stages)
-    # Reject an incomplete mapping of existing FailureTaxonomy: the required core values must be present
-    # (the engine test binds the full snapshot to the live enum for exact completeness).
+    # Bind the declared snapshots to the LIVE runtime enums (fail-closed): the mapping is only "grounded
+    # in the real contracts" if its known_failure_taxonomy / known_stage_markers equal, exactly and in
+    # order, corpus_studio.platform.enums.FailureTaxonomy / StageMarker. A drifted or fabricated snapshot
+    # is refused by the validator itself, not only by a CI test. The enums are torch-free; if they cannot
+    # be imported the grounding cannot be verified, so validation refuses rather than trusting the file.
+    try:
+        from corpus_studio.platform.enums import (  # noqa: PLC0415
+            FailureTaxonomy,
+            StageMarker,
+        )
+    except ImportError as exc:  # pragma: no cover - exercised only outside an engine environment
+        raise ProtocolValidationError(
+            "cannot import the runtime FailureTaxonomy/StageMarker enums to verify the "
+            "math_terminal_flash_eligibility taxonomy/stage snapshots"
+        ) from exc
+    if known_taxonomy != [member.value for member in FailureTaxonomy]:
+        raise ProtocolValidationError(
+            "known_failure_taxonomy does not equal the live FailureTaxonomy enum (exact order)"
+        )
+    if known_stages != [member.value for member in StageMarker]:
+        raise ProtocolValidationError(
+            "known_stage_markers does not equal the live StageMarker enum (exact order)"
+        )
     if not REQUIRED_TAXONOMY_TREATMENTS <= known_taxonomy_set:
         missing = sorted(REQUIRED_TAXONOMY_TREATMENTS - known_taxonomy_set)
         raise ProtocolValidationError(
@@ -792,7 +872,13 @@ def validate_candidate_identities(
             raise ProtocolValidationError(
                 f"candidate {field} must contain canonical ASCII identities"
             )
-        overlap = sorted(set(values).intersection(reserved[field]))
+        if field in ID_IDENTITY_FIELDS:
+            # ID classes are compared case-INSENSITIVELY: a case-variant of a reserved id (e.g. an
+            # uppercased-hex UUID) is not a fresh identity, so it must not slip past disjointness.
+            reserved_folded = {str(item).casefold() for item in reserved[field]}
+            overlap = sorted(value for value in values if value.casefold() in reserved_folded)
+        else:
+            overlap = sorted(set(values).intersection(reserved[field]))
         if field in PATH_IDENTITY_FIELDS:
             for value in values:
                 candidate_path_value = PurePosixPath(value)
@@ -905,6 +991,7 @@ def validate(
         )
     _validate_reserved(reserved)
     _validate_reserved_superset(reserved)
+    _validate_preserved_evidence_reserved(effective, reserved)
     _validate_supersession(manifest)
     _validate_authored_at(manifest)
     _validate_affected_counts(effective)

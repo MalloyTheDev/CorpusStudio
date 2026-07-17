@@ -14,12 +14,12 @@ import pytest
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _STUDY = _REPOSITORY_ROOT / "research/ieee-linux-training"
 _VALIDATOR = _STUDY / "validate_protocol.py"
-_EFFECTIVE_MATRIX = _STUDY / "EXPERIMENT_MATRIX.v1.5.0.json"
+_EFFECTIVE_MATRIX = _STUDY / "EXPERIMENT_MATRIX.v1.6.0.json"
 _CONTRACTS = _REPOSITORY_ROOT / "docs/contracts"
-# Amendment 0005 -> effective matrix 1.5.0 (v8 worker lineage; Environment Manager 1.4.0 + exact
-# per-lineage floor binding). Reconstructed byte-deterministically from the base matrix plus the 0005
-# manifest.
-_EFFECTIVE_HASH = "2939a8cb78aff658561eed7ad2f2b640bb0c4257b882b6bf5fde753cab010f87"
+# Amendment 0006 -> effective matrix 1.6.0 (protocol-validator hardening; no scientific change - the v8
+# lineage, floor/worker-source-commit bindings, and 7B ladder carry forward from 1.5.0 unchanged except
+# the version stamp). Reconstructed byte-deterministically from the base matrix plus the 0006 manifest.
+_EFFECTIVE_HASH = "65ae1efb439b9b1ee5ef75d880f0c5956d016c25c67a1c44449d7569136528e5"
 
 
 def _load_validator_module():
@@ -273,7 +273,7 @@ def test_amendment_authored_at_is_not_in_the_future() -> None:
     vp = _load_validator_module()
     manifest = json.loads(
         (_STUDY / "amendments"
-         / "0005-2026-07-16-v8-manager-1.4-floor-binding-lineage.manifest.json").read_text()
+         / "0006-2026-07-17-validator-hardening.manifest.json").read_text()
     )
     # The committed amendment validates against the real clock.
     vp._validate_authored_at(manifest)
@@ -291,7 +291,7 @@ def test_effective_matrix_reconstruction_is_byte_deterministic() -> None:
     base = vp._load_yaml(_STUDY / "EXPERIMENT_MATRIX.yaml")
     manifest = json.loads(
         (_STUDY / "amendments"
-         / "0005-2026-07-16-v8-manager-1.4-floor-binding-lineage.manifest.json").read_text()
+         / "0006-2026-07-17-validator-hardening.manifest.json").read_text()
     )
     first = json.dumps(vp._build_expected_effective(base, manifest), indent=2, ensure_ascii=False)
     second = json.dumps(vp._build_expected_effective(base, manifest), indent=2, ensure_ascii=False)
@@ -549,8 +549,10 @@ def test_math_terminal_flash_eligibility_rejects_bad_mappings() -> None:
         vp._validate_math_terminal_flash_eligibility(
             bad(lambda m: m.__setitem__("default_action", "run-flash-anyway"))
         )
-    # Incomplete mapping of existing FailureTaxonomy values.
-    with pytest.raises(vp.ProtocolValidationError, match="known_failure_taxonomy is incomplete"):
+    # Incomplete mapping of existing FailureTaxonomy values: dropping a real taxonomy no longer equals
+    # the live enum, so the amendment-0006 live-enum binding rejects it (a superset of the old
+    # incompleteness check).
+    with pytest.raises(vp.ProtocolValidationError, match="does not equal the live FailureTaxonomy"):
         vp._validate_math_terminal_flash_eligibility(
             bad(lambda m: m["known_failure_taxonomy"].remove("OOM"))
         )
@@ -693,18 +695,17 @@ def test_lineage_classification_separates_wheel_identity_from_worker_execution()
     assert classification["reason_code"] == (
         "worker-artifact-identity-and-manager-lock-generation-changed-fresh-v8-required"
     )
-    # The manifest reason codes carry the corrected, non-overclaiming code and not the old one.
+    # The old overclaiming code appears nowhere in the (unchanged) v8 lineage classification.
+    assert "worker-execution" not in classification["reason_code"]
+    # Amendment 0006 is a validator-hardening amendment: its manifest reason codes describe that
+    # hardening (the v8 lineage reason code lives in the effective matrix above and is unchanged).
     manifest = json.loads(
         (_STUDY / "amendments"
-         / "0005-2026-07-16-v8-manager-1.4-floor-binding-lineage.manifest.json").read_text()
+         / "0006-2026-07-17-validator-hardening.manifest.json").read_text()
     )
-    assert (
-        "worker-artifact-identity-and-manager-lock-generation-changed-fresh-v8-required"
-        in manifest["reason_codes"]
-    )
-    assert (
-        "worker-execution-and-wheel-identity-changed-fresh-v8-required"
-        not in manifest["reason_codes"]
+    assert any(
+        "validator-hardening" in code or "no-scientific-change" in code
+        for code in manifest["reason_codes"]
     )
 
     # A reason code that claims a worker-execution change while the flag denies one is refused.
@@ -712,3 +713,85 @@ def test_lineage_classification_separates_wheel_identity_from_worker_execution()
     bad["lineage_change_classification"]["reason_code"] = "worker-execution-changed-fresh-v8"
     with pytest.raises(vp.ProtocolValidationError, match="worker-execution change while"):
         vp._validate_lineage_change_classification(bad)
+
+
+# ---- amendment 0006 validator hardening ----------------------------------------------------------
+
+
+def test_validator_binds_taxonomy_stage_snapshots_to_live_enums() -> None:
+    # F1: the validator itself (not only a CI test) binds known_failure_taxonomy / known_stage_markers
+    # to the live FailureTaxonomy / StageMarker enums, so a drifted or fabricated snapshot is refused.
+    from corpus_studio.platform.enums import FailureTaxonomy, StageMarker
+
+    vp = _load_validator_module()
+    effective = _effective_matrix()
+    mapping = effective["math_terminal_flash_eligibility"]
+    assert mapping["known_failure_taxonomy"] == [m.value for m in FailureTaxonomy]
+    assert mapping["known_stage_markers"] == [m.value for m in StageMarker]
+    vp._validate_math_terminal_flash_eligibility(effective)  # committed passes
+
+    for mutate, message in (
+        (lambda k: k["known_failure_taxonomy"].append("MADE_UP"), "known_failure_taxonomy does not equal"),
+        (lambda k: k["known_failure_taxonomy"].remove("GRADIENT_FAILURE"), "known_failure_taxonomy does not equal"),
+        (lambda k: k["known_stage_markers"].remove("export"), "known_stage_markers does not equal"),
+    ):
+        bad = copy.deepcopy(effective)
+        mutate(bad["math_terminal_flash_eligibility"])
+        with pytest.raises(vp.ProtocolValidationError, match=message):
+            vp._validate_math_terminal_flash_eligibility(bad)
+
+
+def test_preserved_evidence_identities_must_be_reserved() -> None:
+    # F2: every completed-run identity documented as history in a preserved_*_evidence block must be in
+    # the reserved registry, closing the one-hop-superset gap for identities new in the newest version.
+    vp = _load_validator_module()
+    effective = _effective_matrix()
+    reserved = json.loads(
+        (_STUDY / "amendments" / "RESERVED_IDENTITIES.v6.json").read_text()
+    )
+    vp._validate_preserved_evidence_reserved(effective, reserved)  # committed passes
+
+    dropped = copy.deepcopy(reserved)
+    dropped["environment_ids"] = [
+        e for e in dropped["environment_ids"] if e != "backend-corpus-studio-research-math-v7"
+    ]
+    with pytest.raises(vp.ProtocolValidationError, match="is not reserved"):
+        vp._validate_preserved_evidence_reserved(effective, dropped)
+
+
+def test_reserved_disjointness_is_case_insensitive(tmp_path: Path) -> None:
+    # F3: a case-variant (uppercased-hex) of a reserved id is not a fresh identity and is refused.
+    candidate = tmp_path / "candidate-identities.json"
+    candidate.write_text(
+        json.dumps(
+            _fresh_candidate(
+                plan_ids=[
+                    "PLAN-019F6944-782A-7658-BC95-672994F9C08A",  # uppercase variant of a reserved v7 id
+                    "plan-fresh-math-v8",
+                ]
+            ),
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    result = _run_validator("--candidate-identities", str(candidate))
+    assert result.returncode == 1
+    assert "candidate reuses reserved plan_ids" in result.stderr
+
+
+def test_worker_execution_reason_guard_rejects_reworded_claims() -> None:
+    # F4: when the classification denies a worker-execution change, a reworded execution claim (dodging
+    # the exact "worker-execution" token) is still rejected; the committed reason code stays accepted.
+    vp = _load_validator_module()
+    effective = _effective_matrix()
+    vp._validate_lineage_change_classification(effective)  # committed accepted
+    for reworded in (
+        "worker-runtime-bytes-changed-fresh-v8",
+        "worker-child-execution-changed",
+        "runtime-bytes-changed",
+    ):
+        bad = copy.deepcopy(effective)
+        bad["lineage_change_classification"]["reason_code"] = reworded
+        with pytest.raises(vp.ProtocolValidationError, match="worker-execution change while"):
+            vp._validate_lineage_change_classification(bad)
