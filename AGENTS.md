@@ -18,16 +18,18 @@ the local builder lifecycle: dataset creation / import / conversion / cleaning /
 validation / versioning → schema support (pretraining, instruction, chat, preference, evaluation) →
 dataset inspection, statistics, quality scoring, provenance, licensing → model + tokenizer selection →
 local fine-tuning / training (config, environment setup, checkpoint/resume, progress) → evaluation and
-comparison → adapter / model export — all **hardware-aware**, with optional advanced workspaces (e.g.
-Behavior Lab) *inside* the app. Control plane stays lightweight; heavy frameworks live in isolated worker
-envs; the UI is a client. See [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md).
+comparison → adapter / model export — all **hardware-aware**, with **planned** advanced workspaces (e.g.
+a future **Behavior Lab**) *inside* the app. Control plane stays lightweight; heavy frameworks live in
+isolated worker envs; the UI is a client. See [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md).
 
 The **native-Linux 7B research paper** (`research/ieee-linux-training/`, `docs/paper/`) is a **separate
 project that uses** CorpusStudio to verify the training engine can train a 7B model at sequence length
 4096 on this host. Its experiment matrices, amendments, reserved identities, paper-performance gates, and
-sealed-research evidence rules are an **opt-in overlay** and **must not define normal product behavior**.
-Resource-elastic MoE is a forward research direction, not a product-wide mandate. The exact
-standard-vs-sealed boundary is [`docs/PRODUCT_VS_RESEARCH.md`](docs/PRODUCT_VS_RESEARCH.md).
+sealed-research evidence rules are an **opt-in overlay**. **The IEEE 7B paper must not define
+CorpusStudio's product identity, defaults, navigation, or ordinary user workflow** — though CorpusStudio
+may still contain opt-in research and interpretability tools (e.g. a future Behavior Lab). Resource-elastic
+MoE is a forward research direction, not a product-wide mandate. The standard / verified / sealed-research
+boundary is [`docs/PRODUCT_VS_RESEARCH.md`](docs/PRODUCT_VS_RESEARCH.md).
 Three surfaces:
 - **Engine** (`engine/corpus_studio/`, Python) — a **dependency-light** core (no torch at import) +
   an opt-in `[train]` QLoRA trainer extra.
