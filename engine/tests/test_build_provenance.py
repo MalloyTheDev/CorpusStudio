@@ -464,6 +464,33 @@ def _minimal_source_repo(root: Path) -> str:
     return _git(root, "rev-parse", "HEAD")
 
 
+def _minimal_source_repo_engine_layout(root: Path) -> str:
+    """A buildable, clean git source tree whose project lives under engine/ (the REAL repository
+    layout: the git root has no build config; engine/pyproject.toml is the buildable project).
+    Returns HEAD (the repository-wide build source commit)."""
+
+    engine = root / "engine"
+    engine.mkdir(parents=True, exist_ok=True)
+    (engine / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["setuptools>=64"]\nbuild-backend = "setuptools.build_meta"\n\n'
+        '[project]\nname = "corpus-studio-engine"\nversion = "0.0.1"\n\n'
+        '[tool.setuptools.packages.find]\ninclude = ["corpus_studio*"]\n',
+        encoding="utf-8",
+    )
+    pkg = engine / "corpus_studio"
+    pkg.mkdir(exist_ok=True)
+    (pkg / "__init__.py").write_text("# worker\n", encoding="utf-8")
+    # A non-build file at the git root, so the root is a real repository root with NO build config.
+    (root / "README.md").write_text("# repo\n", encoding="utf-8")
+    (root / ".gitignore").write_text("engine/build/\nengine/*.egg-info/\n", encoding="utf-8")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@e.st")
+    _git(root, "config", "user.name", "t")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "src")
+    return _git(root, "rev-parse", "HEAD")
+
+
 def _invoke_build(cli_module, root: Path, dest: Path, *args: str):
     from typer.testing import CliRunner
 
@@ -580,6 +607,50 @@ def test_build_cli_real_source_build_embeds_provenance_and_admits(tmp_path: Path
     assert bp.validate_wheel_provenance_for_scientific_admission(str(wheel)) == head
     overlay = worker_identity_overlay(_artifact(wheel))
     assert overlay.repository_commit == head
+
+
+def test_build_cli_builds_project_under_engine_subdir(tmp_path: Path, monkeypatch) -> None:
+    # Regression: the real repository has NO top-level pyproject.toml - the buildable project is
+    # engine/pyproject.toml. The builder must target the engine/ project dir (git operations stay on
+    # the repository root), so a repository whose build config lives under engine/ still builds, embeds
+    # provenance, and admits. Before the fix, `pip wheel <repo_root>` failed "not installable".
+    import corpus_studio.cli as cli
+
+    root = tmp_path / "repo"
+    head = _minimal_source_repo_engine_layout(root)
+    assert not (root / "pyproject.toml").exists()  # mirrors the real repo: no top-level build config
+    assert (root / "engine" / "pyproject.toml").exists()
+    monkeypatch.setattr(cli, "repository_root", lambda: root)
+    dest = tmp_path / "out"
+    result = _invoke_build(cli, root, dest, "--required-ancestor", head)
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["source_commit"] == head
+    assert payload["required_git_ancestor"] == head
+    wheel = Path(payload["wheel"])
+    assert wheel.exists() and wheel.suffix == ".whl"
+    assert bp.read_embedded_source_commit(str(wheel)) == head
+    assert bp.validate_wheel_provenance_for_scientific_admission(str(wheel)) == head
+
+
+def test_build_cli_refuses_when_no_buildable_project(tmp_path: Path, monkeypatch) -> None:
+    # A repository root with neither a top-level nor an engine/ build config is refused fail-closed
+    # (no wheel), rather than surfacing a raw pip "not installable" error.
+    import corpus_studio.cli as cli
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "README.md").write_text("# no project\n", encoding="utf-8")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@e.st")
+    _git(root, "config", "user.name", "t")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "src")
+    head = _git(root, "rev-parse", "HEAD")
+    monkeypatch.setattr(cli, "repository_root", lambda: root)
+    result = _invoke_build(cli, root, tmp_path / "out", "--required-ancestor", head)
+    assert result.exit_code == 2
+    assert "no buildable worker project" in result.output
 
 
 def test_build_cli_two_builds_same_commit_are_byte_identical(tmp_path: Path, monkeypatch) -> None:
