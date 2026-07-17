@@ -9,8 +9,10 @@ Files:
 - [PROTOCOL.md](PROTOCOL.md) defines the design, controls, execution order, stopping rules, exclusions, and claim boundaries.
 - [HYPOTHESES.md](HYPOTHESES.md) separates confirmatory hypotheses from exploratory analyses.
 - [EXPERIMENT_MATRIX.yaml](EXPERIMENT_MATRIX.yaml) is the immutable, machine-readable factor and trial specification.
-- [EXPERIMENT_MATRIX.v1.5.0.json](EXPERIMENT_MATRIX.v1.5.0.json) is the complete, hash-sealed
-  **current** effective matrix (after amendment 0005).
+- [EXPERIMENT_MATRIX.v1.6.0.json](EXPERIMENT_MATRIX.v1.6.0.json) is the complete, hash-sealed
+  **current** effective matrix (after amendment 0006 - validator hardening; byte-identical to 1.5.0
+  except the version stamp).
+  [EXPERIMENT_MATRIX.v1.5.0.json](EXPERIMENT_MATRIX.v1.5.0.json) (amendment 0005),
   [EXPERIMENT_MATRIX.v1.4.0.json](EXPERIMENT_MATRIX.v1.4.0.json) (amendment 0004),
   [EXPERIMENT_MATRIX.v1.3.0.json](EXPERIMENT_MATRIX.v1.3.0.json) (amendment 0003),
   [EXPERIMENT_MATRIX.v1.2.0.json](EXPERIMENT_MATRIX.v1.2.0.json) (amendment 0002) and
@@ -120,6 +122,19 @@ cells. The validator binds every controlling value exactly (not by nonempty pros
 the wheel-identity-vs-worker-execution lineage classification (v8 requires a fresh wheel/environment
 lineage but is not a worker-execution change). No v8 wheel, environment, plan, or run exists yet; this
 amendment is preregistration only.
+
+Amendment [0006](amendments/0006-2026-07-17-validator-hardening.md) supersedes 0005 with effective
+protocol version **1.6.0** for **protocol-validator hardening only - no scientific change**. A
+pre-training audit surfaced four validator gaps; because `validate_protocol.py` is hash-sealed inside
+0005 (self-hash enforced), re-sealing the hardened validator requires a superseding amendment. 1.6.0
+(a) binds the declared `known_failure_taxonomy`/`known_stage_markers` snapshots to the LIVE
+`FailureTaxonomy`/`StageMarker` enums inside the validator (fail-closed, not only in a CI test);
+(b) requires every `preserved_*_evidence` identity to be reserved; (c) makes reserved-identity
+disjointness case-insensitive; and (d) strengthens the worker-execution reason-code guard. The effective
+matrix 1.6.0 is byte-identical to 1.5.0 except the version stamp and amendment metadata; the v8 lineage,
+floor and reviewed-worker-source-commit bindings, and the 7B ladder are unchanged.
+[RESERVED_IDENTITIES.v6](amendments/RESERVED_IDENTITIES.v6.json) reserves exactly the v5 set (append-only
+superset, zero additions). No environment, plan, run, or model is created.
 
 ## Evidence boundary at preregistration
 
