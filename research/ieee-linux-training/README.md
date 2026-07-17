@@ -9,9 +9,10 @@ Files:
 - [PROTOCOL.md](PROTOCOL.md) defines the design, controls, execution order, stopping rules, exclusions, and claim boundaries.
 - [HYPOTHESES.md](HYPOTHESES.md) separates confirmatory hypotheses from exploratory analyses.
 - [EXPERIMENT_MATRIX.yaml](EXPERIMENT_MATRIX.yaml) is the immutable, machine-readable factor and trial specification.
-- [EXPERIMENT_MATRIX.v1.6.0.json](EXPERIMENT_MATRIX.v1.6.0.json) is the complete, hash-sealed
-  **current** effective matrix (after amendment 0006 - validator hardening; byte-identical to 1.5.0
-  except the version stamp).
+- [EXPERIMENT_MATRIX.v1.7.0.json](EXPERIMENT_MATRIX.v1.7.0.json) is the complete, hash-sealed
+  **current** effective matrix (after amendment 0007 - exact-length non-padding feasibility fixture
+  binding; a fixture-identity change only, no worker or environment lineage change).
+  [EXPERIMENT_MATRIX.v1.6.0.json](EXPERIMENT_MATRIX.v1.6.0.json) (amendment 0006),
   [EXPERIMENT_MATRIX.v1.5.0.json](EXPERIMENT_MATRIX.v1.5.0.json) (amendment 0005),
   [EXPERIMENT_MATRIX.v1.4.0.json](EXPERIMENT_MATRIX.v1.4.0.json) (amendment 0004),
   [EXPERIMENT_MATRIX.v1.3.0.json](EXPERIMENT_MATRIX.v1.3.0.json) (amendment 0003),
@@ -135,6 +136,21 @@ matrix 1.6.0 is byte-identical to 1.5.0 except the version stamp and amendment m
 floor and reviewed-worker-source-commit bindings, and the 7B ladder are unchanged.
 [RESERVED_IDENTITIES.v6](amendments/RESERVED_IDENTITIES.v6.json) reserves exactly the v5 set (append-only
 superset, zero additions). No environment, plan, run, or model is created.
+
+Amendment [0007](amendments/0007-2026-07-17-exact-length-fixture-binding.md) supersedes 0006 with
+effective protocol version **1.7.0** for an **exact-length (non-padding) feasibility fixture binding -
+a fixture-identity change only** (no worker execution change, no new wheel/environment lineage, no
+primary-matrix change). It rebinds the `seven_b_native_linux_feasibility_ladder` fixture to
+`cs-ieee-linux-7b-nonpadding-seq-fixture-v1` (CC0-1.0, 12 rows/rung, deterministic), whose rows tokenize
+to EXACTLY each rung so a real micro-batch-1 step carries exactly the rung in non-padding tokens (proven
+pre-dispatch by the actual trl collator, CPU-only). 1.7.0 binds the model/tokenizer/chat-template
+identity, the full-language-model objective (supervised tokens == rung), the pre-dispatch conformance
+evidence (explicitly not a completed worker execution or GPU result), and an exact-width execution-time
+admission (`observed_microbatches == 1`, `nonpadding_tokens == rung`, no truncation/packing/fallback);
+`validate_protocol.py` adds `_validate_nonpadding_sequence_feasibility` and is re-sealed.
+[RESERVED_IDENTITIES.v7](amendments/RESERVED_IDENTITIES.v7.json) is a strict append-only superset of v6
+(zero new run/plan/execution/wheel/environment identities; the frozen fixture and its conformance
+evidence are added as host-evidence source manifests, not a reusable identity class).
 
 ## Evidence boundary at preregistration
 

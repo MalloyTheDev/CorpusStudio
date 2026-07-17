@@ -24,25 +24,25 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 STUDY_ROOT = Path(__file__).resolve().parent
 BASE_PROTOCOL = STUDY_ROOT / "PROTOCOL.md"
 BASE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.yaml"
-# Current (newest) amendment: 0006 -> effective matrix 1.6.0, reserved-identity registry v6.
-EFFECTIVE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.v1.6.0.json"
+# Current (newest) amendment: 0007 -> effective matrix 1.7.0, reserved-identity registry v7.
+EFFECTIVE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.v1.7.0.json"
 AMENDMENT = STUDY_ROOT / (
-    "amendments/0006-2026-07-17-validator-hardening.md"
+    "amendments/0007-2026-07-17-exact-length-fixture-binding.md"
 )
 AMENDMENT_MANIFEST = STUDY_ROOT / (
-    "amendments/0006-2026-07-17-validator-hardening.manifest.json"
+    "amendments/0007-2026-07-17-exact-length-fixture-binding.manifest.json"
 )
-RESERVED_IDENTITIES = STUDY_ROOT / "amendments/RESERVED_IDENTITIES.v6.json"
-# Frozen prior amendment (0005 -> effective matrix 1.5.0). The current amendment supersedes it; the
-# chain is verified below so 0005 stays byte-frozen and the amendment ordering is provable.
+RESERVED_IDENTITIES = STUDY_ROOT / "amendments/RESERVED_IDENTITIES.v7.json"
+# Frozen prior amendment (0006 -> effective matrix 1.6.0). The current amendment supersedes it; the
+# chain is verified below so 0006 stays byte-frozen and the amendment ordering is provable.
 PRIOR_AMENDMENT = STUDY_ROOT / (
-    "amendments/0005-2026-07-16-v8-manager-1.4-floor-binding-lineage.md"
+    "amendments/0006-2026-07-17-validator-hardening.md"
 )
 PRIOR_AMENDMENT_MANIFEST = STUDY_ROOT / (
-    "amendments/0005-2026-07-16-v8-manager-1.4-floor-binding-lineage.manifest.json"
+    "amendments/0006-2026-07-17-validator-hardening.manifest.json"
 )
-PRIOR_EFFECTIVE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.v1.5.0.json"
-PRIOR_RESERVED_IDENTITIES = STUDY_ROOT / "amendments/RESERVED_IDENTITIES.v5.json"
+PRIOR_EFFECTIVE_MATRIX = STUDY_ROOT / "EXPERIMENT_MATRIX.v1.6.0.json"
+PRIOR_RESERVED_IDENTITIES = STUDY_ROOT / "amendments/RESERVED_IDENTITIES.v6.json"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 HASH_IDENTITY_FIELDS = {
@@ -177,6 +177,32 @@ _EVIDENCE_FIELD_RESERVED_CLASS = {
     "plan_id": "plan_ids",
     "artifact_id": "artifact_ids",
 }
+
+# Amendment 0007 - exact-length (non-padding) sequence feasibility. The feasibility fixture is rebound to
+# a per-rung, license-clear, exact-length chat fixture so a real mb=1 microbatch carries EXACTLY the rung
+# in non-padding tokens (proven pre-dispatch by the actual TRL collator, CPU-only). This is a
+# fixture-identity change ONLY: no worker execution change, no new wheel/environment lineage, no
+# primary-matrix change. These bindings hold the new fixture semantics shut by exact controlling values.
+NONPADDING_ARM_NAME = "seven_b_native_linux_nonpadding_sequence_feasibility"
+NONPADDING_FIXTURE_ID = "cs-ieee-linux-7b-nonpadding-seq-fixture-v1"
+NONPADDING_MODEL_REPOSITORY = "Qwen/Qwen2.5-7B-Instruct"
+NONPADDING_MODEL_REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
+NONPADDING_MODEL_LICENSE = "apache-2.0"
+NONPADDING_FIXTURE_LICENSE = "CC0-1.0"
+NONPADDING_OBJECTIVE_MODE = "full_language_model_supervision"
+NONPADDING_RUNG_EQUALITY = "rung"  # admission binds equality to the rung, never a weaker "<=" bound
+NONPADDING_CONFORMANCE_STATUS = "PREDISPATCH_RUNTIME_COLLATOR_CONFORMANCE_PASS"
+NONPADDING_WIDTH_CLAIM_SOURCE = "raw_run_event_measurements"
+# The primary private corpus id the feasibility fixture must never be conflated with.
+PRIMARY_PRIVATE_DATASET_ID = "cs-ieee-linux-sft-v1"
+
+
+def _require_full_sha256(value: object, label: str) -> None:
+    """A bound hash must be a full 64-hex lowercase SHA-256 - an abbreviated hash is refused so a
+    truncated digest can never enter the effective matrix."""
+
+    if not (isinstance(value, str) and SHA256_RE.fullmatch(value)):
+        raise ProtocolValidationError(f"{label} must be a full 64-hex SHA-256 (no abbreviation)")
 
 
 class ProtocolValidationError(ValueError):
@@ -394,8 +420,8 @@ def _validate_supersession(manifest: dict[str, Any]) -> None:
     supersedes = manifest.get("supersedes")
     if not isinstance(supersedes, dict):
         raise ProtocolValidationError("amendment must record the superseded prior amendment")
-    if supersedes.get("effective_protocol_version") != "1.5.0":
-        raise ProtocolValidationError("amendment must supersede exactly effective version 1.5.0")
+    if supersedes.get("effective_protocol_version") != "1.6.0":
+        raise ProtocolValidationError("amendment must supersede exactly effective version 1.6.0")
     prior_files = {
         "prior_amendment_manifest_sha256": PRIOR_AMENDMENT_MANIFEST,
         "prior_narrative_sha256": PRIOR_AMENDMENT,
@@ -827,6 +853,191 @@ def _validate_seven_b_feasibility_ladder(effective: dict[str, Any]) -> None:
         )
 
 
+def _validate_nonpadding_sequence_feasibility(effective: dict[str, Any]) -> None:
+    """Amendment 0007 binds the exact-length (non-padding) feasibility fixture shut, by exact controlling
+    values (not prose): (A) the fixture is the license-clear, per-rung exact-length chat fixture, distinct
+    from the private corpus, with 12 rows/rung, fixed row order, no packing/truncation, and full canonical
+    hashes for the generator, fixture-root SHA256SUMS, chat template, tokenizer content, and per-rung
+    dataset/rendered/token-id aggregates - every per-rung ``exact_non_padding_length`` equal to its rung;
+    (B) the model binding pins the 40-hex revision, model/tokenizer/template aggregates, apache-2.0, and
+    trust_remote_code false; (C) the training objective is full-language-model supervision with the
+    expected supervised-token count equal to the rung; (D) the pre-dispatch conformance is the actual-TRL
+    collator PASS, explicitly NOT a completed worker execution or GPU result; (E) the execution-time
+    admission requires, per optimizer step, observed_microbatches exactly 1, non-padding tokens EQUAL to
+    the rung (never a weaker bound), supervised tokens equal to the rung, positive step time, and no
+    truncation/packing/fallback with finite loss - a step whose non-padding tokens are below the rung
+    invalidates that rung's sequence-width claim, and the claim is sourced from the raw RunEvent
+    measurements, not sequence_len / fixture metadata / the collator report; and (F) the change is
+    classified fixture-identity-only, with no worker-execution change and no new environment lineage."""
+
+    ladder = effective.get(SEVEN_B_LADDER_KEY)
+    if not isinstance(ladder, dict):
+        raise ProtocolValidationError("seven-B feasibility ladder is missing or malformed")
+
+    # (F) fixture-only classification - and it must not claim a worker change or a new lineage.
+    classification = ladder.get("fixture_change_classification")
+    if not isinstance(classification, dict):
+        raise ProtocolValidationError("feasibility ladder is missing fixture_change_classification")
+    for flag in (
+        "FIXTURE_IDENTITY_CHANGE_ONLY",
+        "NO_WORKER_CHANGE",
+        "NO_NEW_ENVIRONMENT_LINEAGE",
+        "NO_PRIMARY_MATRIX_CHANGE",
+    ):
+        if classification.get(flag) is not True:
+            raise ProtocolValidationError(
+                f"fixture_change_classification.{flag} must be true for this fixture-only amendment"
+            )
+    if ladder.get("arm_name") != NONPADDING_ARM_NAME:
+        raise ProtocolValidationError(
+            f"feasibility ladder arm_name must be {NONPADDING_ARM_NAME!r}"
+        )
+    folded_ladder = json.dumps(ladder).casefold()
+    for token in _WORKER_EXECUTION_CLAIM_TOKENS:
+        if token in folded_ladder:
+            raise ProtocolValidationError(
+                "a fixture-only amendment must not use worker-execution-change wording in the ladder"
+            )
+    if "new_lineage" in folded_ladder or "new-lineage" in folded_ladder:
+        raise ProtocolValidationError(
+            "a fixture-only amendment must not claim a new lineage in the ladder"
+        )
+
+    # (A) fixture identity contract - exact-length, per-rung, license-clear, distinct from the corpus.
+    fixture = ladder.get("feasibility_fixture")
+    if not isinstance(fixture, dict):
+        raise ProtocolValidationError("feasibility fixture identity contract is missing")
+    if fixture.get("fixture_id") != NONPADDING_FIXTURE_ID:
+        raise ProtocolValidationError(
+            f"feasibility fixture_id must be the exact-length fixture {NONPADDING_FIXTURE_ID!r}"
+        )
+    if fixture.get("fixture_id") == PRIMARY_PRIVATE_DATASET_ID:
+        raise ProtocolValidationError("the feasibility fixture must not be the private corpus")
+    if fixture.get("is_primary_private_corpus") is not False:
+        raise ProtocolValidationError("feasibility fixture must not be the primary private corpus")
+    if fixture.get("distinct_from_primary_private_corpus") is not True:
+        raise ProtocolValidationError("feasibility fixture must be distinct from the private corpus")
+    if fixture.get("license") != NONPADDING_FIXTURE_LICENSE:
+        raise ProtocolValidationError(
+            f"feasibility fixture license must be {NONPADDING_FIXTURE_LICENSE!r}"
+        )
+    if fixture.get("packing") is not False:
+        raise ProtocolValidationError("feasibility fixture must disable packing")
+    if fixture.get("truncation") is not False:
+        raise ProtocolValidationError("feasibility fixture must disable truncation")
+    if fixture.get("fixed_row_order") is not True:
+        raise ProtocolValidationError("feasibility fixture must fix row order")
+    if fixture.get("rows_per_rung") != 12:
+        raise ProtocolValidationError("feasibility fixture must bind exactly 12 rows per rung")
+    for sha_field in ("generator_sha256", "fixture_root_sha256sums",
+                      "chat_template_sha256", "tokenizer_content_sha256"):
+        _require_full_sha256(fixture.get(sha_field), f"feasibility fixture {sha_field}")
+
+    # (B) exact model binding.
+    binding = fixture.get("model_binding")
+    if not isinstance(binding, dict):
+        raise ProtocolValidationError("feasibility fixture model_binding is missing")
+    if binding.get("repository") != NONPADDING_MODEL_REPOSITORY:
+        raise ProtocolValidationError(
+            f"feasibility fixture model repository must be {NONPADDING_MODEL_REPOSITORY!r}"
+        )
+    revision = binding.get("revision")
+    if not (isinstance(revision, str) and NONPADDING_MODEL_REVISION_RE.fullmatch(revision)):
+        raise ProtocolValidationError("feasibility fixture model revision must be a 40-hex commit")
+    for sha_field in ("model_aggregate_sha256", "tokenizer_aggregate_sha256",
+                      "chat_template_sha256", "acquisition_sha256sums"):
+        _require_full_sha256(binding.get(sha_field), f"feasibility fixture model_binding {sha_field}")
+    if binding.get("license") != NONPADDING_MODEL_LICENSE:
+        raise ProtocolValidationError(
+            f"feasibility fixture model license must be {NONPADDING_MODEL_LICENSE!r}"
+        )
+    if binding.get("trust_remote_code") is not False:
+        raise ProtocolValidationError("feasibility fixture model trust_remote_code must be false")
+
+    # (A cont.) per-rung exact-length identity: keys are exactly the rungs, each length equals its rung.
+    per_rung = fixture.get("per_rung")
+    if not isinstance(per_rung, dict):
+        raise ProtocolValidationError("feasibility fixture per_rung binding is missing")
+    if [str(rung) for rung in LADDER_RUNGS] != list(per_rung):
+        raise ProtocolValidationError(
+            f"feasibility fixture per_rung keys must be exactly {LADDER_RUNGS} in that order"
+        )
+    for rung in LADDER_RUNGS:
+        entry = per_rung.get(str(rung))
+        if not isinstance(entry, dict):
+            raise ProtocolValidationError(f"feasibility fixture per_rung {rung} entry is malformed")
+        if entry.get("exact_non_padding_length") != rung:
+            raise ProtocolValidationError(
+                f"feasibility fixture per_rung {rung} exact_non_padding_length must equal {rung}"
+            )
+        for sha_field in ("dataset_sha256", "rendered_examples_aggregate_sha256",
+                          "token_id_aggregate_sha256"):
+            _require_full_sha256(entry.get(sha_field), f"feasibility fixture per_rung {rung} {sha_field}")
+
+    # (C) training objective - full-language-model supervision, supervised tokens equal to the rung.
+    objective = ladder.get("training_objective")
+    if not isinstance(objective, dict):
+        raise ProtocolValidationError("feasibility ladder training_objective is missing")
+    if not objective.get("mode"):
+        raise ProtocolValidationError("feasibility ladder training_objective must declare a mode")
+    if objective.get("mode") != NONPADDING_OBJECTIVE_MODE:
+        raise ProtocolValidationError(
+            f"feasibility ladder training objective mode must be {NONPADDING_OBJECTIVE_MODE!r}"
+        )
+    if objective.get("expected_supervised_tokens_per_microbatch") != NONPADDING_RUNG_EQUALITY:
+        raise ProtocolValidationError(
+            "feasibility ladder training objective must expect supervised tokens equal to the rung"
+        )
+
+    # (D) pre-dispatch conformance - the actual TRL collator PASS, NOT a completed worker/GPU result.
+    conformance = ladder.get("predispatch_conformance")
+    if not isinstance(conformance, dict):
+        raise ProtocolValidationError("feasibility ladder predispatch_conformance is missing")
+    if conformance.get("status") != NONPADDING_CONFORMANCE_STATUS:
+        raise ProtocolValidationError(
+            f"predispatch conformance status must be {NONPADDING_CONFORMANCE_STATUS!r}"
+        )
+    _require_full_sha256(
+        conformance.get("conformance_evidence_sha256sums"),
+        "predispatch conformance evidence SHA256SUMS",
+    )
+    if conformance.get("is_not_a_completed_worker_execution_or_gpu_result") is not True:
+        raise ProtocolValidationError(
+            "pre-dispatch collator conformance must be recorded as NOT a completed execution or GPU result"
+        )
+
+    # (E) execution-time admission - equality to the rung, observed_microbatches exactly 1, raw-event claim.
+    admission = ladder.get("execution_time_admission")
+    if not isinstance(admission, dict):
+        raise ProtocolValidationError("feasibility ladder execution_time_admission is missing")
+    per_step = admission.get("per_optimizer_step")
+    if not isinstance(per_step, dict):
+        raise ProtocolValidationError("execution_time_admission.per_optimizer_step is missing")
+    if per_step.get("observed_microbatches") != 1:
+        raise ProtocolValidationError("execution-time admission observed_microbatches must be exactly 1")
+    if per_step.get("nonpadding_tokens_equals") != NONPADDING_RUNG_EQUALITY:
+        raise ProtocolValidationError(
+            "execution-time admission must require non-padding tokens EQUAL to the rung (not a weaker bound)"
+        )
+    if per_step.get("supervised_tokens_equals") != NONPADDING_RUNG_EQUALITY:
+        raise ProtocolValidationError(
+            "execution-time admission must require supervised tokens equal to the rung"
+        )
+    if per_step.get("step_time_seconds_gt") != 0:
+        raise ProtocolValidationError("execution-time admission must require positive step time")
+    for flag in ("no_truncation", "no_packing", "no_fallback", "finite_loss"):
+        if per_step.get(flag) is not True:
+            raise ProtocolValidationError(f"execution-time admission {flag} must be true")
+    if admission.get("nonpadding_below_rung_invalidates_rung_sequence_width_claim") is not True:
+        raise ProtocolValidationError(
+            "admission must state that non-padding tokens below the rung invalidate the width claim"
+        )
+    if admission.get("sequence_width_claim_source") != NONPADDING_WIDTH_CLAIM_SOURCE:
+        raise ProtocolValidationError(
+            f"the sequence-width claim source must be {NONPADDING_WIDTH_CLAIM_SOURCE!r}"
+        )
+
+
 def validate_candidate_identities(
     candidate_path: Path,
     reserved: dict[str, Any],
@@ -998,6 +1209,7 @@ def validate(
     _validate_lineage_change_classification(effective)
     _validate_math_terminal_flash_eligibility(effective)
     _validate_seven_b_feasibility_ladder(effective)
+    _validate_nonpadding_sequence_feasibility(effective)
 
     non_reuse = effective.get("historical_identity_non_reuse")
     if not isinstance(non_reuse, dict):

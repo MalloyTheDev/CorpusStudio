@@ -1,0 +1,679 @@
+{
+  "schema_version": "1.0.0",
+  "amendment_id": "cs-ieee-linux-training-amendment-0007",
+  "study_id": "cs-ieee-linux-training-v1",
+  "base_protocol_version": "1.0.0",
+  "effective_protocol_version": "1.7.0",
+  "authored_at": "2026-07-17T15:54:00Z",
+  "author": "CorpusStudio maintainers",
+  "status": "prospective",
+  "analysis_role": "primary",
+  "reason_codes": [
+    "rebind-feasibility-fixture-to-exact-length-per-rung-nonpadding-chat-fixture",
+    "bind-model-tokenizer-and-chat-template-identity-into-feasibility-arm",
+    "bind-predispatch-actual-trl-collator-conformance-evidence",
+    "bind-exact-width-execution-time-admission-nonpadding-equals-rung",
+    "fixture-identity-change-only-no-worker-or-environment-lineage-change"
+  ],
+  "supersedes": {
+    "amendment_id": "cs-ieee-linux-training-amendment-0006",
+    "effective_protocol_version": "1.6.0",
+    "prior_amendment_manifest_sha256": "8bf399aeecdc4d9b0672beaaf72ab52c7cce5ce0641b0464dda7f0ab2e93cb2c",
+    "prior_narrative_sha256": "a8961eeb3b167a268c08782f6a1a2fabde3c3ccb44a9d6c4c0cd54e195a915a4",
+    "prior_effective_matrix_sha256": "65ae1efb439b9b1ee5ef75d880f0c5956d016c25c67a1c44449d7569136528e5",
+    "prior_reserved_identities_sha256": "36448c802c97b1dcb4b94d0e40fe9ef124cd8b1c15ed0859a2643c454c28bc8d"
+  },
+  "compatibility_impact": {
+    "prior_protocol_and_evidence_preserved": true,
+    "prior_environment_lock_admission": "historical-only",
+    "fresh_worker_wheel_required": false,
+    "fresh_environment_locks_required": false,
+    "fresh_runplans_required": true,
+    "primary_analysis_version": "1.7.0",
+    "fixture_identity_change_only": true
+  },
+  "files": {
+    "base_protocol_sha256": "b7a029bdd4a91ba9efbfe34c81d734b5dfafac13fbd81df545f9f694440ef34d",
+    "base_matrix_sha256": "77b820df6c0ebda9ec5410f9c538a58a23c36e7dc0bc91d37c0f50370c1b2907",
+    "effective_matrix_sha256": "a8e770058bb9bfe3c69e5e9e3fbe10e3dee6a529b257fdf71bf441f21f830e66",
+    "narrative_sha256": "f2ba49e36d3d58d4f341b01c698e81d49fb64d672af12155cffa374ddd17ec37",
+    "reserved_identities_sha256": "a1f5e71f66572f33ec8edead5d265ca6e6cbc5575f81f42eb15b4880fc5523dd",
+    "validator_sha256": "cf925d16f9787a3ed5d71b78e4f5fe80d34ce2c6ca23e76db446eeef77371076"
+  },
+  "validation_contract": {
+    "identity_algorithm": "sha256-raw-file-v1",
+    "duplicate_mapping_keys": "refuse",
+    "base_hash_match_required": true,
+    "selector_match_count_exact": 1,
+    "old_value_match_required": true,
+    "unknown_effective_change_policy": "refuse",
+    "reserved_identity_set_disjointness_required": true,
+    "reserved_registry_append_only_required": true,
+    "prior_amendment_supersession_hash_required": true,
+    "candidate_stage_completeness_required": true,
+    "lowercase_sha256_identity_required": true,
+    "canonical_absolute_posix_paths_required": true,
+    "host_evidence_rehash_available": true
+  },
+  "direct_changes": {
+    "schema_version": {
+      "old_value": "1.0.0",
+      "new_value": "1.7.0"
+    },
+    "protocol_version": {
+      "old_value": "1.0.0",
+      "new_value": "1.7.0"
+    }
+  },
+  "changes": [
+    {
+      "selector": {
+        "collection": "first_party_execution_paths",
+        "id": "first-party-math",
+        "field": "environment_id"
+      },
+      "old_value": "backend-corpus-studio-research-math-v1",
+      "new_value": "backend-corpus-studio-research-math-v8"
+    },
+    {
+      "selector": {
+        "collection": "first_party_execution_paths",
+        "id": "first-party-flash",
+        "field": "environment_id"
+      },
+      "old_value": "backend-corpus-studio-research-flash-v1",
+      "new_value": "backend-corpus-studio-research-flash-v8"
+    }
+  ],
+  "immutable_binding_additions": {
+    "effective_matrix_sha256": "required-per-environment-plan-and-trial",
+    "reserved_identities_sha256": "required-before-new-identity-allocation",
+    "worker_source_commit": "required-per-environment-and-trial"
+  },
+  "added_top_level_fields": {
+    "amendment": {
+      "amendment_id": "cs-ieee-linux-training-amendment-0007",
+      "base_protocol_version": "1.0.0",
+      "supersedes_effective_protocol_version": "1.6.0",
+      "authored_at": "2026-07-17T15:54:00Z",
+      "status": "prospective",
+      "narrative_path": "research/ieee-linux-training/amendments/0007-2026-07-17-exact-length-fixture-binding.md",
+      "manifest_path": "research/ieee-linux-training/amendments/0007-2026-07-17-exact-length-fixture-binding.manifest.json"
+    },
+    "effective_specification": {
+      "identity_algorithm": "sha256-raw-file-v1",
+      "canonical_path": "research/ieee-linux-training/EXPERIMENT_MATRIX.v1.7.0.json",
+      "serialization": "committed-utf8-json-with-one-trailing-lf",
+      "unknown_or_extra_field_policy": "refuse-by-exact-content-hash",
+      "exact_hash_required_before_environment_plan": true,
+      "exact_hash_required_in_every_plan_evidence_bundle_and_trial": true
+    },
+    "environment_admission": {
+      "manager_version_exact": "1.4.0",
+      "sealed_environment_ids": {
+        "math": "backend-corpus-studio-research-math-v8",
+        "flash": "backend-corpus-studio-research-flash-v8"
+      },
+      "same_worker_wheel_bytes_required": true,
+      "matched_package_artifacts_required": true,
+      "separately_sealed_execution_tuples_required": true,
+      "package_lock": {
+        "record_integrity_exact": "verified",
+        "record_count_semantics_exact": "all_record_rows_v2",
+        "record_entries_minimum": 1,
+        "record_verified_entries_minimum": 1,
+        "installed_file_count_minimum": 1,
+        "required_count_equality": "record_verified_entries == record_entries == installed_file_count",
+        "record_failed_entries_exact": 0,
+        "installed_record_sha256_required": true,
+        "installed_tree_sha256_required": true,
+        "package_source_evidence_required": true
+      },
+      "historical_manager_locks_authorized_for_new_admission": false
+    },
+    "worker_success_admission": {
+      "required_git_ancestor": "4bab1de6a844acfb7443344880c5a82c1ac8e872",
+      "required_git_ancestor_rationale": "the final v8 wheel source must descend from 4bab1de6a844acfb7443344880c5a82c1ac8e872 (the merged floor-binding admission PR 471), which descends from the v7 floor 25c901ec, the v6 floor 73b756c, the 0003 floor af28be9, and the df86db5 worker-source floor; env-manager admission proves byte-equality between this exact per-lineage floor and the wheel's EMBEDDED required_git_ancestor, build-worker-wheel proves ancestry that the exact source_commit descends from it, and the exact final post-amendment source commit is recorded in the wheel evidence, not pinned here",
+      "worker_artifact_correction_commit": "4078825a82309223b3b39d1192cc08f8c26afc85",
+      "worker_telemetry_correction_commit": "9a15b5c095accd451fbb57e887bf4b2c1ad0a7e7",
+      "exact_source_commit_required_in_wheel_evidence": true,
+      "exact_wheel_sha256_required_in_environment_and_trial": true,
+      "historical_worker_wheel_reuse_authorized": false,
+      "run_manifest_contract_version": "1.0.0",
+      "trainable_state_hash_algorithm": "sha256-trainable-state-v1",
+      "adapter_export_state_hash_algorithm": "sha256-safetensors-tensor-state-v1",
+      "materialized_gradient_observation_minimum": 1,
+      "optimizer_created_from_real_optimizer_required": true,
+      "cpu_scalar_adamw_step_accepted": true,
+      "optimizer_moment_tensors_on_expected_device_required": true,
+      "exact_finite_loss_per_completed_optimizer_step_required": true,
+      "logging_strategy": "steps",
+      "logging_steps": 1,
+      "logging_nan_inf_filter": false,
+      "adapter_root_auxiliary_metadata_allowlist": [
+        "training_args.bin"
+      ],
+      "adapter_root_auxiliary_metadata_never_deserialized": true,
+      "output_path_adapter_bytes_artifact_integrity_required": true,
+      "required_paper_telemetry_fields": [
+        "step.step_losses",
+        "step.step_time_seconds",
+        "gpu.power_watts",
+        "gpu.memory",
+        "energy.run_joules",
+        "host.process_tree_rss",
+        "identity.repository_commit",
+        "identity.worker_wheel_sha256",
+        "identity.environment_lock_hash",
+        "identity.plan_hash",
+        "identity.execution_configuration_hash",
+        "identity.run_id",
+        "step.nonpadding_tokens_per_second",
+        "step.supervised_tokens_per_second",
+        "completeness.scientific_throughput_complete",
+        "completeness.paper_performance_complete"
+      ],
+      "scientific_completeness_required_for_paper_promotion": true,
+      "proven_measured_fit_requires_complete_success_evidence": true,
+      "failed_run_native_unproven_unless_spill_measured": true,
+      "worker_token_throughput_correction_pr": 466,
+      "worker_token_throughput_correction_commit": "25c901ec85fd6f6303eff6c3dd81938afe328a2b",
+      "token_observation_boundary": "training_step_inputs",
+      "token_observation_pure_read_required": true,
+      "token_counts_null_when_observer_missed_not_zero": true,
+      "throughput_rate_must_equal_observed_tokens_over_duration": true,
+      "token_throughput_validity_required_for_paper_performance": true,
+      "paper_performance_complete_required_for_paper_promotion": true,
+      "required_paper_event_metrics_fields": [
+        "nonpadding_tokens",
+        "observed_microbatches",
+        "supervised_tokens"
+      ],
+      "evidence_path_namespaces": {
+        "summary_paths_resolve_against": "docs/contracts/RunTelemetrySummary.schema.json",
+        "event_metrics_fields_resolve_against": "docs/contracts/RunEvent.schema.json#/$defs/EventMetrics"
+      },
+      "floor_binding_admission_pr": 471,
+      "floor_binding_admission_commit": "4bab1de6a844acfb7443344880c5a82c1ac8e872",
+      "floor_admission_is_byte_equality_not_ancestry": true,
+      "build_provenance_source_commit_emission_required": true
+    },
+    "historical_identity_non_reuse": {
+      "manifest_path": "research/ieee-linux-training/amendments/RESERVED_IDENTITIES.v7.json",
+      "manifest_sha256": "a1f5e71f66572f33ec8edead5d265ca6e6cbc5575f81f42eb15b4880fc5523dd",
+      "supersedes_manifest_path": "research/ieee-linux-training/amendments/RESERVED_IDENTITIES.v6.json",
+      "supersedes_manifest_sha256": "36448c802c97b1dcb4b94d0e40fe9ef124cd8b1c15ed0859a2643c454c28bc8d",
+      "append_only_required": true,
+      "exact_set_disjointness_required_before_plan_generation": true,
+      "identity_classes": [
+        "environment_ids",
+        "environment_lock_hashes",
+        "worker_wheel_sha256",
+        "plan_ids",
+        "plan_hashes",
+        "execution_configuration_ids",
+        "execution_configuration_hashes",
+        "run_ids",
+        "output_paths",
+        "artifact_ids",
+        "evidence_roots"
+      ]
+    },
+    "prior_amendments": [
+      {
+        "amendment_id": "cs-ieee-linux-training-amendment-0001",
+        "effective_protocol_version": "1.1.0",
+        "manifest_sha256": "c33ea08601791884667f51314810246a84c7bffe579489175ac2889b09264bd4",
+        "narrative_sha256": "e20e564fa3292247ed6d5f937be1d074dee4541263aefae9655a54ccd34d8dea",
+        "effective_matrix_sha256": "731101c9ee81bd93f9acabb0433788180b86bcec3d78a7af03892df7af41f4f9",
+        "reserved_identities_sha256": "e369690412919b30563bcaa715198a45576bb0b79d366b2dcf997486b25e1e41"
+      },
+      {
+        "amendment_id": "cs-ieee-linux-training-amendment-0002",
+        "effective_protocol_version": "1.2.0",
+        "manifest_sha256": "d3a45d5ff2bd617a28dfe64c498dc821e0912332147fbd66bacdd53bacbb7fb9",
+        "narrative_sha256": "d39197ec92b0fa87525c48909de8a0e8acd4f300fcdbccb4da286b5a4cc33112",
+        "effective_matrix_sha256": "168189145150c0ed13ce70151a065c9490d9e70052ca30569aac709e718f9e12",
+        "reserved_identities_sha256": "0f9b9a32a16a54fcb3f49e91aa215eb86c2b0c6bdf92bdf4f1d2702ae671859c"
+      },
+      {
+        "amendment_id": "cs-ieee-linux-training-amendment-0003",
+        "effective_protocol_version": "1.3.0",
+        "manifest_sha256": "3a8aab300c8685edf9de1db0dbc98d3f43f29dae19279d573ab7a211a77bdf75",
+        "narrative_sha256": "6b4c22f16fb5605a9e9294e0c32e8be721dc057e009111ee270ec6f005f6f93b",
+        "effective_matrix_sha256": "e7b95d47aa23a87b4aed0ddac6dabf5fc070dc77e4d7ec710129fb690a7c4587",
+        "reserved_identities_sha256": "414d23862e7a835f88b0c454c6fb0a930bc3904cca08bac8d793d5de1db10d40"
+      },
+      {
+        "amendment_id": "cs-ieee-linux-training-amendment-0004",
+        "effective_protocol_version": "1.4.0",
+        "manifest_sha256": "7803c70ddf1a5957e3c5ade62aa652468d763bb97cbdd92748087c334202c236",
+        "narrative_sha256": "d77d59a8398b317cc05168499dd85313d63d2a1e7c4c0a8e8e5bf8e070ec964d",
+        "effective_matrix_sha256": "0ce1fbd425e0401824c3f75f430b72bc4cc51b74e592399cd503a7084c4e593e",
+        "reserved_identities_sha256": "f0c78fa77ad8f3d93035d58e4cd6b8781d095873e6bdd8c5e41a8ea970c4c27b"
+      },
+      {
+        "amendment_id": "cs-ieee-linux-training-amendment-0005",
+        "effective_protocol_version": "1.5.0",
+        "manifest_sha256": "cc7ad4de1f877a6d1f348d8629178137d50f4e33824483088186365b4f7100a0",
+        "narrative_sha256": "8dcbd1246ba6beb4059c1eed06113d4196a192fd2d379e4f639b9b72e0356a86",
+        "effective_matrix_sha256": "2939a8cb78aff658561eed7ad2f2b640bb0c4257b882b6bf5fde753cab010f87",
+        "reserved_identities_sha256": "229709a991ab6b6bd66b3417a6ef96d40b1630643d719775f8ee07050d309775"
+      },
+      {
+        "amendment_id": "cs-ieee-linux-training-amendment-0006",
+        "effective_protocol_version": "1.6.0",
+        "manifest_sha256": "8bf399aeecdc4d9b0672beaaf72ab52c7cce5ce0641b0464dda7f0ab2e93cb2c",
+        "narrative_sha256": "a8961eeb3b167a268c08782f6a1a2fabde3c3ccb44a9d6c4c0cd54e195a915a4",
+        "effective_matrix_sha256": "65ae1efb439b9b1ee5ef75d880f0c5956d016c25c67a1c44449d7569136528e5",
+        "reserved_identities_sha256": "36448c802c97b1dcb4b94d0e40fe9ef124cd8b1c15ed0859a2643c454c28bc8d"
+      }
+    ],
+    "preserved_v4_evidence": {
+      "classification": "non-paper-bring-up",
+      "math_run_id": "run-019f6518-3927-7d73-b106-15f385b61415",
+      "math_terminal_taxonomy": "GRADIENT_FAILURE",
+      "math_terminal_stage": "backward",
+      "math_completed_optimizer_steps": 0,
+      "math_artifacts_written": 0,
+      "flash_dispatched": false,
+      "real_optimizer_step_passed_platform_run": false,
+      "sequence_length_4096_verified": false
+    },
+    "preserved_v5_evidence": {
+      "classification": "non-paper-bring-up",
+      "worker_wheel_sha256": "271447bf0b82ab14ddb4848bd0d47cc0f2f5ad8ff378f291f04cff65be2fc895",
+      "worker_source_commit": "713fde14c8a6bae1888c43851fa6a487a031a242",
+      "math_first_real_training": true,
+      "math_completed_optimizer_steps": 12,
+      "math_loss_decreased": true,
+      "math_run_id": "run-019f67e6-8d14-782a-8b10-ecdb4e74a6e0",
+      "math_terminal_taxonomy": "ARTIFACT_FAILURE",
+      "math_terminal_stage": "export",
+      "math_terminal_cause": "training_args.bin falsely classified as alternate model weights",
+      "math_measured_fit": "NATIVE_UNPROVEN",
+      "math_scientifically_complete": false,
+      "rejected_ga8_instruction_math_run_id": "run-019f67ac-275f-7405-ac92-f407c91be70f",
+      "rejected_ga8_instruction_math_taxonomy": "UNSUPPORTED_CONFIGURATION",
+      "flash_dispatched": false,
+      "artifact_admission_corrected_by_pr": 461,
+      "telemetry_population_corrected_by_pr": 462,
+      "corrections_change_worker_bytes": true,
+      "real_optimizer_step_passed_platform_run": true,
+      "paper_matrix_cells_executed": 0
+    },
+    "full_training_phase": {
+      "status": "gated-until-feasibility-config-identified",
+      "separate_from_feasibility_characterization": true,
+      "corpus": "approximately-500-output-immutable-license-cleared-corpus",
+      "preregistration_required_before_run": true,
+      "distinct_from_feasibility_smoke_and_characterization_trials": true,
+      "quality_and_systems_outcomes_both_required": true,
+      "adapter_lineage_and_base_model_license_required_before_promotion": true
+    },
+    "affected_scope_snapshot": {
+      "captured_at": "2026-07-16T23:28:00Z",
+      "completed_primary_cells": 0,
+      "completed_secondary_cells": 0,
+      "visible_non_paper_bring_up_attempts": 8,
+      "first_party_bring_up_path_ids": [
+        "first-party-math",
+        "first-party-flash"
+      ],
+      "primary_cells": {
+        "selector": "primary_matrix.execution_path_ids in [first-party-math, first-party-flash]",
+        "expected_affected_cell_count": 30
+      },
+      "secondary_cells": {
+        "selector": "secondary_adapter_matrix.execution_path_ids in [first-party-math, first-party-flash]",
+        "expected_affected_cell_count": 16
+      },
+      "adaptive_follow_up": "affected-when-a-first-party-path-is-used",
+      "unsloth_cells_affected_by_environment_identity_change": false
+    },
+    "preserved_v6_evidence": {
+      "classification": "non-paper-bring-up",
+      "verdict": "V6_MATH_AND_FLASH_BRINGUP_PASS",
+      "worker_source_commit": "73b756c49da0f03203ebd05dfb5528805b0fd280",
+      "worker_wheel_sha256": "bdc32196203539cbeb9078ce2317fb41d2a30abe68f7e94bc0fa290a97f414d4",
+      "math_run_id": "run-019f688c-67c0-77cf-82e2-477f52fab76f",
+      "flash_run_id": "run-019f6892-3a54-7922-8e10-d138ee7e77ce",
+      "math_completed_optimizer_steps": 12,
+      "flash_completed_optimizer_steps": 12,
+      "both_arms_loss_decreased": true,
+      "both_arms_adapter_admitted": true,
+      "both_arms_measured_fit": "NATIVE_SAFE",
+      "first_fully_admitted_end_to_end_success": true,
+      "token_throughput_status": "UNAVAILABLE_OBSERVER_MISSED_BATCHES",
+      "token_throughput_recorded_zero_is_not_measured_zero": true,
+      "token_observer_root_cause": "accelerate-prepared DataLoaderShard bypassed the collate-fn observer",
+      "token_fix_pr": 466,
+      "token_fix_changes_worker_bytes": true,
+      "paper_matrix_cells_executed": 0,
+      "sequence_length_4096_verified": false
+    },
+    "preserved_v7_evidence": {
+      "classification": "non-paper-bring-up",
+      "verdict": "V7_MATH_AND_FLASH_THROUGHPUT_PASS",
+      "worker_source_commit": "21aa81d97ff752709fd4d03791288c1bb76a2339",
+      "worker_wheel_sha256": "090f879b46d52e8c33c96fad8aeb61a41c320d44c20bd189dabfd5be606479b2",
+      "math_run_id": "run-019f6956-d55c-7684-8c7a-9ebb7bad7a04",
+      "flash_run_id": "run-019f6966-1c87-71e4-8c30-6fc5fa085caf",
+      "math_environment_id": "backend-corpus-studio-research-math-v7",
+      "flash_environment_id": "backend-corpus-studio-research-flash-v7",
+      "math_completed_optimizer_steps": 12,
+      "flash_completed_optimizer_steps": 12,
+      "both_arms_loss_decreased": true,
+      "both_arms_adapter_admitted": true,
+      "both_arms_measured_fit": "NATIVE_SAFE",
+      "token_throughput_status": "VALID_POSITIVE_ON_EVERY_MEASURED_STEP",
+      "math_nonpadding_tokens_per_second_approx": 104,
+      "flash_nonpadding_tokens_per_second_approx": 108,
+      "scientific_throughput_complete": true,
+      "worker_source_commit_provenance_alias_defect_corrected_forward": true,
+      "paper_matrix_cells_executed": 0,
+      "sequence_length_4096_verified": false
+    },
+    "lineage_change_classification": {
+      "NEW_WHEEL_AND_ENVIRONMENT_LINEAGE_REQUIRED": true,
+      "WORKER_EXECUTION_CHANGE_REQUIRED": false,
+      "reason_code": "worker-artifact-identity-and-manager-lock-generation-changed-fresh-v8-required",
+      "explanation": "PR 471 changed control-plane admission (environment_manager.py, environments.py, cli.py) and bumped the Environment Manager lock generation from 1.3.0 to 1.4.0 (a new additive EnvironmentLock field), and the worker build-provenance generator now emits the canonical source_commit key; all of these change the v8 wheel content hash and the sealed environment lineage. NONE of them changes the worker execution closure (the worker/supervisor/artifacts/runners/trainer runtime bytes that execute optimizer steps); the only closure-adjacent change is an additive optional contract field that defaults to null with no runtime behavior change. A fresh v8 wheel and environment pair is therefore required because the wheel artifact identity and manager lock generation changed, not because worker execution changed - unlike the v6->v7 transition, which was a genuine worker-execution change (the training_step token observer in training/trainer.py).",
+      "contrast_v6_to_v7": "WORKER_EXECUTION_CHANGE_REQUIRED was true (trainer.py token observer)"
+    },
+    "math_terminal_flash_eligibility": {
+      "grounded_in_contracts": {
+        "failure_record": "corpus_studio.platform.contracts.FailureRecord",
+        "taxonomy_enum": "corpus_studio.platform.enums.FailureTaxonomy",
+        "stage_enum": "corpus_studio.platform.enums.StageMarker",
+        "evidence_fields": [
+          "taxonomy",
+          "stage"
+        ]
+      },
+      "decision_is_scheduling_eligibility_not_math_kernel_causation": true,
+      "requires_confirmed_forced_math_no_fallback": true,
+      "requires_all_clean_failure_preconditions": true,
+      "eligible": [
+        {
+          "taxonomy": "OOM",
+          "stages": [
+            "forward",
+            "backward"
+          ]
+        },
+        {
+          "taxonomy": "KERNEL_STALL",
+          "stages": [
+            "forward",
+            "backward"
+          ]
+        }
+      ],
+      "default_action": "withhold-flash-and-stop",
+      "unmapped_combination_action": "NOT_RUN-stop-fail-closed",
+      "timeout_decision": "withhold",
+      "timeout_evidence_basis": "FailureRecord (corpus_studio.platform.contracts.FailureRecord) localizes a failure only by taxonomy (FailureTaxonomy) and stage (StageMarker); the finest failure stage is the forward/backward pass, and no machine-readable field proves a TIMEOUT occurred within the active math attention execution (there is no attention-kernel or effective-backend field on FailureRecord, and attention_policy_applied is a one-time setup stage, not a per-op execution marker). A generic TIMEOUT is therefore not conclusively kernel-specific and is withheld fail-closed; broadening TIMEOUT eligibility would require a contract change adding a machine-readable math-attention-execution marker.",
+      "known_failure_taxonomy": [
+        "PASS",
+        "FAIL",
+        "OOM",
+        "TIMEOUT",
+        "KERNEL_STALL",
+        "NUMERICAL_FAILURE",
+        "GRADIENT_FAILURE",
+        "LOSS_EVIDENCE_FAILURE",
+        "OPTIMIZER_FAILURE",
+        "UPDATE_FAILURE",
+        "ARTIFACT_FAILURE",
+        "CHECKPOINT_FAILURE",
+        "ENVIRONMENT_FAILURE",
+        "UNSUPPORTED_CONFIGURATION",
+        "ACCIDENTAL_SPILL",
+        "CONTROLLED_OFFLOAD"
+      ],
+      "known_stage_markers": [
+        "process_start",
+        "dataset_verification",
+        "execution_config_verified",
+        "env_loaded",
+        "cuda_init",
+        "tokenizer_load",
+        "dataset_formatting",
+        "truncation_analysis",
+        "attention_policy_applied",
+        "model_load",
+        "placement_verified",
+        "placement_deviation",
+        "model_loaded",
+        "quantized",
+        "adapter_attached",
+        "optimizer_created",
+        "batch_materialized",
+        "forward",
+        "loss",
+        "backward",
+        "optimizer_step",
+        "checkpoint",
+        "reload",
+        "evaluation",
+        "export"
+      ],
+      "no_invented_terminal_classes": true,
+      "notes": "After a math FAILURE, flash stays eligible only for OOM or KERNEL_STALL at forward/backward under confirmed forced-math with no fallback and all clean-failure preconditions; OOM at model_load, optimizer_created, export, or any other shared/non-forward-backward stage, a generic TIMEOUT, and every other taxonomy/stage combination withhold flash and stop; any unknown, missing, or unmapped combination is NOT_RUN and stops fail-closed. This is a scheduling decision about whether flash is worth trying, not proof the math kernel caused the failure."
+    },
+    "seven_b_native_linux_feasibility_ladder": {
+      "classification": "non-paper-feasibility",
+      "is_primary_paper_cell": false,
+      "satisfies_three_trial_characterization_matrix": false,
+      "model_id": "qwen2.5-7b-instruct",
+      "model_source_repository": "Qwen/Qwen2.5-7B-Instruct",
+      "feasibility_fixture": {
+        "fixture_id": "cs-ieee-linux-7b-nonpadding-seq-fixture-v1",
+        "belongs_to": "seven_b_native_linux_feasibility_ladder",
+        "kind": "exact-length-per-rung-license-clear-chat-fixture",
+        "is_primary_private_corpus": false,
+        "distinct_from_primary_private_corpus": true,
+        "license": "CC0-1.0",
+        "license_evidence_required": true,
+        "content_read_and_frozen": true,
+        "fixed_row_order": true,
+        "packing": false,
+        "truncation": false,
+        "deterministic": true,
+        "base_seed": 7,
+        "generator_sha256": "e080a94910c47f6365d4a17f5e1fc6e2280614859d9184708e070e39caffb23b",
+        "rows_per_rung": 12,
+        "fixture_root_sha256sums": "e1208e2fa930e0c4d33f8d9a8b8e3ea952a9ab022b06bbd6e705a01ed2ccbd60",
+        "content_sha256": "e1208e2fa930e0c4d33f8d9a8b8e3ea952a9ab022b06bbd6e705a01ed2ccbd60",
+        "rendered_examples_sha256": "557c2ed3a1092e2728f5c10b2b490c98e8dd414e3989f57cd8a083b193db5578",
+        "tokenizer_content_sha256": "81feaac8d04514a200e05e9a15d594181fff403abc1202b11a5f3883198155e1",
+        "chat_template_sha256": "cd8e9439f0570856fd70470bf8889ebd8b5d1107207f67a5efb46e342330527f",
+        "model_binding": {
+          "repository": "Qwen/Qwen2.5-7B-Instruct",
+          "revision": "a09a35458c702b33eeacc393d103063234e8bc28",
+          "model_aggregate_sha256": "d5d037c244ca0a00cf7a792b661f0dbcc6b7cdd5a3b81a624b4e23af96d90842",
+          "tokenizer_aggregate_sha256": "81feaac8d04514a200e05e9a15d594181fff403abc1202b11a5f3883198155e1",
+          "chat_template_sha256": "cd8e9439f0570856fd70470bf8889ebd8b5d1107207f67a5efb46e342330527f",
+          "license": "apache-2.0",
+          "trust_remote_code": false,
+          "acquisition_sha256sums": "007de7e9d7cc29daafd591435f93e22383ba795e17ae066b76992724d3df1cf2"
+        },
+        "per_rung": {
+          "512": {
+            "exact_non_padding_length": 512,
+            "dataset_sha256": "3640ab76dd8808cba3f857e72afc73f617ea9d0e072be9f09b83a872e53b950d",
+            "rendered_examples_aggregate_sha256": "c80be51441d838c5b51ace70d031059e93526013cb4f6ade340d6b43d7ba483a",
+            "token_id_aggregate_sha256": "a6e689105559bc10c00c8f234ccc233e55bb6618c3cecb72893ee96791e1c273"
+          },
+          "1024": {
+            "exact_non_padding_length": 1024,
+            "dataset_sha256": "3e771f18e85d2ca1d658cce8a15b2b7c8883abe78ca62060aa21bf191a71ae88",
+            "rendered_examples_aggregate_sha256": "17a93ffe01a9880def1850253f1c683380e7a35e5462589552f66ee18d25d5fa",
+            "token_id_aggregate_sha256": "6f53ea613237ad1e5d8831699db215e45de549a29c81619ee7c7c73d5f129df5"
+          },
+          "2048": {
+            "exact_non_padding_length": 2048,
+            "dataset_sha256": "4e382c2a49b5615642a157502ecfb002356bc6150a7ecd00728b8d60a3962c75",
+            "rendered_examples_aggregate_sha256": "9c601ad5ebf02e64a433d3ec80128398c1618edd600a6fdacb0e3dc0b7477a71",
+            "token_id_aggregate_sha256": "0dba30dc4e49be9a83922f9be1380e9b42f03be7639fb3a28f586579f85158ef"
+          },
+          "3072": {
+            "exact_non_padding_length": 3072,
+            "dataset_sha256": "4aea5e3e514198f4648beca245dca3a5bb0bf3050083571539532fba6404e79c",
+            "rendered_examples_aggregate_sha256": "c47682c97ff0b4ed28d463797f5d918954871a2f9d5a242616d31fba0be730c5",
+            "token_id_aggregate_sha256": "67aecee336c65d454965ee5f69ea2bddeda057bcd9659aea981eb75703176be4"
+          },
+          "4096": {
+            "exact_non_padding_length": 4096,
+            "dataset_sha256": "fbdf980637bab1872075e387c4ce315fb4df7b3a6e91f10d802340414ede33aa",
+            "rendered_examples_aggregate_sha256": "e6737eb82a1f46dc2a32d108d24c108d599e3744bea9d2124ee0cdbd61a0427e",
+            "token_id_aggregate_sha256": "1bbe10d0487a6160062a83a856690362394c82766d39fcc068ec9f62bb66d3c8"
+          }
+        }
+      },
+      "fixed_ladder_configuration": {
+        "sequence_length_rungs": [
+          512,
+          1024,
+          2048,
+          3072,
+          4096
+        ],
+        "rung_order": "ascending",
+        "microbatch": 1,
+        "gradient_accumulation": 1,
+        "bounded_optimizer_steps": 12,
+        "offload": "none",
+        "automatic_workload_retry_count": 0,
+        "math_runs": "first-once",
+        "flash_runs": "at-most-once"
+      },
+      "flash_eligibility": {
+        "flash_condition": "run-after-math-success-or-mapped-clean-math-terminal-taxonomy-and-stage",
+        "run_when_math_succeeds": true,
+        "run_when_math_failure_matches_mapped_terminal_taxonomy_and_stage": true,
+        "terminal_taxonomy_mapping": "math_terminal_flash_eligibility",
+        "confirmed_forced_math_no_fallback_required": true,
+        "clean_math_specific_failure_preconditions": [
+          "declared_math_kernel_selected_no_fallback",
+          "environment_health_and_drift_checks_passed",
+          "evidence_remained_valid",
+          "gpu_memory_released",
+          "process_terminated_cleanly",
+          "shared_preparation_passed"
+        ],
+        "withheld_flash_status": "NOT_RUN",
+        "decision_is_scheduling_eligibility_not_math_kernel_causation": true
+      },
+      "rung_result_definitions": {
+        "kernel_success": "one-kernel-satisfies-every-rung_success_requires-condition",
+        "rung_success": "at-least-one-executed-kernel-succeeds",
+        "matched_pair_success": "both-math-and-flash-succeed",
+        "sequence_4096_feasibility_claim": "at-least-one-kernel-succeeds-at-rung-4096",
+        "flash_failure_does_not_erase_math_success": true,
+        "math_fail_then_flash_success_is_rung_success_not_matched_pair": true
+      },
+      "progression": {
+        "advance_only_after_rung_success": true,
+        "stop_after_rung_with_no_kernel_success": true,
+        "longer_rungs_status_after_stop": "NOT_RUN_PRIOR_RUNG_NO_SUCCESS",
+        "impute_longer_rungs": false,
+        "impute_any_result": false,
+        "shared_path_failure_stops_ladder_immediately": true,
+        "preserve_every_terminal_result": true
+      },
+      "rung_success_requires": [
+        "exactly_12_optimizer_steps",
+        "finite_loss_at_every_step",
+        "forced_declared_kernel_no_fallback",
+        "positive_token_evidence",
+        "changed_adapter_state",
+        "admitted_artifact",
+        "complete_telemetry",
+        "measured_fit",
+        "clean_gpu_release"
+      ],
+      "sequence_length_4096_success_requires": [
+        "exactly_12_optimizer_steps",
+        "finite_loss_at_every_step",
+        "forced_declared_kernel_no_fallback",
+        "positive_token_evidence",
+        "changed_adapter_state",
+        "admitted_artifact",
+        "complete_telemetry",
+        "measured_fit",
+        "clean_gpu_release"
+      ],
+      "authorization": "preregistration-only-no-download-no-fixture-read-no-execution-in-this-amendment",
+      "arm_name": "seven_b_native_linux_nonpadding_sequence_feasibility",
+      "training_objective": {
+        "mode": "full_language_model_supervision",
+        "expected_supervised_tokens_per_microbatch": "rung",
+        "supervised_tokens_equals_nonpadding_tokens": true,
+        "rationale": "the worker sets no completion-only loss; trl language modeling supervises every token"
+      },
+      "predispatch_conformance": {
+        "status": "PREDISPATCH_RUNTIME_COLLATOR_CONFORMANCE_PASS",
+        "collator": "trl.trainer.sft_trainer.DataCollatorForLanguageModeling",
+        "cpu_tokenizer_only_no_gpu_no_model_weights": true,
+        "conformance_evidence_sha256sums": "95944f122c5a3b31a28b0f6dd925c8c29917d12faca1495970b3c22fff0e7939",
+        "proves": [
+          "tensor_width_equals_rung",
+          "attention_mask_exactly_rung_active",
+          "zero_padding",
+          "zero_truncation",
+          "labels_width_equals_rung",
+          "expected_supervision_exists",
+          "source_rows_not_mutated"
+        ],
+        "is_not_a_completed_worker_execution_or_gpu_result": true
+      },
+      "execution_time_admission": {
+        "per_optimizer_step": {
+          "observed_microbatches": 1,
+          "nonpadding_tokens_equals": "rung",
+          "supervised_tokens_equals": "rung",
+          "step_time_seconds_gt": 0,
+          "no_truncation": true,
+          "no_packing": true,
+          "no_fallback": true,
+          "finite_loss": true
+        },
+        "nonpadding_below_rung_invalidates_rung_sequence_width_claim": true,
+        "sequence_width_claim_source": "raw_run_event_measurements",
+        "sequence_width_claim_not_inferred_from": [
+          "sequence_len",
+          "fixture_metadata",
+          "collator_report"
+        ]
+      },
+      "fixture_change_classification": {
+        "FIXTURE_IDENTITY_CHANGE_ONLY": true,
+        "NO_WORKER_CHANGE": true,
+        "NO_NEW_ENVIRONMENT_LINEAGE": true,
+        "NO_PRIMARY_MATRIX_CHANGE": true,
+        "authorized_future_lineage": [
+          "backend-corpus-studio-research-math-v8",
+          "backend-corpus-studio-research-flash-v8"
+        ]
+      }
+    }
+  },
+  "affected_scope": {
+    "first_party_bring_up_paths": 2,
+    "primary_cells": 30,
+    "secondary_first_party_cells": 16,
+    "adaptive_first_party_follow_up": "affected-if-run",
+    "unsloth_cells": "unchanged",
+    "completed_primary_cells_at_authorship": 0,
+    "completed_secondary_cells_at_authorship": 0
+  },
+  "visible_evidence_before_amendment": {
+    "amendment_0006_merged": true,
+    "exact_length_fixture_frozen_and_byte_identical_on_regeneration": true,
+    "predispatch_runtime_collator_conformance_pass": true,
+    "no_new_run_or_lineage_identity_instantiated": true,
+    "paper_matrix_cells_executed": 0
+  }
+}

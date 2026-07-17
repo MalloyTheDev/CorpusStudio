@@ -14,12 +14,16 @@ import pytest
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _STUDY = _REPOSITORY_ROOT / "research/ieee-linux-training"
 _VALIDATOR = _STUDY / "validate_protocol.py"
-_EFFECTIVE_MATRIX = _STUDY / "EXPERIMENT_MATRIX.v1.6.0.json"
+_EFFECTIVE_MATRIX = _STUDY / "EXPERIMENT_MATRIX.v1.7.0.json"
 _CONTRACTS = _REPOSITORY_ROOT / "docs/contracts"
-# Amendment 0006 -> effective matrix 1.6.0 (protocol-validator hardening; no scientific change - the v8
-# lineage, floor/worker-source-commit bindings, and 7B ladder carry forward from 1.5.0 unchanged except
-# the version stamp). Reconstructed byte-deterministically from the base matrix plus the 0006 manifest.
-_EFFECTIVE_HASH = "65ae1efb439b9b1ee5ef75d880f0c5956d016c25c67a1c44449d7569136528e5"
+_AMENDMENT_MANIFEST = (
+    _STUDY / "amendments" / "0007-2026-07-17-exact-length-fixture-binding.manifest.json"
+)
+# Amendment 0007 -> effective matrix 1.7.0 (exact-length non-padding feasibility fixture binding; a
+# fixture-identity change only - no worker execution change and no new wheel/environment lineage. The v8
+# lineage, floor bindings, math_terminal_flash_eligibility, and the rest of the 7B ladder carry forward
+# from 1.6.0). Reconstructed byte-deterministically from the base matrix plus the 0007 manifest.
+_EFFECTIVE_HASH = "a8e770058bb9bfe3c69e5e9e3fbe10e3dee6a529b257fdf71bf441f21f830e66"
 
 
 def _load_validator_module():
@@ -40,7 +44,7 @@ def _run_validator(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _fresh_candidate(**updates: object) -> dict[str, object]:
-    # Under effective 1.5.0 the sealed environment ids are the fresh v8 pair, and every v1-v7 identity
+    # Under effective 1.7.0 the sealed environment ids are the fresh v8 pair, and every prior identity
     # is reserved, so a valid fresh runplan candidate binds the exact math-v8/flash-v8 environments and
     # otherwise-unallocated identities.
     candidate: dict[str, object] = {
@@ -271,10 +275,7 @@ def test_pseudo_paths_do_not_resolve_against_the_schema() -> None:
 
 def test_amendment_authored_at_is_not_in_the_future() -> None:
     vp = _load_validator_module()
-    manifest = json.loads(
-        (_STUDY / "amendments"
-         / "0006-2026-07-17-validator-hardening.manifest.json").read_text()
-    )
+    manifest = json.loads(_AMENDMENT_MANIFEST.read_text())
     # The committed amendment validates against the real clock.
     vp._validate_authored_at(manifest)
     # A future timestamp is rejected regardless of the clock.
@@ -289,10 +290,7 @@ def test_amendment_authored_at_is_not_in_the_future() -> None:
 def test_effective_matrix_reconstruction_is_byte_deterministic() -> None:
     vp = _load_validator_module()
     base = vp._load_yaml(_STUDY / "EXPERIMENT_MATRIX.yaml")
-    manifest = json.loads(
-        (_STUDY / "amendments"
-         / "0006-2026-07-17-validator-hardening.manifest.json").read_text()
-    )
+    manifest = json.loads(_AMENDMENT_MANIFEST.read_text())
     first = json.dumps(vp._build_expected_effective(base, manifest), indent=2, ensure_ascii=False)
     second = json.dumps(vp._build_expected_effective(base, manifest), indent=2, ensure_ascii=False)
     assert first == second
@@ -361,17 +359,18 @@ def test_feasibility_fixture_identity_is_bound_and_distinct_from_private_corpus(
     vp = _load_validator_module()
     effective = _effective_matrix()
     fixture = _ladder(effective)["feasibility_fixture"]
-    # The fixture is explicitly not the primary private corpus and requires its identity before planning.
+    # The fixture is explicitly not the primary private corpus; amendment 0007 rebound it to the frozen,
+    # read-and-frozen exact-length fixture, so its legacy identity hashes are now real SHA-256 values.
     assert fixture["is_primary_private_corpus"] is False
     assert fixture["distinct_from_primary_private_corpus"] is True
-    assert fixture["content_read_or_frozen_in_this_amendment"] is False
+    assert fixture["content_read_and_frozen"] is True
     for sha_field in (
         "content_sha256",
         "rendered_examples_sha256",
         "tokenizer_content_sha256",
         "chat_template_sha256",
     ):
-        assert fixture[sha_field] == "required-before-planning"
+        assert vp.SHA256_RE.fullmatch(fixture[sha_field])
     assert fixture["license_evidence_required"] is True
     assert fixture["fixed_row_order"] is True
     assert fixture["packing"] is False
@@ -747,7 +746,7 @@ def test_preserved_evidence_identities_must_be_reserved() -> None:
     vp = _load_validator_module()
     effective = _effective_matrix()
     reserved = json.loads(
-        (_STUDY / "amendments" / "RESERVED_IDENTITIES.v6.json").read_text()
+        (_STUDY / "amendments" / "RESERVED_IDENTITIES.v7.json").read_text()
     )
     vp._validate_preserved_evidence_reserved(effective, reserved)  # committed passes
 
@@ -795,3 +794,122 @@ def test_worker_execution_reason_guard_rejects_reworded_claims() -> None:
         bad["lineage_change_classification"]["reason_code"] = reworded
         with pytest.raises(vp.ProtocolValidationError, match="worker-execution change while"):
             vp._validate_lineage_change_classification(bad)
+
+
+# ---- amendment 0007 exact-length (non-padding) sequence feasibility fixture ------------------------
+
+
+def test_committed_matrix_passes_the_nonpadding_feasibility_gate() -> None:
+    vp = _load_validator_module()
+    effective = _effective_matrix()
+    vp._validate_nonpadding_sequence_feasibility(effective)  # committed passes
+    ladder = _ladder(effective)
+    assert ladder["arm_name"] == "seven_b_native_linux_nonpadding_sequence_feasibility"
+    fixture = ladder["feasibility_fixture"]
+    assert fixture["fixture_id"] == "cs-ieee-linux-7b-nonpadding-seq-fixture-v1"
+    assert fixture["license"] == "CC0-1.0"
+    assert fixture["rows_per_rung"] == 12
+    assert list(fixture["per_rung"]) == ["512", "1024", "2048", "3072", "4096"]
+    for rung, entry in fixture["per_rung"].items():
+        assert entry["exact_non_padding_length"] == int(rung)
+        for sha_field in ("dataset_sha256", "rendered_examples_aggregate_sha256",
+                          "token_id_aggregate_sha256"):
+            assert vp.SHA256_RE.fullmatch(entry[sha_field])
+    binding = fixture["model_binding"]
+    assert binding["repository"] == "Qwen/Qwen2.5-7B-Instruct"
+    assert vp.NONPADDING_MODEL_REVISION_RE.fullmatch(binding["revision"])
+    assert binding["trust_remote_code"] is False
+    assert ladder["training_objective"]["mode"] == "full_language_model_supervision"
+    assert ladder["training_objective"]["expected_supervised_tokens_per_microbatch"] == "rung"
+    step = ladder["execution_time_admission"]["per_optimizer_step"]
+    assert step["nonpadding_tokens_equals"] == "rung"
+    assert step["observed_microbatches"] == 1
+    assert ladder["execution_time_admission"]["sequence_width_claim_source"] == "raw_run_event_measurements"
+    # The pre-dispatch collator PASS is explicitly NOT a completed worker execution or GPU result.
+    assert ladder["predispatch_conformance"]["is_not_a_completed_worker_execution_or_gpu_result"] is True
+    assert ladder["fixture_change_classification"]["NO_WORKER_CHANGE"] is True
+    assert ladder["fixture_change_classification"]["NO_NEW_ENVIRONMENT_LINEAGE"] is True
+
+
+def test_nonpadding_feasibility_gate_rejects_weakened_bindings() -> None:
+    vp = _load_validator_module()
+    effective = _effective_matrix()
+
+    def reject(mutate, message):
+        bad = copy.deepcopy(effective)
+        mutate(_ladder(bad))
+        with pytest.raises(vp.ProtocolValidationError, match=message):
+            vp._validate_nonpadding_sequence_feasibility(bad)
+
+    # A non-padding admission weaker than equality to the rung is refused.
+    reject(
+        lambda L: L["execution_time_admission"]["per_optimizer_step"].__setitem__(
+            "nonpadding_tokens_equals", "<=rung"
+        ),
+        "EQUAL to the rung",
+    )
+    # observed_microbatches other than exactly 1 is refused.
+    reject(
+        lambda L: L["execution_time_admission"]["per_optimizer_step"].__setitem__(
+            "observed_microbatches", 2
+        ),
+        "observed_microbatches must be exactly 1",
+    )
+    # A row count other than 12 is refused.
+    reject(lambda L: L["feasibility_fixture"].__setitem__("rows_per_rung", 16), "exactly 12 rows")
+    # An abbreviated per-rung hash is refused.
+    reject(
+        lambda L: L["feasibility_fixture"]["per_rung"]["512"].__setitem__("dataset_sha256", "abc123"),
+        "must be a full 64-hex SHA-256",
+    )
+    # A wrong rung list / order is refused.
+    reject(
+        lambda L: L["feasibility_fixture"]["per_rung"].__setitem__(
+            "768", L["feasibility_fixture"]["per_rung"]["512"]
+        ),
+        "per_rung keys must be exactly",
+    )
+    # Substituting the private corpus for the fixture is refused.
+    reject(
+        lambda L: L["feasibility_fixture"].__setitem__("is_primary_private_corpus", True),
+        "must not be the primary private corpus",
+    )
+    # Packing or truncation on the fixture is refused.
+    reject(lambda L: L["feasibility_fixture"].__setitem__("packing", True), "disable packing")
+    reject(lambda L: L["feasibility_fixture"].__setitem__("truncation", True), "disable truncation")
+    # A missing training objective mode is refused.
+    reject(
+        lambda L: L.__setitem__(
+            "training_objective", {"expected_supervised_tokens_per_microbatch": "rung"}
+        ),
+        "must declare a mode",
+    )
+    # Missing conformance evidence is refused.
+    reject(lambda L: L.__setitem__("predispatch_conformance", {}), "predispatch conformance status")
+    # A claim that the collator evidence alone proves execution is refused.
+    reject(
+        lambda L: L["predispatch_conformance"].__setitem__(
+            "is_not_a_completed_worker_execution_or_gpu_result", False
+        ),
+        "NOT a completed execution",
+    )
+    # A non-40-hex model revision is refused.
+    reject(
+        lambda L: L["feasibility_fixture"]["model_binding"].__setitem__("revision", "short"),
+        "model revision must be a 40-hex",
+    )
+    # Marking the amendment as anything but fixture-only (a worker change) is refused.
+    reject(
+        lambda L: L["fixture_change_classification"].__setitem__("NO_WORKER_CHANGE", False),
+        "must be true for this fixture-only amendment",
+    )
+
+
+def test_nonpadding_feasibility_rejects_worker_execution_wording() -> None:
+    # The fixture-only amendment must not smuggle a worker-execution-change claim into the ladder.
+    vp = _load_validator_module()
+    effective = _effective_matrix()
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["predispatch_conformance"]["note"] = "this is a worker-execution-change"
+    with pytest.raises(vp.ProtocolValidationError, match="worker-execution-change wording"):
+        vp._validate_nonpadding_sequence_feasibility(bad)
