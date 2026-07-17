@@ -98,15 +98,22 @@ execution configs, both v7 runs, both admitted v7 adapters, and the v7 output/ev
 scientific tuple and all 1.4.0 throughput gates are unchanged. 0005 also preregisters the separate
 non-paper `seven_b_native_linux_feasibility_ladder`: model `qwen2.5-7b-instruct` (a resolvable
 `models[].id`, repository `Qwen/Qwen2.5-7B-Instruct`) against its own license-clear feasibility fixture
-(distinct from the private corpus, no fixture content read here); rungs 512/1024/2048/3072/4096; mb=1,
-ga=1; one bounded 12-step run per kernel per rung (math required, flash only after same-rung math
-success, max two kernel runs, zero automatic retries, unexecuted flash `NOT_RUN`); no imputation; exact
-per-rung success criteria (12 steps, finite loss, forced kernel, positive tokens, changed adapter,
-admitted artifact, complete telemetry, measured fit, clean GPU release) with seq-4096 held no weaker; not
-primary paper cells. The validator now semantically checks this ladder and the wheel-identity-vs-worker-
-execution lineage classification (v8 requires a fresh wheel/environment lineage but is not a
-worker-execution change). No v8 wheel, environment, plan, or run exists yet; this amendment is
-preregistration only.
+(distinct from the private corpus, no fixture content read here). Fixed configuration: rungs
+512/1024/2048/3072/4096 ascending; mb=1, ga=1; 12 bounded optimizer steps; offload none; zero automatic
+retries; math first-once, flash at-most-once. Flash eligibility (avoiding a false negative): flash runs
+after math success OR a clean, conclusively math-specific OOM/timeout (all preconditions met), and is
+withheld (`NOT_RUN`) for shared-path/identity/environment/artifact/telemetry/protocol/corruption/
+uncontrolled-health failures. Rung result definitions are separate: kernel success (every per-kernel
+criterion), rung success (at least one executed kernel succeeds), matched-pair (both succeed), and the
+seq-4096 feasibility claim (at least one kernel at 4096); a flash failure never erases a valid math
+success. Progression advances only after rung success, stops with no kernel success (longer rungs
+`NOT_RUN_PRIOR_RUNG_NO_SUCCESS`), imputes nothing, and a shared-path failure stops immediately. Per-kernel
+success is exact (12 steps, finite loss, forced kernel, positive tokens, changed adapter, admitted
+artifact, complete telemetry, measured fit, clean GPU release), seq-4096 no weaker; not primary paper
+cells. The validator binds every controlling value exactly (not by nonempty prose) and separately checks
+the wheel-identity-vs-worker-execution lineage classification (v8 requires a fresh wheel/environment
+lineage but is not a worker-execution change). No v8 wheel, environment, plan, or run exists yet; this
+amendment is preregistration only.
 
 ## Evidence boundary at preregistration
 

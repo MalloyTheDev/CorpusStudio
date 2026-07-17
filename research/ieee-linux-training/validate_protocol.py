@@ -118,6 +118,40 @@ RUNG_SUCCESS_CRITERIA = (
     "measured_fit",
     "clean_gpu_release",
 )
+# Fixed feasibility ladder - exact controlling values, bound (not validated by nonempty prose).
+LADDER_RUNGS = [512, 1024, 2048, 3072, 4096]
+LADDER_RUNG_ORDER = "ascending"
+# Flash runs at most once, only after math succeeds OR after a clean, conclusively math-specific OOM or
+# timeout; it is withheld for any other failure class. The exact controlling values follow.
+FLASH_CONDITION_REQUIRED = "run-after-math-success-or-clean-math-specific-oom-or-timeout"
+ELIGIBLE_MATH_TERMINAL_CLASSES = frozenset({"kernel_specific_oom", "kernel_specific_timeout"})
+CLEAN_MATH_SPECIFIC_PRECONDITIONS = frozenset(
+    {
+        "shared_preparation_passed",
+        "declared_math_kernel_selected_no_fallback",
+        "evidence_remained_valid",
+        "process_terminated_cleanly",
+        "gpu_memory_released",
+        "environment_health_and_drift_checks_passed",
+    }
+)
+WITHHOLD_FLASH_FAILURE_CLASSES = frozenset(
+    {
+        "shared_path",
+        "identity",
+        "environment",
+        "artifact",
+        "telemetry",
+        "protocol",
+        "corruption",
+        "uncontrolled_health",
+    }
+)
+KERNEL_SUCCESS_DEFINITION = "one-kernel-satisfies-every-rung_success_requires-condition"
+RUNG_SUCCESS_DEFINITION = "at-least-one-executed-kernel-succeeds"
+MATCHED_PAIR_DEFINITION = "both-math-and-flash-succeed"
+SEQ_4096_CLAIM_DEFINITION = "at-least-one-kernel-succeeds-at-rung-4096"
+NOT_RUN_LONGER_STATUS = "NOT_RUN_PRIOR_RUNG_NO_SUCCESS"
 
 
 class ProtocolValidationError(ValueError):
@@ -397,12 +431,20 @@ def _validate_lineage_change_classification(effective: dict[str, Any]) -> None:
 
 
 def _validate_seven_b_feasibility_ladder(effective: dict[str, Any]) -> None:
-    """The 7B feasibility ladder is a separate, non-paper arm. This binds its four ambiguities shut:
-    (1) the model reference must resolve to exactly one ``models[].id`` and match its repository (a
-    repository-shaped id is refused); (2) the feasibility fixture carries its own identity contract and
-    is explicitly not the primary private corpus; (3) the per-kernel run count is unambiguous (one run
-    per kernel per rung, math required, flash only after math success, cap two, zero automatic retries);
-    (4) a rung success is held to the exact ordered criteria, with sequence length 4096 no weaker."""
+    """The 7B feasibility ladder is a separate, non-paper arm. This binds its semantics shut, by exact
+    controlling values (not descriptive prose): (0) non-paper separation; (1) the model reference must
+    resolve to exactly one ``models[].id`` and match its repository (a repository-shaped id is refused);
+    (2) the feasibility fixture carries its own identity contract, distinct from the private corpus;
+    (3) the fixed ladder configuration (rung list and order, microbatch 1, gradient accumulation 1, 12
+    bounded steps, no offload, zero automatic retries, math first-once, flash at-most-once); (4) the
+    flash-eligibility rule (flash runs after math success OR a clean, conclusively math-specific OOM or
+    timeout, and is withheld for every other enumerated failure class - so a math OOM that flash would
+    survive is not a false negative); (5) the separate rung-result definitions (kernel success, rung
+    success = at least one executed kernel succeeds, matched-pair = both succeed, seq-4096 claim = at
+    least one kernel succeeds at 4096; a flash failure never erases a valid math success); (6) the
+    progression and stopping rule (advance only after rung success, stop with no kernel success, longer
+    rungs NOT_RUN_PRIOR_RUNG_NO_SUCCESS, no imputation, shared-path failure stops immediately); and
+    (7) the exact per-kernel success criteria, with sequence length 4096 held no weaker."""
 
     ladder = effective.get(SEVEN_B_LADDER_KEY)
     if not isinstance(ladder, dict):
@@ -471,42 +513,107 @@ def _validate_seven_b_feasibility_ladder(effective: dict[str, Any]) -> None:
     if fixture.get("truncation") is not False:
         raise ProtocolValidationError("feasibility fixture must disable truncation")
 
-    # (3) unambiguous per-kernel run count.
-    per_rung = ladder.get("per_rung")
-    if not isinstance(per_rung, dict):
-        raise ProtocolValidationError("feasibility ladder per_rung is malformed")
-    if "runs_per_rung" in per_rung:
+    # (3) fixed ladder configuration - exact controlling values.
+    config = ladder.get("fixed_ladder_configuration")
+    if not isinstance(config, dict):
+        raise ProtocolValidationError("feasibility ladder fixed configuration is missing")
+    if config.get("sequence_length_rungs") != LADDER_RUNGS:
         raise ProtocolValidationError(
-            "feasibility ladder must not use the ambiguous runs_per_rung; declare per-kernel semantics"
+            f"feasibility ladder rungs must be exactly {LADDER_RUNGS} in that order"
         )
-    if per_rung.get("runs_per_kernel_per_rung") != 1:
-        raise ProtocolValidationError(
-            "feasibility ladder must run exactly one run per kernel per rung"
-        )
-    if per_rung.get("math_required") is not True:
-        raise ProtocolValidationError("feasibility ladder must require the math kernel at each rung")
-    if per_rung.get("flash_condition") != "run-only-after-math-success-at-the-same-rung":
-        raise ProtocolValidationError("feasibility ladder flash condition is not the required rule")
-    if per_rung.get("maximum_kernel_runs_per_rung") != 2:
-        raise ProtocolValidationError("feasibility ladder must cap kernel runs per rung at 2")
-    if per_rung.get("automatic_workload_retry_count") != 0:
-        raise ProtocolValidationError("feasibility ladder must forbid automatic workload retries")
-    if per_rung.get("unexecuted_flash_status") != "NOT_RUN":
-        raise ProtocolValidationError("feasibility ladder unexecuted flash must remain NOT_RUN")
-
-    # failure semantics without imputation.
-    failure = ladder.get("failure_semantics")
-    if not isinstance(failure, dict):
-        raise ProtocolValidationError("feasibility ladder failure semantics are missing")
-    if failure.get("imputation") != "none":
-        raise ProtocolValidationError("feasibility ladder must not impute failures")
-    for condition in ("shared_path_failure", "oom", "timeout", "flash_withheld"):
-        if not isinstance(failure.get(condition), str) or not failure.get(condition):
+    fixed_scalars = {
+        "rung_order": LADDER_RUNG_ORDER,
+        "microbatch": 1,
+        "gradient_accumulation": 1,
+        "bounded_optimizer_steps": 12,
+        "offload": "none",
+        "automatic_workload_retry_count": 0,
+        "math_runs": "first-once",
+        "flash_runs": "at-most-once",
+    }
+    for field, expected in fixed_scalars.items():
+        if config.get(field) != expected:
             raise ProtocolValidationError(
-                f"feasibility ladder must define {condition} behavior without imputation"
+                f"feasibility ladder fixed configuration {field} must be {expected!r}"
             )
 
-    # (4) exact success criteria; sequence length 4096 no weaker.
+    # (4) flash-eligibility rule - exactly bound (no false negative on a survivable math OOM).
+    flash = ladder.get("flash_eligibility")
+    if not isinstance(flash, dict):
+        raise ProtocolValidationError("feasibility ladder flash eligibility is missing")
+    if flash.get("flash_condition") != FLASH_CONDITION_REQUIRED:
+        raise ProtocolValidationError(
+            f"feasibility ladder flash_condition must be {FLASH_CONDITION_REQUIRED!r}"
+        )
+    if flash.get("run_when_math_succeeds") is not True:
+        raise ProtocolValidationError("flash must run when math succeeds")
+    if flash.get("run_when_math_ends_clean_kernel_specific_oom_or_timeout") is not True:
+        raise ProtocolValidationError(
+            "flash must run after a clean, conclusively math-specific OOM or timeout"
+        )
+    if set(flash.get("eligible_math_terminal_classes") or []) != ELIGIBLE_MATH_TERMINAL_CLASSES:
+        raise ProtocolValidationError(
+            "flash eligibility must bind exactly the kernel-specific OOM and timeout terminal classes"
+        )
+    if (
+        set(flash.get("clean_math_specific_failure_preconditions") or [])
+        != CLEAN_MATH_SPECIFIC_PRECONDITIONS
+    ):
+        raise ProtocolValidationError(
+            "flash eligibility must bind exactly the clean math-specific failure preconditions"
+        )
+    if set(flash.get("withhold_flash_failure_classes") or []) != WITHHOLD_FLASH_FAILURE_CLASSES:
+        raise ProtocolValidationError(
+            "flash eligibility must withhold flash for exactly the enumerated failure classes"
+        )
+    if flash.get("withheld_flash_status") != "NOT_RUN":
+        raise ProtocolValidationError("a withheld flash must be recorded NOT_RUN")
+
+    # (5) separate rung-result definitions.
+    results = ladder.get("rung_result_definitions")
+    if not isinstance(results, dict):
+        raise ProtocolValidationError("feasibility ladder rung result definitions are missing")
+    result_defs = {
+        "kernel_success": KERNEL_SUCCESS_DEFINITION,
+        "rung_success": RUNG_SUCCESS_DEFINITION,
+        "matched_pair_success": MATCHED_PAIR_DEFINITION,
+        "sequence_4096_feasibility_claim": SEQ_4096_CLAIM_DEFINITION,
+    }
+    for field, expected in result_defs.items():
+        if results.get(field) != expected:
+            raise ProtocolValidationError(
+                f"feasibility ladder {field} definition must be {expected!r}"
+            )
+    if results.get("flash_failure_does_not_erase_math_success") is not True:
+        raise ProtocolValidationError("a flash failure must not erase a valid math success")
+    if results.get("math_fail_then_flash_success_is_rung_success_not_matched_pair") is not True:
+        raise ProtocolValidationError(
+            "math-fail then flash-success must be rung success but not matched-pair success"
+        )
+
+    # (6) progression and stopping rule.
+    progression = ladder.get("progression")
+    if not isinstance(progression, dict):
+        raise ProtocolValidationError("feasibility ladder progression is missing")
+    progression_flags = {
+        "advance_only_after_rung_success": True,
+        "stop_after_rung_with_no_kernel_success": True,
+        "impute_longer_rungs": False,
+        "impute_any_result": False,
+        "shared_path_failure_stops_ladder_immediately": True,
+        "preserve_every_terminal_result": True,
+    }
+    for field, expected in progression_flags.items():
+        if progression.get(field) is not expected:
+            raise ProtocolValidationError(
+                f"feasibility ladder progression {field} must be {expected}"
+            )
+    if progression.get("longer_rungs_status_after_stop") != NOT_RUN_LONGER_STATUS:
+        raise ProtocolValidationError(
+            f"longer rungs after a stop must be {NOT_RUN_LONGER_STATUS!r}"
+        )
+
+    # (7) exact per-kernel success criteria; sequence length 4096 no weaker.
     if list(ladder.get("rung_success_requires") or []) != list(RUNG_SUCCESS_CRITERIA):
         raise ProtocolValidationError(
             "feasibility ladder rung_success_requires is not the exact required criteria set"

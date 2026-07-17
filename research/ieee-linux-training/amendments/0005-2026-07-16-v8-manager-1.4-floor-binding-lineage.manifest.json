@@ -34,10 +34,10 @@
   "files": {
     "base_protocol_sha256": "b7a029bdd4a91ba9efbfe34c81d734b5dfafac13fbd81df545f9f694440ef34d",
     "base_matrix_sha256": "77b820df6c0ebda9ec5410f9c538a58a23c36e7dc0bc91d37c0f50370c1b2907",
-    "effective_matrix_sha256": "7d3ebbaf93d7138e82a7a00e3e61c3cb228cd89a5d60dc4e16acb0bcb20b7ef0",
-    "narrative_sha256": "a8e0a3b545daa9eb3c31d1d8ee38bfa905a95ebd117f4c9e0004ad2c92fbf8f4",
+    "effective_matrix_sha256": "ed7239caa1747c292d78284e0c7baf000201d341794cb6415e9334d1a7ea81d6",
+    "narrative_sha256": "9e86ec5f062aa42b60fb17f271869a24fbd918c927ad2327ded4851a4ac9b3c0",
     "reserved_identities_sha256": "229709a991ab6b6bd66b3417a6ef96d40b1630643d719775f8ee07050d309775",
-    "validator_sha256": "5a66fb0075a7ed1d1d3e2d06b3983ab5284c83b668de0a5e57dbcd5a97db0a91"
+    "validator_sha256": "aac5034d7d1492e79b4daa761a497ad5f80f2e1e3482db1f57f63768597c6600"
   },
   "validation_contract": {
     "identity_algorithm": "sha256-raw-file-v1",
@@ -386,33 +386,67 @@
         "truncation": false,
         "content_read_or_frozen_in_this_amendment": false
       },
-      "sequence_length_rungs": [
-        512,
-        1024,
-        2048,
-        3072,
-        4096
-      ],
-      "per_rung": {
+      "fixed_ladder_configuration": {
+        "sequence_length_rungs": [
+          512,
+          1024,
+          2048,
+          3072,
+          4096
+        ],
+        "rung_order": "ascending",
         "microbatch": 1,
         "gradient_accumulation": 1,
         "bounded_optimizer_steps": 12,
-        "runs_per_kernel_per_rung": 1,
-        "math_required": true,
-        "flash_condition": "run-only-after-math-success-at-the-same-rung",
-        "maximum_kernel_runs_per_rung": 2,
-        "automatic_workload_retry_count": 0,
-        "kernel_order": "math-first-flash-conditional",
-        "unexecuted_flash_status": "NOT_RUN",
         "offload": "none",
-        "failure_retained_honestly": true
+        "automatic_workload_retry_count": 0,
+        "math_runs": "first-once",
+        "flash_runs": "at-most-once"
       },
-      "failure_semantics": {
-        "imputation": "none",
-        "shared_path_failure": "a rung whose shared preparation (model load, tokenizer, fixture render, or environment probe) fails is recorded as a shared-path failure for that rung; it is neither a math nor a flash result, is not imputed, and does not advance the ladder",
-        "oom": "an out-of-memory termination is recorded under the terminal OOM taxonomy for the exact kernel and rung that produced it, retained honestly, and never imputed to the other kernel or a longer rung",
-        "timeout": "a wall-time or step-time stop is recorded under the terminal timeout taxonomy for that exact kernel and rung, retained honestly, and never imputed",
-        "flash_withheld": "when math does not succeed at a rung, flash is withheld at that rung and recorded NOT_RUN; a withheld or unexecuted flash rung is never a pass, a fail, or an imputed value"
+      "flash_eligibility": {
+        "flash_condition": "run-after-math-success-or-clean-math-specific-oom-or-timeout",
+        "run_when_math_succeeds": true,
+        "run_when_math_ends_clean_kernel_specific_oom_or_timeout": true,
+        "eligible_math_terminal_classes": [
+          "kernel_specific_oom",
+          "kernel_specific_timeout"
+        ],
+        "clean_math_specific_failure_preconditions": [
+          "declared_math_kernel_selected_no_fallback",
+          "environment_health_and_drift_checks_passed",
+          "evidence_remained_valid",
+          "gpu_memory_released",
+          "process_terminated_cleanly",
+          "shared_preparation_passed"
+        ],
+        "withhold_flash_failure_classes": [
+          "artifact",
+          "corruption",
+          "environment",
+          "identity",
+          "protocol",
+          "shared_path",
+          "telemetry",
+          "uncontrolled_health"
+        ],
+        "withheld_flash_status": "NOT_RUN"
+      },
+      "rung_result_definitions": {
+        "kernel_success": "one-kernel-satisfies-every-rung_success_requires-condition",
+        "rung_success": "at-least-one-executed-kernel-succeeds",
+        "matched_pair_success": "both-math-and-flash-succeed",
+        "sequence_4096_feasibility_claim": "at-least-one-kernel-succeeds-at-rung-4096",
+        "flash_failure_does_not_erase_math_success": true,
+        "math_fail_then_flash_success_is_rung_success_not_matched_pair": true
+      },
+      "progression": {
+        "advance_only_after_rung_success": true,
+        "stop_after_rung_with_no_kernel_success": true,
+        "longer_rungs_status_after_stop": "NOT_RUN_PRIOR_RUNG_NO_SUCCESS",
+        "impute_longer_rungs": false,
+        "impute_any_result": false,
+        "shared_path_failure_stops_ladder_immediately": true,
+        "preserve_every_terminal_result": true
       },
       "rung_success_requires": [
         "exactly_12_optimizer_steps",

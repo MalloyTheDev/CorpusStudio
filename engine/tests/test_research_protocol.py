@@ -19,7 +19,7 @@ _CONTRACTS = _REPOSITORY_ROOT / "docs/contracts"
 # Amendment 0005 -> effective matrix 1.5.0 (v8 worker lineage; Environment Manager 1.4.0 + exact
 # per-lineage floor binding). Reconstructed byte-deterministically from the base matrix plus the 0005
 # manifest.
-_EFFECTIVE_HASH = "7d3ebbaf93d7138e82a7a00e3e61c3cb228cd89a5d60dc4e16acb0bcb20b7ef0"
+_EFFECTIVE_HASH = "ed7239caa1747c292d78284e0c7baf000201d341794cb6415e9334d1a7ea81d6"
 
 
 def _load_validator_module():
@@ -396,34 +396,141 @@ def test_feasibility_fixture_identity_is_bound_and_distinct_from_private_corpus(
         vp._validate_seven_b_feasibility_ladder(bad)
 
 
-def test_feasibility_per_kernel_run_count_is_unambiguous() -> None:
+def test_feasibility_fixed_configuration_is_bound_exactly() -> None:
     vp = _load_validator_module()
     effective = _effective_matrix()
-    per_rung = _ladder(effective)["per_rung"]
-    # The ambiguous runs_per_rung is gone; per-kernel semantics are explicit.
-    assert "runs_per_rung" not in per_rung
-    assert per_rung["runs_per_kernel_per_rung"] == 1
-    assert per_rung["math_required"] is True
-    assert per_rung["flash_condition"] == "run-only-after-math-success-at-the-same-rung"
-    assert per_rung["maximum_kernel_runs_per_rung"] == 2
-    assert per_rung["automatic_workload_retry_count"] == 0
-    assert per_rung["unexecuted_flash_status"] == "NOT_RUN"
-    # Failure semantics are declared without imputation.
-    failure = _ladder(effective)["failure_semantics"]
-    assert failure["imputation"] == "none"
-    for condition in ("shared_path_failure", "oom", "timeout", "flash_withheld"):
-        assert isinstance(failure[condition], str) and failure[condition]
+    config = _ladder(effective)["fixed_ladder_configuration"]
+    assert config["sequence_length_rungs"] == [512, 1024, 2048, 3072, 4096]
+    assert config["rung_order"] == "ascending"
+    assert config["microbatch"] == 1
+    assert config["gradient_accumulation"] == 1
+    assert config["bounded_optimizer_steps"] == 12
+    assert config["offload"] == "none"
+    assert config["automatic_workload_retry_count"] == 0
+    assert config["math_runs"] == "first-once"
+    assert config["flash_runs"] == "at-most-once"
 
-    # Reintroducing the ambiguous runs_per_rung is refused.
+    # Each controlling scalar is bound exactly (not by nonempty prose): a mutation is refused.
+    for field, bad_value, message in (
+        ("sequence_length_rungs", [512, 1024, 2048, 4096], "rungs must be exactly"),
+        ("sequence_length_rungs", [4096, 3072, 2048, 1024, 512], "rungs must be exactly"),
+        ("microbatch", 2, "microbatch must be 1"),
+        ("gradient_accumulation", 4, "gradient_accumulation must be 1"),
+        ("bounded_optimizer_steps", 24, "bounded_optimizer_steps must be 12"),
+        ("offload", "cpu", "offload must be 'none'"),
+        ("automatic_workload_retry_count", 1, "automatic_workload_retry_count must be 0"),
+    ):
+        bad = copy.deepcopy(effective)
+        _ladder(bad)["fixed_ladder_configuration"][field] = bad_value
+        with pytest.raises(vp.ProtocolValidationError, match=message):
+            vp._validate_seven_b_feasibility_ladder(bad)
+
+
+def test_feasibility_flash_eligibility_avoids_the_math_oom_false_negative() -> None:
+    vp = _load_validator_module()
+    effective = _effective_matrix()
+    flash = _ladder(effective)["flash_eligibility"]
+    # Flash runs after math success OR a clean, conclusively math-specific OOM/timeout - so a math OOM
+    # that flash would survive is not a false negative.
+    assert flash["flash_condition"] == "run-after-math-success-or-clean-math-specific-oom-or-timeout"
+    assert flash["run_when_math_succeeds"] is True
+    assert flash["run_when_math_ends_clean_kernel_specific_oom_or_timeout"] is True
+    assert set(flash["eligible_math_terminal_classes"]) == {
+        "kernel_specific_oom", "kernel_specific_timeout",
+    }
+    assert set(flash["clean_math_specific_failure_preconditions"]) == {
+        "shared_preparation_passed",
+        "declared_math_kernel_selected_no_fallback",
+        "evidence_remained_valid",
+        "process_terminated_cleanly",
+        "gpu_memory_released",
+        "environment_health_and_drift_checks_passed",
+    }
+    assert set(flash["withhold_flash_failure_classes"]) == {
+        "shared_path", "identity", "environment", "artifact",
+        "telemetry", "protocol", "corruption", "uncontrolled_health",
+    }
+    assert flash["withheld_flash_status"] == "NOT_RUN"
+
+    # The old narrow "flash only after math success" rule is now refused (it caused the false negative).
     bad = copy.deepcopy(effective)
-    _ladder(bad)["per_rung"]["runs_per_rung"] = 1
-    with pytest.raises(vp.ProtocolValidationError, match="ambiguous runs_per_rung"):
+    _ladder(bad)["flash_eligibility"]["flash_condition"] = "run-only-after-math-success-at-the-same-rung"
+    with pytest.raises(vp.ProtocolValidationError, match="flash_condition must be"):
         vp._validate_seven_b_feasibility_ladder(bad)
 
-    # An imputing failure policy is refused.
+    # Refusing to run flash after a clean math-specific OOM is refused.
     bad = copy.deepcopy(effective)
-    _ladder(bad)["failure_semantics"]["imputation"] = "nearest-rung"
-    with pytest.raises(vp.ProtocolValidationError, match="must not impute failures"):
+    _ladder(bad)["flash_eligibility"]["run_when_math_ends_clean_kernel_specific_oom_or_timeout"] = False
+    with pytest.raises(vp.ProtocolValidationError, match="after a clean, conclusively math-specific"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+    # Dropping a withhold class (making flash eligible after a shared-path failure) is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["flash_eligibility"]["withhold_flash_failure_classes"].remove("shared_path")
+    with pytest.raises(vp.ProtocolValidationError, match="withhold flash for exactly"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+
+def test_feasibility_rung_aggregation_and_matched_pair_are_separate() -> None:
+    vp = _load_validator_module()
+    effective = _effective_matrix()
+    results = _ladder(effective)["rung_result_definitions"]
+    assert results["kernel_success"] == "one-kernel-satisfies-every-rung_success_requires-condition"
+    assert results["rung_success"] == "at-least-one-executed-kernel-succeeds"
+    assert results["matched_pair_success"] == "both-math-and-flash-succeed"
+    assert results["sequence_4096_feasibility_claim"] == "at-least-one-kernel-succeeds-at-rung-4096"
+    # A flash failure must not erase a valid math success; math-fail then flash-success is rung
+    # success but not matched-pair success.
+    assert results["flash_failure_does_not_erase_math_success"] is True
+    assert results["math_fail_then_flash_success_is_rung_success_not_matched_pair"] is True
+
+    # Requiring both kernels for rung success (instead of at-least-one) is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["rung_result_definitions"]["rung_success"] = "both-kernels-succeed"
+    with pytest.raises(vp.ProtocolValidationError, match="rung_success definition must be"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+    # Letting a flash failure erase a math success is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["rung_result_definitions"]["flash_failure_does_not_erase_math_success"] = False
+    with pytest.raises(vp.ProtocolValidationError, match="must not erase a valid math success"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+    # A weaker 4096 claim (both kernels) than "at least one kernel" is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["rung_result_definitions"]["sequence_4096_feasibility_claim"] = "both-kernels-at-4096"
+    with pytest.raises(vp.ProtocolValidationError, match="sequence_4096_feasibility_claim definition"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+
+def test_feasibility_progression_and_stopping_rule_is_bound() -> None:
+    vp = _load_validator_module()
+    effective = _effective_matrix()
+    progression = _ladder(effective)["progression"]
+    assert progression["advance_only_after_rung_success"] is True
+    assert progression["stop_after_rung_with_no_kernel_success"] is True
+    assert progression["longer_rungs_status_after_stop"] == "NOT_RUN_PRIOR_RUNG_NO_SUCCESS"
+    assert progression["impute_longer_rungs"] is False
+    assert progression["impute_any_result"] is False
+    assert progression["shared_path_failure_stops_ladder_immediately"] is True
+    assert progression["preserve_every_terminal_result"] is True
+
+    # Advancing without rung success is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["progression"]["advance_only_after_rung_success"] = False
+    with pytest.raises(vp.ProtocolValidationError, match="advance_only_after_rung_success must be True"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+    # A wrong NOT_RUN status for longer rungs is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["progression"]["longer_rungs_status_after_stop"] = "NOT_RUN"
+    with pytest.raises(vp.ProtocolValidationError, match="NOT_RUN_PRIOR_RUNG_NO_SUCCESS"):
+        vp._validate_seven_b_feasibility_ladder(bad)
+
+    # Imputing longer rungs is refused.
+    bad = copy.deepcopy(effective)
+    _ladder(bad)["progression"]["impute_longer_rungs"] = True
+    with pytest.raises(vp.ProtocolValidationError, match="impute_longer_rungs must be False"):
         vp._validate_seven_b_feasibility_ladder(bad)
 
 
