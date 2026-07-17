@@ -190,6 +190,7 @@ export type NormalizedName2 = string;
 export type Path = string;
 export type SizeBytes = number;
 export type Version3 = string;
+export type WorkerSourceCommit = string | null;
 
 /**
  * The exact, reproducible record of what an environment actually contains — the post-install
@@ -219,6 +220,7 @@ export interface EnvironmentLock {
   torch_build?: TorchBuild;
   torch_version?: TorchVersion;
   worker_artifact?: WorkerArtifactIdentity | null;
+  worker_source_commit?: WorkerSourceCommit;
 }
 /**
  * Sanitized pip-install provenance retained separately from installed-file inspection.

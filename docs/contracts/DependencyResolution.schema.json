@@ -784,6 +784,19 @@
         }
       ],
       "default": null
+    },
+    "worker_source_commit": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Worker Source Commit"
     }
   },
   "required": [

@@ -844,6 +844,46 @@ def test_scientific_admission_refuses_wheel_floor_mismatch(tmp_path):
     )
 
 
+def test_scientific_admission_refuses_worker_source_commit_mismatch(tmp_path):
+    # When a plan reviews a worker_source_commit, the wheel's EMBEDDED source_commit must equal it - the
+    # same value-match discipline as the floor, applied to the field that becomes the recorded
+    # provenance. A mismatch is refused at admission BEFORE any mutation.
+    manager, base, _, wheel = _manager_and_readiness_resolution(tmp_path)
+    mismatched = "c1c2c3c4c5c6c1c2c3c4c5c6c1c2c3c4c5c6c1c2"
+    assert mismatched != _FIXTURE_SOURCE_COMMIT
+    resolution = manager.preview(
+        "backend-corpus-studio-readiness-v2",
+        env_id="backend-corpus-studio-readiness-v2",
+        runtime_executable=base.runtime.executable,
+        accelerator_tag="cu128",
+        worker_wheel=wheel,
+        required_git_ancestor=_FIXTURE_REQUIRED_ANCESTOR,
+        worker_source_commit=mismatched,
+    )
+    assert resolution.resolvable and resolution.resolution_hash
+    with pytest.raises(EnvironmentManagerError, match="does not match the reviewed source commit"):
+        manager.create(resolution, confirmed_resolution_hash=resolution.resolution_hash or "")
+    assert not manager.environment_root("backend-corpus-studio-readiness-v2").exists()
+
+
+def test_scientific_create_admits_and_records_matching_worker_source_commit(tmp_path):
+    # A plan reviewing the wheel's ACTUAL embedded source_commit admits, and the admitted commit is
+    # recorded in the sealed lock (recoverable from evidence), alongside the floor.
+    manager, base, _, wheel = _manager_and_readiness_resolution(tmp_path)
+    resolution = manager.preview(
+        "backend-corpus-studio-readiness-v2",
+        env_id="backend-corpus-studio-readiness-v2",
+        runtime_executable=base.runtime.executable,
+        accelerator_tag="cu128",
+        worker_wheel=wheel,
+        required_git_ancestor=_FIXTURE_REQUIRED_ANCESTOR,
+        worker_source_commit=_FIXTURE_SOURCE_COMMIT,
+    )
+    result = manager.create(resolution, confirmed_resolution_hash=resolution.resolution_hash or "")
+    assert result.lock is not None
+    assert result.lock.worker_source_commit == _FIXTURE_SOURCE_COMMIT
+
+
 def test_scientific_admission_refuses_wheel_embedding_historical_minimum_when_plan_pins_exact(
     tmp_path,
 ):
@@ -2973,9 +3013,11 @@ def test_legacy_environment_lock_digest_remains_compatible(tmp_path):
         "resolution_ref",
         "package_install_evidence",
         "worker_artifact",
-        # A legacy lock predates the manager-1.3 admitted-floor field; its original seal never saw it,
-        # so the pop-when-None carve-out drops it and reproduces the historical digest byte-for-byte.
+        # A legacy lock predates the manager-1.3 admitted-floor field and the later reviewed-worker-
+        # source-commit field; its original seal never saw either, so the pop-when-None carve-outs drop
+        # them and reproduce the historical digest byte-for-byte.
         "required_git_ancestor",
+        "worker_source_commit",
         "probe_evidence",
     ):
         body.pop(field_name)

@@ -46,6 +46,7 @@ from corpus_studio.platform.environments import (
 # DISTINCT and must never be treated as interchangeable (see the dedicated regression test).
 _V7_EXACT_FLOOR = "25c901ec85fd6f6303eff6c3dd81938afe328a2b"
 _HISTORICAL_MINIMUM = "df86db53e294a6e15b724c586f7016a1c9fdac00"
+_REVIEWED_SOURCE_COMMIT = "fedd7d5e04c2161c1393016f0b83f469a17d0cd2"
 
 runner = CliRunner()
 
@@ -194,6 +195,62 @@ def test_supplied_plan_floor_changes_resolution_and_confirmation_hash():
     assert moved.required_git_ancestor == _HISTORICAL_MINIMUM
     assert moved.recipe_ref.hash == base.recipe_ref.hash  # recipe identity unchanged
     assert moved.resolution_hash != base.resolution_hash  # confirmation hash reseals on floor change
+
+
+def test_supplied_worker_source_commit_seals_reseals_and_is_optional():
+    # The reviewed worker source commit is an OPTIONAL per-lineage plan input: supplying it seals the
+    # resolution and its confirmation hash; a different commit reseals; and omitting it leaves the plan
+    # resolvable with a hash byte-identical to before the field existed (pop-when-None).
+    recipe = get_recipe("backend-corpus-studio-readiness-v2")
+    assert recipe is not None
+    common = dict(
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+        required_git_ancestor=_V7_EXACT_FLOOR,
+    )
+    without = resolve_dependencies(recipe, **common)
+    assert without.worker_source_commit is None
+    with_commit = resolve_dependencies(recipe, **common, worker_source_commit=_REVIEWED_SOURCE_COMMIT)
+    assert with_commit.worker_source_commit == _REVIEWED_SOURCE_COMMIT
+    assert with_commit.resolvable is True
+    # Omitting the commit keeps the confirmation hash exactly as before the field existed.
+    again_without = resolve_dependencies(recipe, **common)
+    assert again_without.resolution_hash == without.resolution_hash
+    # Sealing a commit reseals the confirmation hash (a stale plan cannot be replayed under a new commit).
+    assert with_commit.resolution_hash != without.resolution_hash
+    other = resolve_dependencies(recipe, **common, worker_source_commit=_V7_EXACT_FLOOR)
+    assert other.resolution_hash != with_commit.resolution_hash
+    assert with_commit.recipe_ref.hash == without.recipe_ref.hash  # recipe identity unchanged
+
+
+def test_worker_source_commit_is_validated_and_scoped():
+    # A malformed worker source commit for a worker recipe blocks the plan; a non-worker recipe refuses
+    # one entirely. A worker recipe simply omitting it stays resolvable (the field is optional).
+    worker = get_recipe("backend-corpus-studio-readiness-v2")
+    assert worker is not None
+    malformed = resolve_dependencies(
+        worker,
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+        required_git_ancestor=_V7_EXACT_FLOOR,
+        worker_source_commit="not-a-commit",
+    )
+    assert malformed.resolvable is False
+    assert any("worker-source-commit" in reason for reason in malformed.blocking_reasons)
+
+    non_worker = get_recipe("backend-corpus-studio")
+    assert non_worker is not None and non_worker.requires_worker_wheel is False
+    refused = resolve_dependencies(
+        non_worker,
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+        worker_source_commit=_REVIEWED_SOURCE_COMMIT,
+    )
+    assert refused.resolvable is False
+    assert any("non-worker recipe does not accept" in reason for reason in refused.blocking_reasons)
 
 
 def test_worker_recipe_refuses_missing_or_malformed_plan_floor():

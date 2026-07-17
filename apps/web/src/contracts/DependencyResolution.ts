@@ -107,6 +107,7 @@ export type NormalizedName = string;
 export type Path = string;
 export type SizeBytes = number;
 export type Version1 = string;
+export type WorkerSourceCommit = string | null;
 
 /**
  * The resolved PREVIEW of provisioning a recipe on a specific host — the exact argv steps, the
@@ -134,6 +135,7 @@ export interface DependencyResolution {
   runtime?: PythonRuntime | null;
   warnings?: Warnings;
   worker_artifact?: WorkerArtifactIdentity | null;
+  worker_source_commit?: WorkerSourceCommit;
 }
 /**
  * A stable reference to another contract instance by id, optionally pinned to a content hash so
