@@ -143,34 +143,47 @@ def _hf_tokenizer(model_id: str) -> Any:
     return _hf_tokenizer_cache[model_id]
 
 
-def estimate_tokens(text: str, model_id: str | None = None) -> int:
-    """Best-effort token count: the target model's own tokenizer when available,
-    else tiktoken, else the Unicode-aware heuristic. ``model_id`` is a Hub id such
-    as ``"meta-llama/Llama-3-8B"``; omit it to skip the model-specific tier."""
+def estimate_tokens_with_tier(text: str, model_id: str | None = None) -> tuple[int, str]:
+    """Best-effort token count PLUS the estimator tier that ACTUALLY produced it.
+
+    The tier name here can never disagree with the executed one: :func:`estimator_name` predicts the
+    tier from whether the tokenizer *loads*, but a per-text ``encode()`` can still raise and fall
+    through to a lower tier - this returns whichever tier really ran. Empty text is ``(0, <predicted
+    tier>)`` (there is nothing to execute)."""
     if not text:
-        return 0
+        return 0, estimator_name(model_id)
 
     if model_id:
         tokenizer = _hf_tokenizer(model_id)
         if tokenizer is not None:
             try:
-                return max(1, len(tokenizer.encode(text).ids))
+                return max(1, len(tokenizer.encode(text).ids)), f"hf:{model_id}"
             except Exception:  # noqa: BLE001 - fall through to tiktoken / heuristic.
                 pass
 
     encoder = _tiktoken_encoder()
     if encoder is not None:
         try:
-            return max(1, len(encoder.encode(text)))
+            return max(1, len(encoder.encode(text))), "tiktoken"
         except Exception:  # noqa: BLE001 - fall back to the heuristic on any error.
             pass
 
-    return _heuristic_token_estimate(text)
+    return _heuristic_token_estimate(text), "heuristic"
+
+
+def estimate_tokens(text: str, model_id: str | None = None) -> int:
+    """Best-effort token count: the target model's own tokenizer when available,
+    else tiktoken, else the Unicode-aware heuristic. ``model_id`` is a Hub id such
+    as ``"meta-llama/Llama-3-8B"``; omit it to skip the model-specific tier. Use
+    :func:`estimate_tokens_with_tier` when you also need the tier that produced the count."""
+    return estimate_tokens_with_tier(text, model_id)[0]
 
 
 def estimator_name(model_id: str | None = None) -> str:
-    """Which estimator ``estimate_tokens`` will use for this model: the model's own
-    Hub tokenizer (``'hf:<model_id>'``), ``'tiktoken'``, or ``'heuristic'``."""
+    """The estimator tier ``estimate_tokens`` is PREDICTED to use for this model - based on which
+    tokenizer loads: the model's own Hub tokenizer (``'hf:<model_id>'``), ``'tiktoken'``, or
+    ``'heuristic'``. This is a prediction: a per-text ``encode()`` can still fail and fall to a lower
+    tier, so for the tier that ACTUALLY ran on a given text use :func:`estimate_tokens_with_tier`."""
     if model_id and _hf_tokenizer(model_id) is not None:
         return f"hf:{model_id}"
     return "tiktoken" if _tiktoken_encoder() is not None else "heuristic"

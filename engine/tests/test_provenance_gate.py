@@ -60,6 +60,36 @@ def test_google_gemini_palm_and_vertex_teachers_are_quarantined():
     assert report.unknown_rows == 0
 
 
+def test_open_gpt_family_models_are_not_mislabeled_openai():
+    # #567: open EleutherAI / GPT-2 weights must NOT be quarantined as restricted OpenAI provenance;
+    # they fall through to UNKNOWN (allow-listable), which is honest rather than a false 'openai' label.
+    for teacher in ("gpt-neo-2.7b", "gpt-j-6b", "gpt-neox-20b", "gpt2", "gpt-2"):
+        status, provider, _ = classify_teacher(teacher)
+        assert provider != "openai", teacher
+        assert status is TeacherStatus.UNKNOWN, teacher
+
+
+def test_proprietary_openai_models_are_still_quarantined():
+    for teacher in (
+        "gpt-4o",
+        "gpt-4-turbo",
+        "gpt-3.5-turbo",
+        "chatgpt-4o-latest",
+        "o1-mini",
+        "o3-mini",
+        "davinci-002",
+        "text-davinci-003",
+    ):
+        status, provider, _ = classify_teacher(teacher)
+        assert provider == "openai" and status is TeacherStatus.QUARANTINED, teacher
+
+
+def test_word_boundary_avoids_over_matching():
+    # 'palmyra' (Writer) must not match Google's 'palm'; 'olmo' (AllenAI) must not match the o-series.
+    assert classify_teacher("palmyra-x-004")[1] != "google"
+    assert classify_teacher("olmo-2-13b")[1] != "openai"
+
+
 def test_untagged_is_unknown_not_quarantined_or_pass():
     for teacher in (None, "", "   "):
         status, provider, _ = classify_teacher(teacher)

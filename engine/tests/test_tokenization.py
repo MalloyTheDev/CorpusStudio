@@ -3,6 +3,7 @@ import pytest
 from corpus_studio.tokenization import estimate as estimate_mod
 from corpus_studio.tokenization.estimate import (
     estimate_tokens,
+    estimate_tokens_with_tier,
     estimator_name,
     rough_token_estimate,
     tokenizer_offline,
@@ -87,6 +88,35 @@ def test_no_model_id_skips_the_model_tokenizer_tier(monkeypatch):
     # (model-agnostic) behavior — so existing callers are unaffected.
     _use_fake_hf_tokenizer(monkeypatch)
     assert estimator_name() == "heuristic"
+
+
+# --- estimate_tokens_with_tier reports the tier that ACTUALLY ran (#568) -------
+
+
+def test_with_tier_matches_estimate_tokens_and_handles_empty():
+    assert estimate_tokens_with_tier("hello world")[0] == estimate_tokens("hello world")
+    assert estimate_tokens_with_tier("")[0] == 0
+
+
+def test_with_tier_reports_hf_when_the_model_tokenizer_runs(monkeypatch):
+    _use_fake_hf_tokenizer(monkeypatch)
+    count, tier = estimate_tokens_with_tier("a b c d e", model_id="fake/model")
+    assert count == 5 and tier == "hf:fake/model"
+
+
+def test_with_tier_reports_the_actual_tier_when_encode_raises(monkeypatch):
+    # estimator_name PREDICTS hf (the tokenizer loads), but a per-text encode() can still raise;
+    # estimate_tokens_with_tier reports whatever tier actually ran - the honesty guarantee (#568).
+    class _EncodeRaises:
+        def encode(self, text: str) -> object:
+            raise RuntimeError("boom")
+
+    _use_fake_hf_tokenizer(monkeypatch, tokenizer=_EncodeRaises())
+    assert estimator_name("fake/model") == "hf:fake/model"  # prediction (the load succeeded)
+    count, tier = estimate_tokens_with_tier("hello world", model_id="fake/model")
+    assert count > 0
+    assert tier != "hf:fake/model"  # honest: it fell through to a lower tier
+    assert tier in ("tiktoken", "heuristic")
     assert estimate_tokens("a b c d e") >= 5  # heuristic, not the 5-id fake
 
 
