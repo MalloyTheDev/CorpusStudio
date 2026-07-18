@@ -99,7 +99,7 @@ def extract_evaluation_examples(
     rows: list[dict],
     schema_id: str,
 ) -> list[EvaluationDatasetExample]:
-    """Extract instruction/chat rows into Evaluation Lab examples."""
+    """Extract instruction/chat rows into Evaluation Studio examples."""
 
     if schema_id == "instruction":
         return [
@@ -119,7 +119,7 @@ def extract_evaluation_examples(
             if (example := _chat_example(index, row)) is not None
         ]
 
-    raise ValueError("Evaluation Lab MVP supports instruction and chat schemas.")
+    raise ValueError("Evaluation Studio MVP supports instruction and chat schemas.")
 
 
 def should_report_progress(completed: int, total: int) -> bool:

@@ -1,4 +1,4 @@
-"""Ollama backend support for local Evaluation Lab runs."""
+"""Ollama backend support for local Evaluation Studio runs."""
 
 from collections.abc import Callable, Iterator, Sequence
 import json

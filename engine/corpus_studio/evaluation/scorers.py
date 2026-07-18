@@ -1,4 +1,4 @@
-"""Pluggable Evaluation Lab scorers.
+"""Pluggable Evaluation Studio scorers.
 
 Two scorers produce the automatic per-example ``score``:
 

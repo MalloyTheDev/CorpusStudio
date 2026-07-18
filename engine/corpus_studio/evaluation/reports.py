@@ -1,4 +1,4 @@
-"""Report models for the planned Evaluation Lab."""
+"""Report models for the planned Evaluation Studio."""
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +25,7 @@ class EvaluationExampleResult(BaseModel):
 
 
 class EvaluationTagSummary(BaseModel):
-    """Aggregate Evaluation Lab scores and failures for a dataset tag."""
+    """Aggregate Evaluation Studio scores and failures for a dataset tag."""
 
     tag: str
     examples: int
@@ -41,7 +41,7 @@ class EvaluationFailureReasonSummary(BaseModel):
 
 
 class EvaluationScoreBandSummary(BaseModel):
-    """Aggregate Evaluation Lab results by score band."""
+    """Aggregate Evaluation Studio results by score band."""
 
     band: str
     examples: int
