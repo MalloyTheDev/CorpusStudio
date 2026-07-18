@@ -238,7 +238,7 @@ def platform_schemas(
     ),
 ):
     """Emit the language-neutral platform contract JSON Schemas (RunPlan, RunEvent, BackendManifest,
-    EnvironmentProfile, FailureRecord, FitClassification, WorkerMessage, …) — the boundary the
+    EnvironmentProfile, FailureRecord, FitClassification, WorkerMessage, ...) - the boundary the
     Rust core / Avalonia / Tauri clients consume. With --out, writes <Name>.schema.json files;
     otherwise prints the whole schema set to stdout."""
     from corpus_studio.platform import CONTRACT_VERSION, contract_schemas, export_json_schemas
@@ -273,9 +273,9 @@ def platform_probe(
         False, "--refresh", help="Re-run the probes and update the cache even on a signature hit."
     ),
 ):
-    """Profile the current host and run the functional capability probes — 'readiness = a kernel
+    """Profile the current host and run the functional capability probes - 'readiness = a kernel
     actually ran', not 'the package imports'. Emits an EnvironmentProfile (OS/residency/GPUs/package
-    locks + signature) and a CapabilityReport (per-probe PASS/KERNEL_STALL/… + effective
+    locks + signature) and a CapabilityReport (per-probe PASS/KERNEL_STALL/... + effective
     capabilities + ready/cpu_toy_only/not_ready). With --cache, an unchanged host reuses the stored
     report instead of re-running the (torch-loading) probes."""
     from corpus_studio.platform.profiler import build_environment_profile
@@ -296,7 +296,7 @@ def platform_probe(
             profile, report = resolved.profile, resolved.report
             typer.echo(
                 f"capabilities: {'cached' if resolved.cached else 'freshly probed'} "
-                f"(signature {profile.environment_signature[:12]}…)",
+                f"(signature {profile.environment_signature[:12]}...)",
                 err=True,
             )
         else:
@@ -329,12 +329,12 @@ def platform_probe(
         "Platform probe",
         f"  OS: {profile.host.os.value} ({profile.host.memory_residency_model.value})",
         f"  GPU: {gpu}",
-        f"  env signature: {profile.environment_signature[:12]}…",
+        f"  env signature: {profile.environment_signature[:12]}...",
         f"  READINESS: {report.readiness}",
     ]
     for result in report.probe_results:
         lines.append(f"    {result.outcome.value:<12} {result.probe}"
-                     + (f"  — {result.detail}" if result.detail else ""))
+                     + (f"  - {result.detail}" if result.detail else ""))
     if report.effective_capabilities is not None:
         eff = report.effective_capabilities
         proven = (
@@ -373,8 +373,8 @@ def platform_storage(
     """Characterize the host's storage topology and judge whether a path is SAFE for a run role.
 
     Detection is dependency-light and NON-destructive (mount + capacity + cheaply-discoverable device
-    attributes — no benchmark, no SMART read), so throughput/endurance stay honestly absent. With
-    --path it returns the per-role suitability verdict — the safe-spill guardrail that refuses offload
+    attributes - no benchmark, no SMART read), so throughput/endurance stay honestly absent. With
+    --path it returns the per-role suitability verdict - the safe-spill guardrail that refuses offload
     onto a USB bridge, a cloud-sync folder, a nearly-full disk, inside the source repo, small-file
     roles (repo/venv) on a WSL /mnt mount, or (marginal) a rotational/USB device. --diagnose triages a
     failure message (storage vs VRAM/kernel); --recommend prints the recommended per-role storage tier."""
@@ -484,7 +484,7 @@ def platform_profiles(
         report = load_report(signature, store_dir)
         gpu = profile.gpus[0].name if profile and profile.gpus else "no GPU"
         readiness = report.readiness if report else "?"
-        typer.echo(f"  {signature[:12]}…  {gpu:<24}  {readiness}")
+        typer.echo(f"  {signature[:12]}...  {gpu:<24}  {readiness}")
 
 
 @app.command("platform-run")
@@ -512,7 +512,7 @@ def platform_run(
     subprocess_mode: bool = typer.Option(
         False,
         "--subprocess",
-        help="Run in a supervised CHILD process — the parent can KILL a hung run (a stall becomes a "
+        help="Run in a supervised CHILD process - the parent can KILL a hung run (a stall becomes a "
         "real KERNEL_STALL) and a backend crash is isolated from the core.",
     ),
     silence_timeout: float = typer.Option(
@@ -872,7 +872,7 @@ def platform_plan(
     ),
     dataset_path: str = typer.Option(..., "--dataset", help="Path to the training JSONL."),
     dataset_ref: str = typer.Option("dataset", "--dataset-ref", help="Stable id for the dataset the plan references."),
-    task_type: str = typer.Option("sft", "--task-type", help="Training task type (sft / preference / …)."),
+    task_type: str = typer.Option("sft", "--task-type", help="Training task type (sft / preference / ...)."),
     dataset_format: str = typer.Option("instruction", "--dataset-format", help="Row format: instruction (Alpaca) or chat (messages)."),
     output_dir: Optional[str] = typer.Option(
         None,
@@ -963,8 +963,8 @@ def platform_plan(
         False, "--json", help="Emit {run_plan, fit_classification} as one JSON bundle to stdout."
     ),
 ):
-    """Profile the host, prove its capabilities, and RESOLVE an immutable, hash-sealed RunPlan — the
-    goal+data+hardware → runnable-plan step. Every ambiguous field (precision / quantization /
+    """Profile the host, prove its capabilities, and RESOLVE an immutable, hash-sealed RunPlan - the
+    goal+data+hardware -> runnable-plan step. Every ambiguous field (precision / quantization /
     attention / adapter) is resolved against what PROVED to work on THIS host: bf16 only when proven,
     nf4 only when bitsandbytes passed, and math attention on Blackwell (sm_120). An unready host is a
     clean PlannerError, never a silent downgrade."""
@@ -1168,7 +1168,7 @@ def platform_plan(
             )
         )
         return
-    typer.echo(f"predicted fit: {fit.classification.value} — {fit.rationale}", err=True)
+    typer.echo(f"predicted fit: {fit.classification.value} - {fit.rationale}", err=True)
     typer.echo(plan.model_dump_json(indent=2))
 
 
@@ -1380,7 +1380,7 @@ def platform_backends(
         typer.echo(json.dumps([b.model_dump(mode="json") for b in backends], indent=2))
         return
     for backend in backends:
-        typer.echo(f"{backend.backend_id}  —  {backend.display_name}")
+        typer.echo(f"{backend.backend_id}  -  {backend.display_name}")
         typer.echo(
             f"    devices: {', '.join(d.value for d in backend.supported_devices)}"
             f"  |  precision: {', '.join(p.value for p in backend.precision_modes)}"
@@ -2666,7 +2666,7 @@ def import_preview(path: Path, schema: str):
 @app.command("run-provenance")
 def run_provenance(project_dir: Path, config_path: Path):
     """Build a training run's reproducibility manifest: the dataset fingerprint +
-    row count, the config SHA-256, and the engine version / platform. Best-effort —
+    row count, the config SHA-256, and the engine version / platform. Best-effort -
     a missing dataset/config leaves that field null rather than failing."""
     from corpus_studio.training.provenance import build_run_provenance
 
@@ -2681,7 +2681,7 @@ def import_convert(path: Path, output_path: Path):
     Routed by extension: ``.parquet`` uses the typed columnar reader (values keep
     their type); ``.csv``/``.tsv``/other use the tabular reader (the header defines
     the keys; every cell is text). Either way this only reshapes the source ->
-    JSONL — schema validation is the import-preview's job, so a value that violates
+    JSONL - schema validation is the import-preview's job, so a value that violates
     the target schema quarantines the same as any JSONL/Hugging Face import.
     Parquet needs the optional ``[parquet]`` extra (a clear message if it's missing).
     """
@@ -3435,7 +3435,7 @@ def hf_import(
     is always a flat, inspectable object.
     """
     # The engine must never write the dataset's single source of truth. Compare the basename
-    # case-insensitively (casefold, NOT os.path.normcase — which only case-folds on Windows, so
+    # case-insensitively (casefold, NOT os.path.normcase - which only case-folds on Windows, so
     # it was a no-op on the Linux CI) so `--out Examples.jsonl` cannot slip past the guard on a
     # case-insensitive filesystem (Windows/macOS). Refusing the name on a case-sensitive OS too
     # is safe and conservative.
@@ -3589,7 +3589,7 @@ def eval_run(
     reasoning: bool = typer.Option(
         False,
         "--reasoning",
-        help="Trace-aware: strip the model's <think>…</think> and score only the ANSWER (so a "
+        help="Trace-aware: strip the model's <think>...</think> and score only the ANSWER (so a "
         "reasoning model's thinking doesn't corrupt the score). Flags answers with no reasoning.",
     ),
     judge_model: Optional[str] = typer.Option(
@@ -3722,7 +3722,7 @@ def _evaluate_suite_case(case: "SuiteCase", project_dir: "Optional[Path]" = None
 
 
 def _evaluate_suite_dataset(case: "SuiteCase", dataset_path: Path, overrides_dir: Path) -> "EvaluationReport":
-    """Evaluate a case against a concrete dataset file — the SAME policy-enforced eval path as
+    """Evaluate a case against a concrete dataset file - the SAME policy-enforced eval path as
     ``eval-run`` (backend + optional evaluator-only judge scorer). ``overrides_dir`` is where
     project-local provider-policy overrides are read from (the suite's project)."""
 
@@ -3815,9 +3815,9 @@ def suite_list(
         return
     for summary in summaries:
         if summary.valid:
-            typer.echo(f"{summary.name} — {summary.case_count} case(s)")
+            typer.echo(f"{summary.name} - {summary.case_count} case(s)")
         else:
-            typer.echo(f"{summary.name} — invalid: {summary.error}")
+            typer.echo(f"{summary.name} - invalid: {summary.error}")
 
 
 @app.command("suite-run")
@@ -3859,7 +3859,7 @@ def suite_run(
         raise typer.Exit(code=1) from exc
 
     typer.echo(
-        f"Running {len(definition.cases)} case(s) — each is a live backend evaluation.",
+        f"Running {len(definition.cases)} case(s) - each is a live backend evaluation.",
         err=True,
     )
     report = run_suite(
@@ -3884,9 +3884,9 @@ def suite_history(
     project_dir: Path = typer.Option(..., "--project-dir", help="Project holding suite_reports/history/."),
     as_json: bool = typer.Option(False, "--json", help="Emit the history as JSON."),
 ):
-    """Show a registered suite's run history (oldest → newest) for trending pass/warn/block over time.
+    """Show a registered suite's run history (oldest -> newest) for trending pass/warn/block over time.
 
-    Each point is the run time, the aggregate verdict, and per-status case counts — a count, never a
+    Each point is the run time, the aggregate verdict, and per-status case counts - a count, never a
     folded quality score.
     """
     from corpus_studio.suites.runner import load_suite_history
@@ -3899,7 +3899,7 @@ def suite_history(
     if not entries:
         typer.echo(f"No run history for suite '{name}' yet.")
         return
-    typer.echo(f"Suite '{name}' — {len(entries)} run(s):")
+    typer.echo(f"Suite '{name}' - {len(entries)} run(s):")
     for entry in entries:
         typer.echo(
             f"  {entry.generated_at or '?'}  {entry.overall_status.value.upper():5}  "
@@ -4387,7 +4387,7 @@ def artifact_update(
     """Update an artifact's keep/reject status.
 
     A transition to ``kept`` is PROMOTE-GATED in the engine (integrity + source-run
-    regression), so no caller — CLI, desktop, or script — can promote a modified/missing or
+    regression), so no caller - CLI, desktop, or script - can promote a modified/missing or
     regressed artifact by bypassing the UI. ``candidate``/``rejected`` are ungated.
     """
 
@@ -4562,7 +4562,7 @@ def training_eval_plan(
     ),
     as_json: bool = typer.Option(False, "--json", help="Emit the plan as JSON."),
 ):
-    """Close the train→eval loop: print the ordered steps to evaluate a finished run's model.
+    """Close the train->eval loop: print the ordered steps to evaluate a finished run's model.
 
     The serve step is external (Ollama/vLLM/TGI); the eval/link/gate commands are exact. When
     ``--eval-dataset`` / ``--schema`` are omitted they are pre-filled from the run's baseline
@@ -4671,7 +4671,7 @@ def train_check(
     json_output: bool = typer.Option(False, "--json", help="Emit the machine-readable report instead of the table."),
 ):
     """Preflight the FIRST-PARTY training runtime (the opt-in [train] extra): which deps are present,
-    whether a CUDA GPU is available, and whether a real 4-bit QLoRA run — or only the CPU toy path —
+    whether a CUDA GPU is available, and whether a real 4-bit QLoRA run - or only the CPU toy path -
     is possible. Reads only the Python environment (no project needed); safe with none of the training
     deps installed. Exit stays 0 (the verdict is in the report)."""
 
@@ -4697,7 +4697,7 @@ def dataset_tokens(
     json_out: bool = typer.Option(False, "--json", help="Emit the TruncationReport as JSON."),
 ):
     """Measure a dataset's token-length distribution and how many examples a given sequence_len would
-    TRUNCATE — the guardrail to run BEFORE training so you never silently train on cut-off outputs
+    TRUNCATE - the guardrail to run BEFORE training so you never silently train on cut-off outputs
     (the failure that taught the WBG model to emit incomplete JSON). Exit 3 when it truncates."""
     from corpus_studio.importers.jsonl_importer import read_jsonl
     from corpus_studio.training.trainer import (
@@ -4709,7 +4709,7 @@ def dataset_tokens(
     try:
         from transformers import AutoTokenizer  # noqa: PLC0415 - the [train] extra (heavy).
     except ImportError:
-        typer.echo("dataset-tokens needs the [train] extra (transformers) — install it first.", err=True)
+        typer.echo("dataset-tokens needs the [train] extra (transformers) - install it first.", err=True)
         raise typer.Exit(code=2) from None
 
     tokenizer = AutoTokenizer.from_pretrained(base_model)
@@ -5276,7 +5276,7 @@ def train_run(
     cpu_toy: bool = typer.Option(False, "--cpu-toy", help="Run the tiny CPU smoke path (a small model, a few steps, no GPU/bitsandbytes)."),
     max_steps: Optional[int] = typer.Option(None, "--max-steps", help="Cap the number of training steps."),
     attn_implementation: Optional[str] = typer.Option(None, "--attn-implementation", help="Attention backend (eager | sdpa | flash_attention_2). Default auto: on Blackwell/sm_120 the fused flash/mem-efficient SDPA is disabled (it deadlocks the first backward there) and the math SDPA path is used."),
-    optim: Optional[str] = typer.Option(None, "--optim", help="Optimizer (e.g. adamw_torch | paged_adamw_8bit). 'paged_adamw_8bit' pages optimizer state to host RAM under pressure — spike-safe on a tight GPU."),
+    optim: Optional[str] = typer.Option(None, "--optim", help="Optimizer (e.g. adamw_torch | paged_adamw_8bit). 'paged_adamw_8bit' pages optimizer state to host RAM under pressure - spike-safe on a tight GPU."),
     use_liger: bool = typer.Option(False, "--use-liger", help="Fuse the cross-entropy loss (Liger) to drop the full-vocab logits memory spike at long sequence_len. Needs the 'liger-kernel' package; Blackwell support unverified."),
     memory_efficient: bool = typer.Option(False, "--memory-efficient", help="Shortcut for a tight GPU: enable the memory-saving levers (paged optimizer + fused Liger loss). Explicit --optim / --use-liger override it."),
     save_steps: Optional[int] = typer.Option(
@@ -5374,11 +5374,11 @@ def train_merge(
     adapter_path: Path,
     base_model: Optional[str] = typer.Option(None, "--base-model", help="Base to merge into (default: the adapter's recorded base)."),
     output_dir: Optional[Path] = typer.Option(None, "--output-dir", help="Where to write the merged model (default: <adapter>/../merged)."),
-    strategy: str = typer.Option("auto", "--strategy", help="auto | gpu | cpu | adapter-only. auto = gpu→cpu→adapter-only."),
+    strategy: str = typer.Option("auto", "--strategy", help="auto | gpu | cpu | adapter-only. auto = gpu->cpu->adapter-only."),
 ):
     """Merge a trained LoRA adapter into its base model, with a fallback for small-VRAM cards: a 7B
-    fp16 merge (~14 GB) won't fit a 12 GB GPU, so `auto` tries GPU → CPU-offload → adapter-only (serve
-    base+adapter unmerged). Progress → stderr; the JSON result → stdout. Exit 2 if every strategy fails."""
+    fp16 merge (~14 GB) won't fit a 12 GB GPU, so `auto` tries GPU -> CPU-offload -> adapter-only (serve
+    base+adapter unmerged). Progress -> stderr; the JSON result -> stdout. Exit 2 if every strategy fails."""
 
     from corpus_studio.training.merge import MergeError, merge_adapter
 
@@ -5447,10 +5447,10 @@ def model_fetch(
     revision: Optional[str] = typer.Option(None, "--revision", help="Branch / tag / commit to fetch."),
     allow: Optional[list[str]] = typer.Option(None, "--allow", help="Restrict to these glob(s), e.g. --allow '*.safetensors' (the model card + *.json are always kept so it loads and its license is readable). Repeatable."),
 ):
-    """Reliably download a base model from the Hugging Face Hub — RESUMABLE, so it survives dropped
-    connections — and report its LICENSE. Prefer MIT/Apache/permissive base models: the base model's
-    license governs what you can do with the trained result (data availability ≠ permission). JSON
-    result → stdout, progress → stderr; exit 2 if the fetch fails or the training runtime is missing."""
+    """Reliably download a base model from the Hugging Face Hub - RESUMABLE, so it survives dropped
+    connections - and report its LICENSE. Prefer MIT/Apache/permissive base models: the base model's
+    license governs what you can do with the trained result (data availability != permission). JSON
+    result -> stdout, progress -> stderr; exit 2 if the fetch fails or the training runtime is missing."""
 
     from corpus_studio.training.model_fetch import fetch_model
 
@@ -5471,7 +5471,7 @@ def model_fetch(
 
     if not result.license_permissive:
         typer.echo(
-            f"⚠ License: {result.license or 'none declared'} — not clearly permissive; review before training.",
+            f"WARNING: License: {result.license or 'none declared'} - not clearly permissive; review before training.",
             err=True,
         )
     typer.echo(result.model_dump_json(indent=2))
@@ -5720,7 +5720,7 @@ def export(
         False,
         "--redact-pii",
         help="Mask detected PII/secrets (emails, SSNs, keys/tokens, cards) in the EXPORT with typed "
-        "[REDACTED:kind] placeholders. Masks known high-precision patterns only — NOT a guarantee of "
+        "[REDACTED:kind] placeholders. Masks known high-precision patterns only - NOT a guarantee of "
         "de-identification. Writes a redaction manifest; never rewrites the input.",
     ),
     check_provenance: bool = typer.Option(
@@ -5744,7 +5744,7 @@ def export(
         "jsonl",
         "--format",
         help="Output format: jsonl (default, model-ready, all schemas), csv/tsv, or parquet. CSV/TSV is a "
-        "flat-schema convenience — a schema with chat messages or nested objects is refused (use jsonl/parquet); "
+        "flat-schema convenience - a schema with chat messages or nested objects is refused (use jsonl/parquet); "
         "scalar list fields (e.g. tags) are written as a '; '-joined cell. Parquet is columnar and supports "
         "every schema (chat/nested included) but needs the optional [parquet] extra.",
     ),
@@ -5770,7 +5770,7 @@ def export(
         )
         raise typer.Exit(code=1)
 
-    # Parquet needs the optional pyarrow extra — fail fast with the install hint
+    # Parquet needs the optional pyarrow extra - fail fast with the install hint
     # before any validation/cleaning work so no partial output is written.
     if export_format == "parquet":
         from corpus_studio.parquet_support import PARQUET_INSTALL_HINT, parquet_available
@@ -5798,7 +5798,7 @@ def export(
             raise typer.Exit(code=2)
 
     # Enforce the export gate BEFORE writing the deliverable: block on PII/secrets (and
-    # empty input / schema). Quality issues (duplicates / low-information) only warn — the
+    # empty input / schema). Quality issues (duplicates / low-information) only warn - the
     # optional cleaning pass handles those. This is what makes "export blocks on PII" true.
     from corpus_studio.gates.models import GateStatus
 
@@ -5806,7 +5806,7 @@ def export(
 
     # Opt-in redaction runs BEFORE the export gate so masking the known PII/secret patterns is what
     # lets a blocked-on-PII dataset export (with the secrets masked) rather than being refused. It is a
-    # known-pattern safety net, not de-identification — the manifest records what was masked.
+    # known-pattern safety net, not de-identification - the manifest records what was masked.
     redaction_result = None
     if redact_pii:
         rows, redaction_result = redact_rows(rows)
@@ -5904,7 +5904,7 @@ def export(
         elif tabular_schema is not None:
             _, tabular_columns = write_tabular(rows, output_path, tabular_schema, delimiter)
         elif redaction_result is not None:
-            # Redaction changed the rows, so the deliverable is the redacted rows — not an input copy.
+            # Redaction changed the rows, so the deliverable is the redacted rows - not an input copy.
             write_jsonl(rows, output_path)
         else:
             export_jsonl(input_path, output_path)
@@ -5951,7 +5951,7 @@ def export(
             warnings.append(
                 f"Redacted {redaction_result.redacted_spans} PII/secret span(s) across "
                 f"{redaction_result.redacted_rows} row(s) with [REDACTED:kind] placeholders. Known "
-                "high-precision patterns only — NOT a guarantee of de-identification; review before publishing."
+                "high-precision patterns only - NOT a guarantee of de-identification; review before publishing."
             )
 
     typer.echo(json.dumps(payload, indent=2))
@@ -6014,7 +6014,7 @@ def arena_run(
         raise typer.Exit(code=1) from exc
 
     # Resolve a policy per generation model (arena responses are non-trainable, so this
-    # authorizes each as an EVALUATION participant) and gate the run — a provider blocked from
+    # authorizes each as an EVALUATION participant) and gate the run - a provider blocked from
     # the evaluator role cannot generate arena responses.
     gen_provider = infer_provider_id(backend, base_url)
     gen_overrides = load_overrides(input_path.parent)
@@ -6696,7 +6696,7 @@ def provenance_gate(
     gates generation-time) and run-provenance (which fingerprints a run). The verdict
     (BLOCK/WARN/PASS) is the JSON report on stdout; a human table + verdict go to stderr.
 
-    Exit stays 0 — the verdict IS the report. Honest scope: it trusts each row's DECLARED
+    Exit stays 0 - the verdict IS the report. Honest scope: it trusts each row's DECLARED
     teacher (a mislabeled/omitted teacher is not caught by content), and an unknown teacher
     is quarantine-until-verified, never assumed safe."""
 
@@ -7425,7 +7425,7 @@ def _ensure_utf8_stdio() -> None:
 
 def main() -> None:
     """Console-script + ``-m`` entry point. Forces UTF-8 stdio BEFORE the CLI runs so
-    non-ASCII output — including the ``→`` arrows in ``--help`` — never dies on a Windows
+    non-ASCII output - including the ``->`` arrows in ``--help`` - never dies on a Windows
     cp1252 console (``UnicodeEncodeError``). The ``corpus-studio`` script points here so it
     gets the same UTF-8 handling as ``python -m corpus_studio.cli`` (previously only the
     ``__main__`` path reconfigured, so the bare ``corpus-studio --help`` crashed)."""
