@@ -89,7 +89,11 @@ def redact_text(text: str) -> tuple[str, dict[str, int]]:
 
 
 def _redact_value(value: Any, tally: dict[str, int]) -> Any:
-    """Recursively redact string leaves in a row value; non-strings pass through."""
+    """Recursively redact PII/secret spans in a row value. String leaves are masked in
+    place; a NUMERIC leaf whose text form contains PII (e.g. a payment-card number or SSN
+    stored as a JSON number) is masked to the placeholder string, so numeric PII the
+    quality gate flags can actually be cleared (#505). A value with no match is returned
+    unchanged and keeps its type."""
     if isinstance(value, str):
         redacted, hits = redact_text(value)
         for kind, count in hits.items():
@@ -99,6 +103,14 @@ def _redact_value(value: Any, tally: dict[str, int]) -> Any:
         return [_redact_value(item, tally) for item in value]
     if isinstance(value, dict):
         return {key: _redact_value(item, tally) for key, item in value.items()}
+    # PII detection scans numeric leaves as text (a card number stored as a number is
+    # still PII), so redaction must be able to clear them too - but only on a real match.
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        redacted, hits = redact_text(str(value))
+        if hits:
+            for kind, count in hits.items():
+                tally[kind] = tally.get(kind, 0) + count
+            return redacted
     return value
 
 
