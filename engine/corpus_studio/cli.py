@@ -6017,6 +6017,117 @@ def gate_thresholds_set(
     typer.echo(json.dumps({"path": str(path), "thresholds": thresholds.model_dump()}, indent=2))
 
 
+@app.command("provenance-allowlist-set")
+def provenance_allowlist_set(
+    project_dir: Path,
+    allow: list[str] = typer.Option(
+        [],
+        "--allow",
+        help="Add/update an entry as 'teacher=note' (or just 'teacher'); repeatable.",
+    ),
+    remove: list[str] = typer.Option(
+        [], "--remove", help="Remove a teacher from the allowlist; repeatable."
+    ),
+    values_json: Optional[str] = typer.Option(
+        None,
+        "--values-json",
+        help="Replace the ENTIRE allowlist with this JSON object {teacher: note}. Mutually "
+        "exclusive with --allow/--remove.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit the resulting allowlist as JSON."),
+):
+    """Validate and write a project's provenance_allowlist.json - the setter counterpart to the
+    provenance-gate reader.
+
+    The allow-list maps a teacher/provider to a short license note; a LISTED teacher passes the
+    provenance gate (the note is documentation, not the approval - presence is). Manage it
+    incrementally with --allow 'teacher=note' / --remove 'teacher', or replace it wholesale with
+    --values-json. Invalid input (an empty teacher, a non-string note) is refused (exit 1) rather than
+    written, so the fail-closed provenance gate can never be weakened by a broken file.
+    """
+    from corpus_studio.gates.provenance_gate import (
+        load_provenance_allowlist,
+        save_provenance_allowlist,
+    )
+
+    if not project_dir.is_dir():
+        typer.echo(f"Project directory '{project_dir}' does not exist.", err=True)
+        raise typer.Exit(code=1)
+    if values_json is not None and (allow or remove):
+        typer.echo("--values-json cannot be combined with --allow/--remove.", err=True)
+        raise typer.Exit(code=1)
+    if values_json is None and not (allow or remove):
+        typer.echo("Nothing to do: provide --allow/--remove, or --values-json.", err=True)
+        raise typer.Exit(code=1)
+
+    before = load_provenance_allowlist(project_dir)
+    attempted_removes: list[str] = []
+
+    if values_json is not None:
+        try:
+            data = json.loads(values_json)
+        except json.JSONDecodeError as exc:
+            typer.echo(f"Invalid --values-json: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        if not isinstance(data, dict):
+            typer.echo("--values-json must be a JSON object of {teacher: note}.", err=True)
+            raise typer.Exit(code=1)
+        allowlist: dict[str, str] = {}
+        for key, value in data.items():
+            teacher = key.strip() if isinstance(key, str) else ""
+            if not teacher:
+                typer.echo("Refusing an empty teacher name in --values-json.", err=True)
+                raise typer.Exit(code=1)
+            if value is not None and not isinstance(value, str):
+                typer.echo(f"The note for '{teacher}' must be a string.", err=True)
+                raise typer.Exit(code=1)
+            allowlist[teacher] = value or ""
+    else:
+        allowlist = dict(before)
+        for entry in remove:
+            teacher = entry.strip()
+            if not teacher:
+                typer.echo("Refusing an empty teacher name in --remove.", err=True)
+                raise typer.Exit(code=1)
+            attempted_removes.append(teacher)
+            allowlist.pop(teacher, None)
+        for entry in allow:
+            teacher, separator, note = entry.partition("=")
+            teacher = teacher.strip()
+            if not teacher:
+                typer.echo(f"Refusing an empty teacher name in --allow '{entry}'.", err=True)
+                raise typer.Exit(code=1)
+            allowlist[teacher] = note if separator else "allow-listed via provenance-allowlist-set"
+
+    # Report the NET before->after effect (a diff), not the raw operations, so a re-added or
+    # unchanged teacher is never mislabeled as removed, --values-json honestly discloses which prior
+    # approvals it dropped, and duplicate flags don't inflate the lists.
+    added = sorted(teacher for teacher in allowlist if before.get(teacher) != allowlist[teacher])
+    removed = sorted(teacher for teacher in before if teacher not in allowlist)
+    not_found = sorted(
+        {teacher for teacher in attempted_removes if teacher not in before and teacher not in allowlist}
+    )
+
+    path = save_provenance_allowlist(project_dir, allowlist)
+    result = {
+        "path": str(path),
+        "count": len(allowlist),
+        "allowlist": allowlist,
+        "added": added,
+        "removed": removed,
+        "not_found": not_found,
+    }
+    if as_json:
+        typer.echo(json.dumps(result, indent=2))
+    else:
+        typer.echo(
+            f"Wrote {len(allowlist)} allow-list entr(y/ies) to {path} "
+            f"(+{len(added)} set, -{len(removed)} removed)."
+        )
+    for teacher in not_found:
+        typer.echo(f"  note: '{teacher}' was not in the allow-list (nothing to remove).", err=True)
+
+
 @app.command("gate-run")
 def gate_run(
     input_path: Path,
