@@ -173,3 +173,132 @@ def test_cli_new_project_without_opt_in_skips_index(tmp_path: Path):
     )
     assert result.exit_code == 0
     assert not default_index_path(root).exists()
+
+
+# --- project lifecycle: delete / rename + list --rollup (#582, G7) ----------------------------
+
+INSTR = [{"instruction": f"do task {n}", "output": f"result {n} is complete"} for n in range(3)]
+
+
+def _seed(root: Path, project_id: str, rows: list[dict]) -> None:
+    (root / project_id / "examples.jsonl").write_text(
+        "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
+    )
+
+
+def test_project_list_rollup_adds_debt_grade(tmp_path: Path):
+    root = tmp_path / "projects"
+    runner.invoke(app, ["new-project", "full", "Full", "instruction", "--root", str(root)])
+    runner.invoke(app, ["new-project", "empty", "Empty", "instruction", "--root", str(root)])
+    _seed(root, "full", INSTR)
+
+    result = runner.invoke(app, ["project-list", "--root", str(root), "--rollup"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["rollup"] is True
+    by_id = {p["id"]: p for p in payload["projects"]}
+    assert by_id["full"]["has_data"] is True and by_id["full"]["debt_grade"] != "N/A"
+    assert by_id["empty"]["has_data"] is False and by_id["empty"]["debt_grade"] == "N/A"
+    # without --rollup, no debt fields are added
+    plain = json.loads(runner.invoke(app, ["project-list", "--root", str(root)]).output)
+    assert "debt_grade" not in plain["projects"][0]
+
+
+def test_project_delete_requires_yes_and_removes_folder(tmp_path: Path):
+    root = tmp_path / "projects"
+    runner.invoke(app, ["new-project", "gone", "Gone", "instruction", "--root", str(root)])
+    # refused without --yes; folder still there
+    refused = runner.invoke(app, ["project-delete", "gone", "--root", str(root)])
+    assert refused.exit_code == 1 and "--yes" in refused.output
+    assert (root / "gone").is_dir()
+    # deleted with --yes
+    deleted = runner.invoke(app, ["project-delete", "gone", "--root", str(root), "--yes"])
+    assert deleted.exit_code == 0, deleted.output
+    assert not (root / "gone").exists()
+
+
+def test_project_delete_refuses_non_project(tmp_path: Path):
+    root = tmp_path / "projects"
+    root.mkdir(parents=True)
+    (root / "notaproject").mkdir()  # a dir with no project.json
+    result = runner.invoke(app, ["project-delete", "notaproject", "--root", str(root), "--yes"])
+    assert result.exit_code == 1 and "no project.json" in result.output
+    assert (root / "notaproject").is_dir()  # untouched
+
+
+def test_project_rename_display_name(tmp_path: Path):
+    root = tmp_path / "projects"
+    runner.invoke(app, ["new-project", "proj", "Old Name", "instruction", "--root", str(root)])
+    result = runner.invoke(app, ["project-rename", "proj", "--name", "New Name", "--root", str(root)])
+    assert result.exit_code == 0, result.output
+    stored = json.loads((root / "proj" / "project.json").read_text())
+    assert stored["name"] == "New Name" and stored["id"] == "proj"
+
+
+def test_project_rename_id_moves_folder(tmp_path: Path):
+    root = tmp_path / "projects"
+    runner.invoke(app, ["new-project", "oldid", "P", "instruction", "--root", str(root)])
+    _seed(root, "oldid", INSTR)
+    result = runner.invoke(app, ["project-rename", "oldid", "--to", "newid", "--root", str(root)])
+    assert result.exit_code == 0, result.output
+    assert not (root / "oldid").exists() and (root / "newid" / "examples.jsonl").exists()
+    stored = json.loads((root / "newid" / "project.json").read_text())
+    assert stored["id"] == "newid"
+
+
+def test_project_rename_refuses_existing_target_and_empty(tmp_path: Path):
+    root = tmp_path / "projects"
+    runner.invoke(app, ["new-project", "a", "A", "instruction", "--root", str(root)])
+    runner.invoke(app, ["new-project", "b", "B", "instruction", "--root", str(root)])
+    clash = runner.invoke(app, ["project-rename", "a", "--to", "b", "--root", str(root)])
+    assert clash.exit_code == 1 and "already exists" in clash.output
+    assert (root / "a").is_dir()  # unchanged
+    nothing = runner.invoke(app, ["project-rename", "a", "--root", str(root)])
+    assert nothing.exit_code == 1 and "Nothing to rename" in nothing.output
+
+
+def test_project_delete_and_rename_update_the_index(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("CORPUS_STUDIO_USE_INDEX", "1")
+    root = tmp_path / "projects"
+    runner.invoke(app, ["new-project", "keep", "Keep", "instruction", "--root", str(root)])
+    runner.invoke(app, ["new-project", "drop", "Drop", "instruction", "--root", str(root)])
+    runner.invoke(app, ["project-delete", "drop", "--root", str(root), "--yes"])
+    assert {entry.id for entry in list_projects_from_root(root)} == {"keep"}
+    runner.invoke(app, ["project-rename", "keep", "--to", "kept", "--root", str(root)])
+    assert {entry.id for entry in list_projects_from_root(root)} == {"kept"}
+
+
+def test_rename_never_fabricates_a_partial_index(tmp_path: Path, monkeypatch):
+    # Regression: projects created WITHOUT an index, then a rename must NOT seed a one-entry index
+    # that makes project-list silently hide the other on-disk projects.
+    root = tmp_path / "projects"
+    runner.invoke(app, ["new-project", "foo", "Foo", "instruction", "--root", str(root)])
+    runner.invoke(app, ["new-project", "bar", "Bar", "instruction", "--root", str(root)])
+    assert not default_index_path(root).exists()
+    monkeypatch.setenv("CORPUS_STUDIO_USE_INDEX", "1")
+    assert runner.invoke(app, ["project-rename", "foo", "--to", "qux", "--root", str(root)]).exit_code == 0
+    listed = json.loads(runner.invoke(app, ["project-list", "--root", str(root)]).output)
+    assert {p["id"] for p in listed["projects"]} == {"bar", "qux"}  # never a partial {qux}
+
+
+def test_lifecycle_refreshes_an_existing_index_even_with_flag_unset(tmp_path: Path):
+    # Regression: if an index file exists, a delete must refresh it (not leave a ghost row) even when
+    # CORPUS_STUDIO_USE_INDEX is unset - project-list reads any existing index.
+    root = tmp_path / "projects"
+    runner.invoke(app, ["new-project", "keep", "K", "instruction", "--root", str(root)])
+    runner.invoke(app, ["new-project", "drop", "D", "instruction", "--root", str(root)])
+    runner.invoke(app, ["project-index-rebuild", "--root", str(root)])
+    assert default_index_path(root).exists()
+    runner.invoke(app, ["project-delete", "drop", "--root", str(root), "--yes"])
+    listed = json.loads(runner.invoke(app, ["project-list", "--root", str(root)]).output)
+    assert {p["id"] for p in listed["projects"]} == {"keep"}  # no deleted ghost
+
+
+def test_project_delete_refuses_a_symlinked_project_dir(tmp_path: Path):
+    # A destructive op must not follow a symlink (rmtree would fail on it anyway; refuse cleanly).
+    root = tmp_path / "projects"
+    runner.invoke(app, ["new-project", "real", "R", "instruction", "--root", str(root)])
+    (root / "link").symlink_to(root / "real")
+    result = runner.invoke(app, ["project-delete", "link", "--root", str(root), "--yes"])
+    assert result.exit_code == 1 and "symlink" in result.output
+    assert (root / "real").is_dir()  # the real project is untouched
