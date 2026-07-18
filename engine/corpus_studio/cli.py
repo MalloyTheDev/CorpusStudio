@@ -2936,6 +2936,146 @@ def examples_edit(
         typer.echo(f"Edited row {row}; {total_rows} row(s) total. Undo version: {undo_id}")
 
 
+def _parse_example_lines(lines: list[str]) -> list[dict[str, Any]]:
+    """Parse verbatim examples.jsonl lines into row objects for cleaning. Refuses (fail closed) on a
+    malformed line or a non-object row rather than silently dropping it - a dataset we cannot fully
+    read is a dataset we must not clean. Raises :class:`_ExamplesMutationError`."""
+    rows: list[dict[str, Any]] = []
+    for number, line in enumerate(lines, start=1):
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise _ExamplesMutationError(
+                f"row {number} is not valid JSON ({exc}); refusing to clean, nothing changed."
+            ) from exc
+        if not isinstance(row, dict):
+            raise _ExamplesMutationError(
+                f"row {number} is not a JSON object; refusing to clean, nothing changed."
+            )
+        rows.append(row)
+    return rows
+
+
+@app.command("examples-clean")
+def examples_clean(
+    project_dir: Path,
+    dedupe: bool = typer.Option(
+        False, "--dedupe", help="Remove exact and normalized-duplicate rows (keeps the first)."
+    ),
+    drop_low_information: bool = typer.Option(
+        False,
+        "--drop-low-information",
+        help="Also drop low-information rows (fewer than the token threshold).",
+    ),
+    in_place: bool = typer.Option(
+        False,
+        "--in-place",
+        help="Apply the clean to examples.jsonl (captures an undo version first). Default is a "
+        "read-only preview of what would be removed.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit the clean result as JSON."),
+):
+    """Dedupe / drop low-information rows from examples.jsonl - the sanctioned single writer.
+
+    Uses the SAME cleaning the export path uses (exact + NFKC-normalized duplicates, low-information
+    rows), so a project can clean its dataset in place instead of only on export. Default is a
+    read-only PREVIEW of exactly what would be removed. With --in-place it captures a verified undo
+    version FIRST, then writes the kept rows atomically under the single-writer lock; the returned
+    undo_version_id restores the prior dataset. Refuses if the dataset is unreadable (nothing changed).
+    """
+    from corpus_studio.exporters.cleaning import CleanResult, clean_rows
+    from corpus_studio.storage.examples_writer import examples_path, read_existing_lines
+
+    if not project_dir.is_dir():
+        typer.echo(f"Project directory '{project_dir}' does not exist.", err=True)
+        raise typer.Exit(code=1)
+    if not (dedupe or drop_low_information):
+        typer.echo("Choose at least one of --dedupe or --drop-low-information.", err=True)
+        raise typer.Exit(code=1)
+    if not examples_path(project_dir).exists():
+        typer.echo("The project has no examples.jsonl yet - nothing to clean.", err=True)
+        raise typer.Exit(code=1)
+
+    # Preview on the current dataset (read-only). A malformed row refuses here, before any mutation.
+    try:
+        current_rows = _parse_example_lines(read_existing_lines(project_dir))
+    except _ExamplesMutationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    _, preview = clean_rows(
+        current_rows, dedupe=dedupe, drop_low_information=drop_low_information
+    )
+
+    def _emit(mode: str, result: CleanResult, undo_version_id: Optional[str]) -> None:
+        payload = {
+            "examples_path": str(examples_path(project_dir)),
+            "mode": mode,
+            **result.model_dump(),
+            "undo_version_id": undo_version_id,
+        }
+        if as_json:
+            typer.echo(json.dumps(payload, indent=2))
+            return
+        breakdown = (
+            f"{result.removed_exact_duplicates} exact dup, "
+            f"{result.removed_normalized_duplicates} normalized dup, "
+            f"{result.removed_low_information} low-info"
+        )
+        if mode == "preview":
+            typer.echo(
+                f"Would remove {result.removed_rows} of {result.input_rows} row(s) ({breakdown}); "
+                f"{result.kept_rows} would remain. Run with --in-place to apply."
+            )
+        else:
+            typer.echo(
+                f"Removed {result.removed_rows} of {result.input_rows} row(s) ({breakdown}); "
+                f"{result.kept_rows} remain. Undo version: {undo_version_id}"
+            )
+
+    if not in_place:
+        _emit("preview", preview, None)
+        return
+    if preview.removed_rows == 0:
+        typer.echo(
+            json.dumps(
+                {
+                    "examples_path": str(examples_path(project_dir)),
+                    "mode": "in_place",
+                    **preview.model_dump(),
+                    "undo_version_id": None,
+                },
+                indent=2,
+            )
+            if as_json
+            else f"Dataset is already clean ({preview.input_rows} row(s)); nothing changed."
+        )
+        return
+
+    # Apply in-place through the shared undo-first, single-lock helper. The transform re-cleans the
+    # locked rows (authoritative) and captures that CleanResult for the report.
+    captured: dict[str, CleanResult] = {}
+
+    def _transform(existing: list[str]) -> list[str]:
+        rows = _parse_example_lines(existing)
+        kept_rows, result = clean_rows(
+            rows, dedupe=dedupe, drop_low_information=drop_low_information
+        )
+        captured["result"] = result
+        return [json.dumps(row, ensure_ascii=False) for row in kept_rows]
+
+    try:
+        _, undo_id = _apply_examples_mutation(
+            project_dir,
+            _transform,
+            undo_label="undo before examples-clean",
+            undo_trigger="clean_undo",
+        )
+    except _ExamplesMutationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    _emit("in_place", captured["result"], undo_id)
+
+
 @app.command("import-commit")
 def import_commit(
     project_dir: Path,
