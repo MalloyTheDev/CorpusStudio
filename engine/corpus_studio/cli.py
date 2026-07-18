@@ -2644,6 +2644,53 @@ def examples_append(
         typer.echo(f"  skipped row {entry['row_number']}: {'; '.join(entry['issues'])}", err=True)
 
 
+@app.command("examples-list")
+def examples_list(
+    project_dir: Path,
+    offset: int = typer.Option(0, "--offset", min=0, help="0-based row index to start the page at."),
+    limit: int = typer.Option(50, "--limit", min=1, help="Maximum number of rows to return."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the page as JSON."),
+):
+    """List a project's examples.jsonl rows, paged - the read side of the single writer.
+
+    The thin client must not parse examples.jsonl itself (row identity/canonicalization is engine
+    logic); this returns one page of rows plus the file's total row count. Each row carries its
+    1-based row_number - its stable address for examples-edit / examples-delete. A line that is not
+    valid JSON is surfaced with a parse_error (never silently skipped). Read-only.
+    """
+
+    from corpus_studio.storage.examples_writer import examples_path, read_examples_page
+
+    if not project_dir.is_dir():
+        typer.echo(f"Project directory '{project_dir}' does not exist.", err=True)
+        raise typer.Exit(code=1)
+
+    total, rows = read_examples_page(project_dir, offset=offset, limit=limit)
+    result = {
+        "examples_path": str(examples_path(project_dir)),
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "count": len(rows),
+        "rows": rows,
+    }
+    if as_json:
+        typer.echo(json.dumps(result, indent=2))
+        return
+    if total == 0:
+        typer.echo(f"No rows in {result['examples_path']}.")
+        return
+    typer.echo(f"Showing {len(rows)} row(s) from offset {offset} of {total} total:")
+    for entry in rows:
+        if "parse_error" in entry:
+            typer.echo(f"  {entry['row_number']}: <unparseable: {entry['parse_error']}>")
+            continue
+        preview = json.dumps(entry["example"], ensure_ascii=False)
+        if len(preview) > 160:
+            preview = preview[:157] + "..."
+        typer.echo(f"  {entry['row_number']}: {preview}")
+
+
 @app.command("import-commit")
 def import_commit(
     project_dir: Path,
