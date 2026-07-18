@@ -70,7 +70,7 @@ Pretraining optimization is declared explicitly (no product defaults substituted
 choices): optimizer, LR schedule, warmup, gradient clipping, weight decay, and precision. These reuse the
 shipped `OptimizerSpec` / `TrainingSchedule` / `PrecisionExecutionPolicy` contracts; the pretraining
 objective's `ObjectiveUpdatePolicy` is `all_parameters` with a global optimizer clock (dense) or a
-per-expert clock (MoE, see [`MOE_TRAINING_ARCHITECTURE.md`](MOE_TRAINING_ARCHITECTURE.md)).
+per-expert clock (MoE, see [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md)).
 
 ## 5. Checkpoint / resume with a data cursor (the G2 gap)
 

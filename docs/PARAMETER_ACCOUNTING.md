@@ -68,7 +68,7 @@ Supplying a different or changed snapshot cannot silently attach evidence to the
 revision. Malformed, oversized, linked, overlapping, incomplete, or changing inputs produce bounded
 gaps rather than a guessed count.
 
-Static [`ExpertTopologyCounts`](MOE_MODEL_INSPECTION.md) are deliberately outside this parameter
+Static [`ExpertTopologyCounts`](MOE_ARCHITECTURE.md) are deliberately outside this parameter
 coordinate algebra. They count expert **instances** across layers and expert identities selected per
 token; they do not reveal how many independent coordinates each expert contains, which coordinates
 are tied/shared, or where any coordinate resides. A router top-k therefore never manufactures
