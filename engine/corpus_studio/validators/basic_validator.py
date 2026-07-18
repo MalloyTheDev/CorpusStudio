@@ -237,6 +237,20 @@ def validate_jsonl_row(
     return validate_example_fields(row, schema_id, row_number)
 
 
+def validate_jsonl_row_against(
+    row: Any,
+    schema: DatasetSchema,
+    row_number: int | None = None,
+) -> list[ValidationIssue]:
+    """Like :func:`validate_jsonl_row`, but against an already-resolved ``DatasetSchema`` (e.g. a
+    project-local schema) instead of a builtin id - the seam that lets the single writer validate
+    against a project's own derived schema."""
+    if not isinstance(row, dict):
+        return [_issue("Row must be a JSON object.", row_number)]
+
+    return validate_example_fields_against(row, schema, row_number)
+
+
 def validate_jsonl_file(path: Path, schema_id: str) -> ValidationReport:
     report = ValidationReport(valid=True, schema_id=schema_id)
 
