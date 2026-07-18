@@ -116,16 +116,25 @@ def _rows_to_lines(rows: Iterable[Any]) -> list[str]:
     return [json.dumps(row, ensure_ascii=False) for row in rows]
 
 
-def append_examples(project_dir: Path | str, rows: list[Any]) -> int:
-    """Append ``rows`` to ``examples.jsonl`` atomically (read existing + concat +
-    atomic replace, so a reader never sees a partial file), under the single-writer
-    lock. Returns the number of rows appended. The caller validates ``rows`` first."""
+def append_examples_locked(project_dir: Path | str, rows: list[Any]) -> int:
+    """Append ``rows`` to ``examples.jsonl`` atomically **without acquiring the lock** -
+    the caller MUST already hold :func:`single_writer_lock`. For a compound critical
+    section (e.g. append + version capture) that must be one atomic unit so a concurrent
+    writer cannot interleave. Returns the count appended; the caller validates ``rows`` first."""
 
     new_lines = _rows_to_lines(rows)
-    with single_writer_lock(project_dir):
-        existing = read_existing_lines(project_dir)
-        _atomic_write_lines(examples_path(project_dir), existing + new_lines)
+    existing = read_existing_lines(project_dir)
+    _atomic_write_lines(examples_path(project_dir), existing + new_lines)
     return len(new_lines)
+
+
+def append_examples(project_dir: Path | str, rows: list[Any]) -> int:
+    """Append ``rows`` to ``examples.jsonl`` atomically under the single-writer lock
+    (read existing + concat + atomic replace, so a reader never sees a partial file).
+    Returns the number of rows appended. The caller validates ``rows`` first."""
+
+    with single_writer_lock(project_dir):
+        return append_examples_locked(project_dir, rows)
 
 
 def write_examples(project_dir: Path | str, rows: list[Any]) -> int:

@@ -84,3 +84,28 @@ def test_commit_missing_project_dir(tmp_path: Path):
     )
     assert result.exit_code == 1
     assert "does not exist" in result.output
+
+
+def test_import_commit_holds_lock_across_version_capture(tmp_path, monkeypatch):
+    # #566: append + version capture run under ONE held lock. A create_dataset_version that
+    # tries to re-acquire the single-writer lock must fail (the lock is already held),
+    # proving there is no unlock window between the append and the capture.
+    import pytest
+
+    pytest.importorskip("fcntl")
+    from corpus_studio.storage.examples_writer import single_writer_lock
+
+    project = _project(tmp_path)
+    src = _staging(tmp_path, VALID)
+
+    def _fake_capture(project_dir, **_kw):
+        with single_writer_lock(project_dir):  # would succeed only if the lock were released
+            pass
+        raise AssertionError("the single-writer lock was NOT held during version capture")
+
+    monkeypatch.setattr(
+        "corpus_studio.versions.version_registry.create_dataset_version", _fake_capture
+    )
+    result = runner.invoke(app, ["import-commit", str(project), "--from", str(src), "--json"])
+    assert result.exit_code == 1  # the inner re-acquire raises ExamplesLockedError -> exit 1
+    assert _rows(project) == VALID  # the append still happened, before the capture attempt

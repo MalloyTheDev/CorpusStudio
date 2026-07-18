@@ -2648,8 +2648,9 @@ def import_commit(
 
     from corpus_studio.storage.examples_writer import (
         ExamplesLockedError,
-        append_examples,
+        append_examples_locked,
         examples_path,
+        single_writer_lock,
     )
     from corpus_studio.validators.basic_validator import validate_jsonl_row
 
@@ -2694,18 +2695,23 @@ def import_commit(
 
     version_id: Optional[str] = None
     if accepted:
+        # Hold the single-writer lock across BOTH the append and the version capture, so
+        # the captured undo point reflects exactly this commit - no concurrent writer can
+        # slip in between (create_dataset_version only reads examples.jsonl + writes under
+        # dataset_versions/, so it runs safely inside the held lock).
         try:
-            append_examples(project_dir, accepted)
+            with single_writer_lock(project_dir):
+                append_examples_locked(project_dir, accepted)
+                if capture_version:
+                    from corpus_studio.versions.version_registry import create_dataset_version
+
+                    record = create_dataset_version(
+                        project_dir, label="import commit", trigger="import_commit", store_rows=True
+                    )
+                    version_id = record.version_id
         except ExamplesLockedError as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=1) from exc
-        if capture_version:
-            from corpus_studio.versions.version_registry import create_dataset_version
-
-            record = create_dataset_version(
-                project_dir, label="import commit", trigger="import_commit", store_rows=True
-            )
-            version_id = record.version_id
 
     result = {
         "examples_path": str(examples_path(project_dir)),
