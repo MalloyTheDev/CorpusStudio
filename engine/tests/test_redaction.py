@@ -84,3 +84,20 @@ def test_redact_rows_handles_nested_list_and_dict_values() -> None:
     assert report.redacted_spans == 1
     assert "[REDACTED:email]" in redacted[0]["messages"][0]["content"]
     assert redacted[0]["messages"][1]["content"] == "noted"
+
+
+def test_redact_masks_numeric_pii_so_the_gate_can_clear() -> None:
+    # A payment-card number stored as a JSON number is flagged by PII detection but was
+    # not redactable (#505). Now it is; a legit number keeps its value and type.
+    rows = [{"card": 4111111111111111, "note": "ok", "qty": 42}]  # "note" separates the numbers
+
+    before = build_basic_quality_report(rows)
+    assert before.pii_finding_count >= 1  # the numeric card is flagged
+
+    redacted, report = redact_rows(rows)
+    assert redacted[0]["card"] == "[REDACTED:credit_card]"
+    assert redacted[0]["qty"] == 42  # legit number unchanged (value + type)
+    assert any(hit.kind == "credit_card" for hit in report.by_kind)
+
+    after = build_basic_quality_report(redacted)
+    assert after.pii_finding_count == 0  # redaction cleared it -> the gate can pass
