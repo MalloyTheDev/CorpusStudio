@@ -19,8 +19,6 @@ New to the codebase? See docs/DEVELOPER_GUIDE.md.
 <!-- What you actually ran (not "should pass"). Tick what applies. -->
 
 - [ ] Engine gate green: `ruff` + `mypy corpus_studio` + `pytest -q` (from `engine/`, in the venv)
-- [ ] Desktop builds (both heads): `dotnet build apps/desktop/CorpusStudio.Desktop.sln`
-- [ ] Desktop tests: `dotnet test apps/desktop/CorpusStudio.Desktop.sln`
 - [ ] New/changed behavior has tests
 - [ ] Docs updated (if behavior or a command changed)
 - [ ] Manual check noted below (for anything CI can't exercise — e.g. a live training/eval run)

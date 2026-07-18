@@ -49,10 +49,11 @@ Three surfaces:
   conformance/process-tree boundary (not a real new backend) + the hash-sealed
   `ResolvedExecutionConfiguration` consumed directly by the first-party worker (no post-seal semantic
   overrides, implicit placement, or silent trainer-field filtering).
-- **UI** — the target frontend is **Tauri 2 + React** (`apps/web`, TS); the WPF/Avalonia desktop
-  (`apps/desktop`, C#) is a **decommissioning prototype** (#545), kept only until the engine CLI
-  re-homes dataset authoring (#546). UI is a client over the engine CLI; it never owns training
-  behavior. Target architecture: a **Rust authoritative core** + isolated Python ML workers (#522).
+- **UI** — the frontend is **Tauri 2 + React** (`apps/web`, TS). The WPF/Avalonia desktop prototype
+  was **removed** (#545) after the engine CLI re-homed dataset authoring (#546); `apps/web` is an
+  early contract-first client whose full Studio-screen port is in progress. UI is a client over the
+  engine CLI; it never owns training behavior. Target architecture: a **Rust authoritative core** +
+  isolated Python ML workers (#522).
 
 ## Build & verify (the gate)
 From `engine/` with the venv:
@@ -61,7 +62,7 @@ From `engine/` with the venv:
 .venv/bin/python -m mypy corpus_studio
 .venv/bin/python -m pytest -q --no-header --basetemp=.pytest_tmp
 ```
-CI runs on **Linux / Python 3.11** with `pytest --cov=corpus_studio --cov-fail-under=88` + C#/web jobs.
+CI runs on **Linux / Python 3.11** with `pytest --cov=corpus_studio --cov-fail-under=88` + the web job.
 - **Coverage**: this host is native Linux, so `storage_profiler`'s Linux-only detection now runs
   locally - the old ~0.3% Windows-run under-measurement no longer applies; the CI floor is 88%.
 - **After editing any `platform/` contract**, regenerate schemas:

@@ -20,7 +20,7 @@ body:
     id: steps
     attributes:
       label: Steps to reproduce
-      description: The minimal steps (a CLI command or the desktop clicks). Include a tiny synthetic dataset if relevant.
+      description: The minimal steps (a CLI command or UI clicks). Include a tiny synthetic dataset if relevant.
       placeholder: |
         1. …
         2. …
@@ -34,8 +34,7 @@ body:
       description: Where does the bug live?
       options:
         - Engine (Python CLI)
-        - Desktop (WPF)
-        - Avalonia head
+        - Web UI (Tauri/React)
         - Evaluation / suites
         - Training
         - Import / export

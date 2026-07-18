@@ -3,7 +3,7 @@
   "name": "Nocturne",
   "version": "1.0.0",
   "description": "Framework-agnostic design tokens for the Corpus Studio production UI. Single source of truth consumed by BOTH desktop shells: the Avalonia interim head (as ResourceDictionary brushes, #AARRGGBB) and the eventual Tauri/React shell (as CSS custom properties). Extracted from docs/design/handoff/. Theming is a token-set swap between dark (primary) and light.",
-  "notes": "Color values are given in web form (#RRGGBB or rgba()); the Avalonia mapping in apps/desktop/CorpusStudio.Avalonia/App.axaml uses #AARRGGBB (alpha-first). color-mix() values from the handoff are resolved here to concrete rgba for portability.",
+  "notes": "Color values are given in web form (#RRGGBB or rgba()); color-mix() values from the handoff are resolved here to concrete rgba for portability. (Framework-agnostic tokens; the WPF/Avalonia desktop that consumed them was removed - #545.)",
   "themes": {
     "dark": {
       "win": "#12141f",

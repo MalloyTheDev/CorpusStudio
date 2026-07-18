@@ -1,9 +1,9 @@
 # Corpus Studio — Tauri + React shell
 
-A cross-platform client over the platform's **language-neutral contracts**. This is the eventual
-production head (see [`docs/design/`](../../docs/design/)); the Avalonia head under
-[`apps/desktop/`](../desktop/) is the interim. Both consume the **same design tokens** and the **same
-JSON-Schema contracts** the engine emits, so this ports ~1:1.
+A cross-platform client over the platform's **language-neutral contracts**. This is the target
+production UI (see [`docs/design/`](../../docs/design/)). The WPF/Avalonia desktop prototype was
+removed (#545); this client consumes the **same design tokens** and the **same JSON-Schema
+contracts** the engine emits.
 
 ## Architecture
 

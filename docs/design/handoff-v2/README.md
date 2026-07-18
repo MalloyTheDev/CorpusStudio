@@ -18,8 +18,8 @@ source-of-truth glyph + token set that both shells consume.
 
 ## How the two shells use these glyphs
 
-- **Avalonia interim head (today):** [`apps/desktop/CorpusStudio.Avalonia/Styles/Icons.axaml`](../../../apps/desktop/CorpusStudio.Avalonia/Styles/Icons.axaml)
-  **inlines these exact glyphs** as `StreamGeometry` resources — the resource path data is the
+- **Removed WPF/Avalonia desktop head (#545):** the desktop's `Icons.axaml`
+  **inlined these exact glyphs** as `StreamGeometry` resources — the resource path data is the
   byte-for-byte Phosphor path from the matching SVG here (e.g. the `IcoDashboard` geometry is
   `assets/icons/regular/gauge.svg`'s path). The `.axaml` resource keys are short app-local names
   (`Ico…`), not the Phosphor names; use `ICONS.md`/`icons.json` to map a glyph back to its Phosphor

@@ -1,5 +1,9 @@
 # Workspace System
 
+> **Note:** this documents the workspace **design** (Start Center, Explorer, editor tabs). The
+> WPF/Avalonia desktop that first implemented it was **removed** (#545); this is the spec the target
+> Tauri 2/React UI (`apps/web`) implements.
+
 CorpusStudio's universal workspace is the **IDE surface across its seven product areas** (Data, Training,
 Evaluation, Behavior Lab, Model & Release, Environment & Hardware, Evidence - see
 [`PRODUCT_AREAS.md`](PRODUCT_AREAS.md)) — think VS Code / Cursor for the full dataset-to-model-to-release
@@ -144,7 +148,6 @@ services and models — **no change to the existing project flow**:
   `Services/ProjectTemplateService` (pure `BuildPlan` + guarded `Scaffold`),
   `Services/WorkspaceExplorerService` (deterministic tree + guarded create),
   `Services/WorkspaceDocumentService` (safe open + explicit atomic save + metadata).
-- Tests in `CorpusStudio.Desktop.Tests/WorkspaceSystemTests.cs`.
 
 The **Start Center, New Project wizard, Open/Initialize flow, VS Code-style
 Explorer view, and editor/viewer tabs** are fully specified by an interactive

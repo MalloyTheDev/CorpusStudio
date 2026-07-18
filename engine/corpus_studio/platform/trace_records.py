@@ -634,7 +634,7 @@ def check_trace_dataset_for_training(
 def _refuse_examples_jsonl(path: Path) -> None:
     if path.name.casefold() == "examples.jsonl":
         raise TraceRecordError(
-            "the engine never writes examples.jsonl; write a separate artifact and import it through the desktop"
+            "this command never writes examples.jsonl; write a separate artifact and commit it with examples-append"
         )
 
 

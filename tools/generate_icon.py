@@ -26,11 +26,9 @@ ICO_SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256,
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BRANDING = REPO_ROOT / "assets" / "branding"
-# Both heads consume a local copy so the csproj/axaml references stay simple.
+# The branding .ico is retained (the WPF/Avalonia desktop that also consumed it was removed, #545).
 ICO_TARGETS = [
     BRANDING / "corpusstudio.ico",
-    REPO_ROOT / "apps" / "desktop" / "CorpusStudio.Desktop" / "app.ico",
-    REPO_ROOT / "apps" / "desktop" / "CorpusStudio.Avalonia" / "app.ico",
 ]
 PNG_TARGET = BRANDING / "corpusstudio-256.png"
 

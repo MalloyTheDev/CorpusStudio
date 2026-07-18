@@ -79,7 +79,7 @@ Design/study only - implementation is gated. See the Behavior Lab entry in
 ## Workspace, UI & developer reference
 
 - [`WORKSPACE_SYSTEM.md`](WORKSPACE_SYSTEM.md) - the IDE-style universal workspace.
-- [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md) - the cross-platform / Avalonia plan (incl. the Cross-Platform Assessment).
+- [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md) - the cross-platform / Avalonia plan (superseded by #545, kept as history; incl. the Cross-Platform Assessment).
 - [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md) - the developer guide (incl. Development Setup).
 - [`CLI_REFERENCE.md`](CLI_REFERENCE.md) - the engine CLI reference.
 

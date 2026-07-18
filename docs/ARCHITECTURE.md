@@ -12,10 +12,10 @@ plane has three layers:
    (`engine/corpus_studio/platform/`: RunPlan / RunEvent / BackendManifest / …) + a headless run
    supervisor + supervised in-process **and subprocess** Python training workers + a multi-backend
    trainer registry ("pick your framework": `corpus_studio`, `unsloth`).
-3. **UI** — the **Tauri 2 + React** frontend (`apps/web`) is the target head; the C# WPF/Avalonia
-   desktop (`apps/desktop`) is a **decommissioning prototype** (#545), kept only until the engine CLI
-   re-homes dataset authoring (#546). Each head is a *client* of the engine/platform; none contains
-   platform logic. Target architecture: a **Rust authoritative core** + isolated Python ML workers (#522).
+3. **UI** — the **Tauri 2 + React** frontend (`apps/web`). The C# WPF/Avalonia desktop prototype was
+   **removed** (#545) after the engine CLI took over dataset authoring (#546); `apps/web` is an early
+   client whose full Studio-screen port is in progress. It is a *client* of the engine/platform; it
+   contains no platform logic. Target architecture: a **Rust authoritative core** + isolated Python ML workers (#522).
 
 The UI (the target Tauri/React head; the desktop is a retiring prototype) owns user interaction.
 The Python engine owns dataset logic.
@@ -23,9 +23,9 @@ The Python engine owns dataset logic.
 ## System diagram
 
 ```text
-Desktop UI
+UI client (Tauri/React)
   |
-  | calls local engine service / CLI / IPC
+  | shells out to the engine CLI
   v
 Dataset Engine
   |
@@ -46,9 +46,9 @@ Dataset Engine
   +-- storage adapters
 ```
 
-## Desktop layer
+## UI layer
 
-The desktop layer is responsible for:
+The UI layer (the Tauri 2/React frontend; the removed desktop prototype presented these) is responsible for:
 
 - project dashboard
 - schema selection
@@ -62,26 +62,12 @@ The desktop layer is responsible for:
 - reviewing AI Assist suggestions and queue states before they return to Writing Studio
 - generating and previewing Training Studio config exports
 
-### Desktop internal structure (decommissioning)
+### UI implementation status
 
-> The C# desktop is a **prototype being removed** (#545); the target UI is the Tauri 2/React
-> frontend (`apps/web`). This section documents the current structure until it is retired.
-
-The desktop is a .NET solution with the UI logic being decomposed for cross-platform reuse:
-
-- **`CorpusStudio.Core`** (`net8.0`) — WPF-free shared library: all Models, Services, and the
-  per-tab view-models (each `IXxxViewModel` + `XxxViewModel : ViewModelBase`), plus the head-agnostic
-  seams — `IEngineService` (engine run-orchestration, faked in tests), `IDialogService`, and
-  `IFilePickerService` — resolved via a DI container (each with a Core `Null*` default).
-- **`CorpusStudio.Desktop`** (`net8.0-windows`) — the retiring WPF head (#545): Views + `App` + the WPF
-  seam adapters (`MessageBoxDialogService`, `Win32FilePickerService`, `PythonEngineService`), referencing Core.
-- **`CorpusStudio.Avalonia`** (`net8.0`) — a proof cross-platform head binding the full tab set over
-  the *unchanged* Core view-models (not shipped).
-
-All per-tab view-models are now extracted out of the former `MainWindowViewModel` god-object; what
-remains on the shell is legitimate orchestration (shell mode, project list, active project, output log)
-plus the engine-run commands being consolidated off the per-head code-behind (issue #184). See
-[`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md).
+The WPF/Avalonia desktop that first implemented these screens has been **removed** (#545). The
+target UI is the **Tauri 2 + React** frontend (`apps/web`) — an early contract-first client whose
+full Studio-screen port is in progress. The framework-agnostic design source (tokens, icon set,
+screen inventory) lives in [`docs/design/`](design/) and carries forward to it.
 
 ## Engine layer
 
@@ -138,11 +124,8 @@ the optional project index. Opt-in local Ollama integration tests
 `CORPUS_STUDIO_OLLAMA_INTEGRATION=1` and a running backend, and self-skip when it
 is unavailable.
 
-The desktop app has xUnit tests (`apps/desktop/CorpusStudio.Desktop.Tests`)
-covering the `PythonEngineService` project-local JSON persistence for reviewed
-fixes, evaluation failure filters, and AI Assist rewrite batches. Engine tests
-run in CI via `.github/workflows/engine-tests.yml`; desktop tests run on Windows
-via `.github/workflows/desktop-tests.yml`.
+Engine tests run in CI via `.github/workflows/engine-tests.yml`, and the web client via
+`.github/workflows/web.yml`. (The desktop's xUnit suite was removed with the desktop, #545.)
 
 ## IPC options
 
@@ -156,7 +139,7 @@ Possible app-to-engine communication:
 Current path:
 
 ```text
-Desktop writes project files -> Python CLI validates/exports -> Desktop reads results
+UI client -> engine CLI writes/validates/exports project files -> client reads results
 ```
 
 This is simple, debuggable, and avoids premature complexity.
@@ -220,14 +203,14 @@ Desktop Future Labs
 
 Model calls stay behind backend adapters. Real first-party execution is owned by `platform-plan` →
 `platform-run`; backend identity, environment, capabilities, immutable inputs, and runner lane form
-one chain. The Tauri/React Platform client drives that lifecycle. WPF/Avalonia still launches reviewed
-external-trainer argv, but deliberately refuses its former direct first-party `train-run` path. No UI
-head contains training logic.
+one chain. The Tauri/React Platform client drives that lifecycle. A UI client may launch reviewed
+external-trainer argv, but no UI head owns the first-party path (that is `platform-plan` ->
+`platform-run`) or contains training logic.
 
-The Training Studio MVP uses the same desktop-to-engine boundary:
+Training-config generation uses the same UI-to-engine boundary:
 
 ```text
-Desktop Training tab -> Python training-config CLI -> training templates -> rendered config file
+UI client -> Python training-config CLI -> training templates -> rendered config file
 ```
 
 The `training-config` command writes inspectable config files only. External targets may expose an
