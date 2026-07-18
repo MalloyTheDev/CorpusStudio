@@ -1,0 +1,12 @@
+# Single source of truth for the pydantic version used across CI.
+#
+# JSON Schema serialization details can shift across pydantic releases, so the schema-generation
+# job (.github/workflows/web.yml) and the engine test/type-check job
+# (.github/workflows/engine-tests.yml) must install the SAME pydantic. Otherwise the engine could be
+# tested against a pydantic that emits a slightly different schema than the committed
+# docs/contracts + apps/web/src/contracts, making the diff gate flap.
+#
+# Bump intentionally: change this line, then regenerate docs/contracts and apps/web/src/contracts in
+# the same PR (CI diffs them). The engine's own dependency constraint stays the loose `pydantic>=2.0`
+# in pyproject.toml; this file only pins the exact CI resolution.
+pydantic==2.13.4

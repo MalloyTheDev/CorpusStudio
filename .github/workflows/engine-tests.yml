@@ -27,10 +27,13 @@ jobs:
           python-version: "3.11"
 
       - name: Install engine
+        # -c constraints.txt pins pydantic to the SAME version the schema-generation job (web.yml)
+        # uses, so the engine is tested/type-checked against the exact pydantic that produced the
+        # committed docs/contracts + apps/web/src/contracts. Single source: engine/constraints.txt.
         run: |
           cd engine
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev]" -c constraints.txt
 
       - name: Lint (ruff)
         run: |
