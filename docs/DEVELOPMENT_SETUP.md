@@ -118,11 +118,11 @@ Or run the automated Windows-only WPF desktop smoke test:
 ```
 
 The smoke script exercises the current desktop loop, including project
-creation, validation, quality checks, splits, imports, Evaluation Lab shelling,
+creation, validation, quality checks, splits, imports, Evaluation Studio shelling,
 Evaluation report comparison, saved Evaluation regression rerun settings, AI
 Assist queue behavior, persistent AI Assist rewrite batch resume, Evaluation
 tag/failure/score-band summaries, failed Evaluation row edit handoff to Writing
-Studio, Training Lab config export, and saved lab backend settings.
+Studio, Training Studio config export, and saved lab backend settings.
 
 ## Validate example datasets
 

@@ -60,7 +60,7 @@ Each registry is an independent, versioned, dependency-light set of entries. Eve
 | 7 | **PrecisionAndQuantization** | compute/param/quant dtypes | **shipped enums** - `PrecisionMode`, `QuantizationMode`, `PrecisionExecutionPolicy`. Registry surface: **planned**. |
 | 8 | **HardwareTarget** | CUDA / ROCm / Metal-MLX / XLA-TPU / CPU | **partial** - `DeviceKind`, `EnvironmentProfile`, `AcceleratorRuntime`; only CUDA is workload-touched. |
 | 9 | **CheckpointStrategy** | monolithic vs sharded/resharding + resume | **contract shipped** - `CheckpointImpl`, `CheckpointManifest`, `SealedTrainingState`, `ResumeLineage`. See [`CHECKPOINT_RESUME.md`](CHECKPOINT_RESUME.md). Pretraining **data cursor** is a gap (§6). |
-| 10 | **EvaluationProfile** | how a run is scored/gated | **contract shipped** - `EvaluationResult`, `EvalGate`, `EvalMetric`, `EvalTarget`. See [`EVALUATION_LAB.md`](EVALUATION_LAB.md). Named profiles: **planned**. |
+| 10 | **EvaluationProfile** | how a run is scored/gated | **contract shipped** - `EvaluationResult`, `EvalGate`, `EvalMetric`, `EvalTarget`. See [`EVALUATION_STUDIO.md`](EVALUATION_STUDIO.md). Named profiles: **planned**. |
 | 11 | **TrainingPreset** | a named convenience profile pinning one entry per dimension | **new** - e.g. `unsloth-qlora-qwen`. |
 
 ## 3. The TrainingPlan composition layer

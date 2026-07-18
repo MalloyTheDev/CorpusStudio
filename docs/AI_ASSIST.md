@@ -1,6 +1,6 @@
-# AI Assist Lab
+# AI Assist
 
-AI Assist Lab uses models to help review, rewrite, tag, and draft dataset
+AI Assist uses models to help review, rewrite, tag, and draft dataset
 examples — review-first by design. AI should assist authors, not blindly generate
 rows into the dataset; human accept/reject remains required, and output is always
 `review_required`.
@@ -27,7 +27,7 @@ export for DPO or reward-model review.
 
 ## Product Role
 
-AI Assist Lab should help users move faster while preserving dataset quality. It
+AI Assist should help users move faster while preserving dataset quality. It
 should make weak examples easier to find, draft candidates easier to review, and
 schema violations easier to correct.
 
@@ -52,7 +52,7 @@ AI-assisted actions in scope:
 - detect repetitive synthetic patterns; MVP emits review warnings for repeated openings, repeated text fields, and generic phrases
 - review a draft without rewriting; MVP action key: `review`
 
-These actions should use the same model backend abstraction as Evaluation Lab.
+These actions should use the same model backend abstraction as Evaluation Studio.
 Local-first backends should be the default path.
 
 ## Human Review Requirement
@@ -88,7 +88,7 @@ Synthetic data can quickly introduce repetition, shallow phrasing, incorrect
 answers, format drift, and hidden leakage. Synthetic data should pass schema
 validation and quality gates before being accepted.
 
-AI Assist Lab should flag common synthetic-data problems:
+AI Assist should flag common synthetic-data problems:
 
 - repeated openings or closings
 - overused examples
@@ -153,7 +153,7 @@ policy.
 
 ## Implementation Notes
 
-AI Assist Lab should be implemented as a review queue, not as direct mutation of
+AI Assist should be implemented as a review queue, not as direct mutation of
 accepted examples.
 
 Recommended data states:

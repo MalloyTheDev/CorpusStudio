@@ -27,7 +27,7 @@ is not useful if the dataset is broken, leaky, duplicated, poorly split, or
 untested.
 
 Corpus Studio must not implement full training until dataset validation,
-splitting, export, and Evaluation Lab workflows are stable.
+splitting, export, and Evaluation Studio workflows are stable.
 
 ### Why Training Comes Later
 
@@ -46,7 +46,7 @@ The staged order is:
 6. launch local training jobs
 7. compare checkpoints against the same eval set
 
-### Training Lab Phases
+### Training Studio Phases
 
 #### v0.4 Config Generation
 
@@ -322,14 +322,14 @@ completed run is not a quality signal, and license classification is fail-closed
 ### Rule
 
 Training should only run after validation, quality checks, splitting, and
-Evaluation Lab checks are stable.
+Evaluation Studio checks are stable.
 
 
 ---
 
 ## Training Configs
 
-Training config export is the v0.4 Training Lab feature for turning a clean,
+Training config export is the v0.4 Training Studio feature for turning a clean,
 split, evaluated dataset into config files for established training tools.
 
 Current status: Corpus Studio generates a config from the engine

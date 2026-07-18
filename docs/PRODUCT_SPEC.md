@@ -28,9 +28,9 @@ Today it combines:
 - a cleaning lab
 - a quality dashboard + graded debt ledger
 - a split/export manager
-- an Evaluation Lab (local models, optional LLM judge) + Model Arena
-- a review-first AI Assist Lab
-- a Training Lab (external config/launcher + sealed first-party platform client)
+- an Evaluation Studio (local models, optional LLM judge) + Model Arena
+- a review-first AI Assist
+- a Training Studio (external config/launcher + sealed first-party platform client)
 - dataset version history + a model-artifact registry
 
 The app exists to make the whole path from raw data to a released model - and the evidence that it
@@ -123,7 +123,7 @@ Create project
 -> export
 ```
 
-The full shipped loop extends this through split/quality/debt, Evaluation Lab and Model
+The full shipped loop extends this through split/quality/debt, Evaluation Studio and Model
 Arena, review-first AI Assist, external training-config launch and sealed first-party platform
 dispatch, and dataset
 version history — see [`CURRENT_STATE.md`](CURRENT_STATE.md) for the step-by-step feature
@@ -151,5 +151,5 @@ board (they drift when copied). Instead:
 - **What works today** (authoritative): [`CURRENT_STATE.md`](CURRENT_STATE.md).
 - **Staged milestones v0.1 → v1.3** and their exit criteria: [`ROADMAP.md`](ROADMAP.md).
 - **Initial build board** (historical, through v0.4): [`../TASKS.md`](../TASKS.md).
-- Deep-dive references live under [`docs/`](.) (Evaluation Lab, AI Assist Lab, Gates,
+- Deep-dive references live under [`docs/`](.) (Evaluation Studio, AI Assist, Gates,
   Provider Policy, Versioning, Training, Workspace System, and more).

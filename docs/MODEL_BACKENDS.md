@@ -1,6 +1,6 @@
 # Model Backends
 
-Model backends are the abstraction that lets Evaluation Lab and AI Assist Lab
+Model backends are the abstraction that lets Evaluation Studio and AI Assist
 run models without hardcoding one provider.
 
 Corpus Studio should remain local-first. Hosted providers can be supported later
@@ -22,7 +22,7 @@ Planned explicit opt-in backends:
 - Hugging Face Inference later
 
 Current engine status: Ollama and OpenAI-compatible adapters exist for explicit
-Evaluation Lab and AI Assist Lab MVP runs. The engine also exposes
+Evaluation Studio and AI Assist MVP runs. The engine also exposes
 `backend-health` and `model-list` commands so the app can check connectivity
 and list locally available models, including Ollama models returned from
 `/api/tags`. They use the Python standard library for HTTP calls and do not add

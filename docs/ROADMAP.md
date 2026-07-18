@@ -11,7 +11,7 @@ serve all seven areas, not training alone. For the authoritative list of what wo
 
 The full local dataset-to-model loop is shipped end to end: authoring/validation,
 import quarantine, quality reports + a graded debt ledger, leakage-checked splits,
-JSONL/preference export, Evaluation Lab, multi-model benchmark, Model Arena,
+JSONL/preference export, Evaluation Studio, multi-model benchmark, Model Arena,
 review-first AI Assist (with pre-review candidate gating), a governed provider
 policy + gate runner, the local training launcher (in-app launch, live logs,
 checkpoints, resume, before/after eval), a training run registry + regression
@@ -61,11 +61,11 @@ resulting features in full.
 - **v0.1 — Dataset Creation Studio.** Local projects from schema templates,
   editors, schema validation, JSONL import (quarantine review/retry) and export,
   train/validation/test splitting, basic quality checks, quality history.
-- **v0.2 — Evaluation Lab.** Run datasets against local Ollama / OpenAI-compatible
+- **v0.2 — Evaluation Studio.** Run datasets against local Ollama / OpenAI-compatible
   models: health checks, model discovery, JSON reports + history + two-report
   comparison, regression reruns, tag/failure/score-band summaries, failed-row edit
   loops, manual scoring, saved failure filters, versioned reviewed-fix tracking.
-- **v0.3 — AI Assist Lab.** Review-first accept/reject queue with saved views,
+- **v0.3 — AI Assist.** Review-first accept/reject queue with saved views,
   bulk triage + undo, resumable rewrite batches, synthetic-pattern + preference
   warnings; output is always `review_required`, never auto-accepted.
 - **v0.4 — Training Config Generation.** Inspectable configs for Axolotl / TRL /
@@ -100,7 +100,7 @@ resulting features in full.
 - **v1.2 — Approved Provider Generation (candidate gating).** `run_ai_assist` runs
   the dataset gate runner over generated candidates and attaches the verdict as
   `candidate_gate` — a pre-review signal only (v1.2.1 surfaces it in the desktop
-  with confirm-on-block). See [`AI_ASSIST_LAB.md`](AI_ASSIST_LAB.md).
+  with confirm-on-block). See [`AI_ASSIST.md`](AI_ASSIST.md).
 - **v1.3 — Evaluation Suites & Chat Gates.** Named multi-case evaluation suites with a
   per-metric verdict and optional `version_id`-pinned cases (engine + `suite-*` CLI +
   desktop **Suites** tab); a conversation-structure chat gate (`chat-gate` + desktop

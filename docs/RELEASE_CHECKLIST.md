@@ -51,11 +51,11 @@ These are the paths a first-time user exercises; capture output as evidence.
 
 ## 4. Screenshots
 
-- [ ] Refresh the `docs/screenshots/` workflow gallery (Start Center, wizard,
-      Explorer, Studio dashboard, Problems, Output, Debt) so the README preview
-      matches the current UI.
-- [ ] Capture the Evaluation tab showing drilldown filters, reviewed fixes, and
-      report history if they changed.
+- [ ] **Deferred until the production UI is settled.** The desktop is currently a
+      high-fidelity **prototype**, so the README no longer ships a screenshot
+      gallery. Re-introduce the workflow screenshots (Start Center, wizard,
+      Explorer, Studio dashboard, Problems, Output, Debt) and the Evaluation-tab
+      drilldown only once the settled product UI lands.
 
 ## 5. Repo hygiene
 
