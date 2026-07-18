@@ -92,6 +92,22 @@ export const appendRows = (projectDir: string, rowsJsonl: string): Promise<Appen
 export const datasetDebt = (projectDir: string): Promise<DebtReport> =>
   call<DebtReport>("data_debt", { projectDir });
 
+export interface ImportCommitResult {
+  examples_path: string;
+  committed: number;
+  rejected: number;
+  version_id: string | null;
+  schema_id: string;
+}
+
+/** Validate/preview a source file (JSONL/CSV/TSV/Parquet) against the schema, without committing. */
+export const importPreview = (schema: string, sourcePath: string): Promise<PreviewReport> =>
+  call<PreviewReport>("data_import_preview", { schema, sourcePath });
+
+/** Commit a source file's schema-valid rows into examples.jsonl + capture a version. */
+export const importCommit = (projectDir: string, sourcePath: string): Promise<ImportCommitResult> =>
+  call<ImportCommitResult>("data_import_commit", { projectDir, sourcePath });
+
 /** The project's on-disk directory (the engine's default projects root + id). */
 export const projectDir = (list: ProjectList, project: ProjectSummary): string =>
   `${list.projects_root}/${project.id}`;

@@ -154,6 +154,53 @@ fn data_debt(project_dir: String) -> Result<Value, String> {
     run_engine(&["dataset-debt", &examples.to_string_lossy(), "--json"])
 }
 
+/// Stage a source file to JSONL the engine can preview/commit. A `.jsonl` source is used directly;
+/// CSV/TSV/Parquet is converted via `import-convert` into a temp file (the bool marks it for cleanup).
+/// The engine does all reading/writing/conversion; the shell only routes paths.
+fn stage_source(source: &str) -> Result<(std::path::PathBuf, bool), String> {
+    if source.to_lowercase().ends_with(".jsonl") {
+        return Ok((std::path::PathBuf::from(source), false));
+    }
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mut staging = std::env::temp_dir();
+    staging.push(format!("corpus-studio-import-{}-{}.jsonl", std::process::id(), nanos));
+    run_engine(&["import-convert", source, &staging.to_string_lossy()])?;
+    Ok((staging, true))
+}
+
+/// Validate/preview a source file (JSONL/CSV/TSV/Parquet) against the project schema without
+/// committing — the accepted/rejected report the Import panel renders.
+#[tauri::command]
+fn data_import_preview(schema: String, source_path: String) -> Result<Value, String> {
+    let (staging, is_temp) = stage_source(&source_path)?;
+    let result = run_engine(&["import-preview", &staging.to_string_lossy(), &schema]);
+    if is_temp {
+        let _ = std::fs::remove_file(&staging);
+    }
+    result
+}
+
+/// Commit a source file's schema-valid rows into examples.jsonl via `import-commit` (the sanctioned
+/// single writer; invalid rows are reported, not dropped) and capture a version.
+#[tauri::command]
+fn data_import_commit(project_dir: String, source_path: String) -> Result<Value, String> {
+    let (staging, is_temp) = stage_source(&source_path)?;
+    let result = run_engine(&[
+        "import-commit",
+        &project_dir,
+        "--from",
+        &staging.to_string_lossy(),
+        "--json",
+    ]);
+    if is_temp {
+        let _ = std::fs::remove_file(&staging);
+    }
+    result
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -166,7 +213,9 @@ pub fn run() {
             data_new_project,
             data_preview,
             data_append,
-            data_debt
+            data_debt,
+            data_import_preview,
+            data_import_commit
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Corpus Studio shell");
