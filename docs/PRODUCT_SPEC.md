@@ -58,9 +58,18 @@ create dataset
 -> improve weak examples
 -> export clean dataset
 -> generate training config
--> launch local adapter training
+-> launch local training (pretraining, fine-tuning, or post-training)
 -> compare checkpoints with evaluation runs
 ```
+
+The training surface expands from adapter fine-tuning into a complete, pluggable **model-development
+system** — from-scratch and continued pretraining, full-parameter and adapter/PEFT fine-tuning,
+preference/RL post-training, distillation, dense and MoE architectures, and single-device or distributed
+execution across multiple framework/orchestrator adapters. It stays **opt-in and evidence-gated**:
+CorpusStudio composes a `TrainingPlan` from independent capability registries and dispatches a sealed plan
+to an isolated worker (or exports a config for an external trainer); it never bundles a training framework
+into the dependency-light control plane, and no capability is a default until it is workload-verified. See
+[`TRAINING_SYSTEMS_ARCHITECTURE.md`](TRAINING_SYSTEMS_ARCHITECTURE.md).
 
 ## Current Non-Goals
 
