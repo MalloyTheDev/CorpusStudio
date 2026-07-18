@@ -78,11 +78,11 @@ installed external trainer:
   whether the current dataset still matches a version (matches / drifted /
   unreadable), and a live version card renders the lineage
 - compare two versions (added / removed / common rows) and **restore** a
-  version's exact rows. In the desktop, an in-place restore captures the current
-  dataset as an undo point first, atomically swaps in the restored rows, and
-  refuses if a safe undo could not be captured. The engine never writes
-  `examples.jsonl` — the desktop is the single writer. See
-  [`docs/VERSIONING.md`](docs/VERSIONING.md)
+  version's exact rows. `examples.jsonl` now has a **single writer in the engine** —
+  the `examples-append` command (#546); the WPF/Avalonia desktop that previously
+  owned it is being retired (#545). In-place restore (capture an undo point, atomically
+  swap in the restored rows, refuse without a safe undo) is being re-homed to the engine
+  CLI next (#546). See [`docs/VERSIONING.md`](docs/VERSIONING.md)
 
 **Govern & gate**
 - role-based provider policy enforced **in the engine** (not just the UI):
@@ -144,8 +144,8 @@ installed external trainer:
   [`docs/TRACE_RECORDS.md`](docs/TRACE_RECORDS.md))
 - in-app Platform plan/run integration in the Tauri/React client, plus external-trainer launch in the
   WPF/Avalonia Training Studio (explicit command review, no shell), live log streaming, and a Stop that
-  kills the process tree. The shipping WPF/Avalonia desktop intentionally refuses the old mutable-
-  config first-party launch instead of bypassing Platform lineage
+  kills the process tree. The current WPF/Avalonia desktop (a decommissioning prototype, #545)
+  intentionally refuses the old mutable-config first-party launch instead of bypassing Platform lineage
 - checkpoint tracking during and after runs, resume-from-latest for targets
   with a CLI resume flag, and before/after evaluation comparison against the
   baseline captured at launch
@@ -215,17 +215,26 @@ Every dataset example should be:
 
 ```text
 CorpusStudio
+├── engine/     # Python: dependency-light control-plane engine (CLI) + opt-in [train] worker
 ├── apps/
-│   ├── desktop/             # C# desktop heads (WPF shipping + Avalonia interim) over a shared Core
-│   └── web/                 # Tauri 2 + React contract-first client (early-stage)
-├── engine/                  # Python dataset engine + platform run lifecycle and environment manager
-├── schemas/                 # Built-in schema definitions
-├── docs/                    # Product, architecture, roadmap, workflows
-├── examples/                # Example dataset rows
-├── scripts/                 # Developer scripts
-├── data/                    # Local project data, ignored by git
-└── exports/                 # Exported datasets, ignored by git
+│   ├── web/        # Tauri 2 + React frontend — the TARGET UI (in progress)
+│   └── desktop/    # C# WPF/Avalonia prototype — DECOMMISSIONING, being removed (#545)
+├── schemas/    # Built-in dataset schema definitions
+├── docs/       # Documentation (indexed by docs/README.md)
+├── research/   # Opt-in IEEE native-Linux research overlay (supporting track)
+├── examples/   # Example dataset rows
+├── scripts/    # Developer scripts
+├── tools/      # Developer utilities
+├── assets/     # Branding / static assets
+├── data/       # Local project data, ignored by git
+├── output/     # Local run output, ignored by git
+└── exports/    # Exported datasets, ignored by git
 ```
+
+**Target architecture:** a **Rust authoritative core** + isolated Python ML workers, driven by the
+**Tauri 2 / React** frontend over the Python engine. The WPF/Avalonia desktop is a **decommissioning
+prototype** (#545), kept only until the engine CLI re-homes dataset authoring (#546); the Rust core is
+a staged target (#522) and is not yet in the tree.
 
 ## Desktop preview
 
@@ -247,7 +256,8 @@ Explorer → Studio — is defined in that design source and rendered by the cur
 
 The current WPF/Avalonia desktop is a **high-fidelity prototype** of the Nocturne
 design language - a working shell used to pressure-test the full workflow, not the
-final production UI, so the README no longer embeds a screenshot gallery. The
+final production UI. It is being **retired** in favor of the Tauri 2/React frontend
+(#545), so the README no longer embeds a screenshot gallery. The
 framework-agnostic design tokens, icon set, and screen inventory in
 [`docs/design/`](docs/design/) are the source of truth and carry forward to the
 settled product UI; [`docs/WORKSPACE_SYSTEM.md`](docs/WORKSPACE_SYSTEM.md) describes
@@ -270,7 +280,7 @@ Build a local desktop app that supports:
 
 The recommended stack is:
 
-- C# WPF / WinUI-style desktop front-end
+- Tauri 2 + React frontend (`apps/web`) — the target UI (a C# WPF/Avalonia desktop prototype is being retired, #545)
 - Python dataset engine
 - file-backed project state, with an optional SQLite index for fast project listing
 - JSONL as the first export target

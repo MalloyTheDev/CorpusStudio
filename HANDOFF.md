@@ -93,8 +93,8 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
    native Windows/WDDM (plus separately labeled WSL probes); the native-Linux host now adds a
    `HARDWARE_VERIFIED` managed environment (env-manager GPU probe — see
    [`docs/HOST_STATE.md`](docs/HOST_STATE.md)), still not bare-Linux full-workload or real-offload proof.
-3. **UI heads** — WPF (shipping), Avalonia (cross-platform interim), Tauri 2 + React (`apps/web`,
-   contract-first future head). The UI is a **client** over the engine CLI; it never owns training.
+3. **UI** — Tauri 2 + React (`apps/web`) is the target head; the WPF/Avalonia desktop is a
+   decommissioning prototype (#545). The UI is a **client** over the engine CLI; it never owns training.
 
 ## 2. Current git / PR state
 
