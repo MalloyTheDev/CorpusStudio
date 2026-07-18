@@ -6128,6 +6128,297 @@ def provenance_allowlist_set(
         typer.echo(f"  note: '{teacher}' was not in the allow-list (nothing to remove).", err=True)
 
 
+@app.command("schema-derive")
+def schema_derive(
+    project_dir: Path,
+    source: str = typer.Option(..., "--from", help="Builtin schema id to copy (e.g. 'chat')."),
+    new_id: Optional[str] = typer.Option(
+        None, "--id", help="Id for the project-local copy (default: same as --from)."
+    ),
+    name: Optional[str] = typer.Option(
+        None, "--name", help="Human name for the copy (default: the source schema's name)."
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Overwrite an existing project-local schema with this id."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+):
+    """Copy a builtin schema into a project as an editable project-local schema.
+
+    The copy lives at <project>/schemas/<id>.schema.json; tighten it with schema-set-field and check
+    it with schema-validate. A project-local schema shadows the builtin of the same id when resolved
+    by the schema-* commands. Note: other commands (examples-append, import-commit, export) still use
+    the builtin schema of that id - honoring project-local schemas there is a planned follow-up.
+    """
+    from corpus_studio.schemas.project_schemas import (
+        SchemaError,
+        has_project_schema,
+        project_schema_path,
+        save_project_schema,
+    )
+
+    if not project_dir.is_dir():
+        typer.echo(f"Project directory '{project_dir}' does not exist.", err=True)
+        raise typer.Exit(code=1)
+    try:
+        schema = load_builtin_schema(source)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    target_id = new_id or source
+    try:
+        target_path = project_schema_path(project_dir, target_id)
+    except SchemaError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    if has_project_schema(project_dir, target_id) and not force:
+        typer.echo(
+            f"A project-local schema '{target_id}' already exists ({target_path}); pass --force to "
+            "overwrite.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    derived = schema.model_copy(update={"id": target_id, "name": name or schema.name})
+    path = save_project_schema(project_dir, derived)
+    result = {
+        "path": str(path),
+        "id": target_id,
+        "source_builtin": source,
+        "field_count": len(derived.fields),
+    }
+    if as_json:
+        typer.echo(json.dumps(result, indent=2))
+    else:
+        typer.echo(
+            f"Derived project-local schema '{target_id}' from builtin '{source}' "
+            f"({len(derived.fields)} field(s)) at {path}."
+        )
+
+
+@app.command("schema-set-field")
+def schema_set_field(
+    project_dir: Path,
+    schema_id: str = typer.Argument(..., help="Project-local schema id to edit."),
+    field: str = typer.Option(..., "--name", help="Top-level field name to add or modify."),
+    field_type: Optional[str] = typer.Option(
+        None, "--type", help="FieldType (string/integer/...); required when adding a new field."
+    ),
+    required: Optional[bool] = typer.Option(
+        None, "--required/--optional", help="Tighten to required (or relax); unchanged if omitted."
+    ),
+    enum: Optional[str] = typer.Option(
+        None,
+        "--enum",
+        help="Comma-separated allowed string values to pin; an empty string clears the enum.",
+    ),
+    description: Optional[str] = typer.Option(None, "--description", help="Field description."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+):
+    """Add or modify a TOP-LEVEL field of a project-local schema - pin a label enum, add a field, or
+    tighten a field to required.
+
+    The edited schema is re-validated as a whole before it is written; an invalid edit (an unknown
+    field type, a broken shape) is refused and nothing changes. Nested object/list-element fields are
+    out of scope here - edit the .schema.json directly for those.
+    """
+    from pydantic import ValidationError
+
+    from corpus_studio.schemas.base import DatasetSchema, SchemaField
+    from corpus_studio.schemas.project_schemas import (
+        SchemaError,
+        load_project_schema,
+        save_project_schema,
+    )
+
+    if not project_dir.is_dir():
+        typer.echo(f"Project directory '{project_dir}' does not exist.", err=True)
+        raise typer.Exit(code=1)
+    try:
+        schema = load_project_schema(project_dir, schema_id)
+    except SchemaError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    fields = list(schema.fields)
+    index = next((i for i, existing in enumerate(fields) if existing.name == field), None)
+    if index is None and field_type is None:
+        typer.echo(f"Adding the new field '{field}' requires --type.", err=True)
+        raise typer.Exit(code=1)
+
+    data: dict[str, Any] = (
+        fields[index].model_dump() if index is not None else {"name": field, "type": field_type}
+    )
+    if field_type is not None:
+        data["type"] = field_type
+    if required is not None:
+        data["required"] = required
+    if description is not None:
+        data["description"] = description
+    if enum is not None:
+        values = [value.strip() for value in enum.split(",") if value.strip()]
+        data["enum"] = values or None
+
+    try:
+        updated_field = SchemaField(**data)
+        if index is not None:
+            fields[index] = updated_field
+        else:
+            fields.append(updated_field)
+        # Re-validate the WHOLE schema so a broken edit can never be written.
+        edited = DatasetSchema.model_validate(schema.model_copy(update={"fields": fields}).model_dump())
+    except ValidationError as exc:
+        typer.echo(f"Refusing the edit - the schema would be invalid: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    path = save_project_schema(project_dir, edited)
+    action = "modified" if index is not None else "added"
+    result = {
+        "path": str(path),
+        "field": field,
+        "action": action,
+        "field_count": len(edited.fields),
+    }
+    if as_json:
+        typer.echo(json.dumps(result, indent=2))
+    else:
+        typer.echo(
+            f"{action.capitalize()} field '{field}' in project schema '{schema_id}' "
+            f"({len(edited.fields)} field(s)) at {path}."
+        )
+
+
+@app.command("schema-validate")
+def schema_validate(
+    project_dir: Path,
+    schema_id: str = typer.Argument(..., help="Schema id (project-local first, then builtin)."),
+    data: Optional[Path] = typer.Option(
+        None, "--data", help="Also validate this JSONL dataset against the schema."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+):
+    """Validate a schema (project-local first, else builtin) is well-formed, and optionally validate a
+    JSONL dataset against it.
+
+    Resolving the schema proves it is well-formed (it parses as a DatasetSchema). With --data every
+    row is checked and the failures are reported. Exit 1 if the schema is unresolved/malformed or any
+    data row fails.
+    """
+    from corpus_studio.schemas.project_schemas import SchemaError, resolve_schema
+    from corpus_studio.validators.basic_validator import validate_example_fields_against
+
+    if not project_dir.is_dir():
+        typer.echo(f"Project directory '{project_dir}' does not exist.", err=True)
+        raise typer.Exit(code=1)
+    try:
+        schema, source = resolve_schema(project_dir, schema_id)
+    except (SchemaError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    row_errors: list[dict[str, Any]] = []
+    rows_checked = 0
+    if data is not None:
+        try:
+            rows = list(read_jsonl(data))
+        except (OSError, ValueError) as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+        for number, row in enumerate(rows, start=1):
+            rows_checked += 1
+            if not isinstance(row, dict):
+                row_errors.append({"row_number": number, "message": "Row must be a JSON object."})
+                continue
+            for issue in validate_example_fields_against(row, schema, number):
+                row_errors.append({"row_number": number, "message": issue.message})
+
+    result = {
+        "schema_id": schema_id,
+        "source": source,
+        "field_count": len(schema.fields),
+        "valid_schema": True,
+        "rows_checked": rows_checked,
+        "row_error_count": len(row_errors),
+        "row_errors": row_errors[:50],
+    }
+    if as_json:
+        typer.echo(json.dumps(result, indent=2))
+    else:
+        typer.echo(
+            f"Schema '{schema_id}' ({source}) is well-formed: {len(schema.fields)} field(s)."
+        )
+        if data is not None:
+            verdict = "all rows valid" if not row_errors else f"{len(row_errors)} row error(s)"
+            typer.echo(f"Checked {rows_checked} row(s) against it: {verdict}.")
+    for entry in row_errors[:20]:
+        typer.echo(f"  row {entry['row_number']}: {entry['message']}", err=True)
+    if row_errors:
+        raise typer.Exit(code=1)
+
+
+@app.command("schema-list")
+def schema_list(
+    project_dir: Path,
+    as_json: bool = typer.Option(False, "--json", help="Emit the listing as JSON."),
+):
+    """List a project's schemas: project-local (editable) first, then builtin - marking which builtin
+    ids a project-local schema shadows.
+
+    Shadowing is keyed on the project schema FILE existing (exactly what resolution keys on), so a
+    present-but-malformed project schema is shown as malformed and still marks its builtin shadowed -
+    never silently hidden while it breaks resolution for that id.
+    """
+    from corpus_studio.schemas.project_schemas import project_schema_entries
+
+    if not project_dir.is_dir():
+        typer.echo(f"Project directory '{project_dir}' does not exist.", err=True)
+        raise typer.Exit(code=1)
+    project_entries = project_schema_entries(project_dir)
+    project_ids = {schema_id for schema_id, _ in project_entries}  # existence-based (incl. malformed)
+    malformed_ids: list[str] = []
+    entries: list[dict[str, Any]] = []
+    for schema_id, schema in project_entries:
+        if schema is None:
+            malformed_ids.append(schema_id)
+            entries.append({"id": schema_id, "source": "project", "malformed": True})
+        else:
+            entries.append(
+                {
+                    "id": schema.id,
+                    "name": schema.name,
+                    "source": "project",
+                    "field_count": len(schema.fields),
+                }
+            )
+    for schema in list_builtin_schemas():
+        entries.append(
+            {
+                "id": schema.id,
+                "name": schema.name,
+                "source": "builtin",
+                "shadowed_by_project": schema.id in project_ids,
+                "field_count": len(schema.fields),
+            }
+        )
+    if as_json:
+        typer.echo(json.dumps({"schemas": entries}, indent=2))
+    else:
+        for entry in entries:
+            if entry.get("malformed"):
+                typer.echo(f"  {entry['id']:<20} project (MALFORMED - fix or remove the file)")
+                continue
+            tag = entry["source"]
+            if entry.get("shadowed_by_project"):
+                tag += " (shadowed by a project-local schema)"
+            typer.echo(f"  {entry['id']:<20} {tag}  ({entry['field_count']} field(s))")
+    for schema_id in malformed_ids:
+        typer.echo(
+            f"  warning: project schema '{schema_id}' is malformed and is shadowing the builtin - "
+            f"schema-validate will fail for '{schema_id}' until it is fixed or removed.",
+            err=True,
+        )
+
+
 @app.command("gate-run")
 def gate_run(
     input_path: Path,
