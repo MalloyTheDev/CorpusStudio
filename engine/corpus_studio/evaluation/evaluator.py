@@ -67,8 +67,8 @@ def build_report_from_outputs(
         config: Evaluation run metadata.
         outputs: Tuples of ``(prompt, expected_output, model_output)``.
 
-    TODO: Replace this helper with backend-driven execution once v0.2 model
-    backends are wired.
+    Note: this scores already-produced outputs (offline); live backend-driven
+    execution runs through the model_backends adapters.
     """
 
     results: list[EvaluationExampleResult] = []

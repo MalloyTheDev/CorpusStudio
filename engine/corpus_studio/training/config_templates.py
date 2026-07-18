@@ -72,8 +72,8 @@ def build_lora_config_template(
 ) -> TrainingConfigTemplate:
     """Build a conservative LoRA config template.
 
-    TODO: Add richer target-specific compatibility checks in v0.4 after the
-    export matrix is finalized.
+    Note: richer target-specific compatibility checks could build on the export
+    matrix here in future.
     """
 
     return TrainingConfigTemplate(

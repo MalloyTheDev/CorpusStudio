@@ -3581,7 +3581,12 @@ def eval_run(
     model: str = typer.Option(..., "--model", help="Model name to run."),
     backend: str = typer.Option("ollama", "--backend", help="ollama or openai-compatible."),
     base_url: Optional[str] = typer.Option(None, "--base-url", help="Override provider base URL."),
-    api_key: Optional[str] = typer.Option(None, "--api-key", help="Optional API key."),
+    api_key: Optional[str] = typer.Option(
+        None,
+        "--api-key",
+        envvar="CORPUS_STUDIO_API_KEY",
+        help="Optional API key (or set CORPUS_STUDIO_API_KEY to keep it out of shell history / ps).",
+    ),
     output_path: Optional[Path] = typer.Option(None, "--output-path", help="Write report JSON."),
     limit: Optional[int] = typer.Option(None, "--limit", help="Maximum examples to run."),
     score_threshold: float = typer.Option(70.0, "--score-threshold"),
@@ -3600,7 +3605,12 @@ def eval_run(
     ),
     judge_backend: str = typer.Option("ollama", "--judge-backend", help="Judge backend."),
     judge_base_url: Optional[str] = typer.Option(None, "--judge-base-url", help="Judge provider base URL."),
-    judge_api_key: Optional[str] = typer.Option(None, "--judge-api-key", help="Judge API key."),
+    judge_api_key: Optional[str] = typer.Option(
+        None,
+        "--judge-api-key",
+        envvar="CORPUS_STUDIO_JUDGE_API_KEY",
+        help="Judge API key (or set CORPUS_STUDIO_JUDGE_API_KEY).",
+    ),
     progress: bool = typer.Option(
         False,
         "--progress",
@@ -3916,7 +3926,12 @@ def benchmark(
     models: list[str] = typer.Option(..., "--model", help="Model to benchmark (repeatable)."),
     backend: str = typer.Option("ollama", "--backend", help="ollama or openai-compatible."),
     base_url: Optional[str] = typer.Option(None, "--base-url", help="Override provider base URL."),
-    api_key: Optional[str] = typer.Option(None, "--api-key", help="Optional API key."),
+    api_key: Optional[str] = typer.Option(
+        None,
+        "--api-key",
+        envvar="CORPUS_STUDIO_API_KEY",
+        help="Optional API key (or set CORPUS_STUDIO_API_KEY to keep it out of shell history / ps).",
+    ),
     output_path: Optional[Path] = typer.Option(None, "--output-path", help="Write report JSON."),
     limit: Optional[int] = typer.Option(None, "--limit", help="Maximum examples per model."),
     score_threshold: float = typer.Option(70.0, "--score-threshold"),
@@ -3995,7 +4010,12 @@ def ai_assist(
     model: str = typer.Option(..., "--model", help="Model name to run."),
     backend: str = typer.Option("ollama", "--backend", help="ollama or openai-compatible."),
     base_url: Optional[str] = typer.Option(None, "--base-url", help="Override provider base URL."),
-    api_key: Optional[str] = typer.Option(None, "--api-key", help="Optional API key."),
+    api_key: Optional[str] = typer.Option(
+        None,
+        "--api-key",
+        envvar="CORPUS_STUDIO_API_KEY",
+        help="Optional API key (or set CORPUS_STUDIO_API_KEY to keep it out of shell history / ps).",
+    ),
     output_path: Optional[Path] = typer.Option(None, "--output-path", help="Write result JSON."),
     user_instruction: Optional[str] = typer.Option(None, "--instruction", help="Reviewer guidance."),
     timeout_seconds: int = typer.Option(120, "--timeout-seconds"),
@@ -4050,7 +4070,12 @@ def backend_health(
     model: str = typer.Option(..., "--model", help="Model name to check."),
     backend: str = typer.Option("ollama", "--backend", help="ollama or openai-compatible."),
     base_url: Optional[str] = typer.Option(None, "--base-url", help="Override provider base URL."),
-    api_key: Optional[str] = typer.Option(None, "--api-key", help="Optional API key."),
+    api_key: Optional[str] = typer.Option(
+        None,
+        "--api-key",
+        envvar="CORPUS_STUDIO_API_KEY",
+        help="Optional API key (or set CORPUS_STUDIO_API_KEY to keep it out of shell history / ps).",
+    ),
     timeout_seconds: int = typer.Option(10, "--timeout-seconds"),
 ):
     """Check whether a configured model backend is reachable."""
@@ -4077,7 +4102,12 @@ def backend_health(
 def model_list(
     backend: str = typer.Option("ollama", "--backend", help="ollama or openai-compatible."),
     base_url: Optional[str] = typer.Option(None, "--base-url", help="Override provider base URL."),
-    api_key: Optional[str] = typer.Option(None, "--api-key", help="Optional API key."),
+    api_key: Optional[str] = typer.Option(
+        None,
+        "--api-key",
+        envvar="CORPUS_STUDIO_API_KEY",
+        help="Optional API key (or set CORPUS_STUDIO_API_KEY to keep it out of shell history / ps).",
+    ),
     timeout_seconds: int = typer.Option(10, "--timeout-seconds"),
 ):
     """List models available from a configured local model backend."""
@@ -4996,7 +5026,12 @@ def trace_generate(
     backend: str = typer.Option("ollama", "--backend", help="Model backend: ollama | openai-compatible."),
     model: str = typer.Option(..., "--model", help="The approved model that generates the candidate reasoning."),
     base_url: Optional[str] = typer.Option(None, "--base-url", help="Backend base URL (default: the provider's local default)."),
-    api_key: Optional[str] = typer.Option(None, "--api-key", help="API key for an openai-compatible teacher."),
+    api_key: Optional[str] = typer.Option(
+        None,
+        "--api-key",
+        envvar="CORPUS_STUDIO_API_KEY",
+        help="API key for an openai-compatible teacher (or set CORPUS_STUDIO_API_KEY).",
+    ),
     max_tokens: int = typer.Option(1024, "--max-tokens", help="Max tokens per generation (reasoning + answer)."),
     temperature: float = typer.Option(0.7, "--temperature"),
     system: Optional[str] = typer.Option(None, "--system", help="Override the reasoning system prompt."),
@@ -5963,7 +5998,12 @@ def arena_run(
     models: list[str] = typer.Option(..., "--model", help="Model to run (repeatable)."),
     backend: str = typer.Option("ollama", "--backend", help="ollama or openai-compatible."),
     base_url: Optional[str] = typer.Option(None, "--base-url", help="Override provider base URL."),
-    api_key: Optional[str] = typer.Option(None, "--api-key", help="Optional API key."),
+    api_key: Optional[str] = typer.Option(
+        None,
+        "--api-key",
+        envvar="CORPUS_STUDIO_API_KEY",
+        help="Optional API key (or set CORPUS_STUDIO_API_KEY to keep it out of shell history / ps).",
+    ),
     output_path: Optional[Path] = typer.Option(None, "--output-path", help="Write report JSON."),
     project_dir: Optional[Path] = typer.Option(None, "--project-dir", help="Save under arena_reports/."),
     limit: Optional[int] = typer.Option(None, "--limit", help="Maximum prompts to run."),
@@ -5971,7 +6011,12 @@ def arena_run(
     judge_model: Optional[str] = typer.Option(None, "--judge-model", help="Evaluator model that ranks responses."),
     judge_backend: str = typer.Option("ollama", "--judge-backend", help="Judge backend."),
     judge_base_url: Optional[str] = typer.Option(None, "--judge-base-url", help="Judge provider base URL."),
-    judge_api_key: Optional[str] = typer.Option(None, "--judge-api-key", help="Judge API key."),
+    judge_api_key: Optional[str] = typer.Option(
+        None,
+        "--judge-api-key",
+        envvar="CORPUS_STUDIO_JUDGE_API_KEY",
+        help="Judge API key (or set CORPUS_STUDIO_JUDGE_API_KEY).",
+    ),
 ):
     """Run a prompt suite across several models and capture responses side by side.
 
