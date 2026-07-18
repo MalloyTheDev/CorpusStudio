@@ -60,9 +60,11 @@ jobs:
           python-version: "3.11"
       - name: Install engine + pip-audit
         # Install the engine with the SAME pinned pydantic CI uses (engine/constraints.txt), so the
-        # audited dependency tree matches what the engine job resolves.
+        # audited dependency tree matches what the engine job resolves. Upgrade the build toolchain
+        # (pip + setuptools) first so the audit reflects a patched toolchain rather than the runner
+        # image's older ambient setuptools - a stale build tool must not be reported as our surface.
         run: |
-          python -m pip install --upgrade pip "pip-audit==2.10.1"
+          python -m pip install --upgrade pip setuptools "pip-audit==2.10.1"
           cd engine
           pip install -e ".[dev]" -c constraints.txt
       - name: Audit installed dependencies for known vulnerabilities
