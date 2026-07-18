@@ -66,8 +66,8 @@ version, or verification claim.
 Trainable generation fails closed. Approve the exact local model or route first in the project policy,
 then generate:
 
-    corpus-studio provider-approve ollama qwen-model --project-dir C:\path\to\project
-    corpus-studio trace-generate prompts.jsonl --model qwen-model --project-dir C:\path\to\project --out trace-records.pending.jsonl
+    corpus-studio provider-approve ollama qwen-model --project-dir ./project
+    corpus-studio trace-generate prompts.jsonl --model qwen-model --project-dir ./project --out trace-records.pending.jsonl
 
 Policy is resolved and authorized before the backend is constructed or called. Accepted records are
 still pending; quality filtering is not human review. The adjacent report JSON records every
@@ -82,8 +82,8 @@ versioned review gate.
 
 Write approved or rejected successors to a new artifact:
 
-    corpus-studio trace-review trace-records.pending.jsonl --out trace-records.approved.jsonl --reviewer reviewer-id --decision approved --all --project-dir C:\path\to\project
-    corpus-studio trace-validate trace-records.approved.jsonl --require-approved --project-dir C:\path\to\project
+    corpus-studio trace-review trace-records.pending.jsonl --out trace-records.approved.jsonl --reviewer reviewer-id --decision approved --all --project-dir ./project
+    corpus-studio trace-validate trace-records.approved.jsonl --require-approved --project-dir ./project
 
 Use repeated trace-id options instead of all to review a subset. Approval recomputes the engine's
 validator/version/config/findings instead of trusting stored evidence, and blocked validation cannot

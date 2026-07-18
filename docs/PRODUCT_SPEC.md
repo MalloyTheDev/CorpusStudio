@@ -101,7 +101,7 @@ into the dependency-light control plane, and no capability is a default until it
 
 ## Supported dataset types
 
-Available today in both the desktop project-creation flow and the Python engine CLI (nine built-in schemas):
+Available today in both the desktop project-creation flow and the Python engine CLI (nine built-in dataset schemas; a tenth built-in, `trace`, is a reasoning-trace draft-authoring schema):
 
 1. raw text
 2. instruction
@@ -127,7 +127,7 @@ The full shipped loop extends this through split/quality/debt, Evaluation Lab an
 Arena, review-first AI Assist, external training-config launch and sealed first-party platform
 dispatch, and dataset
 version history — see [`CURRENT_STATE.md`](CURRENT_STATE.md) for the step-by-step feature
-list and [`WORKFLOWS.md`](WORKFLOWS.md) for the end-to-end walkthrough.
+list and [`WORKFLOWS.md`](WORKFLOWS.md) for dataset-task walkthroughs.
 
 ## Product principles
 

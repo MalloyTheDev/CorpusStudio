@@ -98,7 +98,7 @@ replace or reinterpret the legacy environment above. It is `HARDWARE_VERIFIED` f
 BF16-configured NF4 + double-quant + QLoRA + **math-only SDPA** + AdamW + adapter-reload tuple. Its
 sealed manager-1.1 evidence predates the explicit `forward_autocast` field, so it is not retroactively
 an observed BF16-activation/autocast claim. Its exact narrow identity remains readable historical
-rollback evidence. Manager 1.3 does not grant it a new health/planning claim without a replacement
+rollback evidence. Manager 1.4 does not grant it a new health/planning claim without a replacement
 lock carrying complete all-row RECORD counts. Do not modify, recreate, reseal, or delete it while
 developing flash readiness.
 
@@ -242,7 +242,7 @@ The old investigation correctly found no `record_integrity=unknown` or null RECO
 authoritative v3 plan bundle under manager-1.2 semantics; unknown fields occurred only in preserved
 version-only probe journals and were not admitted. The audit checkpoint nevertheless found a stricter
 integrity gap: all 84 installed packages in each v3 lock claimed `verified` while
-`record_verified_entries < record_entries`. Manager 1.3 tags the new meaning explicitly with
+`record_verified_entries < record_entries`. Manager 1.4 tags the new meaning explicitly with
 `record_count_semantics="all_record_rows_v2"` and requires positive equality with the installed-file
 count. Missing semantics keeps the old documents hash-verifiable, but health refuses them without
 rewriting their historical state. Consequently these locks and plans cannot authorize new work. A post-merge

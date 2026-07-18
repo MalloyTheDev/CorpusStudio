@@ -124,7 +124,16 @@ Assist queue behavior, persistent AI Assist rewrite batch resume, Evaluation
 tag/failure/score-band summaries, failed Evaluation row edit handoff to Writing
 Studio, Training Lab config export, and saved lab backend settings.
 
-## Validate example datasets (Windows PowerShell examples)
+## Validate example datasets
+
+On the current native-Linux host (venv `engine/.venv/bin/python`):
+
+```bash
+engine/.venv/bin/python -m corpus_studio.cli validate examples/datasets/instruction/train.jsonl instruction
+engine/.venv/bin/python scripts/validate_examples.py
+```
+
+Windows (PowerShell):
 
 ```powershell
 .\engine\.venv\Scripts\python.exe -m corpus_studio.cli validate examples\datasets\instruction\train.jsonl instruction

@@ -239,8 +239,8 @@ output.
 
 ## Current CLI MVP
 
-```powershell
-python -m corpus_studio.cli ai-assist examples\datasets\instruction\train.jsonl instruction --action review --backend ollama --model qwen2.5-coder:7b
+```bash
+python -m corpus_studio.cli ai-assist examples/datasets/instruction/train.jsonl instruction --action review --backend ollama --model qwen2.5-coder:7b
 ```
 
 The CLI builds a guarded prompt, treats dataset rows as untrusted content,

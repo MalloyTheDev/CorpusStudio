@@ -1,8 +1,9 @@
 # Workspace System
 
-Corpus Studio is evolving from a fixed set of dataset tabs into an **IDE-like
-workspace** for datasets — think VS Code / Cursor, but for dataset creation,
-validation, review, export, evaluation, and training orchestration.
+CorpusStudio's universal workspace is the **IDE surface across its seven product areas** (Data, Training,
+Evaluation, Behavior Lab, Model & Release, Environment & Hardware, Evidence - see
+[`PRODUCT_AREAS.md`](PRODUCT_AREAS.md)) — think VS Code / Cursor for the full dataset-to-model-to-release
+lifecycle, not a fixed set of dataset tabs.
 
 The guiding rule: **one universal workspace, many schemas, many file viewers** —
 *not* one hardcoded UI per dataset type.

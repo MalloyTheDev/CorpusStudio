@@ -247,7 +247,7 @@ per-item error isolation, and off-thread document opens.
   unrecorded site-package files and symlinks fail before
   installed torch is imported in a second process; a final lock is sealed only after the required
   probes and a stable post-probe inventory.
-  Health/capability probes are also bracketed by clean inventories. Manager 1.3 keeps legacy-count
+  Health/capability probes are also bracketed by clean inventories. Manager 1.4 keeps legacy-count
   contracts hash-verifiable for reconstruction, returns a non-mutating health admission refusal, and
   requires explicit complete RECORD semantics plus stronger measured configuration for
   every new creation. The existing manager-1.1 flash lock is preserved as historical evidence but is not

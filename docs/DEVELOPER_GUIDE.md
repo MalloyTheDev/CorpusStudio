@@ -133,7 +133,7 @@ WPF adapters (`MessageBoxDialogService`, `Win32FilePickerService`, `WpfDispatche
 - **WPF on Windows only**: `dotnet build apps/desktop/CorpusStudio.Desktop.sln` and
   `dotnet test apps/desktop/CorpusStudio.Desktop.Tests/CorpusStudio.Desktop.Tests.csproj`.
 - **Web/Tauri client on Linux**: `cd apps/web`, then `npm ci` and `npm run build`.
-- **CI** runs the engine gate, desktop build+tests, and CodeQL (Python + C#) on every PR.
+- **CI** runs the engine gate, desktop build+tests, the web/Tauri build, and CodeQL (Python + C#) on every PR.
 
 ## Honesty invariants (don't weaken these)
 

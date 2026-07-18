@@ -1,6 +1,11 @@
 # Architecture
 
-Corpus Studio has grown from a two-layer app into a **platform**:
+CorpusStudio is a **local-first, end-to-end AI development ecosystem and IDE** covering the full model
+lifecycle across seven co-equal product areas (see [`PRODUCT_AREAS.md`](PRODUCT_AREAS.md)). The **target
+architecture** is a **Rust authoritative core + isolated Python ML workers** ("Rust owns truth; Python
+computes ML and returns evidence"); today the control plane is still the dependency-light Python engine
+described below, and the Rust-core migration is gated and incremental. Structurally the current control
+plane has three layers:
 
 1. **Dataset engine** — the dependency-light Python core (torch-free at import).
 2. **Platform run lifecycle** — a language-neutral contracts substrate
@@ -122,7 +127,7 @@ remain the inspectable source of truth.
 
 ## Testing
 
-The Python engine has a large pytest suite (800+ tests) covering schemas, validation,
+The Python engine has a large pytest suite (1,800+ tests) covering schemas, validation,
 importers, quality, evaluation reporting, training config, dataset cards, and
 the optional project index. Opt-in local Ollama integration tests
 (`engine/tests/test_ollama_integration.py`) require

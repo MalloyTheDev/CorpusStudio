@@ -134,7 +134,7 @@ Project folders can also contain:
 - `evaluation_failure_filters.json`
 - `gate_thresholds.json` and `gate_reports/` (per-project gate config + saved gate reports)
 - `provenance_allowlist.json` (approved teacher/providers for the per-row provenance gate)
-- `dataset_versions/` and the content-addressed `row_store/` (immutable dataset snapshots)
+- `dataset_versions/` — immutable, content-addressed dataset snapshots (stored in `dataset_versions/row_store.jsonl`)
 - `training_runs/` (the durable run registry) and `model_artifacts/` (tracked adapters/checkpoints)
 
 `ai_assist_rewrite_batches.json` stores prepared synthetic batch rewrite

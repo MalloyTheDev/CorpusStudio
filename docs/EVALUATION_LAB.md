@@ -90,7 +90,6 @@ report summaries by tag/failure/score-band, saved failure drilldowns, versioned
 reviewed-fix tracking, and an opt-in judge-model scorer. Genuinely future:
 rubric-based grading, checkpoint comparison, and prompt-template versioning.
 - cost and token accounting
-- failed-example review queues
 
 ## Example Report Format
 

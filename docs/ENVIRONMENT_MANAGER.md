@@ -17,7 +17,7 @@ interpreter or each other's dependency graph.
 > the managed `backend-corpus-studio`, `backend-corpus-studio-readiness-v2`, and
 > `backend-corpus-studio-readiness-flash-v1` environments have preserved `HARDWARE_VERIFIED` evidence
 > for their respective exact probe tuples (legacy minimal hardware probe; readiness-v2 complete math
-> QLoRA tuple; readiness-flash-v1 complete forced-flash QLoRA tuple with bf16 autocast). Manager 1.3
+> QLoRA tuple; readiness-flash-v1 complete forced-flash QLoRA tuple with bf16 autocast). Manager 1.4
 > preserves those files as historical evidence but requires a new lock with complete positive RECORD
 > counts before any of them can authorize new planning or execution. Sealed identities are recorded
 > in [`HOST_STATE.md`](HOST_STATE.md).
@@ -225,7 +225,7 @@ after the parent validates that non-executable evidence does a second isolated p
 Health and capability probes are bracketed by fresh inventories; a probe-side package/file mutation
 cannot be returned as healthy.
 
-Manager 1.3 leaves every manager-1.1/1.2 file and digest untouched as historical evidence. Missing
+Manager 1.4 leaves every manager-1.1/1.2 file and digest untouched as historical evidence. Missing
 count semantics preserves the old hash-bearing-row meaning, so those contracts and their hashes stay
 readable; it is never reinterpreted as the new all-row claim. A health request returns a non-mutating
 `DEGRADED` admission refusal before importing installed code, and planning cannot consume it. New

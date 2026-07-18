@@ -1,8 +1,12 @@
-# Implementation Plan — Full AI Lifecycle Platform
+# Implementation Plan — training-and-execution frontier
 
-This is the forward-looking engineering plan for evolving Corpus Studio from its current state (a
-mature dataset-to-model-to-evaluation control plane with a hardware-aware run lifecycle) toward the
-complete local-first AI engineering platform described in the product vision. It is **planning**, not
+This is the forward-looking engineering plan for the **training-and-execution frontier** of CorpusStudio -
+the local-first, end-to-end AI development ecosystem and IDE with seven co-equal product areas (see
+[`PRODUCT_AREAS.md`](PRODUCT_AREAS.md)). It evolves the current Python control plane (a mature
+dataset-to-model-to-evaluation control plane with a hardware-aware run lifecycle) toward the full
+lifecycle. The **target platform architecture — a Rust authoritative core plus isolated Python ML
+workers — is a separate tracked epic**; this plan covers the Python-side lifecycle/training contracts,
+which are the highest-priority engineering gate (not the product's whole purpose). It is **planning**, not
 a record of shipped work — for what actually works today, [`CURRENT_STATE.md`](CURRENT_STATE.md) is
 the source of truth. Nothing here is claimed as implemented unless it links to a shipped feature.
 
