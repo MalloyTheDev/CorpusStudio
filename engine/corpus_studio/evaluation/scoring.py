@@ -1,4 +1,4 @@
-"""Keyword-overlap scoring for the Evaluation Lab.
+"""Keyword-overlap scoring for the Evaluation Studio.
 
 IMPORTANT: this is a lexical *recall* heuristic, NOT a quality judgment. It measures
 how many of the expected output's words appear in the model output (case-folded,

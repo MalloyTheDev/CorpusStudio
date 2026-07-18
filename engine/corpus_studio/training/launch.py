@@ -1,4 +1,4 @@
-"""Launch-command generation for the Training Lab.
+"""Launch-command generation for the Training Studio.
 
 For an *external* target (axolotl / TRL / Unsloth / Hugging Face / LLaMA-Factory) this emits the exact
 command the user would run with their own installed trainer, the resume variant, and the dependencies

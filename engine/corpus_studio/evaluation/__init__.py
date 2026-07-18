@@ -1,4 +1,4 @@
-"""Evaluation Lab skeletons for Corpus Studio."""
+"""Evaluation Studio skeletons for Corpus Studio."""
 
 from corpus_studio.evaluation.reports import (
     EvaluationExampleResult,

@@ -1,4 +1,4 @@
-"""AI Assist Lab helpers."""
+"""AI Assist helpers."""
 
 from corpus_studio.ai_assist.assistant import (
     AI_ASSIST_ACTIONS,

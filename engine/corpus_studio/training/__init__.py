@@ -1,4 +1,4 @@
-"""Training Lab skeletons for future config generation."""
+"""Training Studio skeletons for future config generation."""
 
 from corpus_studio.training.config_templates import TrainingConfigTemplate
 from corpus_studio.training.config_templates import build_lora_config_template

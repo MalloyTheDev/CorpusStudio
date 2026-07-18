@@ -2736,7 +2736,7 @@ def eval_run(
         "The report JSON still prints to stdout unchanged.",
     ),
 ):
-    """Run an Evaluation Lab pass against a local model backend.
+    """Run an Evaluation Studio pass against a local model backend.
 
     The automatic score is keyword-overlap recall (a lexical proxy, not a quality
     judgment) unless ``--judge-model`` selects an evaluator model to score 0-100 with a
@@ -3128,7 +3128,7 @@ def ai_assist(
     user_instruction: Optional[str] = typer.Option(None, "--instruction", help="Reviewer guidance."),
     timeout_seconds: int = typer.Option(120, "--timeout-seconds"),
 ):
-    """Run AI Assist Lab on draft rows and return review-only suggestions."""
+    """Run AI Assist on draft rows and return review-only suggestions."""
 
     provider_id = infer_provider_id(backend, base_url)
     route_id = model if provider_id == "openrouter" else None
@@ -3263,7 +3263,7 @@ def training_config(
         help="Where the trainer writes checkpoints (relative paths resolve against the config's directory).",
     ),
 ):
-    """Generate an inspectable Training Lab config without launching training."""
+    """Generate an inspectable Training Studio config without launching training."""
 
     validation_report = validate_jsonl_file(input_path, schema)
     _exit_if_invalid(validation_report)
