@@ -2623,6 +2623,109 @@ def examples_append(
         typer.echo(f"  skipped row {entry['row_number']}: {'; '.join(entry['issues'])}", err=True)
 
 
+@app.command("import-commit")
+def import_commit(
+    project_dir: Path,
+    from_file: Path = typer.Option(
+        ..., "--from", help="Staging JSONL file whose schema-valid rows to commit to examples.jsonl."
+    ),
+    schema: Optional[str] = typer.Option(
+        None, "--schema", help="Schema id to validate against (default: the project's schema_id)."
+    ),
+    capture_version: bool = typer.Option(
+        True, "--version/--no-version", help="Capture a dataset version after committing (default: on)."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+):
+    """Commit a staging file's schema-valid rows into examples.jsonl and capture a version.
+
+    The import endpoint of the sanctioned single writer: rows that pass the project
+    schema are atomically appended to examples.jsonl; rows that fail are reported and
+    left out (quarantined), never silently dropped. Unless --no-version, a dataset
+    version (trigger import_commit) is captured so the import is an undoable point in
+    the lineage. Nothing is committed if no row passes.
+    """
+
+    from corpus_studio.storage.examples_writer import (
+        ExamplesLockedError,
+        append_examples,
+        examples_path,
+    )
+    from corpus_studio.validators.basic_validator import validate_jsonl_row
+
+    if not project_dir.is_dir():
+        typer.echo(f"Project directory '{project_dir}' does not exist.", err=True)
+        raise typer.Exit(code=1)
+
+    schema_id = schema
+    if schema_id is None:
+        project_json = project_dir / "project.json"
+        if project_json.exists():
+            try:
+                schema_id = json.loads(project_json.read_text(encoding="utf-8")).get("schema_id")
+            except (OSError, ValueError):
+                schema_id = None
+    if not isinstance(schema_id, str) or not schema_id:
+        typer.echo(
+            "No schema: pass --schema, or run in a project whose project.json has a schema_id.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    try:
+        load_builtin_schema(schema_id)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    try:
+        rows = list(read_jsonl(from_file))
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    accepted: list[Any] = []
+    rejected: list[dict[str, Any]] = []
+    for number, row in enumerate(rows, start=1):
+        issues = validate_jsonl_row(row, schema_id, number)
+        if issues:
+            rejected.append({"row_number": number, "issues": [issue.message for issue in issues]})
+        else:
+            accepted.append(row)
+
+    version_id: Optional[str] = None
+    if accepted:
+        try:
+            append_examples(project_dir, accepted)
+        except ExamplesLockedError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+        if capture_version:
+            from corpus_studio.versions.version_registry import create_dataset_version
+
+            record = create_dataset_version(
+                project_dir, label="import commit", trigger="import_commit", store_rows=True
+            )
+            version_id = record.version_id
+
+    result = {
+        "examples_path": str(examples_path(project_dir)),
+        "committed": len(accepted),
+        "rejected": len(rejected),
+        "version_id": version_id,
+        "schema_id": schema_id,
+    }
+    if as_json:
+        typer.echo(json.dumps(result, indent=2))
+    else:
+        version_note = f"; captured version {version_id}" if version_id else ""
+        typer.echo(
+            f"Committed {len(accepted)} row(s) to {result['examples_path']} "
+            f"({len(rejected)} rejected){version_note}."
+        )
+    for entry in rejected[:20]:
+        typer.echo(f"  rejected row {entry['row_number']}: {'; '.join(entry['issues'])}", err=True)
+
+
 @app.command("hf-inspect")
 def hf_inspect(dataset_id: str):
     """Inspect a public Hugging Face dataset: configs/splits, columns, and license.
