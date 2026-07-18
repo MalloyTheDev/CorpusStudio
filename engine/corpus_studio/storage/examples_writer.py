@@ -147,3 +147,14 @@ def write_examples_lines(project_dir: Path | str, lines: Iterable[str]) -> int:
     with single_writer_lock(project_dir):
         _atomic_write_lines(examples_path(project_dir), materialized)
     return len(materialized)
+
+
+def replace_examples_lines_locked(project_dir: Path | str, lines: Iterable[str]) -> int:
+    """Atomically replace ``examples.jsonl`` **without acquiring the lock** - the caller
+    MUST already hold :func:`single_writer_lock`. For a compound critical section
+    (snapshot -> verify -> swap) that must be one atomic unit, so a concurrent writer
+    cannot interleave between the snapshot and the replace. Returns the row count."""
+
+    materialized = list(lines)
+    _atomic_write_lines(examples_path(project_dir), materialized)
+    return len(materialized)

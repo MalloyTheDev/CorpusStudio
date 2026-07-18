@@ -369,9 +369,14 @@ def capture_dataset(
     finally:
         if store_handle is not None:
             try:
+                store_handle.flush()
+                os.fsync(store_handle.fileno())
                 store_handle.close()
             except OSError:
-                pass
+                # A flush/fsync/close failure means buffered rows may NOT have reached
+                # disk - treat the store write as failed so rows_stored is not a false
+                # promise and the store is rolled back below.
+                store_failed = True
 
     # Roll the store back on any failure so a failed/partial capture stores
     # nothing on disk (not just in the return value).
@@ -388,3 +393,48 @@ def capture_dataset(
         new_rows_stored=0 if store_failed else new_stored,
         rows_stored=store_rows and not store_failed,
     )
+
+def create_dataset_version(
+    project_dir: Path | str,
+    *,
+    label: str = "",
+    trigger: str = "manual",
+    store_rows: bool = True,
+) -> DatasetVersionRecord:
+    """Capture examples.jsonl as a new dataset version and persist it.
+
+    Encapsulates the capture -> mint id -> save manifest -> save record sequence
+    for callers that need a plain version (no run/artifact/gate linkage) - notably
+    in-place restore's undo capture. Reads examples.jsonl; writes only under
+    dataset_versions/. Returns the saved record.
+    """
+
+    import secrets
+    from datetime import datetime, timezone
+
+    from corpus_studio.versions.row_store import ROW_MANIFEST_ALGO
+
+    project = Path(project_dir)
+    capture = capture_dataset(project / "examples.jsonl", project, store_rows=store_rows)
+    rows_stored = capture.rows_stored
+    now_dt = datetime.now(timezone.utc)
+    version_id = mint_version_id(
+        now_dt.strftime("%Y%m%dT%H%M%S"), f"{now_dt.microsecond:06d}-{secrets.token_hex(3)}"
+    )
+    now_iso = now_dt.isoformat()
+    record = DatasetVersionRecord(
+        version_id=version_id,
+        created_at=now_iso,
+        updated_at=now_iso,
+        label=label,
+        trigger=trigger,
+        row_count=capture.row_count,
+        content_fingerprint=capture.content_fingerprint,
+        rows_stored=rows_stored,
+        stored_row_count=capture.row_count if rows_stored else 0,
+        row_manifest_algo=ROW_MANIFEST_ALGO if rows_stored else None,
+    )
+    if rows_stored:
+        save_row_manifest(project, version_id, capture.row_ids)
+    save_version_record(project, record)
+    return record

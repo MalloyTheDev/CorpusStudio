@@ -102,7 +102,7 @@ def test_cli_restore_refuses_examples_jsonl(tmp_path: Path):
         ["dataset-version-restore", str(tmp_path), "--version-id", vid, "--output", str(tmp_path / "examples.jsonl")],
     )
     assert result.exit_code == 1
-    assert "never writes the dataset" in result.stderr
+    assert "--in-place" in result.stderr  # --output refusal now points at the sanctioned in-place path
 
 
 def test_cli_restore_refuses_existing_then_force_overwrites(tmp_path: Path):
