@@ -720,3 +720,41 @@ def test_cli_module_source_is_ascii():
     source = Path(cli.__file__).read_text(encoding="utf-8")
     offenders = sorted({character for character in source if ord(character) > 127})
     assert not offenders, f"non-ASCII characters in cli.py: {[hex(ord(c)) for c in offenders]}"
+
+
+def test_api_key_falls_back_to_env_var(tmp_path, monkeypatch):
+    # #551: --api-key resolves from CORPUS_STUDIO_API_KEY, so a key need not be passed as a process
+    # argument (which is visible in shell history / ps).
+    captured: dict[str, object] = {}
+
+    def _fake_build_backend(*, backend, model, base_url, api_key, timeout_seconds):
+        captured["api_key"] = api_key
+        raise ValueError("stop before any network call")
+
+    monkeypatch.setattr(cli, "_build_backend", _fake_build_backend)
+    src = tmp_path / "rows.jsonl"
+    src.write_text(json.dumps({"instruction": "x", "output": "y"}) + "\n", encoding="utf-8")
+    result = runner.invoke(
+        app,
+        ["ai-assist", str(src), "instruction", "--model", "m"],
+        env={"CORPUS_STUDIO_API_KEY": "env-secret"},
+    )
+    assert captured.get("api_key") == "env-secret", result.output
+
+
+def test_explicit_api_key_overrides_the_env_var(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    def _fake_build_backend(*, backend, model, base_url, api_key, timeout_seconds):
+        captured["api_key"] = api_key
+        raise ValueError("stop")
+
+    monkeypatch.setattr(cli, "_build_backend", _fake_build_backend)
+    src = tmp_path / "rows.jsonl"
+    src.write_text(json.dumps({"instruction": "x", "output": "y"}) + "\n", encoding="utf-8")
+    runner.invoke(
+        app,
+        ["ai-assist", str(src), "instruction", "--model", "m", "--api-key", "explicit"],
+        env={"CORPUS_STUDIO_API_KEY": "env-secret"},
+    )
+    assert captured.get("api_key") == "explicit"
