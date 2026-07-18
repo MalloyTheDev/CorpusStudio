@@ -1,15 +1,24 @@
 ---
 name: corpus-studio
-description: "Project-specific guardrails for editing the CorpusStudio repo (the local-first, hardware-aware AI training platform at /mnt/training-nvme/repos/CorpusStudio: torch-free control plane + isolated [train] QLoRA worker + WPF/Avalonia/Tauri UI + the IEEE native-Linux research protocol). Use for ANY change here - engine/platform contracts, the trainer, the Environment Manager, the CLI, the research amendments, or docs - so every edit keeps the dependency-light boundary, the honesty invariants, the contract-regeneration dance, the append-only research protocol, and the one-coherent-CI-green-PR-per-slice workflow. Pair it with the general existing-repo-engineer skill (that one owns generic repo mechanics; this one owns CorpusStudio's non-negotiable invariants and current program state). Keep trivial questions lightweight; load this whenever files or repository behavior in CorpusStudio actually matter."
+description: "Project-specific guardrails for editing the CorpusStudio repo - a local-first AI dataset and model-development application at /mnt/training-nvme/repos/CorpusStudio (torch-free control plane + isolated [train] QLoRA worker + WPF/Avalonia/Tauri UI). Use for ANY change here - dataset features, the training engine, the Environment Manager, model/tokenizer management, evaluation, the CLI, UI, or docs - so every edit keeps the dependency-light boundary, the honesty invariants, the contract-regeneration dance, and the one-coherent-CI-green-PR-per-slice workflow. The native-Linux 7B research paper (research/ieee-linux-training, docs/paper) is a SEPARATE opt-in overlay that uses CorpusStudio to verify the training engine; its amendments, reserved identities, and sealed-research gates apply only when the task is the paper, and never define normal product behavior. Pair with the general existing-repo-engineer skill (that one owns generic repo mechanics; this one owns CorpusStudio's invariants and program state). Keep trivial questions lightweight; load this whenever files or repository behavior in CorpusStudio actually matter."
 ---
 
 # CorpusStudio
 
-Operate as a senior engineer on **CorpusStudio** - a local-first, hardware-aware AI training platform:
-a dependency-light, torch-free **control plane** (`engine/corpus_studio/platform/`), an opt-in `[train]`
-QLoRA **worker**, WPF/Avalonia/Tauri **UI** clients, and a preregistered **IEEE native-Linux research
-protocol** (`research/ieee-linux-training/`). The bar here is not "it works" - it is "the evidence,
-contracts, and honesty invariants still hold." A passing run obtained by weakening a gate is a defect.
+Operate as a senior engineer on **CorpusStudio** - a **local-first AI dataset and model-development
+application**: a dependency-light, torch-free **control plane** (`engine/corpus_studio/platform/`), an
+opt-in `[train]` QLoRA **worker**, and WPF/Avalonia/Tauri **UI** clients. The product surface is the
+local builder lifecycle - dataset creation / cleaning / validation / versioning, schema support, dataset
+inspection and quality, model + tokenizer selection, local fine-tuning / training, evaluation, and
+export - all hardware-aware. The bar here is not "it works" - it is "the evidence, contracts, and honesty
+invariants still hold." A passing run obtained by weakening a gate is a defect.
+
+The **native-Linux 7B research paper** (`research/ieee-linux-training/`, `docs/paper/`) is a **separate
+project that uses** CorpusStudio to verify the training engine can train a 7B model at seq 4096 on this
+host. Its experiment matrices, amendments, reserved identities, paper-performance gates, and
+sealed-research evidence rules are an **opt-in overlay** (the "Research overlay" sections below) and
+**must not define normal product behavior**. The standard-vs-sealed boundary is
+[`docs/PRODUCT_VS_RESEARCH.md`](../../../docs/PRODUCT_VS_RESEARCH.md).
 
 This skill is the CorpusStudio-specific overlay. It assumes the general **existing-repo-engineer**
 skill for repo mechanics (recon, minimal-diff, verify-before-handoff) and adds the invariants a generic
@@ -33,7 +42,12 @@ Before non-trivial work, ground yourself in the repo's own source of truth (do n
   hardware-adjacent. Where older docs show Windows `C:`/`F:` paths, HOST_STATE supersedes them.
 - [`HANDOFF.md`](../../../HANDOFF.md) - session state + roadmap.
 - [`docs/CURRENT_STATE.md`](../../../docs/CURRENT_STATE.md) - authoritative feature state.
-- [`docs/IMPLEMENTATION_PLAN.md`](../../../docs/IMPLEMENTATION_PLAN.md) / [`docs/MOE_ARCHITECTURE.md`](../../../docs/MOE_ARCHITECTURE.md) - forward plan; foundational contracts must be MoE-safe now.
+- [`docs/IMPLEMENTATION_PLAN.md`](../../../docs/IMPLEMENTATION_PLAN.md) - forward plan;
+  [`docs/PRODUCT_VS_RESEARCH.md`](../../../docs/PRODUCT_VS_RESEARCH.md) - the product vs research boundary.
+  MoE must not define product identity, defaults, or workflow, but **no new foundational contract may
+  assume dense execution** - foundational contracts (`ModelDescriptor`, `TrainingObjective`, `RunPlan`,
+  `ArtifactManifest`, checkpoint, telemetry, evaluation) stay dense-safe / MoE-compatible
+  (`docs/IMPLEMENTATION_PLAN.md`, `docs/MOE_ARCHITECTURE.md`).
 
 ## The verify gate (run before you claim a change is done)
 
@@ -88,6 +102,92 @@ From `engine/` with the venv (`engine/.venv`, CPython 3.12.3, torch-free core + 
    full-sequence 7B success, DeepSpeed/FSDP/CPU/NVMe offload, real offload fit, PCIe/NVMe throughput,
    bare-Linux FlashAttention for the workload, or MoE runtime capability without a measured run.
 
+## Worker execution closure and identity impact
+
+A GENERAL rule for any worker change (product or research). Before editing any `platform/` module, decide
+whether it runs INSIDE the managed worker child, because that decides whether the change needs a new
+worker package + fresh sealed environments or is control-plane-only. The amendment / effective-matrix /
+`RESERVED_IDENTITIES` machinery in the consequence below is only the **sealed-research FORM** of it - a
+Verified-tier worker change still needs a fresh pinned/verified package and new environment locks, just
+not a study amendment.
+
+- **The worker execution closure** = everything the `--subprocess` child imports/executes:
+  `platform/worker.py::run_worker` -> `supervisor.py::execute_run` -> the success-admission chain
+  (`validate_training_success_evidence` -> `validate_sealed_adapter_artifact` in `platform/artifacts.py`)
+  -> the runner (`platform/runners.py`) -> the trainer (`training/trainer.py`). **`artifacts.py` and
+  `runners.py` are worker code even though they live under `platform/`.** Success admission runs in the
+  child; the parent `subprocess_supervisor.py` re-validates for defense in depth but does not move the
+  boundary.
+- **Consequence:** changing any file in that closure changes worker execution bytes. A sealed
+  environment is pinned to a wheel content hash and is IMMUTABLE - it cannot be patched in place and
+  must not be recreated under the same id. In sealed research mode a worker-closure change needs: a fresh
+  amendment -> effective-matrix bump -> superset `RESERVED_IDENTITIES` -> a new wheel (built reproducibly,
+  twice, byte-identical) -> new `-vN` environments -> fresh plans. Control-plane-only changes (planner,
+  CLI wiring, schema, summary aggregation, the parent-side telemetry sampler) do not.
+- **Once identities are instantiated** (wheel built, environments sealed, a plan dispatched, a visible
+  run produced) a "reuse the existing lineage" rationale that depended on non-instantiation no longer
+  holds - prove worker non-impact by call-graph, or bump the lineage. Do not guess; trace the import
+  path in source and write the classification down (WORKER_CHANGE_REQUIRED vs control-plane-only).
+
+## Framework output-tree admission
+
+A GENERAL artifact-integrity rule (product or research). The trainer runs a third-party framework
+(TRL/transformers) that writes its own files into the adapter output dir. The artifact validator must
+admit exactly the benign framework metadata and still fail-closed on real alternate weight payloads.
+
+- TRL's `SFTTrainer.save_model` writes `training_args.bin` (a `TrainingArguments` pickle - NOT weights)
+  next to `adapter_model.safetensors`. The `.bin` suffix is in `_WEIGHT_SUFFIXES`, so a naive check
+  rejects it as an "alternate or nested model-weight payload" (a false rejection at the export gate).
+- The fix pattern (see `platform/artifacts.py`): a **narrow, named allowlist** of root auxiliary
+  metadata files, admitted only under strict guards (regular file, single hard link, small size cap,
+  never deserialized). Everything else with a weight suffix is still rejected. Never widen the check to
+  "ignore all `.bin`" - that would let a real payload through. The file still enters the content hash.
+- General rule: when a framework legitimately emits a non-weight file into an output tree, admit it by
+  an explicit name + structural guards, never by relaxing the payload class. Original run outputs and
+  artifacts are immutable - never edit, relabel, or reuse them.
+
+## CPU-before-GPU semantic validation
+
+A GENERAL rule for ANY training dispatch (product or research). **A syntactically valid RunPlan is not
+necessarily a semantically executable RunPlan** - GPU time must never be spent discovering a defect a
+CPU-only planning preflight can reject. (Workload success is a separate, later claim from verified fit: a
+completed step is never proof of fit - see invariant 4.)
+
+- **Schema validity != semantic executability.** Prove the selected formatter can consume the EXACT
+  immutable dataset before any GPU allocation.
+- **Dataset structure must match the selected formatter.** `platform-plan` runs a torch-free structural
+  conformance preflight (`platform/dataset_conformance.py`) that refuses a plan with zero structurally
+  compatible rows before any id is minted - but you still select the correct `--dataset-format`
+  explicitly; the preflight is a backstop, not the decision.
+- **For chat training:** the tokenizer exposes a non-empty chat template; its exact raw-template SHA-256
+  (`sha256(tokenizer.chat_template.encode("utf-8"))`, no normalization) matches the plan; all expected
+  rows render non-empty; tokenization yields non-empty examples; the assistant/trainable region exists.
+- **CPU rejects before GPU allocates.** Render + tokenize with the exact immutable tokenizer on the CPU
+  first; never let GPU work discover a defect a planning/preflight step could have rejected.
+
+## Where the product stands
+
+Product identity, scope, and roadmap are the source of truth for ordinary work: read
+[`docs/PRODUCT_SPEC.md`](../../../docs/PRODUCT_SPEC.md) (who it is for and what it is),
+[`docs/CURRENT_STATE.md`](../../../docs/CURRENT_STATE.md) (what is built today), and
+[`docs/ROADMAP.md`](../../../docs/ROADMAP.md) (milestones). CorpusStudio is a dataset + model-development
+application; the 7B paper is a capability test that lives in the overlay below, not the product's
+identity.
+
+## Research overlay (paper project only)
+
+**Four sections below apply ONLY when the task is the native-Linux 7B research paper**
+(`research/ieee-linux-training/`, `docs/paper/`): "Research protocol", "Research plan matrix + identity
+gate", "Scientific telemetry gate", and "Research overlay: where the paper program stands". They cover the
+paper-only machinery: append-only amendments, effective experiment matrices, reserved identities, exact
+research `required_git_ancestor` floors, paper telemetry completeness, matched trials, and paper
+promotion. Ordinary product work needs **none** of them. The shared engineering invariants ABOVE
+(worker-closure classification, framework output-tree admission, CPU-before-GPU validation, plus the
+non-negotiable invariants: null-not-fabricated evidence, artifact integrity, workload-success != verified
+fit) still apply everywhere. The sealed-research provenance gate fires only for `requires_worker_wheel`
+recipes; the standard product training backend (`backend-corpus-studio`) does not. Boundary detail:
+[`docs/PRODUCT_VS_RESEARCH.md`](../../../docs/PRODUCT_VS_RESEARCH.md).
+
 ## Research protocol (research/ieee-linux-training/) - append-only
 
 - The protocol is **append-only after any visible result**. Never edit `PROTOCOL.md`, the base
@@ -103,34 +203,23 @@ From `engine/` with the venv (`engine/.venv`, CPython 3.12.3, torch-free core + 
   measured 3-12; trapezoidal energy; n=3 t=4.3026527299). Any measurement code must implement them
   exactly, not approximately.
 
-## Research plan pre-dispatch semantic gate
+## Research plan matrix + identity gate
 
-Before ANY research GPU dispatch, prove the sealed plan is not merely schema-valid but semantically
-executable. **A syntactically valid RunPlan is not necessarily a semantically executable RunPlan.**
-GPU time must never be spent discovering a defect a CPU-only planning preflight can reject.
+Before ANY research GPU dispatch, additionally prove the sealed plan against the STUDY (the generic
+CPU-before-GPU semantic check is above, under "CPU-before-GPU semantic validation", and applies to every
+dispatch; this section adds the paper-only bindings):
 
 1. **No trusted product defaults for matrix-bearing values.** Every one is explicitly supplied or
    compared against the effective matrix: dataset format; model + tokenizer revisions; chat-template
    hash; sequence length; microbatch; gradient accumulation; max steps; optimizer; precision;
    quantization; adapter config; attention path; checkpoint policy; truncation and packing. A product
    default is not a research choice.
-2. **Dataset structure must match the selected formatter.** `platform-plan` runs a torch-free
-   structural conformance preflight (`platform/dataset_conformance.py`) that refuses a plan with zero
-   structurally compatible rows before any id is minted - but you still select the correct
-   `--dataset-format` explicitly; the preflight is a backstop, not the decision.
-3. **For chat training:** the tokenizer exposes a non-empty chat template; its exact raw-template
-   SHA-256 (`sha256(tokenizer.chat_template.encode("utf-8"))`, no normalization) matches the plan; all
-   expected rows render non-empty; tokenization yields non-empty examples; the assistant/trainable
-   region exists.
-4. **CPU rejects before GPU allocates.** Render + tokenize with the exact immutable tokenizer on the CPU
-   first; never let GPU work discover a defect a planning/preflight step could have rejected.
-5. **The pre-dispatch review reports** (all of): source / compatible / rendered / tokenized row counts;
+2. **The pre-dispatch review reports** (all of): source / compatible / rendered / tokenized row counts;
    dataset hash; rendered-example hash; tokenizer + chat-template hashes; batching tuple;
    sequence/truncation policy; the normalized math/flash plan diff; the candidate-identity disjointness
    result.
-6. **Rejected or superseded plans are preserved, never edited or reused** - their identities are burned.
-7. **Schema validity != semantic executability.** Prove the selected formatter can consume the EXACT
-   immutable dataset before any GPU allocation.
+3. **Rejected or superseded plans are preserved, never edited or reused** - their study identities are
+   burned.
 
 **Lessons already learned (do not relearn on the GPU):** product default **GA=8** vs research **GA=1**
 (a matrix-bearing value silently defaulted); a **chat** fixture planned as **instruction** (zero usable
@@ -138,46 +227,6 @@ rows, discovered only after model load); an environment **probe** (`HARDWARE_VER
 evidence; a **completed step is not a proven fit** (predicted fit is never `NATIVE_SAFE`). Keep volatile
 commit ids, lock hashes, plan ids, and run ids OUT of this file - `HANDOFF.md` + `docs/HOST_STATE.md`
 own those.
-
-## Worker execution closure and identity impact
-
-Before editing any `platform/` module, decide whether it runs INSIDE the managed worker child, because
-that decides whether the change needs a new worker wheel + new sealed environments (v-lineage bump) or
-is control-plane-only.
-
-- **The worker execution closure** = everything the `--subprocess` child imports/executes:
-  `platform/worker.py::run_worker` -> `supervisor.py::execute_run` -> the success-admission chain
-  (`validate_training_success_evidence` -> `validate_sealed_adapter_artifact` in `platform/artifacts.py`)
-  -> the runner (`platform/runners.py`) -> the trainer (`training/trainer.py`). **`artifacts.py` and
-  `runners.py` are worker code even though they live under `platform/`.** Success admission runs in the
-  child; the parent `subprocess_supervisor.py` re-validates for defense in depth but does not move the
-  boundary.
-- **Consequence:** changing any file in that closure changes worker execution bytes. A sealed
-  environment is pinned to a wheel content hash and is IMMUTABLE - it cannot be patched in place and
-  must not be recreated under the same id. So a worker-closure change needs: a fresh amendment ->
-  effective-matrix bump -> superset `RESERVED_IDENTITIES` -> a new wheel (built reproducibly, twice,
-  byte-identical) -> new `-vN` environments -> fresh plans. Control-plane-only changes (planner, CLI
-  wiring, schema, summary aggregation, the parent-side telemetry sampler) do not.
-- **Once identities are instantiated** (wheel built, environments sealed, a plan dispatched, a visible
-  run produced) a "reuse the existing lineage" rationale that depended on non-instantiation no longer
-  holds - prove worker non-impact by call-graph, or bump the lineage. Do not guess; trace the import
-  path in source and write the classification down (WORKER_CHANGE_REQUIRED vs control-plane-only).
-
-## Framework output-tree admission
-
-The trainer runs a third-party framework (TRL/transformers) that writes its own files into the adapter
-output dir. The sealed artifact validator must admit exactly the benign framework metadata and still
-fail-closed on real alternate weight payloads.
-
-- TRL's `SFTTrainer.save_model` writes `training_args.bin` (a `TrainingArguments` pickle - NOT weights)
-  next to `adapter_model.safetensors`. The `.bin` suffix is in `_WEIGHT_SUFFIXES`, so a naive check
-  rejects it as an "alternate or nested model-weight payload" (a false rejection at the export gate).
-- The fix pattern (see `platform/artifacts.py`): a **narrow, named allowlist** of root auxiliary
-  metadata files, admitted only under strict guards (regular file, single hard link, small size cap,
-  never deserialized). Everything else with a weight suffix is still rejected. Never widen the check to
-  "ignore all `.bin`" - that would let a real payload through. The file still enters the content hash.
-- General rule: when a framework legitimately emits a non-weight file into a sealed tree, admit it by
-  an explicit name + structural guards, never by relaxing the payload class.
 
 ## Scientific telemetry gate
 
@@ -238,9 +287,11 @@ A run can be a workload success yet not paper-usable. `RunTelemetrySummary.compl
 - **Do not commit generated junk:** stray `*.schema.json`/`index.json` exported into `engine/` are
   session artifacts - clean them; the canonical schemas live in `docs/contracts/`.
 
-## Where the current program stands (update this as it moves)
+## Research overlay: where the paper program stands (update this as it moves)
 
-The active thread is bringing CorpusStudio to full 7B training/research readiness. The **v7 0.5B GPU
+*This is the state of the native-Linux 7B **paper** project, not the product roadmap; it is relevant only
+when working on the paper overlay.* The active thread is proving the training engine can train at the 7B
+/ seq-4096 target. The **v7 0.5B GPU
 bring-up PASSED (`V7_MATH_AND_FLASH_THROUGHPUT_PASS`, 2026-07-16)**: the v6 token-throughput observer gap
 (`tokens/sec = 0.0`, UNAVAILABLE not zero) was fixed in the worker child by PR **#466** (merge
 `25c901ec`) - observe `inputs` at `SFTTrainer.training_step` (the trainer's un-bypassable consumption

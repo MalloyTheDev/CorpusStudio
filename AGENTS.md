@@ -13,13 +13,25 @@ Instructions for AI coding agents (Codex, Claude, etc.) working in this repo.
   history-only: do not develop from or write to those stale fallbacks because they will drift.
 
 ## What this is
-A **local-first, hardware-aware AI engineering platform** covering the whole lifecycle — sources →
-dataset construction (objectives / mixtures / reasoning traces) → model + tokenizer management →
-storage/hardware-aware run planning → training through swappable **isolated backends** → telemetry +
-checkpoint/artifact lineage → evaluation → deployment prep. Control plane stays lightweight; heavy
-frameworks live in isolated worker envs; the UI is a client. Research North Star: **resource-elastic
-MoE** on consumer hardware (`N_resident << N_active << N_logical`) — so foundational contracts must be
-**MoE-safe now**. See [`HANDOFF.md`](HANDOFF.md) §3 and [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
+CorpusStudio is a **local-first AI dataset and model-development application**. Its product surface is
+the local builder lifecycle: dataset creation / import / conversion / cleaning / filtering / dedup /
+validation / versioning → schema support (pretraining, instruction, chat, preference, evaluation) →
+dataset inspection, statistics, quality scoring, provenance, licensing → model + tokenizer selection →
+local fine-tuning / training (config, environment setup, checkpoint/resume, progress) → evaluation and
+comparison → adapter / model export — all **hardware-aware**, with **planned** advanced workspaces (e.g.
+a future **Behavior Lab**) *inside* the app. Control plane stays lightweight; heavy frameworks live in
+isolated worker envs; the UI is a client. See [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md).
+
+The **native-Linux 7B research paper** (`research/ieee-linux-training/`, `docs/paper/`) is a **separate
+project that uses** CorpusStudio to verify the training engine can train a 7B model at sequence length
+4096 on this host. Its experiment matrices, amendments, reserved identities, paper-performance gates, and
+sealed-research evidence rules are an **opt-in overlay**. **The IEEE 7B paper must not define
+CorpusStudio's product identity, defaults, navigation, or ordinary user workflow** — though CorpusStudio
+may still contain opt-in research and interpretability tools (e.g. a future Behavior Lab). Resource-elastic
+MoE likewise must not define the product's identity, navigation, defaults, or ordinary workflow — **but
+foundational contracts must stay dense-safe and MoE-compatible: no new foundational contract may assume
+dense execution** (`docs/IMPLEMENTATION_PLAN.md`, `docs/MOE_ARCHITECTURE.md`). The standard / verified /
+sealed-research boundary is [`docs/PRODUCT_VS_RESEARCH.md`](docs/PRODUCT_VS_RESEARCH.md).
 Three surfaces:
 - **Engine** (`engine/corpus_studio/`, Python) — a **dependency-light** core (no torch at import) +
   an opt-in `[train]` QLoRA trainer extra.
@@ -78,4 +90,8 @@ CI runs on **Linux / Python 3.11** with `pytest --cov=corpus_studio --cov-fail-u
 - Branch first (`git checkout -b feat/<slice>`), one coherent CI-green PR per slice.
 - Do NOT spawn multi-agent fan-outs by default (cost); verify inline.
 - Source of truth for features: `docs/CURRENT_STATE.md`. Plan: `docs/IMPLEMENTATION_PLAN.md`.
-  MoE constraint (foundational contracts must be MoE-safe): `docs/MOE_ARCHITECTURE.md`.
+  Product vs research boundary: `docs/PRODUCT_VS_RESEARCH.md`. MoE must not define product identity,
+  navigation, defaults, or ordinary workflow, but **no new foundational contract may assume dense
+  execution**: `ModelDescriptor`, `TrainingObjective`, `RunPlan`, `ArtifactManifest`, checkpoint,
+  telemetry, and evaluation stay dense-safe / MoE-compatible (`docs/IMPLEMENTATION_PLAN.md`,
+  `docs/MOE_ARCHITECTURE.md`).
