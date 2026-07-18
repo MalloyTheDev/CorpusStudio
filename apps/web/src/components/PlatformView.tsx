@@ -149,7 +149,7 @@ export function PlatformView({
                 <Chip tone="neutral">not launched</Chip>
               </Row>
               <p className="cs-note">
-                Plan resolved — nothing has executed yet. Launch it from the desktop shell
+                Plan resolved — nothing has executed yet. Launch it from the Tauri app
                 (<span className="cs-mono">platform-run --runner training</span>); the live RunEvent
                 stream lands here.
               </p>
@@ -183,10 +183,10 @@ export function PlatformView({
 
       <p className="cs-note">
         Rendered from the engine's language-neutral JSON-Schema contracts (docs/contracts) — the same
-        boundary the Rust core and the Avalonia head consume.{" "}
+        boundary this Tauri client consumes.{" "}
         {onPickBackend
-          ? "This is a live probe → plan against your host; launch a run from the desktop shell to populate the run stream."
-          : "This is a real engine-generated snapshot; switch to “Live host” inside the desktop shell to probe your own machine."}
+          ? "This is a live probe → plan against your host; launch a run from the Tauri app to populate the run stream."
+          : "This is a real engine-generated snapshot; switch to “Live host” inside the Tauri app to probe your own machine."}
       </p>
     </div>
   );

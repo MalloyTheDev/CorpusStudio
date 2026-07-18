@@ -1,5 +1,5 @@
 /* Nocturne design tokens as CSS custom properties — the web half of docs/design/nocturne-tokens.json
-   (the same token set the Avalonia head consumes as ResourceDictionary brushes). Theme = a token-set
+   (the shared, framework-agnostic design source). Theme = a token-set
    swap on :root[data-theme]. Keep in sync with the tokens JSON. */
 
 :root,

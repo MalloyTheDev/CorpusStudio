@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Corpus Studio's Tauri 2 + React shell — a client over the platform's language-neutral contracts. Renders the run lifecycle (profile → plan → fit → run) from the same JSON-Schema contracts the engine emits, skinned with the shared Nocturne design tokens. The eventual cross-platform head (see docs/design/); the Avalonia head is the interim.",
+  "description": "Corpus Studio's Tauri 2 + React shell — a client over the platform's language-neutral contracts. Renders the run lifecycle (profile → plan → fit → run) from the same JSON-Schema contracts the engine emits, skinned with the shared Nocturne design tokens (see docs/design/).",
   "scripts": {
     "gen:contracts": "node scripts/gen-contracts.mjs",
     "dev": "vite",
