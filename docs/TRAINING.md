@@ -15,10 +15,12 @@ A first-party run is now driven by the **platform run lifecycle** (profile → p
 
 ---
 
-## Training Lab
+## Training Studio
 
-Training Lab is the Corpus Studio workspace for preparing training artifacts
-now and eventually launching local fine-tuning jobs.
+Training Studio is CorpusStudio's training product area (one of seven co-equal areas; see
+[`PRODUCT_AREAS.md`](PRODUCT_AREAS.md)) - for preparing training artifacts now, launching local
+fine-tuning, and, on the roadmap, pretraining. Its internal design is
+[`TRAINING_SYSTEMS_ARCHITECTURE.md`](TRAINING_SYSTEMS_ARCHITECTURE.md).
 
 Training should come after dataset validation and evaluation. A training button
 is not useful if the dataset is broken, leaky, duplicated, poorly split, or

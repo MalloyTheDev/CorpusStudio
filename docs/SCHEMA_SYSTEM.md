@@ -133,7 +133,8 @@ _Consolidated from the former SCHEMA_EXAMPLES.md._
 
 ### Schema Examples
 
-Corpus Studio ships nine built-in schemas. Each carries a `description` and a valid `example` row; the desktop new-project dialog shows both and pre-fills the editor with the example so the correct format is obvious. Each line below is a single JSONL row.
+Corpus Studio ships ten built-in schemas (the tenth, `trace`, is a reasoning-trace draft-authoring schema
+used with `trace-migrate`; the nine text-row schemas are copyable below). Each carries a `description` and a valid `example` row; the desktop new-project dialog shows both and pre-fills the editor with the example so the correct format is obvious. Each line below is a single JSONL row.
 
 The current validator checks that each row is a JSON object, required fields are present and non-empty, declared field types match, and chat messages include valid role/content structure.
 

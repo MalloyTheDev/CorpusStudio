@@ -2,7 +2,9 @@
 
 This is the current verification runbook for long-sequence 7B QLoRA on a 12 GB card. The native-Linux
 host is assembled, and its managed `backend-corpus-studio` environment passed the exact minimal
-hardware-probe tuple. It is not a record of a completed native-Linux real workload or offload run.
+hardware-probe tuple; small (0.5B) QLoRA GPU smokes have since run (see
+[`HOST_STATE.md`](HOST_STATE.md) for current status). It is **not** a record of a completed
+**7B / seq-4096** real workload or any offload run.
 
 > **Current evidence boundary:** native Windows/WDDM and WSL2 workload results remain labeled where
 > measured. On native Linux, only the managed-environment CUDA-allocation, 4-bit-construction, minimal

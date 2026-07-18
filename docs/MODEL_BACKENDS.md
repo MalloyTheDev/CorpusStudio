@@ -88,11 +88,11 @@ Recommended local defaults:
 
 ## Current Commands
 
-```powershell
+```bash
 python -m corpus_studio.cli model-list --backend ollama
 python -m corpus_studio.cli backend-health --backend ollama --model qwen2.5-coder:7b
-python -m corpus_studio.cli eval-run examples\datasets\instruction\train.jsonl instruction --backend ollama --model qwen2.5-coder:7b --limit 5
-python -m corpus_studio.cli ai-assist examples\datasets\instruction\train.jsonl instruction --action review --backend ollama --model qwen2.5-coder:7b
+python -m corpus_studio.cli eval-run examples/datasets/instruction/train.jsonl instruction --backend ollama --model qwen2.5-coder:7b --limit 5
+python -m corpus_studio.cli ai-assist examples/datasets/instruction/train.jsonl instruction --action review --backend ollama --model qwen2.5-coder:7b
 ```
 
 `model-list` is safe to use for discovery. It lists model names exposed by the

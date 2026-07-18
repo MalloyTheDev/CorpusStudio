@@ -78,8 +78,8 @@ memory), and takes the columns from the Parquet schema. Because Parquet needs th
 large `pyarrow` dependency, it is an **optional extra** — the engine stays
 dependency-light by default and, without it installed, every Parquet path fails fast
 with `pip install corpus-studio-engine[parquet]` instead of an opaque error. Binary
-columns are best-effort decoded as text (image/audio payloads are out of scope for a
-text-dataset tool).
+columns are best-effort decoded as text (image/audio payloads are out of scope for this
+JSONL/Parquet import path).
 
 ### Import principles
 

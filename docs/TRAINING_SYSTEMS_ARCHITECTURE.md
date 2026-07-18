@@ -3,9 +3,11 @@
 **Status: architecture proposal for review. Docs-only. No training code, dependency, model, dataset, GPU,
 or research action is part of this document.**
 
-CorpusStudio is a local-first AI dataset and model-development **application** (see
-[`PRODUCT_SPEC.md`](PRODUCT_SPEC.md)). This doc expands the training surface from "fine-tuning support"
-into a complete, **pluggable model-development system** that spans from-scratch pretraining, continued
+CorpusStudio is a **local-first, end-to-end AI development ecosystem and IDE** (see
+[`PRODUCT_AREAS.md`](PRODUCT_AREAS.md), [`PRODUCT_SPEC.md`](PRODUCT_SPEC.md)); this doc is the internal
+design of its **Training Studio** area (one of seven co-equal product areas). It expands the training
+surface from "fine-tuning support" into a complete, **pluggable model-development system** that spans
+from-scratch pretraining, continued
 pretraining, full-parameter fine-tuning, adapter/PEFT fine-tuning, preference and RL post-training,
 distillation, dense and MoE architectures, single-device and distributed execution, and multiple
 framework and orchestrator adapters.
@@ -74,6 +76,12 @@ Three layers, from user intent to sealed execution (only the top is new):
 - **ResolvedExecutionConfiguration** (shipped) - the separately hash-sealed exact execution truth the
   worker echoes and refuses to deviate from. See
   [`EFFECTIVE_EXECUTION_CONFIGURATION.md`](EFFECTIVE_EXECUTION_CONFIGURATION.md).
+
+**Authority + the Rust-core target.** "The core" that seals plans, verifies, and admits results is the
+authoritative control plane. The **target architecture is a Rust authoritative core + isolated Python ML
+workers** ("Rust owns truth; Python computes ML and returns evidence"; a worker result is a candidate until
+the core admits it); the control plane is Python today and the migration is gated/incremental. The
+composition model below is unchanged by that migration - only which language owns the authority moves.
 
 `TrainingPlan` composes; it does not replace `RunPlan`. Resolution lowers a `TrainingPlan` into
 **one or more** `RunPlan`s (one per objective/stage; `RunPlan.task_type` is single-valued over the rich
