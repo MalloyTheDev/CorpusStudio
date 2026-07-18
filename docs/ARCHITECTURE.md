@@ -12,11 +12,12 @@ plane has three layers:
    (`engine/corpus_studio/platform/`: RunPlan / RunEvent / BackendManifest / …) + a headless run
    supervisor + supervised in-process **and subprocess** Python training workers + a multi-backend
    trainer registry ("pick your framework": `corpus_studio`, `unsloth`).
-3. **UI heads over a shared Core** — WPF (shipping), Avalonia (cross-platform interim), and a new
-   Tauri 2 + React contract-first client (`apps/web`). Each head is a *client* of the engine/platform;
-   none contains platform logic.
+3. **UI** — the **Tauri 2 + React** frontend (`apps/web`) is the target head; the C# WPF/Avalonia
+   desktop (`apps/desktop`) is a **decommissioning prototype** (#545), kept only until the engine CLI
+   re-homes dataset authoring (#546). Each head is a *client* of the engine/platform; none contains
+   platform logic. Target architecture: a **Rust authoritative core** + isolated Python ML workers (#522).
 
-The desktop app owns user interaction.
+The UI (the target Tauri/React head; the desktop is a retiring prototype) owns user interaction.
 The Python engine owns dataset logic.
 
 ## System diagram
@@ -61,7 +62,10 @@ The desktop layer is responsible for:
 - reviewing AI Assist suggestions and queue states before they return to Writing Studio
 - generating and previewing Training Studio config exports
 
-### Desktop internal structure
+### Desktop internal structure (decommissioning)
+
+> The C# desktop is a **prototype being removed** (#545); the target UI is the Tauri 2/React
+> frontend (`apps/web`). This section documents the current structure until it is retired.
 
 The desktop is a .NET solution with the UI logic being decomposed for cross-platform reuse:
 

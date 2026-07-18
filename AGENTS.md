@@ -49,8 +49,10 @@ Three surfaces:
   conformance/process-tree boundary (not a real new backend) + the hash-sealed
   `ResolvedExecutionConfiguration` consumed directly by the first-party worker (no post-seal semantic
   overrides, implicit placement, or silent trainer-field filtering).
-- **UI** — WPF + Avalonia (`apps/desktop`, C#) and Tauri 2 + React (`apps/web`, TS). UI is a client
-  over the engine CLI; it never owns training behavior.
+- **UI** — the target frontend is **Tauri 2 + React** (`apps/web`, TS); the WPF/Avalonia desktop
+  (`apps/desktop`, C#) is a **decommissioning prototype** (#545), kept only until the engine CLI
+  re-homes dataset authoring (#546). UI is a client over the engine CLI; it never owns training
+  behavior. Target architecture: a **Rust authoritative core** + isolated Python ML workers (#522).
 
 ## Build & verify (the gate)
 From `engine/` with the venv:
