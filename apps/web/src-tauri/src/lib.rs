@@ -3,6 +3,7 @@
 //! telemetry) and returns the parsed contract to the React frontend. The engine remains the single
 //! source of truth; the shell never contains platform logic (see docs/platform-architecture-epic).
 
+use std::io::Write;
 use std::process::Command;
 
 use serde_json::Value;
@@ -67,13 +68,105 @@ fn platform_plan(
     run_engine(&args)
 }
 
+// --- Data Studio ------------------------------------------------------------
+// The engine is the single writer of examples.jsonl (via `examples-append`); the shell
+// only authors rows into a temp file and dispatches the sanctioned CLI. It never mutates
+// a dataset itself.
+
+/// Run a `corpus-studio` subcommand and return its trimmed stdout as text (for commands that
+/// print a value, e.g. `new-project` emits the created project directory).
+fn run_engine_text(args: &[&str]) -> Result<String, String> {
+    let output = Command::new("corpus-studio")
+        .args(args)
+        .output()
+        .map_err(|e| format!("could not launch the engine: {e}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Write authored JSONL to a unique temp file the engine can read; the caller removes it.
+fn write_temp_jsonl(content: &str) -> Result<std::path::PathBuf, String> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mut path = std::env::temp_dir();
+    path.push(format!("corpus-studio-rows-{}-{}.jsonl", std::process::id(), nanos));
+    let mut file =
+        std::fs::File::create(&path).map_err(|e| format!("could not write temp rows: {e}"))?;
+    file.write_all(content.as_bytes())
+        .map_err(|e| format!("could not write temp rows: {e}"))?;
+    Ok(path)
+}
+
+/// The built-in dataset schemas (id, name, fields) — the engine owns the registry.
+#[tauri::command]
+fn data_schemas() -> Result<Value, String> {
+    run_engine(&["schemas"])
+}
+
+/// Local dataset projects: `{projects_root, count, projects:[{id, name, schema_id, ...}]}`.
+#[tauri::command]
+fn data_projects() -> Result<Value, String> {
+    run_engine(&["project-list"])
+}
+
+/// Create a local dataset project; returns `{project_dir}` (the engine prints the path).
+#[tauri::command]
+fn data_new_project(project_id: String, name: String, schema: String) -> Result<Value, String> {
+    let dir = run_engine_text(&["new-project", &project_id, &name, &schema])?;
+    Ok(serde_json::json!({ "project_dir": dir }))
+}
+
+/// Validate/preview authored JSONL rows against a schema (accepted/rejected report).
+#[tauri::command]
+fn data_preview(schema: String, rows_jsonl: String) -> Result<Value, String> {
+    let temp = write_temp_jsonl(&rows_jsonl)?;
+    let result = run_engine(&["import-preview", &temp.to_string_lossy(), &schema]);
+    let _ = std::fs::remove_file(&temp);
+    result
+}
+
+/// Commit authored rows into the project's examples.jsonl via the sanctioned single writer
+/// (`examples-append --skip-invalid`); invalid rows are reported, not silently dropped.
+#[tauri::command]
+fn data_append(project_dir: String, rows_jsonl: String) -> Result<Value, String> {
+    let temp = write_temp_jsonl(&rows_jsonl)?;
+    let result = run_engine(&[
+        "examples-append",
+        &project_dir,
+        "--from",
+        &temp.to_string_lossy(),
+        "--skip-invalid",
+        "--json",
+    ]);
+    let _ = std::fs::remove_file(&temp);
+    result
+}
+
+/// The graded dataset-debt report for a project's examples.jsonl.
+#[tauri::command]
+fn data_debt(project_dir: String) -> Result<Value, String> {
+    let mut examples = std::path::PathBuf::from(&project_dir);
+    examples.push("examples.jsonl");
+    run_engine(&["dataset-debt", &examples.to_string_lossy(), "--json"])
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             platform_probe,
             platform_plan,
-            platform_backends
+            platform_backends,
+            data_schemas,
+            data_projects,
+            data_new_project,
+            data_preview,
+            data_append,
+            data_debt
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Corpus Studio shell");

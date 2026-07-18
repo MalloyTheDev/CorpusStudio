@@ -8,14 +8,17 @@ import {
   type PlatformSnapshot,
 } from "./platform/api";
 import { PlatformView } from "./components/PlatformView";
+import { DataStudio } from "./components/DataStudio";
 
 type Theme = "dark" | "light";
 type Mode = "sample" | "live";
+type View = "platform" | "data";
 
 export default function App() {
   const [sampleSnap, setSampleSnap] = useState<PlatformSnapshot | null>(null);
   const [liveSnap, setLiveSnap] = useState<PlatformSnapshot | null>(null);
   const [mode, setMode] = useState<Mode>("sample");
+  const [view, setView] = useState<View>("platform");
   const [theme, setTheme] = useState<Theme>("dark");
   const [inputs, setInputs] = useState<PlanInputs>({
     baseModel: "Qwen/Qwen2.5-7B-Instruct",
@@ -85,34 +88,60 @@ export default function App() {
         <div className="cs-brand">C</div>
         <div>
           <div className="cs-title">Corpus Studio</div>
-          <div className="cs-subtitle">Platform · run lifecycle</div>
+          <div className="cs-subtitle">{view === "data" ? "Data Studio" : "Platform · run lifecycle"}</div>
+        </div>
+        <div className="cs-segment" role="tablist" aria-label="View">
+          <button
+            className={`cs-seg${view === "platform" ? " on" : ""}`}
+            role="tab"
+            aria-selected={view === "platform"}
+            onClick={() => setView("platform")}
+          >
+            Platform
+          </button>
+          <button
+            className={`cs-seg${view === "data" ? " on" : ""}`}
+            role="tab"
+            aria-selected={view === "data"}
+            onClick={() => setView("data")}
+          >
+            Data Studio
+          </button>
         </div>
         <div className="cs-spacer" />
-        <div className="cs-segment" role="tablist" aria-label="Data source">
-          <button
-            className={`cs-seg${mode === "sample" ? " on" : ""}`}
-            role="tab"
-            aria-selected={mode === "sample"}
-            onClick={() => switchMode("sample")}
-          >
-            Sample
-          </button>
-          <button
-            className={`cs-seg${mode === "live" ? " on" : ""}`}
-            role="tab"
-            aria-selected={mode === "live"}
-            disabled={!live}
-            title={live ? "Probe this host" : "Live host runs inside the desktop shell"}
-            onClick={() => switchMode("live")}
-          >
-            Live host
-          </button>
-        </div>
+        {view === "platform" ? (
+          <div className="cs-segment" role="tablist" aria-label="Data source">
+            <button
+              className={`cs-seg${mode === "sample" ? " on" : ""}`}
+              role="tab"
+              aria-selected={mode === "sample"}
+              onClick={() => switchMode("sample")}
+            >
+              Sample
+            </button>
+            <button
+              className={`cs-seg${mode === "live" ? " on" : ""}`}
+              role="tab"
+              aria-selected={mode === "live"}
+              disabled={!live}
+              title={live ? "Probe this host" : "Live host runs inside the desktop shell"}
+              onClick={() => switchMode("live")}
+            >
+              Live host
+            </button>
+          </div>
+        ) : null}
         <button className="cs-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
           {theme === "dark" ? "☾ Dark" : "☀ Light"}
         </button>
       </header>
 
+      {view === "data" ? (
+        <div className="cs-body">
+          <DataStudio live={live} />
+        </div>
+      ) : (
+        <>
       {mode === "live" ? (
         <form
           className="cs-planbar"
@@ -180,6 +209,8 @@ export default function App() {
         </div>
       ) : (
         <div className="cs-body">Loading…</div>
+      )}
+        </>
       )}
     </div>
   );

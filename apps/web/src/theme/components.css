@@ -377,3 +377,27 @@
   font-size: 11.5px;
   margin-top: 2px;
 }
+
+/* --- Data Studio --------------------------------------------------------- */
+.cs-datastudio { display: grid; gap: 16px; padding: 16px 20px; }
+.cs-project-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.cs-project { display: inline-flex; align-items: center; gap: 8px; background: var(--cs-panel-2);
+  color: var(--cs-text); border: 1px solid var(--cs-line); border-radius: var(--cs-radius-button);
+  padding: 6px 10px; cursor: pointer; font: inherit; }
+.cs-project:hover { background: var(--cs-hover); }
+.cs-project.on { border-color: var(--cs-accent); background: var(--cs-accent-soft); }
+.cs-project-name { font-weight: 600; }
+.cs-create { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cs-input { background: var(--cs-panel-2); color: var(--cs-text); border: 1px solid var(--cs-line);
+  border-radius: var(--cs-radius-button); padding: 7px 10px; font: inherit; min-width: 150px; }
+.cs-input:focus { outline: none; border-color: var(--cs-accent); }
+.cs-textarea { width: 100%; box-sizing: border-box; margin-top: 6px; background: var(--cs-panel-2);
+  color: var(--cs-text); border: 1px solid var(--cs-line); border-radius: var(--cs-radius-card);
+  padding: 10px; font-family: var(--cs-mono); font-size: 13px; resize: vertical; }
+.cs-textarea:focus { outline: none; border-color: var(--cs-accent); }
+.cs-debt { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.cs-actions { display: flex; gap: 8px; margin-top: 10px; }
+.cs-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.cs-btn.primary { background: var(--cs-accent); color: var(--cs-accent-ink); border-color: var(--cs-accent); }
+.cs-btn.primary:hover { background: var(--cs-accent-strong); }
+.cs-btn:disabled { opacity: .5; cursor: not-allowed; }
