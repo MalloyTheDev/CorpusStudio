@@ -127,7 +127,7 @@ export default function App() {
               role="tab"
               aria-selected={mode === "live"}
               disabled={!live}
-              title={live ? "Probe this host" : "Live host runs inside the desktop shell"}
+              title={live ? "Probe this host" : "Live host runs inside the Tauri app"}
               onClick={() => switchMode("live")}
             >
               Live host

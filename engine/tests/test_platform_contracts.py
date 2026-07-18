@@ -699,7 +699,7 @@ def test_worker_message_rejects_wrong_direction_and_body_shape():
 
 def test_export_json_schemas_writes_language_neutral_files(tmp_path):
     written = P.export_json_schemas(tmp_path)
-    # 30 contract schemas + index.json
+    # 31 contract schemas + index.json
     assert len(written) == 32
     index = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
     assert index["contract_version"] == "1.0.0"

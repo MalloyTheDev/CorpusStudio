@@ -137,7 +137,7 @@ export function BackendPicker({
         kernels can’t do the math path) is filtered out, not silently downgraded.{" "}
         {onPick
           ? "Picking a fitting backend re-plans through the engine."
-          : "This is the committed demo snapshot; picking previews a backend (live re-planning runs in the desktop shell)."}
+          : "This is the committed demo snapshot; picking previews a backend (live re-planning runs in the Tauri app)."}
       </p>
     </section>
   );
