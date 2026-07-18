@@ -5,7 +5,7 @@ import os
 import sqlite3
 import sys
 import tempfile
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import typer
 from pydantic import ValidationError
@@ -2689,6 +2689,251 @@ def examples_list(
         if len(preview) > 160:
             preview = preview[:157] + "..."
         typer.echo(f"  {entry['row_number']}: {preview}")
+
+
+class _ExamplesMutationError(Exception):
+    """A sanctioned examples.jsonl mutation was refused (bad address, unreadable dataset, no safe
+    undo, or a locked file). Carries the exact ASCII operator message; the command maps it to exit 1."""
+
+
+def _resolve_project_schema_id(project_dir: Path, schema: Optional[str]) -> str:
+    """The schema id to validate against: --schema if given, else the project.json schema_id. Raises
+    :class:`_ExamplesMutationError` if neither is available or it is not a known builtin schema."""
+    schema_id = schema
+    if schema_id is None:
+        project_json = project_dir / "project.json"
+        if project_json.exists():
+            try:
+                schema_id = json.loads(project_json.read_text(encoding="utf-8")).get("schema_id")
+            except (OSError, ValueError):
+                schema_id = None
+    if not isinstance(schema_id, str) or not schema_id:
+        raise _ExamplesMutationError(
+            "No schema: pass --schema, or run in a project whose project.json has a schema_id."
+        )
+    try:
+        load_builtin_schema(schema_id)
+    except ValueError as exc:
+        raise _ExamplesMutationError(str(exc)) from exc
+    return schema_id
+
+
+def _apply_examples_mutation(
+    project_dir: Path,
+    transform: Callable[[list[str]], list[str]],
+    *,
+    undo_label: str,
+    undo_trigger: str,
+) -> tuple[int, Optional[str]]:
+    """Apply ``transform(existing_lines) -> new_lines`` to examples.jsonl atomically under the
+    single-writer lock, capturing a VERIFIED undo version first. Returns ``(new_row_count, undo_id)``.
+
+    Mirrors dataset-version-restore --in-place safety and runs as ONE lock scope so no concurrent
+    writer can interleave between the undo snapshot and the swap. Refuses (writing nothing) if there
+    is no dataset, if the current dataset is unreadable, if a restorable undo cannot be captured or
+    verified, or if ``transform`` rejects the address (it raises :class:`_ExamplesMutationError`)."""
+    from corpus_studio.storage.examples_writer import (
+        ExamplesLockedError,
+        examples_path,
+        read_existing_lines,
+        replace_examples_lines_locked,
+        single_writer_lock,
+    )
+    from corpus_studio.versions.version_registry import create_dataset_version
+    from corpus_studio.versions.version_restore import reconstruct_version_lines
+
+    if not examples_path(project_dir).exists():
+        raise _ExamplesMutationError(
+            "the project has no examples.jsonl yet - nothing to edit or delete."
+        )
+    try:
+        with single_writer_lock(project_dir):
+            existing = read_existing_lines(project_dir)
+            # Compute the result FIRST so a bad address refuses before any undo/version churn.
+            new_lines = transform(existing)
+            undo = create_dataset_version(
+                project_dir, label=undo_label, trigger=undo_trigger, store_rows=True
+            )
+            # A current dataset that yields NO fingerprint is UNREADABLE (a torn line), not empty -
+            # refuse rather than mutate it behind a dead undo.
+            if undo.content_fingerprint is None:
+                raise _ExamplesMutationError(
+                    "the current examples.jsonl is unreadable (a malformed row?); no safe undo "
+                    "could be captured, nothing changed."
+                )
+            # A stored-row FLAG is not proof the rows reached disk: prove the undo is actually
+            # restorable (reconstruct + fingerprint verify) BEFORE overwriting.
+            if undo.row_count > 0:
+                if not undo.rows_stored:
+                    raise _ExamplesMutationError(
+                        "could not store the current dataset as a restorable undo; nothing changed."
+                    )
+                try:
+                    reconstruct_version_lines(project_dir, undo.version_id)
+                except (FileNotFoundError, ValueError) as exc:
+                    raise _ExamplesMutationError(
+                        f"the undo version did not verify ({exc}); nothing changed."
+                    ) from exc
+            replace_examples_lines_locked(project_dir, new_lines)
+            return len(new_lines), undo.version_id
+    except ExamplesLockedError as exc:
+        raise _ExamplesMutationError(
+            f"examples.jsonl is locked by another writer: {exc}"
+        ) from exc
+
+
+@app.command("examples-delete")
+def examples_delete(
+    project_dir: Path,
+    rows: list[int] = typer.Option(
+        ..., "--row", help="1-based row number to delete (from examples-list); repeatable."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+):
+    """Delete row(s) from examples.jsonl by 1-based row number - the sanctioned single writer.
+
+    Captures a verified undo version FIRST (mirrors dataset-version-restore --in-place), then writes
+    atomically under the single-writer lock. Refuses if any row number is out of range (nothing
+    changed) or if a safe undo cannot be captured. Get row numbers from examples-list; the returned
+    undo_version_id restores the prior dataset via dataset-version-restore --in-place.
+    """
+    from corpus_studio.storage.examples_writer import examples_path
+
+    if not project_dir.is_dir():
+        typer.echo(f"Project directory '{project_dir}' does not exist.", err=True)
+        raise typer.Exit(code=1)
+    targets = set(rows)
+
+    def _transform(existing: list[str]) -> list[str]:
+        total = len(existing)
+        out_of_range = sorted(number for number in targets if number < 1 or number > total)
+        if out_of_range:
+            raise _ExamplesMutationError(
+                f"row number(s) {out_of_range} out of range; the dataset has {total} row(s), "
+                "nothing changed."
+            )
+        return [line for number, line in enumerate(existing, start=1) if number not in targets]
+
+    try:
+        remaining, undo_id = _apply_examples_mutation(
+            project_dir,
+            _transform,
+            undo_label=f"undo before deleting {len(targets)} row(s)",
+            undo_trigger="delete_undo",
+        )
+    except _ExamplesMutationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    result = {
+        "examples_path": str(examples_path(project_dir)),
+        "deleted": len(targets),
+        "remaining": remaining,
+        "undo_version_id": undo_id,
+    }
+    if as_json:
+        typer.echo(json.dumps(result, indent=2))
+    else:
+        typer.echo(f"Deleted {len(targets)} row(s); {remaining} remain. Undo version: {undo_id}")
+
+
+@app.command("examples-edit")
+def examples_edit(
+    project_dir: Path,
+    row: int = typer.Option(
+        ..., "--row", min=1, help="1-based row number to replace (from examples-list)."
+    ),
+    to_value: Optional[str] = typer.Option(
+        None, "--to", help="Replacement row as an inline JSON object."
+    ),
+    from_file: Optional[Path] = typer.Option(
+        None, "--from", help="File holding the replacement row as one JSON object."
+    ),
+    schema: Optional[str] = typer.Option(
+        None, "--schema", help="Schema id to validate against (default: the project's schema_id)."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+):
+    """Replace one row of examples.jsonl (by 1-based row number) with a new, schema-valid row - the
+    sanctioned single writer.
+
+    Provide the replacement with --to '<json>' or --from <file>. It is validated against the project
+    schema (or --schema); an invalid row is refused. A verified undo version is captured FIRST, then
+    the write is atomic under the single-writer lock. Refuses an out-of-range row number or if a safe
+    undo cannot be captured - nothing changed.
+    """
+    from corpus_studio.storage.examples_writer import examples_path
+    from corpus_studio.validators.basic_validator import validate_jsonl_row
+
+    if not project_dir.is_dir():
+        typer.echo(f"Project directory '{project_dir}' does not exist.", err=True)
+        raise typer.Exit(code=1)
+    if (to_value is None) == (from_file is None):
+        typer.echo("Provide exactly one of --to '<json>' or --from <file>.", err=True)
+        raise typer.Exit(code=1)
+
+    raw = to_value
+    if from_file is not None:
+        try:
+            raw = from_file.read_text(encoding="utf-8")
+        except OSError as exc:
+            typer.echo(f"Cannot read --from '{from_file}': {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+    assert raw is not None
+    try:
+        new_row = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        typer.echo(f"The replacement row is not valid JSON: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    try:
+        schema_id = _resolve_project_schema_id(project_dir, schema)
+    except _ExamplesMutationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    issues = validate_jsonl_row(new_row, schema_id, row)
+    if issues:
+        typer.echo(
+            f"Refusing to edit: the replacement row fails the '{schema_id}' schema "
+            f"({'; '.join(issue.message for issue in issues)}); nothing changed.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    new_line = json.dumps(new_row, ensure_ascii=False)
+
+    def _transform(existing: list[str]) -> list[str]:
+        total = len(existing)
+        if row > total:
+            raise _ExamplesMutationError(
+                f"row {row} out of range; the dataset has {total} row(s), nothing changed."
+            )
+        updated = list(existing)
+        updated[row - 1] = new_line
+        return updated
+
+    try:
+        total_rows, undo_id = _apply_examples_mutation(
+            project_dir,
+            _transform,
+            undo_label=f"undo before editing row {row}",
+            undo_trigger="edit_undo",
+        )
+    except _ExamplesMutationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    result = {
+        "examples_path": str(examples_path(project_dir)),
+        "edited_row": row,
+        "total": total_rows,
+        "schema_id": schema_id,
+        "undo_version_id": undo_id,
+    }
+    if as_json:
+        typer.echo(json.dumps(result, indent=2))
+    else:
+        typer.echo(f"Edited row {row}; {total_rows} row(s) total. Undo version: {undo_id}")
 
 
 @app.command("import-commit")
