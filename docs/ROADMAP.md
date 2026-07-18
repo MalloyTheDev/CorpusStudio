@@ -175,8 +175,8 @@ input side. Ordered:
 - **Decommission the WPF/Avalonia desktop; consolidate on CLI + Tauri 2/React + a Rust core.** The
   target UI is the **Tauri 2 + React** frontend (`apps/web`); the C# desktop is a retiring prototype.
   Sequence: re-home dataset authoring to the engine CLI (`examples-append`, in-place restore — #546,
-  done) → grow `apps/web` to cover the Studio screens → remove `apps/desktop` (#545), tagging a
-  reference first. Target architecture: a **Rust authoritative core** + isolated Python ML workers (#522).
+  done) → grow `apps/web` to cover the Studio screens. `apps/desktop` has been **removed** (#545,
+  tagged `wpf-avalonia-final`). Target architecture: a **Rust authoritative core** + isolated Python ML workers (#522).
   See [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md) (superseded, kept as history).
 - Smaller: dataset-version reorder detection and a normalized row identity. (Row-store GC,
   PII redaction on export, and the desktop gate-threshold editor now ship.)

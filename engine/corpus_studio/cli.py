@@ -2758,9 +2758,9 @@ def hf_import(
 ):
     """Import rows from a public Hugging Face dataset into a STAGING JSONL file.
 
-    Read-only and public-only: no auth, no upload. The engine never writes
-    examples.jsonl — the staging file flows through the normal import-preview /
-    quarantine path so the desktop stays the single writer. Imported data is NOT
+    Read-only and public-only: no auth, no upload. The staging file flows through the
+    normal import-preview / quarantine path; commit accepted rows with `import-commit`
+    or `examples-append` (the engine's sanctioned single writer). Imported data is NOT
     assumed to be training-licensed; the dataset license is reported.
 
     The staging file is UNTRUSTED until preview: rows are fetched from a third party
@@ -2776,8 +2776,8 @@ def hf_import(
     # is safe and conservative.
     if out.name.casefold() == "examples.jsonl":
         typer.echo(
-            "Refusing to write examples.jsonl: HF import writes a staging file that the "
-            "desktop imports through preview/quarantine.",
+            "Refusing to write examples.jsonl: HF import writes a staging file; commit accepted "
+            "rows with import-commit or examples-append.",
             err=True,
         )
         raise typer.Exit(code=2)
@@ -3545,11 +3545,10 @@ def training_config(
     warnings = [
         (
             "This first-party config is inspectable input only; create a sealed RunPlan with "
-            "platform-plan and dispatch it with platform-run. The desktop does not execute this "
+            "platform-plan and dispatch it with platform-run. No UI client executes this "
             "mutable config directly."
             if normalized_target == "corpus_studio"
-            else "This command exports the config only; launch it with the emitted command or "
-            "from the desktop Training tab."
+            else "This command exports the config only; launch it with the emitted command."
         ),
         "Review dataset rights, eval readiness, compute budget, and target tool docs before training.",
     ]
@@ -5085,8 +5084,8 @@ def export(
     if output_path.name.casefold() == "examples.jsonl":
         typer.echo(
             "Refusing to write examples.jsonl: export writes a training deliverable, not the "
-            "project's dataset. Choose a different --output (the desktop is the single writer "
-            "of examples.jsonl).",
+            "project's dataset. Choose a different --output (author examples.jsonl with "
+            "examples-append).",
             err=True,
         )
         raise typer.Exit(code=2)

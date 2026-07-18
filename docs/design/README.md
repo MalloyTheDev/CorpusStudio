@@ -1,5 +1,11 @@
 # Corpus Studio — Production UI (Nocturne)
 
+> **Note (2026-07-18):** the WPF/Avalonia desktop that first implemented this Nocturne design was
+> **removed** (#545), and the UI/UX will likely be **revised** now that the product identity is
+> settled. Treat this as **reference** design source, not a fixed spec to match — the target
+> **Tauri 2/React** frontend (`apps/web`) is being built fresh.
+
+
 The production design system + information architecture for the Corpus Studio desktop app. This is
 the **single design source of truth for both shells**: the current **Avalonia** interim head and the
 eventual **Tauri 2 + React** shell. Because the tokens + IA are framework-agnostic, the Avalonia UI

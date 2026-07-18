@@ -486,14 +486,9 @@ per-item error isolation, and off-thread document opens.
   extracted children. Run-orchestration is being consolidated off the per-head code-behind into
   the VM as testable commands behind an **`IEngineService`** seam (issue #184): code-behind
   `_Click` handlers are down from 108 to ~59, with ~55 `ICommand`s.
-- Cross-platform (Avalonia) migration — **Phases 0–3 done; `ICommand` conversion in progress**
-  (not shipped; WPF stays the product head). Head-agnostic seams live on the view-models —
-  `IEngineService`, `IDialogService`, `IFilePickerService` (each with a Core `Null*` default and
-  WPF/Avalonia DI adapters) — plus a cross-platform venv-path fix; all Models + view-models +
-  WPF-free services live in a shared **`CorpusStudio.Core`** (`net8.0`) library; and the proof
-  **`CorpusStudio.Avalonia`** head re-authors the *whole* app as `.axaml` over those unchanged
-  view-models with compiled bindings (the GO/NO-GO spike passed, then grew to the full shell). See
-  [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md).
+- The WPF/Avalonia desktop that presented these views has been **removed** (#545); the target UI is
+  the **Tauri 2 + React** frontend (`apps/web`, port in progress). See
+  [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md) (superseded, kept as history).
 
 ## Hard boundaries (by design)
 
@@ -526,7 +521,7 @@ per-item error isolation, and off-thread document opens.
   deliberate non-goal for now. (Read-only Hub *import* already ships.)
 - **Decommission the WPF/Avalonia desktop** — it is a retiring prototype (#545); the target UI is the
   **Tauri 2 + React** frontend (`apps/web`). Dataset authoring is being re-homed to the engine CLI
-  first (`examples-append`, in-place restore — #546, done), then `apps/desktop` is removed. See
+  first (`examples-append`, in-place restore — #546, done); `apps/desktop` has been removed (#545). See
   `AVALONIA_MIGRATION_PLAN.md` (superseded, kept as history).
 - Dataset-version **reorder detection** and a normalized row identity are still future.
 

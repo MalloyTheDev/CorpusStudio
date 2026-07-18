@@ -273,7 +273,7 @@ def test_trace_migrate_refuses_engine_write_to_examples_jsonl(tmp_path: Path):
         ["trace-migrate", str(legacy), "--out", str(tmp_path / "examples.jsonl")],
     )
     assert result.exit_code == 2
-    assert "engine never writes examples.jsonl" in result.output
+    assert "never writes examples.jsonl" in result.output  # message no longer names the removed desktop
 
 
 def test_trace_generate_report_preserves_per_row_rejection(tmp_path: Path, monkeypatch):

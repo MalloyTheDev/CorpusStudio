@@ -23,8 +23,7 @@ body:
       label: Area
       options:
         - Engine (Python CLI)
-        - Desktop (WPF)
-        - Avalonia head
+        - Web UI (Tauri/React)
         - Evaluation / suites
         - Training
         - Import / export

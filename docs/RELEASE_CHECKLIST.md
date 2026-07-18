@@ -29,14 +29,9 @@ in the release PR.
 - [ ] Ruff and mypy pass on Linux: from `engine`, run
       `.venv/bin/python -m ruff check corpus_studio tests` and
       `.venv/bin/python -m mypy corpus_studio`.
-- [ ] Avalonia builds clean on Linux:
-      `dotnet build apps/desktop/CorpusStudio.Avalonia/CorpusStudio.Avalonia.csproj`.
-- [ ] WPF builds and desktop unit tests pass on Windows only:
-      `dotnet build apps/desktop/CorpusStudio.Desktop.sln` and
-      `dotnet test apps/desktop/CorpusStudio.Desktop.Tests/CorpusStudio.Desktop.Tests.csproj`.
 - [ ] Web/Tauri client builds on Linux: `cd apps/web`, then `npm ci` and `npm run build`.
-- [ ] CI is green on the release commit (`.github/workflows/engine-tests.yml`
-      and `.github/workflows/desktop-tests.yml`).
+- [ ] CI is green on the release commit (`.github/workflows/engine-tests.yml`,
+      `.github/workflows/web.yml`, and CodeQL).
 
 ## 3. Local backend smoke evidence (opt-in)
 
@@ -47,7 +42,6 @@ These are the paths a first-time user exercises; capture output as evidence.
 - [ ] `corpus_studio.cli backend-health --backend ollama --model <model>` reports reachable.
 - [ ] Opt-in integration tests pass or self-skip:
       `CORPUS_STUDIO_OLLAMA_INTEGRATION=1 pytest -m integration`.
-- [ ] Windows-only WPF example smoke test runs: `scripts/smoke_desktop_examples.ps1`.
 
 ## 4. Screenshots
 
@@ -92,12 +86,8 @@ notes so expectations are set:
 ## 7. Final steps
 
 - [ ] Squash/organize the release commit(s) with a clear summary.
-- [ ] Tag the release (`v*`) and push. This triggers the **Release** workflow
-      (`.github/workflows/release.yml`): it re-runs the engine + desktop gates,
-      publishes the self-contained single-file Windows build (`win-x64` profile,
-      WPF head), and — via the `avalonia-dist` job — self-contained macOS
-      (`osx-arm64` / `osx-x64`) and Linux (`linux-x64`) builds of the Avalonia
-      head, attaching them all to the GitHub Release. (Run it via
-      **workflow_dispatch** first for a dry-run build — it publishes nothing,
-      only uploads each platform build as a workflow artifact.)
+- [ ] Tag the release (`v*`) and push. **There is currently no release-automation
+      workflow** — the desktop-shaped `release.yml` was retired with the desktop
+      (#545). A Tauri-bundle release pipeline for `apps/web` is future work; until
+      then a release is the tag plus hand-authored notes.
 - [ ] Attach smoke evidence and screenshots to the release notes.

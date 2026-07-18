@@ -93,8 +93,8 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
    native Windows/WDDM (plus separately labeled WSL probes); the native-Linux host now adds a
    `HARDWARE_VERIFIED` managed environment (env-manager GPU probe — see
    [`docs/HOST_STATE.md`](docs/HOST_STATE.md)), still not bare-Linux full-workload or real-offload proof.
-3. **UI** — Tauri 2 + React (`apps/web`) is the target head; the WPF/Avalonia desktop is a
-   decommissioning prototype (#545). The UI is a **client** over the engine CLI; it never owns training.
+3. **UI** — Tauri 2 + React (`apps/web`) is the UI head; the WPF/Avalonia desktop was **removed**
+   (#545). The UI is a **client** over the engine CLI; it never owns training.
 
 ## 2. Current git / PR state
 
@@ -300,8 +300,8 @@ From `/mnt/training-nvme/repos/CorpusStudio/engine` (bash):
 .venv/bin/python -m pytest -q --no-header --basetemp=.pytest_tmp
 ```
 CI (GitHub Actions, **Linux + Python 3.11**) runs `pytest --cov=corpus_studio --cov-report=term-missing`
-with **`--cov-fail-under=88`**, plus `avalonia-linux-build`, `desktop-tests`, web typecheck/build,
-schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
+with **`--cov-fail-under=88`**, plus the web build (`web.yml`, incl. schema-to-TypeScript
+regeneration drift checks) and Python CodeQL.
 
 - **★ COVERAGE:** this host is native Linux, so `storage_profiler`'s Linux-only detection now executes
   locally — the old ~0.3% Windows-run under-measurement no longer applies and local coverage tracks CI.
@@ -475,8 +475,8 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 ## 10. Notes for Codex specifically
 
-- Languages: **Python** (engine — the primary surface), **C#/.NET** (`apps/desktop` WPF +
-  `apps/desktop/CorpusStudio.Avalonia`), **TypeScript/React** (`apps/web`, Tauri 2).
+- Languages: **Python** (engine — the primary surface) and **TypeScript/React** (`apps/web`, Tauri 2).
+  (The C#/.NET WPF/Avalonia desktop was removed - #545.)
 - Use the venv at `engine/.venv`; run the gate in §4. Respect the invariants in §6 (especially
   no-shell argv, fail-closed policy, and the Blackwell math-attention rule).
 - The engine core must stay import-torch-free; put heavy deps behind lazy imports + the `[train]` extra.

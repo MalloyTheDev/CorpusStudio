@@ -1,9 +1,8 @@
 # CorpusStudio Platform Contracts (v1.0.0)
 
 The **language-neutral boundary** between the (Python → Rust) platform core, the Python AI backend
-worker(s), and the UI shell (Avalonia now, Tauri later). These JSON Schemas (draft 2020-12) let a
-Rust core, a C#/Avalonia client, or a TypeScript/Tauri client validate and generate the same
-messages the Python engine does.
+worker(s), and the UI shell (Tauri 2/React). These JSON Schemas (draft 2020-12) let a Rust core or a
+TypeScript/Tauri client validate and generate the same messages the Python engine does.
 
 ## Generated — do not hand-edit
 

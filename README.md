@@ -142,10 +142,10 @@ installed external trainer:
   are pending by default; `trace-review` writes immutable successors and first-party trainer admission refuses
   pending/rejected/tampered records before model loading (see
   [`docs/TRACE_RECORDS.md`](docs/TRACE_RECORDS.md))
-- in-app Platform plan/run integration in the Tauri/React client, plus external-trainer launch in the
-  WPF/Avalonia Training Studio (explicit command review, no shell), live log streaming, and a Stop that
-  kills the process tree. The current WPF/Avalonia desktop (a decommissioning prototype, #545)
-  intentionally refuses the old mutable-config first-party launch instead of bypassing Platform lineage
+- in-app Platform plan/run integration in the Tauri/React client. (The removed WPF/Avalonia desktop
+  (#545) also launched reviewed external trainers with live logs + a process-tree Stop; that UX
+  returns in the Tauri client. No UI head owns the first-party path — that is `platform-plan` ->
+  `platform-run`, never a mutable-config bypass of Platform lineage
 - checkpoint tracking during and after runs, resume-from-latest for targets
   with a CLI resume flag, and before/after evaluation comparison against the
   baseline captured at launch
@@ -217,8 +217,7 @@ Every dataset example should be:
 CorpusStudio
 ├── engine/     # Python: dependency-light control-plane engine (CLI) + opt-in [train] worker
 ├── apps/
-│   ├── web/        # Tauri 2 + React frontend — the TARGET UI (in progress)
-│   └── desktop/    # C# WPF/Avalonia prototype — DECOMMISSIONING, being removed (#545)
+│   └── web/        # Tauri 2 + React frontend — the UI (in progress)
 ├── schemas/    # Built-in dataset schema definitions
 ├── docs/       # Documentation (indexed by docs/README.md)
 ├── research/   # Opt-in IEEE native-Linux research overlay (supporting track)
@@ -243,25 +242,14 @@ between the **Start Center**, the file **Explorer**, and the **Studio**, with
 **Problems** and **Output** panels docked at the bottom. See
 [`docs/WORKSPACE_SYSTEM.md`](docs/WORKSPACE_SYSTEM.md).
 
-The cross-platform (Avalonia) shell has been re-skinned to the **Nocturne** design
-system — a quiet, compact, dark-first look with a grouped workflow-phase sidebar
-(**Overview · Author · Measure · Evaluate · Train**) in place of a flat tab strip,
-Phosphor iconography throughout, and a contextual quality rail. The tokens, icon
-set, and screen inventory are the framework-agnostic source of truth in
-[`docs/design/`](docs/design/), so the same design carries toward the eventual
-Tauri/React shell. The full workflow — Start Center → New Project wizard →
-Explorer → Studio — is defined in that design source and rendered by the current prototype desktop.
+### Design system (Nocturne)
 
-### Desktop (high-fidelity prototype)
-
-The current WPF/Avalonia desktop is a **high-fidelity prototype** of the Nocturne
-design language - a working shell used to pressure-test the full workflow, not the
-final production UI. It is being **retired** in favor of the Tauri 2/React frontend
-(#545), so the README no longer embeds a screenshot gallery. The
-framework-agnostic design tokens, icon set, and screen inventory in
-[`docs/design/`](docs/design/) are the source of truth and carry forward to the
-settled product UI; [`docs/WORKSPACE_SYSTEM.md`](docs/WORKSPACE_SYSTEM.md) describes
-the IDE-style workspace behavior the shell is wired to.
+The **Nocturne** design system — a quiet, dark-first look with a grouped workflow-phase sidebar
+(**Overview · Author · Measure · Evaluate · Train**), Phosphor iconography, and a contextual quality
+rail — is the framework-agnostic source of truth in [`docs/design/`](docs/design/) (tokens, icon set,
+screen inventory). The removed WPF/Avalonia desktop prototype (#545) implemented it; the target
+**Tauri 2/React** frontend (`apps/web`) carries the same design forward.
+[`docs/WORKSPACE_SYSTEM.md`](docs/WORKSPACE_SYSTEM.md) describes the workspace behavior it specifies.
 
 ## Core Local Loop
 
@@ -288,9 +276,8 @@ The recommended stack is:
 - Polars / DuckDB later for large datasets when needed
 
 Tests: the Python engine has a pytest suite (with opt-in local Ollama
-integration tests), and the desktop app has xUnit tests over its persistence
-layer. Both run in CI (`.github/workflows/engine-tests.yml` and
-`.github/workflows/desktop-tests.yml`).
+integration tests) that runs in CI (`.github/workflows/engine-tests.yml`); the
+Tauri/React web client is built by `.github/workflows/web.yml`.
 
 For what is implemented today, see [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md)
 (the source of truth). For the product vision and staged roadmap, see

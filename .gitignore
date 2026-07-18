@@ -28,16 +28,6 @@ dist/
 build/
 *.egg-info/
 
-# .NET
-bin/
-obj/
-.vs/
-*.user
-*.suo
-*.userosscache
-*.sln.docstates
-TestResults/
-
 # Local data
 data/*
 !data/.gitkeep

@@ -4,9 +4,9 @@ Fetches rows from the public Hugging Face **datasets-server** JSON API with the
 standard library only (the same urllib pattern the model backends use), so no
 ``datasets`` / ``huggingface_hub`` / pyarrow dependency is pulled in. Import is
 read-only and public-dataset-only: no auth, no upload, no publishing — the
-engine never touches the cloud on its own, and it never writes ``examples.jsonl``
-(the desktop remains the single writer; imported rows land in a *staging* file
-that flows through the existing import-preview / quarantine path).
+engine never touches the cloud on its own; imported rows land in a *staging* file
+that flows through the existing import-preview / quarantine path (commit accepted
+rows with ``examples-append`` / ``import-commit``, the engine's sanctioned writer).
 
 Imported data is NOT assumed to be licensed for training — the dataset's license
 is surfaced with a caveat so the user reviews it before training use.

@@ -3,8 +3,8 @@
 Corpus Studio is MIT-licensed and open to contributions.
 
 **New here?** Start with the [Developer Guide](docs/DEVELOPER_GUIDE.md) — a hands-on
-walkthrough of the engine⇄desktop bridge, the seam-based view-model structure, the
-recipe for adding a feature, and how the tests fake it all. See also
+walkthrough of the engine, the platform contracts, the verify gate, and how the tests
+fake the ML/worker boundaries. See also
 [ARCHITECTURE.md](docs/ARCHITECTURE.md), [DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md),
 and the [CLI reference](docs/CLI_REFERENCE.md).
 
