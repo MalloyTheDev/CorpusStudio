@@ -2646,7 +2646,13 @@ def dataset_debt(
 
 @app.command("import-preview")
 def import_preview(path: Path, schema: str):
-    """Preview a JSONL import and report accepted/rejected rows."""
+    """Preview a JSONL import and report accepted/rejected rows.
+
+    This is a path-based preview: it validates against the BUILTIN schema named by <schema>. It is
+    not project-aware, so a project's derived (project-local) schema does NOT apply here - the
+    authoritative gate is the commit (import-commit / examples-append), which validates against the
+    project's own schema. Preview against a derived schema is a planned follow-up.
+    """
     try:
         load_builtin_schema(schema)
     except ValueError as exc:
@@ -2743,29 +2749,17 @@ def examples_append(
         append_examples,
         examples_path,
     )
-    from corpus_studio.validators.basic_validator import validate_jsonl_row
+    from corpus_studio.validators.basic_validator import validate_jsonl_row_against
 
     if not project_dir.is_dir():
         typer.echo(f"Project directory '{project_dir}' does not exist.", err=True)
         raise typer.Exit(code=1)
 
-    schema_id = schema
-    if schema_id is None:
-        project_json = project_dir / "project.json"
-        if project_json.exists():
-            try:
-                schema_id = json.loads(project_json.read_text(encoding="utf-8")).get("schema_id")
-            except (OSError, ValueError):
-                schema_id = None
-    if not isinstance(schema_id, str) or not schema_id:
-        typer.echo(
-            "No schema: pass --schema, or run in a project whose project.json has a schema_id.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
+    # Validate against the project's OWN schema: a project-local (derived) schema shadows the builtin
+    # of that id, so the sanctioned single writer enforces what the project actually declared.
     try:
-        load_builtin_schema(schema_id)
-    except ValueError as exc:
+        schema_id, resolved_schema, schema_source = _resolve_project_schema(project_dir, schema)
+    except _ExamplesMutationError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
@@ -2778,7 +2772,7 @@ def examples_append(
     valid_rows: list[Any] = []
     invalid: list[dict[str, Any]] = []
     for number, row in enumerate(rows, start=1):
-        issues = validate_jsonl_row(row, schema_id, number)
+        issues = validate_jsonl_row_against(row, resolved_schema, number)
         if issues:
             invalid.append({"row_number": number, "issues": [issue.message for issue in issues]})
         else:
@@ -2805,6 +2799,7 @@ def examples_append(
         "appended": appended,
         "skipped_invalid": len(invalid),
         "schema_id": schema_id,
+        "schema_source": schema_source,
     }
     if as_json:
         typer.echo(json.dumps(result, indent=2))
@@ -2812,6 +2807,8 @@ def examples_append(
         message = f"Appended {appended} row(s) to {result['examples_path']}"
         if invalid:
             message += f" (skipped {len(invalid)} invalid)"
+        if schema_source == "project":
+            message += f"; validated against the project-local schema '{schema_id}'"
         typer.echo(message)
     for entry in invalid[:20]:
         typer.echo(f"  skipped row {entry['row_number']}: {'; '.join(entry['issues'])}", err=True)
@@ -2869,9 +2866,12 @@ class _ExamplesMutationError(Exception):
     undo, or a locked file). Carries the exact ASCII operator message; the command maps it to exit 1."""
 
 
-def _resolve_project_schema_id(project_dir: Path, schema: Optional[str]) -> str:
-    """The schema id to validate against: --schema if given, else the project.json schema_id. Raises
-    :class:`_ExamplesMutationError` if neither is available or it is not a known builtin schema."""
+def _resolve_project_schema(project_dir: Path, schema: Optional[str]) -> tuple[str, Any, str]:
+    """Resolve ``(schema_id, schema, source)`` for a project-writing command: the id from --schema or
+    the project's schema_id, then the ``DatasetSchema`` itself - preferring a PROJECT-LOCAL schema
+    over the builtin of that id. This is what lets the sanctioned single writer validate against a
+    project's own (possibly derived) schema, not only the builtin. Raises :class:`_ExamplesMutationError`
+    if no schema is available or the id is unknown (neither project-local nor builtin)."""
     schema_id = schema
     if schema_id is None:
         project_json = project_dir / "project.json"
@@ -2884,11 +2884,13 @@ def _resolve_project_schema_id(project_dir: Path, schema: Optional[str]) -> str:
         raise _ExamplesMutationError(
             "No schema: pass --schema, or run in a project whose project.json has a schema_id."
         )
+    from corpus_studio.schemas.project_schemas import SchemaError, resolve_schema
+
     try:
-        load_builtin_schema(schema_id)
-    except ValueError as exc:
+        resolved, source = resolve_schema(project_dir, schema_id)
+    except (SchemaError, ValueError) as exc:
         raise _ExamplesMutationError(str(exc)) from exc
-    return schema_id
+    return schema_id, resolved, source
 
 
 def _apply_examples_mutation(
@@ -3036,7 +3038,7 @@ def examples_edit(
     undo cannot be captured - nothing changed.
     """
     from corpus_studio.storage.examples_writer import examples_path
-    from corpus_studio.validators.basic_validator import validate_jsonl_row
+    from corpus_studio.validators.basic_validator import validate_jsonl_row_against
 
     if not project_dir.is_dir():
         typer.echo(f"Project directory '{project_dir}' does not exist.", err=True)
@@ -3060,11 +3062,11 @@ def examples_edit(
         raise typer.Exit(code=1) from exc
 
     try:
-        schema_id = _resolve_project_schema_id(project_dir, schema)
+        schema_id, resolved_schema, _schema_source = _resolve_project_schema(project_dir, schema)
     except _ExamplesMutationError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
-    issues = validate_jsonl_row(new_row, schema_id, row)
+    issues = validate_jsonl_row_against(new_row, resolved_schema, row)
     if issues:
         typer.echo(
             f"Refusing to edit: the replacement row fails the '{schema_id}' schema "
@@ -3285,29 +3287,16 @@ def import_commit(
         examples_path,
         single_writer_lock,
     )
-    from corpus_studio.validators.basic_validator import validate_jsonl_row
+    from corpus_studio.validators.basic_validator import validate_jsonl_row_against
 
     if not project_dir.is_dir():
         typer.echo(f"Project directory '{project_dir}' does not exist.", err=True)
         raise typer.Exit(code=1)
 
-    schema_id = schema
-    if schema_id is None:
-        project_json = project_dir / "project.json"
-        if project_json.exists():
-            try:
-                schema_id = json.loads(project_json.read_text(encoding="utf-8")).get("schema_id")
-            except (OSError, ValueError):
-                schema_id = None
-    if not isinstance(schema_id, str) or not schema_id:
-        typer.echo(
-            "No schema: pass --schema, or run in a project whose project.json has a schema_id.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
+    # Commit against the project's OWN schema (a project-local/derived schema shadows the builtin id).
     try:
-        load_builtin_schema(schema_id)
-    except ValueError as exc:
+        schema_id, resolved_schema, schema_source = _resolve_project_schema(project_dir, schema)
+    except _ExamplesMutationError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
@@ -3320,7 +3309,7 @@ def import_commit(
     accepted: list[Any] = []
     rejected: list[dict[str, Any]] = []
     for number, row in enumerate(rows, start=1):
-        issues = validate_jsonl_row(row, schema_id, number)
+        issues = validate_jsonl_row_against(row, resolved_schema, number)
         if issues:
             # Keep the original row so --quarantine can persist it for repair, not just the reasons.
             rejected.append(
@@ -3376,15 +3365,19 @@ def import_commit(
         "rejected": len(rejected),
         "version_id": version_id,
         "schema_id": schema_id,
+        "schema_source": schema_source,
         "quarantine_path": quarantine_path,
     }
     if as_json:
         typer.echo(json.dumps(result, indent=2))
     else:
         version_note = f"; captured version {version_id}" if version_id else ""
+        schema_note = (
+            f" (project schema '{schema_id}')" if schema_source == "project" else ""
+        )
         typer.echo(
             f"Committed {len(accepted)} row(s) to {result['examples_path']} "
-            f"({len(rejected)} rejected){version_note}."
+            f"({len(rejected)} rejected){version_note}{schema_note}."
         )
         if quarantine_path:
             typer.echo(f"Quarantined {len(rejected)} rejected row(s) to {quarantine_path}.")
