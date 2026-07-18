@@ -185,3 +185,115 @@ def test_allowlist_round_trips_and_fails_closed(tmp_path):
     # A non-dict top-level file → empty (never crashes the gate).
     (tmp_path / "provenance_allowlist.json").write_text("[]", encoding="utf-8")
     assert load_provenance_allowlist(tmp_path) == {}
+
+
+# ---- provenance-allowlist-set CLI (#580, G5) ---------------------------------
+
+from typer.testing import CliRunner  # noqa: E402
+
+from corpus_studio.cli import app  # noqa: E402
+
+_runner = CliRunner()
+
+
+def test_cli_allow_adds_entry_with_note(tmp_path):
+    result = _runner.invoke(
+        app, ["provenance-allowlist-set", str(tmp_path), "--allow", "mistral=Apache-2.0", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["allowlist"] == {"mistral": "Apache-2.0"} and payload["added"] == ["mistral"]
+    assert load_provenance_allowlist(tmp_path) == {"mistral": "Apache-2.0"}
+
+
+def test_cli_allow_without_note_uses_a_default(tmp_path):
+    result = _runner.invoke(app, ["provenance-allowlist-set", str(tmp_path), "--allow", "mistral"])
+    assert result.exit_code == 0, result.output
+    assert load_provenance_allowlist(tmp_path)["mistral"]  # non-empty default note
+
+
+def test_cli_remove_deletes_and_reports_not_found(tmp_path):
+    save_provenance_allowlist(tmp_path, {"mistral": "Apache-2.0", "qwen": "Apache-2.0"})
+    result = _runner.invoke(
+        app,
+        ["provenance-allowlist-set", str(tmp_path), "--remove", "mistral", "--remove", "ghost", "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["removed"] == ["mistral"] and payload["not_found"] == ["ghost"]
+    assert load_provenance_allowlist(tmp_path) == {"qwen": "Apache-2.0"}
+
+
+def test_cli_values_json_replaces_entire_allowlist(tmp_path):
+    save_provenance_allowlist(tmp_path, {"old": "note"})
+    result = _runner.invoke(
+        app,
+        ["provenance-allowlist-set", str(tmp_path), "--values-json", '{"qwen": "Apache-2.0"}', "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    assert load_provenance_allowlist(tmp_path) == {"qwen": "Apache-2.0"}  # "old" is gone
+
+
+def test_cli_values_json_refuses_non_string_note(tmp_path):
+    # a hand-crafted "approval object" must be refused, never written - fail closed
+    result = _runner.invoke(
+        app,
+        ["provenance-allowlist-set", str(tmp_path), "--values-json", '{"claude": {"approved": true}}'],
+    )
+    assert result.exit_code == 1
+    assert "must be a string" in result.output
+    assert load_provenance_allowlist(tmp_path) == {}  # nothing written
+
+
+def test_cli_refuses_empty_teacher(tmp_path):
+    result = _runner.invoke(app, ["provenance-allowlist-set", str(tmp_path), "--allow", "=just a note"])
+    assert result.exit_code == 1
+    assert "empty teacher" in result.output
+
+
+def test_cli_values_json_and_incremental_are_mutually_exclusive(tmp_path):
+    result = _runner.invoke(
+        app,
+        ["provenance-allowlist-set", str(tmp_path), "--allow", "mistral", "--values-json", "{}"],
+    )
+    assert result.exit_code == 1
+    assert "cannot be combined" in result.output
+
+
+def test_cli_nothing_to_do_is_refused(tmp_path):
+    result = _runner.invoke(app, ["provenance-allowlist-set", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "Nothing to do" in result.output
+
+
+def test_cli_missing_project_dir(tmp_path):
+    result = _runner.invoke(
+        app, ["provenance-allowlist-set", str(tmp_path / "nope"), "--allow", "mistral"]
+    )
+    assert result.exit_code == 1
+    assert "does not exist" in result.output
+
+
+def test_cli_report_is_the_net_diff_not_raw_ops(tmp_path):
+    # A teacher named in BOTH --remove and --allow ends up allow-listed (the user asked for it); the
+    # report must reflect the NET state - it appears in `added`, never in `removed`.
+    result = _runner.invoke(
+        app,
+        ["provenance-allowlist-set", str(tmp_path), "--remove", "claude", "--allow", "claude=oops", "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["allowlist"] == {"claude": "oops"}
+    assert payload["added"] == ["claude"] and payload["removed"] == [] and payload["not_found"] == []
+
+
+def test_cli_values_json_discloses_dropped_approvals(tmp_path):
+    # Wholesale replace must be HONEST about which prior approvals it drops.
+    save_provenance_allowlist(tmp_path, {"old-teacher": "note"})
+    result = _runner.invoke(
+        app,
+        ["provenance-allowlist-set", str(tmp_path), "--values-json", '{"qwen": "Apache-2.0"}', "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["added"] == ["qwen"] and payload["removed"] == ["old-teacher"]
