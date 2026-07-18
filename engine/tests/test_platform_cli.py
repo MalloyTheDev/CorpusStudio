@@ -695,3 +695,102 @@ def test_platform_plan_instruction_dataset_remains_compatible(monkeypatch, tmp_p
     _ready_host(monkeypatch)
     result = runner.invoke(app, [*_platform_plan_args(tmp_path), "--json"])
     assert result.exit_code == 0
+
+
+def _partial_chat_dataset(tmp_path):
+    # Two structurally-valid chat rows plus one that cannot render (no messages list). The set is
+    # is_conformant (>=1 compatible) so the zero-row gate passes; the partial gate is what must fire.
+    ds = tmp_path / "partial_chat.jsonl"
+    good = {
+        "messages": [
+            {"role": "user", "content": "Write the lowercase form of ALPHA."},
+            {"role": "assistant", "content": "alpha"},
+        ]
+    }
+    ds.write_text(
+        "\n".join(json.dumps(r) for r in (good, good, {"note": "not chat-shaped"})) + "\n",
+        encoding="utf-8",
+    )
+    return ds
+
+
+def test_platform_plan_refuses_partially_unrenderable_dataset(monkeypatch, tmp_path):
+    # A plan must not silently seal claiming the whole dataset when only some rows render. Default is
+    # fail closed: 2 of 3 chat rows render, 1 does not -> refuse with the exact counts, mint no plan.
+    from corpus_studio.platform.execution_config import stable_file_sha256
+
+    _ready_host(monkeypatch)
+    ds = _partial_chat_dataset(tmp_path)
+    digest_before = stable_file_sha256(str(ds))
+    out = tmp_path / "out"
+    result = runner.invoke(
+        app,
+        [
+            "platform-plan",
+            "--base-model", "m",
+            "--model-revision", _MODEL_REVISION,
+            "--dataset", str(ds),
+            "--dataset-format", "chat",
+            "--chat-template-sha256", "c" * 64,
+            "--out", str(out),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "1 of 3 row(s)" in result.output
+    assert "over-claim the trained row count" in result.output
+    assert "--allow-unrenderable-rows" in result.output
+    # no plan id, plan hash, or sealed conformance is minted for a refused plan
+    assert not out.exists() or not list(out.rglob("RunPlan.json"))
+    assert not out.exists() or not list(out.rglob("DatasetConformance.json"))
+    # read-only preflight: the dataset bytes are unchanged
+    assert stable_file_sha256(str(ds)) == digest_before
+
+
+def test_platform_plan_allow_unrenderable_rows_seals_and_records_conformance(monkeypatch, tmp_path):
+    # With the explicit opt-in, the plan seals but is HONEST: it warns, and the sealed evidence +
+    # --json bundle record exactly how many rows the dataset_format renders vs drops.
+    _ready_host(monkeypatch)
+    ds = _partial_chat_dataset(tmp_path)
+    out = tmp_path / "out"
+    result = runner.invoke(
+        app,
+        [
+            "platform-plan",
+            "--base-model", "m",
+            "--model-revision", _MODEL_REVISION,
+            "--dataset", str(ds),
+            "--dataset-format", "chat",
+            "--chat-template-sha256", "c" * 64,
+            "--allow-unrenderable-rows",
+            "--out", str(out),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0
+    # the operator is warned on stderr (never silent) about the dropped rows
+    assert "WARNING" in result.stderr and "1 of 3 row(s)" in result.stderr
+    # the sealed conformance verdict is written next to the plan
+    sealed = json.loads((out / "DatasetConformance.json").read_text(encoding="utf-8"))
+    assert sealed == {
+        "dataset_format": "chat",
+        "total_rows": 3,
+        "compatible_rows": 2,
+        "rejected_rows": 1,
+        "representative_rejections": [{"index": 2, "reason": "no non-empty 'messages' list"}],
+    }
+    # and the live-flow bundle carries the same verdict for the client
+    bundle = json.loads(result.stdout)
+    assert bundle["dataset_conformance"]["compatible_rows"] == 2
+    assert bundle["dataset_conformance"]["rejected_rows"] == 1
+
+
+def test_platform_plan_bundle_records_full_conformance_for_a_clean_dataset(monkeypatch, tmp_path):
+    # A fully compatible dataset seals with rejected_rows == 0 recorded, so a downstream reader can
+    # always trust the sealed row accounting rather than inferring "all rows" from silence.
+    _ready_host(monkeypatch)
+    result = runner.invoke(app, [*_platform_plan_args(tmp_path), "--json"])
+    assert result.exit_code == 0
+    conformance = json.loads(result.stdout)["dataset_conformance"]
+    assert conformance["rejected_rows"] == 0
+    assert conformance["compatible_rows"] == conformance["total_rows"] >= 1

@@ -184,6 +184,30 @@ def test_load_jsonl_skips_blank_lines(tmp_path):
     assert len(load_jsonl_rows(path)) == 2
 
 
+# ---- partial-conformance messaging (the plan over-claim guard) -----------------------------------
+
+
+def test_describe_partial_refusal_carries_ascii_counts():
+    rows = [CHAT_ROW, {"messages": []}, CHAT_ROW]  # 2 compatible, 1 rejected
+    report = assess_dataset_format_conformance(rows, "chat")
+    message = report.describe_partial_refusal("data/train.jsonl")
+    assert message.isascii()
+    assert "1 of 3 row(s)" in message
+    assert "over-claim the trained row count" in message
+    assert "--allow-unrenderable-rows" in message
+    assert "row 1:" in message  # the rejected row's index is surfaced
+
+
+def test_describe_partial_warning_reports_the_kept_count():
+    rows = [CHAT_ROW, {"messages": []}, CHAT_ROW]
+    report = assess_dataset_format_conformance(rows, "chat")
+    warning = report.describe_partial_warning("data/train.jsonl")
+    assert warning.isascii()
+    assert warning.startswith("WARNING:")
+    assert "1 of 3 row(s)" in warning
+    assert "only the 2 compatible row(s)" in warning
+
+
 def test_load_jsonl_malformed_line_raises(tmp_path):
     path = tmp_path / "d.jsonl"
     path.write_text('{"messages": [}\n', encoding="utf-8")

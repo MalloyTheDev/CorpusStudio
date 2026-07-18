@@ -908,6 +908,13 @@ def platform_plan(
         "--allow-truncation",
         help="Explicitly permit examples longer than --sequence-len; default is fail closed.",
     ),
+    allow_unrenderable_rows: bool = typer.Option(
+        False,
+        "--allow-unrenderable-rows",
+        help="Permit sealing a plan when some dataset rows are structurally unrenderable for the "
+        "selected --dataset-format; only the compatible rows train. Default is fail closed so a plan "
+        "cannot silently claim more rows than it will train.",
+    ),
     chat_template_sha256: Optional[str] = typer.Option(
         None,
         "--chat-template-sha256",
@@ -1005,6 +1012,14 @@ def platform_plan(
     if not dataset_conformance.is_conformant:
         typer.echo(dataset_conformance.describe_refusal(dataset_path), err=True)
         raise typer.Exit(2)
+    # Partial conformance: some rows render, some do not. Sealing silently would over-claim the
+    # trained row count (the plan implies the whole dataset trains, but only the compatible rows do).
+    # Fail closed unless the caller explicitly accepts training only the compatible rows.
+    if dataset_conformance.rejected_rows > 0:
+        if not allow_unrenderable_rows:
+            typer.echo(dataset_conformance.describe_partial_refusal(dataset_path), err=True)
+            raise typer.Exit(2)
+        typer.echo(dataset_conformance.describe_partial_warning(dataset_path), err=True)
     # Resolve, canonicalize, and CONTAIN the sealed output root so a plan's write location is
     # CWD-independent and can never land inside the checkout (containment finding F5). Omission defaults
     # to the application-data runs root; an in-repo path is refused fail-closed before any plan id mints.
@@ -1126,6 +1141,11 @@ def platform_plan(
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / "RunPlan.json").write_text(plan.model_dump_json(indent=2), encoding="utf-8")
         (out_dir / "FitClassification.json").write_text(fit.model_dump_json(indent=2), encoding="utf-8")
+        # Seal the structural-conformance verdict alongside the plan so the sealed evidence records
+        # exactly how many rows the plan's dataset_format renders (compatible) vs drops (rejected).
+        (out_dir / "DatasetConformance.json").write_text(
+            json.dumps(dataset_conformance.as_dict(), indent=2), encoding="utf-8"
+        )
         if parameter_accounting is not None:
             (out_dir / "ParameterAccountingReport.json").write_text(
                 parameter_accounting.model_dump_json(indent=2), encoding="utf-8"
@@ -1142,6 +1162,7 @@ def platform_plan(
                 {
                     "run_plan": plan.model_dump(mode="json"),
                     "fit_classification": fit.model_dump(mode="json"),
+                    "dataset_conformance": dataset_conformance.as_dict(),
                 },
                 indent=2,
             )
@@ -4062,6 +4083,15 @@ def dataset_tokens(
         text = format_example_text(row, dataset_format, tokenizer)
         if text:
             lengths.append(len(tokenizer(text)["input_ids"]))
+    # Rows that render to "" are excluded from the token stats. Surface that on stderr (stdout stays
+    # pure JSON) so the distribution below is never silently read as covering the whole dataset.
+    unrenderable = len(rows) - len(lengths)
+    if unrenderable > 0:
+        typer.echo(
+            f"NOTE: {unrenderable} of {len(rows)} row(s) produced no renderable text for "
+            f"dataset_format '{dataset_format}' and are excluded from the token stats below.",
+            err=True,
+        )
     report = analyze_truncation(lengths, seq_len)
     if json_out:
         typer.echo(report.model_dump_json(indent=2))
