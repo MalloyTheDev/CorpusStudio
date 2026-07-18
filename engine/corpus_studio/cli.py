@@ -2376,11 +2376,18 @@ def project_list(
     index_path: Optional[Path] = typer.Option(
         None, "--index-path", help="Override the SQLite index path."
     ),
+    rollup: bool = typer.Option(
+        False,
+        "--rollup",
+        help="Add each project's debt grade (reads every project's examples.jsonl in one pass, so a "
+        "dashboard needs one call instead of N per-project dataset-debt calls).",
+    ),
 ):
     """List local dataset projects using the optional SQLite index.
 
     The index is built from project.json files on first use and rebuilt on
-    demand; the JSON/JSONL files remain the source of truth.
+    demand; the JSON/JSONL files remain the source of truth. Each entry already
+    carries example_count; --rollup adds a per-project debt grade.
     """
     projects_root = root or _repo_relative_path(
         "CORPUS_STUDIO_DATA_DIR", Path("data") / "projects"
@@ -2392,13 +2399,32 @@ def project_list(
         name_contains=name_contains,
         rebuild=rebuild,
     )
+    projects_payload: list[dict[str, Any]] = []
+    for entry in entries:
+        item = entry.model_dump()
+        if rollup:
+            from corpus_studio.reporting.debt_report import build_debt_report
+
+            examples_file = projects_root / entry.id / "examples.jsonl"
+            try:
+                rows = list(read_jsonl(examples_file))
+                debt = build_debt_report(build_basic_quality_report(rows))
+                item["debt_grade"] = debt.grade
+                item["has_data"] = debt.has_data
+            except (OSError, ValueError):
+                # A project whose examples.jsonl is missing/unreadable rolls up as ungraded, never
+                # crashing the whole listing; the reason is visible (has_data False, grade N/A).
+                item["debt_grade"] = "N/A"
+                item["has_data"] = False
+        projects_payload.append(item)
     typer.echo(
         json.dumps(
             {
                 "projects_root": str(projects_root),
                 "index_path": str(index_path or default_index_path(projects_root)),
                 "count": len(entries),
-                "projects": [entry.model_dump() for entry in entries],
+                "rollup": rollup,
+                "projects": projects_payload,
             },
             indent=2,
         )
@@ -2427,6 +2453,153 @@ def project_index_rebuild(
                 "index_path": str(resolved_index),
                 "indexed": count,
             },
+            indent=2,
+        )
+    )
+
+
+def _resolve_project_dir(projects_root: Path, project_id: str) -> Path:
+    """Validate ``project_id`` as a slug and resolve it to <root>/<id>, refusing (raising typer.Exit)
+    if it is not a slug, is a symlink, or is not an actual project (no project.json). The slug rule is
+    the creator's exact pattern, so the path is always contained in ``projects_root`` - no traversal;
+    a symlink is refused so a destructive op never follows a link out of the projects root."""
+    from corpus_studio.storage.project import _PROJECT_ID_PATTERN
+
+    if not _PROJECT_ID_PATTERN.fullmatch(project_id or ""):
+        typer.echo(
+            f"Invalid project id '{project_id}': lowercase letters/digits then _-/ only.", err=True
+        )
+        raise typer.Exit(code=1)
+    project_dir = projects_root / project_id
+    if project_dir.is_symlink():
+        typer.echo(
+            f"Refusing '{project_id}': it is a symlink, not a real project directory.", err=True
+        )
+        raise typer.Exit(code=1)
+    if not project_dir.is_dir() or not (project_dir / "project.json").exists():
+        typer.echo(
+            f"No project '{project_id}' under {projects_root} (no project.json there).", err=True
+        )
+        raise typer.Exit(code=1)
+    return project_dir
+
+
+def _reindex_after_lifecycle(projects_root: Path, index_path: Optional[Path]) -> None:
+    """Keep the project index truthful after a delete/rename. Rebuilds from disk ONLY if an index
+    already exists - so it can never hold a stale/partial view, and it never fabricates a one-entry
+    index that would make project-list hide the other on-disk projects. If no index exists, do nothing
+    (project-list rebuilds from disk on demand). The index is a cache; never fail the op on it."""
+    resolved_index = index_path or default_index_path(projects_root)
+    if not resolved_index.exists():
+        return
+    try:
+        rebuild_index(projects_root, resolved_index)
+    except (sqlite3.Error, OSError):
+        pass
+
+
+@app.command("project-delete")
+def project_delete(
+    project_id: str,
+    root: Optional[Path] = typer.Option(
+        None, "--root", help="Projects root. Defaults to the data dir."
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", help="Confirm deletion; required because it permanently removes the project."
+    ),
+    index_path: Optional[Path] = typer.Option(
+        None, "--index-path", help="Override the SQLite index path."
+    ),
+):
+    """Delete a local dataset project - its folder and all its data. IRREVERSIBLE.
+
+    Refuses unless the target is an actual project (has project.json) and --yes is given. The id must
+    be a valid slug, so deletion is contained to <root>/<id> and can never traverse out.
+    """
+    import shutil
+
+    projects_root = root or _repo_relative_path("CORPUS_STUDIO_DATA_DIR", Path("data") / "projects")
+    project_dir = _resolve_project_dir(projects_root, project_id)
+    if not yes:
+        typer.echo(
+            f"Refusing to delete '{project_id}' without --yes; this permanently removes "
+            f"{project_dir} and all its data.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    shutil.rmtree(project_dir)
+    _reindex_after_lifecycle(projects_root, index_path)
+    typer.echo(json.dumps({"deleted": project_id, "path": str(project_dir)}, indent=2))
+
+
+@app.command("project-rename")
+def project_rename(
+    project_id: str,
+    new_id: Optional[str] = typer.Option(
+        None, "--to", help="New project id (renames the folder); must be an unused slug."
+    ),
+    new_name: Optional[str] = typer.Option(None, "--name", help="New human display name."),
+    root: Optional[Path] = typer.Option(
+        None, "--root", help="Projects root. Defaults to the data dir."
+    ),
+    index_path: Optional[Path] = typer.Option(
+        None, "--index-path", help="Override the SQLite index path."
+    ),
+):
+    """Rename a project's id (its folder) and/or its display name.
+
+    Refuses if neither --to nor --name is given, if the source is not a project, or if --to names an
+    id that already exists. project.json (id/name/updated_at) is updated; an EXISTING project index is
+    then rebuilt from disk so it stays truthful (a missing index is left for project-list to rebuild).
+    """
+    from datetime import datetime, timezone
+
+    from corpus_studio.storage.project import _PROJECT_ID_PATTERN
+
+    projects_root = root or _repo_relative_path("CORPUS_STUDIO_DATA_DIR", Path("data") / "projects")
+    if new_id is None and new_name is None:
+        typer.echo("Nothing to rename: provide --to <new_id> and/or --name <new_name>.", err=True)
+        raise typer.Exit(code=1)
+    project_dir = _resolve_project_dir(projects_root, project_id)
+
+    final_id = project_id
+    target_dir = project_dir
+    if new_id is not None and new_id != project_id:
+        if not _PROJECT_ID_PATTERN.fullmatch(new_id):
+            typer.echo(f"Invalid new project id '{new_id}'.", err=True)
+            raise typer.Exit(code=1)
+        target_dir = projects_root / new_id
+        if target_dir.exists():
+            typer.echo(f"A project '{new_id}' already exists at {target_dir}.", err=True)
+            raise typer.Exit(code=1)
+        final_id = new_id
+
+    try:
+        project = DatasetProject.model_validate_json(
+            (project_dir / "project.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValidationError, ValueError) as exc:
+        typer.echo(f"Cannot read project.json: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    updated = project.model_copy(
+        update={
+            "id": final_id,
+            "name": new_name if new_name is not None else project.name,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    # Move the folder first (atomic same-filesystem rename), then write the updated project.json in
+    # its final location, so id and folder name never disagree in the success path.
+    if target_dir != project_dir:
+        os.rename(project_dir, target_dir)
+    (target_dir / "project.json").write_text(updated.model_dump_json(indent=2), encoding="utf-8")
+
+    _reindex_after_lifecycle(projects_root, index_path)
+    typer.echo(
+        json.dumps(
+            {"renamed": project_id, "id": final_id, "name": updated.name, "path": str(target_dir)},
             indent=2,
         )
     )
