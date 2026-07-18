@@ -56,10 +56,10 @@ The desktop layer is responsible for:
 - showing quality reports
 - triggering imports/exports
 - showing split/export status
-- selecting model backends for Evaluation Lab MVP runs
-- reviewing Evaluation Lab summary and report JSON
+- selecting model backends for Evaluation Studio MVP runs
+- reviewing Evaluation Studio summary and report JSON
 - reviewing AI Assist suggestions and queue states before they return to Writing Studio
-- generating and previewing Training Lab config exports
+- generating and previewing Training Studio config exports
 
 ### Desktop internal structure
 
@@ -157,7 +157,7 @@ Desktop writes project files -> Python CLI validates/exports -> Desktop reads re
 
 This is simple, debuggable, and avoids premature complexity.
 
-The Evaluation Lab MVP uses the same boundary:
+The Evaluation Studio MVP uses the same boundary:
 
 ```text
 Desktop Evaluation tab -> Python eval-run CLI -> model_backends -> JSON report -> Desktop report view
@@ -201,7 +201,7 @@ goes through the existing validator and explicit user action.
 
 ## Lab boundaries
 
-Evaluation Lab, AI Assist Lab, and Training all build on the engine. Training is **shipped and
+Evaluation Studio, AI Assist, and Training all build on the engine. Training is **shipped and
 opt-in**: the first-party QLoRA backend (the `[train]` extra) is admitted and executed only through the
 hash-sealed Platform lifecycle. Heavy imports remain lazy inside its worker, so the control plane stays
 dependency-light. The engine can also generate a config to launch an external trainer.
@@ -209,9 +209,9 @@ dependency-light. The engine can also generate a config to launch an external tr
 ```text
 Desktop Future Labs
   |
-  +-- Evaluation Lab -> model_backends + evaluation reports
-  +-- AI Assist Lab  -> model_backends + validators + review-only suggestions
-  +-- Training Lab   -> split/export outputs + training config templates + rendered config files
+  +-- Evaluation Studio -> model_backends + evaluation reports
+  +-- AI Assist  -> model_backends + validators + review-only suggestions
+  +-- Training Studio   -> split/export outputs + training config templates + rendered config files
 ```
 
 Model calls stay behind backend adapters. Real first-party execution is owned by `platform-plan` →
@@ -220,7 +220,7 @@ one chain. The Tauri/React Platform client drives that lifecycle. WPF/Avalonia s
 external-trainer argv, but deliberately refuses its former direct first-party `train-run` path. No UI
 head contains training logic.
 
-The Training Lab MVP uses the same desktop-to-engine boundary:
+The Training Studio MVP uses the same desktop-to-engine boundary:
 
 ```text
 Desktop Training tab -> Python training-config CLI -> training templates -> rendered config file

@@ -240,7 +240,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `apps/web/vite.config.ts`
 - `data/.gitkeep`
 - `docs/ARCHITECTURE.md`
-- `docs/AI_ASSIST_LAB.md`
+- `docs/AI_ASSIST.md`
 - `docs/AVALONIA_MIGRATION_PLAN.md`
 - `docs/CROSS_PLATFORM_ASSESSMENT.md`
 - `docs/CURRENT_STATE.md`
@@ -250,7 +250,7 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/DEBT.md`
 - `docs/DEVELOPMENT_SETUP.md`
 - `docs/ENVIRONMENT_MANAGER.md`
-- `docs/EVALUATION_LAB.md`
+- `docs/EVALUATION_STUDIO.md`
 - `docs/EVALUATION_SUITES.md`
 - `docs/GATES.md`
 - `docs/HARDWARE_STORAGE_PROFILE.md`
@@ -281,9 +281,6 @@ Generated file list for the Corpus Studio MIT project skeleton.
 - `docs/screenshots/output-panel.png`
 - `docs/screenshots/problems-panel.png`
 - `docs/screenshots/studio-dashboard.png`
-- `docs/screenshots/workspace-explorer.png`
-- `docs/screenshots/workspace-start-center.png`
-- `docs/screenshots/workspace-wizard.png`
 - `engine/README.md`
 - `engine/corpus_studio/__init__.py`
 - `engine/corpus_studio/ai_assist/__init__.py`

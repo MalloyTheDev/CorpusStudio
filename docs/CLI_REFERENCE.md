@@ -53,11 +53,11 @@ that flows through the same preview → quarantine → commit path.
 ## Evaluation & suites
 
 All make **live backend calls**. The automatic score is keyword-overlap recall unless
-`--judge-model` opts into an evaluator-model score (see [EVALUATION_LAB.md](EVALUATION_LAB.md)).
+`--judge-model` opts into an evaluator-model score (see [EVALUATION_STUDIO.md](EVALUATION_STUDIO.md)).
 
 | Command | What it does |
 |---|---|
-| `eval-run <file.jsonl> <schema> --model … [--backend … --base-url … --judge-model … --judge-backend … --judge-base-url … --limit … --progress --reasoning]` | Run one Evaluation Lab pass; `--progress` streams `[k/N] evaluated` to stderr. **`--reasoning`** scores a reasoning model's **answer only** — the `<think>…</think>` block is stripped before scoring (the reasoning isn't the reference) while the full output is kept in the record; a "reasoning" model that emitted no reasoning is flagged. |
+| `eval-run <file.jsonl> <schema> --model … [--backend … --base-url … --judge-model … --judge-backend … --judge-base-url … --limit … --progress --reasoning]` | Run one Evaluation Studio pass; `--progress` streams `[k/N] evaluated` to stderr. **`--reasoning`** scores a reasoning model's **answer only** — the `<think>…</think>` block is stripped before scoring (the reasoning isn't the reference) while the full output is kept in the record; a "reasoning" model that emitted no reasoning is flagged. |
 | `suite-init <name> [--project-dir … --force]` | Scaffold an example evaluation suite at `evaluation_suites/<name>.json` (`--force` overwrites an existing one). |
 | `suite-list [--project-dir …] [--json]` | List the registered evaluation suites. |
 | `suite-run <name-or-path> [--project-dir …] [--strict] [--json]` | Run a suite (each case = a live eval + gate); rolls up **per metric**. `--strict` exits 2 on a block. |
@@ -70,7 +70,7 @@ All make **live backend calls**. The automatic score is keyword-overlap recall u
 
 | Command | What it does |
 |---|---|
-| `ai-assist <draft.jsonl> <schema> --action … --model … [--backend … --base-url …]` | Run the AI Assist Lab on draft rows; returns **review-only** suggestions (never auto-saved). |
+| `ai-assist <draft.jsonl> <schema> --action … --model … [--backend … --base-url …]` | Run the AI Assist on draft rows; returns **review-only** suggestions (never auto-saved). |
 
 ## Training
 

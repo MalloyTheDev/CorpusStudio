@@ -1,6 +1,6 @@
-# Evaluation Lab
+# Evaluation Studio
 
-Evaluation Lab tests datasets by running prompts through selected models and
+Evaluation Studio tests datasets by running prompts through selected models and
 comparing the responses with expected outputs, rubrics, or human scores — building
 on the dataset-creation loop. (Training is now a shipped, opt-in capability via the `[train]` extra;
 the eval path itself still needs no CUDA/ML deps — it only calls a serving endpoint.)
@@ -21,7 +21,7 @@ LLM-judge scorer (`--judge-model`) scores each answer 0–100 with a rationale.
 
 ## Purpose
 
-The purpose of Evaluation Lab is to answer practical dataset questions before a
+The purpose of Evaluation Studio is to answer practical dataset questions before a
 user trains or ships a model:
 
 - Does a model already answer these examples well?
@@ -30,7 +30,7 @@ user trains or ships a model:
 - Did a dataset edit improve model behavior?
 - Did a checkpoint regress compared with a previous run?
 
-Evaluation Lab should treat model runs as repeatable dataset tests. A user
+Evaluation Studio should treat model runs as repeatable dataset tests. A user
 should be able to run a sample, inspect failures, edit examples, and rerun the
 same test.
 
@@ -60,12 +60,12 @@ Corpus Studio, this means:
 
 - train, validation, and test splits must be visible to the user
 - evaluation exports should identify which examples were tested
-- Training Lab must warn before using held-out eval files as training input
+- Training Studio must warn before using held-out eval files as training input
 - before/after model comparisons must use the same held-out eval set
 
 ## Initial Workflows
 
-Evaluation Lab should initially support these workflows:
+Evaluation Studio should initially support these workflows:
 
 - run a model on instruction examples
 - run a model on chat examples
@@ -216,7 +216,7 @@ credential management and multi-run failure triage are not yet provided.
 
 ## UI Screen Basis
 
-Evaluation Lab can become these screens:
+Evaluation Studio can become these screens:
 
 - backend selector
 - dataset and split selector

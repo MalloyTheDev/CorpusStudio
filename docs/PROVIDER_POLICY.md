@@ -90,4 +90,4 @@ is refused (exit code 2).
 Real OpenAI/Anthropic/OpenRouter API clients — policy is enforced regardless of
 whether a given transport is implemented (evaluator-only providers are configured,
 not embedded). The approved-generation → review-queue pipeline shipped in v1.2 as
-candidate gating; see [`AI_ASSIST_LAB.md`](AI_ASSIST_LAB.md).
+candidate gating; see [`AI_ASSIST.md`](AI_ASSIST.md).

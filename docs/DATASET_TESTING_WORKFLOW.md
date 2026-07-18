@@ -62,7 +62,7 @@ Useful screen elements:
 
 ### Backend Selection
 
-The user selects a local model backend for Evaluation Lab.
+The user selects a local model backend for Evaluation Studio.
 
 Useful screen elements:
 

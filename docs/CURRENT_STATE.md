@@ -122,7 +122,7 @@ per-item error isolation, and off-thread document opens.
   See [`GATES.md`](GATES.md).
 
 **Evaluate & assist**
-- Evaluation Lab against local Ollama or OpenAI-compatible endpoints: health
+- Evaluation Studio against local Ollama or OpenAI-compatible endpoints: health
   checks, model discovery, report history, two-report comparison, regression
   reruns, tag/failure/score-band summaries, failed-row edit loops, manual
   scoring, saved failure filters. The default automatic score is **keyword-overlap
@@ -130,7 +130,7 @@ per-item error isolation, and off-thread document opens.
   An opt-in **LLM-judge scorer** (`eval-run --judge-model …`, `metric: "llm_judge"`)
   scores each answer 0–100 with a rationale, reusing the evaluator-only judge (provider
   policy enforced; no judge configured ⇒ no cloud call). Manual scoring stays the
-  human-trustworthy path. See `docs/EVALUATION_LAB.md`. *(Judge scorer: engine + CLI;
+  human-trustworthy path. See `docs/EVALUATION_STUDIO.md`. *(Judge scorer: engine + CLI;
   the desktop Evaluation-tab field is a pending follow-up.)*
 - Multi-model benchmark (`benchmark`): one dataset across several models, ranked
   by the same keyword-overlap score, with per-model deltas and the examples every
@@ -154,13 +154,13 @@ per-item error isolation, and off-thread document opens.
   activity, so OpenAI/Anthropic are permitted as the judge. Saved reports under
   `arena_reports/`. A desktop **Arena** tab surfaces prompts + model list +
   optional judge with side-by-side responses.
-- Review-first AI Assist Lab: persistent accept/reject queue, saved views, bulk
+- Review-first AI Assist: persistent accept/reject queue, saved views, bulk
   triage with undo, resumable rewrite batches. AI Assist output is always
   `review_required` and never auto-accepted. Generated candidate rows are run
   through the existing dataset gate runner (schema/quality/PII) before review and
   the verdict is attached as `candidate_gate` — a pre-review signal only: a clean
   gate is not approval, a block does not auto-reject, and provider policy is still
-  enforced before generation. See [`AI_ASSIST_LAB.md`](AI_ASSIST_LAB.md).
+  enforced before generation. See [`AI_ASSIST.md`](AI_ASSIST.md).
 
 **Train & track**
 - Training config export for axolotl / TRL / Unsloth / Hugging Face /
@@ -168,7 +168,7 @@ per-item error isolation, and off-thread document opens.
   (tokens-per-epoch after truncation, over-length counts), a rough arithmetic
   VRAM planning estimate (never inspects hardware), a LoRA rank/alpha suggestion,
   and the exact launch command.
-- The WPF/Avalonia Training Lab launches reviewed, no-shell argv for installed **external** trainers.
+- The WPF/Avalonia Training Studio launches reviewed, no-shell argv for installed **external** trainers.
   It intentionally emits no direct first-party launch and refuses the old mutable-config path. The
   Tauri/React Platform client plans and executes first-party work through `platform-plan` →
   `platform-run`. Supporting first-party commands are `train-check`, `train-merge`, and `model-fetch`;

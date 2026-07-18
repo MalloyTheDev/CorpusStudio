@@ -100,7 +100,7 @@ installed external trainer:
   turns — advisory by default, escalatable to a block
 
 **Evaluate & compare**
-- Evaluation Lab runs against local Ollama or OpenAI-compatible endpoints with
+- Evaluation Studio runs against local Ollama or OpenAI-compatible endpoints with
   health checks, model discovery, report history, two-report comparison,
   regression reruns, tag/failure/score-band summaries, failed-row edit loops,
   manual scoring, and saved failure filters. The default automatic score is
@@ -116,7 +116,7 @@ installed external trainer:
   with a per-metric verdict and optional dataset-`version_id`-pinned cases, run from
   the `suite-*` CLI or the desktop Suites tab. See
   [`docs/EVALUATION_SUITES.md`](docs/EVALUATION_SUITES.md)
-- review-first AI Assist Lab with a persistent accept/reject queue, saved
+- review-first AI Assist with a persistent accept/reject queue, saved
   views, bulk triage with undo, and resumable rewrite batches — every AI
   suggestion is review-required and never auto-accepted. AI-generated candidate
   rows are run through the dataset gate runner (schema/quality/PII) before review
@@ -143,7 +143,7 @@ installed external trainer:
   pending/rejected/tampered records before model loading (see
   [`docs/TRACE_RECORDS.md`](docs/TRACE_RECORDS.md))
 - in-app Platform plan/run integration in the Tauri/React client, plus external-trainer launch in the
-  WPF/Avalonia Training Lab (explicit command review, no shell), live log streaming, and a Stop that
+  WPF/Avalonia Training Studio (explicit command review, no shell), live log streaming, and a Stop that
   kills the process tree. The shipping WPF/Avalonia desktop intentionally refuses the old mutable-
   config first-party launch instead of bypassing Platform lineage
 - checkpoint tracking during and after runs, resume-from-latest for targets
@@ -241,95 +241,17 @@ Phosphor iconography throughout, and a contextual quality rail. The tokens, icon
 set, and screen inventory are the framework-agnostic source of truth in
 [`docs/design/`](docs/design/), so the same design carries toward the eventual
 Tauri/React shell. The full workflow — Start Center → New Project wizard →
-Explorer → Studio — is shown below on that Nocturne shell.
+Explorer → Studio — is defined in that design source and rendered by the current prototype desktop.
 
-### Nocturne desktop
+### Desktop (high-fidelity prototype)
 
-The Studio, screen by screen, on the cross-platform shell. Every surface renders
-**live engine data** — grades, quality metrics, split ratios, integrity verdicts —
-and where a signal doesn't exist it reads neutral rather than inventing one.
-
-![Corpus Studio Nocturne dashboard](docs/screenshots/nocturne-dashboard.png)
-
-**Dashboard** — a readiness hero (the dataset-debt grade badge over a 7-node
-lifecycle strip whose per-node status is derived from real view-model signals and
-stays neutral where a signal doesn't exist), stat cards, quick actions, a RECENT
-ACTIVITY feed bound to the real engine-operation log, and the contextual Quality rail.
-
-![Corpus Studio Nocturne writing studio](docs/screenshots/nocturne-writing-studio.png)
-
-**Writing Studio** — a structured Instruction / Input / Output authoring form (a
-live projection of the underlying JSON, so validation and save are unchanged), with
-the schema pill, Validate / Save actions, and an honest validation card.
-
-![Corpus Studio Nocturne quality grid](docs/screenshots/nocturne-quality.png)
-
-**Quality** — a metric-card grid (empty rows, exact/near duplicates, PII/secrets,
-low-information, synthetic patterns) with severity pills, plus synthetic-issue
-triage; severities are advisory and never silently block export.
-
-![Corpus Studio Nocturne dataset-debt ledger](docs/screenshots/nocturne-dataset-debt.png)
-
-**Dataset Debt** — a grade hero with a verdict headline (derived honestly from the
-grade) and a mini bar-chart of the real quality-issue trend, over a severity-ranked
-remediation ledger; the rail's PII banner and validation card reflect real state.
-
-![Corpus Studio Nocturne splits](docs/screenshots/nocturne-splits.png)
-
-**Splits** — leakage-checked train / val / test with a proportion bar sized by the
-real ratios, a "No leakage" chip driven by the real shared-row count, and a counts
-footer — no fabricated proportions.
-
-![Corpus Studio Nocturne version timeline](docs/screenshots/nocturne-versions.png)
-
-**Versions** — a single-writer-safe snapshot timeline: the head is marked
-**CURRENT**, older snapshots restore in place, and each card shows the real row
-count + content fingerprint (no per-version grade is invented).
-
-![Corpus Studio Nocturne suites](docs/screenshots/nocturne-suites.png)
-
-**Suites** — saved evaluation suites as self-contained cards with a per-kind glyph,
-a valid/invalid badge from the real registry state, and a per-card Run — omitting
-the metric/score tokens the engine payload doesn't carry rather than faking them.
-
-![Corpus Studio Nocturne artifacts](docs/screenshots/nocturne-artifacts.png)
-
-**Artifacts** — trained weights as provenance cards with a real integrity chip
-(present / modified) and, when a run's weights changed since eval, the actual
-promote-gate block message — the honesty invariant, surfaced.
-
-![Corpus Studio Nocturne settings](docs/screenshots/nocturne-settings.png)
-
-**Settings** — appearance, engine status, gate thresholds, and the **fail-closed
-provider policy** (cloud providers are evaluator-only; only the local backend may
-generate training rows) shown truthfully rather than as an editable free-for-all.
-
-### Workspace features
-
-The Studio also lives inside an IDE-style workspace — a Start Center, a
-scaffolding wizard, and a universal file explorer (see
-[`docs/WORKSPACE_SYSTEM.md`](docs/WORKSPACE_SYSTEM.md)).
-
-![Corpus Studio Start Center](docs/screenshots/workspace-start-center.png)
-
-**Start Center** — a dataset is a workspace, not just rows. Start a new project,
-import a dataset, open an existing folder (Corpus Studio never mutates your files
-without asking), or jump back into a recent workspace. Missing folders are flagged
-"missing", never silently dropped, and the engine-status card reads live.
-
-![Corpus Studio new project wizard](docs/screenshots/workspace-wizard.png)
-
-**New Project wizard** — a four-step flow (**Name · Schema · Source · Review**):
-name the project, pick a dataset schema from the built-in set, choose a starting
-point (scaffold template), then review a live preview of the exact folder structure
-before anything is written to disk.
-
-![Corpus Studio workspace explorer](docs/screenshots/workspace-explorer.png)
-
-**Universal Workspace Explorer** — a VS Code-style file tree with file-type chips
-and a marker on generated artifacts, document tabs, and a read-only code viewer with
-a line-number gutter. `examples.jsonl` opens with a single-writer caution banner and
-is never mutated except by an explicit save.
+The current WPF/Avalonia desktop is a **high-fidelity prototype** of the Nocturne
+design language - a working shell used to pressure-test the full workflow, not the
+final production UI, so the README no longer embeds a screenshot gallery. The
+framework-agnostic design tokens, icon set, and screen inventory in
+[`docs/design/`](docs/design/) are the source of truth and carry forward to the
+settled product UI; [`docs/WORKSPACE_SYSTEM.md`](docs/WORKSPACE_SYSTEM.md) describes
+the IDE-style workspace behavior the shell is wired to.
 
 ## Core Local Loop
 
@@ -376,8 +298,8 @@ For provider generation policy and gates, see
 [`docs/GATES.md`](docs/GATES.md).
 For dataset version history (capture/diff/restore) and the debt ledger, see
 [`docs/VERSIONING.md`](docs/VERSIONING.md) and [`docs/DEBT.md`](docs/DEBT.md).
-For the staged labs, see [`docs/EVALUATION_LAB.md`](docs/EVALUATION_LAB.md),
-[`docs/AI_ASSIST_LAB.md`](docs/AI_ASSIST_LAB.md), and
+For Evaluation Studio, AI Assist, and training, see [`docs/EVALUATION_STUDIO.md`](docs/EVALUATION_STUDIO.md),
+[`docs/AI_ASSIST.md`](docs/AI_ASSIST.md), and
 [`docs/TRAINING.md`](docs/TRAINING.md) (config export, launcher architecture,
 run tracking).
 For dataset task walkthroughs, see [`docs/WORKFLOWS.md`](docs/WORKFLOWS.md).

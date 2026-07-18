@@ -109,7 +109,7 @@ exported -> training config generated -> local training run
 
 ## Lab schema hints
 
-Evaluation Lab, AI Assist Lab, and Training Lab features should read schema
+Evaluation Studio, AI Assist, and Training Studio features should read schema
 metadata instead of hardcoding dataset behavior in the UI.
 
 Useful hints include:
@@ -226,7 +226,7 @@ Required fields: `id`, `prompt`, `expected_answer`
 {"id":"eval-001","prompt":"What is the time complexity of binary search?","expected_answer":"O(log n).","rubric":"Full credit for O(log n); partial credit for mentioning logarithmic time.","category":"algorithms"}
 ```
 
-Use evaluation rows for held-out Evaluation Lab test sets. Keep these separate from training data.
+Use evaluation rows for held-out Evaluation Studio test sets. Keep these separate from training data.
 
 #### Validate a row file
 

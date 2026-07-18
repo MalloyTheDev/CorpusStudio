@@ -80,7 +80,7 @@ is `null` when a run proposes no gate-able (JSON-object) rows; a batch that prop
 content but no object rows still surfaces those via `validation_errors` plus an
 explicit "gate not run" warning. Provider policy is enforced *before* the
 provider call, so the gate step can never run on a generation a forbidden provider
-was not allowed to perform. See [`AI_ASSIST_LAB.md`](AI_ASSIST_LAB.md).
+was not allowed to perform. See [`AI_ASSIST.md`](AI_ASSIST.md).
 
 ## Chat gates (chat_suite scope)
 
