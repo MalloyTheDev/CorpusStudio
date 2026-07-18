@@ -7,9 +7,20 @@ history see [`ROADMAP.md`](ROADMAP.md).
 
 ## Product identity
 
-Corpus Studio is a local-first dataset creation studio for AI builders.
+Corpus Studio is a **local-first, end-to-end AI development ecosystem and IDE** for AI builders - a
+dataset-to-model workspace covering the complete model lifecycle: data ingestion -> dataset engineering ->
+validation & provenance -> model & tokenizer selection -> training -> checkpointing -> evaluation ->
+behavior analysis & modification -> packaging -> export -> release -> reproducible evidence. It is **not** a
+research platform, a training platform, an experiment runner, a dataset tool, or a fine-tuning app - those
+are individual capabilities.
 
-It combines:
+Its surface is organized into **seven co-equal product areas**: Data Studio, Training Studio, Evaluation
+Studio, Behavior Lab, Model & Release Studio, Environment & Hardware, and Evidence & Experiments. Research
+protocols, telemetry, and the IEEE paper are a **supporting track** (the Evidence & Experiments area) that
+validates the product and documents discoveries - they do not define it. See
+[`PRODUCT_AREAS.md`](PRODUCT_AREAS.md) for the canonical product map.
+
+Today it combines:
 
 - a writing application
 - a schema-driven dataset editor
@@ -22,7 +33,8 @@ It combines:
 - a Training Lab (external config/launcher + sealed first-party platform client)
 - dataset version history + a model-artifact registry
 
-The app exists to make training-data creation less fragile, less manual, and less scattered.
+The app exists to make the whole path from raw data to a released model - and the evidence that it
+works - less fragile, less manual, and less scattered.
 
 ## Target users
 

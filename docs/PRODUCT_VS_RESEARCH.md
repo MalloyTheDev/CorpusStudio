@@ -1,9 +1,11 @@
 # Product vs research boundary
 
-CorpusStudio is a **local-first AI dataset and model-development application** (see
-[`PRODUCT_SPEC.md`](PRODUCT_SPEC.md)). The **native-Linux 7B research paper** under
+CorpusStudio is a **local-first, end-to-end AI development ecosystem and IDE** with seven co-equal product
+areas (see [`PRODUCT_AREAS.md`](PRODUCT_AREAS.md) and [`PRODUCT_SPEC.md`](PRODUCT_SPEC.md)). Research is the
+**supporting Evidence & Experiments track** - one area among seven - that validates the product and
+documents discoveries; it does not define it. The **native-Linux 7B research paper** under
 [`../research/ieee-linux-training/`](../research/ieee-linux-training/) and [`paper/`](paper/) is a
-**separate project that uses** CorpusStudio to verify the training engine can train a 7B model at
+**separate evidence program that uses** CorpusStudio to verify the training engine can train a 7B model at
 sequence length 4096 on this host.
 
 **The IEEE 7B paper must not define CorpusStudio's product identity, defaults, navigation, or ordinary

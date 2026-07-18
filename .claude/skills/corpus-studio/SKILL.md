@@ -1,17 +1,19 @@
 ---
 name: corpus-studio
-description: "Project-specific guardrails for editing the CorpusStudio repo - a local-first AI dataset and model-development application at /mnt/training-nvme/repos/CorpusStudio (torch-free control plane + isolated [train] QLoRA worker + WPF/Avalonia/Tauri UI). Use for ANY change here - dataset features, the training engine, the Environment Manager, model/tokenizer management, evaluation, the CLI, UI, or docs - so every edit keeps the dependency-light boundary, the honesty invariants, the contract-regeneration dance, and the one-coherent-CI-green-PR-per-slice workflow. The native-Linux 7B research paper (research/ieee-linux-training, docs/paper) is a SEPARATE opt-in overlay that uses CorpusStudio to verify the training engine; its amendments, reserved identities, and sealed-research gates apply only when the task is the paper, and never define normal product behavior. Pair with the general existing-repo-engineer skill (that one owns generic repo mechanics; this one owns CorpusStudio's invariants and program state). Keep trivial questions lightweight; load this whenever files or repository behavior in CorpusStudio actually matter."
+description: "Project-specific guardrails for editing the CorpusStudio repo - a local-first, end-to-end AI development ecosystem and IDE (seven co-equal areas: Data Studio, Training Studio, Evaluation Studio, Behavior Lab, Model & Release Studio, Environment & Hardware, Evidence & Experiments) at /mnt/training-nvme/repos/CorpusStudio (torch-free control plane + isolated [train] QLoRA worker + WPF/Avalonia/Tauri UI). Use for ANY change here - dataset engineering, training, evaluation, behavior analysis, model/release, environment/hardware, the CLI, UI, or docs - so every edit keeps the dependency-light boundary, the honesty invariants, the contract-regeneration dance, and the one-coherent-CI-green-PR-per-slice workflow. The native-Linux 7B research paper (research/ieee-linux-training, docs/paper) is a SEPARATE opt-in overlay that uses CorpusStudio to verify the training engine; its amendments, reserved identities, and sealed-research gates apply only when the task is the paper, and never define normal product behavior. Pair with the general existing-repo-engineer skill (that one owns generic repo mechanics; this one owns CorpusStudio's invariants and program state). Keep trivial questions lightweight; load this whenever files or repository behavior in CorpusStudio actually matter."
 ---
 
 # CorpusStudio
 
-Operate as a senior engineer on **CorpusStudio** - a **local-first AI dataset and model-development
-application**: a dependency-light, torch-free **control plane** (`engine/corpus_studio/platform/`), an
-opt-in `[train]` QLoRA **worker**, and WPF/Avalonia/Tauri **UI** clients. The product surface is the
-local builder lifecycle - dataset creation / cleaning / validation / versioning, schema support, dataset
-inspection and quality, model + tokenizer selection, local fine-tuning / training, evaluation, and
-export - all hardware-aware. The bar here is not "it works" - it is "the evidence, contracts, and honesty
-invariants still hold." A passing run obtained by weakening a gate is a defect.
+Operate as a senior engineer on **CorpusStudio** - a **local-first, end-to-end AI development ecosystem and
+IDE** covering the complete model lifecycle, organized into seven co-equal product areas: **Data Studio**,
+**Training Studio**, **Evaluation Studio**, **Behavior Lab**, **Model & Release Studio**, **Environment &
+Hardware**, and **Evidence & Experiments** (canonical map: [`docs/PRODUCT_AREAS.md`](../../../docs/PRODUCT_AREAS.md)).
+It is **not** a "research platform" or "training platform" - those are individual capabilities.
+Implementation surfaces: a dependency-light, torch-free **control plane** (`engine/corpus_studio/platform/`;
+Rust-core target), an opt-in `[train]` QLoRA **worker**, and WPF/Avalonia/Tauri **UI** clients. The bar here
+is not "it works" - it is "the evidence, contracts, and honesty invariants still hold." A passing run
+obtained by weakening a gate is a defect.
 
 The **native-Linux 7B research paper** (`research/ieee-linux-training/`, `docs/paper/`) is a **separate
 project that uses** CorpusStudio to verify the training engine can train a 7B model at seq 4096 on this
