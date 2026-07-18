@@ -401,3 +401,4 @@
 .cs-btn.primary { background: var(--cs-accent); color: var(--cs-accent-ink); border-color: var(--cs-accent); }
 .cs-btn.primary:hover { background: var(--cs-accent-strong); }
 .cs-btn:disabled { opacity: .5; cursor: not-allowed; }
+.cs-tabs { margin: 6px 0 12px; }

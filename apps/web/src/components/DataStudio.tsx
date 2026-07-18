@@ -3,6 +3,8 @@ import {
   appendRows,
   createProject,
   datasetDebt,
+  importCommit,
+  importPreview,
   listProjects,
   listSchemas,
   previewRows,
@@ -10,6 +12,7 @@ import {
   type AppendResult,
   type DatasetSchema,
   type DebtReport,
+  type ImportCommitResult,
   type PreviewReport,
   type ProjectList,
   type ProjectSummary,
@@ -33,6 +36,10 @@ export function DataStudio({ live }: { live: boolean }) {
   const [newSchema, setNewSchema] = useState("instruction");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<"author" | "import">("author");
+  const [importPath, setImportPath] = useState("");
+  const [importPrev, setImportPrev] = useState<PreviewReport | null>(null);
+  const [importResult, setImportResult] = useState<ImportCommitResult | null>(null);
 
   useEffect(() => {
     if (!live) return;
@@ -48,6 +55,8 @@ export function DataStudio({ live }: { live: boolean }) {
     setSelected(project);
     setPreview(null);
     setAppended(null);
+    setImportPrev(null);
+    setImportResult(null);
     setError(null);
     if (list) {
       try {
@@ -102,6 +111,35 @@ export function DataStudio({ live }: { live: boolean }) {
       setAppended(await appendRows(projectDir(list, selected), rows));
       setPreview(null);
       setRows("");
+      await loadDebt(selected, list);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onImportPreview = async (): Promise<void> => {
+    if (!selected) return;
+    setBusy(true);
+    setError(null);
+    setImportResult(null);
+    try {
+      setImportPrev(await importPreview(selected.schema_id, importPath.trim()));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onImportCommit = async (): Promise<void> => {
+    if (!selected || !list) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setImportResult(await importCommit(projectDir(list, selected), importPath.trim()));
+      setImportPrev(null);
       await loadDebt(selected, list);
     } catch (e) {
       setError(String(e));
@@ -181,46 +219,120 @@ export function DataStudio({ live }: { live: boolean }) {
             </div>
           ) : null}
 
-          <label className="cs-field">
-            <span>Author rows (one JSON object per line)</span>
-            <textarea
-              className="cs-textarea"
-              rows={6}
-              value={rows}
-              placeholder={'{"instruction": "...", "output": "..."}'}
-              onChange={(e) => setRows(e.target.value)}
-            />
-          </label>
-          <div className="cs-actions">
-            <button className="cs-btn" disabled={busy || !rows.trim()} onClick={() => void onPreview()}>
-              Preview
+          <div className="cs-segment cs-tabs" role="tablist" aria-label="Dataset action">
+            <button
+              className={`cs-seg${tab === "author" ? " on" : ""}`}
+              role="tab"
+              aria-selected={tab === "author"}
+              onClick={() => setTab("author")}
+            >
+              Author
             </button>
             <button
-              className="cs-btn primary"
-              disabled={busy || !rows.trim()}
-              onClick={() => void onCommit()}
+              className={`cs-seg${tab === "import" ? " on" : ""}`}
+              role="tab"
+              aria-selected={tab === "import"}
+              onClick={() => setTab("import")}
             >
-              Commit valid rows
+              Import file
             </button>
           </div>
 
-          {preview ? (
-            <div className="cs-preview">
-              <Chip tone={preview.rejected_rows > 0 ? "warn" : "ok"}>{preview.accepted_rows} valid</Chip>
-              {preview.rejected_rows > 0 ? <Chip tone="bad">{preview.rejected_rows} rejected</Chip> : null}
-              {preview.failed_rows.map((f) => (
-                <div key={f.row_number} className="cs-note">
-                  row {f.row_number}: {f.errors.map((x) => x.message).join("; ")}
+          {tab === "author" ? (
+            <>
+              <label className="cs-field">
+                <span>Author rows (one JSON object per line)</span>
+                <textarea
+                  className="cs-textarea"
+                  rows={6}
+                  value={rows}
+                  placeholder={'{"instruction": "...", "output": "..."}'}
+                  onChange={(e) => setRows(e.target.value)}
+                />
+              </label>
+              <div className="cs-actions">
+                <button className="cs-btn" disabled={busy || !rows.trim()} onClick={() => void onPreview()}>
+                  Preview
+                </button>
+                <button
+                  className="cs-btn primary"
+                  disabled={busy || !rows.trim()}
+                  onClick={() => void onCommit()}
+                >
+                  Commit valid rows
+                </button>
+              </div>
+              {preview ? (
+                <div className="cs-preview">
+                  <Chip tone={preview.rejected_rows > 0 ? "warn" : "ok"}>
+                    {preview.accepted_rows} valid
+                  </Chip>
+                  {preview.rejected_rows > 0 ? <Chip tone="bad">{preview.rejected_rows} rejected</Chip> : null}
+                  {preview.failed_rows.map((f) => (
+                    <div key={f.row_number} className="cs-note">
+                      row {f.row_number}: {f.errors.map((x) => x.message).join("; ")}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          ) : null}
-          {appended ? (
-            <p className="cs-note">
-              Committed {appended.appended} row(s)
-              {appended.skipped_invalid > 0 ? `, skipped ${appended.skipped_invalid} invalid` : ""}.
-            </p>
-          ) : null}
+              ) : null}
+              {appended ? (
+                <p className="cs-note">
+                  Committed {appended.appended} row(s)
+                  {appended.skipped_invalid > 0 ? `, skipped ${appended.skipped_invalid} invalid` : ""}.
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <label className="cs-field">
+                <span>Source file path (JSONL, CSV, TSV, or Parquet)</span>
+                <input
+                  className="cs-input"
+                  value={importPath}
+                  placeholder="/path/to/data.csv"
+                  onChange={(e) => setImportPath(e.target.value)}
+                />
+              </label>
+              <div className="cs-actions">
+                <button
+                  className="cs-btn"
+                  disabled={busy || !importPath.trim()}
+                  onClick={() => void onImportPreview()}
+                >
+                  Preview
+                </button>
+                <button
+                  className="cs-btn primary"
+                  disabled={busy || !importPath.trim()}
+                  onClick={() => void onImportCommit()}
+                >
+                  Commit valid rows
+                </button>
+              </div>
+              {importPrev ? (
+                <div className="cs-preview">
+                  <Chip tone={importPrev.rejected_rows > 0 ? "warn" : "ok"}>
+                    {importPrev.accepted_rows} valid
+                  </Chip>
+                  {importPrev.rejected_rows > 0 ? (
+                    <Chip tone="bad">{importPrev.rejected_rows} rejected</Chip>
+                  ) : null}
+                  {importPrev.failed_rows.map((f) => (
+                    <div key={f.row_number} className="cs-note">
+                      row {f.row_number}: {f.errors.map((x) => x.message).join("; ")}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {importResult ? (
+                <p className="cs-note">
+                  Committed {importResult.committed} row(s)
+                  {importResult.rejected > 0 ? `, ${importResult.rejected} rejected` : ""}
+                  {importResult.version_id ? ` · version ${importResult.version_id}` : ""}.
+                </p>
+              ) : null}
+            </>
+          )}
         </Card>
       ) : null}
     </div>
