@@ -711,3 +711,12 @@ def test_main_forces_utf8_stdio_before_running(monkeypatch):
     monkeypatch.setattr(cli, "app", lambda: order.append("app"))
     cli.main()
     assert order == ["utf8", "app"]  # UTF-8 first, then the CLI
+
+
+def test_cli_module_source_is_ascii():
+    # The ASCII-in-CLI-facing-strings invariant (AGENTS.md): the CLI ships cross-platform, so a
+    # non-ASCII char (em dash, arrow, ellipsis) would garble a Windows console. Keep cli.py pure ASCII
+    # so it cannot regress - use '-' not an em dash, '->' not an arrow, '...' not an ellipsis.
+    source = Path(cli.__file__).read_text(encoding="utf-8")
+    offenders = sorted({character for character in source if ord(character) > 127})
+    assert not offenders, f"non-ASCII characters in cli.py: {[hex(ord(c)) for c in offenders]}"
