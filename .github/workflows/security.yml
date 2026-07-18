@@ -1,0 +1,69 @@
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so newly-published advisories are caught even without a push.
+    - cron: "41 5 * * 1"
+
+# Least privilege: every scanner only needs to read the checked-out repository. These jobs are
+# intentionally NOT required status checks yet (soak first) - they inform, they do not block merges.
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install gitleaks
+        # Pinned release binary (linux x64). Using the binary avoids the marketplace action's
+        # org-license path and keeps the exact scanner version explicit here.
+        run: |
+          ver=8.30.1
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_x64.tar.gz" -o gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks version
+      - name: Scan the working tree for secrets
+        # dir scans the checked-out files (not git history); --redact keeps any match out of the log;
+        # the default exit code 1 fails the job on a finding. Config allowlists synthetic test fixtures.
+        run: ./gitleaks dir . --config .gitleaks.toml --redact=100 --exit-code 1 --verbose
+
+  filesystem:
+    name: Vulnerability scan (trivy fs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Trivy filesystem scan
+        # SHA-pinned (a security workflow pins its third-party actions to an immutable commit).
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          format: table
+
+  python-deps:
+    name: Dependency audit (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install engine + pip-audit
+        # Install the engine with the SAME pinned pydantic CI uses (engine/constraints.txt), so the
+        # audited dependency tree matches what the engine job resolves.
+        run: |
+          python -m pip install --upgrade pip "pip-audit==2.10.1"
+          cd engine
+          pip install -e ".[dev]" -c constraints.txt
+      - name: Audit installed dependencies for known vulnerabilities
+        run: pip-audit --desc
