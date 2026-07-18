@@ -1,10 +1,11 @@
 # Corpus Studio Roadmap
 
-Corpus Studio is a one-stop workspace for creating, validating, testing,
-exporting, and launching training on datasets — staged so each release stays
-focused and usable. For the authoritative list of what works today, see
-[`CURRENT_STATE.md`](CURRENT_STATE.md); this file is the milestone history and the
-forward plan.
+Corpus Studio is a **local-first, end-to-end AI development ecosystem and IDE** covering the full model
+lifecycle across seven co-equal product areas (Data Studio, Training Studio, Evaluation Studio, Behavior
+Lab, Model & Release Studio, Environment & Hardware, Evidence & Experiments — see
+[`PRODUCT_AREAS.md`](PRODUCT_AREAS.md)) — staged so each release stays focused and usable. Milestones below
+serve all seven areas, not training alone. For the authoritative list of what works today, see
+[`CURRENT_STATE.md`](CURRENT_STATE.md); this file is the milestone history and the forward plan.
 
 ## Current checkpoint
 

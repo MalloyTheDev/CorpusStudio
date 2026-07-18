@@ -13,14 +13,18 @@ Instructions for AI coding agents (Codex, Claude, etc.) working in this repo.
   history-only: do not develop from or write to those stale fallbacks because they will drift.
 
 ## What this is
-CorpusStudio is a **local-first AI dataset and model-development application**. Its product surface is
-the local builder lifecycle: dataset creation / import / conversion / cleaning / filtering / dedup /
-validation / versioning → schema support (pretraining, instruction, chat, preference, evaluation) →
-dataset inspection, statistics, quality scoring, provenance, licensing → model + tokenizer selection →
-local fine-tuning / training (config, environment setup, checkpoint/resume, progress) → evaluation and
-comparison → adapter / model export — all **hardware-aware**, with **planned** advanced workspaces (e.g.
-a future **Behavior Lab**) *inside* the app. Control plane stays lightweight; heavy frameworks live in
-isolated worker envs; the UI is a client. See [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md).
+CorpusStudio is a **local-first, end-to-end AI development ecosystem and IDE** covering the complete model
+lifecycle, organized into **seven co-equal product areas**: **Data Studio**, **Training Studio**,
+**Evaluation Studio**, **Behavior Lab**, **Model & Release Studio**, **Environment & Hardware**, and
+**Evidence & Experiments** (canonical map: [`docs/PRODUCT_AREAS.md`](docs/PRODUCT_AREAS.md)). It is **not** a
+"research platform" or "training platform" - those are individual capabilities. Its surface spans: data
+ingestion / import / conversion / cleaning / dedup / validation / versioning → schema support (pretraining,
+instruction, chat, preference, evaluation) → inspection, quality, provenance, licensing → model + tokenizer
+selection → fine-tuning / (future) pretraining (config, env setup, checkpoint/resume) → evaluation &
+comparison → behavior analysis & modification → adapter / model export → release → reproducible evidence -
+all **hardware-aware**. Behavior Lab is a first-class area (implementation gated). Control plane stays
+lightweight; heavy frameworks live in isolated worker envs; the UI is a client. See
+[`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md).
 
 The **native-Linux 7B research paper** (`research/ieee-linux-training/`, `docs/paper/`) is a **separate
 project that uses** CorpusStudio to verify the training engine can train a 7B model at sequence length
