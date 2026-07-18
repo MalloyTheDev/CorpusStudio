@@ -12,6 +12,7 @@ from corpus_studio.storage.examples_writer import (
     ExamplesLockedError,
     append_examples,
     examples_path,
+    read_examples_page,
     read_existing_lines,
     single_writer_lock,
     write_examples,
@@ -165,3 +166,80 @@ def test_append_examples_locked_appends_within_a_held_lock(tmp_path: Path):
     with single_writer_lock(tmp_path):
         assert append_examples_locked(tmp_path, VALID) == 2
     assert list(read_jsonl(examples_path(tmp_path))) == VALID
+
+
+# --- read_examples_page + CLI: examples-list ----------------------------------
+
+def _seed_examples(project: Path, rows: list[dict]) -> None:
+    examples_path(project).write_text(
+        "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
+    )
+
+
+def test_read_examples_page_pages_and_numbers_rows(tmp_path: Path):
+    rows = [{"instruction": f"i{n}", "output": f"o{n}"} for n in range(5)]
+    _seed_examples(tmp_path, rows)
+    total, page = read_examples_page(tmp_path, offset=1, limit=2)
+    assert total == 5
+    assert [e["row_number"] for e in page] == [2, 3]  # 1-based absolute addresses
+    assert [e["example"] for e in page] == rows[1:3]
+
+
+def test_read_examples_page_missing_file_is_empty(tmp_path: Path):
+    total, page = read_examples_page(tmp_path)
+    assert total == 0 and page == []
+
+
+def test_read_examples_page_offset_past_end_returns_total_and_no_rows(tmp_path: Path):
+    _seed_examples(tmp_path, VALID)
+    total, page = read_examples_page(tmp_path, offset=10, limit=5)
+    assert total == 2 and page == []
+
+
+def test_read_examples_page_surfaces_unparseable_line(tmp_path: Path):
+    # a malformed line is surfaced (parse_error + preview), never silently dropped; it still counts
+    # toward total and keeps the row numbering stable so the bad row remains addressable.
+    examples_path(tmp_path).write_text(
+        json.dumps(VALID[0]) + "\n" + "{not json\n" + json.dumps(VALID[1]) + "\n",
+        encoding="utf-8",
+    )
+    total, page = read_examples_page(tmp_path)
+    assert total == 3
+    assert page[1]["row_number"] == 2 and "parse_error" in page[1]
+    assert page[1]["raw_preview"].startswith("{not json")
+    assert page[0]["example"] == VALID[0] and page[2]["example"] == VALID[1]
+
+
+def test_cli_examples_list_json_pages(tmp_path: Path):
+    rows = [{"instruction": f"i{n}", "output": f"o{n}"} for n in range(4)]
+    _seed_examples(tmp_path, rows)
+    result = runner.invoke(
+        app, ["examples-list", str(tmp_path), "--offset", "1", "--limit", "2", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["total"] == 4 and payload["offset"] == 1 and payload["limit"] == 2
+    assert payload["count"] == 2
+    assert [e["row_number"] for e in payload["rows"]] == [2, 3]
+    assert payload["rows"][0]["example"] == rows[1]
+
+
+def test_cli_examples_list_empty_project(tmp_path: Path):
+    result = runner.invoke(app, ["examples-list", str(tmp_path), "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["total"] == 0 and payload["rows"] == []
+
+
+def test_cli_examples_list_missing_project_dir(tmp_path: Path):
+    result = runner.invoke(app, ["examples-list", str(tmp_path / "nope")])
+    assert result.exit_code == 1
+    assert "does not exist" in result.output
+
+
+def test_cli_examples_list_human_readable_lists_row_numbers(tmp_path: Path):
+    _seed_examples(tmp_path, VALID)
+    result = runner.invoke(app, ["examples-list", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert "of 2 total" in result.output
+    assert "  1:" in result.output and "  2:" in result.output

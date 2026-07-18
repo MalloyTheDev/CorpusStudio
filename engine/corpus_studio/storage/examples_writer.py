@@ -90,6 +90,34 @@ def read_existing_lines(project_dir: Path | str) -> list[str]:
     return lines
 
 
+def read_examples_page(
+    project_dir: Path | str, *, offset: int = 0, limit: int | None = None
+) -> tuple[int, list[dict[str, Any]]]:
+    """Read a paged window of ``examples.jsonl`` for inspection/curation (read-only).
+
+    Returns ``(total, rows)`` where ``total`` is the whole file's row count and ``rows`` is the
+    ``limit`` rows starting at ``offset`` (0-based; ``limit=None`` returns all from ``offset``). Each
+    entry carries its 1-based ``row_number`` (its absolute, stable address - the same address the
+    mutation commands use) and the parsed ``example``. A line that is not valid JSON is surfaced (never
+    silently dropped) as ``parse_error`` + a short ``raw_preview`` so a curation screen can show and
+    fix it. The client must not parse ``examples.jsonl`` itself; row identity is engine logic."""
+
+    lines = read_existing_lines(project_dir)
+    total = len(lines)
+    start = max(offset, 0)
+    window = lines[start:] if limit is None else lines[start : start + max(limit, 0)]
+    rows: list[dict[str, Any]] = []
+    for index, line in enumerate(window):
+        row_number = start + index + 1
+        try:
+            rows.append({"row_number": row_number, "example": json.loads(line)})
+        except json.JSONDecodeError as exc:
+            rows.append(
+                {"row_number": row_number, "parse_error": str(exc), "raw_preview": line[:200]}
+            )
+    return total, rows
+
+
 def _atomic_write_lines(path: Path, lines: list[str]) -> None:
     """Write each item of ``lines`` as one ``\\n``-terminated row to ``path``
     atomically: a temp file in the same directory, ``fsync``, then ``os.replace``."""
