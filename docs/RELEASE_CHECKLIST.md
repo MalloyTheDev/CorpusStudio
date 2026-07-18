@@ -14,7 +14,7 @@ in the release PR.
 
 - [ ] Bump `version` in `engine/pyproject.toml`.
 - [ ] Update `engine/corpus_studio/__init__.py` if it carries a version string.
-- [ ] Note user-facing changes since the last tag (new Labs surfaces, new CLI
+- [ ] Note user-facing changes since the last tag (new Studio surfaces, new CLI
       commands, new project-local JSON files).
 - [ ] **Reconcile [`CURRENT_STATE.md`](CURRENT_STATE.md)** to what actually shipped —
       it is the single source of truth other docs defer to, so a shipped milestone must

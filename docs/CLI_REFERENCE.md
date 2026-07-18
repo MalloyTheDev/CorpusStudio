@@ -1,7 +1,8 @@
 # CLI Reference
 
-The Corpus Studio engine is a dependency-light Python CLI. The desktop app shells out
-to these same commands, so anything the app does you can also script.
+The Corpus Studio engine is a dependency-light Python CLI. UI clients (the target Tauri/React
+head; the retiring desktop prototype) shell out to these same commands, so anything they do you
+can also script.
 
 **Invocation.** Installed (`pip install -e engine`): `corpus-studio <command> [args]`.
 From source: `python -m corpus_studio.cli <command> [args]`. Every command supports
@@ -24,6 +25,7 @@ make real calls to a running local model backend.
 | `new-project <id> <name> <schema>` | Create a local dataset project folder. |
 | `project-list [--root <dir>]` | List local dataset projects (via the optional SQLite index). |
 | `project-index-rebuild [--root <dir>]` | Rebuild the optional SQLite project index from `project.json` files. |
+| `examples-append <project_dir> --from <rows.jsonl> [--schema <id>] [--skip-invalid]` | Validate rows against the project schema and atomically append them to `examples.jsonl` — the engine's sanctioned single writer. |
 
 ## Quality & debt
 

@@ -190,7 +190,7 @@ A 2026-07-13 source audit identified drift between the sealed plan and the first
   explicit allow policy was sealed;
 - backend identity fixes the runner lane, every execution receives a fresh UUIDv7 run ID, output is
   isolated beneath a run-scoped directory, and success requires optimizer-step plus real adapter
-  weight evidence. The shipping desktop no longer exposes the unsealed direct-trainer path.
+  weight evidence. The retiring desktop prototype (#545) no longer exposes the unsealed direct-trainer path.
 
 This is control-plane and fake/unit-test evidence, not new GPU-workload proof. The current native-Linux
 host now supplies the separate prerequisite environment result: `backend-corpus-studio` passed its

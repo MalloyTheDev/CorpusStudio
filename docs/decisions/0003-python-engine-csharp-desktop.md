@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted — implemented (the engine/desktop split ships through v1.3+).
+Superseded in part (2026-07-18) — the **Python-engine boundary stands**, but the **C# desktop
+shell is being decommissioned** (#545; target UI = Tauri 2 + React, Rust core #522; see PR #555).
 
 ## Context
 

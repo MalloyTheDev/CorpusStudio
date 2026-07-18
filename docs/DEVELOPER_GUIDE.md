@@ -22,7 +22,7 @@ setup see [the Development Setup section](#development-setup); for every engine 
   - **`CorpusStudio.Core`** (`net8.0`, WPF-free) — the view-models, models, and service
     **seams**. This is where nearly all logic lives.
   - **`CorpusStudio.Desktop`** (`net8.0-windows`) — the WPF head: XAML views + the real
-    platform adapters. This is the shipping app.
+    platform adapters. This is the retiring desktop prototype (#545).
   - **`CorpusStudio.Avalonia`** (`net8.0`) — a cross-platform proof head over the *same*
     `Core` view-models, with Avalonia adapters.
   - **`CorpusStudio.Desktop.Tests`** (xUnit) — tests against `Core` with fakes.

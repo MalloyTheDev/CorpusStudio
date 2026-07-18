@@ -26,8 +26,8 @@ and proves the complete Phase 9B execution contract),
 a **calibrator + watchdog** (predicted-vs-measured fit, spill/stall detection), and a **supervised
 subprocess worker** that can KILL a hung run. Worker protocol 2.0 now binds the exact backend-manifest
 digest and environment/lock ref before dispatch, then fail-closes message order and terminal lineage.
-It is exercised by a **Tauri 2 + React** contract-first client (`apps/web`) alongside the WPF
-(shipping) and Avalonia (interim) heads. A pre-Phase-9B lifecycle ran end to end on a real RTX 5070
+It is exercised by a **Tauri 2 + React** contract-first client (`apps/web`) the target UI; the
+WPF/Avalonia desktop is a retiring prototype (#545). A pre-Phase-9B lifecycle ran end to end on a real RTX 5070
 (Blackwell/sm_120) under native Windows/WDDM, including a real GPU QLoRA run. That historical run does
 not verify the new effective-execution contract. On the current native-Linux host, the managed
 `backend-corpus-studio` environment separately passed its minimal CUDA-allocation, 4-bit-construction,
@@ -172,14 +172,12 @@ input side. Ordered:
   fallback, while static descriptors deliberately make no encode/decode claim.
 - **Hugging Face Hub export/push** (upload/publishing) — stays a deliberate
   non-goal for now; read-only Hub *import* already ships.
-- **Finish the Avalonia cross-platform port.** Phases 0–3 are **done** — a shared
-  `CorpusStudio.Core` (`net8.0`) holds all the extracted view-models behind interfaces, and the
-  Avalonia head re-authors the whole app as `.axaml` over them (compiled bindings, same DI). The
-  **`ICommand` conversion is in progress** (WPF code-behind engine handlers → shared testable
-  commands behind `IEngineService`/`IDialogService`/`IFilePickerService`); the remaining handlers
-  need a process-streaming seam, timer decoupling, and undo-state migration, after which Fluent-theme
-  styling and per-OS packaging follow. See [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md)
-  and [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md).
+- **Decommission the WPF/Avalonia desktop; consolidate on CLI + Tauri 2/React + a Rust core.** The
+  target UI is the **Tauri 2 + React** frontend (`apps/web`); the C# desktop is a retiring prototype.
+  Sequence: re-home dataset authoring to the engine CLI (`examples-append`, in-place restore — #546,
+  done) → grow `apps/web` to cover the Studio screens → remove `apps/desktop` (#545), tagging a
+  reference first. Target architecture: a **Rust authoritative core** + isolated Python ML workers (#522).
+  See [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md) (superseded, kept as history).
 - Smaller: dataset-version reorder detection and a normalized row identity. (Row-store GC,
   PII redaction on export, and the desktop gate-threshold editor now ship.)
 

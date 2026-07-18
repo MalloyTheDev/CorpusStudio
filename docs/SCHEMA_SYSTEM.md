@@ -107,7 +107,7 @@ Training preparation is staged after export:
 exported -> training config generated -> local training run
 ```
 
-## Lab schema hints
+## Studio schema hints
 
 Evaluation Studio, AI Assist, and Training Studio features should read schema
 metadata instead of hardcoding dataset behavior in the UI.
