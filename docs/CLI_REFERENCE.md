@@ -26,6 +26,7 @@ make real calls to a running local model backend.
 | `project-list [--root <dir>]` | List local dataset projects (via the optional SQLite index). |
 | `project-index-rebuild [--root <dir>]` | Rebuild the optional SQLite project index from `project.json` files. |
 | `examples-append <project_dir> --from <rows.jsonl> [--schema <id>] [--skip-invalid]` | Validate rows against the project schema and atomically append them to `examples.jsonl` — the engine's sanctioned single writer. |
+| `import-commit <project_dir> --from <staging.jsonl> [--schema <id>] [--no-version]` | Commit a staging file's schema-valid rows into `examples.jsonl` (invalid rows reported, not dropped) and capture a version (trigger `import_commit`). |
 
 ## Quality & debt
 
