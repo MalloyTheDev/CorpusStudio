@@ -90,6 +90,35 @@ class DatasetFormatConformance:
             f"rows carrying a 'messages' list) or supply a compatible dataset."
         )
 
+    def describe_partial_refusal(self, dataset_path: str) -> str:
+        """ASCII refusal for a PARTIALLY conformant dataset - some rows render, some do not.
+
+        Sealing silently here would over-claim the trained row count: the plan implies the whole
+        dataset trains, but only ``compatible_rows`` of ``total_rows`` render. Refused unless the
+        caller explicitly accepts training only the compatible rows (--allow-unrenderable-rows)."""
+        reasons = "; ".join(
+            f"row {rejection.index}: {rejection.reason}"
+            for rejection in self.representative_rejections
+        )
+        return (
+            f"dataset '{dataset_path}' has {self.rejected_rows} of {self.total_rows} row(s) that are "
+            f"structurally incompatible with dataset_format '{self.dataset_format}'; only "
+            f"{self.compatible_rows} would render into usable training examples. Planning is refused "
+            f"so the sealed plan cannot over-claim the trained row count. Representative rejections: "
+            f"{reasons or '(none)'}. Fix or remove the incompatible rows, select the dataset_format "
+            f"that matches the data, or pass --allow-unrenderable-rows to seal a plan that trains only "
+            f"the {self.compatible_rows} compatible row(s)."
+        )
+
+    def describe_partial_warning(self, dataset_path: str) -> str:
+        """ASCII stderr note when --allow-unrenderable-rows accepts a partial drop, so the operator
+        sees exactly how many rows the sealed plan will NOT train."""
+        return (
+            f"WARNING: dataset '{dataset_path}' has {self.rejected_rows} of {self.total_rows} row(s) "
+            f"incompatible with dataset_format '{self.dataset_format}'; the sealed plan will train "
+            f"only the {self.compatible_rows} compatible row(s) (--allow-unrenderable-rows was set)."
+        )
+
 
 def load_jsonl_rows(path: str | Path) -> list[Any]:
     """Read a JSONL dataset into a list of parsed rows (torch-free, read-only).
