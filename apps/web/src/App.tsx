@@ -30,11 +30,14 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [replanning, setReplanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [bootError, setBootError] = useState<string | null>(null);
 
   const live = isTauri();
 
   useEffect(() => {
-    loadSnapshot().then(setSampleSnap);
+    loadSnapshot()
+      .then(setSampleSnap)
+      .catch((e) => setBootError(String(e)));
   }, []);
 
   useEffect(() => {
@@ -206,6 +209,12 @@ export default function App() {
       ) : mode === "live" ? (
         <div className="cs-body cs-note">
           Enter a base model + dataset, then probe your host to resolve a plan.
+        </div>
+      ) : bootError ? (
+        <div className="cs-body">
+          <div className="cs-error" role="alert">
+            <strong>Could not load.</strong> {bootError}
+          </div>
         </div>
       ) : (
         <div className="cs-body">Loading…</div>
