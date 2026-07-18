@@ -27,7 +27,9 @@ Both are content-addressed and recorded in the plan's immutable inputs.
 Pretraining may **train** a tokenizer, not just consume one. Three explicit modes, each frozen before any
 token is consumed (a tokenizer change invalidates all downstream token accounting):
 
-- **train** - corpus sample -> algorithm/vocab-size/special-tokens -> new tokenizer; sealed by hash.
+- **train** - corpus sample -> algorithm/vocab-size/special-tokens -> new tokenizer; sealed by hash. A
+  **new** subsystem: no tokenizer-training code exists today (import and freeze are the shipped modes;
+  "freeze" is import-then-pin).
 - **import** - an existing tokenizer bound by `tokenizer_content_sha256` (as SFT does today).
 - **freeze** - the exact tokenizer identity that produced the token stream, pinned into the plan and
   every checkpoint (`CheckpointBoundIdentities.tokenizer_ref` already exists).
@@ -52,6 +54,16 @@ A new `PretrainingDataPolicy` (additive; parallel to `TrainingDataPolicy`) decla
 - **global batch + token budget** - global batch size (across all data-parallel ranks) and a target
   total-token budget; the run stops at the budget, never silently truncates.
 
+**Streaming is not a free-standing parallel policy.** The worker consumes a single hash-sealed
+`ResolvedExecutionConfiguration.data: TrainingDataPolicy`; `ExecutionInputs.dataset` is a single binding;
+and `ExecutionInputBinding` currently **fail-closed refuses** any dataset whose source is not a pinned
+`local_file` ("the current dense trainer consumes a pinned local dataset file"). Admitting a shard set
+therefore extends the **sealed** execution/input contracts (a union or backend-scoped variant on
+`ResolvedExecutionConfiguration.data`, a widened `ExecutionInputs.dataset`, and a relaxed/branched
+`ExecutionInputBinding`) - additive, but it touches the sealed worker boundary and forces schema
+regeneration + the contract-count test updates. This is P0 contract work
+(see [`TRAINING_SYSTEMS_ARCHITECTURE.md`](TRAINING_SYSTEMS_ARCHITECTURE.md) G8).
+
 ## 4. Optimization
 
 Pretraining optimization is declared explicitly (no product defaults substituted for research/pretraining
@@ -62,27 +74,44 @@ per-expert clock (MoE, see [`MOE_TRAINING_ARCHITECTURE.md`](MOE_TRAINING_ARCHITE
 
 ## 5. Checkpoint / resume with a data cursor (the G2 gap)
 
-`SealedTrainingState` today places a checkpoint on the optimizer-step / microstep / epoch timeline for a
-finite dataset. Streaming pretraining additionally requires a **data cursor**:
+`SealedTrainingState` today places a checkpoint on the optimizer-step / microstep / **epoch** timeline for
+a finite dataset (`epoch` is a required, validated field), captures one opaque `sampler.pt` cursor, and is
+single-rank; `TrainingSchedule` permits only `max_steps` XOR epochs (no token budget). Streaming
+pretraining requires **extending** that contract, not just adding fields alongside it:
 
-- shard id + intra-shard offset (or a resumable iterator state),
-- cumulative consumed tokens,
-- the realized mixture position,
+- a **data cursor**: shard id + intra-shard offset (or a resumable iterator state), cumulative consumed
+  tokens, the realized mixture position, mixture RNG state, and any packing-buffer residual;
+- **per-rank** cursors (a list, not one scalar) + a rank/world binding - a shape change;
+- **epoch-optional** semantics for an unbounded stream (the required `epoch` validator must relax);
+- a new `CheckpointFileEntry.role` for the data cursor, and a **token-budget** stop condition on
+  `TrainingSchedule` (amending its exactly-one-of invariant).
 
-so a resume continues from the **exact** token, never an approximate one. This extends the checkpoint
-contract; the exact-lineage rules in [`CHECKPOINT_RESUME.md`](CHECKPOINT_RESUME.md) (bitwise-equivalent
-resume) apply unchanged.
+**Resume-equivalence claim (scoped).** The bitwise-equivalent resume proven in
+[`CHECKPOINT_RESUME.md`](CHECKPOINT_RESUME.md) holds only for a **fixed single-rank** topology
+(single-process, single-thread, deterministic CPU) - it is the SFT path's guarantee and it does **not**
+transfer here unchanged. Resume across a **changed world size / data-parallel degree** is **not**
+bitwise-equivalent and is **not proven** (each rank's shard assignment changes); multi-rank streaming
+resume is `WORKLOAD_VERIFIED`-gated future work, not a current claim.
 
-## 6. Evidence (what a pretraining run must prove)
+## 6. Evidence
 
-- **validation loss** on a held-out shard on the declared schedule.
+A pretraining run **records** (when available; **null with a typed reason**, never a fabricated zero - the
+token-throughput observer lesson):
+
+- **validation loss** on a held-out shard on the declared schedule - a **new** in-loop evaluation path
+  (the SFT trainer wires no `eval_dataset`).
 - **consumed-data evidence** - which shards/documents/tokens were actually consumed (planned vs realized
-  mixture), so a claim is bound to what the model actually saw.
+  mixture). A **new evidence type**: today token accounting is per-optimizer-step only, with no
+  per-shard/per-document consumption, cumulative token counter, or realized-mixture record.
 - **compute / memory / power / energy** - via the shipped telemetry suite (`RunTelemetrySummary`,
-  `EnergyIntegration`, `EventMetrics`), with token-throughput at the un-bypassable consumption boundary
-  (the v6/v7 lesson: unavailable is null, never a fabricated zero).
+  `EnergyIntegration`, `EventMetrics`), token-throughput observed at the un-bypassable consumption boundary.
 - **exact token accounting** every measured step (positive non-padding + supervised counts; rates ==
   observed tokens / duration).
+
+These are **standard-tier product** telemetry, recorded-when-available. Paper-telemetry completeness
+(`scientifically_complete` / `REQUIRED_PAPER_FIELDS`) is **not** required for a standard product
+pretraining run - it remains a SEALED_RESEARCH-only gate (see
+[`PRODUCT_VS_RESEARCH.md`](PRODUCT_VS_RESEARCH.md)).
 
 ## 7. What is implemented vs planned
 

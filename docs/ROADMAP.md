@@ -164,27 +164,6 @@ input side. Ordered:
   reviewed content-hashed wheel, add inter-process lifecycle locks, and make environment replacement
   blue/green. Then add another dense backend only with its own exact contract and functional proof.
 
-### Training Systems expansion (proposed — under review)
-
-Expand training from "fine-tuning support" into a complete, pluggable model-development system
-(pretraining, continued pretraining, full-parameter + adapter/PEFT fine-tuning, preference/RL
-post-training, distillation, dense + MoE, single-device + distributed, multiple framework/orchestrator
-adapters). The foundational contracts are already dense-safe / MoE-safe; the work is **additive**. See
-[`TRAINING_SYSTEMS_ARCHITECTURE.md`](TRAINING_SYSTEMS_ARCHITECTURE.md),
-[`PRETRAINING_ARCHITECTURE.md`](PRETRAINING_ARCHITECTURE.md),
-[`MOE_TRAINING_ARCHITECTURE.md`](MOE_TRAINING_ARCHITECTURE.md), and
-[`TRAINING_BACKEND_REGISTRY.md`](TRAINING_BACKEND_REGISTRY.md). Sequence:
-
-- **P0** — contracts + capability registry (`SupportLevel`, `TrainingPlan`, framework/orchestrator split,
-  backend-manifest fields, thin registries). Docs/schemas/tests only.
-- **P1** dense small-model pretraining → **P2** continued pretraining → **P3** full-parameter
-  fine-tuning → **P4** single-device small-MoE semantic validation → **P5** distributed FSDP/DeepSpeed →
-  **P6** multi-device MoE expert parallelism → **P7** JAX / Keras / MLX / external-orchestrator adapters.
-
-Each capability advances the support ladder (`DECLARED` → `WORKLOAD_VERIFIED` → `PRODUCTION_SUPPORTED`)
-only on measured evidence; defaults are evidence-selected, never asserted. No implementation until the
-architecture is reviewed.
-
 - **Surface the LLM judge in the Evaluation tab** — the `--judge-model` scorer ships in
   the engine and in suites, but the desktop Evaluation tab still has no judge-model field.
 - **Tokenizer training/editing + isolated functional probes.** Optional target-model `tokenizers`
@@ -202,3 +181,25 @@ architecture is reviewed.
   and [`CROSS_PLATFORM_ASSESSMENT.md`](CROSS_PLATFORM_ASSESSMENT.md).
 - Smaller: dataset-version reorder detection and a normalized row identity. (Row-store GC,
   PII redaction on export, and the desktop gate-threshold editor now ship.)
+
+### Training Systems expansion (proposed — under review)
+
+Expand training from "fine-tuning support" into a complete, pluggable model-development system
+(pretraining, continued pretraining, full-parameter + adapter/PEFT fine-tuning, preference/RL
+post-training, distillation, dense + MoE, single-device + distributed, multiple framework/orchestrator
+adapters). The foundational contracts are already dense-safe / MoE-safe; the work is **additive**. See
+[`TRAINING_SYSTEMS_ARCHITECTURE.md`](TRAINING_SYSTEMS_ARCHITECTURE.md),
+[`PRETRAINING_ARCHITECTURE.md`](PRETRAINING_ARCHITECTURE.md),
+[`MOE_TRAINING_ARCHITECTURE.md`](MOE_TRAINING_ARCHITECTURE.md), and
+[`TRAINING_BACKEND_REGISTRY.md`](TRAINING_BACKEND_REGISTRY.md). Sequence:
+
+- **P0** — contracts + capability registry + authority cleanup (`SupportLevel` coexisting rollup,
+  `TrainingPlan`, framework/orchestrator split, **backend-scoped resolved-execution**, backend **security
+  posture**, backend-manifest fields, thin registries). Docs/schemas/tests only.
+- **P1** dense small-model pretraining → **P2** continued pretraining → **P3** full-parameter
+  fine-tuning → **P4** single-device small-MoE semantic validation → **P5** distributed FSDP/DeepSpeed →
+  **P6** multi-device MoE expert parallelism → **P7** JAX / Keras / MLX / external-orchestrator adapters.
+
+Each capability advances the support ladder (`DECLARED` → `WORKLOAD_VERIFIED` → `PRODUCTION_SUPPORTED`)
+only on measured evidence; defaults are evidence-selected, never asserted. No implementation until the
+architecture is reviewed.

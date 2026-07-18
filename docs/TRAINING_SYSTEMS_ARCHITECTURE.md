@@ -75,8 +75,16 @@ Three layers, from user intent to sealed execution (only the top is new):
   worker echoes and refuses to deviate from. See
   [`EFFECTIVE_EXECUTION_CONFIGURATION.md`](EFFECTIVE_EXECUTION_CONFIGURATION.md).
 
-`TrainingPlan` composes; it does not replace `RunPlan`. Resolution lowers a `TrainingPlan` into a
-`RunPlan` for a chosen `(FrameworkBackend, OrchestratorAdapter)` pair.
+`TrainingPlan` composes; it does not replace `RunPlan`. Resolution lowers a `TrainingPlan` into
+**one or more** `RunPlan`s (one per objective/stage; `RunPlan.task_type` is single-valued over the rich
+`TaskType` enum) for a chosen `(FrameworkBackend, OrchestratorAdapter)` pair. Two invariants keep
+`TrainingPlan` from becoming a second planning authority: (1) it carries **no** `plan_hash` /
+`configuration_hash`-sealed execution field - it is pre-resolution intent only; `RunPlan` retains sole
+sealing authority and `ResolvedExecutionConfiguration` is independently sealed with an explicit
+single-trainer-config-authority guard. (2) Its cross-dimension compatibility check is an **early UX
+pre-check**, never the authoritative gate - the authoritative gate stays the planner's declared-and-proven
+capability check plus the `ExecutionCapabilityCombination`-in-a-passing-probe match (which is why proving
+one capability tuple never implies another; see §6).
 
 ## 4. Support levels (installed is never supported)
 
@@ -94,8 +102,18 @@ Every capability - a registry entry, a backend manifest claim, a preset - carrie
 
 `INSTALLED` never implies `PROBED` or `WORKLOAD_VERIFIED`. This is the honesty invariant that already
 governs the repo (`ObjectiveVerificationStatus`, `RecipeVerification`, "a completed step != proven fit",
-"installed != supported"). This 7-state ladder is a **superset** of the shipped 5-state
-`ObjectiveVerificationStatus` and needs one additive `SupportLevel` enum + a mapping (§6, gap G3).
+"installed != supported").
+
+`SupportLevel` does **not** replace the shipped verification vocabulary. The committed ladders are
+**multi-axis**, not linear: `ObjectiveVerificationStatus` has 6 members (incl. `not_applicable`) and is
+applied on three independent axes (`ObjectiveVerification`: definition / implementation / hardware);
+`VerificationOutcome` carries `partial` / `not_checked` and its docstring explicitly forbids collapsing
+integrity/compatibility/functional/hardware into "a misleading linear level." `SupportLevel` is therefore
+an **additive, coarse capability-support rollup that COEXISTS** with those ladders (which remain the
+authority). The mapping from them is a **lossy partial projection**, defined only for the proven axes;
+`not_applicable` / `partial` / `not_checked` are **carried, not projected**; `REFUSED`,
+`CONFIG_GENERATION_ONLY`, `INSTALLED`, and `PRODUCTION_SUPPORTED` are net-new states. A single
+`SupportLevel` never states *which* axis is proven - the multi-axis records do. See §6 gap G3.
 
 The **default** framework/orchestrator/preset for any workload is **evidence-selected**: it must reach
 `WORKLOAD_VERIFIED` on the actual host stack. Unsloth (or any project) is **not** the default until its
@@ -121,13 +139,13 @@ All changes are **additive and MoE-safe by construction**; none is a foundationa
 | ID | Existing assumption / gap | Required contract change |
 |---|---|---|
 | **G1** | `TrainingDataPolicy.dataset_format` is `Literal["instruction","chat","trace"]` - **SFT-only** | Add a pretraining/corpus data contract: shards, streaming, mixture weights, document boundaries, deterministic sample order, token budget. See [`PRETRAINING_ARCHITECTURE.md`](PRETRAINING_ARCHITECTURE.md). |
-| **G2** | `SealedTrainingState` captures a sampler cursor for a finite in-memory SFT dataset (`sampler_state_captured`, `consumed_microsteps`), not a streaming-corpus position | Add a **data cursor** (shard id + intra-shard offset + consumed tokens) to the checkpoint contract for pretraining/streaming. |
-| **G3** | Two overlapping verification ladders (`ObjectiveVerificationStatus` 5-state, `RecipeVerification`) and no `CONFIG_GENERATION_ONLY` / `INSTALLED` / `PRODUCTION_SUPPORTED` / `REFUSED` | Add one `SupportLevel` enum (§4) + a total mapping from the existing ladders. |
-| **G4** | `BackendManifest` conflates framework + orchestrator + recipe and omits 7 declared fields | Split `FrameworkBackend` / `OrchestratorAdapter`; add `model_topologies`, `license`, `security_boundaries`, `config_generator`, `launcher`, `progress_parser`, `failure_parser`. |
+| **G2** | `SealedTrainingState` is single-cursor / single-rank / `epoch`-required (validated), captures one opaque `sampler.pt`; `TrainingSchedule` allows only `max_steps` XOR epochs (no token budget) | Extend the checkpoint contract for streaming: a **data cursor** (shard id + intra-shard offset + consumed tokens + mixture RNG + packing-buffer), **per-rank** cursors (a shape change, not a scalar add), epoch-optional-for-streaming, a new `CheckpointFileEntry.role`, and a **token-budget** stop condition on `TrainingSchedule`. See [`PRETRAINING_ARCHITECTURE.md`](PRETRAINING_ARCHITECTURE.md). |
+| **G3** | The shipped verification ladders are **multi-axis** (`ObjectiveVerificationStatus` 6-state on 3 axes; `VerificationOutcome` with `partial`/`not_checked` + an explicit anti-collapse rule; `RecipeVerification`) and lack `CONFIG_GENERATION_ONLY` / `INSTALLED` / `PRODUCTION_SUPPORTED` / `REFUSED` | Add a `SupportLevel` enum (§4) that **coexists** with the ladders (not a replacement); a **lossy partial** projection that carries `not_applicable`/`partial`/`not_checked`. Never collapse the three axes into one linear level. |
+| **G4** | `BackendManifest` conflates framework + orchestrator + recipe (`backend_id` + `trainer_target`) and has **no field to declare or refuse** a backend that enables `trust_remote_code` / network / model-download inside its isolated process (security gap) | Split `FrameworkBackend` / `OrchestratorAdapter`; add `model_topologies`, `license`, `security_boundaries`, a `trust_remote_code`/network posture (refusable by assurance tier), `config_generator`, `launcher`, `progress_parser`, `failure_parser`. Because `backend_manifest_digest` hashes the whole manifest into `backend_ref`, the split lands as an **append-only new backend identity/version**, never a mutation of the sealed reference manifest. |
 | **G5** | No user-facing composition object; `RunPlan.task_type` is a single value and topology/orchestrator are implicit | Add `TrainingPlan` (§3) that composes the 11 registries and validates cross-dimension compatibility before resolution. |
 | **G6** | Registries 2,3,6,7,8,10 exist only as enums/contracts, not as exposed entry sets with support levels | Add thin registry surfaces (dependency-light, sealed, like the `TrainingObjective` registry). |
 | **G7** | No `TrainingPreset` contract | Add a preset that pins one entry per dimension + records the support level of the whole composition. |
-| **G8** | Only one dense PyTorch reference backend is implemented; MoE training and distributed execution are contract-only | No contract change - these are **implementation** milestones (§9), each gated by workload verification. |
+| **G8** | The **sealed execution/export seal** (`ResolvedExecutionConfiguration`, `TrainerInterfacePolicy`, `BackendManifest.trainer_fields`, `ExecutionInputBinding`, worker `artifacts.py`) is hard-locked to first-party dense-QLoRA-SFT via `Literal`/validator locks (`adapter_task_type=CAUSAL_LM`; `export_format==adapter_peft` else raise; `checkpoint_impl==adapter_only` else raise; single `local_file` dataset; one `adapter_model.safetensors`) | Additive but a **contract change** (not "implementation only"): **backend-scoped** resolved-execution variants (or per-backend resolved-config contracts) to express pretraining / full-parameter / MoE; new `CheckpointFileEntry` roles (`expert_shard`/`routing_state`) + a reshard-plan / EP-degree binding on `CheckpointBoundIdentities` (exact `plan_hash` match refuses an EP-degree change today); align `ArtifactManifest.kind` with `ObjectiveArtifactKind` (`expert_shards`). Belongs in **P0**. The composition authority (`RunPlan`/`ResolvedExecutionConfiguration`) is unchanged; only the seal's validators specialize. |
 
 **What already holds (no change needed):** objective families (incl. pretraining/preference/reward/
 distillation), `ParallelismKind` (dp/tp/pp/ep/sp/cp), `ModelTopology`/experts, `ObjectiveUpdateScope`
@@ -171,7 +189,7 @@ is unaffected by this expansion.
 
 | Phase | Deliverable | Exit at |
 |---|---|---|
-| **P0** | Contracts + capability registry: `SupportLevel`, `TrainingPlan`, `FrameworkBackend`/`OrchestratorAdapter` split, backend-manifest fields, thin registries. Docs + schemas + tests only. | contracts validated, schemas regenerated |
+| **P0** | Contracts + capability registry + authority cleanup: `SupportLevel` (coexisting rollup + lossy-partial mapping), `TrainingPlan` (no sealed fields; pre-check only), `FrameworkBackend`/`OrchestratorAdapter` split (append-only backend identity), **backend-scoped resolved-execution variants**, backend **security posture** (`trust_remote_code`/network/license, refusable by assurance tier), backend-manifest fields, thin registries. Docs + schemas + tests only. | contracts validated, schemas regenerated |
 | **P1** | Dense pretraining on a small model (corpus data contract, token budget, validation loss, data-cursor resume) | `WORKLOAD_VERIFIED` (small) |
 | **P2** | Continued pretraining (init-from-checkpoint, mixture reweight) | `WORKLOAD_VERIFIED` |
 | **P3** | Full-parameter fine-tuning | `WORKLOAD_VERIFIED` |

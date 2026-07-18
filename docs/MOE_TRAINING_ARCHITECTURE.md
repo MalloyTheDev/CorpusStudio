@@ -36,16 +36,24 @@ Declared per model, never hard-coded to one implementation:
 - **DP, TP, PP, CP, and EP degrees** (`ParallelismKind` already has data/tensor/pipeline/context/expert)
   composed independently; a `TrainingPlan` may declare `parallelism=[dp,tp,ep]`.
 - **expert placement** - which experts live on which ranks (expert-parallel groups), via the shipped
-  `ParallelGroup` / `RankBinding` / `StatePlacement`.
+  `ParallelGroup` / `RankBinding` / `StatePlacement`. See
+  [`RUN_PLAN_PHYSICAL_EXECUTION.md`](RUN_PLAN_PHYSICAL_EXECUTION.md) (the authoritative parallelism/placement
+  home; the current first-party worker refuses non-trivial specs fail-closed until an isolated worker
+  implements them).
 - Communication via `CommunicationBackend` (nccl/gloo/mpi/ucc).
 
 ## 3. Expert checkpoint shards and resharding
 
-- **expert checkpoint shards** - a checkpoint is not one monolithic file; experts are sharded across
-  ranks (`ObjectiveArtifactKind.expert_shards`, `routing_state`). `CheckpointManifest` already lists
-  per-file entries with hashes.
-- **resharding** - resume under a different EP degree must remap expert shards deterministically, with a
-  recorded reshard plan; exact-lineage rules from [`CHECKPOINT_RESUME.md`](CHECKPOINT_RESUME.md) hold.
+- **expert checkpoint shards** - a checkpoint is not one monolithic file; `CheckpointManifest.files` is
+  already a multi-file hashed list. But `CheckpointFileEntry.role` has **no** `expert_shard` /
+  `routing_state` role today (they fall into `other`), and a resumable checkpoint currently **mandates** a
+  single optimizer-state file - so sharded expert/optimizer state needs new roles.
+- **resharding** - resume under a different EP degree must remap expert shards deterministically with a
+  recorded reshard plan. This is **not free today**: `CheckpointBoundIdentities` carries no
+  EP-degree / world-size / reshard-plan field and requires an **exact `plan_hash` match**, so an EP-degree
+  change currently **fails closed** rather than resharding. Adding the roles + a reshard-plan/EP-degree
+  binding is additive (see [`TRAINING_SYSTEMS_ARCHITECTURE.md`](TRAINING_SYSTEMS_ARCHITECTURE.md) G8); the
+  exact-lineage discipline from [`CHECKPOINT_RESUME.md`](CHECKPOINT_RESUME.md) still governs.
 
 ## 4. Router and expert telemetry (per-step evidence)
 
@@ -84,7 +92,8 @@ one dense parameter count.**
 | Static MoE topology inspection (hash-pinned allowlist) | shipped (inspection only) |
 | Router/expert **training** telemetry channels | **planned (P4)** |
 | Single-device small-MoE semantic validation (routing/balancing/coverage) | **planned (P4)** |
-| Expert-parallel multi-device training + shards/resharding | **planned (P6)** |
+| Expert-parallel multi-device training + shards/resharding (new `CheckpointFileEntry` roles + reshard/EP-degree binding) | **planned (P6)** |
+| MoE / full-model export (new worker exporter + `ArtifactManifest.kind` alignment with `ObjectiveArtifactKind`; today one `adapter_model.safetensors` only) | **planned** |
 | Expert-contribution evaluation profiles | **planned** |
 
 No MoE **runtime training capability** is claimed by any static contract or inspection. Every MoE

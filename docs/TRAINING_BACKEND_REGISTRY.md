@@ -19,8 +19,13 @@ Shipped in `BackendManifest`: `task_types`, `objective_capabilities`, `model_fam
 `dependency_conflicts`, `known_failure_modes`, `capability_probes`, `telemetry_hooks`.
 
 **Additive (new) fields** required by this architecture: `model_topologies` (dense/moe), `license`,
-`security_boundaries`, `config_generator`, `launcher`, `progress_parser`, `failure_parser`, and the
-split of `FrameworkBackend` vs `OrchestratorAdapter` (today conflated in one backend id).
+`security_boundaries`, `config_generator`, `launcher`, `progress_parser`, `failure_parser`, and the split
+of `FrameworkBackend` vs `OrchestratorAdapter` (today conflated in one `backend_id` + `trainer_target`).
+Because `backend_manifest_digest` hashes the whole manifest into a `backend_ref` pinned across `RunPlan` /
+`ResolvedExecutionConfiguration` / `CheckpointBoundIdentities`, these additions land as an **append-only
+new backend identity/version**, never a mutation of the sealed reference manifest. Existing manifest
+consumers (`unmet_requirements`, `compatible_backends`) ignore unknown fields, so the split needs no
+consumer rework.
 
 Every declared capability carries a **support level** (`DECLARED` .. `PRODUCTION_SUPPORTED` / `REFUSED`;
 see [`TRAINING_SYSTEMS_ARCHITECTURE.md`](TRAINING_SYSTEMS_ARCHITECTURE.md) §4). **Installed never means
@@ -109,10 +114,19 @@ The reference `(PyTorch, HF/TRL/PEFT)` backend is the only stack with real GPU w
 (bounded 0.5B smokes; the 7B workload is **not** claimed). Any promotion of another stack to a default
 requires that stack to reach `WORKLOAD_VERIFIED` on this host, recorded as evidence - not asserted.
 
-## 4. Security boundaries (new manifest field)
+## 4. Security boundaries (new manifest fields - HIGH priority)
 
-Each manifest declares its trust surface: `trust_remote_code` posture, network access during
-train/install, deserialization surfaces (pickle/`training_args.bin` handling - see the framework
-output-tree admission rule), and the isolated-environment boundary. A backend that needs
-`trust_remote_code` or network at train time must declare it; the planner can then refuse it under a
-stricter assurance tier.
+Today the platform pins `trust_remote_code` **off** globally and fail-closed
+(`ResolvedExecutionConfiguration.trust_remote_code=False`, `TrustRequirement.trust_remote_code=False`), but
+`BackendManifest` has **no field** for a backend to declare - and no field for the planner to **refuse** -
+a backend that enables `trust_remote_code`, downloads models, or opens a network connection **inside its
+own isolated process**, where the core's global policy gate cannot observe it. A `MANAGED_ADAPTER_CANDIDATE`
+(Axolotl / Unsloth / DeepSpeed) could do exactly that silently. This is a **HIGH-priority additive security
+field**, not optional polish.
+
+Each manifest must declare its trust surface: `trust_remote_code` posture, network access during
+train/install, model/dataset download behavior, deserialization surfaces (pickle / `training_args.bin`
+handling - see the framework output-tree admission rule), external telemetry behavior, and the
+isolated-environment boundary. The planner refuses any posture that exceeds the run's assurance tier.
+**No backend may silently enable `trust_remote_code`, upload telemetry, download a model, access
+credentials, or invoke a remote training service.**
