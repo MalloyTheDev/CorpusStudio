@@ -127,7 +127,7 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
   1,434 Python tests passed /
   6 skipped / 88.47% Windows coverage, deterministic 27-root schema/TypeScript generation, web
   production build, 815 desktop tests, and zero-warning WPF/Avalonia Release builds. See
-  `docs/MOE_MODEL_INSPECTION.md`.
+  `docs/MOE_ARCHITECTURE.md`.
 - **#418 merged the Phase 9A backend-worker protocol/isolation foundation** as `bca5246`:
   protocol 2.0 worker-first
   backend/environment identity, typed envelope/state-machine validation, managed recipe/lock/backend
@@ -433,7 +433,7 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 - **TrainingObjective foundation** (Phase 4): `platform/objectives.py` + the `TrainingObjective` /
   `ObjectiveCompatibilityReport` roots. The sealed 29-entry registry is backend-independent;
   `training-objectives` and `training-objective-check` expose definitions and conservative evidence
-  axes. It does not add RunPlan wiring or trainer implementations; see `docs/TRAINING_OBJECTIVES.md`.
+  axes. It does not add RunPlan wiring or trainer implementations; see `docs/TRAINING_SYSTEMS_ARCHITECTURE.md`.
 - **Parameter-accounting foundation** (Phase 5): `platform/parameter_accounting.py` + the
   `ParameterAccountingReport` root. `model-inspect --parameter-accounting` and `parameter-account`
   produce/reconcile sealed static and typed runtime evidence; stored elements/allocator bytes are not
@@ -454,7 +454,7 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   surface in `contracts.py`. `model-inspect` recognizes only exact allowlisted family mappings, pins
   the verified config digest/paths, reports expert-instance structure, and leaves all runtime,
   backend, placement, residency, fit, and hardware claims unverified. See
-  `docs/MOE_MODEL_INSPECTION.md`.
+  `docs/MOE_ARCHITECTURE.md`.
 - **Worker protocol/isolation** (Phase 9A): `platform/worker_protocol.py`,
   `subprocess_supervisor.py`, `process_control.py`, `worker.py`, and `backends.py`; exact backend and
   environment identity, strict message ordering/lineage, pre-run seal checks, and process-tree cleanup.
@@ -465,7 +465,7 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
   (including `platform-*`, the full `env-*` lifecycle, and `train-*`).
 - **Docs**: source of truth `docs/CURRENT_STATE.md`; plan `docs/IMPLEMENTATION_PLAN.md`; MoE
   `docs/MOE_ARCHITECTURE.md`; storage `docs/HARDWARE_STORAGE_PROFILE.md`; env
-  `docs/ENVIRONMENT_MANAGER.md`; objectives `docs/TRAINING_OBJECTIVES.md`; parameter evidence
+  `docs/ENVIRONMENT_MANAGER.md`; objectives `docs/TRAINING_SYSTEMS_ARCHITECTURE.md`; parameter evidence
   `docs/PARAMETER_ACCOUNTING.md`; platform run `docs/PLATFORM_RUN.md`; worker boundary
   `docs/BACKEND_WORKER_PROTOCOL.md`.
 - **Claude memory** (persists across Claude sessions): on this Linux host,

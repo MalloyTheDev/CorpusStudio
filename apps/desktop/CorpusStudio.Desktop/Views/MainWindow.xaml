@@ -3677,7 +3677,7 @@
                                    FontFamily="Consolas" FontSize="11.5" Foreground="{DynamicResource Fg64748B}" />
                     </Border>
                     <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource Fg475569}" FontSize="12.5" Margin="0,0,0,16"
-                               Text="Locate the engine folder below, or set the CORPUS_STUDIO_ENGINE_DIR environment variable and retry. See docs/DEVELOPMENT_SETUP.md." />
+                               Text="Locate the engine folder below, or set the CORPUS_STUDIO_ENGINE_DIR environment variable and retry. See docs/DEVELOPER_GUIDE.md." />
                     <StackPanel Orientation="Horizontal">
                         <Button Style="{StaticResource PrimaryButtonStyle}"
                                 AutomationProperties.AutomationId="LocateEngineButton"

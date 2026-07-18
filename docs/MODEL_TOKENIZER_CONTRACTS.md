@@ -138,7 +138,7 @@ Phase 3 supplies this representation substrate. The Phase 5
 [`ParameterAccountingReport`](PARAMETER_ACCOUNTING.md) now produces and validates separately scoped
 logical/active/resident/touched/updated/exposed evidence and can be requested with
 `model-inspect --parameter-accounting`. Phase 8 recognizes only `mixtral`, `qwen2_moe`,
-`deepseek_v2`, and `deepseek_v3`; see [`MOE_MODEL_INSPECTION.md`](MOE_MODEL_INSPECTION.md). A complete
+`deepseek_v2`, and `deepseek_v3`; see [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md). A complete
 allowlisted mapping may set `execution_kind: mixture_of_experts` and emit structural expert-instance
 counts. Those counts do not populate active or resident parameter-coordinate evidence, establish
 loadability/backend support, or prove MoE execution. Every other topology remains unknown.

@@ -51,7 +51,7 @@ Each registry is an independent, versioned, dependency-light set of entries. Eve
 
 | # | Registry | What an entry is | Today |
 |---|---|---|---|
-| 1 | **TrainingObjective** | what is optimized (loss/label/mask/update semantics) | **shipped** - 29 sealed defs, `TrainingObjective` contract, `ObjectiveKind` (16 families incl. pretraining, preference, reward, distillation, process-supervision, embedding, multimodal). See [`TRAINING_OBJECTIVES.md`](TRAINING_OBJECTIVES.md). |
+| 1 | **TrainingObjective** | what is optimized (loss/label/mask/update semantics) | **shipped** - 29 sealed defs, `TrainingObjective` contract, `ObjectiveKind` (16 families incl. pretraining, preference, reward, distillation, process-supervision, embedding, multimodal). See [Training Objectives](#training-objectives). |
 | 2 | **ModelTopology** | dense vs MoE structure + expert layout | **contract shipped** - `ModelTopology`, `ExpertGroup`, `ExpertTopologyCounts`, `SemanticRouting`; no runtime training claim. Registry surface: **planned**. |
 | 3 | **UpdateMethod** | which parameters change + how | **partial** - `AdapterMethod` enum + `ObjectiveUpdateScope` (all_parameters / adapters / router / selected_experts / all_experts). Full independent registry with per-method deps/hardware: **planned**. |
 | 4 | **FrameworkBackend** | compute substrate (PyTorch / JAX / TF-Keras / MLX) | **new** - today only PyTorch is assumed. Must be split out of `BackendManifest`. |
@@ -167,7 +167,7 @@ MoE training fields (expert count, top-k, shared experts, layer placement, exper
 score/dtype, capacity/token-dropping, load-balancing/z-loss, DP/TP/PP/CP/EP degrees, expert placement,
 expert checkpoint shards/resharding, router/expert telemetry, expert utilization, dropped/overflow
 tokens, dead/starved experts, per-expert gradient/update coverage, expert-contribution evaluation) are
-specified in [`MOE_TRAINING_ARCHITECTURE.md`](MOE_TRAINING_ARCHITECTURE.md). **No foundational contract
+specified in [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md). **No foundational contract
 may assume one dense parameter block** - this is already enforced by the existing MoE-safe contracts and
 [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md).
 
@@ -183,7 +183,7 @@ specialists that load by task. These are a *plan of record*; no skill files are 
 - **Fine-Tuning and PEFT** - full-parameter + adapter methods; today's reference path.
 - **Post-Training and RL** - preference optimization, reward modeling, RL (TRL/verl/OpenRLHF/NeMo-RL).
 - **MoE and Parallelism** - expert routing/balancing, EP/TP/PP, expert shards. See
-  [`MOE_TRAINING_ARCHITECTURE.md`](MOE_TRAINING_ARCHITECTURE.md).
+  [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md).
 - **Backend Integration** - `FrameworkBackend`/`OrchestratorAdapter` manifests, probes, launchers,
   progress/failure parsers. See [`TRAINING_BACKEND_REGISTRY.md`](TRAINING_BACKEND_REGISTRY.md).
 - **Checkpoint and Resume** - exact lineage, sharded/resharding, data cursor. See
@@ -212,10 +212,115 @@ evidence. No phase is claimed until it is workload-verified.
 ## 10. Related documents
 
 - [`PRETRAINING_ARCHITECTURE.md`](PRETRAINING_ARCHITECTURE.md) - pretraining first-class contracts.
-- [`MOE_TRAINING_ARCHITECTURE.md`](MOE_TRAINING_ARCHITECTURE.md) - MoE training contracts.
+- [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md) - MoE training contracts.
 - [`TRAINING_BACKEND_REGISTRY.md`](TRAINING_BACKEND_REGISTRY.md) - backend manifest + inventory.
-- [`TRAINING_OBJECTIVES.md`](TRAINING_OBJECTIVES.md) - the shipped objective registry.
+- [Training Objectives](#training-objectives) - the shipped objective registry.
 - [`RUN_PLAN_PHYSICAL_EXECUTION.md`](RUN_PLAN_PHYSICAL_EXECUTION.md) - parallelism/placement contract.
 - [`PARAMETER_ACCOUNTING.md`](PARAMETER_ACCOUNTING.md) - dense/MoE-safe parameter evidence.
 - [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md) - the dense-safe foundational-contract mandate.
 - [`PRODUCT_VS_RESEARCH.md`](PRODUCT_VS_RESEARCH.md) - standard / verified / sealed-research boundary.
+
+---
+
+## Training Objectives
+
+_Consolidated from the former `docs/TRAINING_OBJECTIVES.md`._
+
+CorpusStudio has a versioned, dependency-light `TrainingObjective` registry that describes **what a
+run is meant to optimize**, independently from the backend that might implement it. A registry entry
+is not a support claim: a backend manifest is only a static declaration, and a compatible
+`CapabilityReport` must explicitly prove the objective capability before the compatibility report can
+say `verified_compatible`.
+
+### Built-in catalog
+
+The registry contains 29 sealed definitions:
+
+- language-model training: `pretraining`, `continued_pretraining`, `full_parameter_sft`, `lora`,
+  `qlora`, `other_peft`, `chat_tuning`, `completion_only`, `response_only_loss`, and `tool_use`;
+- preference and reward: `dpo`, `ipo`, `kto`, `orpo`, and `reward_model`;
+- distillation and supervision: `knowledge_distillation`, `sequence_distillation`,
+  `logit_distillation`, `rationale_distillation`, `process_supervision`, and `verifier_training`;
+- task-specific training: `embedding`, `reranker`, `classifier`, and `multimodal`;
+- non-training operations: `evaluation_only`, `merge_only`, `conversion_only`, and
+  `quantization_only`.
+
+Every definition has an `objective_version` and a canonical SHA-256 `objective_hash`. The hash seals
+the complete definition except the hash field itself. Catalog loading rejects duplicate id/version
+pairs and invalid seals.
+
+### What an objective records
+
+Each `TrainingObjective` explicitly defines:
+
+- accepted dataset schema ids and versions, required fields/types, dataset format, and whether the
+  schema is built-in, structural, or only planned;
+- label construction, loss-mask construction, and separately keyed loss components;
+- compatible model task classes and execution kinds;
+- adaptation methods and a semantic update policy;
+- backend task/loss/adapter/quantization requirements plus objective capability tokens;
+- expected artifacts, exact/fork/restart resume semantics, evaluation requirements, qualitative
+  hardware implications, limitations, and independent definition/implementation/hardware evidence.
+
+The `TaskType` enum remains only a coarse bridge. It is not the objective identity.
+
+A loss component's `default_weight` is optional by design. A numeric value is the objective's
+declared default coefficient; `None` means the objective intentionally leaves that coefficient
+unspecified. Omitted and explicit `None` values therefore deserialize identically and cannot silently
+become `1.0` across an `exclude_none` protocol round trip. Built-in objectives that require unit
+weight record `1.0` explicitly.
+
+### MoE-safe update semantics
+
+The objective contract does not assume every parameter is active, resident, exposed, or updated.
+Update scopes can distinguish shared parameters, adapters, router, selected experts, all experts,
+embeddings, heads, and projectors. Router-only and expert-selective policies are independently
+representable. Expert-scoped updates require stable expert identity and per-expert exposure tracking;
+the contract also carries optimizer-clock, starvation-gate, and routing-collapse requirements.
+
+This is semantic intent only. Device placement, residency, prefetch, storage tiering, and physical
+scheduling remain future `RunPlan` responsibilities.
+
+### Compatibility evidence
+
+`ObjectiveCompatibilityReport` keeps three independent axes:
+
+- **dataset**: accepted schema id/version plus required declared fields/types; objectives with more
+  than one input stay unverified until role-keyed evidence is available;
+- **model**: `ModelDescriptor` task class, topology, tokenizer/head evidence, trust policy, and any
+  router/expert requirements;
+- **backend**: `BackendManifest` task/loss/adapter/objective declarations, optionally intersected with
+  a measured, matching-backend-version `CapabilityReport`.
+
+Statuses are `declared_compatible`, `verified_compatible`, `incompatible`, `unverified`, and
+`not_applicable`. Any contradiction makes the overall result incompatible; any evidence gap makes it
+unverified. A static backend match can earn only `declared_compatible`. Package installation, config
+generation, broad task support, or a lower-level kernel probe never proves an objective.
+
+The current built-in backends statically declare causal-LM SFT plus LoRA/QLoRA capability tokens.
+Current host capability probes do not claim an end-to-end objective execution token, so supplying one
+of today's reports will remain unverified at that axis until a dedicated objective probe is added.
+
+### CLI
+
+```powershell
+corpus-studio training-objectives
+corpus-studio training-objectives qlora --json
+corpus-studio training-objective-check qlora --schema instruction --backend corpus_studio --json
+corpus-studio training-objective-check logit_distillation --schema logit_distillation --schema-version 1.0.0 --fields input_ids:list,teacher_logits:object
+```
+
+Built-in schemas automatically provide their version and fields. `--schema-version VERSION` and
+`--fields name:type,...` provide explicit evidence for non-built-in shapes. `--model-descriptor FILE`
+adds structural model evidence. `--capability-report FILE` adds measured backend evidence and must pin
+the selected manifest's backend version. The checker does not predict hardware fit; only a measured
+run can prove fit.
+
+### Deliberate non-goals of this slice
+
+- No objective is added to `RunPlan` yet; that belongs to the planned RunPlan-expansion phase.
+- No DPO/reward/distillation/MoE trainer is implemented by catalog presence.
+- No model loading, training, network access, physical scheduling, parameter-count production, or
+  checkpoint expansion is performed here. The later generalized trace contract now ships separately
+  as `TraceRecord`; catalog presence still does not implement process/tool/verifier trainers.
+- The existing advisory `training-compat` command remains separate.

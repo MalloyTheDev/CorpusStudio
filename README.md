@@ -115,7 +115,7 @@ installed external trainer:
 - Evaluation Suites: named, reusable multi-case suites (dataset × model × metric)
   with a per-metric verdict and optional dataset-`version_id`-pinned cases, run from
   the `suite-*` CLI or the desktop Suites tab. See
-  [`docs/EVALUATION_SUITES.md`](docs/EVALUATION_SUITES.md)
+  [`docs/EVALUATION_STUDIO.md`](docs/EVALUATION_STUDIO.md)
 - review-first AI Assist with a persistent accept/reject queue, saved
   views, bulk triage with undo, and resumable rewrite batches — every AI
   suggestion is review-required and never auto-accepted. AI-generated candidate
@@ -177,11 +177,11 @@ installed external trainer:
   while keeping runtime capability unverified; no model code is imported and no loadability/backend/
   fit/residency claim is made (see
   [`docs/MODEL_TOKENIZER_CONTRACTS.md`](docs/MODEL_TOKENIZER_CONTRACTS.md) and
-  [`docs/MOE_MODEL_INSPECTION.md`](docs/MOE_MODEL_INSPECTION.md))
+  [`docs/MOE_ARCHITECTURE.md`](docs/MOE_ARCHITECTURE.md))
 - a 29-entry, hash-sealed `TrainingObjective` registry describes datasets, labels, masks, losses,
   model/update/backend requirements, artifacts, resume/evaluation, and MoE-safe router/expert intent
   independently from backend implementation; its checker keeps declarations separate from measured
-  capability evidence (see [`docs/TRAINING_OBJECTIVES.md`](docs/TRAINING_OBJECTIVES.md))
+  capability evidence (see [`docs/TRAINING_SYSTEMS_ARCHITECTURE.md`](docs/TRAINING_SYSTEMS_ARCHITECTURE.md))
 - a hash-sealed, MoE-safe parameter-accounting boundary keeps logical, active, resident, touched,
   updated, and exposed coordinates distinct; static descriptor/safetensors evidence and typed runtime
   reconciliation surface explicit gaps/conflicts without converting storage elements or allocator
@@ -287,12 +287,12 @@ For what is implemented today, see [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.
 [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md), [`docs/ROADMAP.md`](docs/ROADMAP.md),
 and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-For hands-on setup, see [`docs/DEVELOPMENT_SETUP.md`](docs/DEVELOPMENT_SETUP.md).
+For hands-on setup, see [`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md).
 For every engine command (the desktop shells out to the same ones), see the
 [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md).
 For copyable row formats, see [`docs/SCHEMA_SYSTEM.md`](docs/SCHEMA_SYSTEM.md) and
 the per-schema reference in [`docs/schemas/`](docs/schemas/README.md).
-For dataset card output, see [`docs/DATASET_CARD.md`](docs/DATASET_CARD.md).
+For dataset card output, see [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md).
 For provider generation policy and gates, see
 [`docs/PROVIDER_POLICY.md`](docs/PROVIDER_POLICY.md) and
 [`docs/GATES.md`](docs/GATES.md).

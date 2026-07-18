@@ -105,7 +105,7 @@ resulting features in full.
   per-metric verdict and optional `version_id`-pinned cases (engine + `suite-*` CLI +
   desktop **Suites** tab); a conversation-structure chat gate (`chat-gate` + desktop
   button). Plus auto-capture of a dataset version after an import commit. See
-  [`EVALUATION_SUITES.md`](EVALUATION_SUITES.md) and [`GATES.md`](GATES.md).
+  [`EVALUATION_STUDIO.md`](EVALUATION_STUDIO.md) and [`GATES.md`](GATES.md).
 
 ## Next
 
@@ -130,12 +130,12 @@ input side. Ordered:
   structural expert-instance evidence. This does not load/train/edit models or tokenizers, prove
   backend support, populate active/resident parameter coordinates, or establish MoE runtime
   capability. See [`MODEL_TOKENIZER_CONTRACTS.md`](MODEL_TOKENIZER_CONTRACTS.md) and
-  [`MOE_MODEL_INSPECTION.md`](MOE_MODEL_INSPECTION.md).
+  [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md).
 - ✅ **TrainingObjective contract + registry foundation** — 29 hash-sealed, backend-independent
   definitions with dataset/label/mask/loss semantics, MoE-safe update scope/exposure rules, artifacts,
   resume/eval/hardware implications, and conservative dataset/model/backend compatibility axes. This
   does not yet wire an objective into `RunPlan` or add trainer implementations. See
-  [`TRAINING_OBJECTIVES.md`](TRAINING_OBJECTIVES.md).
+  [`TRAINING_SYSTEMS_ARCHITECTURE.md`](TRAINING_SYSTEMS_ARCHITECTURE.md).
 - ✅ **Parameter-accounting evidence foundation** — sealed dense/MoE-safe reports, bounded static
   descriptor/safetensors evidence, typed runtime observations, strict reconciliation, explicit
   gaps/conflicts, and lifecycle refs. Backend workers still need real coordinate instrumentation. See
@@ -179,7 +179,7 @@ input side. Ordered:
   commands behind `IEngineService`/`IDialogService`/`IFilePickerService`); the remaining handlers
   need a process-streaming seam, timer decoupling, and undo-state migration, after which Fluent-theme
   styling and per-OS packaging follow. See [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md)
-  and [`CROSS_PLATFORM_ASSESSMENT.md`](CROSS_PLATFORM_ASSESSMENT.md).
+  and [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md).
 - Smaller: dataset-version reorder detection and a normalized row identity. (Row-store GC,
   PII redaction on export, and the desktop gate-threshold editor now ship.)
 
@@ -191,7 +191,7 @@ post-training, distillation, dense + MoE, single-device + distributed, multiple 
 adapters). The foundational contracts are already dense-safe / MoE-safe; the work is **additive**. See
 [`TRAINING_SYSTEMS_ARCHITECTURE.md`](TRAINING_SYSTEMS_ARCHITECTURE.md),
 [`PRETRAINING_ARCHITECTURE.md`](PRETRAINING_ARCHITECTURE.md),
-[`MOE_TRAINING_ARCHITECTURE.md`](MOE_TRAINING_ARCHITECTURE.md), and
+[`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md), and
 [`TRAINING_BACKEND_REGISTRY.md`](TRAINING_BACKEND_REGISTRY.md). Sequence:
 
 - **P0** — contracts + capability registry + authority cleanup (`SupportLevel` coexisting rollup,

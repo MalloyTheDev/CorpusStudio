@@ -140,7 +140,7 @@ per-item error isolation, and off-thread document opens.
   with a **per-metric** roll-up and an aggregate pass/warn/block verdict. Reuses the
   eval run + evaluation gate (no new scoring); per-case failure isolation; each case
   records its dataset fingerprint; advisory by default, `--strict` exits 2 on block.
-  Never folds non-comparable metric scales. See [`EVALUATION_SUITES.md`](EVALUATION_SUITES.md).
+  Never folds non-comparable metric scales. See [`EVALUATION_STUDIO.md`](EVALUATION_STUDIO.md).
   A per-project `evaluation_suites/` **registry** (`suite-init` / `suite-list` /
   `suite-run` by name), a desktop **Suites** tab (list / run / view), and
   **`version_id`-pinned cases** (a case re-evaluates the verified reconstruction of a
@@ -295,7 +295,7 @@ per-item error isolation, and off-thread document opens.
   MoE-like unsupported families are never guessed. This is **not** model loading, tokenizer
   training/editing, MoE execution, backend support proof, parameter-coordinate activity/residency, or
   hardware-fit proof. See [`MODEL_TOKENIZER_CONTRACTS.md`](MODEL_TOKENIZER_CONTRACTS.md) and
-  [`MOE_MODEL_INSPECTION.md`](MOE_MODEL_INSPECTION.md) for the exact static evidence boundary.
+  [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md) for the exact static evidence boundary.
 - **Training objective foundation** (`training-objectives` / `training-objective-check`): a
   hash-sealed registry of 29 backend-independent definitions spanning pretraining, full/adapter SFT,
   completion/response masks, preference and reward optimization, four distillation modes,
@@ -308,7 +308,7 @@ per-item error isolation, and off-thread document opens.
   compatibility report keeps dataset/model/backend evidence independent: a static manifest can earn
   only `declared_compatible`; installed packages or broad `TaskType` support never become verified
   objective support. This does **not** modify `RunPlan` or add new trainers. See
-  [`TRAINING_OBJECTIVES.md`](TRAINING_OBJECTIVES.md).
+  [`TRAINING_SYSTEMS_ARCHITECTURE.md`](TRAINING_SYSTEMS_ARCHITECTURE.md).
 - **MoE-safe parameter-accounting foundation** (`model-inspect --parameter-accounting` /
   `parameter-account`): a hash-sealed `ParameterAccountingReport` keeps logical, per-token,
   per-sequence, touched, resident, updated, exposed, and optional effective counts distinct. Every

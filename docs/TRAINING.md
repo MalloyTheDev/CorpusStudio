@@ -382,7 +382,7 @@ not "this run will succeed".
 > needs `transformers`) is a follow-up. As of v0.5 the desktop can also launch the
 user's installed trainer from that command (with explicit confirmation), stream
 logs, stop it, track checkpoints, resume, and compare before/after evaluations —
-see the [Training Launcher Design](#training-launcher-design-v05) section below.
+see the [Training Launcher Design](#external-training-launcher-design-v05) section below.
 
 **Reproducibility manifest.** Each run record (`training_runs/<run_id>.json`) now captures a
 `provenance` manifest at run start: the engine's canonical **dataset fingerprint** + row count
