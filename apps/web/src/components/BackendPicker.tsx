@@ -21,6 +21,7 @@ export function BackendPicker({
   busy?: boolean;
 }) {
   const [backends, setBackends] = useState<BackendManifest[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const reqs = useMemo(() => planRequirements(snap), [snap]);
   // The picked backend follows the resolved plan, so a live re-plan keeps the selection in sync.
   const picked = snap.plan.backend_ref.id;
@@ -28,7 +29,9 @@ export function BackendPicker({
   const selected = onPick ? picked : previewed;
 
   useEffect(() => {
-    loadBackends().then(setBackends);
+    loadBackends()
+      .then(setBackends)
+      .catch((e) => setError(String(e)));
   }, []);
 
   const choose = (backendId: string): void => {
@@ -36,6 +39,15 @@ export function BackendPicker({
     else setPreviewed(backendId);
   };
 
+  if (error) {
+    return (
+      <section className="cs-backends-section">
+        <div className="cs-error" role="alert">
+          Could not load backends: {error}
+        </div>
+      </section>
+    );
+  }
   if (!backends) return null;
   const pickedBackend = backends.find((b) => b.backend_id === selected) ?? null;
 
