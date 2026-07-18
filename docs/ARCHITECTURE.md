@@ -73,7 +73,7 @@ The desktop is a .NET solution with the UI logic being decomposed for cross-plat
   per-tab view-models (each `IXxxViewModel` + `XxxViewModel : ViewModelBase`), plus the head-agnostic
   seams — `IEngineService` (engine run-orchestration, faked in tests), `IDialogService`, and
   `IFilePickerService` — resolved via a DI container (each with a Core `Null*` default).
-- **`CorpusStudio.Desktop`** (`net8.0-windows`) — the shipping WPF head: Views + `App` + the WPF
+- **`CorpusStudio.Desktop`** (`net8.0-windows`) — the retiring WPF head (#545): Views + `App` + the WPF
   seam adapters (`MessageBoxDialogService`, `Win32FilePickerService`, `PythonEngineService`), referencing Core.
 - **`CorpusStudio.Avalonia`** (`net8.0`) — a proof cross-platform head binding the full tab set over
   the *unchanged* Core view-models (not shipped).

@@ -122,11 +122,11 @@ message rather than guessing.
 `dataset-version-restore` reconstructs a version's exact rows (manifest order,
 from the store) and writes them as JSONL to `--output`:
 
-- **The engine never writes `examples.jsonl`.** Restore targets an explicit
-  `--output` path and *refuses* if that path resolves to the project's
-  `examples.jsonl`. The long-standing boundary holds — the dataset has one
-  writer (the desktop); in-place restore is a deferred desktop capability. A
-  CLI user restores to another file and adopts it deliberately.
+- **`examples.jsonl` has one sanctioned writer — the engine.** By default restore
+  targets an explicit `--output` path (and refuses to resolve to `examples.jsonl`);
+  `--in-place` overwrites the dataset through the engine's single-writer
+  (`examples-append` / `storage/examples_writer.py`), capturing an undo version
+  first. The WPF/Avalonia desktop that historically owned the write is retiring (#545).
 - **Verified by default.** The reconstruction is re-fingerprinted and must equal
   the version's recorded `content_fingerprint` — because the row signature is
   idempotent on canonical rows, a faithful restore *must* reproduce it. On a
@@ -174,15 +174,15 @@ ordered manifest captured single-pass with the fingerprint
 **Implemented (v1.0.3, engine):** `dataset-version-restore`
 (`versions/version_restore.py`) — reconstruct a version's rows from the store to
 an `--output` file, verified against the recorded fingerprint (all-or-nothing,
-overwrite-safe, atomic). The engine still **never** writes `examples.jsonl`.
+overwrite-safe, atomic), or in place via `--in-place` (below).
 
-**Implemented (desktop in-place restore):** a confirmed "Restore this version"
-button captures the current dataset as an **undo** version first (and refuses if
-that undo isn't a genuine recovery point — e.g. the row store couldn't be
-written), then the engine reconstructs the selected version to a verified temp
-beside `examples.jsonl` and the desktop atomically swaps it in. Any failure
-before the swap leaves the dataset untouched; the engine still never writes
-`examples.jsonl`. The undo version stays in the history, so restoring it reverts.
+**Implemented (engine in-place restore, `--in-place`):** `dataset-version-restore
+--in-place` captures the current dataset as an **undo** version first (and refuses
+if that undo isn't a genuine recovery point — an unreadable dataset, or the row
+store couldn't be written), verifies the reconstruction, then atomically swaps it
+in through the single-writer lock (snapshot → verify → swap is one locked critical
+section). Any failure before the swap leaves the dataset untouched. The undo version
+stays in the history, so restoring it reverts.
 
 **Implemented (desktop diff view):** the Versions tab can compare two versions —
 "Set diff base" pins the selected version, then "Diff base → selected" renders the

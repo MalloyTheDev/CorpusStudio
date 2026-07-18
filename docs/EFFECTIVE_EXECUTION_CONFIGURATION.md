@@ -141,7 +141,7 @@ persists the terminal records under `RECORD_ROOT/runs/<run-id>/`.
 Exact source-run/checkpoint identity, optimizer/scheduler/RNG/sampler state, and fresh resumed-run
 lineage for first-party runs expected to exceed 30 minutes are tracked separately in issue #440.
 
-The shipping WPF/Avalonia desktop no longer constructs or launches `train-run`. A first-party config
+The retiring WPF/Avalonia desktop prototype (#545) no longer constructs or launches `train-run`. A first-party config
 export has no executable argv and directs the user to Platform planning. The retained low-level CLI
 command refuses unless `--allow-unsealed-direct-execution` is supplied; when explicitly used for
 development, it labels the result `UNSEALED_DIRECT_EXECUTION`, `NON_REPRODUCIBLE`, and

@@ -113,10 +113,10 @@ This stays inside the project's boundaries:
 
 - **Read-only and public-only** — no auth, no upload, no publishing. The engine
   makes a Hub network call only when you explicitly run these commands.
-- **The engine never writes `examples.jsonl`.** `hf-import` writes a *staging*
-  file (and refuses to target `examples.jsonl`); that file flows through the
-  normal import-preview → validate → quarantine path, where the **desktop** is
-  the single writer that appends accepted rows.
+- **`hf-import` writes a *staging* file** (and refuses to target `examples.jsonl`);
+  that file flows through the normal import-preview → validate → quarantine path.
+  Accepted rows are appended to `examples.jsonl` by the engine's sanctioned
+  single-writer, `examples-append` (atomic, locked, schema-validated).
 - **Gated / private datasets are refused** (they need auth — out of scope here).
 
 Pushing datasets *to* the Hub (export/publish) is deliberately **not** supported —

@@ -260,7 +260,7 @@ A **local-first AI dataset→model→evaluation lifecycle platform**. Three piec
 **The bigger picture (the end state).** CorpusStudio is becoming a complete **local-first,
 hardware-aware AI engineering platform** covering the whole lifecycle: raw sources → dataset
 construction (multiple training objectives, mixtures, reasoning/tool **traces**) → model + tokenizer
-management (a Model/Tokenizer Lab) → hardware- and storage-aware **run planning** → training through
+management (Model & Tokenizer) → hardware- and storage-aware **run planning** → training through
 **swappable, isolated backends** → live-telemetry supervision → checkpoint + **artifact lineage** →
 evaluation → deployment prep → reproducible experimentation. The **control plane stays lightweight and
 torch-free**; heavy frameworks live in **isolated worker environments** behind the versioned
@@ -269,8 +269,8 @@ concrete research North Star driving the contract design: **resource-elastic MoE
 ~30B-logical / 2–4B-active / 50–200M-resident model on consumer hardware
 (`N_resident << N_active << N_logical`), which is exactly why the foundational contracts must be
 MoE-safe *now*. The WBG-7B / RTX-5070 work is the **reference stress-test** that surfaces the generic
-requirements — not the product scope. The eventual shell strangles WPF → Avalonia (interim) → Tauri 2 +
-React, over the stable language-neutral contracts, with a progressively Rust-ified core.
+requirements — not the product scope. The eventual shell replaces the desktop prototype directly
+with Tauri 2 + React (#545), over the stable language-neutral contracts, with a Rust authoritative core (#522).
 
 The big epic (memory `platform-architecture-epic`). Non-negotiables the user has set:
 
@@ -332,8 +332,8 @@ schema-to-TypeScript regeneration drift checks, and C# + Python CodeQL.
 
 - License **fail-closed**; provenance gate; **"a completed step ≠ proven fit"**; **no silent target
   truncation**; **"installed ≠ supported"**; **no-shell argv** execution (installers/trainer launches
-  are `argv` lists, never shell strings); single-writer `examples.jsonl` (desktop is the only writer;
-  the engine refuses to write it); provider policy enforced **in the engine**, not just the UI.
+  are `argv` lists, never shell strings); single-writer `examples.jsonl` (the engine's `examples-append` /
+  `storage/examples_writer.py` is the sole sanctioned writer); provider policy enforced **in the engine**, not just the UI.
 - **Predicted fit is never `NATIVE_SAFE`** — only a *measured* run earns it (the calibrator/watchdog).
 - **Blackwell / sm_120**: the **math** attention path is the verified-safe default — the fused flash-SDPA
   kernel **deadlocks on the first backward under native-Windows WDDM** (high GPU util, low power). WSL

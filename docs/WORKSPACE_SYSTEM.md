@@ -25,7 +25,7 @@ A workspace is identified by a manifest at `.corpus/project.json`. It is the
 primary way to open a workspace, and it *points at* the authoritative dataset
 files (e.g. `examples_file`) without replacing them — the dataset content under
 the workspace root stays the source of truth, and `examples.jsonl` keeps its
-single writer (the desktop).
+single writer (now the engine's `examples-append`).
 
 Fields: `format` (`"corpus_studio_project"`), `format_version`, `project_id`,
 `name`, `schema_id`, `template_id`, `created_at`, `last_opened_at`,

@@ -3,7 +3,7 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-07-15 (through **v1.3** — Evaluation Suites & Chat Gates — plus the **platform
+Last reconciled: 2026-07-18 (through **v1.3** — Evaluation Suites & Chat Gates — plus the **platform
 run lifecycle** re-scope: profile → plan → predict-fit → run → measure-fit → artifacts, a multi-backend
 registry, and subprocess reliability. The pre-Phase-9B real GPU workload evidence remains historical
 native Windows/WDDM evidence. The managed native-Linux environments now separately seal the legacy
@@ -56,7 +56,7 @@ per-item error isolation, and off-thread document opens.
   `hf-import` fetch rows via the public datasets-server JSON API (stdlib urllib,
   no `datasets`/`huggingface_hub` dependency), map columns to a schema, and write
   a *staging* JSONL that flows through the normal import-preview/quarantine path —
-  the engine never writes `examples.jsonl`, gated/private datasets are refused, and
+  the engine's `examples-append` is the sanctioned single writer of `examples.jsonl`, gated/private datasets are refused, and
   the dataset license is surfaced with a "not assumed training-licensed" caveat. A
   desktop **Import from Hugging Face** dialog (inspect → pick config/split → map
   columns to the project schema → stage) drives it end to end through that same
@@ -420,8 +420,8 @@ per-item error isolation, and off-thread document opens.
   `dataset-version-diff` compares two versions (multiset added/removed/common +
   sample rows). `dataset-version-restore` reconstructs a version's rows to an
   `--output` file, verified against the recorded fingerprint (all-or-nothing,
-  atomic, overwrite-safe). The engine **refuses to write `examples.jsonl`** — the
-  dataset has one writer (the desktop).
+  atomic, overwrite-safe), or **in place** with `--in-place` (undo-captured). The
+  sanctioned single writer of `examples.jsonl` is the engine's `examples-append`.
 - A desktop **Versions** tab: read-only history with a live integrity badge, an
   opt-in **Capture version** button, **View card**, a **diff view** ("Set diff
   base" → "Diff base → selected"), and **Restore this version** (in-place). The
@@ -444,7 +444,7 @@ per-item error isolation, and off-thread document opens.
   caution), and the **Studio** (Dashboard, Writing Studio, Examples,
   Preference Review, Quarantine, Splits, Evaluation, AI Assist, Training, Arena,
   Artifacts, **Suites**, Versions, Debt, Settings) — a flat 15-tab strip in the
-  shipping WPF head, re-skinned to the **Nocturne** grouped workflow-phase sidebar
+  retiring WPF prototype head (#545), re-skinned to the **Nocturne** grouped workflow-phase sidebar
   (Overview · Author · Measure · Evaluate · Train) on the cross-platform Avalonia
   shell (see [`design/`](design/)). Both New Project entry points open the one
   wizard. See [`WORKSPACE_SYSTEM.md`](WORKSPACE_SYSTEM.md).
@@ -507,8 +507,8 @@ per-item error isolation, and off-thread document opens.
   exact backend/runner/environment/input/effective-configuration chain, use no shell, and write
   inspectable per-run metadata. No hidden lane switching.
 - The engine never moves, copies, or deletes the user's weight files or
-  `examples.jsonl` (reference paths only; the desktop is the single writer of
-  `examples.jsonl`).
+  `examples.jsonl` (reference paths only; the engine's `examples-append` is the
+  sanctioned single writer of `examples.jsonl`).
 - No silent cloud behavior, publishing, dataset upload, or auto-acceptance of
   AI-generated dataset rows. Provider permissions are enforced in the engine, not
   just the UI.
@@ -524,11 +524,10 @@ per-item error isolation, and off-thread document opens.
   does not execute a tokenizer, and the dependency-light core never makes a heavy tokenizer mandatory.
 - **HF export/push** (upload/publishing) — see the hard boundary above; it stays a
   deliberate non-goal for now. (Read-only Hub *import* already ships.)
-- **Finish the Avalonia port** — Phases 0–3 are done (all view-models extracted; the whole app
-  re-authored as `.axaml` over the shared `CorpusStudio.Core`); the **`ICommand` conversion is in
-  progress** (WPF code-behind engine handlers → shared testable commands behind `IEngineService`),
-  with the process-streaming/timer/undo-state handlers and Fluent-theme styling + per-OS packaging
-  still to do. The Avalonia head is not shipped yet. See `AVALONIA_MIGRATION_PLAN.md`.
+- **Decommission the WPF/Avalonia desktop** — it is a retiring prototype (#545); the target UI is the
+  **Tauri 2 + React** frontend (`apps/web`). Dataset authoring is being re-homed to the engine CLI
+  first (`examples-append`, in-place restore — #546, done), then `apps/desktop` is removed. See
+  `AVALONIA_MIGRATION_PLAN.md` (superseded, kept as history).
 - Dataset-version **reorder detection** and a normalized row identity are still future.
 
   _Previously listed here but now **shipped** (see `CLI_REFERENCE.md`): row-store garbage collection

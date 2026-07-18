@@ -1,5 +1,9 @@
 # Avalonia Migration — Execution Plan
 
+> **SUPERSEDED (2026-07-18) by the desktop-decommission decision (#545; Phase-0 record PR #555).**
+> The target UI is **Tauri 2 + React** (`apps/web`); the WPF/Avalonia desktop is being removed, not
+> ported. This plan is preserved as history.
+
 **The companion [Cross-Platform Assessment](#cross-platform-assessment-avalonia-migration) is consolidated at the end of this doc.** The assessment
 answers *whether/why* (yes, eventually; Avalonia; decompose first). This document is the *how* — a
 concrete, phased, slice-by-slice plan grounded in the current decomposition state.

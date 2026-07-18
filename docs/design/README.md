@@ -58,4 +58,4 @@ The Nocturne re-skin has landed across the cross-platform (Avalonia) shell:
   Dashboard recent-activity feed, the Splits proportion bar, and the docked-console styling.
 
 The interim Avalonia head is being matured to this design so it ports ~1:1 toward the Tauri/React
-endpoint. See [`AVALONIA_MIGRATION_PLAN.md`](AVALONIA_MIGRATION_PLAN.md).
+endpoint. See [`AVALONIA_MIGRATION_PLAN.md`](../AVALONIA_MIGRATION_PLAN.md).
