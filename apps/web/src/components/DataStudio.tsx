@@ -3,23 +3,29 @@ import {
   appendRows,
   createProject,
   datasetDebt,
+  gateRun,
   importCommit,
   importPreview,
   listProjects,
   listSchemas,
   previewRows,
   projectDir,
+  quality,
   type AppendResult,
   type DatasetSchema,
   type DebtReport,
+  type GateReport,
   type ImportCommitResult,
   type PreviewReport,
   type ProjectList,
   type ProjectSummary,
+  type QualityReport,
 } from "../platform/dataStudio";
 import { Card, Chip, type Tone } from "./ui";
 
 const GRADE_TONE: Record<string, Tone> = { A: "ok", B: "ok", C: "warn", D: "warn", F: "bad" };
+const SEV_TONE: Record<string, Tone> = { critical: "bad", high: "bad", medium: "warn", low: "neutral" };
+const GATE_TONE: Record<string, Tone> = { pass: "ok", warn: "warn", block: "bad" };
 
 /** Data Studio: create a project, author rows, validate them, and commit through the engine's
  *  sanctioned single writer (examples-append). Real engine data — no sample. */
@@ -36,10 +42,12 @@ export function DataStudio({ live }: { live: boolean }) {
   const [newSchema, setNewSchema] = useState("instruction");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<"author" | "import">("author");
+  const [tab, setTab] = useState<"author" | "import" | "quality">("author");
   const [importPath, setImportPath] = useState("");
   const [importPrev, setImportPrev] = useState<PreviewReport | null>(null);
   const [importResult, setImportResult] = useState<ImportCommitResult | null>(null);
+  const [qualityReport, setQualityReport] = useState<QualityReport | null>(null);
+  const [gateReport, setGateReport] = useState<GateReport | null>(null);
 
   useEffect(() => {
     if (!live) return;
@@ -57,6 +65,8 @@ export function DataStudio({ live }: { live: boolean }) {
     setAppended(null);
     setImportPrev(null);
     setImportResult(null);
+    setQualityReport(null);
+    setGateReport(null);
     setError(null);
     if (list) {
       try {
@@ -141,6 +151,32 @@ export function DataStudio({ live }: { live: boolean }) {
       setImportResult(await importCommit(projectDir(list, selected), importPath.trim()));
       setImportPrev(null);
       await loadDebt(selected, list);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onRunQuality = async (): Promise<void> => {
+    if (!selected || !list) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setQualityReport(await quality(projectDir(list, selected)));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onRunGates = async (): Promise<void> => {
+    if (!selected || !list) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setGateReport(await gateRun(projectDir(list, selected), selected.schema_id));
     } catch (e) {
       setError(String(e));
     } finally {
@@ -236,6 +272,14 @@ export function DataStudio({ live }: { live: boolean }) {
             >
               Import file
             </button>
+            <button
+              className={`cs-seg${tab === "quality" ? " on" : ""}`}
+              role="tab"
+              aria-selected={tab === "quality"}
+              onClick={() => setTab("quality")}
+            >
+              Quality
+            </button>
           </div>
 
           {tab === "author" ? (
@@ -282,7 +326,9 @@ export function DataStudio({ live }: { live: boolean }) {
                 </p>
               ) : null}
             </>
-          ) : (
+          ) : null}
+
+          {tab === "import" ? (
             <>
               <label className="cs-field">
                 <span>Source file path (JSONL, CSV, TSV, or Parquet)</span>
@@ -332,7 +378,67 @@ export function DataStudio({ live }: { live: boolean }) {
                 </p>
               ) : null}
             </>
-          )}
+          ) : null}
+
+          {tab === "quality" ? (
+            <>
+              <div className="cs-actions">
+                <button className="cs-btn" disabled={busy} onClick={() => void onRunQuality()}>
+                  Run quality report
+                </button>
+                <button className="cs-btn" disabled={busy} onClick={() => void onRunGates()}>
+                  Run gates
+                </button>
+              </div>
+
+              {debt && debt.items.length > 0 ? (
+                <div className="cs-ledger">
+                  {debt.items.map((it) => (
+                    <div key={it.category} className="cs-ledger-item">
+                      <Chip tone={SEV_TONE[it.severity] ?? "neutral"}>{it.severity}</Chip>
+                      <span className="cs-ledger-msg">{it.message}</span>
+                      <span className="cs-note">{it.remediation}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : debt ? (
+                <p className="cs-note">No outstanding debt items.</p>
+              ) : null}
+
+              {gateReport ? (
+                <div className="cs-gates">
+                  <Chip tone={GATE_TONE[gateReport.overall_status] ?? "neutral"}>
+                    Gates: {gateReport.overall_status}
+                  </Chip>
+                  <span className="cs-note">
+                    {gateReport.pass_count} pass · {gateReport.warn_count} warn · {gateReport.block_count} block
+                  </span>
+                  {gateReport.results
+                    .filter((r) => r.status !== "pass")
+                    .map((r) => (
+                      <div key={r.gate_id} className="cs-note">
+                        <Chip tone={GATE_TONE[r.status] ?? "neutral"}>{r.status}</Chip> {r.name}: {r.message}
+                      </div>
+                    ))}
+                </div>
+              ) : null}
+
+              {qualityReport ? (
+                <div className="cs-quality">
+                  <div className="cs-note">
+                    {qualityReport.duplicate_exact_count} exact-dup · {qualityReport.duplicate_normalized_count} near-dup ·{" "}
+                    {qualityReport.low_information_count} low-info · {qualityReport.empty_row_count} empty
+                  </div>
+                  {qualityReport.pii_findings.map((p) => (
+                    <div key={`${p.kind}-${p.sample}`} className="cs-note">
+                      <Chip tone={SEV_TONE[p.severity] ?? "warn"}>{p.kind}</Chip> {p.match_count} match(es), row(s){" "}
+                      {p.row_numbers.join(", ")} — {p.sample}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : null}
         </Card>
       ) : null}
     </div>

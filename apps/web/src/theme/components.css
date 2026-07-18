@@ -402,3 +402,7 @@
 .cs-btn.primary:hover { background: var(--cs-accent-strong); }
 .cs-btn:disabled { opacity: .5; cursor: not-allowed; }
 .cs-tabs { margin: 6px 0 12px; }
+.cs-ledger { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.cs-ledger-item { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cs-ledger-msg { color: var(--cs-text); }
+.cs-gates, .cs-quality { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
