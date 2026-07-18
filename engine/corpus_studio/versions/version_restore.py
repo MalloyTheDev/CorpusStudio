@@ -11,8 +11,8 @@ byte-identical to the original file — the fingerprint match proves the rows ar
 *semantically* identical, which is the honest promise.
 
 This module is pure (no file writes). The CLI performs the atomic write to an
-``--output`` path and never touches ``examples.jsonl`` — in-place restore is a
-desktop operation.
+``--output`` path, or in-place to ``examples.jsonl`` via the sanctioned
+single-writer (``--in-place``, which captures an undo version first).
 """
 
 from __future__ import annotations
@@ -32,6 +32,8 @@ class RestoreResult(BaseModel):
     verified: bool
     verify_skipped: bool
     output_path: str
+    in_place: bool = False
+    undo_version_id: str | None = None
 
 
 def reconstruct_and_verify(
