@@ -13,3 +13,25 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+
+  # apps/web frontend (React / Vite / Tauri JS deps).
+  - package-ecosystem: "npm"
+    directory: "/apps/web"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      web-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # apps/web Tauri Rust shell (src-tauri Cargo deps).
+  - package-ecosystem: "cargo"
+    directory: "/apps/web/src-tauri"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      tauri-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
