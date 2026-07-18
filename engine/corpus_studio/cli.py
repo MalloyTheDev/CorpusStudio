@@ -2519,6 +2519,110 @@ def import_convert(path: Path, output_path: Path):
     )
 
 
+@app.command("examples-append")
+def examples_append(
+    project_dir: Path,
+    from_file: Path = typer.Option(
+        ..., "--from", help="JSONL file whose rows to append to the project's examples.jsonl."
+    ),
+    schema: Optional[str] = typer.Option(
+        None, "--schema", help="Schema id to validate against (default: the project's schema_id)."
+    ),
+    skip_invalid: bool = typer.Option(
+        False,
+        "--skip-invalid",
+        help="Skip rows that fail schema validation (each reported) instead of refusing the whole append.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+):
+    """Append validated rows to a project's examples.jsonl - the sanctioned single writer.
+
+    Rows are validated against the project schema (or --schema). By default an
+    invalid row refuses the whole append (nothing written) and every failure is
+    reported - no silent truncation; with --skip-invalid, invalid rows are skipped
+    (and reported) and only the valid rows are appended. The write is atomic (a
+    reader never sees a partial file) and single-writer (an advisory lock).
+    """
+
+    from corpus_studio.storage.examples_writer import (
+        ExamplesLockedError,
+        append_examples,
+        examples_path,
+    )
+    from corpus_studio.validators.basic_validator import validate_jsonl_row
+
+    if not project_dir.is_dir():
+        typer.echo(f"Project directory '{project_dir}' does not exist.", err=True)
+        raise typer.Exit(code=1)
+
+    schema_id = schema
+    if schema_id is None:
+        project_json = project_dir / "project.json"
+        if project_json.exists():
+            try:
+                schema_id = json.loads(project_json.read_text(encoding="utf-8")).get("schema_id")
+            except (OSError, ValueError):
+                schema_id = None
+    if not isinstance(schema_id, str) or not schema_id:
+        typer.echo(
+            "No schema: pass --schema, or run in a project whose project.json has a schema_id.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    try:
+        load_builtin_schema(schema_id)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    try:
+        rows = list(read_jsonl(from_file))
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    valid_rows: list[Any] = []
+    invalid: list[dict[str, Any]] = []
+    for number, row in enumerate(rows, start=1):
+        issues = validate_jsonl_row(row, schema_id, number)
+        if issues:
+            invalid.append({"row_number": number, "issues": [issue.message for issue in issues]})
+        else:
+            valid_rows.append(row)
+
+    if invalid and not skip_invalid:
+        typer.echo(
+            f"Refusing to append: {len(invalid)} of {len(rows)} row(s) fail the '{schema_id}' "
+            "schema (nothing written). Fix them, or pass --skip-invalid to append the valid rows.",
+            err=True,
+        )
+        for entry in invalid[:20]:
+            typer.echo(f"  row {entry['row_number']}: {'; '.join(entry['issues'])}", err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        appended = append_examples(project_dir, valid_rows) if valid_rows else 0
+    except ExamplesLockedError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    result = {
+        "examples_path": str(examples_path(project_dir)),
+        "appended": appended,
+        "skipped_invalid": len(invalid),
+        "schema_id": schema_id,
+    }
+    if as_json:
+        typer.echo(json.dumps(result, indent=2))
+    else:
+        message = f"Appended {appended} row(s) to {result['examples_path']}"
+        if invalid:
+            message += f" (skipped {len(invalid)} invalid)"
+        typer.echo(message)
+    for entry in invalid[:20]:
+        typer.echo(f"  skipped row {entry['row_number']}: {'; '.join(entry['issues'])}", err=True)
+
+
 @app.command("hf-inspect")
 def hf_inspect(dataset_id: str):
     """Inspect a public Hugging Face dataset: configs/splits, columns, and license.
