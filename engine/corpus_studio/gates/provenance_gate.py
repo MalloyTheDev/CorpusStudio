@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from enum import Enum
 from pathlib import Path
 
@@ -46,21 +47,22 @@ UNTAGGED_LABEL = "(untagged)"
 # The role whose licensing terms this gate enforces (shown in the report header).
 CHECKED_ROLE = ProviderRole.TRAINABLE_OUTPUT_GENERATOR.value
 
-# Vendor prefixes → provider ids, so a bare model string (``claude-opus-4-8``,
-# ``gpt-4o``) resolves to the provider whose policy the gate then applies. Only
-# providers present in the policy table are *confidently* quarantined; anything
-# else falls through to UNKNOWN (quarantine-until-verified), never a false PASS.
-_MODEL_PREFIX_PROVIDERS: tuple[tuple[str, str], ...] = (
-    ("claude", "anthropic"),
-    ("gpt", "openai"),
-    ("chatgpt", "openai"),
-    ("o1", "openai"),
-    ("o3", "openai"),
-    ("o4", "openai"),
-    ("text-davinci", "openai"),
-    ("davinci", "openai"),
-    ("gemini", "google"),
-    ("palm", "google"),
+# Bare model string (``claude-opus-4-8``, ``gpt-4o``) → provider id, so the gate can apply that
+# provider's policy. These are VERSION-SHAPED / word-boundary matches, NOT a bare ``startswith``: the
+# proprietary GPT API family is ``gpt-3``/``gpt-4``/``gpt-5``… so open GPT-family weights (``gpt-neo``,
+# ``gpt-j``, ``gpt-neox``, ``gpt2``, ``gpt-2``) are NOT mislabeled as OpenAI and falsely quarantined -
+# they fall through to UNKNOWN (quarantine-until-verified, allow-listable), which is honest. The
+# ``o1``/``o3``/``o4`` reasoning models and ``davinci`` require a boundary too, so ``o1``/``olmo`` and a
+# stray ``davinci…`` token don't over-match. Only providers in the policy table are confidently
+# quarantined; anything else is UNKNOWN, never a false PASS.
+_MODEL_PROVIDER_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"claude"), "anthropic"),
+    (re.compile(r"chatgpt"), "openai"),
+    (re.compile(r"gpt-[3-9]"), "openai"),  # gpt-3(.5) / gpt-4(o) / gpt-5… (not gpt2, gpt-2, gpt-neo, gpt-j)
+    (re.compile(r"o[1-9](?:[-.]|$)"), "openai"),  # o1 / o3 / o4 reasoning models (incl. -preview/-mini)
+    (re.compile(r"(?:text-)?davinci(?:[-.]|$)"), "openai"),
+    (re.compile(r"gemini"), "google"),
+    (re.compile(r"palm(?:[-.\d]|$)"), "google"),  # palm / palm-2 / palm2 (not palmyra)
 )
 # Fully-qualified ``vendor/model`` prefixes (as used in ``meta.teacher`` tags).
 _VENDOR_ALIASES: dict[str, str] = {
@@ -146,8 +148,8 @@ def _provider_for_teacher(teacher: str) -> str:
     if "/" in normalized:
         prefix = normalized.split("/", 1)[0]
         return _VENDOR_ALIASES.get(prefix, prefix)
-    for prefix, provider in _MODEL_PREFIX_PROVIDERS:
-        if normalized.startswith(prefix):
+    for pattern, provider in _MODEL_PROVIDER_PATTERNS:
+        if pattern.match(normalized):
             return provider
     return _VENDOR_ALIASES.get(normalized, normalized)
 
