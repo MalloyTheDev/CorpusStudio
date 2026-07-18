@@ -33,9 +33,11 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install schema generator dependencies
-        # JSON Schema details can change across pydantic releases. Pin the generator runtime so the
-        # committed schema/client diff gate is reproducible; bump intentionally with regenerated files.
-        run: python -m pip install "pydantic==2.13.4"
+        # JSON Schema details can change across pydantic releases. Install pydantic from the shared
+        # engine/constraints.txt so this generator runtime and the engine test job (engine-tests.yml)
+        # use the SAME pinned pydantic, keeping the committed schema/client diff gate reproducible.
+        # Bump the version in that one file (regenerating the committed contracts in the same PR).
+        run: python -m pip install -c "$GITHUB_WORKSPACE/engine/constraints.txt" pydantic
       - name: Install (locked)
         run: npm ci
       - name: Regenerate language-neutral schemas
