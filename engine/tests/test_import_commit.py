@@ -109,3 +109,70 @@ def test_import_commit_holds_lock_across_version_capture(tmp_path, monkeypatch):
     result = runner.invoke(app, ["import-commit", str(project), "--from", str(src), "--json"])
     assert result.exit_code == 1  # the inner re-acquire raises ExamplesLockedError -> exit 1
     assert _rows(project) == VALID  # the append still happened, before the capture attempt
+
+
+# --- --quarantine (#579, G4) ------------------------------------------------------------------
+
+INVALID = {"instruction": "no output"}  # missing 'output' -> fails the instruction schema
+
+
+def _quarantine_files(project: Path) -> list[Path]:
+    qdir = project / "import_quarantine"
+    return sorted(qdir.glob("*.jsonl")) if qdir.exists() else []
+
+
+def test_quarantine_persists_rejected_rows_with_content_and_reasons(tmp_path: Path):
+    project = _project(tmp_path)
+    src = _staging(tmp_path, [VALID[0], INVALID, VALID[1]])
+    result = runner.invoke(
+        app, ["import-commit", str(project), "--from", str(src), "--quarantine", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["committed"] == 2 and payload["rejected"] == 1
+    assert payload["quarantine_path"] is not None
+    # the good rows still commit
+    assert _rows(project) == VALID
+    # the rejected row is persisted with its ORIGINAL content + reasons, ready for repair
+    quarantined = [json.loads(line) for line in Path(payload["quarantine_path"]).read_text().splitlines()]
+    assert len(quarantined) == 1
+    entry = quarantined[0]
+    assert entry["row_number"] == 2 and entry["row"] == INVALID and entry["issues"]
+
+
+def test_no_quarantine_dir_without_the_flag(tmp_path: Path):
+    project = _project(tmp_path)
+    src = _staging(tmp_path, [VALID[0], INVALID])
+    result = runner.invoke(app, ["import-commit", str(project), "--from", str(src), "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["rejected"] == 1 and payload["quarantine_path"] is None
+    assert _quarantine_files(project) == []
+    # but the operator is told the reject can be saved
+    assert "--quarantine" in result.output
+
+
+def test_quarantine_when_nothing_commits(tmp_path: Path):
+    project = _project(tmp_path)
+    src = _staging(tmp_path, [INVALID, INVALID])
+    result = runner.invoke(
+        app, ["import-commit", str(project), "--from", str(src), "--quarantine", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["committed"] == 0 and payload["rejected"] == 2
+    assert payload["quarantine_path"] is not None
+    quarantined = [json.loads(line) for line in Path(payload["quarantine_path"]).read_text().splitlines()]
+    assert len(quarantined) == 2  # every reject is saved, even when nothing commits
+
+
+def test_quarantine_flag_writes_nothing_when_all_rows_valid(tmp_path: Path):
+    project = _project(tmp_path)
+    src = _staging(tmp_path, VALID)
+    result = runner.invoke(
+        app, ["import-commit", str(project), "--from", str(src), "--quarantine", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["rejected"] == 0 and payload["quarantine_path"] is None
+    assert _quarantine_files(project) == []
