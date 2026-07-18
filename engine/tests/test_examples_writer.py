@@ -157,3 +157,11 @@ def test_cli_append_missing_project_dir(tmp_path: Path):
     )
     assert result.exit_code == 1
     assert "does not exist" in result.output
+
+
+def test_append_examples_locked_appends_within_a_held_lock(tmp_path: Path):
+    from corpus_studio.storage.examples_writer import append_examples_locked
+
+    with single_writer_lock(tmp_path):
+        assert append_examples_locked(tmp_path, VALID) == 2
+    assert list(read_jsonl(examples_path(tmp_path))) == VALID
