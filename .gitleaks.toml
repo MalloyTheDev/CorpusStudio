@@ -1,0 +1,15 @@
+# gitleaks configuration for CorpusStudio secret scanning (.github/workflows/security.yml).
+# Extends gitleaks' maintained default ruleset (API keys, tokens, private keys, ...) and only adds
+# an allowlist for paths that carry SYNTHETIC fixtures - deterministic fake tokens/hashes/PII used
+# by the test suite, which must never hold real secrets. Keeping the allowlist narrow preserves
+# coverage over the shipped source, docs, and CI config.
+title = "CorpusStudio gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic test fixtures - deterministic fake tokens/hashes/PII, never real secrets."
+paths = [
+  '''engine/tests/.*''',
+]
