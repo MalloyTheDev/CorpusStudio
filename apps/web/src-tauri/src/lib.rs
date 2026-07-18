@@ -201,6 +201,32 @@ fn data_import_commit(project_dir: String, source_path: String) -> Result<Value,
     result
 }
 
+/// The full quality report for a project's examples.jsonl (duplicates, low-information, PII findings,
+/// synthetic-pattern signals) — the detail behind the debt grade.
+#[tauri::command]
+fn data_quality(project_dir: String) -> Result<Value, String> {
+    let mut examples = std::path::PathBuf::from(&project_dir);
+    examples.push("examples.jsonl");
+    run_engine(&["quality", &examples.to_string_lossy()])
+}
+
+/// Run the dataset gates (schema / quality / PII-secrets / leakage) and save a report under
+/// gate_reports/. The verdict (pass/warn/block) is in the JSON; a block is not an error exit.
+#[tauri::command]
+fn data_gate_run(project_dir: String, schema: String) -> Result<Value, String> {
+    let mut examples = std::path::PathBuf::from(&project_dir);
+    examples.push("examples.jsonl");
+    run_engine(&[
+        "gate-run",
+        &examples.to_string_lossy(),
+        &schema,
+        "--scope",
+        "dataset",
+        "--project-dir",
+        &project_dir,
+    ])
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -215,7 +241,9 @@ pub fn run() {
             data_append,
             data_debt,
             data_import_preview,
-            data_import_commit
+            data_import_commit,
+            data_quality,
+            data_gate_run
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Corpus Studio shell");

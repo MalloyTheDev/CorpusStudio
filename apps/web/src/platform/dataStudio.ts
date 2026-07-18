@@ -60,11 +60,60 @@ export interface AppendResult {
   schema_id: string;
 }
 
+export interface DebtItem {
+  category: string;
+  severity: string;
+  count: number;
+  rate: number;
+  message: string;
+  remediation: string;
+}
+
 export interface DebtReport {
   example_count: number;
   has_data: boolean;
   grade: string;
-  items: unknown[];
+  items: DebtItem[];
+}
+
+export interface PiiFinding {
+  kind: string;
+  severity: string;
+  match_count: number;
+  row_numbers: number[];
+  sample: string;
+  suggestion: string;
+}
+
+export interface QualityReport {
+  example_count: number;
+  empty_row_count: number;
+  duplicate_exact_count: number;
+  duplicate_normalized_count: number;
+  low_information_count: number;
+  synthetic_pattern_count: number;
+  pii_finding_count: number;
+  pii_findings: PiiFinding[];
+}
+
+export interface GateResult {
+  gate_id: string;
+  name: string;
+  status: string;
+  observed: string;
+  expected: string;
+  message: string;
+  repair: string | null;
+  affected: string[];
+}
+
+export interface GateReport {
+  scope: string;
+  overall_status: string;
+  pass_count: number;
+  warn_count: number;
+  block_count: number;
+  results: GateResult[];
 }
 
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -99,6 +148,14 @@ export interface ImportCommitResult {
   version_id: string | null;
   schema_id: string;
 }
+
+/** The full quality report behind the debt grade (duplicates, low-info, PII findings). */
+export const quality = (projectDir: string): Promise<QualityReport> =>
+  call<QualityReport>("data_quality", { projectDir });
+
+/** Run the dataset gates (schema/quality/PII/leakage); the verdict is in `overall_status`. */
+export const gateRun = (projectDir: string, schema: string): Promise<GateReport> =>
+  call<GateReport>("data_gate_run", { projectDir, schema });
 
 /** Validate/preview a source file (JSONL/CSV/TSV/Parquet) against the schema, without committing. */
 export const importPreview = (schema: string, sourcePath: string): Promise<PreviewReport> =>
