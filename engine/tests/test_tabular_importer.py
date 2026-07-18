@@ -103,3 +103,19 @@ def test_convert_preserves_unicode(tmp_path: Path):
 
     row = json.loads(out.read_text(encoding="utf-8").splitlines()[0])
     assert row == {"text": "日本語のテキスト", "label": "positive"}
+
+
+def test_ragged_row_with_extra_cells_raises(tmp_path: Path):
+    # A row with MORE cells than headers must be surfaced, not silently dropped (#504).
+    csv_path = _write(tmp_path / "d.csv", "a,b\n1,2,3\n")
+
+    with pytest.raises(ValueError, match="more cell"):
+        list(read_tabular(csv_path))
+
+
+def test_duplicate_header_raises(tmp_path: Path):
+    # Duplicate column names collapse to one dict key (last wins) - refuse (#504).
+    csv_path = _write(tmp_path / "d.csv", "a,a,b\n1,2,3\n")
+
+    with pytest.raises(ValueError, match="Duplicate column"):
+        list(read_tabular(csv_path))

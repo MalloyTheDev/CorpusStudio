@@ -25,6 +25,10 @@ from pathlib import Path
 
 _TAB_SUFFIXES = frozenset({".tsv", ".tab"})
 
+# ``csv.DictReader`` collects cells beyond the header count under this key; naming it
+# explicitly lets us detect (and refuse) a ragged row instead of silently dropping them.
+_OVERFLOW_KEY = "__corpus_studio_overflow__"
+
 
 def _delimiter_for(path: Path) -> str:
     """Pick the delimiter from the file extension (deterministic + honest — no
@@ -36,21 +40,46 @@ def read_tabular(path: Path) -> Iterator[dict[str, str]]:
     """Stream a CSV/TSV file as one ``dict[str, str]`` per data row.
 
     The first row is the header and defines the keys. Values are always strings
-    (empty cells → ``""``). Reads as ``utf-8-sig`` so a BOM from Excel/Windows
-    exports is tolerated (matching the JSONL reader). Raises ``ValueError`` when
-    the file has no header row (empty file), so callers' ``(OSError, ValueError)``
-    handlers surface it cleanly.
+    (empty cells -> ``""``). Reads as ``utf-8-sig`` so a BOM from Excel/Windows
+    exports is tolerated (matching the JSONL reader). Raises ``ValueError`` for a
+    structural problem the converter must NOT hide: an empty/blank header,
+    **duplicate column names** (a dict would keep only the last, losing a column),
+    or a **ragged row** with more cells than header columns (the extras would
+    otherwise be silently dropped). A short row is fine - its missing trailing
+    cells pad to ``""``. Callers' ``(OSError, ValueError)`` handlers surface it.
     """
     delimiter = _delimiter_for(path)
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle, delimiter=delimiter, restval="")
+        reader = csv.DictReader(handle, delimiter=delimiter, restval="", restkey=_OVERFLOW_KEY)
         if reader.fieldnames is None:
-            raise ValueError("The file is empty — no header row was found.")
+            raise ValueError("The file is empty - no header row was found.")
         header = [name for name in reader.fieldnames if name is not None]
         if not any(name.strip() for name in header):
-            raise ValueError("The header row is empty — no column names were found.")
+            raise ValueError("The header row is empty - no column names were found.")
 
-        for raw_row in reader:
+        # Duplicate header names collapse to one dict key (last value wins), silently
+        # dropping a column. Refuse rather than mangle the source.
+        seen: set[str] = set()
+        duplicates: list[str] = []
+        for name in header:
+            if name in seen and name not in duplicates:
+                duplicates.append(name)
+            seen.add(name)
+        if duplicates:
+            joined = ", ".join(repr(name) for name in duplicates)
+            raise ValueError(
+                f"Duplicate column name(s) in the header: {joined}. "
+                "Rename them so every column is distinct."
+            )
+
+        for row_number, raw_row in enumerate(reader, start=1):
+            overflow = raw_row.get(_OVERFLOW_KEY)
+            if overflow:
+                raise ValueError(
+                    f"Data row {row_number} has {len(overflow)} more cell(s) than the "
+                    f"{len(header)} header column(s) (a ragged row). Fix the source, or "
+                    "quote a cell that contains the delimiter."
+                )
             row: dict[str, str] = {}
             for key in header:
                 value = raw_row.get(key)
