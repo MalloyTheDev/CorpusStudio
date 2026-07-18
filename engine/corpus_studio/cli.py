@@ -3088,15 +3088,22 @@ def import_commit(
     capture_version: bool = typer.Option(
         True, "--version/--no-version", help="Capture a dataset version after committing (default: on)."
     ),
+    quarantine: bool = typer.Option(
+        False,
+        "--quarantine",
+        help="Persist rejected rows (their original content + rejection reasons) to "
+        "import_quarantine/ so they survive the session for repair and re-import.",
+    ),
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
 ):
     """Commit a staging file's schema-valid rows into examples.jsonl and capture a version.
 
     The import endpoint of the sanctioned single writer: rows that pass the project
     schema are atomically appended to examples.jsonl; rows that fail are reported and
-    left out (quarantined), never silently dropped. Unless --no-version, a dataset
-    version (trigger import_commit) is captured so the import is an undoable point in
-    the lineage. Nothing is committed if no row passes.
+    left out, never silently dropped. With --quarantine the rejected rows (original
+    content + reasons) are written to import_quarantine/ so they survive the session for
+    repair. Unless --no-version, a dataset version (trigger import_commit) is captured so
+    the import is an undoable point in the lineage. Nothing is committed if no row passes.
     """
 
     from corpus_studio.storage.examples_writer import (
@@ -3142,7 +3149,10 @@ def import_commit(
     for number, row in enumerate(rows, start=1):
         issues = validate_jsonl_row(row, schema_id, number)
         if issues:
-            rejected.append({"row_number": number, "issues": [issue.message for issue in issues]})
+            # Keep the original row so --quarantine can persist it for repair, not just the reasons.
+            rejected.append(
+                {"row_number": number, "issues": [issue.message for issue in issues], "row": row}
+            )
         else:
             accepted.append(row)
 
@@ -3166,12 +3176,34 @@ def import_commit(
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=1) from exc
 
+    # Persist the rejects (original content + reasons) so they survive for repair. Written to a
+    # uniquely-named file UNDER the project's import_quarantine/ (from_file.stem carries no path
+    # separators, so the name cannot escape the directory). Independent of whether anything committed.
+    quarantine_path: Optional[str] = None
+    if quarantine and rejected:
+        from datetime import datetime, timezone
+
+        quarantine_dir = project_dir / "import_quarantine"
+        quarantine_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S-%f")
+        target = quarantine_dir / f"{from_file.stem}-{stamp}.jsonl"
+        content = "\n".join(
+            json.dumps(
+                {"row_number": entry["row_number"], "issues": entry["issues"], "row": entry["row"]},
+                ensure_ascii=False,
+            )
+            for entry in rejected
+        )
+        target.write_text(content + "\n", encoding="utf-8", newline="\n")
+        quarantine_path = str(target)
+
     result = {
         "examples_path": str(examples_path(project_dir)),
         "committed": len(accepted),
         "rejected": len(rejected),
         "version_id": version_id,
         "schema_id": schema_id,
+        "quarantine_path": quarantine_path,
     }
     if as_json:
         typer.echo(json.dumps(result, indent=2))
@@ -3180,6 +3212,14 @@ def import_commit(
         typer.echo(
             f"Committed {len(accepted)} row(s) to {result['examples_path']} "
             f"({len(rejected)} rejected){version_note}."
+        )
+        if quarantine_path:
+            typer.echo(f"Quarantined {len(rejected)} rejected row(s) to {quarantine_path}.")
+    # stderr notes (fire in both modes, so --json stdout stays pure JSON): the reject reasons, and -
+    # when rejects were NOT saved - a hint to persist them for repair.
+    if rejected and not quarantine_path:
+        typer.echo(
+            f"Pass --quarantine to save the {len(rejected)} rejected row(s) for repair.", err=True
         )
     for entry in rejected[:20]:
         typer.echo(f"  rejected row {entry['row_number']}: {'; '.join(entry['issues'])}", err=True)
