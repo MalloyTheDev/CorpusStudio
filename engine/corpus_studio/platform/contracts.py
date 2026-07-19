@@ -4171,6 +4171,13 @@ class RunPlan(ContractModel):
     # are not treated as physical evidence or as a substitute for explicit parallel groups.
     offload_strategy: OffloadStrategy = OffloadStrategy.none
     allocator_policy: AllocatorPolicy = AllocatorPolicy.default
+    # Sealed numeric parameters for the parameterized allocator policies (they map to
+    # PYTORCH_CUDA_ALLOC_CONF fragments). ``max_split_size`` REQUIRES ``allocator_max_split_size_mb``
+    # and ``garbage_collection`` REQUIRES ``allocator_gc_threshold``; the worker fails closed if a
+    # policy is sealed without its parameter, so a parameterized policy can never be silently downgraded
+    # to the default allocator. Left None for the ``default`` / ``expandable_segments`` policies.
+    allocator_max_split_size_mb: int | None = Field(default=None, ge=1)
+    allocator_gc_threshold: float | None = Field(default=None, gt=0.0, le=1.0)
     compile_mode: CompileMode = CompileMode.none
     gradient_checkpointing: bool = True
     eval_schedule: EvalSchedule = Field(default_factory=EvalSchedule)

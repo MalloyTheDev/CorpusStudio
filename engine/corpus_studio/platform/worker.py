@@ -81,20 +81,47 @@ def _apply_allocator_policy(plan: Any) -> str:
     import. torch reads that variable once, at the first CUDA init, so this must run before the runner
     imports torch. Returns the applied conf string - evidence that the DECLARED policy was EXECUTED,
     verifiable by the set-before-import ordering (declared != executable). ``default`` leaves the
-    environment untouched; ``expandable_segments`` is MERGED into any operator-set conf, never a silent
-    override. The policy comes only from the hash-verified plan, never smuggled in via the launcher."""
+    environment untouched; every other policy MERGES its fragment into any operator-set conf (never a
+    silent override). A parameterized policy (``max_split_size`` / ``garbage_collection``) whose sealed
+    numeric parameter is missing, or any policy this worker does not implement, FAILS CLOSED with a
+    :class:`WorkerProtocolError` - the worker never silently downgrades a sealed policy to default. The
+    policy comes only from the hash-verified plan, never smuggled in via the launcher."""
     from corpus_studio.platform.enums import AllocatorPolicy  # noqa: PLC0415
 
     policy = getattr(plan, "allocator_policy", AllocatorPolicy.default)
-    if policy != AllocatorPolicy.expandable_segments:
+    if policy == AllocatorPolicy.default:
         return "default"
+    if policy == AllocatorPolicy.expandable_segments:
+        fragment = "expandable_segments:True"
+    elif policy == AllocatorPolicy.max_split_size:
+        megabytes = getattr(plan, "allocator_max_split_size_mb", None)
+        if megabytes is None:
+            raise WorkerProtocolError(
+                "sealed allocator_policy 'max_split_size' has no allocator_max_split_size_mb - "
+                "refusing to silently run under the default allocator"
+            )
+        fragment = f"max_split_size_mb:{megabytes}"
+    elif policy == AllocatorPolicy.garbage_collection:
+        threshold = getattr(plan, "allocator_gc_threshold", None)
+        if threshold is None:
+            raise WorkerProtocolError(
+                "sealed allocator_policy 'garbage_collection' has no allocator_gc_threshold - "
+                "refusing to silently run under the default allocator"
+            )
+        fragment = f"garbage_collection_threshold:{threshold}"
+    else:  # a new AllocatorPolicy member without a worker implementation
+        raise WorkerProtocolError(
+            f"allocator_policy {policy.value!r} is not implemented by this worker - refusing to run "
+            "rather than silently applying the default allocator"
+        )
+    key = fragment.split(":", 1)[0]
     existing = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "")
     parts = [
         part
         for part in existing.split(",")
-        if part and not part.strip().startswith("expandable_segments")
+        if part and not part.strip().startswith(key)
     ]
-    parts.append("expandable_segments:True")
+    parts.append(fragment)
     conf = ",".join(parts)
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = conf
     return conf
@@ -122,6 +149,7 @@ def run_worker(
 
     correlation_id: str | None = None
     run_id = "unknown"
+    applied_allocator_conf = "default"
     try:
         envelope = decode_worker_message(dispatch_line, expected_direction="core_to_worker")
         correlation_id = envelope.message_id
@@ -168,6 +196,10 @@ def run_worker(
             raise WorkerProtocolError(
                 "RunPlan environment_ref does not match this worker's environment identity"
             )
+        # Resolve + apply the sealed allocator policy to the process env BEFORE _build_runner imports
+        # torch. A parameterized policy missing its sealed parameter (or an unimplemented policy) fails
+        # closed here, surfaced as a clean run_rejected below rather than a silent downgrade to default.
+        applied_allocator_conf = _apply_allocator_policy(plan)
     except (ValueError, KeyError, TypeError, WorkerProtocolError) as exc:
         _send(
             "run_rejected",
@@ -181,9 +213,8 @@ def run_worker(
         )
         return 2
 
-    # Apply the sealed allocator policy to the process environment BEFORE _build_runner imports torch.
-    # Recorded in run_accepted as evidence that the declared policy was executed (declared != executable).
-    applied_allocator_conf = _apply_allocator_policy(plan)
+    # applied_allocator_conf was resolved+applied inside the validated block above (fail-closed there);
+    # recorded here as evidence that the declared policy was executed (declared != executable).
     _send(
         "run_accepted",
         {
