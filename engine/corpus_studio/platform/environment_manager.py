@@ -74,6 +74,8 @@ from .contracts import (
 from .enums import DependencyLayer, EnvironmentState, FailureTaxonomy, OperatingSystem
 from .environments import (
     get_recipe,
+    READINESS_FLASH_LIGER_PAGED_V1_RECIPE_ID,
+    READINESS_FLASH_LIGER_V1_RECIPE_ID,
     READINESS_FLASH_V1_RECIPE_ID,
     READINESS_LIGER_V1_RECIPE_ID,
     READINESS_V2_RECIPE_ID,
@@ -97,6 +99,8 @@ SUPPORTED_CREATION_RECIPES = frozenset(
         READINESS_V2_RECIPE_ID,
         READINESS_FLASH_V1_RECIPE_ID,
         READINESS_LIGER_V1_RECIPE_ID,
+        READINESS_FLASH_LIGER_V1_RECIPE_ID,
+        READINESS_FLASH_LIGER_PAGED_V1_RECIPE_ID,
     }
 )
 
@@ -914,9 +918,17 @@ def _bind_capability_package_integrity(
         return sealed
 
     bound_profile_packages = [bind(item, allow_missing=True) for item in profile.packages]
-    if [
-        (item.name, item.version) for item in bound_profile_packages
-    ] != [(item.name, item.version) for item in profile.packages]:
+
+    def _identity(pkg: PackageLock) -> tuple[str, str | None]:
+        # Compare on the PEP 503 normalized name: a distribution whose sealed lock spelling differs from
+        # the live profile only by hyphen/underscore/case (e.g. sealed "liger-kernel" vs installed
+        # "liger_kernel") is the SAME package, and binding it to its sealed integrity evidence must not
+        # read as a changed signature. Version identity is still enforced exactly.
+        return (pkg.normalized_name or _normalized_package_name(pkg.name), pkg.version)
+
+    if [_identity(item) for item in bound_profile_packages] != [
+        _identity(item) for item in profile.packages
+    ]:
         raise EnvironmentManagerError(
             "managed capability integrity binding changed the environment signature projection"
         )
@@ -4279,7 +4291,12 @@ class EnvironmentManager:
         expected_kernel = required.execution_combination.attention_kernel.value
         expected_backend = (
             "FLASH_ATTENTION"
-            if required.probe == "cuda_qlora_sdpa_flash_execution"
+            if required.probe
+            in {
+                "cuda_qlora_sdpa_flash_execution",
+                "cuda_qlora_flash_liger_execution",
+                "cuda_qlora_flash_liger_paged_execution",
+            }
             else "MATH"
         )
         expected_toggles = {

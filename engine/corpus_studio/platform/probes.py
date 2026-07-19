@@ -361,6 +361,7 @@ def _combination(
     attention_kernel: str,
     probe: str,
     loss_impl: str = "cross_entropy",
+    optimizer: str = "adamw_torch",
 ) -> ExecutionCapabilityCombination:
     return ExecutionCapabilityCombination.model_validate(
         {
@@ -371,7 +372,7 @@ def _combination(
             "adapter_method": adapter_method,
             "attention_impl": attention_impl,
             "attention_kernel": attention_kernel,
-            "optimizer": "adamw_torch",
+            "optimizer": optimizer,
             "loss_impl": loss_impl,
             "checkpoint_impl": "adapter_only",
             "export_format": "adapter_peft",
@@ -566,6 +567,61 @@ def _probe_cuda_qlora_liger_execution(
     )
 
 
+def _probe_cuda_qlora_flash_liger_execution(
+    profile: EnvironmentProfile,
+) -> ProbeOutcome:  # pragma: no cover - requires a real CUDA worker environment
+    """Run one bounded BF16/NF4/QLoRA tuple forced onto torch_sdpa_flash WITH Liger fused-linear-CE.
+
+    The two levers compose: flash removes the forward-stage fp32 attention-score matrix (num_heads *
+    seq^2 * 4B) and Liger removes the loss-stage vocab-logits transient. Together they are the only
+    combination that clears BOTH walls, so this is the tuple a seq-4096 run needs proven on this host."""
+
+    return _probe_cuda_qlora_sdpa_execution_tuple(
+        profile,
+        probe_name="cuda_qlora_flash_liger_execution",
+        attention_impl="sdpa",
+        attention_kernel="torch_sdpa_flash",
+        sdp_backend_name="FLASH_ATTENTION",
+        enable_flash=True,
+        enable_math=False,
+        pass_detail=(
+            "BF16/NF4/QLoRA forced-flash-SDPA with Liger fused-linear-CE backward, AdamW update, and "
+            "adapter reload passed"
+        ),
+        proves_attention=["sdpa"],
+        record_phase_timing=True,
+        use_liger=True,
+    )
+
+
+def _probe_cuda_qlora_flash_liger_paged_execution(
+    profile: EnvironmentProfile,
+) -> ProbeOutcome:  # pragma: no cover - requires a real CUDA worker environment
+    """Forced flash SDPA + Liger fused-linear-CE + bitsandbytes paged 8-bit AdamW, in one tuple.
+
+    The full memory-efficient seq-4096 frontier: flash removes the forward attention scores, Liger
+    removes the loss logits, and the paged 8-bit optimizer keeps the fp32 LoRA optimizer state out of
+    resident VRAM (host-paged) - the last ~hundreds of MiB that keep r16 seq-4096 from fitting 12 GB."""
+
+    return _probe_cuda_qlora_sdpa_execution_tuple(
+        profile,
+        probe_name="cuda_qlora_flash_liger_paged_execution",
+        attention_impl="sdpa",
+        attention_kernel="torch_sdpa_flash",
+        sdp_backend_name="FLASH_ATTENTION",
+        enable_flash=True,
+        enable_math=False,
+        pass_detail=(
+            "BF16/NF4/QLoRA forced-flash-SDPA with Liger fused-linear-CE and paged 8-bit AdamW "
+            "backward+update and adapter reload passed"
+        ),
+        proves_attention=["sdpa"],
+        record_phase_timing=True,
+        use_liger=True,
+        optimizer="paged_adamw_8bit",
+    )
+
+
 def _restore_qlora_probe_process_state(
     torch_module: Any,
     *,
@@ -625,6 +681,7 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
     proves_attention: list[str],
     record_phase_timing: bool,
     use_liger: bool = False,
+    optimizer: str = "adamw_torch",
 ) -> ProbeOutcome:  # pragma: no cover - requires a real CUDA worker environment
     """Shared complete QLoRA tuple used by independent math and flash readiness probes.
 
@@ -1007,7 +1064,15 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                         f"double_quant={nested_states}, devices={quantized_devices}",
                     )
                 )
-            optimizer = torch.optim.AdamW(trainable, lr=1e-3)
+            if optimizer == "paged_adamw_8bit":
+                # bitsandbytes' paged 8-bit AdamW keeps optimizer state in host-paged CUDA managed
+                # memory (a distinct kernel path from the nf4 4-bit weights), so proving it here is what
+                # lets a run seal --optim paged_adamw_8bit (installed != proven).
+                from bitsandbytes.optim import PagedAdamW8bit  # noqa: PLC0415
+
+                optimizer_impl = PagedAdamW8bit(trainable, lr=1e-3)
+            else:
+                optimizer_impl = torch.optim.AdamW(trainable, lr=1e-3)
             before = [parameter.detach().clone() for parameter in trainable]
             # Shared with math/flash readiness probes for comparable measurements.
             input_ids = torch.randint(3, 64, (1, 8), device="cuda", dtype=torch.long)
@@ -1078,7 +1143,7 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                 )
             torch.cuda.synchronize(0)
             optimizer_started = time.perf_counter()
-            optimizer.step()
+            optimizer_impl.step()
             torch.cuda.synchronize(0)
             phase_timings["optimizer_step_duration_seconds"] = (
                 time.perf_counter() - optimizer_started
@@ -1165,6 +1230,10 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                     "torch",
                     "transformers",
                     "trl",
+                    # Record liger-kernel too when the fused-CE tuple requires it, so the sealed lock's
+                    # runtime-version evidence covers every required_distribution (the seal refuses a
+                    # tuple that omitted a required distribution's runtime version).
+                    *(("liger-kernel",) if use_liger else ()),
                 )
             }
             runtime_evidence = {
@@ -1189,6 +1258,7 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
             attention_kernel=attention_kernel,
             probe=probe_name,
             loss_impl=proven_loss,
+            optimizer=optimizer,
         )
         return _with_memory(
             ProbeOutcome(
@@ -1214,7 +1284,7 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                         "device_map": {"": "cuda:0"},
                         "target_modules": "all-linear",
                         "gradient_checkpointing": True,
-                        "optimizer": "adamw_torch",
+                        "optimizer": optimizer,
                         "batch_size": 1,
                         "sequence_length": 8,
                         "lora_r": 2,
@@ -1229,7 +1299,7 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                     "attention_kernel": [attention_kernel],
                     "adapter": ["qlora"],
                     "loss": [proven_loss],
-                    "optimizer": ["adamw_torch"],
+                    "optimizer": [optimizer],
                     "checkpoint": ["adapter_only"],
                 },
                 execution_combinations=[combination],
@@ -1280,6 +1350,8 @@ BUILTIN_PROBES: dict[str, ProbeFn] = {
     "cuda_qlora_math_execution": _probe_cuda_qlora_math_execution,
     "cuda_qlora_sdpa_flash_execution": _probe_cuda_qlora_sdpa_flash_execution,
     "cuda_qlora_liger_execution": _probe_cuda_qlora_liger_execution,
+    "cuda_qlora_flash_liger_execution": _probe_cuda_qlora_flash_liger_execution,
+    "cuda_qlora_flash_liger_paged_execution": _probe_cuda_qlora_flash_liger_paged_execution,
 }
 
 
