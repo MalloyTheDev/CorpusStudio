@@ -360,6 +360,7 @@ def _combination(
     attention_impl: str,
     attention_kernel: str,
     probe: str,
+    loss_impl: str = "cross_entropy",
 ) -> ExecutionCapabilityCombination:
     return ExecutionCapabilityCombination.model_validate(
         {
@@ -371,7 +372,7 @@ def _combination(
             "attention_impl": attention_impl,
             "attention_kernel": attention_kernel,
             "optimizer": "adamw_torch",
-            "loss_impl": "cross_entropy",
+            "loss_impl": loss_impl,
             "checkpoint_impl": "adapter_only",
             "export_format": "adapter_peft",
             "execution_contract_version": "1.0.0",
@@ -537,6 +538,34 @@ def _probe_cuda_qlora_sdpa_flash_execution(
     )
 
 
+def _probe_cuda_qlora_liger_execution(
+    profile: EnvironmentProfile,
+) -> ProbeOutcome:  # pragma: no cover - requires a real CUDA worker environment
+    """Run one bounded BF16/NF4/QLoRA math-SDPA tuple with Liger fused-linear-cross-entropy applied.
+
+    Proves the exact fused kernels a ``loss_impl=liger_fused_ce`` run would use actually load and
+    train on THIS host (installed != proven): the fused-linear-CE Triton kernel that never materializes
+    the full [seq, vocab] logits is what lifts the seq-4096 logits wall. Math attention keeps this
+    orthogonal to the flash proof - it isolates the loss axis."""
+
+    return _probe_cuda_qlora_sdpa_execution_tuple(
+        profile,
+        probe_name="cuda_qlora_liger_execution",
+        attention_impl="math",
+        attention_kernel="torch_sdpa_math",
+        sdp_backend_name="MATH",
+        enable_flash=False,
+        enable_math=True,
+        pass_detail=(
+            "BF16/NF4/QLoRA math-SDPA with Liger fused-linear-CE backward, AdamW update, and adapter "
+            "reload passed"
+        ),
+        proves_attention=["math", "sdpa"],
+        record_phase_timing=False,
+        use_liger=True,
+    )
+
+
 def _restore_qlora_probe_process_state(
     torch_module: Any,
     *,
@@ -595,6 +624,7 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
     pass_detail: str,
     proves_attention: list[str],
     record_phase_timing: bool,
+    use_liger: bool = False,
 ) -> ProbeOutcome:  # pragma: no cover - requires a real CUDA worker environment
     """Shared complete QLoRA tuple used by independent math and flash readiness probes.
 
@@ -917,6 +947,17 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                     target_modules="all-linear",
                 ),
             )
+            if use_liger:
+                # Apply Liger via the SAME path the first-party trainer uses (SFTConfig
+                # use_liger_kernel=True -> transformers apply_liger_kernel at _inner_training_loop
+                # start): it unwraps the PEFT model and patches the base in-place with liger's default
+                # config, whose fused-linear-cross-entropy never materializes the full [seq, vocab]
+                # logits. Default kernel_config ({}) matches the trainer, so the probe proves the exact
+                # kernels a use_liger run would apply. Fails LOUD (ImportError/patch error) if the sealed
+                # env lacks liger-kernel >= 0.3.0 - installed != proven.
+                from transformers.integrations.liger import apply_liger_kernel  # noqa: PLC0415
+
+                apply_liger_kernel(model, {})
             placement_deviation = _placement_deviation(model)
             if placement_deviation is not None:
                 return _with_memory(
@@ -1137,6 +1178,7 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                 ),
                 "packages": package_versions,
             }
+        proven_loss = "liger_fused_ce" if use_liger else "cross_entropy"
         combination = _combination(
             runtime_mode="training",
             device="cuda",
@@ -1146,6 +1188,7 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
             attention_impl=attention_impl,
             attention_kernel=attention_kernel,
             probe=probe_name,
+            loss_impl=proven_loss,
         )
         return _with_memory(
             ProbeOutcome(
@@ -1185,7 +1228,7 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                     "attention": proves_attention,
                     "attention_kernel": [attention_kernel],
                     "adapter": ["qlora"],
-                    "loss": ["cross_entropy"],
+                    "loss": [proven_loss],
                     "optimizer": ["adamw_torch"],
                     "checkpoint": ["adapter_only"],
                 },
@@ -1236,6 +1279,7 @@ BUILTIN_PROBES: dict[str, ProbeFn] = {
     "cpu_lora_execution": _probe_cpu_lora_execution,
     "cuda_qlora_math_execution": _probe_cuda_qlora_math_execution,
     "cuda_qlora_sdpa_flash_execution": _probe_cuda_qlora_sdpa_flash_execution,
+    "cuda_qlora_liger_execution": _probe_cuda_qlora_liger_execution,
 }
 
 
