@@ -694,6 +694,34 @@ def test_new_plans_explicitly_disable_unresumable_intermediate_checkpoints():
     assert cfg.save_steps is None and cfg.save_total_limit is None
 
 
+def test_allocator_max_split_size_is_sealed_into_the_plan():
+    plan = _plan(
+        _profile(cc_major=8), _report(),
+        allocator_policy="max_split_size", allocator_max_split_size_mb=128,
+    )
+    assert plan.allocator_policy.value == "max_split_size"
+    assert plan.allocator_max_split_size_mb == 128
+
+
+def test_allocator_max_split_size_without_its_parameter_is_refused():
+    with pytest.raises(PlannerError, match="requires a max_split_size_mb"):
+        _plan(_profile(cc_major=8), _report(), allocator_policy="max_split_size")
+
+
+def test_max_split_size_mb_without_the_matching_policy_is_refused():
+    with pytest.raises(PlannerError, match="only valid with allocator_policy 'max_split_size'"):
+        _plan(_profile(cc_major=8), _report(), allocator_max_split_size_mb=128)
+
+
+def test_expandable_segments_with_a_paged_optimizer_is_refused():
+    # the measured seq-4096 collision: expandable_segments + paged managed memory -> illegal access.
+    with pytest.raises(PlannerError, match="collides with a paged optimizer"):
+        _plan(
+            _profile(cc_major=8), _report(),
+            allocator_policy="expandable_segments", optim="paged_adamw_8bit",
+        )
+
+
 @pytest.mark.parametrize(
     "checkpoint_overrides",
     [{"checkpoint_steps": 50}, {"checkpoint_keep_last": 3}],
