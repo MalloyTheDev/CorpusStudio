@@ -323,6 +323,8 @@ export type LoraAlpha = number | null;
 export type LoraDropout = number | null;
 export type LoraR = number | null;
 export type TargetModules = string[] | null;
+export type AllocatorGcThreshold = number | null;
+export type AllocatorMaxSplitSizeMb = number | null;
 export type AllocatorPolicy = "default" | "expandable_segments" | "max_split_size" | "garbage_collection";
 export type BaseModel = string;
 export type FallbackGradAccumulationSteps = number | null;
@@ -1193,6 +1195,8 @@ export interface RunDispatchBody {
  */
 export interface RunPlan {
   adapter: AdapterSpec;
+  allocator_gc_threshold?: AllocatorGcThreshold;
+  allocator_max_split_size_mb?: AllocatorMaxSplitSizeMb;
   allocator_policy?: AllocatorPolicy;
   attention_backend: AttentionImpl;
   backend_ref: Ref;

@@ -7,6 +7,8 @@ export type LoraR = number | null;
 export type AdapterMethod =
   "none" | "lora" | "qlora" | "dora" | "ia3" | "full_finetune" | "prompt_tuning" | "prefix_tuning";
 export type TargetModules = string[] | null;
+export type AllocatorGcThreshold = number | null;
+export type AllocatorMaxSplitSizeMb = number | null;
 export type AllocatorPolicy = "default" | "expandable_segments" | "max_split_size" | "garbage_collection";
 /**
  * ``math``/``eager`` is forced on native-Windows/WDDM Blackwell sm_120 because the fused flash
@@ -320,6 +322,8 @@ export type TaskType =
  */
 export interface RunPlan {
   adapter: AdapterSpec;
+  allocator_gc_threshold?: AllocatorGcThreshold;
+  allocator_max_split_size_mb?: AllocatorMaxSplitSizeMb;
   allocator_policy?: AllocatorPolicy;
   attention_backend: AttentionImpl;
   backend_ref: Ref;

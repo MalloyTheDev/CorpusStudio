@@ -5799,6 +5799,33 @@
         "adapter": {
           "$ref": "#/$defs/AdapterSpec"
         },
+        "allocator_gc_threshold": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allocator Gc Threshold"
+        },
+        "allocator_max_split_size_mb": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allocator Max Split Size Mb"
+        },
         "allocator_policy": {
           "$ref": "#/$defs/AllocatorPolicy",
           "default": "default"
