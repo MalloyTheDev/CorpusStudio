@@ -21,11 +21,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install gitleaks
-        # Pinned release binary (linux x64). Using the binary avoids the marketplace action's
-        # org-license path and keeps the exact scanner version explicit here.
+        # Pinned release binary (linux x64), verified by content hash - not just the version string.
+        # A GitHub release asset can be deleted and re-uploaded, so pin the SHA256 (from the release's
+        # published gitleaks_${ver}_checksums.txt) and fail closed on mismatch before extracting or
+        # executing the binary. This matches the SHA-pinning used for trivy-action / codecov-action.
         run: |
           ver=8.30.1
+          sha256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
           curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_x64.tar.gz" -o gitleaks.tar.gz
+          echo "${sha256}  gitleaks.tar.gz" | sha256sum -c -
           tar -xzf gitleaks.tar.gz gitleaks
           ./gitleaks version
       - name: Scan the working tree for secrets

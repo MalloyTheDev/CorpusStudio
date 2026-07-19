@@ -6,12 +6,18 @@ on:
       - "apps/web/**"
       - "docs/contracts/**"
       - "engine/corpus_studio/platform/**"
+      # The pinned pydantic drives JSON Schema serialization; a bump here can shift the committed
+      # contracts, so re-run the regenerate+verify drift gate when the pin (or the extras) changes.
+      - "engine/constraints.txt"
+      - "engine/pyproject.toml"
       - ".github/workflows/web.yml"
   pull_request:
     paths:
       - "apps/web/**"
       - "docs/contracts/**"
       - "engine/corpus_studio/platform/**"
+      - "engine/constraints.txt"
+      - "engine/pyproject.toml"
       - ".github/workflows/web.yml"
 
 # Least privilege: typecheck + build only needs to read the repository.
