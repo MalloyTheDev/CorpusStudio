@@ -309,6 +309,27 @@ def test_platform_plan_allocator_policy_flows_through_the_cli(monkeypatch, tmp_p
     assert plan["allocator_max_split_size_mb"] == 128
 
 
+def test_platform_plan_lora_rank_flows_through_the_cli(monkeypatch, tmp_path):
+    # --lora-r / --lora-alpha seal into the plan's adapter - the lever for long-sequence runs at the
+    # card's memory edge (a smaller rank halves the adapter's weight/grad/optimizer VRAM).
+    _ready_host(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            *_platform_plan_args(tmp_path),
+            "--lora-r",
+            "8",
+            "--lora-alpha",
+            "16",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    adapter = json.loads(result.stdout)["run_plan"]["adapter"]
+    assert adapter["lora_r"] == 8
+    assert adapter["lora_alpha"] == 16
+
+
 def test_platform_plan_output_dir_flows_into_resolved_execution(monkeypatch, tmp_path):
     # --output-dir controls where the trainer saves the adapter (so a run can target a project dir,
     # not the CWD). It must reach the sealed worker configuration verbatim.
