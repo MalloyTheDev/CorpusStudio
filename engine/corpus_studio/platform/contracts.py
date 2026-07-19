@@ -3354,7 +3354,9 @@ class SequenceSpec(ContractModel):
     max_sequence_len: int = Field(default=4096, ge=1)
     buckets: list[int] = Field(default_factory=list)
     packing: bool = False
-    # When false, a plan whose dataset has examples_over_sequence_len>0 is invalid.
+    # Mirrors the plan's truncation intent, but is NOT itself validated at plan time. The ENFORCED
+    # no-silent-truncation gate is the worker preflight token-coverage ledger, keyed off the honored
+    # TrainingDataPolicy.truncation_policy; the planner writes both fields from the same constraint.
     truncation_allowed: bool = True
 
 
