@@ -18,9 +18,12 @@ complete placement/quantization/precision verification before training. That lat
 correction has CPU/unit evidence only. Training-success admission also requires canonical
 adapter-state change, honest gradient coverage, a real optimizer, one finite loss per exact completed
 step, and all output/artifact integrity gates before measured fit becomes proven. Package admission
-requires complete positive RECORD counts. No real optimizer step has passed through `platform-run`,
-and sequence length 4096 remains unverified. These environment/diagnostic results are not a 7B
-workload or offload result.
+requires complete positive RECORD counts. Real optimizer steps have since passed through `platform-run`
+(the sealed v6/v7 0.5B smokes), and an **exploratory product run** (NOT a sealed IEEE cell) trained 7B
+QLoRA at sequence length 4096 on this host (flash SDPA + liger fused-CE + bnb paged-8bit-AdamW +
+`max_split_size_mb:128`; see [`POST_4096_ROADMAP_RESEARCH.md`](POST_4096_ROADMAP_RESEARCH.md) and
+`examples/wbg/README.md`). This is exploratory/product evidence: real offload paths remain unverified and
+the sealed IEEE ladder (e.g. the v8 math-2048 OOM cell) stands unchanged.
 The post-v1.3 additions reconciled below include the **reasoning-traces** data loop, a dataset
 **truncation guardrail** +
 external-trainer **checkpoint retention**, and a dependency-light **storage safe-spill** profiler —

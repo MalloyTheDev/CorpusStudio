@@ -31,8 +31,13 @@ WPF/Avalonia desktop is a retiring prototype (#545). A pre-Phase-9B lifecycle ra
 (Blackwell/sm_120) under native Windows/WDDM, including a real GPU QLoRA run. That historical run does
 not verify the new effective-execution contract. On the current native-Linux host, the managed
 `backend-corpus-studio` environment separately passed its minimal CUDA-allocation, 4-bit-construction,
-forward/backward, and math-SDPA probe. That environment result is not a native-Linux real workload,
-full-sequence 7B, real-workload FlashAttention, or offload result; those remain unverified.
+forward/backward, and math-SDPA probe. That environment probe is a minimal tuple, not a workload result.
+Separately, an **exploratory product run** (NOT a sealed IEEE research cell) has since trained 7B QLoRA
+end to end through `platform-run` at sequence length 4096 on this host (envelope: math SDPA <= 2048,
+flash SDPA <= 3072, flash + liger fused-CE + bnb paged-8bit-AdamW + `max_split_size_mb:128` = 4096 - see
+[`POST_4096_ROADMAP_RESEARCH.md`](POST_4096_ROADMAP_RESEARCH.md)). Real offload paths (DeepSpeed/FSDP/CPU/
+NVMe), throughput/endurance, and the paper's immutable sealed ladder remain unverified / unchanged by this
+exploratory result.
 
 On top of that loop, v1.2.1–v1.2.15 added an **IDE-like workspace shell** (Start
 Center, Universal Explorer, Problems + Output panels, one New Project wizard) and
