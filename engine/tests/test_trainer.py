@@ -381,6 +381,51 @@ def test_full_dataset_preflight_does_not_emit_fake_completion_after_tokenizer_fa
     assert not any(message.startswith("verified") for message in tokenization)
 
 
+def _word_count_tokenizer():
+    class Tokenizer:
+        def __call__(self, text):
+            return {"input_ids": text.split()}
+
+    return Tokenizer()
+
+
+def test_full_dataset_preflight_refuses_supervised_truncation_fail_closed():
+    # The token-coverage ledger is now the preflight gate. An over-length example severs supervised
+    # (loss-bearing) tokens, so with truncation_policy 'refuse' (truncation_allowed False) the worker
+    # preflight raises BEFORE any model-weight allocation - no GPU is spent on a silently-cut dataset.
+    rows = [{"instruction": " ".join(f"w{i}" for i in range(40)), "output": "the answer"}]
+    with pytest.raises(TrainerError, match="supervised"):
+        _prepare_training_texts(
+            rows,
+            _cfg(dataset_format="instruction", sequence_len=4, truncation_allowed=False),
+            _word_count_tokenizer(),
+        )
+
+
+def test_full_dataset_preflight_passes_when_every_row_fits():
+    rows = [{"instruction": f"q{i}", "output": f"a{i}"} for i in range(5)]
+    texts, report = _prepare_training_texts(
+        rows,
+        _cfg(dataset_format="instruction", sequence_len=100000, truncation_allowed=False),
+        _word_count_tokenizer(),
+    )
+    assert len(texts) == 5
+    assert report.n_truncated == 0
+
+
+def test_full_dataset_preflight_records_but_does_not_raise_when_lossy_opted_in(capsys):
+    # truncation_allowed True == the operator sealed a lossy policy at plan time: record the coverage
+    # refusal to stderr as an accepted-lossy notice, do not raise.
+    rows = [{"instruction": " ".join(f"w{i}" for i in range(40)), "output": "the answer"}]
+    texts, _report = _prepare_training_texts(
+        rows,
+        _cfg(dataset_format="instruction", sequence_len=4, truncation_allowed=True),
+        _word_count_tokenizer(),
+    )
+    assert len(texts) == 1
+    assert "REFUSED" in capsys.readouterr().err
+
+
 def test_load_config_reads_optim_and_liger(tmp_path):
     cfg = load_run_config_from_file(_config(tmp_path, optim="paged_adamw_8bit", use_liger=True))
     assert cfg.optim == "paged_adamw_8bit"

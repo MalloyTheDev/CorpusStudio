@@ -2532,11 +2532,29 @@ def _prepare_training_texts(
                     f"tokenized {index}/{rendered_count} rendered rows",
                 )
         report = analyze_truncation(lengths, config.sequence_len)
-        warning = truncation_warning(report)
-        if warning:
+        # Token-level coverage ledger - the no-silent-truncation authority (PR #618), now the gate.
+        # Until the first-party trainer applies a completion-only loss mask, the loss covers the whole
+        # rendered text, so supervised_tokens == total_tokens and dropped_supervised is exactly the
+        # right-truncated tail. That makes this a strict superset of the example-level check: ANY
+        # over-length example severs supervised tokens and refuses (it never weakens the old gate).
+        spans = [
+            ExampleTokenSpan(
+                total_tokens=length,
+                supervised_tokens=length,
+                dropped_supervised_tokens=max(0, length - config.sequence_len),
+            )
+            for length in lengths
+        ]
+        ledger = compute_token_coverage(spans, config.sequence_len)
+        refusal = token_coverage_refusal(ledger)
+        if refusal is not None:
             if not config.truncation_allowed:
-                raise TrainerError(warning.removeprefix("[WARNING] "))
-            print(warning, file=sys.stderr)
+                raise TrainerError(refusal.removeprefix("REFUSED: "))
+            # Operator opted into a lossy policy at plan time: record it, do not raise.
+            print(refusal, file=sys.stderr)
+            warning = truncation_warning(report)
+            if warning:
+                print(warning, file=sys.stderr)
     except TrainerError:
         raise
     except Exception as exc:  # noqa: BLE001 - normalize tokenizer failures.
