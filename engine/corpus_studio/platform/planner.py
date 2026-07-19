@@ -719,8 +719,11 @@ def _trainer_interface(
         required_packages.add("liger-kernel")
     if external_attention_package is not None:
         required_packages.add(external_attention_package.name.lower())
+    # Key by the PEP 503 normalized distribution name so a required package matches regardless of the
+    # installed spelling (e.g. required "liger-kernel" vs the dist's reported "liger_kernel"). The
+    # required_packages literals are already in normalized (hyphen) form.
     installed = {
-        item.name.lower(): item
+        item.name.lower().replace("_", "-").replace(".", "-"): item
         for item in capabilities.installed_packages
         if item.version is not None
     }
