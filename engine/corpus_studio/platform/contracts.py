@@ -3112,6 +3112,9 @@ class EnvironmentRecipe(ContractModel):
     requires_cuda: bool = False
     # A dependency that builds a native extension needs a compiler toolchain present (e.g. DeepSpeed).
     requires_native_build: bool = False
+    # The recipe's minimum GPU compute-capability floor (e.g. "12.0" for a Blackwell-only recipe whose
+    # execution evidence was proven there). Enforced at resolve time on the MAJOR digit against a KNOWN
+    # host capability (a sub-floor host is not resolvable), and again by the execution probe at create.
     min_compute_capability: str | None = None
     supported_os: list[OperatingSystem] = Field(default_factory=list)
     known_conflicts: list[DependencyConflict] = Field(default_factory=list)
