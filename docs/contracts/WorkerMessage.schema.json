@@ -5266,6 +5266,18 @@
     "RunAcceptedBody": {
       "additionalProperties": false,
       "properties": {
+        "applied_allocator_conf": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Applied Allocator Conf"
+        },
         "execution_configuration_hash": {
           "anyOf": [
             {

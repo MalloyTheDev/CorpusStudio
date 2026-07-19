@@ -542,6 +542,7 @@ export type CheckpointDir = string;
 export type CheckpointId = string;
 export type CheckpointManifestHash = string;
 export type RunId = string;
+export type AppliedAllocatorConf = string | null;
 export type ExecutionConfigurationHash = string | null;
 export type Pid = number | null;
 export type ProcessStartedAt = string | null;
@@ -1524,6 +1525,7 @@ export interface CheckpointResumeRequest {
   checkpoint_manifest_hash: CheckpointManifestHash;
 }
 export interface RunAcceptedBody {
+  applied_allocator_conf?: AppliedAllocatorConf;
   execution_configuration_hash?: ExecutionConfigurationHash;
   pid?: Pid;
   process_started_at?: ProcessStartedAt;
