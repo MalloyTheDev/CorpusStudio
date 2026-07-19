@@ -1165,6 +1165,10 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                     "torch",
                     "transformers",
                     "trl",
+                    # Record liger-kernel too when the fused-CE tuple requires it, so the sealed lock's
+                    # runtime-version evidence covers every required_distribution (the seal refuses a
+                    # tuple that omitted a required distribution's runtime version).
+                    *(("liger-kernel",) if use_liger else ()),
                 )
             }
             runtime_evidence = {
