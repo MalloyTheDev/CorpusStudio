@@ -31,6 +31,25 @@ def test_version_fragments_do_not_win():
     assert parse_parameter_count("Qwen2.5-Coder-7B") == 7.0
 
 
+def test_local_model_path_ignores_the_git_revision_component():
+    # A local snapshot path ends in a git-revision hex commit whose digits (incl. b/B) can read as a
+    # '<n>b' parameter token. The model NAME must win, not the revision. Regression: the 7B ladder plan
+    # bound .../Qwen2.5-7B-Instruct/a09a35458c702b33... and the fit calibrator read 702B -> a false
+    # 836 GB hard-OOM (the real 7B QLoRA fits in 12 GB).
+    assert (
+        parse_parameter_count(
+            "/mnt/training-nvme/models/Qwen2.5-7B-Instruct/a09a35458c702b33eeacc393d103063234e8bc28"
+        )
+        == 7.0
+    )
+    assert (
+        parse_parameter_count("/models/Qwen2.5-0.5B-Instruct/7ae557604adf67be50417f59c2c2f167def9a775")
+        == 0.5
+    )
+    # a Hub id (no revision component) is unchanged
+    assert parse_parameter_count("Qwen/Qwen2.5-7B-Instruct") == 7.0
+
+
 def test_unparseable_name_returns_none():
     assert parse_parameter_count("my-custom-model") is None
 
