@@ -288,6 +288,27 @@ def test_platform_plan_dataset_format_flows_through_the_cli(monkeypatch, tmp_pat
     assert "format" not in data
 
 
+def test_platform_plan_allocator_policy_flows_through_the_cli(monkeypatch, tmp_path):
+    # --allocator-policy + --max-split-size-mb seal the CUDA allocator config into the plan (so the
+    # seq-4096 paged config no longer smuggles it via the dispatch env).
+    _ready_host(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            *_platform_plan_args(tmp_path),
+            "--allocator-policy",
+            "max_split_size",
+            "--max-split-size-mb",
+            "128",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    plan = json.loads(result.stdout)["run_plan"]
+    assert plan["allocator_policy"] == "max_split_size"
+    assert plan["allocator_max_split_size_mb"] == 128
+
+
 def test_platform_plan_output_dir_flows_into_resolved_execution(monkeypatch, tmp_path):
     # --output-dir controls where the trainer saves the adapter (so a run can target a project dir,
     # not the CWD). It must reach the sealed worker configuration verbatim.

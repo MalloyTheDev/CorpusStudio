@@ -924,6 +924,9 @@ def platform_plan(
     optim: Optional[str] = typer.Option(None, "--optim", help="Request an optimizer (e.g. adamw_torch | paged_adamw_8bit). Planning requires a passing complete execution tuple for the exact optimizer."),
     use_liger: bool = typer.Option(False, "--use-liger", help="Request fused Liger cross-entropy. Package/field presence is insufficient; planning requires a passing complete execution tuple."),
     memory_efficient: bool = typer.Option(False, "--memory-efficient", help="Request paged_adamw_8bit + Liger together. Refused unless that exact complete execution tuple passed in the selected environment."),
+    allocator_policy: str = typer.Option("default", "--allocator-policy", help="Sealed CUDA allocator policy: default | expandable_segments | max_split_size | garbage_collection. A paged optimizer must use max_split_size (expandable_segments collides with it)."),
+    max_split_size_mb: Optional[int] = typer.Option(None, "--max-split-size-mb", min=1, help="max_split_size_mb sealed for --allocator-policy max_split_size (e.g. 128 for the paged seq-4096 config)."),
+    gc_threshold: Optional[float] = typer.Option(None, "--gc-threshold", help="garbage_collection_threshold (0<t<=1) sealed for --allocator-policy garbage_collection."),
     allow_cpu_toy: bool = typer.Option(False, "--allow-cpu-toy", help="Permit a cpu-toy plan when the host is cpu-toy-only."),
     environment_id: Optional[str] = typer.Option(
         None,
@@ -1049,6 +1052,9 @@ def platform_plan(
         backend=backend,
         optim=resolved_optim,
         use_liger=use_liger or memory_efficient,
+        allocator_policy=allocator_policy,
+        allocator_max_split_size_mb=max_split_size_mb,
+        allocator_gc_threshold=gc_threshold,
         allow_cpu_toy=allow_cpu_toy,
     )
     parameter_accounting = None

@@ -69,6 +69,7 @@ from corpus_studio.platform.contracts import (
 from corpus_studio.platform.common import HashRef, PackageLock, Ref
 from corpus_studio.platform.enums import (
     AdapterMethod,
+    AllocatorPolicy,
     AttentionImpl,
     AttentionKernel,
     DeviceKind,
@@ -161,6 +162,13 @@ class PlannerConstraints:
     # paged optimizer (spill optimizer state to RAM) + a fused-CE loss (drop the long-seq logits spike).
     optim: str = "adamw_torch"
     use_liger: bool = False
+    # Sealed CUDA allocator policy + its numeric parameter (PYTORCH_CUDA_ALLOC_CONF). max_split_size
+    # requires allocator_max_split_size_mb; garbage_collection requires allocator_gc_threshold. The
+    # seq-4096 paged config uses max_split_size (expandable_segments COLLIDES with a paged optimizer's
+    # managed memory). Sealed into the plan hash so it is no longer smuggled via the dispatch env.
+    allocator_policy: str = "default"
+    allocator_max_split_size_mb: int | None = None
+    allocator_gc_threshold: float | None = None
     max_steps: int | None = None
     num_train_epochs: float = 1.0
     # Intermediate first-party checkpoints remain disabled until a future execution contract can
@@ -177,6 +185,31 @@ def _require_enum(value: str, enum_cls: type[Enum], label: str) -> None:
     if value not in valid:
         raise PlannerError(
             f"unsupported {label} '{value}'; expected one of: {', '.join(sorted(valid))}"
+        )
+
+
+def _validate_allocator_constraints(constraints: PlannerConstraints) -> None:
+    """Fail closed at PLAN time on an allocator policy that cannot be honestly sealed + applied - the
+    same bar the worker enforces, caught before dispatch so no wheel/GPU is spent. A parameterized
+    policy needs its parameter, and a parameter without its policy is refused rather than silently
+    ignored. ``expandable_segments`` with a paged optimizer is refused: the two collide in CUDA managed
+    memory (the measured seq-4096 lesson) - a paged run must use ``max_split_size``."""
+    policy = constraints.allocator_policy
+    megabytes = constraints.allocator_max_split_size_mb
+    threshold = constraints.allocator_gc_threshold
+    if policy == AllocatorPolicy.max_split_size.value and megabytes is None:
+        raise PlannerError("allocator_policy 'max_split_size' requires a max_split_size_mb value")
+    if policy == AllocatorPolicy.garbage_collection.value and threshold is None:
+        raise PlannerError("allocator_policy 'garbage_collection' requires a gc_threshold value")
+    if megabytes is not None and policy != AllocatorPolicy.max_split_size.value:
+        raise PlannerError("max_split_size_mb is only valid with allocator_policy 'max_split_size'")
+    if threshold is not None and policy != AllocatorPolicy.garbage_collection.value:
+        raise PlannerError("gc_threshold is only valid with allocator_policy 'garbage_collection'")
+    if policy == AllocatorPolicy.expandable_segments.value and "paged" in (constraints.optim or ""):
+        raise PlannerError(
+            "allocator_policy 'expandable_segments' collides with a paged optimizer (CUDA "
+            "managed-memory illegal access); use 'max_split_size' with a max_split_size_mb for a "
+            "paged run"
         )
 
 
@@ -794,6 +827,8 @@ def build_run_plan(
     _require_enum(constraints.task_type, TaskType, "task_type")
     _require_enum(constraints.export_format, ExportFormat, "export_format")
     _require_enum(constraints.optim, Optimizer, "optimizer")
+    _require_enum(constraints.allocator_policy, AllocatorPolicy, "allocator_policy")
+    _validate_allocator_constraints(constraints)
     _require_enum(
         constraints.verification_requirement,
         ExecutionVerificationRequirement,
@@ -1224,6 +1259,9 @@ def build_run_plan(
         "batching": batching,
         "checkpoint_policy": checkpoint_policy,
         "offload_strategy": offload_strategy.value,
+        "allocator_policy": constraints.allocator_policy,
+        "allocator_max_split_size_mb": constraints.allocator_max_split_size_mb,
+        "allocator_gc_threshold": constraints.allocator_gc_threshold,
         "gradient_checkpointing": True,
         "export": {"format": constraints.export_format, "output_dir": constraints.output_dir},
         "seed": constraints.seed,
