@@ -12,7 +12,8 @@ _GB = 1_000_000_000
 
 
 def _plan(*, base_model="Qwen/Qwen2.5-7B-Instruct", quantization="nf4", attention="math",
-          sequence_len=4096, micro_batch=1, lora_r=16, cpu_toy=False, precision="bf16"):
+          sequence_len=4096, micro_batch=1, lora_r=16, cpu_toy=False, precision="bf16",
+          loss_impl=None):
     from corpus_studio.platform.supervisor import demo_run_plan
 
     body = demo_run_plan().model_dump(mode="json")
@@ -27,6 +28,15 @@ def _plan(*, base_model="Qwen/Qwen2.5-7B-Instruct", quantization="nf4", attentio
         "lora_r": lora_r,
         "lora_alpha": lora_r * 2,
     }
+    if loss_impl is not None:
+        # classify_fit reads fields, it does not verify the seal, so setting the loss impl for a fit
+        # prediction needs no re-hash. The demo plan carries no resolved_execution, so the calibrator
+        # falls back to the snapshot - set it there (and in resolved_execution when a plan has one).
+        if body.get("resolved_execution") is not None:
+            body["resolved_execution"]["loss_impl"] = loss_impl
+        snapshot = dict(body.get("training_config_snapshot") or {})
+        snapshot["loss_impl"] = loss_impl
+        body["training_config_snapshot"] = snapshot
     if cpu_toy:
         body["training_config_snapshot"] = {"cpu_toy": True}
     return P.RunPlan.model_validate(body)
@@ -62,6 +72,47 @@ def test_comfortable_fit_is_native_unproven_not_safe():
     assert fit.estimated_peak_bytes and fit.estimated_peak_bytes > 0
     assert fit.attention_path is not None and fit.attention_path.value == "math"
     assert "not measured" in fit.rationale.lower()
+
+
+def test_a_sealed_fused_cross_entropy_clears_the_seq_4096_wall_in_predict_fit():
+    # A sealed fused/chunked cross-entropy removes the seq-scaling vocab-logits transient (the seq-4096
+    # wall), so predict-fit reads a strictly smaller peak. At a capacity between the two predicted peaks,
+    # plain cross_entropy is a predicted spill while the fused plan is predicted-to-fit - never
+    # NATIVE_SAFE (a prediction is not a measurement).
+    def _peak(fused):
+        return build_vram_estimate(
+            "Qwen/Qwen2.5-7B-Instruct", sequence_len=4096, adapter="qlora",
+            math_attention=True, fused_loss=fused,
+        ).total_gb_int4
+
+    ce_peak, fused_peak = _peak(False), _peak(True)
+    assert fused_peak < ce_peak
+    midpoint = (ce_peak + fused_peak) / 2  # fused fits here, cross_entropy does not
+
+    ce_fit = classify_fit(
+        _plan(sequence_len=4096, loss_impl="cross_entropy"), _profile(capacity_gb=midpoint)
+    )
+    fused_fit = classify_fit(
+        _plan(sequence_len=4096, loss_impl="liger_fused_ce"), _profile(capacity_gb=midpoint)
+    )
+    assert fused_fit.estimated_peak_bytes < ce_fit.estimated_peak_bytes
+    assert ce_fit.classification in {
+        FitClass.ACCIDENTAL_WDDM_SPILL,
+        FitClass.ACCIDENTAL_UNIFIED_MEMORY_PAGING,
+        FitClass.THRASHING,
+        FitClass.FAIL,
+    }
+    assert fused_fit.classification in {
+        FitClass.NATIVE_UNPROVEN,
+        FitClass.NATIVE_TIGHT,
+        FitClass.MARGINAL,
+    }
+    assert fused_fit.classification != FitClass.NATIVE_SAFE  # a prediction is never NATIVE_SAFE
+    # chunked_ce (the dependency-free alternative) is treated identically to liger_fused_ce.
+    chunked_fit = classify_fit(
+        _plan(sequence_len=4096, loss_impl="chunked_ce"), _profile(capacity_gb=midpoint)
+    )
+    assert chunked_fit.estimated_peak_bytes == fused_fit.estimated_peak_bytes
 
 
 def test_within_safety_margin_is_marginal():
