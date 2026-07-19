@@ -33,9 +33,12 @@ from corpus_studio.training.trainer import (
     TrainerEnvironmentError,
     TrainerError,
     TrainRunConfig,
+    ExampleTokenSpan,
     analyze_truncation,
     apply_attention_execution_policy,
     build_lora_kwargs,
+    compute_token_coverage,
+    token_coverage_refusal,
     build_model_load_kwargs,
     build_training_kwargs,
     capture_adapter_export_state,
@@ -248,6 +251,69 @@ def test_analyze_truncation_the_wbg_bug():
     assert report.pct_truncated == 100.0
     assert report.seq_len_for_zero_truncation == 3445
     assert "1536" in (truncation_warning(report) or "") and "3445" in (truncation_warning(report) or "")
+
+
+# --- token-coverage ledger (the no-silent-truncation foundation for the full validated run) ---
+
+def test_token_coverage_lossless_when_nothing_exceeds_seqlen():
+    spans = [
+        ExampleTokenSpan(total_tokens=500, supervised_tokens=120, dropped_supervised_tokens=0),
+        ExampleTokenSpan(total_tokens=900, supervised_tokens=300, dropped_supervised_tokens=0),
+    ]
+    led = compute_token_coverage(spans, seq_len=1024)
+    assert led.is_lossless and led.supervision_intact
+    assert led.dropped_tokens == 0 and led.supervised_dropped == 0
+    assert led.coverage_pct == 100.0 and led.supervised_coverage_pct == 100.0
+    assert led.boundary_severances == 0
+    assert token_coverage_refusal(led) is None
+
+
+def test_token_coverage_counts_dropped_tokens_not_just_examples():
+    # Two examples over a seq_len=1000: one drops only prompt context, one severs the completion.
+    spans = [
+        ExampleTokenSpan(total_tokens=1400, supervised_tokens=200, dropped_supervised_tokens=0),   # prompt-only cut
+        ExampleTokenSpan(total_tokens=1200, supervised_tokens=300, dropped_supervised_tokens=200),  # completion severed
+    ]
+    led = compute_token_coverage(spans, seq_len=1000)
+    assert led.input_tokens_total == 2600
+    assert led.retained_tokens == 2000  # min(1400,1000)+min(1200,1000)
+    assert led.dropped_tokens == 600
+    assert not led.is_lossless
+    # supervision: only the second example dropped supervised tokens
+    assert led.supervised_tokens_total == 500
+    assert led.supervised_dropped == 200 and led.supervised_retained == 300
+    assert led.boundary_severances == 1
+    assert not led.supervision_intact
+
+
+def test_token_coverage_refuses_dropped_supervision_but_not_prompt_only_cuts():
+    # Dropping only non-supervised prompt context is a warning, not a refusal.
+    prompt_only = compute_token_coverage(
+        [ExampleTokenSpan(total_tokens=1400, supervised_tokens=200, dropped_supervised_tokens=0)],
+        seq_len=1000,
+    )
+    assert not prompt_only.is_lossless and prompt_only.supervision_intact
+    assert token_coverage_refusal(prompt_only) is None
+    # Dropping a supervised token is fail-closed.
+    severed = compute_token_coverage(
+        [ExampleTokenSpan(total_tokens=1200, supervised_tokens=300, dropped_supervised_tokens=50)],
+        seq_len=1000,
+    )
+    refusal = token_coverage_refusal(severed)
+    assert refusal is not None and "REFUSED" in refusal and "supervised" in refusal
+
+
+def test_token_coverage_empty_dataset_is_fully_covered():
+    led = compute_token_coverage([], seq_len=4096)
+    assert led.is_lossless and led.supervision_intact
+    assert led.coverage_pct == 100.0 and led.supervised_coverage_pct == 100.0
+
+
+def test_example_token_span_rejects_impossible_counts():
+    with pytest.raises(ValueError):
+        ExampleTokenSpan(total_tokens=10, supervised_tokens=20, dropped_supervised_tokens=0)
+    with pytest.raises(ValueError):
+        ExampleTokenSpan(total_tokens=100, supervised_tokens=10, dropped_supervised_tokens=20)
 
 
 def test_full_dataset_preflight_emits_bounded_same_thread_progress():
