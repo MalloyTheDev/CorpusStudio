@@ -135,7 +135,11 @@ export type GradientCheckpointing = true;
 export type MathSdpEnabled = boolean;
 export type MemoryEfficientSdpEnabled = false;
 export type Optimizer1 = "adamw_torch";
-export type Probe1 = "cuda_qlora_math_execution" | "cuda_qlora_sdpa_flash_execution" | "cuda_qlora_liger_execution";
+export type Probe1 =
+  | "cuda_qlora_math_execution"
+  | "cuda_qlora_sdpa_flash_execution"
+  | "cuda_qlora_liger_execution"
+  | "cuda_qlora_flash_liger_execution";
 export type Quantization = "nf4";
 export type RequireAdapterRoundTrip = true;
 export type RequiredDistributions = string[];

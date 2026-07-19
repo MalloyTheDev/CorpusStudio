@@ -74,6 +74,7 @@ from .contracts import (
 from .enums import DependencyLayer, EnvironmentState, FailureTaxonomy, OperatingSystem
 from .environments import (
     get_recipe,
+    READINESS_FLASH_LIGER_V1_RECIPE_ID,
     READINESS_FLASH_V1_RECIPE_ID,
     READINESS_LIGER_V1_RECIPE_ID,
     READINESS_V2_RECIPE_ID,
@@ -97,6 +98,7 @@ SUPPORTED_CREATION_RECIPES = frozenset(
         READINESS_V2_RECIPE_ID,
         READINESS_FLASH_V1_RECIPE_ID,
         READINESS_LIGER_V1_RECIPE_ID,
+        READINESS_FLASH_LIGER_V1_RECIPE_ID,
     }
 )
 

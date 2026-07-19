@@ -566,6 +566,33 @@ def _probe_cuda_qlora_liger_execution(
     )
 
 
+def _probe_cuda_qlora_flash_liger_execution(
+    profile: EnvironmentProfile,
+) -> ProbeOutcome:  # pragma: no cover - requires a real CUDA worker environment
+    """Run one bounded BF16/NF4/QLoRA tuple forced onto torch_sdpa_flash WITH Liger fused-linear-CE.
+
+    The two levers compose: flash removes the forward-stage fp32 attention-score matrix (num_heads *
+    seq^2 * 4B) and Liger removes the loss-stage vocab-logits transient. Together they are the only
+    combination that clears BOTH walls, so this is the tuple a seq-4096 run needs proven on this host."""
+
+    return _probe_cuda_qlora_sdpa_execution_tuple(
+        profile,
+        probe_name="cuda_qlora_flash_liger_execution",
+        attention_impl="sdpa",
+        attention_kernel="torch_sdpa_flash",
+        sdp_backend_name="FLASH_ATTENTION",
+        enable_flash=True,
+        enable_math=False,
+        pass_detail=(
+            "BF16/NF4/QLoRA forced-flash-SDPA with Liger fused-linear-CE backward, AdamW update, and "
+            "adapter reload passed"
+        ),
+        proves_attention=["sdpa"],
+        record_phase_timing=True,
+        use_liger=True,
+    )
+
+
 def _restore_qlora_probe_process_state(
     torch_module: Any,
     *,
@@ -1284,6 +1311,7 @@ BUILTIN_PROBES: dict[str, ProbeFn] = {
     "cuda_qlora_math_execution": _probe_cuda_qlora_math_execution,
     "cuda_qlora_sdpa_flash_execution": _probe_cuda_qlora_sdpa_flash_execution,
     "cuda_qlora_liger_execution": _probe_cuda_qlora_liger_execution,
+    "cuda_qlora_flash_liger_execution": _probe_cuda_qlora_flash_liger_execution,
 }
 
 

@@ -2929,6 +2929,7 @@ class QloraExecutionProbeSpec(ContractModel):
         "cuda_qlora_math_execution",
         "cuda_qlora_sdpa_flash_execution",
         "cuda_qlora_liger_execution",
+        "cuda_qlora_flash_liger_execution",
     ] = "cuda_qlora_math_execution"
     execution_combination: ExecutionCapabilityCombination
     device: Literal["cuda:0"] = "cuda:0"
@@ -2953,8 +2954,12 @@ class QloraExecutionProbeSpec(ContractModel):
 
     @model_validator(mode="after")
     def _validate_complete_tuple(self) -> QloraExecutionProbeSpec:
-        loss_impl = "cross_entropy"
-        if self.probe == "cuda_qlora_sdpa_flash_execution":
+        # Liger changes only the loss axis (fused-linear-cross-entropy); the flash probes change only
+        # attention. They compose freely, so the four tuples are (math|flash) x (cross_entropy|liger).
+        liger_probes = {"cuda_qlora_liger_execution", "cuda_qlora_flash_liger_execution"}
+        flash_probes = {"cuda_qlora_sdpa_flash_execution", "cuda_qlora_flash_liger_execution"}
+        loss_impl = "liger_fused_ce" if self.probe in liger_probes else "cross_entropy"
+        if self.probe in flash_probes:
             attention_impl = "sdpa"
             attention_kernel = "torch_sdpa_flash"
             if self.flash_sdp_enabled is not True or self.math_sdp_enabled is not False:
@@ -2962,16 +2967,12 @@ class QloraExecutionProbeSpec(ContractModel):
                     "flash QLoRA readiness requires flash_sdp_enabled=true and math_sdp_enabled=false"
                 )
         else:
-            # The math baseline and the Liger loss tuple both run under FORCED math SDPA; Liger changes
-            # only the loss axis (fused-linear-cross-entropy), never attention.
             attention_impl = "math"
             attention_kernel = "torch_sdpa_math"
             if self.flash_sdp_enabled is not False or self.math_sdp_enabled is not True:
                 raise ValueError(
                     "math QLoRA readiness requires flash_sdp_enabled=false and math_sdp_enabled=true"
                 )
-            if self.probe == "cuda_qlora_liger_execution":
-                loss_impl = "liger_fused_ce"
         expected = (
             "training",
             "cuda",
