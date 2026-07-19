@@ -30,6 +30,9 @@ _INT4_QUANT = frozenset({"nf4", "int4", "fp4", "gptq", "awq", "hqq"})
 # Full-width precisions whose weights are 4 bytes/param (2× fp16) — an un-quantized fp32 plan must not
 # be costed at the fp16 tier or it would be under-estimated and wrongly predicted to fit.
 _FP32_PRECISION = frozenset({"fp32", "tf32"})
+# Loss impls that never materialize the full [seq, vocab] logits (fused linear-CE / chunked CE), so they
+# remove the seq-scaling vocab-logits transient — the kernel-independent seq-4096 wall.
+_FUSED_LOSS_IMPLS = frozenset({"liger_fused_ce", "chunked_ce"})
 
 
 def classify_fit(plan: RunPlan, profile: EnvironmentProfile) -> FitClassification:
@@ -73,6 +76,15 @@ def classify_fit(plan: RunPlan, profile: EnvironmentProfile) -> FitClassificatio
         )
 
     math_attention = plan.attention_backend.value in _MATH_ATTENTION
+    # A sealed fused/chunked cross-entropy removes the seq-scaling vocab-logits transient (the seq-4096
+    # wall). Read the loss impl from the sealed resolved execution when present, else the snapshot; the
+    # reduction only ever lowers a PREDICTED fit (the band tops out at NATIVE_UNPROVEN), never a measured
+    # NATIVE_SAFE claim.
+    if plan.resolved_execution is not None:
+        loss_impl_value: str | None = plan.resolved_execution.loss_impl.value
+    else:
+        loss_impl_value = plan.training_config_snapshot.get("loss_impl")
+    fused_loss = loss_impl_value in _FUSED_LOSS_IMPLS
     estimate = build_vram_estimate(
         base_model=plan.base_model,
         lora_r=plan.adapter.lora_r or 16,
@@ -80,6 +92,7 @@ def classify_fit(plan: RunPlan, profile: EnvironmentProfile) -> FitClassificatio
         micro_batch_size=plan.batching.micro_batch_size,
         adapter=plan.adapter.method.value,
         math_attention=math_attention,
+        fused_loss=fused_loss,
     )
     total_gb = _select_total_gb(estimate, plan.quantization.value, plan.precision.value)
     if total_gb is None:

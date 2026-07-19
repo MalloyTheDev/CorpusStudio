@@ -197,6 +197,17 @@ _QUANT_RUNTIME_GB_PER_B = 0.39
 # seq-4096 (the logits wall needs a fused/chunked cross-entropy - a separate worker change).
 _ACTIVATION_GB_MATH = 5.5  # math/eager SDPA, seq 4096, 7B: fits seq<=1024, OOM at seq2048 (measured)
 _ACTIVATION_GB_FLASH = 4.0  # flash/mem-efficient SDPA, 7B: avoids attention scores; keeps the logits wall
+# The vocab-logits transient portion of the activation coefficient at seq 4096 for a 7B (seq*vocab*~6B
+# for the fp32 upcast + softmax working set of a ~150k-vocab head). It is KERNEL-INDEPENDENT (both math
+# and flash carry it), scales linearly with seq, and is the seq-4096 wall. A fused/chunked cross-entropy
+# (liger_fused_ce or a hand-rolled chunked_ce) never materializes the full [seq, vocab] logits, so it
+# collapses this transient to roughly one chunk's working set. Kept STRICTLY below both coefficients so
+# the non-fused (logits-carrying) activation never goes negative.
+_LOGITS_TRANSIENT_GB = 3.7
+# What a fused/chunked CE leaves behind: one chunk of logits + the softmax working set. Seq-independent
+# (the chunk width is fixed), scaled by model size. A PREDICTION pending a measured fused-CE run - it is
+# never a NATIVE_SAFE claim, only a predicted (NATIVE_UNPROVEN) fit.
+_FUSED_CE_RESIDUAL_GB = 0.4
 
 
 def parse_parameter_count(base_model: str) -> float | None:
@@ -247,13 +258,20 @@ def build_vram_estimate(
     micro_batch_size: int = 1,
     adapter: str = "lora",
     math_attention: bool = False,
+    fused_loss: bool = False,
 ) -> VramEstimate:
     """Rough VRAM planning estimate from the model name (no hardware access).
 
     ``math_attention=True`` adds the seq²-scaling attention-scores memory that the *math* (eager /
     math-SDPA) attention path materializes and flash/mem-efficient attention avoids. Blackwell GPUs
     (sm_120) MUST use the math path (the fused kernels deadlock), so on that arch the estimate is
-    meaningfully higher — pass True there."""
+    meaningfully higher — pass True there.
+
+    ``fused_loss=True`` models a fused/chunked cross-entropy (liger_fused_ce or a hand-rolled
+    chunked_ce) that never materializes the full [seq, vocab] logits, collapsing the kernel-independent
+    vocab-logits transient (the seq-4096 wall) to one chunk's working set. This is a PREDICTED
+    reduction pending a measured fused-CE run, so it only ever lowers a *predicted* (NATIVE_UNPROVEN)
+    fit - never a NATIVE_SAFE claim."""
 
     params_b = parse_parameter_count(base_model)
     if params_b is None:
@@ -279,12 +297,15 @@ def build_vram_estimate(
     # math path materializes far more than flash/mem-efficient attention; native-Windows/WDDM
     # Blackwell uses it to avoid the measured fused-flash deadlock.
     activation_base = _ACTIVATION_GB_MATH if math_attention else _ACTIVATION_GB_FLASH
-    activation_overhead = (
-        activation_base
-        * (params_b / 7)
-        * (sequence_len / 4096)
-        * max(1, micro_batch_size)
-    )
+    seq_scale = (params_b / 7) * (sequence_len / 4096) * max(1, micro_batch_size)
+    if fused_loss:
+        # Drop the seq-scaling vocab-logits transient; keep a fixed (seq-independent) chunk residual.
+        # The non-logits activation (attention scores, layer activations) still scales with seq.
+        activation_overhead = (activation_base - _LOGITS_TRANSIENT_GB) * seq_scale + (
+            _FUSED_CE_RESIDUAL_GB * (params_b / 7) * max(1, micro_batch_size)
+        )
+    else:
+        activation_overhead = activation_base * seq_scale
 
     quant_overhead = params_b * _QUANT_RUNTIME_GB_PER_B
 
@@ -313,6 +334,18 @@ def build_vram_estimate(
             f"attention): gradient checkpointing, seq_len {sequence_len}, micro-batch {micro_batch_size} - LINEAR "
             "in seq_len; the math path (forced on native-Windows/WDDM Blackwell) uses ~5x more "
             "than flash. Other hosts require their own capability evidence.",
+            *(
+                [
+                    f"Fused/chunked cross-entropy: drops the ~{_LOGITS_TRANSIENT_GB:.1f} GB (@seq4096, 7B) "
+                    "kernel-independent vocab-logits transient to a fixed chunk residual - a PREDICTED "
+                    "reduction pending a measured fused-CE run, never a proven fit."
+                ]
+                if fused_loss
+                else [
+                    f"Includes the ~{_LOGITS_TRANSIENT_GB:.1f} GB (@seq4096, 7B) vocab-logits transient - the "
+                    "seq-4096 wall that a fused/chunked cross-entropy would remove."
+                ]
+            ),
             f"Quantized paths add ~{quant_overhead:.1f} GB for bitsandbytes dequant/compute buffers.",
             f"+{_RUNTIME_OVERHEAD_GB:.0f} GB fixed runtime overhead.",
             "Calibrated to the native-Linux RTX 5070 7B QLoRA ladder (seq512->10.44, seq1024->10.60 GB "

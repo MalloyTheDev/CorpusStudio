@@ -110,6 +110,50 @@ def test_vram_estimate_matches_the_native_linux_7b_ladder():
     assert any("bitsandbytes" in a for a in build_vram_estimate("7B").assumptions)
 
 
+def test_fused_cross_entropy_clears_the_seq_4096_logits_wall():
+    # The seq-4096 wall is the kernel-independent vocab-logits transient (~3.7 GB @seq4096, 7B). A
+    # fused/chunked cross-entropy (liger_fused_ce or a hand-rolled chunked_ce) never materializes the
+    # full [seq, vocab] logits, so it drops that transient to a chunk residual and seq 4096 is PREDICTED
+    # to fit. This is a predicted (NATIVE_UNPROVEN) reduction, pending a measured fused-CE run.
+    def m(seq, fused):
+        return build_vram_estimate(
+            "Qwen/Qwen2.5-7B-Instruct", sequence_len=seq, fused_loss=fused
+        ).total_gb_int4
+
+    # Without the fused CE, seq 4096 is over the 12.34 GB card (the wall); with it, it is predicted to fit.
+    assert m(4096, False) > 12.34, m(4096, False)
+    assert m(4096, True) <= 12.34, m(4096, True)
+    # The reduction is real and seq-scaling: it saves more at 4096 than at 2048.
+    saved_4096 = m(4096, False) - m(4096, True)
+    saved_2048 = m(2048, False) - m(2048, True)
+    assert saved_4096 > saved_2048 > 0, (saved_4096, saved_2048)
+    # It works on the math path too (both kernels carry the same logits transient).
+    math_4096 = build_vram_estimate(
+        "Qwen/Qwen2.5-7B-Instruct", sequence_len=4096, math_attention=True, fused_loss=True
+    ).total_gb_int4
+    assert math_4096 < build_vram_estimate(
+        "Qwen/Qwen2.5-7B-Instruct", sequence_len=4096, math_attention=True
+    ).total_gb_int4
+    # The estimate stays honest: a fused-CE run is a prediction, flagged as such in the assumptions.
+    assumptions = build_vram_estimate(
+        "Qwen/Qwen2.5-7B-Instruct", sequence_len=4096, fused_loss=True
+    ).assumptions
+    assert any("PREDICTED" in a and "fused" in a.lower() for a in assumptions)
+
+
+def test_fused_loss_flag_does_not_change_the_default_non_fused_estimate():
+    # Regression guard for the measured anchors: fused_loss defaults False, so every existing
+    # (non-fused) estimate is byte-identical - the fused path only ever SUBTRACTS a predicted transient.
+    for seq in (512, 1024, 2048, 4096):
+        for math in (False, True):
+            default = build_vram_estimate("7B", sequence_len=seq, math_attention=math)
+            explicit = build_vram_estimate(
+                "7B", sequence_len=seq, math_attention=math, fused_loss=False
+            )
+            assert default.total_gb_int4 == explicit.total_gb_int4
+            assert default.activation_overhead_gb == explicit.activation_overhead_gb
+
+
 def test_math_path_estimate_exceeds_flash():
     # Blackwell/sm_120 is forced onto math/eager attention, which materializes the fp32 attention-score
     # matrix that flash/mem-efficient attention avoids -> math is heavier at a given seq. Both paths share
