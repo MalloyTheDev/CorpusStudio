@@ -363,6 +363,11 @@ def test_eval_run_command_uses_backend_and_writes_report_without_real_network(
         "limit": 1,
         "score_threshold": 55.0,
         "timeout_seconds": 33,
+        # the decode is recorded so the run is reproducible (deterministic greedy defaults)
+        "seed": 0,
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_output_tokens": 2048,
     }
     assert written_report == report
 

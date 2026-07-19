@@ -31,6 +31,13 @@ class EvaluationRunConfig(BaseModel):
     # Reasoning/trace-aware eval: when the model emits <think>…</think>answer, score the ANSWER only —
     # its reasoning is not the reference and would corrupt the score. Off by default.
     reasoning: bool = False
+    # Deterministic decoding: greedy (temperature 0) + a fixed seed + a cap >= the longest expected
+    # output, so every eval number is reproducible and a long structured output is not fake-truncated.
+    # The exact requested decode is recorded in the report (EvaluationRunSettings) as evidence.
+    seed: int | None = 0
+    temperature: float = 0.0
+    top_p: float = 1.0
+    max_output_tokens: int = 2048
 
     def to_report_settings(self) -> EvaluationRunSettings:
         """Return the repeatable settings stored with an evaluation report."""
@@ -44,6 +51,10 @@ class EvaluationRunConfig(BaseModel):
             limit=self.limit,
             score_threshold=self.score_threshold,
             timeout_seconds=self.timeout_seconds,
+            seed=self.seed,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            max_output_tokens=self.max_output_tokens,
         )
 
 
@@ -148,6 +159,10 @@ def _evaluate_example(
             BackendGenerateRequest(
                 prompt=example.prompt if not example.messages else None,
                 messages=example.messages,
+                seed=config.seed,
+                temperature=config.temperature,
+                top_p=config.top_p,
+                max_tokens=config.max_output_tokens,
             )
         )
     except BACKEND_ERROR_TYPES as exc:

@@ -32,6 +32,9 @@ class BackendGenerateRequest(BaseModel):
     max_tokens: int | None = None
     temperature: float | None = None
     top_p: float | None = None
+    # Sampler seed for reproducible decoding. None omits it (server default). With temperature 0 the
+    # decode is greedy; seed pins any residual sampling so two identical eval passes agree.
+    seed: int | None = None
 
 
 class BackendGenerateResponse(BaseModel):
