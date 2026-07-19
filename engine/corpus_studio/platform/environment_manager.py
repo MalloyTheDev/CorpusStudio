@@ -74,6 +74,7 @@ from .contracts import (
 from .enums import DependencyLayer, EnvironmentState, FailureTaxonomy, OperatingSystem
 from .environments import (
     get_recipe,
+    READINESS_FLASH_LIGER_PAGED_V1_RECIPE_ID,
     READINESS_FLASH_LIGER_V1_RECIPE_ID,
     READINESS_FLASH_V1_RECIPE_ID,
     READINESS_LIGER_V1_RECIPE_ID,
@@ -99,6 +100,7 @@ SUPPORTED_CREATION_RECIPES = frozenset(
         READINESS_FLASH_V1_RECIPE_ID,
         READINESS_LIGER_V1_RECIPE_ID,
         READINESS_FLASH_LIGER_V1_RECIPE_ID,
+        READINESS_FLASH_LIGER_PAGED_V1_RECIPE_ID,
     }
 )
 
@@ -4290,7 +4292,11 @@ class EnvironmentManager:
         expected_backend = (
             "FLASH_ATTENTION"
             if required.probe
-            in {"cuda_qlora_sdpa_flash_execution", "cuda_qlora_flash_liger_execution"}
+            in {
+                "cuda_qlora_sdpa_flash_execution",
+                "cuda_qlora_flash_liger_execution",
+                "cuda_qlora_flash_liger_paged_execution",
+            }
             else "MATH"
         )
         expected_toggles = {

@@ -2930,6 +2930,7 @@ class QloraExecutionProbeSpec(ContractModel):
         "cuda_qlora_sdpa_flash_execution",
         "cuda_qlora_liger_execution",
         "cuda_qlora_flash_liger_execution",
+        "cuda_qlora_flash_liger_paged_execution",
     ] = "cuda_qlora_math_execution"
     execution_combination: ExecutionCapabilityCombination
     device: Literal["cuda:0"] = "cuda:0"
@@ -2948,7 +2949,7 @@ class QloraExecutionProbeSpec(ContractModel):
     math_sdp_enabled: bool = True
     target_modules: Literal["all-linear"] = "all-linear"
     gradient_checkpointing: Literal[True] = True
-    optimizer: Literal["adamw_torch"] = "adamw_torch"
+    optimizer: Literal["adamw_torch", "paged_adamw_8bit"] = "adamw_torch"
     require_adapter_round_trip: Literal[True] = True
     required_distributions: list[str] = Field(default_factory=list)
 
@@ -2956,8 +2957,16 @@ class QloraExecutionProbeSpec(ContractModel):
     def _validate_complete_tuple(self) -> QloraExecutionProbeSpec:
         # Liger changes only the loss axis (fused-linear-cross-entropy); the flash probes change only
         # attention. They compose freely, so the four tuples are (math|flash) x (cross_entropy|liger).
-        liger_probes = {"cuda_qlora_liger_execution", "cuda_qlora_flash_liger_execution"}
-        flash_probes = {"cuda_qlora_sdpa_flash_execution", "cuda_qlora_flash_liger_execution"}
+        liger_probes = {
+            "cuda_qlora_liger_execution",
+            "cuda_qlora_flash_liger_execution",
+            "cuda_qlora_flash_liger_paged_execution",
+        }
+        flash_probes = {
+            "cuda_qlora_sdpa_flash_execution",
+            "cuda_qlora_flash_liger_execution",
+            "cuda_qlora_flash_liger_paged_execution",
+        }
         loss_impl = "liger_fused_ce" if self.probe in liger_probes else "cross_entropy"
         if self.probe in flash_probes:
             attention_impl = "sdpa"
@@ -2981,7 +2990,7 @@ class QloraExecutionProbeSpec(ContractModel):
             "qlora",
             attention_impl,
             attention_kernel,
-            "adamw_torch",
+            self.optimizer,
             loss_impl,
             "adapter_only",
             "adapter_peft",

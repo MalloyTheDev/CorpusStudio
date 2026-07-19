@@ -51,6 +51,7 @@ READINESS_V2_RECIPE_ID = "backend-corpus-studio-readiness-v2"
 READINESS_FLASH_V1_RECIPE_ID = "backend-corpus-studio-readiness-flash-v1"
 READINESS_LIGER_V1_RECIPE_ID = "backend-corpus-studio-readiness-liger-v1"
 READINESS_FLASH_LIGER_V1_RECIPE_ID = "backend-corpus-studio-readiness-flash-liger-v1"
+READINESS_FLASH_LIGER_PAGED_V1_RECIPE_ID = "backend-corpus-studio-readiness-flash-liger-paged-v1"
 
 # The exact reviewed per-lineage source floor is NOT baked into a recipe or a module constant: it is a
 # changing per-amendment value supplied at plan time (env-plan --required-git-ancestor) and sealed into
@@ -557,6 +558,98 @@ def builtin_recipes() -> list[EnvironmentRecipe]:
                 "independent probe passes cannot be unioned.",
                 "torch_sdpa_flash identity, not Transformers flash_attention_2 or an external flash-attn "
                 "package. Does not replace the math or flash cross_entropy baselines.",
+            ],
+        ),
+        EnvironmentRecipe(
+            recipe_id=READINESS_FLASH_LIGER_PAGED_V1_RECIPE_ID,
+            display_name="Backend: CorpusStudio readiness flash+liger+paged v1 (memory-efficient frontier)",
+            layer=DependencyLayer.backend_worker,
+            description="The fully memory-efficient seq-4096 frontier tuple: forced flash SDPA + Liger "
+            "fused-linear-cross-entropy + bitsandbytes paged 8-bit AdamW. Flash removes the forward "
+            "attention scores, Liger removes the loss logits, and the paged optimizer keeps the fp32 "
+            "LoRA optimizer state out of resident VRAM - the last lever for 7B r16 seq-4096 on 12 GB.",
+            target="corpus_studio",
+            python_requires=">=3.12",
+            default_index_url=PYPI_INDEX_URL,
+            dependency_requirements=[
+                DependencyRequirement(name="pydantic", specifier="==2.13.4", reason="worker contracts"),
+                DependencyRequirement(name="typer", specifier="==0.26.8", reason="worker CLI"),
+                DependencyRequirement(name="orjson", specifier="==3.11.9", reason="engine runtime"),
+                DependencyRequirement(name="torch", specifier="==2.11.0+cu128"),
+                DependencyRequirement(name="transformers", specifier="==5.13.1"),
+                DependencyRequirement(name="peft", specifier="==0.19.1"),
+                DependencyRequirement(name="trl", specifier="==1.8.0"),
+                DependencyRequirement(name="accelerate", specifier="==1.14.0"),
+                DependencyRequirement(name="datasets", specifier="==5.0.0"),
+                DependencyRequirement(name="bitsandbytes", specifier="==0.49.2"),
+                DependencyRequirement(name="safetensors", specifier="==0.8.0"),
+                DependencyRequirement(name="tokenizers", specifier="==0.22.2"),
+                DependencyRequirement(
+                    name="liger-kernel",
+                    specifier=">=0.3.0",
+                    reason="fused-linear-cross-entropy; transformers 5.13.1 use_liger_kernel requires >=0.3.0",
+                ),
+            ],
+            cuda_index_urls={"cu128": PYTORCH_INDEX_URLS["cu128"]},
+            requires_cuda=True,
+            min_compute_capability="12.0",
+            supported_os=[OperatingSystem.linux],
+            capability_probes=[
+                "gpu_responsive",
+                "cuda_available",
+                "bf16_matmul",
+                "bnb_4bit_load",
+                "flash_attn_backward",
+                "trainer_contract",
+                "cuda_qlora_flash_liger_paged_execution",
+            ],
+            required_execution_probe=QloraExecutionProbeSpec(
+                probe="cuda_qlora_flash_liger_paged_execution",
+                execution_combination=ExecutionCapabilityCombination.model_validate(
+                    {
+                        "runtime_mode": "training",
+                        "device": "cuda",
+                        "precision": "bf16",
+                        "quantization": "nf4",
+                        "adapter_method": "qlora",
+                        "attention_impl": "sdpa",
+                        "attention_kernel": "torch_sdpa_flash",
+                        "optimizer": "paged_adamw_8bit",
+                        "loss_impl": "liger_fused_ce",
+                        "checkpoint_impl": "adapter_only",
+                        "export_format": "adapter_peft",
+                        "execution_contract_version": "1.0.0",
+                        "probe": "cuda_qlora_flash_liger_paged_execution",
+                    }
+                ),
+                optimizer="paged_adamw_8bit",
+                flash_sdp_enabled=True,
+                math_sdp_enabled=False,
+                required_distributions=sorted(
+                    [
+                        "accelerate",
+                        "bitsandbytes",
+                        "datasets",
+                        "liger-kernel",
+                        "peft",
+                        "safetensors",
+                        "tokenizers",
+                        "torch",
+                        "transformers",
+                        "trl",
+                    ]
+                ),
+            ),
+            requires_worker_wheel=True,
+            bootstrap_pip_version="26.1.2",
+            verification=RecipeVerification.declared,
+            notes=[
+                "Plan-only until a separately authorized environment creation.",
+                "Forced flash SDPA + Liger fused-linear-CE + paged 8-bit AdamW - the composed "
+                "memory-efficient seq-4096 frontier. bnb 8-bit optimizer sm_120 support is proven only "
+                "by the one complete cuda_qlora_flash_liger_paged_execution tuple.",
+                "HARDWARE_VERIFIED requires that one complete tuple; independent probe passes cannot be "
+                "unioned. Does not replace the adamw_torch baselines.",
             ],
         ),
         EnvironmentRecipe(

@@ -1203,8 +1203,11 @@
           "type": "boolean"
         },
         "optimizer": {
-          "const": "adamw_torch",
           "default": "adamw_torch",
+          "enum": [
+            "adamw_torch",
+            "paged_adamw_8bit"
+          ],
           "title": "Optimizer",
           "type": "string"
         },
@@ -1214,7 +1217,8 @@
             "cuda_qlora_math_execution",
             "cuda_qlora_sdpa_flash_execution",
             "cuda_qlora_liger_execution",
-            "cuda_qlora_flash_liger_execution"
+            "cuda_qlora_flash_liger_execution",
+            "cuda_qlora_flash_liger_paged_execution"
           ],
           "title": "Probe",
           "type": "string"
