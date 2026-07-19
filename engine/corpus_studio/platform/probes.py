@@ -1299,7 +1299,7 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
                     "attention_kernel": [attention_kernel],
                     "adapter": ["qlora"],
                     "loss": [proven_loss],
-                    "optimizer": ["adamw_torch"],
+                    "optimizer": [optimizer],
                     "checkpoint": ["adapter_only"],
                 },
                 execution_combinations=[combination],
