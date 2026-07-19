@@ -709,6 +709,14 @@ def _parse_min_python(python_requires: str) -> tuple[int, int] | None:
         return None
 
 
+def _parse_cc_major(min_compute_capability: str) -> int | None:
+    """Parse a ``"12.0"``-style compute-capability floor into its MAJOR digit (12); None if malformed."""
+    try:
+        return int(min_compute_capability.strip().split(".")[0])
+    except (ValueError, IndexError):
+        return None
+
+
 def _python_tuple(python_version: str) -> tuple[int, int] | None:
     parts = python_version.strip().split(".")
     try:
@@ -826,6 +834,7 @@ def resolve_dependencies(
     *,
     os_value: OperatingSystem,
     accelerator_tag: str = "cpu",
+    host_compute_capability_major: int | None = None,
     python_version: str = "",
     runtime: PythonRuntime | None = None,
     environment_id: str | None = None,
@@ -893,6 +902,20 @@ def resolve_dependencies(
 
     if recipe.requires_cuda and accelerator_tag == "cpu":
         blocking.append("recipe requires a CUDA accelerator, but none was detected on this host")
+
+    # Enforce the recipe's declared compute-capability floor: a recipe whose execution evidence/probe
+    # is proven on (e.g.) Blackwell must not be reported resolvable on a KNOWN sub-floor host, even if a
+    # CUDA build would install (installed != supported). Fail-safe: an unknown host capability does not
+    # block here - the execution probe remains the authority. Compared on the MAJOR digit (the host
+    # profile carries only compute_capability_major).
+    if recipe.min_compute_capability and host_compute_capability_major is not None:
+        floor_major = _parse_cc_major(recipe.min_compute_capability)
+        if floor_major is not None and host_compute_capability_major < floor_major:
+            blocking.append(
+                f"host GPU compute capability {host_compute_capability_major}.x is below this recipe's "
+                f"declared floor {recipe.min_compute_capability} - its execution evidence is not proven "
+                f"on this hardware"
+            )
 
     if recipe.requires_native_build:
         warnings.append("needs a native build - a C/C++ compiler toolchain must be present")

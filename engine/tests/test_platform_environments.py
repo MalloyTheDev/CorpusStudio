@@ -143,6 +143,38 @@ def test_readiness_recipe_fails_closed_when_no_torch_index_for_host_accelerator(
     )
 
 
+def _readiness_resolution(**overrides):
+    recipe = get_recipe("backend-corpus-studio-readiness-v2")
+    assert recipe is not None and recipe.min_compute_capability == "12.0"
+    kwargs = dict(
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+        required_git_ancestor=_V7_EXACT_FLOOR,
+    )
+    kwargs.update(overrides)
+    return resolve_dependencies(recipe, **kwargs)
+
+
+def test_readiness_recipe_blocks_a_known_sub_floor_compute_capability():
+    # A Blackwell-only recipe (min_compute_capability 12.0) is NOT resolvable on a known cc8 (Ampere)
+    # host, even though a cu128 wheel would install - installed != supported.
+    resolution = _readiness_resolution(host_compute_capability_major=8)
+    assert resolution.resolvable is False
+    assert any("below this recipe's declared floor" in r for r in resolution.blocking_reasons)
+
+
+def test_readiness_recipe_compute_floor_allows_an_at_floor_host():
+    resolution = _readiness_resolution(host_compute_capability_major=12)  # Blackwell
+    assert not any("declared floor" in r for r in resolution.blocking_reasons)
+
+
+def test_unknown_host_compute_capability_does_not_block_at_resolve():
+    # Fail-safe: an unknown host capability does not block here; the execution probe is the authority.
+    resolution = _readiness_resolution(host_compute_capability_major=None)
+    assert not any("declared floor" in r for r in resolution.blocking_reasons)
+
+
 def test_readiness_flash_v1_is_exact_forced_flash_and_independent_of_math():
     math_recipe = get_recipe("backend-corpus-studio-readiness-v2")
     flash_recipe = get_recipe("backend-corpus-studio-readiness-flash-v1")
