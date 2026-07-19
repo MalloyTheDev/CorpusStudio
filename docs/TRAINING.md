@@ -290,7 +290,8 @@ native-Windows + Blackwell hazard resolves to the math path; another host still 
 execution-combination probe before that policy can be sealed. The managed flash tuple now supplies
 environment-level evidence for this host, but the Phase 9B production path still needs a successful
 eligible-hardware optimizer step. Bare-Linux RTX 5070 real-workload behavior and sequence length 4096
-remain unverified.
+remain unverified **as a sealed research result** (an exploratory product run has since reached seq 4096
+on this host - see the ceiling note below).
 
 The real ceiling (measured, and it is **not** an attention-kernel problem): on a **12 GB** card
 the 7B 4-bit QLoRA training peak is ~10.8 GB @ `sequence_len` 1024 → 13.8 GB @ 2048, so above
@@ -308,6 +309,20 @@ kernel barely moves the peak. To fit **full-length rows on 12 GB**, reduce the m
 actually dominates: keep `sequence_len` ≤ ~1280, shorten a long training system prompt (~700 →
 ~80 tokens — also the correct fine-tuning design; the student internalises the rules and doesn't
 need the teacher preamble), or use a **smaller base** (Qwen2.5-3B fits full-length comfortably).
+
+**Update (2026-07-19, native-Linux, exploratory/product - NOT a sealed IEEE result):** on this
+native-Linux RTX 5070 the seq-4096 ceiling *was* lifted - not by a faster attention kernel alone (the
+finding above still holds), but by the **combination** that attacks each memory term: **liger
+fused-linear-CE** removes the ~3.7 GB `[seq, vocab]` logits transient at the loss stage, **bnb
+`paged_adamw_8bit`** moves the resident fp32 optimizer state to host, and
+**`PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128`** holds fragmentation (it is the only allocator
+compatible with the paged managed memory - `expandable_segments` collides with it). With flash SDPA on
+top, an exploratory `platform-run` trained 7B QLoRA at `sequence_len` 4096 (measured envelope: math
+<= 2048, flash <= 3072, flash+liger+paged = 4096); the WBG example's untruncated "after" adapter was
+produced this way (r8 full 3-epoch, or r16 ~1-epoch at the 12 GB edge - see `examples/wbg/README.md`).
+This is exploratory/product evidence, delivered by #613-#619; it is not a sealed research result and does
+not amend the paper's immutable ladder.
+
 Attention is not a post-seal runtime override. Re-plan against capability evidence
 for the desired backend; if the exact kernel policy was not proven, planning
 refuses it.

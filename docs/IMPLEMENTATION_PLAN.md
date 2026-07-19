@@ -22,8 +22,13 @@ non-interchangeable levels:
   backend-manifest registry (`corpus_studio`, `unsloth`), a watchdog (measured fit + spill/stall), and
   a supervised subprocess worker that can **kill a hung run**. The pre-Phase-9B lifecycle ran on a real
   RTX 5070 under native Windows/WDDM. Separately, the current native-Linux host's managed
-  `backend-corpus-studio` environment passed its minimal hardware probe. The new effective-execution
-  path on a real workload, full-sequence 7B behavior, and every real offload path remain unverified.
+  `backend-corpus-studio` environment passed its minimal hardware probe. An **exploratory product run**
+  (not a sealed IEEE research cell) has since exercised the effective-execution path end to end, training
+  7B QLoRA at sequence length 4096 on this host (flash SDPA + liger fused-CE + bnb paged-8bit-AdamW +
+  `max_split_size_mb:128`; envelope math <= 2048 / flash <= 3072 / flash+liger+paged = 4096 - see
+  [`POST_4096_ROADMAP_RESEARCH.md`](POST_4096_ROADMAP_RESEARCH.md)). Only real offload paths (DeepSpeed/
+  FSDP/CPU/NVMe) remain unverified, and this exploratory result does not retire the paper's immutable
+  sealed ladder.
 
 Against the full-platform vision, the frontier is the **input side**. Ranked gaps:
 

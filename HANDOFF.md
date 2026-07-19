@@ -1,5 +1,19 @@
 # CorpusStudio — Session Handoff
 
+**Last updated:** 2026-07-19 (**exploratory seq-4096 7B QLoRA achieved on the native-Linux host -
+product, NOT a sealed IEEE cell**). An exploratory `platform-run` trained Qwen2.5-7B QLoRA at sequence
+length 4096 on this RTX 5070 (12 GB) box, and the WBG example's untruncated "after" adapter was produced
+end to end (train -> export). The measured seq-4096 envelope on this card: math SDPA <= 2048, flash SDPA
+<= 3072, and **flash + liger fused-CE + bnb paged-8bit-AdamW +
+`PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128` = 4096**. Three `HARDWARE_VERIFIED` research-lineage envs
+bind the proven stack (`backend-corpus-studio-research-{liger-v9b, flash-liger-v9c, flash-liger-paged-v9c}`).
+Landed PRs: #613 allocator-policy wiring, #614 forward-stage marker, #615 fused-loss-aware predict-fit,
+#617 paged-optimizer precision + liger/paged probes+recipes, #618 token-coverage ledger
+(no-silent-truncation), #619 `platform-plan --lora-r/--lora-alpha`. This is **exploratory/product**
+evidence: it does NOT retire the paper's immutable sealed ladder (e.g. the v8 math-2048 OOM cell), and
+real offload paths (DeepSpeed/FSDP/CPU/NVMe) remain unverified. Detail:
+[`docs/POST_4096_ROADMAP_RESEARCH.md`](docs/POST_4096_ROADMAP_RESEARCH.md), `examples/wbg/README.md`.
+
 **Last updated:** 2026-07-16 (**v7 0.5B GPU bring-up PASSED - `V7_MATH_AND_FLASH_THROUGHPUT_PASS`**: the
 v6 token-throughput observer gap is fixed (PR #466, merge `25c901ec`; amendment 0004 -> matrix 1.4.0;
 reproducible v7 wheel `090f879b...` from source `21aa81d9`; matched `research-{math,flash}-v7`

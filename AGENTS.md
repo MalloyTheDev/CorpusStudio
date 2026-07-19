@@ -78,7 +78,10 @@ CI runs on **Linux / Python 3.11** with `pytest --cov=corpus_studio --cov-fail-u
   measured run is); single-writer `examples.jsonl`.
 - **Blackwell / sm_120**: the **math** attention path is the verified-safe default (fused flash-SDPA
   deadlocks on native Windows WDDM; on this native-Linux host the env hardware probe verified the math
-  path, and bare-Linux flash-for-the-workload is not yet claimed). Unsloth is refused on Windows/WDDM.
+  path). An **exploratory product run** (not a sealed IEEE cell) has since trained 7B QLoRA at seq 4096
+  here with flash SDPA + liger fused-CE + bnb paged-8bit-AdamW + `max_split_size_mb:128` (envelope: math
+  <= 2048, flash <= 3072, flash+liger+paged = 4096); bare-Linux flash-for-the-workload is still not a
+  **sealed** claim. Unsloth is refused on Windows/WDDM.
 - **ASCII in CLI-facing strings** (Windows console UTF-8 — no `—`, use `-`).
 - **Contracts are the boundary**: change `platform/contracts.py` (pydantic) → regenerate
   `docs/contracts/*.schema.json` → the TS types in `apps/web/src/contracts/` derive from those.
@@ -88,10 +91,12 @@ CI runs on **Linux / Python 3.11** with `pytest --cov=corpus_studio --cov-fail-u
 - **Hardware claims stay evidence-bound**: the native-Linux RTX 5070 host is now assembled and the
   managed `backend-corpus-studio` environment is `HARDWARE_VERIFIED` (env-manager CUDA alloc + 4-bit
   construction + minimal GPU fwd/bwd + math SDPA - see [`docs/HOST_STATE.md`](docs/HOST_STATE.md)). That
-  environment-probe level is NOT a workload result: still do not claim full-sequence 7B success,
-  DeepSpeed/FSDP/CPU/NVMe offload, real offload fit, PCIe/NVMe throughput or endurance, bare-Linux
-  FlashAttention for the real workload, or MoE runtime capability. Contracts, fake workers, CI, and a
-  passing env hardware probe are not proof the 7B workload trains.
+  environment-probe level is NOT a workload result. An exploratory product run has since trained 7B QLoRA
+  at seq 4096 on this host (above), but still do not claim full-sequence 7B success **as a sealed research
+  cell**, nor claim DeepSpeed/FSDP/CPU/NVMe offload, real offload fit, PCIe/NVMe throughput or endurance,
+  bare-Linux FlashAttention for the real workload **as a sealed result**, or MoE runtime capability.
+  Contracts, fake workers, CI, and a passing env hardware probe are not proof of the sealed 7B claim, and
+  an exploratory run does not amend the paper's immutable sealed ladder.
 
 ## Process
 - Branch first (`git checkout -b feat/<slice>`), one coherent CI-green PR per slice.
