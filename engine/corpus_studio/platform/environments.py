@@ -908,6 +908,16 @@ def resolve_dependencies(
             torch_index = recipe.cuda_index_urls["cpu"]
         if torch_index:
             resolved_indexes.append(torch_index)
+        else:
+            # Fail closed: a torch-bearing recipe with no wheel index for this host's accelerator (and
+            # no 'cpu' fallback) must NOT report itself resolvable. _build_install_steps gates the torch
+            # install step on torch_index, so a missing index would silently omit torch while still
+            # installing transformers/peft/trl from PyPI (with deps), pulling an unpinned transitive
+            # torch instead of the recipe's exact pin - breaking the sealing guarantee.
+            blocking.append(
+                f"no PyTorch wheel index for accelerator '{accelerator_tag}' in this recipe "
+                f"(available: {sorted(recipe.cuda_index_urls)})"
+            )
         if accelerator_tag == "cpu":
             warnings.append("no CUDA selected - installing the CPU PyTorch build (no GPU training)")
     if recipe.dependency_requirements:

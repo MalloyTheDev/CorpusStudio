@@ -1389,6 +1389,46 @@ def test_optimizer_state_precision_allows_scalar_cpu_step_but_rejects_offloaded_
         verify_optimizer_state_precision(offloaded, torch, _sealed_config())
 
 
+def test_optimizer_state_precision_paged_allows_cpu_moment_but_still_enforces_dtype():
+    # bitsandbytes paged_adamw_8bit deliberately keeps its moment state in host-paged CUDA-managed
+    # memory that reports as CPU (#617) - that offload is what frees the resident VRAM to fit seq-4096,
+    # so for a paged optimizer a full CPU-resident moment tensor is EXPECTED, not a PLACEMENT_DEVIATION.
+    # This locks in that relaxation AND proves it does NOT relax the independent dtype gate: a
+    # wrong-precision moment is still rejected on the paged path (regression guard for the #617 change).
+    torch = _FakeTorch()
+
+    def tensor(dtype, device, shape):
+        return type("Tensor", (), {"dtype": dtype, "device": device, "shape": shape})()
+
+    # (a) paged optimizer + a full moment tensor on CPU at the sealed dtype -> accepted (relaxation).
+    paged_cpu = type(
+        "Optimizer",
+        (),
+        {
+            "state": {
+                "parameter": {
+                    "step": tensor(torch.float32, "cpu", ()),
+                    "exp_avg": tensor(torch.float32, "cpu", (8, 16)),
+                    "exp_avg_sq": tensor(torch.float32, "cpu", (8, 16)),
+                }
+            }
+        },
+    )()
+    verify_optimizer_state_precision(paged_cpu, torch, _sealed_config(optim="paged_adamw_8bit"))
+
+    # (b) the SAME paged CPU placement but a WRONG-precision moment (fp16 under an fp32 seal) must
+    # still fail closed - the paged DEVICE relaxation does not relax the DTYPE contract.
+    wrong_dtype = type(
+        "Optimizer",
+        (),
+        {"state": {"parameter": {"exp_avg": tensor(torch.float16, "cpu", (8, 16))}}},
+    )()
+    with pytest.raises(TrainerError, match="optimizer-state dtype deviation"):
+        verify_optimizer_state_precision(
+            wrong_dtype, torch, _sealed_config(optim="paged_adamw_8bit")
+        )
+
+
 def test_sealed_max_steps_must_match_the_completed_global_step():
     config = _sealed_config(max_steps=3)
     verify_completed_step_count(config, 3)

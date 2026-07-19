@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -777,3 +778,24 @@ def test_export_json_schemas_is_byte_deterministic(tmp_path):
     assert first_files == second_files
     for name in first_files:
         assert (first / name).read_bytes() == (second / name).read_bytes()
+
+
+def test_export_json_schemas_matches_committed_docs_contracts(tmp_path):
+    # Trigger-independent drift backstop. The web CI job regenerates + diffs the committed schemas,
+    # but it is path-filtered, so a change that shifts JSON-Schema serialization (e.g. a pydantic pin
+    # bump in engine/constraints.txt) WITHOUT regenerating docs/contracts could merge on a PR whose
+    # paths don't match that filter. This test fails on that drift regardless of the touched paths,
+    # provided the pinned pydantic (engine/constraints.txt) is installed (CI installs it).
+    committed = Path(__file__).resolve().parents[2] / "docs" / "contracts"
+    P.export_json_schemas(tmp_path)
+    regenerated = sorted(path.name for path in tmp_path.iterdir())
+    on_disk = sorted(path.name for path in committed.iterdir() if path.suffix == ".json")
+    assert regenerated == on_disk, (
+        "the committed docs/contracts JSON file set drifted from export_json_schemas - "
+        "regenerate and commit the schemas"
+    )
+    for name in regenerated:
+        assert (tmp_path / name).read_bytes() == (committed / name).read_bytes(), (
+            f"docs/contracts/{name} is stale vs export_json_schemas - regenerate and commit "
+            "(a pydantic bump can shift serialization; keep the schemas in the same PR)"
+        )

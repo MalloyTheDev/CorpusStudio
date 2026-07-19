@@ -120,6 +120,29 @@ def test_readiness_v2_recipe_is_exact_and_probe_changes_reseal_the_plan():
     assert first.resolution_hash != second.resolution_hash
 
 
+def test_readiness_recipe_fails_closed_when_no_torch_index_for_host_accelerator():
+    # The readiness recipes pin cuda_index_urls to {"cu128"} only. On a GPU host whose CUDA runtime
+    # reports 12.6/12.1 (select_accelerator_tag -> "cu126"/"cu121"), the recipe has no wheel index for
+    # that tag and no "cpu" fallback. resolve_dependencies MUST fail closed (resolvable False, with a
+    # reason) rather than silently drop the torch install step and let PyPI pull an unpinned transitive
+    # torch in place of the recipe's exact pin.
+    recipe = get_recipe("backend-corpus-studio-readiness-v2")
+    assert recipe is not None
+    assert set(recipe.cuda_index_urls) == {"cu128"}  # precondition this regression guard relies on
+    resolution = resolve_dependencies(
+        recipe,
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu126",
+        python_version="3.12",
+        required_git_ancestor=_V7_EXACT_FLOOR,
+    )
+    assert resolution.resolvable is False
+    assert any(
+        "no PyTorch wheel index for accelerator 'cu126'" in reason
+        for reason in resolution.blocking_reasons
+    )
+
+
 def test_readiness_flash_v1_is_exact_forced_flash_and_independent_of_math():
     math_recipe = get_recipe("backend-corpus-studio-readiness-v2")
     flash_recipe = get_recipe("backend-corpus-studio-readiness-flash-v1")
