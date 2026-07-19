@@ -10,6 +10,20 @@ useDefault = true
 
 [allowlist]
 description = "Synthetic test fixtures - deterministic fake tokens/hashes/PII, never real secrets."
+# regexTarget "line" so the field-name context (e.g. `..._sha256`) is visible to the regexes below;
+# a finding is allowlisted when its PATH matches `paths` OR its LINE matches `regexes` (OR semantics).
+regexTarget = "line"
 paths = [
   '''engine/tests/.*''',
+  # Rust/Tauri build output (gitignored, never committed). Compiled dependency metadata (*.rmeta)
+  # embeds keybinding/string literals that the generic-api-key rule misreads; it is not our source.
+  '''apps/web/src-tauri/target/.*''',
+]
+regexes = [
+  # SHA256 content digests recorded in the sealed research evidence (tokenizer_content_sha256,
+  # token_id_aggregate_sha256, ...) are deterministic content hashes, NOT API keys. A field
+  # explicitly named *_sha256 holding a 64-char hex digest is never a secret. This exempts only
+  # those digest fields (anywhere they appear) - every other line, including the rest of these
+  # sealed files, is still scanned for real secrets.
+  '''_sha256"\s*:\s*"[a-f0-9]{64}"''',
 ]
