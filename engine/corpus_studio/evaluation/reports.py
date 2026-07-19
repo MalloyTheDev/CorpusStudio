@@ -60,6 +60,12 @@ class EvaluationRunSettings(BaseModel):
     limit: int | None = None
     score_threshold: float = 70.0
     timeout_seconds: int = 120
+    # The exact requested decode, recorded so a saved run documents HOW it decoded (reproducibility).
+    # A server that ignores `seed` makes this best-effort - a recorded caveat, never a false guarantee.
+    seed: int | None = 0
+    temperature: float = 0.0
+    top_p: float = 1.0
+    max_output_tokens: int = 2048
 
 
 class EvaluationReport(BaseModel):

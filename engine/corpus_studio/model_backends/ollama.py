@@ -123,7 +123,7 @@ class OllamaBackend:
         return call_with_retry(_do, retry_policy or self._retry_policy, sleep=self._sleep)
 
     def _options(self, request: BackendGenerateRequest) -> dict[str, Any]:
-        return {
+        options: dict[str, Any] = {
             "temperature": request.temperature
             if request.temperature is not None
             else self.config.temperature,
@@ -132,6 +132,9 @@ class OllamaBackend:
             if request.max_tokens is not None
             else self.config.max_tokens,
         }
+        if request.seed is not None:
+            options["seed"] = request.seed  # ollama honors this; with temperature 0 the decode is greedy
+        return options
 
 
 def _join_url(base_url: str, path: str) -> str:

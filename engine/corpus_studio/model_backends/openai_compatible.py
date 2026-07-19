@@ -63,20 +63,21 @@ class OpenAICompatibleBackend:
 
     def generate(self, request: BackendGenerateRequest) -> BackendGenerateResponse:
         messages = request.messages or [{"role": "user", "content": request.prompt or ""}]
-        payload = self._request_json(
-            "POST",
-            "/chat/completions",
-            {
-                "model": self.config.model_name,
-                "messages": messages,
-                "max_tokens": request.max_tokens or self.config.max_tokens,
-                "temperature": request.temperature
-                if request.temperature is not None
-                else self.config.temperature,
-                "top_p": request.top_p if request.top_p is not None else self.config.top_p,
-                "stream": False,
-            },
-        )
+        body: dict[str, Any] = {
+            "model": self.config.model_name,
+            "messages": messages,
+            "max_tokens": request.max_tokens or self.config.max_tokens,
+            "temperature": request.temperature
+            if request.temperature is not None
+            else self.config.temperature,
+            "top_p": request.top_p if request.top_p is not None else self.config.top_p,
+            "stream": False,
+        }
+        if request.seed is not None:
+            # best-effort determinism: some OpenAI-compatible servers honor `seed`, some ignore it
+            # (recorded as a caveat in the eval report, not claimed as a guarantee).
+            body["seed"] = request.seed
+        payload = self._request_json("POST", "/chat/completions", body)
         choice = (payload.get("choices") or [{}])[0]
         text = choice.get("message", {}).get("content") or choice.get("text") or ""
         return BackendGenerateResponse(
