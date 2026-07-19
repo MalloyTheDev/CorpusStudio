@@ -75,6 +75,7 @@ from .enums import DependencyLayer, EnvironmentState, FailureTaxonomy, Operating
 from .environments import (
     get_recipe,
     READINESS_FLASH_V1_RECIPE_ID,
+    READINESS_LIGER_V1_RECIPE_ID,
     READINESS_V2_RECIPE_ID,
     recipe_digest,
     resolution_digest,
@@ -91,7 +92,12 @@ MANAGER_VERSION = "1.4.0"
 _GIT_SHA1_RE = re.compile(r"[0-9a-f]{40}$")
 REFERENCE_RECIPE_ID = "backend-corpus-studio"
 SUPPORTED_CREATION_RECIPES = frozenset(
-    {REFERENCE_RECIPE_ID, READINESS_V2_RECIPE_ID, READINESS_FLASH_V1_RECIPE_ID}
+    {
+        REFERENCE_RECIPE_ID,
+        READINESS_V2_RECIPE_ID,
+        READINESS_FLASH_V1_RECIPE_ID,
+        READINESS_LIGER_V1_RECIPE_ID,
+    }
 )
 
 _OWNER_FILENAME = ".corpusstudio-owner.json"

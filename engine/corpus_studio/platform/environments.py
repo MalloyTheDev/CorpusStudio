@@ -49,6 +49,7 @@ PYTORCH_INDEX_URLS: dict[str, str] = {
 PYPI_INDEX_URL = "https://pypi.org/simple"
 READINESS_V2_RECIPE_ID = "backend-corpus-studio-readiness-v2"
 READINESS_FLASH_V1_RECIPE_ID = "backend-corpus-studio-readiness-flash-v1"
+READINESS_LIGER_V1_RECIPE_ID = "backend-corpus-studio-readiness-liger-v1"
 
 # The exact reviewed per-lineage source floor is NOT baked into a recipe or a module constant: it is a
 # changing per-amendment value supplied at plan time (env-plan --required-git-ancestor) and sealed into
@@ -368,6 +369,100 @@ def builtin_recipes() -> list[EnvironmentRecipe]:
                 "do not claim flash from a Windows math environment.",
                 "This is torch_sdpa_flash identity, not Transformers flash_attention_2 or an "
                 "external flash-attn package.",
+            ],
+        ),
+        EnvironmentRecipe(
+            recipe_id=READINESS_LIGER_V1_RECIPE_ID,
+            display_name="Backend: CorpusStudio readiness liger v1 (exact QLoRA + Liger fused-CE tuple)",
+            layer=DependencyLayer.backend_worker,
+            description="Exact-pinned native-Linux CorpusStudio worker environment - the math "
+            "readiness-v2 stack plus liger-kernel - whose lock is sealed only after one complete "
+            "BF16/NF4/double-quant QLoRA math-SDPA tuple with Liger fused-linear-cross-entropy passes. "
+            "The fused-linear-CE never materializes the full [seq, vocab] logits: the seq-4096 "
+            "logits-wall lever.",
+            target="corpus_studio",
+            python_requires=">=3.12",
+            default_index_url=PYPI_INDEX_URL,
+            dependency_requirements=[
+                DependencyRequirement(name="pydantic", specifier="==2.13.4", reason="worker contracts"),
+                DependencyRequirement(name="typer", specifier="==0.26.8", reason="worker CLI"),
+                DependencyRequirement(name="orjson", specifier="==3.11.9", reason="engine runtime"),
+                DependencyRequirement(name="torch", specifier="==2.11.0+cu128"),
+                DependencyRequirement(name="transformers", specifier="==5.13.1"),
+                DependencyRequirement(name="peft", specifier="==0.19.1"),
+                DependencyRequirement(name="trl", specifier="==1.8.0"),
+                DependencyRequirement(name="accelerate", specifier="==1.14.0"),
+                DependencyRequirement(name="datasets", specifier="==5.0.0"),
+                DependencyRequirement(name="bitsandbytes", specifier="==0.49.2"),
+                DependencyRequirement(name="safetensors", specifier="==0.8.0"),
+                DependencyRequirement(name="tokenizers", specifier="==0.22.2"),
+                DependencyRequirement(
+                    name="liger-kernel",
+                    specifier=">=0.3.0",
+                    reason="fused-linear-cross-entropy; transformers 5.13.1 use_liger_kernel requires >=0.3.0",
+                ),
+            ],
+            cuda_index_urls={"cu128": PYTORCH_INDEX_URLS["cu128"]},
+            requires_cuda=True,
+            min_compute_capability="12.0",
+            supported_os=[OperatingSystem.linux],
+            capability_probes=[
+                "gpu_responsive",
+                "cuda_available",
+                "bf16_matmul",
+                "bnb_4bit_load",
+                "math_sdpa_backward",
+                "trainer_contract",
+                "cuda_qlora_liger_execution",
+            ],
+            required_execution_probe=QloraExecutionProbeSpec(
+                probe="cuda_qlora_liger_execution",
+                execution_combination=ExecutionCapabilityCombination.model_validate(
+                    {
+                        "runtime_mode": "training",
+                        "device": "cuda",
+                        "precision": "bf16",
+                        "quantization": "nf4",
+                        "adapter_method": "qlora",
+                        "attention_impl": "math",
+                        "attention_kernel": "torch_sdpa_math",
+                        "optimizer": "adamw_torch",
+                        "loss_impl": "liger_fused_ce",
+                        "checkpoint_impl": "adapter_only",
+                        "export_format": "adapter_peft",
+                        "execution_contract_version": "1.0.0",
+                        "probe": "cuda_qlora_liger_execution",
+                    }
+                ),
+                flash_sdp_enabled=False,
+                math_sdp_enabled=True,
+                required_distributions=sorted(
+                    [
+                        "accelerate",
+                        "bitsandbytes",
+                        "datasets",
+                        "liger-kernel",
+                        "peft",
+                        "safetensors",
+                        "tokenizers",
+                        "torch",
+                        "transformers",
+                        "trl",
+                    ]
+                ),
+            ),
+            requires_worker_wheel=True,
+            bootstrap_pip_version="26.1.2",
+            verification=RecipeVerification.declared,
+            notes=[
+                "Plan-only until a separately authorized environment creation.",
+                "The math readiness-v2 exact stack + liger-kernel; the only added semantic is the fused "
+                "loss axis (cross_entropy -> liger_fused_ce). Attention stays forced math SDPA.",
+                "HARDWARE_VERIFIED requires the one complete cuda_qlora_liger_execution tuple; "
+                "independent probe passes cannot be unioned.",
+                "Liger applies via the same transformers apply_liger_kernel path the trainer uses; "
+                "installed != proven - the probe must load and train the fused kernels on this host.",
+                "Does not replace backend-corpus-studio-readiness-v2 (the cross_entropy math baseline).",
             ],
         ),
         EnvironmentRecipe(

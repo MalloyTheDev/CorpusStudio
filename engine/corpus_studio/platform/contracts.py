@@ -2925,9 +2925,11 @@ class QloraExecutionProbeSpec(ContractModel):
     independent flash/bitsandbytes/optimizer probes cannot be unioned into a complete capability.
     """
 
-    probe: Literal["cuda_qlora_math_execution", "cuda_qlora_sdpa_flash_execution"] = (
-        "cuda_qlora_math_execution"
-    )
+    probe: Literal[
+        "cuda_qlora_math_execution",
+        "cuda_qlora_sdpa_flash_execution",
+        "cuda_qlora_liger_execution",
+    ] = "cuda_qlora_math_execution"
     execution_combination: ExecutionCapabilityCombination
     device: Literal["cuda:0"] = "cuda:0"
     compute_dtype: Literal["bf16"] = Field(
@@ -2951,20 +2953,25 @@ class QloraExecutionProbeSpec(ContractModel):
 
     @model_validator(mode="after")
     def _validate_complete_tuple(self) -> QloraExecutionProbeSpec:
-        if self.probe == "cuda_qlora_math_execution":
-            attention_impl = "math"
-            attention_kernel = "torch_sdpa_math"
-            if self.flash_sdp_enabled is not False or self.math_sdp_enabled is not True:
-                raise ValueError(
-                    "math QLoRA readiness requires flash_sdp_enabled=false and math_sdp_enabled=true"
-                )
-        else:
+        loss_impl = "cross_entropy"
+        if self.probe == "cuda_qlora_sdpa_flash_execution":
             attention_impl = "sdpa"
             attention_kernel = "torch_sdpa_flash"
             if self.flash_sdp_enabled is not True or self.math_sdp_enabled is not False:
                 raise ValueError(
                     "flash QLoRA readiness requires flash_sdp_enabled=true and math_sdp_enabled=false"
                 )
+        else:
+            # The math baseline and the Liger loss tuple both run under FORCED math SDPA; Liger changes
+            # only the loss axis (fused-linear-cross-entropy), never attention.
+            attention_impl = "math"
+            attention_kernel = "torch_sdpa_math"
+            if self.flash_sdp_enabled is not False or self.math_sdp_enabled is not True:
+                raise ValueError(
+                    "math QLoRA readiness requires flash_sdp_enabled=false and math_sdp_enabled=true"
+                )
+            if self.probe == "cuda_qlora_liger_execution":
+                loss_impl = "liger_fused_ce"
         expected = (
             "training",
             "cuda",
@@ -2974,7 +2981,7 @@ class QloraExecutionProbeSpec(ContractModel):
             attention_impl,
             attention_kernel,
             "adamw_torch",
-            "cross_entropy",
+            loss_impl,
             "adapter_only",
             "adapter_peft",
             "1.0.0",

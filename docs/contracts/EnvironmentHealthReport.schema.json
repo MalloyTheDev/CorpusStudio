@@ -1349,7 +1349,8 @@
           "default": "cuda_qlora_math_execution",
           "enum": [
             "cuda_qlora_math_execution",
-            "cuda_qlora_sdpa_flash_execution"
+            "cuda_qlora_sdpa_flash_execution",
+            "cuda_qlora_liger_execution"
           ],
           "title": "Probe",
           "type": "string"
