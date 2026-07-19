@@ -692,6 +692,26 @@ def test_supervisor_rejects_reversed_or_lossless_completed_step_events(
     assert result.manifest.failure.stage == StageMarker.loss
 
 
+def test_a_forward_stage_oom_is_classified_at_forward_not_a_stale_loss(monkeypatch):
+    # The trainer marks the forward/backward compute region at each optimizer step's start (on_step_begin
+    # -> stage_callback("forward")). A runtime OOM during that step must then be classified at `forward` -
+    # a stage the research protocol's flash-eligibility mapping lists - instead of the prior step's `loss`
+    # log, which fail-closes flash as NOT_RUN. Regression: the 7B ladder rung-2048 OOM landed on `loss`
+    # (structurally unmapped) and withheld flash; forward marking makes the eligibility rule reachable.
+    def _oom_in_forward(config, *, progress_callback=None, stage_callback=None, **_kw):
+        if stage_callback is not None:
+            stage_callback("optimizer_created", "trainer ready")
+            stage_callback("forward", "step 1: forward/backward compute")
+        raise RuntimeError("CUDA out of memory. Tried to allocate 448.00 MiB")
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _oom_in_forward)
+    result = execute_run(demo_training_plan(), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.OOM
+    assert result.manifest.failure.stage == StageMarker.forward
+
+
 def test_event_sink_failure_cannot_rewrite_a_success(monkeypatch):
     monkeypatch.setattr("corpus_studio.training.trainer.run_training", _fake_run_training(2))
 
