@@ -167,6 +167,11 @@ _PARAM_MOE_RE = re.compile(r"(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*b\b", re.IGNORECASE)
 # for names like BLOOM 'b7b1' (= 7.1B). The negative lookahead for a letter
 # stops '8bit' (quantization) parsing as 8B.
 _PARAM_COUNT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*b(\d+)?(?![a-z])", re.IGNORECASE)
+# A local model path can end in an immutable git revision (a 7-64 char hex commit). Its hex digits
+# include b/B, so a run like ``a09a35458c702b33`` reads as a ``702b`` (=702B) parameter token and
+# swamps the real ``7B`` in the model name. A pure-hex path component of commit length is a revision,
+# never a model name, so it is dropped before parsing.
+_GIT_REVISION_RE = re.compile(r"[0-9a-fA-F]{7,64}")
 
 # LoRA trainable fraction of base params at r=16 (all-linear targets, rough).
 _LORA_FRACTION_AT_R16 = 0.006
@@ -196,8 +201,19 @@ def parse_parameter_count(base_model: str) -> float | None:
     suffixes like ``Qwen3-30B-A3B`` (returns the 30B total), and BLOOM-style
     ``7b1`` (= 7.1B). Known limitation: underscore-decimal names such as
     ``stablelm-2-1_6b`` are not recognized (the ``_`` is ambiguous with a
-    separator, e.g. ``llama_2_7b``).
+    separator, e.g. ``llama_2_7b``). A local model path's trailing git-revision
+    hex component is dropped so its digits are not mis-read as a parameter count
+    (e.g. ``.../Qwen2.5-7B-Instruct/a09a35458c702b33...`` -> 7B, not 702B).
     """
+
+    if "/" in base_model or "\\" in base_model:
+        kept = [
+            part
+            for part in re.split(r"[\\/]+", base_model)
+            if part and not _GIT_REVISION_RE.fullmatch(part)
+        ]
+        if kept:
+            base_model = "/".join(kept)
 
     moe = _PARAM_MOE_RE.search(base_model)
     if moe:
