@@ -39,10 +39,27 @@ export), both via the proven seq-4096 config (flash SDPA + liger fused-CE + bnb 
 Per-run **mean** losses (0.93 for r8, 1.17 for r16) differ from the **last-step** losses above and from
 the per-adapter `MODEL_CARD.md`; both are honest, just different reductions. The adapters live under
 `/mnt/training-nvme/corpusstudio/runs/wbg-after-seq4096/` and are **not committed** (r16 exceeds GitHub's
-100 MB/file limit). **No evaluation run has been done yet** - the served-model eval on `validation.jsonl` /
-`test.jsonl` (does the "after" emit COMPLETE JSON where the "before" was truncated?) is the next step.
-The r8 full-length variant was enabled by the `platform-plan --lora-r/--lora-alpha` option (previously
-locked to r16).
+100 MB/file limit). The r8 full-length variant was enabled by the `platform-plan --lora-r/--lora-alpha`
+option (previously locked to r16).
+
+### Eval: does the "after" emit COMPLETE AIResult JSON? (2026-07-19)
+
+Measured on the held-out **test split** (n=27) - deterministic greedy decode of the base in 4-bit nf4 (the
+QLoRA training regime) + each adapter. Metric = output parses as one JSON object with all **13 required
+AIResult keys present** (empty arrays are valid - the gold carries them). Full evidence (harness, raw
+per-example reports, caveats) under `runs/wbg-after-seq4096/eval-closeout/`.
+
+| Model | LoRA / seq | Complete-JSON |
+| --- | --- | --- |
+| base `Qwen2.5-7B` (no adapter) | - | 0/27 (0%) - valid JSON, wrong schema |
+| **before** `adapter-seq1536-baseline` | r16 / 1536 | 9/27 (33.3%) - truncated |
+| after-r16 (rank-matched control) | r16 / 4096 | 24/27 (88.9%) |
+| **after-r8** (default deliverable) | r8 / 4096 | **26/27 (96.3%)** |
+
+**Before -> after: 33.3% -> 96.3%.** The rank-matched pair (before-r16 -> after-r16, both r16) is
+33.3% -> 88.9%, isolating the gain to the **1536 -> 4096 sequence length**. Two identical greedy passes of
+after-r8 were reproducible (27/27 per-example). This is exploratory/product evidence, not a sealed research
+result.
 
 ## The base model — NOT in the repo
 `Qwen/Qwen2.5-7B-Instruct` is ~15 GB (individual shards > GitHub's 100 MB/file limit), so it is **not**
