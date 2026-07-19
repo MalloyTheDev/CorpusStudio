@@ -89,26 +89,34 @@ def test_activation_scales_with_sequence_and_batch():
     assert large.activation_overhead_gb > small.activation_overhead_gb
 
 
-def test_vram_estimate_matches_the_7b_memory_sweep():
-    # Calibrated to a real Qwen2.5-7B 4-bit QLoRA memory sweep on an RTX 5070 (the MATH path Blackwell is
-    # forced onto): base ~7.9 GB + ~2.85 GB/1024 tokens → 10.83 GB @ seq1024, 13.76 @ seq2048. The old
-    # estimate said ~6.7 GB and green-lit a run that then spilled to system RAM and crawled.
-    for seq, real in ((1024, 10.83), (2048, 13.76)):
-        est = build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", sequence_len=seq, math_attention=True).total_gb_int4
-        assert abs(est - real) < 0.5, (seq, est, real)
-    # Flash/mem-efficient attention is far lighter (WBG measured ~9 GB @ seq2048) — the biggest Blackwell lever.
-    assert build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", sequence_len=2048).total_gb_int4 < 10.0
+def test_vram_estimate_matches_the_native_linux_7b_ladder():
+    # RECALIBRATED to the native-Linux RTX 5070 7B QLoRA ladder (MATH path, torch peak_reserved):
+    # seq512 -> 10.44 GB, seq1024 -> 10.60 GB measured NATIVE_SAFE; seq2048 -> OOM (true demand ~12.5 GB
+    # vs the 12.34 GB card). The estimate is CONSERVATIVE (>= the measured points, never under-predicts)
+    # and predicts the OOM boundary at 2048. The old 11.4/2.2 coefficients were a Windows/WDDM sweep that
+    # overstated the native slope AND under-predicted the seq-512 fit (9.3 vs the measured 10.44).
+    def m(seq):
+        return build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", sequence_len=seq, math_attention=True).total_gb_int4
+
+    assert 10.3 <= m(512) <= 11.5, m(512)  # >= measured 10.44 (no under-prediction), still conservative
+    assert 10.6 <= m(1024) <= 11.8, m(1024)  # >= measured 10.60
+    assert m(2048) > 12.34, m(2048)  # predicts the measured OOM (over the 12.34 GB card)
+    # Flash/mem-efficient attention avoids the fp32 attention-score matrix and REACHES seq2048...
+    assert build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", sequence_len=2048).total_gb_int4 <= 12.34
+    # ...but keeps the kernel-INDEPENDENT vocab-logits transient, so flash alone does NOT reach seq4096
+    # (that needs a fused/chunked cross-entropy - a separate worker change).
+    assert build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", sequence_len=4096).total_gb_int4 > 12.34
     # Quantized paths carry the bitsandbytes runtime overhead that fp16 does not.
     assert any("bitsandbytes" in a for a in build_vram_estimate("7B").assumptions)
 
 
-def test_math_path_estimate_far_exceeds_flash():
-    # Blackwell/sm_120 is forced onto math/eager attention, which uses ~5× the activation memory of flash.
-    # At seq 2048 that's ~13.8 GB (math, measured) vs ~9 GB (flash) for a 7B.
+def test_math_path_estimate_exceeds_flash():
+    # Blackwell/sm_120 is forced onto math/eager attention, which materializes the fp32 attention-score
+    # matrix that flash/mem-efficient attention avoids -> math is heavier at a given seq. Both paths share
+    # the kernel-independent vocab-logits transient, so the gap is the attention term (not a 5x factor).
     flash = build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", sequence_len=2048)
     math = build_vram_estimate("Qwen/Qwen2.5-7B-Instruct", sequence_len=2048, math_attention=True)
-    assert math.total_gb_int4 > flash.total_gb_int4 + 3.0  # math is much heavier
-    assert 13.0 <= math.total_gb_int4 <= 14.5  # matches the real sweep (~13.76)
+    assert math.total_gb_int4 > flash.total_gb_int4  # math is heavier (it adds the attention scores)
     assert any("math/eager" in a for a in math.assumptions)
     assert any("flash" in a for a in flash.assumptions)
 

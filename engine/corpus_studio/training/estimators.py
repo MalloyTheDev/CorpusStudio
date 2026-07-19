@@ -177,20 +177,26 @@ _GIT_REVISION_RE = re.compile(r"[0-9a-fA-F]{7,64}")
 _LORA_FRACTION_AT_R16 = 0.006
 # Bytes per trainable LoRA param: fp16 weight+grad plus fp32 AdamW states.
 _LORA_BYTES_PER_PARAM = 16
-# Fixed CUDA context / framework overhead.
-_RUNTIME_OVERHEAD_GB = 1.0
+# Fixed CUDA context + framework/workspace floor. RECALIBRATED to native-Linux RTX 5070 measurements:
+# the 7B QLoRA seq-512 run's torch peak_reserved was 10.44 GB, of which weights+LoRA+quant ~= 6.9 GB,
+# leaving a ~3.5 GB fixed floor (CUDA context + cuBLAS/cuDNN workspaces + the small activation base).
+# The old 1.0 was a Windows-era under-estimate that made the seq-512 fit read 9.3 GB (under by ~1.1).
+_RUNTIME_OVERHEAD_GB = 3.0
 # Extra GB per billion params for a QUANTIZED (4-bit/8-bit) base: bitsandbytes keeps dequant/compute
 # buffers + quant state beyond the raw packed weights, so the real footprint exceeds bytes×params.
-# Calibrated so a 7B 4-bit QLoRA BASE (weights + LoRA + AdamW, no activations) lands at ~7.9 GB.
 _QUANT_RUNTIME_GB_PER_B = 0.39
-# Activation memory for a 7B at seq 4096, micro-batch 1, WITH gradient checkpointing — LINEAR in
-# sequence_len (checkpointing makes the peak scale linearly, not seq²), scaled by params ÷7 and batch.
-# CALIBRATED to a real Qwen2.5-7B 4-bit QLoRA memory sweep on an RTX 5070 (torch max_memory_allocated,
-# which counts the WDDM shared-memory spill): peak = 7.91 GB base + ~2.85 GB per 1024 tokens →
-# 10.83 GB @ seq1024, 13.76 @ seq2048. Two coefficients: the math/eager attention path (what Blackwell
-# is forced onto) materializes far more than flash/mem-efficient attention (~5×).
-_ACTIVATION_GB_MATH = 11.4  # math/eager SDPA, seq 4096, 7B (the measured path)
-_ACTIVATION_GB_FLASH = 2.2  # flash/mem-efficient SDPA, seq 4096, 7B (memory-efficient; ~9 GB @ seq2048)
+# Sequence-scaling activation/transient memory for a 7B at seq 4096, micro-batch 1, WITH gradient
+# checkpointing. RECALIBRATED to the native-Linux RTX 5070 7B QLoRA ladder (torch peak_reserved):
+# seq512->10.44 GB, seq1024->10.60 GB (both measured NATIVE_SAFE), seq2048->OOM (peak_reserved 12.09 vs
+# ~11.49 GiB usable). The old 11.4/2.2 came from a Windows/WDDM sweep that counted shared-memory spill
+# and badly overstated the native slope. Modeled linear-in-seq (conservative: over- not under-predicts
+# the measured points). The MATH path additionally materializes the per-layer fp32 attention-score
+# matrix (num_heads*seq^2*4B) that flash/mem-efficient attention avoids -> a larger coefficient. BOTH
+# paths carry the kernel-INDEPENDENT vocab-logits transient (seq*vocab*~6B: ~3.7 GB @ seq4096 for a
+# 150k-vocab model), which is why the flash coefficient is NOT tiny and flash alone does not reach
+# seq-4096 (the logits wall needs a fused/chunked cross-entropy - a separate worker change).
+_ACTIVATION_GB_MATH = 5.5  # math/eager SDPA, seq 4096, 7B: fits seq<=1024, OOM at seq2048 (measured)
+_ACTIVATION_GB_FLASH = 4.0  # flash/mem-efficient SDPA, 7B: avoids attention scores; keeps the logits wall
 
 
 def parse_parameter_count(base_model: str) -> float | None:
@@ -309,7 +315,8 @@ def build_vram_estimate(
             "than flash. Other hosts require their own capability evidence.",
             f"Quantized paths add ~{quant_overhead:.1f} GB for bitsandbytes dequant/compute buffers.",
             f"+{_RUNTIME_OVERHEAD_GB:.0f} GB fixed runtime overhead.",
-            "Calibrated to a real Qwen2.5-7B 4-bit QLoRA memory sweep (base ~7.9 GB + ~2.85 GB/1024 tokens).",
+            "Calibrated to the native-Linux RTX 5070 7B QLoRA ladder (seq512->10.44, seq1024->10.60 GB "
+        "measured; seq2048 OOM). Linear + conservative; excludes fragmentation and the fused-CE contingency.",
         ],
         note="Rough planning estimate only; real usage varies by architecture and trainer.",
     )
