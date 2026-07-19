@@ -1934,7 +1934,17 @@ def verify_optimizer_state_precision(
                 # missing or non-empty shape is treated as a real state tensor that must stay on the
                 # expected device.
                 is_scalar_counter = getattr(value, "shape", None) == ()
-                permitted = {expected_device, "cpu"} if is_scalar_counter else {expected_device}
+                # A paged optimizer (bitsandbytes paged_adamw_8bit) DELIBERATELY keeps its moment state
+                # in host-paged CUDA-managed memory that reports as CPU - that offload IS the point: it
+                # frees resident VRAM, the lever that lets long-sequence QLoRA fit (measured: it moved 7B
+                # r16 seq-4096 past the optimizer-step memory wall). For a paged optimizer, CPU-resident
+                # state is expected, not a deviation; the non-paged path still pins moments to the device.
+                paged_optimizer = "paged" in (config.optim or "")
+                permitted = (
+                    {expected_device, "cpu"}
+                    if (is_scalar_counter or paged_optimizer)
+                    else {expected_device}
+                )
                 if observed_device not in permitted:
                     raise TrainingEvidenceError(
                         f"PLACEMENT_DEVIATION: optimizer state {name} is on {value.device}, "
