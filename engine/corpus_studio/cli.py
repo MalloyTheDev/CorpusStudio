@@ -40,7 +40,7 @@ from corpus_studio.evaluation.evaluator import (
     run_evaluation,
     should_report_progress,
 )
-from corpus_studio.evaluation.scorers import LlmJudgeScorer
+from corpus_studio.evaluation.scorers import LlmJudgeScorer, SchemaConformanceScorer, Scorer
 from corpus_studio.exporters.cleaning import clean_rows
 from corpus_studio.exporters.redaction import redact_rows
 from corpus_studio.exporters.jsonl_exporter import export_jsonl, write_jsonl
@@ -3609,6 +3609,13 @@ def eval_run(
         help="Trace-aware: strip the model's <think>...</think> and score only the ANSWER (so a "
         "reasoning model's thinking doesn't corrupt the score). Flags answers with no reasoning.",
     ),
+    output_schema: Optional[str] = typer.Option(
+        None,
+        "--output-schema",
+        help="Score STRUCTURED-OUTPUT conformance (metric=schema_conformance): each answer must be one "
+        "JSON object carrying every required key of this builtin schema (e.g. airesult); average_score is "
+        "the conformance rate. Mutually exclusive with --judge-model.",
+    ),
     judge_model: Optional[str] = typer.Option(
         None,
         "--judge-model",
@@ -3654,8 +3661,19 @@ def eval_run(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
-    scorer = None
-    if judge_model is not None:
+    scorer: Scorer | None = None
+    if output_schema is not None and judge_model is not None:
+        typer.echo(
+            "--output-schema and --judge-model are mutually exclusive (one scorer per run).", err=True
+        )
+        raise typer.Exit(code=1)
+    if output_schema is not None:
+        try:
+            scorer = SchemaConformanceScorer(load_builtin_schema(output_schema))
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+    elif judge_model is not None:
         judge_provider = infer_provider_id(judge_backend, judge_base_url)
         judge_route = judge_model if judge_provider == "openrouter" else None
         judge_policy = resolve_policy(

@@ -1,0 +1,39 @@
+{
+  "id": "airesult",
+  "name": "AIResult Lore Entry",
+  "version": "0.1.0",
+  "description": "One structured AIResult lore entry (the World Bible Generator output shape): 13 required keys plus optional names/legacyTitle. Use as eval-run --output-schema to score a model's structured-output conformance (does it emit COMPLETE JSON with every required key?).",
+  "fields": [
+    {"name": "kind", "type": "string", "required": true},
+    {"name": "module", "type": "string", "required": true},
+    {"name": "title", "type": "string", "required": true},
+    {"name": "entryType", "type": "string", "required": true},
+    {"name": "status", "type": "string", "required": true},
+    {"name": "summary", "type": "text", "required": true},
+    {"name": "tags", "type": "list", "item_type": "string", "required": true},
+    {"name": "relationships", "type": "list", "required": true},
+    {"name": "canonNotes", "type": "text", "required": true},
+    {"name": "risks", "type": "list", "required": true},
+    {"name": "storyHooks", "type": "list", "item_type": "string", "required": true},
+    {"name": "gameHooks", "type": "list", "required": true},
+    {"name": "suggestedNextAction", "type": "text", "required": true},
+    {"name": "names", "type": "object", "required": false},
+    {"name": "legacyTitle", "type": "string", "required": false}
+  ],
+  "example": {
+    "kind": "lore",
+    "module": "locations",
+    "title": "The Echoing Grove",
+    "entryType": "location",
+    "status": "draft",
+    "summary": "A grove where sounds from the past replay for those who listen.",
+    "tags": ["forest", "memory"],
+    "relationships": ["Tied to the archive subplot."],
+    "canonNotes": "Introduced in chapter two; ties to the archive subplot.",
+    "risks": ["May reveal the archive too early."],
+    "storyHooks": ["A locked door that was never sealed."],
+    "gameHooks": ["A perception check reveals the echoes."],
+    "suggestedNextAction": "Draft the archive that anchors the grove.",
+    "names": {"display": "Echoing Grove"}
+  }
+}
