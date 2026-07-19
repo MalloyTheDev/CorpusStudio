@@ -5227,6 +5227,10 @@ class RunAcceptedBody(ContractModel):
     pid: int | None = None
     process_started_at: str | None = None
     execution_configuration_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    # The PYTORCH_CUDA_ALLOC_CONF the worker applied from the plan's sealed allocator_policy BEFORE torch
+    # loaded ("default" when the policy is default). Evidence that a declared policy was executed - the
+    # set-before-import ordering is what makes the claim verifiable (declared != executable).
+    applied_allocator_conf: str | None = None
 
 
 class RunControlBody(ContractModel):

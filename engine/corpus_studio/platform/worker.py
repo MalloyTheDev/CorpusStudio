@@ -76,6 +76,30 @@ def _build_runner(runner_name: str) -> Any:
     return TrainingRunner(cpu_toy=(runner_name == "cpu_toy"))
 
 
+def _apply_allocator_policy(plan: Any) -> str:
+    """Apply the plan's SEALED ``allocator_policy`` to ``PYTORCH_CUDA_ALLOC_CONF`` BEFORE any torch
+    import. torch reads that variable once, at the first CUDA init, so this must run before the runner
+    imports torch. Returns the applied conf string - evidence that the DECLARED policy was EXECUTED,
+    verifiable by the set-before-import ordering (declared != executable). ``default`` leaves the
+    environment untouched; ``expandable_segments`` is MERGED into any operator-set conf, never a silent
+    override. The policy comes only from the hash-verified plan, never smuggled in via the launcher."""
+    from corpus_studio.platform.enums import AllocatorPolicy  # noqa: PLC0415
+
+    policy = getattr(plan, "allocator_policy", AllocatorPolicy.default)
+    if policy != AllocatorPolicy.expandable_segments:
+        return "default"
+    existing = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "")
+    parts = [
+        part
+        for part in existing.split(",")
+        if part and not part.strip().startswith("expandable_segments")
+    ]
+    parts.append("expandable_segments:True")
+    conf = ",".join(parts)
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = conf
+    return conf
+
+
 def run_worker(
     dispatch_line: str,
     *,
@@ -157,6 +181,9 @@ def run_worker(
         )
         return 2
 
+    # Apply the sealed allocator policy to the process environment BEFORE _build_runner imports torch.
+    # Recorded in run_accepted as evidence that the declared policy was executed (declared != executable).
+    applied_allocator_conf = _apply_allocator_policy(plan)
     _send(
         "run_accepted",
         {
@@ -167,6 +194,7 @@ def run_worker(
                 if plan.resolved_execution is not None
                 else None
             ),
+            "applied_allocator_conf": applied_allocator_conf,
         },
         correlation_id=correlation_id,
         out=stream,
