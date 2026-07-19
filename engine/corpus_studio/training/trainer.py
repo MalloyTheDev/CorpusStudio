@@ -2831,6 +2831,18 @@ def run_training(  # pragma: no cover - optional training-stack integration
             elif optimizer is not None:
                 _stage("optimizer_created", "observed the optimizer at on_train_begin")
 
+        def on_step_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            # Mark the forward/backward COMPUTE region of this optimizer step. Without it the live stage
+            # stays at the prior step's `loss` log (or a setup marker), so a runtime OOM during the step
+            # is classified at `loss` - a stage the flash-eligibility mapping does not list, which
+            # fail-closes flash as NOT_RUN. The seq-scaling OOMs (fp32 attention scores, the vocab-logits
+            # transient) occur in the forward pass, so `forward` is the truthful last-confirmed stage; a
+            # backward-region OOM also lands here, and `forward` and `backward` are both eligible. Emitted
+            # once per optimizer step (NOT per microstep): low volume, the loss-log cadence, and it also
+            # gives the supervisor a progress signal at step START so a long single step is not misread as
+            # a stall before its end-of-step log.
+            _stage("forward", f"step {int(state.global_step) + 1}: forward/backward compute")
+
         def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
             optimizer = kwargs.get("optimizer")
             if execution_tracker is not None:
