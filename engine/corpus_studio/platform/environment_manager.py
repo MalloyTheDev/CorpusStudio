@@ -4289,7 +4289,8 @@ class EnvironmentManager:
         expected_kernel = required.execution_combination.attention_kernel.value
         expected_backend = (
             "FLASH_ATTENTION"
-            if required.probe == "cuda_qlora_sdpa_flash_execution"
+            if required.probe
+            in {"cuda_qlora_sdpa_flash_execution", "cuda_qlora_flash_liger_execution"}
             else "MATH"
         )
         expected_toggles = {
