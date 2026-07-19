@@ -3736,6 +3736,16 @@ class ResolvedExecutionConfiguration(ContractModel):
             raise ValueError("the first-party trainer does not implement sequence buckets")
         if self.sequence.packing != self.data.packing:
             raise ValueError("sequence and data packing policies must match")
+        # No-silent-truncation cross-check: the worker honors data.truncation_policy. Refuse the one
+        # dangerous contradiction - sequence.truncation_allowed=False (the plan declares over-length
+        # examples make it invalid) while data.truncation_policy='allow' (the runtime would silently
+        # truncate). The safe default (truncation_allowed=True + policy='refuse') is stricter at
+        # runtime, not a contradiction, so it is left alone.
+        if not self.sequence.truncation_allowed and self.data.truncation_policy == "allow":
+            raise ValueError(
+                "sequence.truncation_allowed is False but data.truncation_policy is 'allow' - a config "
+                "that declares no truncation yet permits it at runtime would silently truncate"
+            )
         if any(
             value is None
             for value in (

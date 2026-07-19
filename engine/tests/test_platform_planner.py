@@ -5,6 +5,7 @@ sha256 plan-hash that excludes the volatile stamp). The rendered snapshot is rou
 the actual TrainRunConfig the runner replays."""
 
 import pytest
+from pydantic import ValidationError
 
 import corpus_studio.platform as P
 from corpus_studio.platform.common import Ref
@@ -720,6 +721,20 @@ def test_expandable_segments_with_a_paged_optimizer_is_refused():
             _profile(cc_major=8), _report(),
             allocator_policy="expandable_segments", optim="paged_adamw_8bit",
         )
+
+
+def test_resolved_execution_rejects_a_no_truncation_config_that_permits_truncation():
+    # The no-silent-truncation cross-check: a config that declares no truncation
+    # (sequence.truncation_allowed False) yet permits it at runtime (data.truncation_policy 'allow')
+    # would silently truncate - the contract refuses it. Take a valid planner-built config and flip it.
+    plan = _plan(_profile(cc_major=8), _report())
+    execution = plan.resolved_execution
+    assert execution is not None
+    body = execution.model_dump(mode="json")
+    body["sequence"]["truncation_allowed"] = False
+    body["data"]["truncation_policy"] = "allow"
+    with pytest.raises(ValidationError, match="silently truncate"):
+        type(execution).model_validate(body)
 
 
 @pytest.mark.parametrize(
