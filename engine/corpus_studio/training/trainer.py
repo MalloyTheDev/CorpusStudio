@@ -2378,6 +2378,103 @@ def truncation_warning(report: TruncationReport) -> str | None:
     )
 
 
+class ExampleTokenSpan(BaseModel):
+    """One example's token accounting for the coverage ledger, produced by the tokenizer/formatter that
+    owns the loss mask. ``dropped_supervised_tokens`` is the count of loss-bearing (supervised) tokens
+    that fall PAST ``seq_len`` for this example - the caller computes it from the actual mask because
+    only it knows where the supervised span sits (typically the assistant/output tail, exactly what a
+    right-truncation cuts)."""
+
+    total_tokens: int = Field(ge=0)
+    supervised_tokens: int = Field(ge=0)
+    dropped_supervised_tokens: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _bounds(self) -> ExampleTokenSpan:
+        if self.supervised_tokens > self.total_tokens:
+            raise ValueError("supervised_tokens cannot exceed total_tokens")
+        if self.dropped_supervised_tokens > self.supervised_tokens:
+            raise ValueError("dropped_supervised_tokens cannot exceed supervised_tokens")
+        return self
+
+
+class TokenCoverageLedger(BaseModel):
+    """TOKEN-level coverage of a dataset at a given ``seq_len`` - the honest answer to "was the whole
+    dataset processed as intended?" beyond the example-level :class:`TruncationReport`. The
+    load-bearing metric is ``supervised_coverage_pct``: dropping *any* supervised token means the model
+    is trained on a severed completion (a silent-loss bug wearing a no-truncation badge)."""
+
+    n_examples: int = Field(ge=0)
+    seq_len: int = Field(ge=1)
+    input_tokens_total: int = Field(ge=0)
+    retained_tokens: int = Field(ge=0)
+    dropped_tokens: int = Field(ge=0)
+    coverage_pct: float
+    supervised_tokens_total: int = Field(ge=0)
+    supervised_retained: int = Field(ge=0)
+    supervised_dropped: int = Field(ge=0)
+    supervised_coverage_pct: float
+    # examples where at least one SUPERVISED token was dropped - the completion was severed from its
+    # prompt. This is the count that must be zero for a clean full run.
+    boundary_severances: int = Field(ge=0)
+
+    @property
+    def is_lossless(self) -> bool:
+        """No token dropped at all - the dataset is fully covered at this seq_len."""
+        return self.dropped_tokens == 0
+
+    @property
+    def supervision_intact(self) -> bool:
+        """No SUPERVISED token dropped - every completion is trained whole even if some prompt context
+        was cut. The weaker-but-often-acceptable bar; ``is_lossless`` is the strong bar."""
+        return self.supervised_dropped == 0
+
+
+def compute_token_coverage(spans: list[ExampleTokenSpan], seq_len: int) -> TokenCoverageLedger:
+    """PURE + torch-free. Aggregate per-example token spans into a coverage ledger at ``seq_len``.
+    Total dropped tokens are derived here (``max(0, total - seq_len)`` per example); supervised drops
+    come from the caller's mask (``ExampleTokenSpan.dropped_supervised_tokens``)."""
+    n = len(spans)
+    input_total = sum(s.total_tokens for s in spans)
+    retained = sum(min(s.total_tokens, seq_len) for s in spans)
+    dropped = input_total - retained
+    supervised_total = sum(s.supervised_tokens for s in spans)
+    supervised_dropped = sum(s.dropped_supervised_tokens for s in spans)
+    severances = sum(1 for s in spans if s.dropped_supervised_tokens > 0)
+    return TokenCoverageLedger(
+        n_examples=n,
+        seq_len=seq_len,
+        input_tokens_total=input_total,
+        retained_tokens=retained,
+        dropped_tokens=dropped,
+        coverage_pct=(100.0 * retained / input_total) if input_total else 100.0,
+        supervised_tokens_total=supervised_total,
+        supervised_retained=supervised_total - supervised_dropped,
+        supervised_dropped=supervised_dropped,
+        supervised_coverage_pct=(
+            (100.0 * (supervised_total - supervised_dropped) / supervised_total)
+            if supervised_total
+            else 100.0
+        ),
+        boundary_severances=severances,
+    )
+
+
+def token_coverage_refusal(ledger: TokenCoverageLedger) -> str | None:
+    """Fail-closed gate for the no-silent-truncation invariant: refuse a run that would drop SUPERVISED
+    tokens (train on severed completions). Returns the operator-facing refusal, or None when supervision
+    is intact. Dropping only non-supervised prompt context is a warning, not a refusal - callers decide."""
+    if ledger.supervision_intact:
+        return None
+    return (
+        f"REFUSED: {ledger.supervised_dropped} supervised (loss-bearing) token(s) across "
+        f"{ledger.boundary_severances} example(s) fall past sequence_len={ledger.seq_len} and would be "
+        f"CUT - the model would train on completions severed from their prompts "
+        f"(supervised coverage {ledger.supervised_coverage_pct:.2f}%). Split those records (structure-"
+        f"aware chunking), raise sequence_len, or explicitly opt into a lossy policy - never a silent cut."
+    )
+
+
 def _prepare_training_texts(
     rows: list[dict[str, Any]],
     config: TrainRunConfig,
