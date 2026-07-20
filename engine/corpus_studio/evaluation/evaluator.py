@@ -38,6 +38,9 @@ class EvaluationRunConfig(BaseModel):
     temperature: float = 0.0
     top_p: float = 1.0
     max_output_tokens: int = 2048
+    # For metric=schema_conformance: which OUTPUT schema defined "conforms" (the positional `schema` is
+    # the DATASET/row schema, not this). Recorded so a conformance run is reproducible from the report.
+    output_schema_id: str | None = None
 
     def to_report_settings(self) -> EvaluationRunSettings:
         """Return the repeatable settings stored with an evaluation report."""
@@ -55,6 +58,7 @@ class EvaluationRunConfig(BaseModel):
             temperature=self.temperature,
             top_p=self.top_p,
             max_output_tokens=self.max_output_tokens,
+            output_schema_id=self.output_schema_id,
         )
 
 

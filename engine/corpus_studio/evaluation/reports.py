@@ -66,6 +66,9 @@ class EvaluationRunSettings(BaseModel):
     temperature: float = 0.0
     top_p: float = 1.0
     max_output_tokens: int = 2048
+    # The output schema id for a metric=schema_conformance run (which schema defined "conforms"), so the
+    # saved report is self-describing/reproducible. None for non-conformance metrics.
+    output_schema_id: str | None = None
 
 
 class EvaluationReport(BaseModel):

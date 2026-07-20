@@ -11,8 +11,8 @@ class FakeResponse:
     def __init__(self, payload: str):
         self._payload = payload.encode("utf-8")
 
-    def read(self):
-        return self._payload
+    def read(self, size: int = -1) -> bytes:
+        return self._payload if size < 0 else self._payload[:size]
 
     def __enter__(self):
         return self

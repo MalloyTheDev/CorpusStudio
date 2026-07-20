@@ -51,9 +51,11 @@ class KeywordOverlapScorer:
 
 
 def _extract_json_object(text: str) -> tuple[dict | None, str]:
-    """Return (parsed object, "") or (None, reason). Tolerates a ```json fence and trailing prose:
-    try the whole string, then the first ``{...}`` span. A truncated/unterminated JSON fails to parse
-    (reason ``json_parse_error``) - exactly the "incomplete output" signal this scorer measures."""
+    """Return (parsed object, "") or (None, reason). Tolerates a ```json fence and trailing prose: try
+    the whole string, then the WIDEST ``{...}`` span (first ``{`` to last ``}``). An unterminated object
+    with no closing ``}`` yields ``no_json_object``; a present-but-invalid span yields ``json_parse_error``;
+    deeply-nested untrusted output that overflows the JSON recursion yields ``json_recursion_error`` -
+    every path is a MEASURED miss with a typed reason, never a raise (untrusted model output)."""
     stripped = text.strip()
     if stripped.startswith("```"):
         stripped = stripped.strip("`")
@@ -68,9 +70,13 @@ def _extract_json_object(text: str) -> tuple[dict | None, str]:
             candidate = match.group(0)
         try:
             parsed = json.loads(candidate)
+        except RecursionError:
+            # deeply-nested untrusted output overflows CPython's json scanner (RecursionError is a
+            # RuntimeError, NOT a JSONDecodeError) - measured 0, never a crash that aborts the batch.
+            return None, "json_recursion_error"
         except json.JSONDecodeError as exc:
             if candidate is stripped:
-                continue  # fall through to the first-{...} span
+                continue  # fall through to the widest-{...} span
             return None, f"json_parse_error: {exc.msg}"
         return (parsed, "") if isinstance(parsed, dict) else (None, "not_a_json_object")
     return None, "no_json_object"
@@ -142,7 +148,9 @@ def parse_eval_judgment(text: str) -> ScoreResult:
     if match is not None:
         try:
             data = json.loads(match.group(0))
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
+            # a JSONDecodeError OR a deeply-nested payload that overflows the json scanner (RecursionError
+            # is a RuntimeError, not a JSONDecodeError) -> unparseable, never a crash that aborts the run.
             data = None
         if isinstance(data, dict):
             value = data.get("score")

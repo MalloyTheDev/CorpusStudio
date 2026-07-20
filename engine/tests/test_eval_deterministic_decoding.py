@@ -1,11 +1,17 @@
 """S1: eval-run decodes deterministically (seeded, greedy, non-truncating) and records HOW it decoded,
 so every eval number is reproducible and a long structured output is not fake-truncated by a small cap."""
+import pytest
+
 from corpus_studio.evaluation.evaluator import (
     EvaluationDatasetExample,
     EvaluationRunConfig,
     run_evaluation,
 )
-from corpus_studio.model_backends.base import BackendGenerateRequest, BackendGenerateResponse
+from corpus_studio.model_backends.base import (
+    BackendGenerateRequest,
+    BackendGenerateResponse,
+    read_bounded_json,
+)
 from corpus_studio.model_backends.ollama import OllamaBackend, default_ollama_config
 from corpus_studio.model_backends.openai_compatible import (
     OpenAICompatibleBackend,
@@ -73,3 +79,33 @@ def test_decode_defaults_are_deterministic_greedy_with_a_generous_cap():
     assert config.seed == 0
     assert config.temperature == 0.0  # greedy by default
     assert config.max_output_tokens >= 1358  # >= the longest WBG gold completion, so no fake truncation
+
+
+def test_run_evaluation_records_the_output_schema_id_for_reproducibility():
+    # a schema_conformance run must record WHICH output schema defined "conforms" so the report is
+    # self-describing (there are ~11 builtin schemas).
+    config = EvaluationRunConfig(
+        dataset="d", model="m", schema_id="instruction", output_schema_id="airesult",
+    )
+    report = run_evaluation(
+        config,
+        [EvaluationDatasetExample(example_id="1", prompt="p", expected_output="a")],
+        _CapturingBackend(),
+    )
+    assert report.run_settings is not None
+    assert report.run_settings.output_schema_id == "airesult"
+
+
+class _FakeResponse:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self, size: int = -1) -> bytes:
+        return self._body if size < 0 else self._body[:size]
+
+
+def test_read_bounded_json_parses_small_and_rejects_oversized_bodies():
+    # An untrusted eval-backend response is capped so a huge/trickled body can't OOM the eval process.
+    assert read_bounded_json(_FakeResponse(b'{"ok": 1}'), max_bytes=1000) == {"ok": 1}
+    with pytest.raises(ValueError, match="exceeded"):
+        read_bounded_json(_FakeResponse(b"x" * 5000), max_bytes=100)
