@@ -78,18 +78,22 @@ def _build_runner(runner_name: str) -> Any:
 
 def _apply_allocator_policy(plan: Any) -> str:
     """Apply the plan's SEALED ``allocator_policy`` to ``PYTORCH_CUDA_ALLOC_CONF`` BEFORE any torch
-    import. torch reads that variable once, at the first CUDA init, so this must run before the runner
-    imports torch. Returns the applied conf string - evidence that the DECLARED policy was EXECUTED,
-    verifiable by the set-before-import ordering (declared != executable). ``default`` leaves the
-    environment untouched; every other policy MERGES its fragment into any operator-set conf (never a
-    silent override). A parameterized policy (``max_split_size`` / ``garbage_collection``) whose sealed
-    numeric parameter is missing, or any policy this worker does not implement, FAILS CLOSED with a
-    :class:`WorkerProtocolError` - the worker never silently downgrades a sealed policy to default. The
-    policy comes only from the hash-verified plan, never smuggled in via the launcher."""
+    import - AUTHORITATIVELY. torch reads that variable once at first CUDA init, so the sealed policy
+    must OWN it: any launcher-inherited conf is DISCARDED, not merged. Merging would let an ambient
+    ``expandable_segments`` survive a sealed paged run (the measured seq-4096 CUDA managed-memory
+    illegal-access the planner fails closed on), and would make the returned evidence lie. ``default``
+    CLEARS the variable (the process default); every other policy sets EXACTLY its fragment. Returns the
+    TRUE effective conf (evidence that the DECLARED policy was EXECUTED; declared != executable). A
+    parameterized policy (``max_split_size`` / ``garbage_collection``) whose sealed numeric parameter is
+    missing, or any policy this worker does not implement, FAILS CLOSED with a
+    :class:`WorkerProtocolError`. The policy comes only from the hash-verified plan, never the launcher."""
     from corpus_studio.platform.enums import AllocatorPolicy  # noqa: PLC0415
 
     policy = getattr(plan, "allocator_policy", AllocatorPolicy.default)
     if policy == AllocatorPolicy.default:
+        # Sealed default == the process default allocator: clear any launcher-inherited conf so torch
+        # does not silently run under an unsealed allocator while the evidence records "default".
+        os.environ.pop("PYTORCH_CUDA_ALLOC_CONF", None)
         return "default"
     if policy == AllocatorPolicy.expandable_segments:
         fragment = "expandable_segments:True"
@@ -114,17 +118,10 @@ def _apply_allocator_policy(plan: Any) -> str:
             f"allocator_policy {policy.value!r} is not implemented by this worker - refusing to run "
             "rather than silently applying the default allocator"
         )
-    key = fragment.split(":", 1)[0]
-    existing = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "")
-    parts = [
-        part
-        for part in existing.split(",")
-        if part and not part.strip().startswith(key)
-    ]
-    parts.append(fragment)
-    conf = ",".join(parts)
-    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = conf
-    return conf
+    # The sealed policy is authoritative: set EXACTLY its fragment, discarding any launcher-inherited
+    # conf (which could otherwise collide with the sealed allocator or make the recorded evidence lie).
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = fragment
+    return fragment
 
 
 def run_worker(
