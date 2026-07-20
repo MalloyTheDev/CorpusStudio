@@ -119,3 +119,47 @@ def test_cli_model_card_folds_in_a_training_config(tmp_path: Path):
     assert result.exit_code == 0, result.output
     assert "Sequence length: 2048" in result.output
     assert "Format: instruction" in result.output
+
+
+def test_card_says_not_evaluated_when_no_eval_report_is_attached(tmp_path: Path):
+    adapter = _write_adapter(tmp_path / "run", {"base_model_name_or_path": "m", "r": 8})
+    card = build_model_card(adapter)
+    assert "## Evaluation" in card
+    assert "Not evaluated" in card  # null-with-reason, never a fabricated pass
+
+
+def test_card_renders_the_attached_evaluation_with_metric_score_and_decode(tmp_path: Path):
+    adapter = _write_adapter(tmp_path / "run", {"base_model_name_or_path": "m", "r": 8})
+    evaluation = {
+        "metric": "schema_conformance",
+        "examples_tested": 27,
+        "failed_examples": 1,
+        "average_score": 96.3,
+        "run_settings": {
+            "model": "wbg-after-r8", "seed": 0, "temperature": 0.0, "max_output_tokens": 2048,
+        },
+    }
+    card = build_model_card(adapter, evaluation=evaluation)
+    assert "schema_conformance" in card
+    assert "96.30 average over 27" in card and "1 failed" in card
+    assert "greedy" in card and "seed 0" in card and "wbg-after-r8" in card
+    assert "not a comprehensive quality guarantee" in card
+
+
+def test_card_evaluation_without_a_score_is_null_with_reason_not_a_zero(tmp_path: Path):
+    adapter = _write_adapter(tmp_path / "run", {"base_model_name_or_path": "m", "r": 8})
+    card = build_model_card(adapter, evaluation={"metric": "keyword_overlap", "examples_tested": 5})
+    assert "unavailable" in card  # missing average_score -> null-with-reason, not a fabricated 0
+
+
+def test_model_card_cli_attaches_an_eval_report(tmp_path: Path):
+    adapter = _write_adapter(tmp_path / "run", {"base_model_name_or_path": "m", "r": 8})
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({
+        "metric": "schema_conformance", "examples_tested": 3, "average_score": 100.0,
+        "run_settings": {"model": "x", "seed": 0, "temperature": 0.0, "max_output_tokens": 2048},
+    }), encoding="utf-8")
+    result = runner.invoke(app, ["model-card", str(adapter), "--eval-report", str(report)])
+    assert result.exit_code == 0, result.output
+    assert "schema_conformance" in result.output
+    assert "100.00 average over 3" in result.output

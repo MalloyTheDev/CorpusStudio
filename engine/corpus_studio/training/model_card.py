@@ -37,6 +37,49 @@ def _format_target_modules(value: Any) -> str:
     return str(value) if value is not None else "?"
 
 
+def _evaluation_lines(evaluation: dict[str, Any] | None) -> list[str]:
+    """Render the Evaluation section - honestly. No eval attached => 'Not evaluated' (null-with-reason),
+    never a fabricated pass. When attached, report the metric + measured score + the exact decode, and
+    caveat that it is a signal on THIS dataset/metric, not a comprehensive quality guarantee."""
+    if not evaluation:
+        return [
+            "",
+            "## Evaluation",
+            "",
+            "- **Not evaluated.** No evaluation report is attached to this card. Run "
+            "`corpus-studio eval-run <data> <schema> --model ... --output-path <report>.json`, then "
+            "`corpus-studio model-card <adapter> --eval-report <report>.json`.",
+        ]
+    metric = evaluation.get("metric") or "unknown"
+    tested = evaluation.get("examples_tested")
+    failed = evaluation.get("failed_examples") or 0
+    average = evaluation.get("average_score")
+    settings = evaluation.get("run_settings") or {}
+
+    lines = ["", "## Evaluation", "", f"- **Metric:** `{metric}`"]
+    if isinstance(average, (int, float)) and not isinstance(average, bool) and tested is not None:
+        failed_note = f" ({failed} failed)" if failed else ""
+        lines.append(f"- **Score:** {float(average):.2f} average over {tested} example(s){failed_note}.")
+    else:
+        # an unavailable score is null-with-reason, never a fabricated 0
+        lines.append("- **Score:** unavailable (the report carries no average_score).")
+
+    model_name = settings.get("model")
+    if model_name:
+        temperature = settings.get("temperature")
+        greedy = "greedy" if temperature in (0, 0.0) else f"temperature {temperature}"
+        lines.append(
+            f"- **Decoded as:** model `{model_name}`, {greedy}, seed {settings.get('seed')}, up to "
+            f"{settings.get('max_output_tokens')} tokens (recorded for reproducibility)."
+        )
+    lines.append(
+        "- This is a measured signal on THIS dataset + metric, not a comprehensive quality guarantee: a "
+        "keyword-overlap score is lexical recall (not correctness) and a schema-conformance score is "
+        "structural completeness (not meaning)."
+    )
+    return lines
+
+
 def build_model_card(
     adapter_dir: Path | str,
     *,
@@ -44,6 +87,7 @@ def build_model_card(
     training_config: dict[str, Any] | None = None,
     train_result: dict[str, Any] | None = None,
     provenance: dict[str, Any] | None = None,
+    evaluation: dict[str, Any] | None = None,
     generated_at: str | None = None,
 ) -> str:
     """Render a Markdown model card for a trained LoRA adapter.
@@ -130,6 +174,8 @@ def build_model_card(
             platform = provenance.get("platform")
             lines.append(f"- Engine: {provenance['engine_version']}" + (f" on {platform}" if platform else ""))
 
+    lines += _evaluation_lines(evaluation)
+
     lines += [
         "",
         "## Serving",
@@ -139,7 +185,8 @@ def build_model_card(
         "",
         "## Honesty",
         "",
-        "- A completed run is not a quality signal — run an evaluation suite before promoting this adapter.",
+        "- A completed run is not a quality signal — see the Evaluation section (or run an evaluation "
+        "suite) before promoting this adapter.",
         "- Reproducibility depends on the pinned seed + dataset fingerprint above; changing the data or "
         "config changes the result.",
     ]
