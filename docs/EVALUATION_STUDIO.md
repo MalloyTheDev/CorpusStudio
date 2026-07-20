@@ -155,10 +155,19 @@ correct paraphrase using synonyms scores low. It also drives the benchmark ranki
 and the training-regression / eval-score gates, so treat those as keyword-overlap
 signals, not quality verdicts.
 
-Trustworthy scoring comes from two places:
+Trustworthy scoring comes from three deterministic-or-human paths (plus the opt-in judge):
 
 - **Manual scoring** — per-example `manual_score` / `manual_notes` (`average_manual_score`
   on the report). Always available.
+- **Schema-conformance scoring** (`metric: "schema_conformance"`) — opt-in via
+  `eval-run --output-schema <schema-id>` (a builtin `DatasetSchema` under
+  `schemas/builtin/`). The model's answer is parsed as JSON and scored **structurally**
+  against the schema: required-field presence and type match, deterministically, with **no
+  model call**. It is a structural check, **not** a quality judgment. A non-parseable answer
+  (no `{...}` span, or JSON so deeply nested the parser bails) scores **0 with a typed
+  reason** (e.g. `no_json_object`, `json_recursion_error`) — never a fabricated pass. Because
+  the extraction never trusts unbounded input, an oversized backend response is refused rather
+  than buffered without limit.
 - **Judge-model scoring** (`metric: "llm_judge"`) — opt-in via
   `eval-run --judge-model <model> [--judge-backend … --judge-base-url … --judge-api-key …]`.
   An evaluator model scores each answer 0–100 with a `rationale` (stored per result). The

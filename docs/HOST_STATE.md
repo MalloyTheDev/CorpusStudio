@@ -448,9 +448,13 @@ final RTX 5070 machine, do not claim native-Linux" precondition is now satisfied
 environment probe*. It is **not** proof of any of the following, which remain unverified and
 must not be claimed from this state alone:
 
-- **Full-sequence 7B training success** — the probe is a minimal kernel check, not a real
-  workload. (The `~10.8 GB @ seq 1024` / `~13.8 GB @ 2048` VRAM ceiling on record was measured
-  on native-Windows/WDDM; native-Linux *workload* VRAM behavior is not yet measured.)
+- **Full-sequence 7B training success as a SEALED result** — the probe is a minimal kernel check,
+  not a real workload. (The `~10.8 GB @ seq 1024` / `~13.8 GB @ 2048` VRAM ceiling on record was
+  measured on native-Windows/WDDM.) NOTE (2026-07-19): an **exploratory/product** run (NOT a sealed
+  IEEE cell) has since trained 7B QLoRA at seq 4096 on this host and measured native-Linux workload
+  VRAM (peak ~11.77 GB @ seq 4096; envelope math<=2048 / flash<=3072 / flash+liger+paged=4096 - see
+  `docs/CURRENT_STATE.md`, `examples/wbg/README.md`). That is exploratory evidence, not a sealed
+  research result, and does not retire the paper's immutable ladder.
 - **DeepSpeed / FSDP / CPU / NVMe offload** — no offload backend is implemented; only the dense
   `backend-corpus-studio` reference exists.
 - **Real offload fit, PCIe/NVMe throughput, sustained-write endurance** — the NVMe has not been
@@ -460,8 +464,9 @@ must not be claimed from this state alone:
   on native Linux (adapter admitted, predicted-fit `NATIVE_SAFE`; see the v6 section above), so
   forced-SDPA-flash **at that exact bounded scale is now VERIFIED** — this supersedes the older
   "stopped before step 1" wording. It does **NOT** extend to any of: Transformers
-  `flash_attention_2`, an external `flash-attn` package, sequence 4096, the full corpus, 7B flash,
-  or any Windows/WDDM flash path — all still unverified and refused-on-Windows where applicable.
+  `flash_attention_2`, an external `flash-attn` package, or any Windows/WDDM flash path — those stay
+  unverified/refused-on-Windows. (Sequence 4096, the full WBG corpus, and 7B flash SDPA DID run
+  together in the 2026-07-19 **exploratory/product** run above; that is not a SEALED research result.)
 - **MoE runtime capability** — static inspection only (Phase 8); no MoE execution.
 
 "Installed ≠ supported" and "a completed step ≠ proven fit" both still hold: a passing
