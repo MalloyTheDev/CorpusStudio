@@ -20,6 +20,8 @@ from typing import Protocol
 from corpus_studio.evaluation.scoring import score_text_overlap
 from corpus_studio.model_backends.base import BackendGenerateRequest, ModelBackend
 from corpus_studio.providers.policy import ProviderPolicy, ProviderPolicyError, authorize_evaluation
+from corpus_studio.schemas.base import DatasetSchema
+from corpus_studio.validators.basic_validator import validate_example_fields_against
 
 
 @dataclass
@@ -46,6 +48,65 @@ class KeywordOverlapScorer:
 
     def score(self, prompt: str, expected: str, actual: str) -> ScoreResult:
         return ScoreResult(score=score_text_overlap(expected, actual))
+
+
+def _extract_json_object(text: str) -> tuple[dict | None, str]:
+    """Return (parsed object, "") or (None, reason). Tolerates a ```json fence and trailing prose:
+    try the whole string, then the first ``{...}`` span. A truncated/unterminated JSON fails to parse
+    (reason ``json_parse_error``) - exactly the "incomplete output" signal this scorer measures."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.strip("`")
+        if stripped[:4].lower() == "json":
+            stripped = stripped[4:]
+        stripped = stripped.strip()
+    for candidate in (stripped, None):
+        if candidate is None:
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            if match is None:
+                return None, "no_json_object"
+            candidate = match.group(0)
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            if candidate is stripped:
+                continue  # fall through to the first-{...} span
+            return None, f"json_parse_error: {exc.msg}"
+        return (parsed, "") if isinstance(parsed, dict) else (None, "not_a_json_object")
+    return None, "no_json_object"
+
+
+class SchemaConformanceScorer:
+    """Deterministic structured-output scorer (``metric="schema_conformance"``): is the model's output
+    ONE JSON object that conforms to a declared :class:`DatasetSchema`? Per example the score is 0 or
+    100, so the report's ``average_score`` IS the conformance rate.
+
+    A non-JSON / truncated output is a MEASURED 0 with a reason - caught here (never raised), so the
+    evaluator's per-row isolation does not relabel it a generic ``scorer_error``. Default is
+    PRESENCE-only: every required field is a KEY (empty arrays/strings are valid, since many correct
+    outputs carry empty required lists - the reference data itself does). ``require_nonempty`` adds the
+    schema's non-empty + type checks (stricter; note it also fails a reference output that legitimately
+    contains empty required arrays, so it is not the headline metric)."""
+
+    metric = "schema_conformance"
+
+    def __init__(self, schema: DatasetSchema, *, require_nonempty: bool = False) -> None:
+        self._schema = schema
+        self._require_nonempty = require_nonempty
+
+    def score(self, prompt: str, expected: str, actual: str) -> ScoreResult:
+        obj, reason = _extract_json_object(actual)
+        if obj is None:
+            return ScoreResult(score=0.0, rationale=reason)
+        if self._require_nonempty:
+            issues = validate_example_fields_against(obj, self._schema)
+            if issues:
+                return ScoreResult(score=0.0, rationale="; ".join(i.message for i in issues[:5]))
+            return ScoreResult(score=100.0)
+        missing = [f.name for f in self._schema.fields if f.required and f.name not in obj]
+        if missing:
+            return ScoreResult(score=0.0, rationale="missing_keys: " + ",".join(missing))
+        return ScoreResult(score=100.0)
 
 
 def build_eval_judge_prompt(prompt: str, expected: str, actual: str) -> str:
