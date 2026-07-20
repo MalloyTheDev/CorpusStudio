@@ -132,9 +132,15 @@ per-item error isolation, and off-thread document opens.
   recall** (`metric: "keyword_overlap"`) — a lexical proxy, **not** a quality judgment.
   An opt-in **LLM-judge scorer** (`eval-run --judge-model …`, `metric: "llm_judge"`)
   scores each answer 0–100 with a rationale, reusing the evaluator-only judge (provider
-  policy enforced; no judge configured ⇒ no cloud call). Manual scoring stays the
-  human-trustworthy path. See `docs/EVALUATION_STUDIO.md`. *(Judge scorer: engine + CLI;
-  the desktop Evaluation-tab field is a pending follow-up.)*
+  policy enforced; no judge configured ⇒ no cloud call). A deterministic
+  **schema-conformance scorer** (`eval-run --output-schema <schema-id>`,
+  `metric: "schema_conformance"`) parses the model's answer as JSON and scores it against a
+  builtin `DatasetSchema` (required-field presence / type match) — a structural check, not a
+  quality judgment; a non-parseable answer scores 0 with a typed reason, never a fabricated
+  pass. Decoding is reproducible via `eval-run --seed/--temperature/--max-output-tokens`
+  (recorded in the run settings). Manual scoring stays the human-trustworthy path. See
+  `docs/EVALUATION_STUDIO.md`. *(Judge + schema-conformance scorers: engine + CLI; the
+  desktop Evaluation-tab field is a pending follow-up.)*
 - Multi-model benchmark (`benchmark`): one dataset across several models, ranked
   by the same keyword-overlap score, with per-model deltas and the examples every
   model failed.
