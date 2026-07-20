@@ -897,6 +897,17 @@ def platform_plan(
         min=1,
         help="Per-device microbatch size sealed into the plan (must be positive).",
     ),
+    lora_r: int = typer.Option(
+        16,
+        "--lora-r",
+        min=1,
+        help="LoRA rank sealed into the plan. A smaller rank (e.g. 8) halves the adapter's "
+        "weight/gradient/optimizer-state VRAM - the lever for long-sequence runs that are at the "
+        "card's memory edge.",
+    ),
+    lora_alpha: int = typer.Option(
+        32, "--lora-alpha", min=1, help="LoRA alpha sealed into the plan (convention: 2*r)."
+    ),
     gradient_accumulation_steps: int = typer.Option(
         8,
         "--gradient-accumulation-steps",
@@ -1046,6 +1057,8 @@ def platform_plan(
         max_steps=max_steps,
         num_train_epochs=num_train_epochs,
         micro_batch_size=micro_batch_size,
+        lora_r=lora_r,
+        lora_alpha=lora_alpha,
         gradient_accumulation_steps=gradient_accumulation_steps,
         truncation_allowed=allow_truncation,
         chat_template_sha256=chat_template_sha256,
