@@ -3588,7 +3588,8 @@ def eval_run(
     input_path: Path,
     schema: str,
     model: str = typer.Option(..., "--model", help="Model name to run."),
-    backend: str = typer.Option("ollama", "--backend", help="ollama or openai-compatible."),
+    backend: str = typer.Option("ollama", "--backend", help="ollama, openai-compatible, or in-process (a trained adapter loaded in 4-bit nf4; needs --adapter and the [train] extra)."),
+    adapter: Optional[str] = typer.Option(None, "--adapter", help="Trained LoRA adapter dir to evaluate in-process (--backend in-process). Its base is read from adapter_config.json; --model is the fallback base."),
     base_url: Optional[str] = typer.Option(None, "--base-url", help="Override provider base URL."),
     api_key: Optional[str] = typer.Option(
         None,
@@ -3656,6 +3657,7 @@ def eval_run(
             base_url=base_url,
             api_key=api_key,
             timeout_seconds=timeout_seconds,
+            adapter=adapter,
         )
     except ValueError as exc:
         typer.echo(str(exc), err=True)
@@ -7424,8 +7426,18 @@ def _build_backend(
     base_url: str | None,
     api_key: str | None,
     timeout_seconds: int,
+    adapter: str | None = None,
 ):
     normalized_backend = backend.replace("_", "-").lower()
+    if normalized_backend in {"in-process", "in-proc"}:
+        if not adapter:
+            raise ValueError("--backend in-process requires --adapter <trained-adapter-dir>")
+        from corpus_studio.model_backends.in_process import (  # noqa: PLC0415
+            InProcessAdapterBackend,
+        )
+
+        # base_model is the FALLBACK; the adapter's own recorded base wins (see base_model_for_adapter).
+        return InProcessAdapterBackend(adapter, base_model=model)
     if normalized_backend == "ollama":
         config = default_ollama_config(model)
         if base_url is not None:
