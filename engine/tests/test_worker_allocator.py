@@ -27,25 +27,28 @@ def test_expandable_segments_sets_the_env(monkeypatch):
     assert os.environ["PYTORCH_CUDA_ALLOC_CONF"] == "expandable_segments:True"
 
 
-def test_default_is_a_noop(monkeypatch):
-    monkeypatch.delenv("PYTORCH_CUDA_ALLOC_CONF", raising=False)
+def test_default_clears_an_inherited_conf(monkeypatch):
+    # Sealed default == the process default allocator. An ambient launcher-set conf is CLEARED (not
+    # silently kept), so the recorded "default" evidence reflects reality.
+    monkeypatch.setenv("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     conf = _apply_allocator_policy(_plan(AllocatorPolicy.default))
     assert conf == "default"
+    assert "PYTORCH_CUDA_ALLOC_CONF" not in os.environ  # cleared, not left as the ambient value
+
+
+def test_default_with_no_inherited_conf_stays_clear(monkeypatch):
+    monkeypatch.delenv("PYTORCH_CUDA_ALLOC_CONF", raising=False)
+    assert _apply_allocator_policy(_plan(AllocatorPolicy.default)) == "default"
     assert "PYTORCH_CUDA_ALLOC_CONF" not in os.environ
 
 
-def test_merges_into_an_existing_conf(monkeypatch):
+def test_sealed_policy_is_authoritative_and_discards_an_inherited_conf(monkeypatch):
+    # An ambient launcher-set conf is DISCARDED, not merged - the sealed policy OWNS the allocator, so
+    # it cannot be silently augmented (or its evidence made to lie) by whatever the shell exported.
     monkeypatch.setenv("PYTORCH_CUDA_ALLOC_CONF", "garbage_collection_threshold:0.8")
     conf = _apply_allocator_policy(_plan(AllocatorPolicy.expandable_segments))
-    # keeps the operator's setting, never a silent override
-    assert "garbage_collection_threshold:0.8" in conf
-    assert "expandable_segments:True" in conf
-
-
-def test_does_not_duplicate_an_existing_expandable_segments(monkeypatch):
-    monkeypatch.setenv("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:False")
-    conf = _apply_allocator_policy(_plan(AllocatorPolicy.expandable_segments))
-    assert conf == "expandable_segments:True"  # replaced, not appended
+    assert conf == "expandable_segments:True"  # ambient gc_threshold is gone, not merged
+    assert os.environ["PYTORCH_CUDA_ALLOC_CONF"] == "expandable_segments:True"
 
 
 def test_missing_field_defaults_safely(monkeypatch):
@@ -67,11 +70,14 @@ def test_garbage_collection_applies_the_sealed_threshold(monkeypatch):
     assert conf == "garbage_collection_threshold:0.8"
 
 
-def test_max_split_size_merges_and_replaces_same_key(monkeypatch):
+def test_max_split_size_discards_a_colliding_ambient_expandable_segments(monkeypatch):
+    # The measured seq-4096 lesson: expandable_segments collides with the paged optimizer's managed
+    # memory (CUDA illegal access). An ambient expandable_segments must NOT survive a sealed
+    # max_split_size (paged) run - the authoritative set discards it, so the collision can't recur.
     monkeypatch.setenv("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True,max_split_size_mb:64")
     conf = _apply_allocator_policy(_plan(AllocatorPolicy.max_split_size, max_split_size_mb=128))
-    assert "expandable_segments:True" in conf  # keeps the operator's other setting
-    assert "max_split_size_mb:128" in conf and "max_split_size_mb:64" not in conf  # replaced
+    assert conf == "max_split_size_mb:128"  # ONLY the sealed fragment; ambient expandable is gone
+    assert "expandable_segments" not in conf and "max_split_size_mb:64" not in conf
 
 
 def test_max_split_size_without_its_parameter_fails_closed(monkeypatch):
