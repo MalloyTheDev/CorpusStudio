@@ -3744,6 +3744,7 @@ def eval_run(
             seed=seed,
             temperature=temperature,
             max_output_tokens=max_output_tokens,
+            output_schema_id=output_schema,
         ),
         examples,
         backend_client,

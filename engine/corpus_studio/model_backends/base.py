@@ -4,10 +4,25 @@ These contracts are intentionally lightweight and make no network calls.
 Provider-specific modules can implement them in v0.2.
 """
 
+import json
 from collections.abc import Iterator, Sequence
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
+
+# Cap for reading an untrusted HTTP eval-backend response. Eval responses are tiny; a huge or slowly
+# trickled body (a runaway/hostile --base-url endpoint) must not OOM the eval process. 64 MiB is generous.
+MAX_RESPONSE_BYTES = 64 * 1024 * 1024
+
+
+def read_bounded_json(response: Any, max_bytes: int = MAX_RESPONSE_BYTES) -> dict[str, Any]:
+    """Read + parse a JSON HTTP response with a byte cap. Raises ValueError on overflow - the evaluator and
+    health paths already treat ValueError as a transient backend error, so an oversized body isolates one
+    row (null-with-reason) rather than OOM-crashing the whole batch. Never a silent truncation."""
+    body = response.read(max_bytes + 1)
+    if len(body) > max_bytes:
+        raise ValueError(f"backend response exceeded {max_bytes} bytes (runaway or hostile server)")
+    return json.loads(body.decode("utf-8"))
 
 
 class ModelBackendConfig(BaseModel):

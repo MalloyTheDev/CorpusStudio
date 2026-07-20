@@ -65,3 +65,15 @@ def test_require_nonempty_tier_penalizes_legitimately_empty_required_arrays():
     # present in the reference data) fails - which is exactly why presence-only is the headline metric.
     strict = _scorer(require_nonempty=True).score("p", "e", json.dumps(_complete()))
     assert strict.score == 0.0
+
+
+def test_deeply_nested_untrusted_json_is_measured_zero_not_a_crash():
+    # A hostile/buggy backend can return JSON nested past CPython's json recursion limit, which raises
+    # RecursionError (a RuntimeError, NOT a JSONDecodeError). It must be a measured 0 with a reason, never
+    # a raise that escapes the evaluator's per-row isolation and aborts the whole batch.
+    deep_array = "[" * 60000 + "]" * 60000
+    result = _scorer().score("p", "e", deep_array)
+    assert result.score == 0.0
+    assert "recursion" in (result.rationale or "").lower()
+    deep_object = '{"a":' * 60000 + "1" + "}" * 60000  # {"a":{"a":...{"a":1}...}}
+    assert _scorer().score("p", "e", deep_object).score == 0.0

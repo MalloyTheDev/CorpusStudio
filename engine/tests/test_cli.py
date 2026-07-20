@@ -368,8 +368,46 @@ def test_eval_run_command_uses_backend_and_writes_report_without_real_network(
         "temperature": 0.0,
         "top_p": 1.0,
         "max_output_tokens": 2048,
+        "output_schema_id": None,
     }
     assert written_report == report
+
+
+def test_eval_run_output_schema_routes_schema_conformance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    input_path = tmp_path / "instruction.jsonl"
+    write_rows(input_path, [{"instruction": "make lore", "input": "", "output": "{}", "tags": ["t"]}])
+    complete = json.dumps({
+        "kind": "lore", "module": "locations", "title": "T", "entryType": "location", "status": "draft",
+        "summary": "s", "tags": ["a"], "relationships": [], "canonNotes": "n", "risks": [],
+        "storyHooks": ["h"], "gameHooks": [], "suggestedNextAction": "do x",
+    })
+
+    class FakeBackend:
+        def generate(self, request):
+            return BackendGenerateResponse(text=complete, model_name="fake")
+
+    monkeypatch.setattr(cli, "_build_backend", lambda **_: FakeBackend())
+    result = runner.invoke(
+        app, ["eval-run", str(input_path), "instruction", "--model", "m", "--output-schema", "airesult"]
+    )
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.output)
+    assert report["metric"] == "schema_conformance"
+    assert report["average_score"] == 100.0  # the complete AIResult conforms
+    assert report["run_settings"]["output_schema_id"] == "airesult"
+
+
+def test_eval_run_output_schema_and_judge_model_are_mutually_exclusive(tmp_path: Path, monkeypatch):
+    input_path = tmp_path / "instruction.jsonl"
+    write_rows(input_path, [{"instruction": "x", "input": "", "output": "y", "tags": ["t"]}])
+    monkeypatch.setattr(cli, "_build_backend", lambda **_: object())
+    result = runner.invoke(
+        app,
+        ["eval-run", str(input_path), "instruction", "--model", "m",
+         "--output-schema", "airesult", "--judge-model", "j"],
+    )
+    assert result.exit_code == 1
+    assert "mutually exclusive" in result.output
 
 
 def test_eval_run_with_judge_model_uses_llm_judge_metric(

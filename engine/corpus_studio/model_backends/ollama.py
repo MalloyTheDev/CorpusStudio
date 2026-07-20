@@ -11,6 +11,7 @@ from corpus_studio.model_backends.base import (
     BackendGenerateRequest,
     BackendGenerateResponse,
     ModelBackendConfig,
+    read_bounded_json,
 )
 from corpus_studio.model_backends.retry import RetryPolicy, call_with_retry
 
@@ -118,7 +119,7 @@ class OllamaBackend:
                 headers={"Content-Type": "application/json"},
             )
             with self._opener(request, timeout=self.config.timeout_seconds) as response:
-                return json.loads(response.read().decode("utf-8"))
+                return read_bounded_json(response)
 
         return call_with_retry(_do, retry_policy or self._retry_policy, sleep=self._sleep)
 
