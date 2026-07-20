@@ -16,9 +16,15 @@ Design guarantees:
   message structure + token counts and never over model execution or dense-vs-expert assumptions. Tests
   and the control plane pass a stub/estimator; an exact re-check can pass the real tokenizer.
 
-The emitted chunks are the SAME chat schema, so they re-enter ``platform-plan`` normally and satisfy the
-worker preflight token-coverage gate (feeding the chunks back through ``compute_token_coverage`` yields
-``supervision_intact``).
+The emitted chunks are the SAME chat schema, so they re-enter ``platform-plan`` normally. CAVEAT: chunks
+are sized by the INJECTED ``token_len`` over per-message CONTENT, whereas the worker preflight gate
+tokenizes the FULL chat-template render (role/special/BOS/EOS markers add tokens). So a chunk sized
+``<= seq_len`` here can render slightly OVER ``seq_len`` at the gate and be refused. To guarantee the
+emitted chunks pass the gate, pass a ``token_len`` that reflects the full render, or leave headroom (size
+against ``seq_len - per_message_overhead``); ``compute_token_coverage`` over the chunks confirms
+``supervision_intact`` for the counting model used, not necessarily the render. This module is not yet
+wired into a CLI/worker command (roadmap item 1); the ``token_coverage_refusal`` message names it only as
+a technique, not a shipped command.
 """
 from __future__ import annotations
 
@@ -100,6 +106,15 @@ def chunk_chat_row(
                 body_message_start=0, body_message_end=len(body), duplicated_prompt_context=False,
             ),
         )]
+
+    if not body:
+        # Over-length but there is nothing to chunk: the leading system preamble alone exceeds seq_len
+        # (no user/assistant turn to split at a boundary). Fail closed rather than SILENTLY DROP the
+        # record (the emit loop below would return [] for an empty body, vanishing the row).
+        raise ChunkingRefusal(
+            f"record {source_row_index}: the system preamble alone is {total} tokens > seq_len "
+            f"{seq_len}; nothing to chunk (raise seq_len or shorten the system prompt)"
+        )
 
     # Group the body into exchanges: each starts at a user turn (or the first body message) and runs up
     # to just before the next user turn, so a user prompt and its assistant response(s) stay together.
