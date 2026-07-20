@@ -5496,6 +5496,7 @@ def model_card(
     adapter_path: Path,
     base_model: Optional[str] = typer.Option(None, "--base-model", help="Override the base model recorded in the adapter."),
     config_path: Optional[Path] = typer.Option(None, "--config", help="A CorpusStudio training config JSON to fold in (format / seq-len / lr / seed)."),
+    eval_report: Optional[Path] = typer.Option(None, "--eval-report", help="An eval-run report JSON to attach as the card's Evaluation section (metric + score + the exact decode). Omit and the card honestly says 'not evaluated'."),
     output: Optional[Path] = typer.Option(None, "--output", help="Write the card here (default: print to stdout). train-run already writes <adapter>/MODEL_CARD.md."),
 ):
     """Render a Markdown model card for a trained LoRA adapter: the base model (+ the reminder that ITS
@@ -5513,10 +5514,19 @@ def model_card(
             typer.echo(f"Could not read the training config {config_path}: {exc}", err=True)
             raise typer.Exit(code=2) from exc
 
+    evaluation = None
+    if eval_report is not None:
+        try:
+            evaluation = json.loads(Path(eval_report).read_text(encoding="utf-8-sig"))
+        except (json.JSONDecodeError, OSError) as exc:
+            typer.echo(f"Could not read the eval report {eval_report}: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
+
     card = build_model_card(
         adapter_path,
         base_model=base_model,
         training_config=training_config,
+        evaluation=evaluation,
         generated_at=_utc_now_iso(),
     )
 
