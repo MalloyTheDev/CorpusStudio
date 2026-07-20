@@ -175,6 +175,34 @@ def test_unknown_host_compute_capability_does_not_block_at_resolve():
     assert not any("declared floor" in r for r in resolution.blocking_reasons)
 
 
+def _unsloth_cc(major, minor):
+    recipe = get_recipe("backend-unsloth")  # declares min_compute_capability "7.5" (Turing+)
+    assert recipe is not None and recipe.min_compute_capability == "7.5"
+    return resolve_dependencies(
+        recipe, os_value=OperatingSystem.linux, accelerator_tag="cu128", python_version="3.12",
+        host_compute_capability_major=major, host_compute_capability_minor=minor,
+    )
+
+
+def test_fractional_floor_blocks_a_sub_minor_host_7_0_below_7_5():
+    # The bug: a 7.5 floor was rounded to 'any 7.x', so a Volta (CC 7.0) passed. Now (major, minor) is
+    # compared: 7.0 < 7.5 is BELOW the floor.
+    resolution = _unsloth_cc(7, 0)
+    assert any("below this recipe's declared floor" in r for r in resolution.blocking_reasons)
+
+
+def test_fractional_floor_allows_an_at_floor_7_5_host():
+    resolution = _unsloth_cc(7, 5)  # Turing CC 7.5 == floor
+    assert not any("declared floor" in r for r in resolution.blocking_reasons)
+
+
+def test_fractional_floor_blocks_when_minor_is_unknown_and_major_ties():
+    # Fail-safe: a known major that ties the floor major but an UNKNOWN minor cannot be claimed to meet
+    # a fractional floor - block rather than round up.
+    resolution = _unsloth_cc(7, None)
+    assert any("below this recipe's declared floor" in r for r in resolution.blocking_reasons)
+
+
 def test_readiness_flash_v1_is_exact_forced_flash_and_independent_of_math():
     math_recipe = get_recipe("backend-corpus-studio-readiness-v2")
     flash_recipe = get_recipe("backend-corpus-studio-readiness-flash-v1")

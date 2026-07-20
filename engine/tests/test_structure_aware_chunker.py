@@ -70,6 +70,21 @@ def test_single_over_length_turn_is_refused_fail_closed():
         chunk_chat_row(messages, seq_len=3, token_len=WORDS, source_row_index=2)
 
 
+def test_all_system_over_length_row_is_refused_not_silently_dropped():
+    # A degenerate over-length row whose ONLY messages are system (no user/assistant turn) has an empty
+    # body: the emit loop would return [] and vanish the record. It must fail CLOSED instead.
+    messages = [
+        {"role": "system", "content": "a b c d e f"},
+        {"role": "system", "content": "g h i j k l"},
+    ]
+    with pytest.raises(ChunkingRefusal, match="system preamble alone"):
+        chunk_chat_row(messages, seq_len=3, token_len=WORDS, source_row_index=5)
+    # at the dataset level it is surfaced as a refusal (ok False), never a silent drop
+    plan = chunk_chat_dataset([{"messages": messages}], seq_len=3, token_len=WORDS)
+    assert plan.ok is False
+    assert len(plan.refusals) == 1 and len(plan.rows) == 0
+
+
 def test_emitted_chunks_satisfy_the_coverage_ledger_supervision_intact():
     # The chunker's output must make the worker preflight gate (compute_token_coverage) pass.
     row = _multi_turn_row()

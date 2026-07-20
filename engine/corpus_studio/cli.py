@@ -2020,7 +2020,9 @@ def _build_environment_resolution(
     if recipe is None:
         raise ValueError(f"Unknown recipe '{recipe_id}' (see 'env-recipes').")
     tag = accelerator
-    host_cc_major: Optional[int] = None  # known only when we auto-profile the host below
+    # host compute capability (major, minor) - known only when we auto-profile the host below
+    host_cc_major: Optional[int] = None
+    host_cc_minor: Optional[int] = None
     if tag is None:
         with contextlib.redirect_stdout(sys.stderr):
             from corpus_studio.platform.profiler import build_environment_profile
@@ -2028,6 +2030,11 @@ def _build_environment_resolution(
             profile = build_environment_profile()
         gpu = profile.gpus[0] if profile.gpus else None
         host_cc_major = gpu.compute_capability_major if gpu else None
+        if gpu and gpu.compute_capability and "." in gpu.compute_capability:
+            try:
+                host_cc_minor = int(gpu.compute_capability.split(".")[1])
+            except (ValueError, IndexError):
+                host_cc_minor = None
         tag = select_accelerator_tag(
             cuda_runtime_version=profile.accelerator_runtime.cuda_runtime_version
             if profile.accelerator_runtime
@@ -2042,6 +2049,7 @@ def _build_environment_resolution(
         runtime_executable=runtime or Path(sys.executable),
         accelerator_tag=tag,
         host_compute_capability_major=host_cc_major,
+        host_compute_capability_minor=host_cc_minor,
         worker_wheel=worker_wheel,
         required_git_ancestor=required_git_ancestor,
         worker_source_commit=worker_source_commit,

@@ -709,10 +709,13 @@ def _parse_min_python(python_requires: str) -> tuple[int, int] | None:
         return None
 
 
-def _parse_cc_major(min_compute_capability: str) -> int | None:
-    """Parse a ``"12.0"``-style compute-capability floor into its MAJOR digit (12); None if malformed."""
+def _parse_cc(compute_capability: str) -> tuple[int, int] | None:
+    """Parse a ``"12.0"`` / ``"7.5"`` compute capability into a ``(major, minor)`` tuple (minor 0 when
+    absent); None if malformed. Comparing on the full tuple keeps a 7.5 floor from being rounded to
+    'any 7.x' (a 7.0 host must NOT pass a 7.5 recipe)."""
+    parts = compute_capability.strip().split(".")
     try:
-        return int(min_compute_capability.strip().split(".")[0])
+        return int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
     except (ValueError, IndexError):
         return None
 
@@ -835,6 +838,7 @@ def resolve_dependencies(
     os_value: OperatingSystem,
     accelerator_tag: str = "cpu",
     host_compute_capability_major: int | None = None,
+    host_compute_capability_minor: int | None = None,
     python_version: str = "",
     runtime: PythonRuntime | None = None,
     environment_id: str | None = None,
@@ -906,15 +910,28 @@ def resolve_dependencies(
     # Enforce the recipe's declared compute-capability floor: a recipe whose execution evidence/probe
     # is proven on (e.g.) Blackwell must not be reported resolvable on a KNOWN sub-floor host, even if a
     # CUDA build would install (installed != supported). Fail-safe: an unknown host capability does not
-    # block here - the execution probe remains the authority. Compared on the MAJOR digit (the host
-    # profile carries only compute_capability_major).
-    if recipe.min_compute_capability and host_compute_capability_major is not None:
-        floor_major = _parse_cc_major(recipe.min_compute_capability)
-        if floor_major is not None and host_compute_capability_major < floor_major:
+    # block here - the execution probe remains the authority. Compared on the FULL (major, minor) tuple
+    # so a fractional floor (e.g. 7.5) is not rounded down to 'any 7.x' (a 7.0 host must NOT pass 7.5).
+    floor = _parse_cc(recipe.min_compute_capability) if recipe.min_compute_capability else None
+    if floor is not None and host_compute_capability_major is not None:
+        floor_major, floor_minor = floor
+        below = host_compute_capability_major < floor_major or (
+            host_compute_capability_major == floor_major
+            and (
+                (host_compute_capability_minor is not None and host_compute_capability_minor < floor_minor)
+                # known major but unknown minor cannot be claimed to meet a non-zero fractional floor
+                or (host_compute_capability_minor is None and floor_minor > 0)
+            )
+        )
+        if below:
+            shown = (
+                f"{host_compute_capability_major}.{host_compute_capability_minor}"
+                if host_compute_capability_minor is not None
+                else f"{host_compute_capability_major}.x"
+            )
             blocking.append(
-                f"host GPU compute capability {host_compute_capability_major}.x is below this recipe's "
-                f"declared floor {recipe.min_compute_capability} - its execution evidence is not proven "
-                f"on this hardware"
+                f"host GPU compute capability {shown} is below this recipe's declared floor "
+                f"{recipe.min_compute_capability} - its execution evidence is not proven on this hardware"
             )
 
     if recipe.requires_native_build:
