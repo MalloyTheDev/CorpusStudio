@@ -39,14 +39,14 @@ silently redefine the algorithm.
 
 Use a sealed Phase 5 report when a physical spec names parameter scopes, components, or experts:
 
-```powershell
-corpus-studio platform-plan `
-  --base-model Qwen/Qwen2.5-7B-Instruct `
-  --model-revision a09a35458c702b33eeacc393d103063234e8bc28 `
-  --dataset .\data\examples.jsonl `
-  --physical-spec .\PhysicalExecutionSpec.json `
-  --parameter-accounting-report .\ParameterAccountingReport.json `
-  --out .\plan
+```bash
+corpus-studio platform-plan \
+  --base-model Qwen/Qwen2.5-7B-Instruct \
+  --model-revision a09a35458c702b33eeacc393d103063234e8bc28 \
+  --dataset ./data/examples.jsonl \
+  --physical-spec ./PhysicalExecutionSpec.json \
+  --parameter-accounting-report ./ParameterAccountingReport.json \
+  --out ./plan
 ```
 
 The planner revalidates the report, verifies its canonical hash, checks that every selected ID exists,
@@ -56,10 +56,10 @@ plan, and missing runtime axes remain gaps.
 Storage-backed resources embed the exact per-role `StorageRoleAssessment` and require the matching
 content-hashed `StorageProfile`:
 
-```powershell
-corpus-studio platform-plan ... `
-  --physical-spec .\PhysicalExecutionSpec.json `
-  --storage-profile .\StorageProfile.json
+```bash
+corpus-studio platform-plan ... \
+  --physical-spec ./PhysicalExecutionSpec.json \
+  --storage-profile ./StorageProfile.json
 ```
 
 `unsuitable` is always refused. A `marginal` or `unknown` assessment must already record that exact
