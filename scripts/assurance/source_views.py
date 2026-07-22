@@ -112,17 +112,25 @@ class WorkspaceSourceView:
         except OSError as exc:
             raise SourceViewError(f"cannot stat {path}: {exc}") from exc
         mode = info.st_mode
-        if stat.S_ISLNK(mode):
-            target = os.readlink(full)
-            return FileState(
-                kind="symlink",
-                mode=_MODE_SYMLINK,
-                content_digest=sha256_of_bytes(_encode_target(target, path)),
-            )
-        if stat.S_ISREG(mode):
-            git_mode = "100755" if (mode & 0o111) else "100644"
-            data = full.read_bytes()
-            return FileState(kind="regular", mode=git_mode, content_digest=sha256_of_bytes(data))
+        try:
+            if stat.S_ISLNK(mode):
+                target = os.readlink(full)
+                return FileState(
+                    kind="symlink",
+                    mode=_MODE_SYMLINK,
+                    content_digest=sha256_of_bytes(_encode_target(target, path)),
+                )
+            if stat.S_ISREG(mode):
+                # git canonicalizes the executable bit on the OWNER bit only (mode & 0o100), so a
+                # group/other-exec-only change (e.g. 0o755 -> 0o655) IS a git mode change and must not
+                # be masked by the other exec bits.
+                git_mode = "100755" if (mode & 0o100) else "100644"
+                data = full.read_bytes()
+                return FileState(kind="regular", mode=git_mode, content_digest=sha256_of_bytes(data))
+        except OSError as exc:
+            # A file we can stat but not read (permissions, races) fails CLOSED, not with an uncaught
+            # traceback - the CLI maps AssuranceError to exit 2.
+            raise SourceViewError(f"cannot read {path}: {exc}") from exc
         if stat.S_ISDIR(mode):
             # A tracked path that is a directory in the working tree is a live submodule/gitlink
             # checkout; the kernel models gitlinks from TREES (both sides), not from a live subrepo.

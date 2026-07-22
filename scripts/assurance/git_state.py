@@ -1,10 +1,15 @@
 """Read-only Git plumbing for the assurance change-set kernel (Phase 1).
 
-Every git call is a fixed ``argv`` list run with ``git -C <root>`` - never a shell string - and
-every call here is READ-ONLY: it discovers state and reads objects/trees, and never mutates the
-index, the object database, or the working tree. All name-bearing output is requested in the
-NUL-delimited ``-z`` form so paths are never quoted or ambiguous; a path that is not valid UTF-8
-fails closed (assurance records require UTF-8 POSIX paths).
+Every git call is a fixed ``argv`` list run with ``git -C <root>`` - never a shell string. These
+calls READ repository state: none mutates the object database, the refs, the committed tree, or the
+working tree, so the committed content the repository represents - and the computed change set - are
+never altered. (One content-neutral exception is honest to state: a read such as ``git diff`` may
+refresh the index's cached stat metadata - mtime/size - to reflect the current working tree; this
+changes no tracked bytes, no tree, and no change-set result. ``GIT_OPTIONAL_LOCKS=0`` is set to
+avoid the optional-lock, status-style refreshes; a plumbing ``diff`` still refreshes the stat-cache,
+which is why the promise here is "never mutates committed state", not "never touches .git/index".)
+All name-bearing output is requested in the NUL-delimited ``-z`` form so paths are never quoted or
+ambiguous; a path that is not valid UTF-8 fails closed (assurance records require UTF-8 POSIX paths).
 
 The base source view is derived from the git object store (``ls-tree`` / ``cat-file``), so a
 base tree can be inspected WITHOUT checking it out.
@@ -12,6 +17,7 @@ base tree can be inspected WITHOUT checking it out.
 
 from __future__ import annotations
 
+import os
 import subprocess  # noqa: S404 - fixed-argv git only; never a shell string.
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,12 +72,21 @@ class TreeEntry:
 
 
 def _git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
-    """Run ``git -C <root> <args...>`` capturing bytes. Raises ``GitStateError`` on failure."""
-    proc = subprocess.run(  # noqa: S603 - fixed argv, no shell, no untrusted executable.
-        ["git", "-C", str(root), *args],
-        capture_output=True,
-        check=False,
-    )
+    """Run ``git -C <root> <args...>`` capturing bytes. Raises ``GitStateError`` on failure.
+
+    ``GIT_OPTIONAL_LOCKS=0`` avoids taking the optional index lock for status-style refreshes (see
+    the module docstring for the honest scope of "read-only"). A missing/unrunnable ``git`` binary
+    fails CLOSED as ``GitStateError`` rather than escaping as an uncaught ``OSError``.
+    """
+    try:
+        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell, no untrusted executable.
+            ["git", "-C", str(root), *args],
+            capture_output=True,
+            check=False,
+            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+        )
+    except OSError as exc:  # e.g. git not installed / not on PATH
+        raise GitStateError(f"cannot run git {' '.join(args[:2])}: {exc}") from exc
     if check and proc.returncode != 0:
         stderr = proc.stderr.decode("utf-8", "replace").strip()
         raise GitStateError(f"git {' '.join(args[:2])} failed (exit {proc.returncode}): {stderr}")

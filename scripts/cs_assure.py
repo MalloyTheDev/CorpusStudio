@@ -15,7 +15,9 @@ Exit-code contract:
        limitation, unsupported special file, non-UTF-8 path, or a tree that moved mid-collection).
 
 Later phases add impact / verification / gate / evidence subcommands; this bootstrap kernel
-intentionally does not, and it never mutates the repository.
+intentionally does not, and it never mutates the repository's committed state - the object store,
+refs, the committed tree, or the working tree (a read may refresh the content-neutral index
+stat-cache; see ``assurance/git_state.py``).
 """
 
 from __future__ import annotations

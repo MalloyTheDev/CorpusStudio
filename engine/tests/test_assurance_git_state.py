@@ -37,6 +37,7 @@ from assurance.records import (  # noqa: E402
 )
 from assurance.source_views import (  # noqa: E402
     GitTreeSourceView,
+    SourceViewError,
     UnsupportedSpecialFile,
     WorkspaceSourceView,
 )
@@ -175,6 +176,81 @@ def test_executable_mode_change(tmp_path: Path) -> None:
     assert entry["candidate"]["mode"] == "100755"
     # content is unchanged - only the mode differs, and that alone counts as a change.
     assert entry["base"]["content_digest"] == entry["candidate"]["content_digest"] == sha(b"hello\n")
+
+
+def test_exec_bit_uses_owner_bit_not_any_exec_bit(tmp_path: Path) -> None:
+    # git canonicalizes the exec bit on the OWNER bit only. A file committed 100755 then chmod'd to
+    # a mode with group/other exec but NO owner exec (0o655) is a real git mode change
+    # (100755 -> 100644) and must NOT be silently dropped by treating any exec bit as executable.
+    root, _ = make_base_repo(tmp_path)
+    exe = root / "run.sh"
+    exe.write_text("#!/bin/sh\n")
+    os.chmod(exe, 0o755)
+    commit_all(root, "add executable")  # committed as 100755 on main == HEAD
+    os.chmod(exe, 0o655)  # drop OWNER exec, keep group/other exec
+    # Sanity: git itself reports this as a modification (owner-exec removed).
+    assert "run.sh" in _git(root, "status", "--porcelain").stdout
+    _proc, record = changeset(root)
+    entry = changed(record)["run.sh"]
+    assert entry["base"]["mode"] == "100755"
+    assert entry["candidate"]["mode"] == "100644"  # NOT silently equal to 100755
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires posix chmod semantics")
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0, reason="root bypasses file permissions"
+)
+def test_workspace_view_fails_closed_on_unreadable_regular_file(tmp_path: Path) -> None:
+    # A regular file we can stat but not READ must fail closed as SourceViewError (an AssuranceError
+    # the CLI maps to exit 2), never escape as an unguarded OSError -> traceback -> exit 1.
+    victim = tmp_path / "secret.txt"
+    victim.write_text("nope\n")
+    os.chmod(victim, 0o000)
+    try:
+        with pytest.raises(SourceViewError):
+            WorkspaceSourceView(tmp_path).state("secret.txt")
+    finally:
+        os.chmod(victim, 0o644)  # restore so tmp cleanup can remove it
+
+
+def test_git_launch_failure_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # A missing/unrunnable `git` binary must fail CLOSED as GitStateError, never escape as an
+    # uncaught OSError. exit 1 is also indistinguishable from a doclint --strict staleness signal.
+    from assurance import git_state
+
+    def _no_git(*_a: object, **_k: object) -> None:
+        raise FileNotFoundError(2, "No such file or directory: 'git'")
+
+    monkeypatch.setattr(git_state.subprocess, "run", _no_git)
+    with pytest.raises(git_state.GitStateError):
+        git_state._git(tmp_path, "rev-parse", "HEAD")
+
+
+def test_changeset_never_mutates_committed_state(tmp_path: Path) -> None:
+    # `changeset` READS repository state: even when a stale stat-cache makes git refresh .git/index
+    # (a content-neutral write we honestly do NOT claim to avoid), it must never alter committed
+    # state - HEAD, refs, or the object store - and the computed change set must be deterministic.
+    root, _ = make_base_repo(tmp_path)
+    objects_dir = root / ".git" / "objects"
+
+    def _committed_state() -> tuple[str, list[str]]:
+        head = _git(root, "rev-parse", "HEAD").stdout.strip()
+        objects = sorted(
+            str(p.relative_to(objects_dir)) for p in objects_dir.rglob("*") if p.is_file()
+        )
+        return head, objects
+
+    # Stale every tracked file's cached stat info so git WANTS to refresh the index on `diff`.
+    for name in ("mod.txt", "keep.txt", "a.txt"):
+        os.utime(root / name, (1_000_000_000, 1_000_000_000))
+    before = _committed_state()
+    proc1, rec1 = changeset(root)
+    proc2, rec2 = changeset(root)
+    assert proc1.returncode == 0 and proc2.returncode == 0, (proc1.stderr, proc2.stderr)
+    # Committed state (HEAD + object store) is byte-identical after the reads ...
+    assert _committed_state() == before
+    # ... and the change set is deterministic despite any stat-cache churn between the two runs.
+    assert rec1["payload"]["changed_paths"] == rec2["payload"]["changed_paths"]
 
 
 def test_symlink_target_change_is_not_followed(tmp_path: Path) -> None:
