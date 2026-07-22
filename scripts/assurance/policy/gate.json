@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "description": "cs_assure verify gate: the repo's LOCAL workspace gate as no-shell argv steps, run from the declared cwd. cs_assure runs these itself and seals a WorkspaceVerification record binding the real exit codes to the change set - so a green result is EVIDENCE the gate ran, not a narrated claim. This is the WORKSPACE gate (ruff + mypy + pytest); it is deliberately NOT the CI gate (CI additionally enforces --cov=corpus_studio --cov-fail-under=88 and the web/contract job). A green workspace gate is not commit / PR / release / sealed-research readiness.",
+  "steps": [
+    {"name": "ruff", "argv": [".venv/bin/python", "-m", "ruff", "check", "corpus_studio", "tests"], "cwd": "engine", "expected_exit": 0},
+    {"name": "mypy", "argv": [".venv/bin/python", "-m", "mypy", "corpus_studio"], "cwd": "engine", "expected_exit": 0},
+    {"name": "pytest", "argv": [".venv/bin/python", "-m", "pytest", "-q", "--no-header", "--basetemp=.pytest_tmp"], "cwd": "engine", "expected_exit": 0}
+  ]
+}

@@ -13,19 +13,25 @@ Subcommands:
     impact     map the change set onto the obligations policy and print a sealed ImpactAssessment
                ("given what changed, what must I now do?"). OBSERVATION-ONLY: it reports fired
                obligations; it never enforces, gates, or blocks (no --strict, no exit 1).
+    verify     RUN the declared workspace gate (ruff/mypy/pytest) and print a sealed
+               WorkspaceVerification record binding the real exit codes + the fired obligations to
+               the change set. Green == WORKSPACE_GATE only - never fit / commit / PR / release /
+               sealed / CI. Exit 1 if the gate is red.
 
 Exit-code contract:
-    0  success (an empty change set on a clean tree, a doclint run, or an impact assessment - even
-       one that fires obligations - is still 0),
-    1  doclint --strict found staleness (gate mode only; impact never uses exit 1),
+    0  success (an empty change set on a clean tree, a doclint run, an impact assessment - even one
+       that fires obligations - or a GREEN verify gate is 0),
+    1  a not-clean result of a checking command: doclint --strict found staleness, OR verify's gate
+       is red (a step's real exit code did not match its expected code). impact never uses exit 1.
     2  a fail-closed refusal (not a repo, missing base ref, no merge base, shallow-history
        limitation, unsupported special file, non-UTF-8 path, tree moved mid-collection, a malformed
-       context-source registry, or a malformed obligations policy).
+       context-source registry / obligations policy / gate spec, or a gate step that could not be
+       launched at all).
 
-Every subcommand is read-only: cs_assure never mutates the repository's committed state - the
-object store, refs, the committed tree, or the working tree (a read may refresh the content-neutral
-index stat-cache; see ``assurance/git_state.py``). Later phases add verification / gate / evidence
-subcommands.
+Verify RUNS external gate commands (declared argv, no shell); every other subcommand is read-only.
+cs_assure itself never mutates the repository's committed state - the object store, refs, the
+committed tree, or the working tree (a read may refresh the content-neutral index stat-cache; see
+``assurance/git_state.py``). Later phases add gate / evidence subcommands.
 """
 
 from __future__ import annotations
@@ -46,7 +52,8 @@ from assurance.git_state import AssuranceError  # noqa: E402
 from assurance.records import build_change_set_record  # noqa: E402
 
 EXIT_OK = 0
-EXIT_LINT_FINDINGS = 1
+EXIT_LINT_FINDINGS = 1  # doclint --strict: staleness present
+EXIT_GATE_RED = 1  # verify: the workspace gate is red (same "not-clean" rung as EXIT_LINT_FINDINGS)
 EXIT_FAIL_CLOSED = 2
 
 
@@ -95,6 +102,24 @@ def _cmd_impact(args: argparse.Namespace) -> int:
     # record_digest is over the canonical (compact) form, so re-verification re-canonicalizes.
     sys.stdout.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
     return EXIT_OK
+
+
+def _cmd_verify(args: argparse.Namespace) -> int:
+    from assurance.verification import build_verification_record  # noqa: PLC0415
+
+    start_dir = Path(args.start_dir) if args.start_dir else Path.cwd()
+    record = build_verification_record(
+        start_dir=start_dir,
+        scope=args.scope,
+        base_ref=args.base,
+        gate_relpath=args.gate,
+        policy_relpath=args.policy,
+    )
+    # The record is emitted whether the gate is green or red (it is evidence either way). A red gate
+    # is a not-clean result (exit 1), NOT a fail-closed refusal (exit 2, which means the gate could
+    # not be evaluated). Green is WORKSPACE_GATE only - the record never claims more.
+    sys.stdout.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    return EXIT_OK if record["payload"]["gate_passed"] else EXIT_GATE_RED
 
 
 def _print_doclint_summary(source_count: int, findings: list) -> None:
@@ -205,6 +230,44 @@ def build_parser() -> argparse.ArgumentParser:
         help="directory to resolve the repository from (default: current directory)",
     )
     impact.set_defaults(func=_cmd_impact)
+
+    verify = subparsers.add_parser(
+        "verify",
+        help="run the declared workspace gate and seal a WorkspaceVerification (exit 1 if red)",
+    )
+    verify.add_argument(
+        "--scope",
+        default="workspace",
+        choices=["workspace"],
+        help="which Git state to bind the verification to (workspace only)",
+    )
+    verify.add_argument(
+        "--base",
+        default="main",
+        help="base ref; the bound change set is computed against merge-base(HEAD, base)",
+    )
+    verify.add_argument(
+        "--gate",
+        default="scripts/assurance/policy/gate.json",
+        help="repo-relative path to the gate spec (no-shell argv steps) to run",
+    )
+    verify.add_argument(
+        "--policy",
+        default="scripts/assurance/policy/obligations.json",
+        help="repo-relative obligations policy, to list what fired on the same change set",
+    )
+    verify.add_argument(
+        "--format",
+        default="json",
+        choices=["json"],
+        help="output format (json)",
+    )
+    verify.add_argument(
+        "--start-dir",
+        default=None,
+        help="directory to resolve the repository from (default: current directory)",
+    )
+    verify.set_defaults(func=_cmd_verify)
     return parser
 
 
