@@ -252,8 +252,9 @@ def scan_source(source: DocSource, lines: list[str]) -> list[Finding]:
                     "branch-protection/required-check/merge-authorization asserted as fact; these "
                     "are authenticated GitHub settings, not repository facts",
                 ))
-        # R5 - the known root-contract count drift.
-        if not historical and _COUNT_DRIFT.search(line):
+        # R5 - the known root-contract count drift. Scoped to durable current guidance: a dated log
+        # (VOLATILE_CURRENT) or a frozen record legitimately preserves the count it had when written.
+        if source.mode in _CURRENTISH_MODES and _COUNT_DRIFT.search(line):
             findings.append(_finding(
                 "known-count-drift", "low", "COUNT_DRIFT", source, line_no, line,
                 "schema_export.ROOT_CONTRACTS (31) + tests/test_platform_contracts.py",

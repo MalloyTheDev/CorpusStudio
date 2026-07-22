@@ -16,7 +16,7 @@ The **run lifecycle is largely built.** The `engine/corpus_studio/platform/` pac
 torch-free contract substrate + lifecycle, not a plan on paper. Hardware evidence has two distinct,
 non-interchangeable levels:
 
-- **28 root versioned contracts** (`platform/contracts.py`) → deterministic language-neutral JSON
+- **31 root versioned contracts** (`platform/contracts.py`) → deterministic language-neutral JSON
   Schema (`docs/contracts/`) → generated TypeScript client types.
 - **profile → plan (hash-sealed) → predict-fit → run → measure-fit → account-for-artifacts**, with a
   backend-manifest registry (`corpus_studio`, `unsloth`), a watchdog (measured fit + spill/stall), and

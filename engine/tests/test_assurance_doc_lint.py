@@ -106,9 +106,13 @@ def test_github_setting_asserted_as_fact_is_flagged() -> None:
     assert any(f.classification == "AUTHENTICATED_GITHUB_SETTING_REQUIRED" for f in found)
 
 
-def test_known_count_drift_flagged_outside_historical() -> None:
-    assert "known-count-drift" in _rules(_src("CURRENT"), ["this branch exports 28 root contracts"])
-    assert "known-count-drift" not in _rules(_src("FROZEN_EVIDENCE"), ["exports 28 root contracts"])
+def test_known_count_drift_scoped_to_durable_current_docs() -> None:
+    line = ["this branch exports 28 root contracts"]
+    assert "known-count-drift" in _rules(_src("CURRENT"), line)
+    assert "known-count-drift" in _rules(_src("MIXED_CURRENT_AND_HISTORY"), line)
+    # a dated log or a frozen record legitimately preserves the count it had when written.
+    assert "known-count-drift" not in _rules(_src("VOLATILE_CURRENT"), line)
+    assert "known-count-drift" not in _rules(_src("FROZEN_EVIDENCE"), line)
 
 
 # --------------------------------------------------------------------------- registry validation

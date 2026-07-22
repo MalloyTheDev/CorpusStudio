@@ -1,5 +1,11 @@
 # Manifest
 
+> **HISTORICAL - not a live inventory.** A one-time generated file list from the initial MIT project
+> skeleton. It still lists the removed C# desktop (#545) and omits current files (e.g.
+> `.github/workflows/security.yml`, `web.yml`, `docs/HOST_STATE.md`, `docs/PRODUCT_AREAS.md`,
+> `docs/contracts/`). Use the repository tree for the live file set and `docs/CURRENT_STATE.md` for
+> feature state. Preserved as history; do not treat as current.
+
 Generated file list for the Corpus Studio MIT project skeleton.
 
 - `.editorconfig`
