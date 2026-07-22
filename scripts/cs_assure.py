@@ -17,6 +17,10 @@ Subcommands:
                WorkspaceVerification record binding the real exit codes + the fired obligations to
                the change set. Green == WORKSPACE_GATE only - never fit / commit / PR / release /
                sealed / CI. Exit 1 if the gate is red.
+    status     gather + seal a project_status snapshot ("where are we": change set, fired
+               obligations, doc staleness, branch + recent commits, and a FAIL-SOFT open-issue
+               summary + authority-doc pointers). OBSERVATION-ONLY; the "what's next" judgment is the
+               corpus-progress skill's, not the tool's. A gh failure never changes the exit code.
 
 Exit-code contract:
     0  success (an empty change set on a clean tree, a doclint run, an impact assessment - even one
@@ -120,6 +124,25 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     # not be evaluated). Green is WORKSPACE_GATE only - the record never claims more.
     sys.stdout.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
     return EXIT_OK if record["payload"]["gate_passed"] else EXIT_GATE_RED
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    from assurance.status import build_status_record  # noqa: PLC0415
+
+    start_dir = Path(args.start_dir) if args.start_dir else Path.cwd()
+    record = build_status_record(
+        start_dir=start_dir,
+        scope=args.scope,
+        base_ref=args.base,
+        policy_relpath=args.policy,
+        limit_issues=args.limit_issues,
+        limit_commits=args.limit_commits,
+    )
+    # Observation-only: exit 0 once a snapshot is produced, INCLUDING when issues are unavailable or
+    # obligations fired (a gh failure never changes the exit code); exit 2 only on a fail-closed
+    # git/kernel refusal, via main()'s handler.
+    sys.stdout.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    return EXIT_OK
 
 
 def _print_doclint_summary(source_count: int, findings: list) -> None:
@@ -268,6 +291,51 @@ def build_parser() -> argparse.ArgumentParser:
         help="directory to resolve the repository from (default: current directory)",
     )
     verify.set_defaults(func=_cmd_verify)
+
+    status = subparsers.add_parser(
+        "status",
+        help="gather + seal a project_status snapshot (where are we; observation-only, never gates)",
+    )
+    status.add_argument(
+        "--scope",
+        default="workspace",
+        choices=["workspace"],
+        help="which Git state to bind the snapshot to (workspace only)",
+    )
+    status.add_argument(
+        "--base",
+        default="main",
+        help="base ref; the bound change set is computed against merge-base(HEAD, base)",
+    )
+    status.add_argument(
+        "--policy",
+        default="scripts/assurance/policy/obligations.json",
+        help="repo-relative obligations policy, for the fired-obligation summary",
+    )
+    status.add_argument(
+        "--limit-issues",
+        type=int,
+        default=10,
+        help="max recent open issues to list (total_open + by_area still cover all)",
+    )
+    status.add_argument(
+        "--limit-commits",
+        type=int,
+        default=10,
+        help="max recent commits to list",
+    )
+    status.add_argument(
+        "--format",
+        default="json",
+        choices=["json"],
+        help="output format (json)",
+    )
+    status.add_argument(
+        "--start-dir",
+        default=None,
+        help="directory to resolve the repository from (default: current directory)",
+    )
+    status.set_defaults(func=_cmd_status)
     return parser
 
 

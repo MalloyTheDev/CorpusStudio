@@ -208,3 +208,29 @@ def tree_entry(root: Path, tree_commit: str, path: str) -> TreeEntry | None:
 def blob_bytes(root: Path, oid: str) -> bytes:
     """Return the raw bytes of a blob object (regular content, or a symlink's target string)."""
     return _git(root, "cat-file", "-p", oid).stdout
+
+
+def current_branch(ctx: GitContext) -> str:
+    """The abbreviated ref of HEAD (``'main'`` / ``'feat/...'``), or ``''`` for a detached/unborn HEAD."""
+    if not ctx.head_oid:
+        return ""
+    proc = _git(ctx.root, "rev-parse", "--abbrev-ref", "HEAD", check=False)
+    name = proc.stdout.decode("utf-8").strip()
+    return "" if (proc.returncode != 0 or name == "HEAD") else name
+
+
+def recent_commits(ctx: GitContext, limit: int) -> list[dict[str, str]]:
+    """Up to ``limit`` most-recent ``{oid, subject}`` in git-log recency order.
+
+    An unborn HEAD (no commits) is a real, non-erroneous state -> ``[]`` (fail-OPEN); a git *failure*
+    still fails closed via ``_git`` (``check=True``). ``%s`` is the single-line subject, so splitting on
+    newlines is unambiguous.
+    """
+    if limit <= 0 or not ctx.head_oid:
+        return []
+    proc = _git(ctx.root, "log", "--no-color", f"--max-count={limit}", "--format=%H %s")
+    commits: list[dict[str, str]] = []
+    for line in _decode_utf8(proc.stdout, what="git log output").splitlines():
+        oid, _sep, subject = line.partition(" ")
+        commits.append({"oid": oid, "subject": subject})
+    return commits
