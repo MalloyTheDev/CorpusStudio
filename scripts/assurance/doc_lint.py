@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from assurance.git_state import AssuranceError
@@ -46,10 +46,13 @@ _HISTORICAL_MODES = frozenset({"HISTORICAL", "SUPERSEDED", "FROZEN_EVIDENCE"})
 # Modes that should read as clean-current (subject to the removed-UI rule).
 _CURRENTISH_MODES = frozenset({"CURRENT", "MIXED_CURRENT_AND_HISTORY"})
 
-# A per-line marker that a removed-UI / historical mention is intentional.
+# A per-line marker that a removed-UI / historical mention is intentional. Bare "was"/"were" are
+# deliberately NOT markers: they are too common, and a genuine present-tense claim adjacent to an
+# unrelated "was"/"were" (within the +/-1-line window) would be silently suppressed. A real
+# historical passage names the removal (removed / former / decommissioned / #545 / ...).
 _HISTORICAL_MARKER = re.compile(
     r"remov|former|legacy|historic|decommission|retire|supersed|no longer|replaced|prototype"
-    r"|\bwas\b|\bwere\b|deleted|#545|#546",
+    r"|deleted|#545|#546",
     re.IGNORECASE,
 )
 # WPF and Avalonia are the REMOVED desktop frameworks (#545). Nocturne is deliberately excluded:
@@ -68,6 +71,7 @@ _VOLATILE_LINE = re.compile(
     r"wheel\s+[0-9a-f]{7,}"
     r"|sha256[:=\s]+[0-9a-f]{8,}"
     r"|source[_ ]commit"
+    r"|\b(?:source|commit|floor|ancestor|built from)\s+[0-9a-f]{7,40}\b"
     r"|merge\s+(?:commit\s+)?[0-9a-f]{7,}"
     r"|\brun-[0-9a-f]{4,}"
     r"|effective[- ]?matrix\s+1\.\d+\.\d+"
@@ -137,12 +141,21 @@ def parse_registry(raw: dict[str, Any]) -> list[DocSource]:
     if not isinstance(entries, list) or not entries:
         raise DocLintError("context-source registry has no 'sources' list")
     sources: list[DocSource] = []
+    seen_paths: set[str] = set()
     for index, entry in enumerate(entries):
         path = entry.get("path")
         mode = entry.get("mode")
         authority = entry.get("authority")
         if not isinstance(path, str) or not path:
             raise DocLintError(f"source[{index}] has no 'path'")
+        # A registered path must be repo-relative and stay inside the tree: an absolute path, a
+        # ".." traversal, or a backslash would make the sensor read (and vouch for) files outside
+        # the repo. Fail closed rather than silently scan out-of-tree content.
+        if PurePosixPath(path).is_absolute() or "\\" in path or ".." in PurePosixPath(path).parts:
+            raise DocLintError(f"source {path!r} must be a repo-relative path (no absolute / '..' / '\\')")
+        if path in seen_paths:
+            raise DocLintError(f"source {path!r} is registered more than once (duplicate entry)")
+        seen_paths.add(path)
         if mode not in VALID_MODES:
             raise DocLintError(f"source {path!r}: invalid mode {mode!r} (allowed: {VALID_MODES})")
         if authority not in VALID_AUTHORITIES:
@@ -172,6 +185,11 @@ def load_registry(repo_root: Path) -> list[DocSource]:
         raise DocLintError(f"context-source registry not found at {REGISTRY_RELPATH}") from exc
     except json.JSONDecodeError as exc:
         raise DocLintError(f"context-source registry is not valid JSON: {exc}") from exc
+    except OSError as exc:
+        # A registry path that is a directory / unreadable / otherwise un-openable fails CLOSED as a
+        # structured refusal (exit 2), not an uncaught traceback (which would surface as exit 1 and
+        # collide with the doclint --strict staleness signal).
+        raise DocLintError(f"context-source registry could not be read ({REGISTRY_RELPATH}): {exc}") from exc
     return parse_registry(raw)
 
 
@@ -263,10 +281,33 @@ def lint_repo(repo_root: Path, sources: list[DocSource]) -> list[Finding]:
             ))
             continue
         if target.is_dir():
+            findings.append(Finding(
+                rule="registry-not-a-file",
+                severity="low",
+                classification="REGISTRY_STALE",
+                path=source.path,
+                line=0,
+                excerpt="",
+                superseding_authority="the repository tree",
+                message="registered path is a directory, not a lintable file; fix the registry",
+            ))
             continue
         try:
             text = target.read_text("utf-8")
-        except (UnicodeDecodeError, OSError):
+        except (UnicodeDecodeError, OSError) as exc:
+            # A present-but-unreadable doc must not be silently dropped (the doc-trust sensor would
+            # then read as "clean" while a registered doc went unchecked). Surface it as drift.
+            findings.append(Finding(
+                rule="registry-unreadable-file",
+                severity="low",
+                classification="REGISTRY_STALE",
+                path=source.path,
+                line=0,
+                excerpt="",
+                superseding_authority="the repository tree",
+                message=f"registered doc could not be read ({type(exc).__name__}); "
+                        "the sensor must not silently skip a registered doc",
+            ))
             continue
         findings.extend(scan_source(source, text.splitlines()))
     findings.sort(key=lambda f: (f.path, f.line, f.rule))

@@ -162,3 +162,79 @@ def test_cli_doclint_strict_exit_matches_finding_count() -> None:
     payload = json.loads(run_cli(REPO_ROOT, "doclint", "--format", "json").stdout)
     strict = run_cli(REPO_ROOT, "doclint", "--strict")
     assert strict.returncode == (1 if payload["finding_count"] else 0)
+
+
+# --------------------------------------------------------------------------- hardening (adversarial)
+
+
+def test_removed_ui_bare_was_does_not_suppress() -> None:
+    # "was"/"were" are too common to be historical markers: a genuine present-tense WPF claim next
+    # to an unrelated "was" must STILL be flagged (previously it was silently suppressed).
+    lines = ["The build was slow yesterday.", "The WPF Training Studio renders the tabs."]
+    assert "removed-ui-present-tense" in _rules(_src("CURRENT"), lines)
+
+
+def test_removed_ui_real_marker_still_suppresses() -> None:
+    # A genuine historical marker on an adjacent line still suppresses (no regression from the fix).
+    lines = ["The WPF Training Studio", "was removed in #545."]
+    assert "removed-ui-present-tense" not in _rules(_src("CURRENT"), lines)
+
+
+def test_volatile_labeled_bare_hash_flagged_in_stable_guidance() -> None:
+    src = _src("CURRENT", stable_guidance=True)
+    assert "volatile-identity-in-stable" in _rules(src, ["the wheel was built from source fedd7d5"])
+    assert "volatile-identity-in-stable" in _rules(src, ["floor 45bdd989 for this lineage"])
+
+
+def _tmp_repo(tmp_path: Path, doc_text: str, *, mode: str = "CURRENT") -> Path:
+    repo = tmp_path / "repo"
+    (repo / "scripts" / "assurance" / "policy").mkdir(parents=True)
+    for args in (("init", "-q", "-b", "main"), ("config", "user.email", "a@b.c"),
+                 ("config", "user.name", "t")):
+        subprocess.run(["git", "-C", str(repo), *args], check=True)
+    (repo / "doc.md").write_text(doc_text)
+    (repo / "scripts" / "assurance" / "policy" / "context_sources.json").write_text(
+        json.dumps({"sources": [{"path": "doc.md", "mode": mode, "authority": "canonical"}]})
+    )
+    return repo
+
+
+def test_cli_doclint_strict_exit_1_on_planted_staleness(tmp_path: Path) -> None:
+    # Deterministic exercise of the --strict GATE branch: the real-tree strict test only sees exit 0
+    # once the docs are clean, so a planted stale doc proves exit 1 (and a clean doc proves exit 0).
+    repo = _tmp_repo(tmp_path, "The WPF desktop launches the trainer.\n")
+    detect = run_cli(repo, "doclint", "--format", "json")
+    assert detect.returncode == 0 and json.loads(detect.stdout)["finding_count"] >= 1
+    assert run_cli(repo, "doclint", "--strict").returncode == 1
+    (repo / "doc.md").write_text("The Tauri 2 + React client shows the trainer.\n")
+    assert run_cli(repo, "doclint", "--strict").returncode == 0
+
+
+def test_parse_registry_rejects_duplicate_path() -> None:
+    raw = {"sources": [
+        {"path": "a.md", "mode": "CURRENT", "authority": "canonical"},
+        {"path": "a.md", "mode": "HISTORICAL", "authority": "derived"},
+    ]}
+    with pytest.raises(DocLintError, match="more than once"):
+        parse_registry(raw)
+
+
+def test_parse_registry_rejects_out_of_tree_path() -> None:
+    for bad in ("/etc/passwd", "../secret.md", "a/../../b.md", "a\\b.md"):
+        with pytest.raises(DocLintError, match="repo-relative"):
+            parse_registry({"sources": [{"path": bad, "mode": "CURRENT", "authority": "canonical"}]})
+
+
+def test_load_registry_fails_closed_when_registry_is_a_directory(tmp_path: Path) -> None:
+    # A registry path that is a directory (IsADirectoryError) must fail CLOSED as DocLintError, not
+    # escape as an uncaught OSError -> exit-1 traceback (which collides with the --strict signal).
+    (tmp_path / "scripts" / "assurance" / "policy" / "context_sources.json").mkdir(parents=True)
+    with pytest.raises(DocLintError):
+        load_registry(tmp_path)
+
+
+def test_lint_repo_flags_registered_directory_instead_of_silently_skipping(tmp_path: Path) -> None:
+    (tmp_path / "adir").mkdir()
+    source = DocSource(path="adir", mode="CURRENT", authority="canonical", always_loaded=False,
+                       stable_guidance=False, superseded_by=None, note="")
+    assert [f.rule for f in lint_repo(tmp_path, [source])] == ["registry-not-a-file"]
