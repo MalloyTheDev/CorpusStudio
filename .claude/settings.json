@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -f \"$CLAUDE_PROJECT_DIR/.claude/hooks/finalize_reminder.py\" ] && exec python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/finalize_reminder.py\" || exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}
