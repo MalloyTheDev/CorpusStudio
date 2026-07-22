@@ -68,7 +68,7 @@ CI runs on **Linux / Python 3.11** with `pytest --cov=corpus_studio --cov-fail-u
   weaken the floor.
 - **After editing any `platform/` contract**, regenerate schemas:
   `python -c "from corpus_studio.platform.schema_export import export_json_schemas; export_json_schemas('../docs/contracts')"`
-  and update the two counts in `tests/test_platform_contracts.py`.
+  and update the three contract-count assertions in `tests/test_platform_contracts.py`.
 
 ## Rules — do not break
 - **Dependency-light boundary**: `import corpus_studio.platform` and the engine core must pull **no

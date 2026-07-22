@@ -61,8 +61,8 @@ it) plus the web/contract job. Do not report "done" on red; if tests fail, say s
    module importing torch at load is a defect (`tests/test_platform_contracts.py` guards it).
 2. **Contracts are the boundary.** Edit `platform/contracts.py` -> regenerate `docs/contracts/*.schema.json`
    (`python -c "from corpus_studio.platform.schema_export import export_json_schemas; export_json_schemas('../docs/contracts')"`)
-   -> regenerate TS (`cd apps/web && npm run gen:contracts`) -> update the two counts in
-   `tests/test_platform_contracts.py`. Schemas + TS are committed and CI diffs them.
+   -> regenerate TS (`cd apps/web && npm run gen:contracts`) -> update the three contract-count
+   assertions in `tests/test_platform_contracts.py`. Schemas + TS are committed and CI diffs them.
 3. **No-shell execution.** Installers and trainer launches are `argv` lists, never shell strings.
 4. **Honesty invariants.** License/provenance fail-closed; "a completed step != proven fit"; "installed
    != supported"; no silent target truncation; predicted fit is never `NATIVE_SAFE` (only a measured run
