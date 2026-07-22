@@ -1,21 +1,25 @@
 # CLAUDE.md
 
-Guidance for Claude Code (and other AI coding agents) working in this repository.
-The full agent contract lives in `AGENTS.md` and is imported here so it governs every
-Claude Code session:
+Guidance for Claude Code (and other AI coding agents) in this repository. The full agent contract
+lives in `AGENTS.md` and is imported here so it governs every session:
 
 @AGENTS.md
 
-## Current host (read before anything hardware-adjacent)
+## Context selection
 
-This repository now runs on a **native-Linux RTX 5070 host** (Ubuntu 24.04), not the
-historical Windows/WDDM machine. The active checkout is
-`/mnt/training-nvme/repos/CorpusStudio`. For the verified host facts — paths, GPU, and the
-`HARDWARE_VERIFIED` `backend-corpus-studio` managed environment (and exactly what that
-does and does *not* prove) — read [`docs/HOST_STATE.md`](docs/HOST_STATE.md).
+Use the **corpus-studio** skill as the router and the deterministic assurance tooling
+(`scripts/cs_assure.py`: `changeset`, `doclint`) for change-set and doc-trust facts. Load only what
+the task activates - do not infer host, GPU, or research state unless the task is hardware- or
+paper-adjacent.
 
-Session state + roadmap remain in [`HANDOFF.md`](HANDOFF.md); the authoritative *feature*
-state is [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md); the forward plan is
-[`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md). Where an older doc still shows
-Windows `C:`/`F:` paths or an "until the Linux NVMe is installed" precondition, `HOST_STATE.md`
-supersedes it for *where you are*; the Windows/WDDM evidence is preserved as history, not deleted.
+- **Where you are / host facts:** [`docs/HOST_STATE.md`](docs/HOST_STATE.md) - the checkout path, GPU,
+  the managed environment, and exactly what it does and does not prove. Resolve the checkout root with
+  `git rev-parse --show-toplevel`; host paths are not hardcoded in guidance.
+- **Feature state (authoritative):** [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md).
+- **Session state + roadmap:** [`HANDOFF.md`](HANDOFF.md); forward plan
+  [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
+- **Standard / verified / sealed-research boundary:** [`docs/PRODUCT_VS_RESEARCH.md`](docs/PRODUCT_VS_RESEARCH.md).
+
+Where an older doc shows Windows `C:`/`F:` paths or an "until the Linux NVMe is installed" precondition,
+`HOST_STATE.md` supersedes it for *where you are*; the Windows/WDDM material is preserved as history, not
+current guidance.
