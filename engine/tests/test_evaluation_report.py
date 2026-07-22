@@ -10,6 +10,50 @@ from corpus_studio.evaluation.reports import EvaluationExampleResult, Evaluation
 from corpus_studio.model_backends.base import BackendGenerateResponse
 
 
+def test_average_score_excludes_infra_failures_and_counts_them():
+    # Two measured rows (80, 90) plus a backend_error and a scorer_error recorded as scored-0.
+    # The quality mean must be over the MEASURED rows only (85.0), not dragged down by the two
+    # unavailable rows, which are surfaced separately as unavailable_examples.
+    results = [
+        EvaluationExampleResult(
+            example_id="m1", prompt="p", expected_output="e", model_output="o",
+            score=80.0, passed=True,
+        ),
+        EvaluationExampleResult(
+            example_id="m2", prompt="p", expected_output="e", model_output="o",
+            score=90.0, passed=True,
+        ),
+        EvaluationExampleResult(
+            example_id="be", prompt="p", expected_output="e", model_output="",
+            score=0.0, passed=False, notes="backend_error", error="timeout",
+        ),
+        EvaluationExampleResult(
+            example_id="se", prompt="p", expected_output="e", model_output="o",
+            score=0.0, passed=False, notes="scorer_error", error="judge failed",
+        ),
+    ]
+    report = EvaluationReport.from_results(dataset="d", model="m", results=results)
+    assert report.examples_tested == 4
+    assert report.unavailable_examples == 2
+    # (80 + 90) / 2 = 85.0, NOT (80 + 90 + 0 + 0) / 4 = 42.5.
+    assert report.average_score == 85.0
+    assert report.failed_examples == 2  # the two infra failures still count as failures
+
+
+def test_average_score_is_zero_with_reason_when_all_rows_unavailable():
+    results = [
+        EvaluationExampleResult(
+            example_id="be", prompt="p", expected_output="e", model_output="",
+            score=0.0, passed=False, notes="backend_error",
+        ),
+    ]
+    report = EvaluationReport.from_results(dataset="d", model="m", results=results)
+    assert report.examples_tested == 1
+    # nothing was measured; the 0.0 is disambiguated by unavailable_examples == examples_tested.
+    assert report.unavailable_examples == 1
+    assert report.average_score == 0.0
+
+
 def test_evaluation_report_serializes_cleanly():
     result = EvaluationExampleResult(
         example_id="example-1",
