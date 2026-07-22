@@ -27,7 +27,7 @@ Against the repo's non-negotiable invariants (authority: `AGENTS.md`):
   `platform/` module that imports torch at load is a defect.
 - **No-shell execution.** Installers and trainer launches are `argv` lists, never shell strings.
 - **Contracts boundary.** A change to `platform/contracts.py` must regenerate the JSON Schemas + the TS
-  types and update the two counts in `tests/test_platform_contracts.py`.
+  types and update the three contract-count assertions in `tests/test_platform_contracts.py`.
 - **Worker execution closure.** Decide, by TRACING the import path (not a fixed file list), whether the
   change touches worker-execution bytes. Lazy (function-local) imports make modules like `planner`
   runtime-reachable from the worker; treat any worker-reachable module as

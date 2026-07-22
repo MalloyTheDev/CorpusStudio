@@ -16,7 +16,7 @@ import sys
 
 # (path fragment, reminder). Matched against the edited file path.
 _SENSITIVE: tuple[tuple[str, str], ...] = (
-    ("platform/contracts.py", "contracts changed -> regenerate schemas + TS and update the two counts (test_platform_contracts)."),
+    ("platform/contracts.py", "contracts changed -> regenerate schemas + TS and update the 3 contract-count assertions (test_platform_contracts)."),
     ("platform/worker.py", "worker-closure file -> a worker-byte change needs a fresh package + env locks; trace the import path."),
     ("platform/runners.py", "worker-closure file -> worker code under platform/; classify WORKER_CHANGE_REQUIRED vs control-plane-only."),
     ("platform/artifacts.py", "worker-closure file -> worker code under platform/; success admission runs in the child."),
@@ -26,21 +26,28 @@ _SENSITIVE: tuple[tuple[str, str], ...] = (
     ("docs/paper/", "research paper -> frozen snapshot evidence; do not rewrite for product advances."),
     ("scripts/assurance/", "ASSURANCE SELF-MODIFY (BOOTSTRAP_SELF_MODIFIED) -> provisional; needs trusted-base CI + independent review."),
     ("scripts/cs_assure.py", "ASSURANCE SELF-MODIFY (BOOTSTRAP_SELF_MODIFIED) -> provisional; needs trusted-base CI + independent review."),
-    ("evaluation/", "evaluation path -> an unavailable metric is null-with-reason, never a fabricated 0."),
+    ("corpus_studio/evaluation/", "evaluation path -> an unavailable metric is null-with-reason, never a fabricated 0."),
 )
 
 
 def main() -> None:
     try:
         payload = json.load(sys.stdin)
-        path = str(payload.get("tool_input", {}).get("file_path") or "")
-    except (ValueError, OSError, AttributeError):
+    except (ValueError, OSError):
         sys.exit(0)
+    # An explicit "tool_input": null must not crash (None.get -> AttributeError); default to {}.
+    tool_input = payload.get("tool_input") if isinstance(payload, dict) else None
+    path = str((tool_input if isinstance(tool_input, dict) else {}).get("file_path") or "")
     norm = path.replace("\\", "/")
+    # Segment-boundary match: prepend "/" to both sides so a fragment matches only at a path
+    # boundary ("training/trainer.py" must NOT match "myproj_training/trainer.py").
+    haystack = "/" + norm
     for fragment, reminder in _SENSITIVE:
-        if fragment in norm:
+        if ("/" + fragment) in haystack:
             name = norm.rsplit("/", 1)[-1] or norm
-            sys.stderr.write(f"[corpus-assure] {name}: {reminder}\n")
+            # Strip control chars: file_path is caller-influenced; never inject ANSI/newlines here.
+            safe = "".join(ch if ch.isprintable() and ch not in "\r\n\t" else "?" for ch in name)
+            sys.stderr.write(f"[corpus-assure] {safe}: {reminder}\n")
             break
     sys.exit(0)
 
