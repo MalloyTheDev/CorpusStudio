@@ -106,6 +106,23 @@ def test_no_criteria_is_unproven_not_complete() -> None:
     assert not verdict.complete and "define/approve" in verdict.note
 
 
+def test_unknown_criterion_kind_fails_closed() -> None:
+    # An unrecognized `kind` must NOT silently fall into the (weakest) model-judgment branch - it fails
+    # closed, so a typo'd requirement can never be satisfied without the evidence its real kind demands.
+    bad = Criterion("c1", "x", met=True)
+    object.__setattr__(bad, "kind", "NOT_A_REAL_KIND")  # unrecognized value on the frozen dataclass
+    with pytest.raises(CompletenessError, match="unknown kind"):
+        check_completeness(LoopState(), _critic([bad]))
+
+
+def test_raw_string_kind_normalizes_to_its_enum() -> None:
+    # A valid kind given as a raw string still enforces that kind's evidence rule (here: bound evidence).
+    raw = Criterion("c1", "x", met=True, evidence="sha256:a")
+    object.__setattr__(raw, "kind", "DETERMINISTIC")  # a raw str, not the enum member
+    state = LoopState(assurance_records=["sha256:a"])
+    assert check_completeness(state, _critic([raw])).complete  # normalized -> deterministic + bound -> met
+
+
 def test_critic_returning_non_criteria_fails_closed() -> None:
     with pytest.raises(CompletenessError):
         check_completeness(LoopState(), lambda _s: ["not a criterion"])  # type: ignore[arg-type,list-item]

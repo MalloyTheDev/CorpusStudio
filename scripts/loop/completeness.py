@@ -122,16 +122,23 @@ def check_completeness(state: LoopState, critic: Critic) -> CompletenessVerdict:
     unmet: list[Criterion] = []
     needs_authority: list[Criterion] = []
     for c in criteria:
-        if c.kind is CriterionKind.HUMAN_APPROVAL:
+        # Normalize the kind through the enum: a raw string ("DETERMINISTIC") resolves to its member, and
+        # an UNKNOWN / typo / None kind FAILS CLOSED here rather than falling into a weaker branch - never
+        # give an unrecognized requirement the model-judgment (grant-satisfiable, no-evidence) treatment.
+        try:
+            kind = CriterionKind(c.kind)
+        except ValueError as exc:
+            raise CompletenessError(f"criterion {c.id!r} has an unknown kind {c.kind!r}") from exc
+        if kind is CriterionKind.HUMAN_APPROVAL:
             if not _human_granted(c, state):
                 needs_authority.append(c)  # awaits a recorded human grant; the critic cannot self-grant
             # else: met by a recorded authorization (counted as met - falls through)
-        elif c.kind in (CriterionKind.DETERMINISTIC, CriterionKind.DOMAIN_AUTHORITY):
+        elif kind in (CriterionKind.DETERMINISTIC, CriterionKind.DOMAIN_AUTHORITY):
             # met ONLY if exactly True (a truthy non-bool must not score) AND the evidence is bound.
             if c.met is True and _evidence_is_bound(c.evidence, state):
                 continue
             unmet.append(c)  # asserted without bound evidence is NOT proven -> work it
-        else:  # MODEL_JUDGMENT
+        else:  # MODEL_JUDGMENT (the only remaining valid kind)
             if c.met is not True:
                 unmet.append(c)
             elif _human_granted(c, state):
