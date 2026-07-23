@@ -137,12 +137,16 @@ class Finding:
 
 def parse_registry(raw: dict[str, Any]) -> list[DocSource]:
     """Validate the registry document and return its sources (fails closed on any bad entry)."""
+    if not isinstance(raw, dict):
+        raise DocLintError("context-source registry root is not an object")
     entries = raw.get("sources")
     if not isinstance(entries, list) or not entries:
         raise DocLintError("context-source registry has no 'sources' list")
     sources: list[DocSource] = []
     seen_paths: set[str] = set()
     for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise DocLintError(f"source[{index}] is not an object")
         path = entry.get("path")
         mode = entry.get("mode")
         authority = entry.get("authority")

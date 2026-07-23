@@ -71,6 +71,11 @@ class TreeEntry:
     path: str  # repository-relative POSIX path
 
 
+# A generous per-call bound so a wedged git (giant blob, stalled filesystem, a credential prompt)
+# can never hang the loop unbounded - every subprocess in the kernel has a timeout.
+_GIT_TIMEOUT_S = 120
+
+
 def _git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
     """Run ``git -C <root> <args...>`` capturing bytes. Raises ``GitStateError`` on failure.
 
@@ -83,8 +88,11 @@ def _git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
             ["git", "-C", str(root), *args],
             capture_output=True,
             check=False,
+            timeout=_GIT_TIMEOUT_S,
             env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
         )
+    except subprocess.TimeoutExpired as exc:  # a wedged git (stalled FS, credential prompt) fails closed
+        raise GitStateError(f"git {' '.join(args[:2])} timed out after {_GIT_TIMEOUT_S}s") from exc
     except OSError as exc:  # e.g. git not installed / not on PATH
         raise GitStateError(f"cannot run git {' '.join(args[:2])}: {exc}") from exc
     if check and proc.returncode != 0:

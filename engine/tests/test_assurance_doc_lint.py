@@ -118,6 +118,14 @@ def test_known_count_drift_scoped_to_durable_current_docs() -> None:
 # --------------------------------------------------------------------------- registry validation
 
 
+def test_parse_registry_rejects_non_object_root_or_entry() -> None:
+    # Fail CLOSED like the sibling loaders (parse_policy/parse_gate), never crash with AttributeError.
+    with pytest.raises(DocLintError, match="not an object"):
+        parse_registry([])  # type: ignore[arg-type]  # root not a dict
+    with pytest.raises(DocLintError, match="not an object"):
+        parse_registry({"sources": [123]})  # an entry is not a dict
+
+
 def test_parse_registry_rejects_invalid_mode() -> None:
     with pytest.raises(DocLintError):
         parse_registry({"sources": [{"path": "x.md", "mode": "BOGUS", "authority": "canonical"}]})

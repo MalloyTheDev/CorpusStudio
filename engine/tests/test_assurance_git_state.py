@@ -226,6 +226,18 @@ def test_git_launch_failure_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_pa
         git_state._git(tmp_path, "rev-parse", "HEAD")
 
 
+def test_git_timeout_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # A wedged git (stalled FS / credential prompt) must fail CLOSED, never hang the loop unbounded.
+    from assurance import git_state
+
+    def _hang(*_a: object, **_k: object) -> None:
+        raise git_state.subprocess.TimeoutExpired(cmd="git", timeout=git_state._GIT_TIMEOUT_S)
+
+    monkeypatch.setattr(git_state.subprocess, "run", _hang)
+    with pytest.raises(git_state.GitStateError, match="timed out"):
+        git_state._git(tmp_path, "rev-parse", "HEAD")
+
+
 def test_changeset_never_mutates_committed_state(tmp_path: Path) -> None:
     # `changeset` READS repository state: even when a stale stat-cache makes git refresh .git/index
     # (a content-neutral write we honestly do NOT claim to avoid), it must never alter committed
