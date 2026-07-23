@@ -34,8 +34,8 @@ protocol 2.0** — plus the deep bug/security audit, 19 fixes
 across data integrity, gate/policy
 hardening, and quality/split correctness, PRs #104–118; a residual-audit pass
 hardening the v1.3 surface, PRs #133–142; the CI dependency refresh, PRs
-#94–101; and the Avalonia-migration decomposition — **all per-tab view-models
-extracted** and the WPF code-behind engine handlers being converted to shared
+#94–101; and the Avalonia-migration decomposition (historical - the WPF/Avalonia desktop was later removed, #545) — **all per-tab view-models
+were extracted** and the WPF code-behind engine handlers converted to shared
 testable commands behind `IEngineService`/`IDialogService`/`IFilePickerService`
 seams, PRs #146–243). Earlier
 milestones: the Workspace shell, desktop polish, the LLM-judge evaluation scorer,
@@ -177,8 +177,8 @@ per-item error isolation, and off-thread document opens.
   (tokens-per-epoch after truncation, over-length counts), a rough arithmetic
   VRAM planning estimate (never inspects hardware), a LoRA rank/alpha suggestion,
   and the exact launch command.
-- The WPF/Avalonia Training Studio launches reviewed, no-shell argv for installed **external** trainers.
-  It intentionally emits no direct first-party launch and refuses the old mutable-config path. The
+- The former WPF/Avalonia Training Studio (removed #545) launched reviewed, no-shell argv for installed
+  **external** trainers. It emitted no direct first-party launch and refused the old mutable-config path. The
   Tauri/React Platform client plans and executes first-party work through `platform-plan` →
   `platform-run`. Supporting first-party commands are `train-check`, `train-merge`, and `model-fetch`;
   low-level `train-run` is an explicitly acknowledged and labeled development-only route.
@@ -387,8 +387,8 @@ per-item error isolation, and off-thread document opens.
   lifecycle ran end to end on a real RTX 5070 under native Windows/WDDM, in-process and subprocess.
   That historical run does not verify the new effective-execution enforcement and is not bare-Linux,
   NVMe/offload, full-sequence 7B, or MoE-runtime proof.
-- Consumed by a new **Tauri 2 + React** contract-first client (`apps/web`) alongside the WPF + Avalonia
-  heads.
+- Consumed by the **Tauri 2 + React** contract-first client (`apps/web`); the former WPF/Avalonia heads
+  were removed (#545).
 - Checkpoint tracking during and after runs, resume-from-latest for targets
   with a CLI resume flag, and before/after evaluation comparison against the
   baseline captured at launch.

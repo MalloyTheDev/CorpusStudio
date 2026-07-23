@@ -5,19 +5,23 @@ Usage::
 
     python3 scripts/cs_assure.py changeset --scope workspace --base main --format json
 
-Phase 1 exposes exactly one subcommand, ``changeset``: it snapshots the selected Git state,
-computes a deterministic, rename-free, content-addressed change set against
-``merge-base(HEAD, --base)``, and prints a sealed ChangeSetRecord.
+Subcommands:
+    changeset  snapshot the selected Git state and print a deterministic, rename-free,
+               content-addressed ChangeSetRecord vs merge-base(HEAD, --base) (Phase 1 kernel).
+    doclint    lint the documentation context plane for staleness against the context-source
+               registry (detect-only; edits nothing) - the doc-trust sub-loop's sensor.
 
 Exit-code contract:
-    0  a record was produced (an empty change set on a clean tree is still success),
+    0  success (an empty change set on a clean tree, or a doclint run, is still 0),
+    1  doclint --strict found staleness (gate mode only),
     2  a fail-closed refusal (not a repo, missing base ref, no merge base, shallow-history
-       limitation, unsupported special file, non-UTF-8 path, or a tree that moved mid-collection).
+       limitation, unsupported special file, non-UTF-8 path, tree moved mid-collection, or a
+       malformed context-source registry).
 
-Later phases add impact / verification / gate / evidence subcommands; this bootstrap kernel
-intentionally does not, and it never mutates the repository's committed state - the object store,
-refs, the committed tree, or the working tree (a read may refresh the content-neutral index
-stat-cache; see ``assurance/git_state.py``).
+Both subcommands are read-only: cs_assure never mutates the repository's committed state - the
+object store, refs, the committed tree, or the working tree (a read may refresh the content-neutral
+index stat-cache; see ``assurance/git_state.py``). Later phases add impact / verification / gate /
+evidence subcommands.
 """
 
 from __future__ import annotations
@@ -38,6 +42,7 @@ from assurance.git_state import AssuranceError  # noqa: E402
 from assurance.records import build_change_set_record  # noqa: E402
 
 EXIT_OK = 0
+EXIT_LINT_FINDINGS = 1
 EXIT_FAIL_CLOSED = 2
 
 
@@ -49,6 +54,52 @@ def _cmd_changeset(args: argparse.Namespace) -> int:
     # parsed object rather than re-hashing these display bytes.
     sys.stdout.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
     return EXIT_OK
+
+
+def _cmd_doclint(args: argparse.Namespace) -> int:
+    from assurance.doc_lint import load_registry, lint_repo  # noqa: PLC0415
+    from assurance.git_state import discover_git_context  # noqa: PLC0415
+
+    start_dir = Path(args.start_dir) if args.start_dir else Path.cwd()
+    ctx = discover_git_context(start_dir)
+    sources = load_registry(ctx.root)
+    findings = lint_repo(ctx.root, sources)
+    if args.format == "json":
+        payload = {
+            "tool": "cs_assure doclint",
+            "registry_source_count": len(sources),
+            "finding_count": len(findings),
+            "findings": [f.to_record() for f in findings],
+        }
+        sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    else:
+        _print_doclint_summary(len(sources), findings)
+    # Detect-only by default (exit 0). --strict turns it into a gate (exit 1 on any finding).
+    if args.strict and findings:
+        return EXIT_LINT_FINDINGS
+    return EXIT_OK
+
+
+def _print_doclint_summary(source_count: int, findings: list) -> None:
+    out = sys.stdout
+    out.write(f"cs_assure doclint - {source_count} registered sources, {len(findings)} findings\n")
+    if not findings:
+        out.write("  no staleness findings\n")
+        return
+    by_rule: dict[str, int] = {}
+    by_file: dict[str, int] = {}
+    for finding in findings:
+        by_rule[finding.rule] = by_rule.get(finding.rule, 0) + 1
+        by_file[finding.path] = by_file.get(finding.path, 0) + 1
+    out.write("  by rule:\n")
+    for rule in sorted(by_rule):
+        out.write(f"    {rule}: {by_rule[rule]}\n")
+    out.write("  by file:\n")
+    for path in sorted(by_file):
+        out.write(f"    {path}: {by_file[path]}\n")
+    out.write("  findings (path:line [rule] excerpt):\n")
+    for finding in findings:
+        out.write(f"    {finding.path}:{finding.line} [{finding.rule}] {finding.excerpt}\n")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -82,6 +133,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="directory to resolve the repository from (default: current directory)",
     )
     changeset.set_defaults(func=_cmd_changeset)
+
+    doclint = subparsers.add_parser(
+        "doclint",
+        help="lint the documentation context plane for staleness (detect-only; edits nothing)",
+    )
+    doclint.add_argument(
+        "--format",
+        default="summary",
+        choices=["summary", "json"],
+        help="summary = human counts + findings; json = full deterministic list",
+    )
+    doclint.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit 1 if any findings are reported (for CI gating); default is detect-only exit 0",
+    )
+    doclint.add_argument(
+        "--start-dir",
+        default=None,
+        help="directory to resolve the repository from (default: current directory)",
+    )
+    doclint.set_defaults(func=_cmd_doclint)
     return parser
 
 
