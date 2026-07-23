@@ -26,6 +26,7 @@ from loop.tasks import (
     parse_tasks,
     ready_tasks,
     set_status,
+    status_for,
     tasks_conflict,
 )
 
@@ -125,15 +126,8 @@ def dispatch_wave(state: LoopState, runner: AgentRunner, *,
             status = TaskStatus.FAILED
             reason = f"agent for {task.id!r} edited outside its boundary: {sorted(outside)}"
         else:
-            # Only SUCCESS completes a task. PROGRESS means "moved forward, not done" -> leave it PENDING
-            # (re-dispatchable, no completion claim); anything else is a failure.
             observation = result.observation
-            if observation is Observation.SUCCESS:
-                status = TaskStatus.DONE
-            elif observation is Observation.PROGRESS:
-                status = TaskStatus.PENDING
-            else:
-                status = TaskStatus.FAILED
+            status = status_for(observation)  # SUCCESS->DONE, PROGRESS->PENDING, else FAILED (shared)
             reason = result.note or f"agent for {task.id!r} -> {observation.value}"
         set_status(state, task.id, status, evidence=result.evidence)
         outcomes.append(WaveOutcome(task.id, observation, status, reason))
