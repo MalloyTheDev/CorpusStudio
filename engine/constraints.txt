@@ -10,3 +10,11 @@
 # the same PR (CI diffs them). The engine's own dependency constraint stays the loose `pydantic>=2.0`
 # in pyproject.toml; this file only pins the exact CI resolution.
 pydantic==2.13.4
+
+# Pin ruff so the lint gate is REPRODUCIBLE. The engine's ruff config sets only line-length (no explicit
+# `select`), so it rides ruff's DEFAULT ruleset - which expands across releases. `pyproject.toml` keeps the
+# loose `ruff>=0.5` dep; without an exact pin here CI installs whatever ruff is newest, and a release that
+# enables new default rules turns a green tree red with no code change (ruff 0.16.0 flagged ~950
+# pre-existing findings: RUF100 / UP045 / B008 / I001 / ...). Bump intentionally: raise this pin in its own
+# PR that also resolves whatever the new ruff flags (or freezes an explicit rule set).
+ruff==0.15.21
