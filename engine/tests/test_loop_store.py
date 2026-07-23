@@ -93,3 +93,22 @@ def test_load_fails_closed_on_missing_file(tmp_path: Path) -> None:
 
 def test_schema_version_is_emitted() -> None:
     assert to_dict(LoopState())["schema_version"] == 1
+
+
+def test_round_trip_is_independent_not_aliased() -> None:
+    # A to_dict/from_dict round-trip must own INDEPENDENT containers - the driver mutates state in place,
+    # so an aliased snapshot/restored copy would be silently corrupted.
+    s = _mid_loop_state()
+    r = from_dict(to_dict(s))
+    assert r.observations is not s.observations and r.budgets is not s.budgets
+    r.budgets["total_attempts"] = 999
+    r.observations.append({"x": 1})
+    assert s.budgets["total_attempts"] != 999
+    assert len(s.observations) != len(r.observations)
+
+
+def test_from_dict_rejects_a_future_or_non_int_schema_version() -> None:
+    with pytest.raises(LoopStateError, match="schema_version"):
+        from_dict({"schema_version": 999, "current_phase": "EXECUTE"})  # newer than this build
+    with pytest.raises(LoopStateError, match="schema_version"):
+        from_dict({"schema_version": "x", "current_phase": "EXECUTE"})  # not an int

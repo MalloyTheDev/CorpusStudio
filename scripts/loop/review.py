@@ -18,7 +18,7 @@ from enum import Enum
 from typing import Callable
 
 from loop.controller import LoopState, Observation
-from loop.tasks import parse_tasks
+from loop.tasks import LoopTaskError, parse_tasks
 
 
 class ReviewError(Exception):
@@ -54,9 +54,14 @@ class ReviewResult:
 Reviewer = Callable[[LoopState], "list[Finding]"]
 
 
-def _correction_task(finding: Finding, deps: list[str]) -> dict[str, object]:
+def _correction_id(reviewed_task_id: str | None, finding: Finding) -> str:
+    # Namespace by the reviewed task so per-round-local finding ids cannot collide across rounds.
+    return f"fix-{reviewed_task_id or 'goal'}-{finding.id}"
+
+
+def _correction_task(finding: Finding, deps: list[str], task_id: str) -> dict[str, object]:
     return {
-        "id": f"fix-{finding.id}",
+        "id": task_id,
         "description": f"Address review finding: {finding.summary}",
         "owner": "self",
         "allowed_paths": list(finding.allowed_paths),
@@ -80,19 +85,35 @@ def review(state: LoopState, reviewer: Reviewer, *, reviewed_task_id: str | None
         return ReviewResult(ReviewVerdict.CLEAN, findings, [], [])
 
     existing_ids = {t.get("id") for t in state.task_graph if isinstance(t, dict)}
+    # Dedup against corrections THIS loop actually created (tracked in review_state), not arbitrary
+    # existing task ids - so an unrelated task that happens to share the id never silently swallows a
+    # finding. A collision with a truly-existing id is still skipped, but it is surfaced (below).
+    created = state.review_state.get("correction_ids", [])
+    if not isinstance(created, list):
+        created = []
     deps: list[str] = [reviewed_task_id] if reviewed_task_id is not None and reviewed_task_id in existing_ids else []
     new_tasks: list[dict[str, object]] = []
     new_ids: list[str] = []
+    blocked: list[str] = []
     for finding in accepted:
-        tid = f"fix-{finding.id}"
-        if tid in existing_ids or tid in new_ids:
-            continue  # already have a correction task for this finding (idempotent re-review)
-        new_tasks.append(_correction_task(finding, deps))
+        tid = _correction_id(reviewed_task_id, finding)
+        if tid in created or tid in new_ids:
+            continue  # already scheduled this correction (idempotent re-review)
+        if tid in existing_ids:
+            blocked.append(tid)  # a foreign task already owns this id - do not conflate; surface it
+            continue
+        new_tasks.append(_correction_task(finding, deps, tid))
         new_ids.append(tid)
 
+    if blocked:
+        raise ReviewError(f"correction id(s) already exist as unrelated tasks: {sorted(blocked)}")
     if new_tasks:
-        tasks = parse_tasks(list(state.task_graph) + new_tasks)  # fail-closed validation of the graph
+        try:
+            tasks = parse_tasks(list(state.task_graph) + new_tasks)  # fail-closed validation
+        except LoopTaskError as exc:
+            raise ReviewError(f"review corrections form an invalid task graph: {exc}") from exc
         state.task_graph = [t.to_dict() for t in tasks]
+        state.review_state["correction_ids"] = created + new_ids
     return ReviewResult(ReviewVerdict.CHANGES_REQUESTED, findings, accepted, new_ids)
 
 

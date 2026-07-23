@@ -58,9 +58,13 @@ def test_next_directive_is_terminal_marked_when_state_terminal() -> None:
 
 
 def test_next_directive_surfaces_active_task_allowed_paths() -> None:
-    state = LoopState(current_phase=Phase.EXECUTE,
-                      task_graph=[{"status": "active", "allowed_paths": ["scripts/loop/", "x.py"]}])
-    assert next_directive(state).allowed_paths == ["scripts/loop/", "x.py"]
+    # Build the graph via the REAL producer (decompose+assign_next) so the status casing matches what the
+    # pipeline actually emits ("ACTIVE") - a hand-built lowercase fixture would mask the wiring.
+    from loop.tasks import assign_next, decompose
+    state = LoopState(current_phase=Phase.EXECUTE)
+    decompose(state, [{"id": "t", "allowed_paths": ["scripts/loop/", "scripts/x.py"]}])
+    assign_next(state)
+    assert next_directive(state).allowed_paths == ["scripts/loop/", "scripts/x.py"]
 
 
 # --------------------------------------------------------------------------- one cycle
@@ -122,6 +126,16 @@ def test_run_hard_step_cap_stops_independently_of_the_budget() -> None:
     state = LoopState(current_phase=Phase.EXECUTE, budgets={"total_attempts": 0, "max_attempts": 100000})
     run(state, REPO_ROOT, _executor(Observation.SUCCESS), observer=_observer(Observation.TEST_REGRESSION),
         max_steps=5)
+    assert state.current_phase is Phase.STOPPED and "hard step cap" in (state.termination_reason or "")
+
+
+def test_hard_step_cap_fires_even_with_a_stale_termination_reason() -> None:
+    # A resumed non-terminal state may carry a leftover reason; the cap MUST still force STOP (else run()
+    # returns non-terminal and the caller spins forever).
+    state = LoopState(current_phase=Phase.EXECUTE, termination_reason="stale-leftover",
+                      budgets={"total_attempts": 0, "max_attempts": 100000})
+    run(state, REPO_ROOT, _executor(Observation.SUCCESS), observer=_observer(Observation.TEST_REGRESSION),
+        max_steps=4)
     assert state.current_phase is Phase.STOPPED and "hard step cap" in (state.termination_reason or "")
 
 

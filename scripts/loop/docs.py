@@ -45,8 +45,10 @@ DEFAULT_COUPLINGS: tuple[DocCoupling, ...] = (
     DocCoupling(
         name="platform-contracts",
         code_globs=["engine/corpus_studio/platform/contracts.py", "engine/corpus_studio/platform/enums.py"],
-        doc_paths=["docs/contracts/"],
-        reason="a contract change needs regenerated schemas (docs/contracts) + the count assertions",
+        # A regenerated schema, not merely any file under docs/contracts/ - an unrelated note there must
+        # not silently discharge the obligation to re-export the schemas.
+        doc_paths=["docs/contracts/*.schema.json"],
+        reason="a contract change needs regenerated schemas (docs/contracts/*.schema.json) + the count assertions",
     ),
     DocCoupling(
         name="cli",

@@ -17,6 +17,7 @@ Discipline (same as the kernel and the assurance plane):
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 from pathlib import Path
@@ -48,7 +49,9 @@ def to_dict(state: LoopState) -> dict[str, Any]:
     """Serialise a LoopState to a JSON-native dict (the Phase enum becomes its string value)."""
     data: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "current_phase": state.current_phase.value}
     for name in _PASSTHROUGH_FIELDS:
-        data[name] = getattr(state, name)
+        # Deep-copy the mutable containers so the emitted dict is INDEPENDENT of the live state (a
+        # round-trip must not alias the source's lists/dicts - matching the JSON path's semantics).
+        data[name] = copy.deepcopy(getattr(state, name))
     return data
 
 
@@ -57,6 +60,12 @@ def from_dict(data: Any) -> LoopState:
     any structural or type problem raises :class:`LoopStateError` rather than defaulting silently."""
     if not isinstance(data, dict):
         raise LoopStateError(f"loop state document is not an object (got {type(data).__name__})")
+
+    version = data.get("schema_version", SCHEMA_VERSION)
+    if not isinstance(version, int) or isinstance(version, bool) or version > SCHEMA_VERSION:
+        # A future / non-int schema version cannot be faithfully represented by this build - fail closed
+        # rather than load it and silently drop the fields this version does not know about.
+        raise LoopStateError(f"unsupported loop-state schema_version {version!r} (this build supports <= {SCHEMA_VERSION})")
 
     phase_value = data.get("current_phase", Phase.RECEIVE_GOAL.value)
     try:
@@ -77,7 +86,9 @@ def from_dict(data: Any) -> LoopState:
             raise LoopStateError(f"field 'goal' must be a string (got {type(value).__name__})")
         if name == "termination_reason" and value is not None and not isinstance(value, str):
             raise LoopStateError("field 'termination_reason' must be a string or null")
-        kwargs[name] = value
+        # Deep-copy so the reconstructed state owns independent containers, regardless of the input
+        # dict's provenance (a caller may keep + mutate the dict it passed in).
+        kwargs[name] = copy.deepcopy(value)
     return LoopState(**kwargs)
 
 

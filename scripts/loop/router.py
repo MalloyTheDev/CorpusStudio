@@ -66,15 +66,22 @@ def _covers(parent: str, child: str) -> bool:
 
 
 def within_boundary(changed: str, allowed_paths: list[str]) -> bool:
-    """True if ``changed`` falls under some allowed path (i.e. the agent stayed in its lane)."""
+    """True if ``changed`` falls under some allowed path (i.e. the agent stayed in its lane). A changed
+    path that is absolute, uses a backslash, or contains a ``..`` segment is ALWAYS out of bounds
+    (fail-closed): a traversal like ``engine/../scripts/x`` must never be scored as in-lane, mirroring
+    the same rejection tasks.Task applies to declared paths."""
+    p = PurePosixPath(changed)
+    if p.is_absolute() or "\\" in changed or ".." in p.parts:
+        return False
     return any(_covers(a, changed) for a in allowed_paths)
 
 
 def check_boundary(task: Task, changed_paths: list[str]) -> list[str]:
-    """The changed paths that fall OUTSIDE the task's ownership boundary (empty = the agent stayed in
-    its lane). A task with no declared ``allowed_paths`` is unconstrained - nothing to enforce."""
+    """The changed paths that fall OUTSIDE the task's ownership boundary (empty result = the agent
+    stayed in its lane). A task with NO declared ``allowed_paths`` owns nothing, so ANY edit it makes is
+    a breach (fail-closed) - an agent must declare its lane to be trusted with edits."""
     if not task.allowed_paths:
-        return []
+        return list(changed_paths)
     return [c for c in changed_paths if not within_boundary(c, task.allowed_paths)]
 
 
