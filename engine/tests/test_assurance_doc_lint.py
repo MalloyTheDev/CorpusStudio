@@ -8,6 +8,7 @@ shrink to zero as the docs are cleaned) and check structure + determinism instea
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -144,6 +145,43 @@ def test_oversized_registered_doc_is_bounded_drift(tmp_path: Path) -> None:
     rules = {f.rule for f in findings}
     assert "registry-oversized-file" in rules
     assert "removed-ui-present-tense" not in rules  # the oversized file is NOT linted past the bound
+
+
+# --------------------------------------------------------------------------- audit hardening (2026-07-23)
+
+
+def test_count_drift_ignores_dates_and_unrelated_counts() -> None:
+    # The tightened regex requires the digits to DIRECTLY quantify "root contracts", so a nearby date
+    # or an unrelated count is not mis-flagged as drift (that would fail CI on a CORRECT doc).
+    for line in ("As of 2026-06-28, index.json lists 31 root contracts.",
+                 "we ship 28 enums and 31 root contracts"):
+        assert "root-contract-count-drift" not in _rules(_src("CURRENT"), [line], contract_count=31), line
+    # ...but a genuinely wrong ADJACENT count is still caught.
+    assert "root-contract-count-drift" in _rules(_src("CURRENT"), ["exports 28 root contracts"], contract_count=31)
+
+
+def test_load_registry_fails_closed_on_invalid_utf8(tmp_path: Path) -> None:
+    # Invalid UTF-8 in the registry must fail CLOSED as a typed DocLintError (symmetry with the sibling
+    # loaders), not leak an untyped UnicodeDecodeError to the CLI backstop.
+    policy = tmp_path / "scripts" / "assurance" / "policy"
+    policy.mkdir(parents=True)
+    (policy / "context_sources.json").write_bytes(b"\xff\xfe not valid utf-8")
+    with pytest.raises(DocLintError, match="UTF-8"):
+        load_registry(tmp_path)
+
+
+def test_non_regular_registered_path_is_drift_not_a_hang(tmp_path: Path) -> None:
+    # A registered path that is a directory / FIFO / device-symlink must be surfaced as drift BEFORE any
+    # open() - is_file() rejects it, so a blocking FIFO cannot hang the sensor.
+    (tmp_path / "adir").mkdir()
+    names = ["adir"]
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(tmp_path / "afifo")
+        names.append("afifo")
+    srcs = [DocSource(path=n, mode="CURRENT", authority="canonical", always_loaded=False,
+                      stable_guidance=False, superseded_by=None, note="") for n in names]
+    rules = {f.rule for f in lint_repo(tmp_path, srcs)}
+    assert rules == {"registry-not-a-file"}
 
 
 # --------------------------------------------------------------------------- registry validation

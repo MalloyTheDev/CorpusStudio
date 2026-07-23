@@ -89,8 +89,10 @@ _GITHUB_SETTING = re.compile(
 )
 # The stated root-contract count in prose. The actual count is DERIVED from the committed schema
 # index (count_root_contracts) - never hardcoded here - so this rule tracks the real number as it
-# changes instead of going stale itself.
-_ROOT_CONTRACT_COUNT = re.compile(r"\b(\d{1,3})\b[^\n]{0,30}\broot contracts\b", re.IGNORECASE)
+# changes instead of going stale itself. The digits must DIRECTLY quantify "root contracts" (adjacent,
+# not merely within N chars) so a nearby date ("2026-06-28 ... root contracts") or an unrelated count
+# ("28 enums and 31 root contracts") is not mis-captured as the contract count (false-positive drift).
+_ROOT_CONTRACT_COUNT = re.compile(r"\b(\d{1,3})\s+root contracts\b", re.IGNORECASE)
 
 _MAX_EXCERPT = 160
 # A registered doc is guidance prose/JSON; the largest today is ~44 KiB. Bound the read so a registry
@@ -206,6 +208,10 @@ def load_registry(repo_root: Path) -> list[DocSource]:
         raise DocLintError(f"context-source registry not found at {REGISTRY_RELPATH}") from exc
     except json.JSONDecodeError as exc:
         raise DocLintError(f"context-source registry is not valid JSON: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        # Invalid UTF-8 bytes: a ValueError but NOT a JSONDecodeError - catch it explicitly (as the
+        # sibling loaders do) so it fails CLOSED as a typed DocLintError, not an untyped leak.
+        raise DocLintError(f"context-source registry is not valid UTF-8 ({REGISTRY_RELPATH}): {exc}") from exc
     except RecursionError as exc:
         # Deeply-nested JSON: NOT a JSONDecodeError/ValueError - fail CLOSED, not exit-1 traceback.
         raise DocLintError(f"context-source registry is nested too deeply to parse: {exc}") from exc
@@ -349,7 +355,10 @@ def lint_repo(repo_root: Path, sources: list[DocSource]) -> list[Finding]:
                 message="registered doc does not exist (registry drift); update the registry",
             ))
             continue
-        if target.is_dir():
+        if not target.is_file():
+            # is_file() follows the symlink and is False for a directory / device / FIFO / socket, so
+            # this rejects a registered path repointed at /dev/zero or a blocking FIFO BEFORE open() -
+            # a bounded read alone would still block on a FIFO. (A broken symlink was caught by exists.)
             findings.append(Finding(
                 rule="registry-not-a-file",
                 severity="low",
@@ -358,7 +367,8 @@ def lint_repo(repo_root: Path, sources: list[DocSource]) -> list[Finding]:
                 line=0,
                 excerpt="",
                 superseding_authority="the repository tree",
-                message="registered path is a directory, not a lintable file; fix the registry",
+                message="registered path is not a regular file (directory / device / FIFO / symlink "
+                        "to one); fix the registry",
             ))
             continue
         try:
