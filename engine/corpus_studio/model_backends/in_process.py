@@ -28,6 +28,28 @@ class InProcessAdapterError(RuntimeError):
     """The in-process adapter backend could not resolve, load, or generate."""
 
 
+def _generation_kwargs(request: BackendGenerateRequest, default_max_tokens: int) -> dict[str, Any]:
+    """The decode kwargs actually PASSED to ``model.generate`` - so a recorded temperature/top_p is
+    honoured, not merely logged.
+
+    ``temperature`` None/0 is greedy (deterministic; ``top_p`` is irrelevant). Otherwise the REQUESTED
+    ``temperature`` and ``top_p`` are applied. Previously they were omitted from the generate call, so a
+    run that recorded temperature 0.7 / top_p 0.9 silently decoded at the model's defaults (1.0/1.0) -
+    a decode configuration the saved run claimed but did not honour.
+    """
+    greedy = not request.temperature
+    kwargs: dict[str, Any] = {
+        "max_new_tokens": request.max_tokens or default_max_tokens,
+        "do_sample": not greedy,
+        "use_cache": True,
+    }
+    if not greedy:
+        kwargs["temperature"] = request.temperature
+        if request.top_p is not None:
+            kwargs["top_p"] = request.top_p
+    return kwargs
+
+
 def base_model_for_adapter(adapter_dir: str | Path, fallback: str | None = None) -> str:
     """Resolve the base model to load UNDER the adapter. Prefer the adapter's own recorded base
     (``base_model_name_or_path`` in ``adapter_config.json``) - the adapter knows what it trained on -
@@ -105,14 +127,11 @@ class InProcessAdapterBackend:
         inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
         if request.seed is not None:
             torch.manual_seed(request.seed)
-        greedy = not request.temperature  # None / 0.0 -> greedy (deterministic)
         with torch.no_grad():
             output = self._model.generate(
                 **inputs,
-                max_new_tokens=request.max_tokens or self.config.max_tokens,
-                do_sample=not greedy,
-                use_cache=True,
                 pad_token_id=self._tokenizer.eos_token_id,
+                **_generation_kwargs(request, self.config.max_tokens),
             )
         generated = output[0][inputs["input_ids"].shape[1]:]
         text = self._tokenizer.decode(generated, skip_special_tokens=True)
