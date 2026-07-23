@@ -26,11 +26,14 @@ from pathlib import Path
 from typing import Callable
 
 from loop.completeness import (
+    CompletenessError,
     CompletenessVerdict,
     Critic,
     check_completeness,
     completeness_correction_tasks,
     completeness_observation,
+    record_outcome,
+    seed_known_dead_ends,
 )
 from loop.controller import (
     Decision,
@@ -48,7 +51,7 @@ from loop.observe import CsAssureRunner, LoopObserveError, _run_cs_assure, obser
 from loop.review import Reviewer, review, review_observation
 from loop.router import AgentRunner, aggregate_observation, dispatch_wave
 from loop.store import save
-from loop.tasks import LoopTaskError, TaskStatus, parse_tasks
+from loop.tasks import LoopTaskError, TaskStatus, parse_tasks, ready_tasks, set_status
 
 # The executor (the LLM/agent) acts ON the state (it may set the task graph, make edits) and returns its
 # judged Observation - a richer signature than driver.Executor, which only sees the directive.
@@ -78,6 +81,7 @@ class LoopContext:
     couplings: tuple[DocCoupling, ...] = DEFAULT_COUPLINGS
     run_cs_assure: CsAssureRunner = _run_cs_assure
     store_path: Path | None = None
+    ledger_path: Path | None = None  # cross-goal learning ledger (seed at start, record at terminal)
 
 
 @dataclass(frozen=True)
@@ -133,16 +137,20 @@ def _fired_obligations(ctx: LoopContext) -> list[str]:
 
 
 def _append_completeness_tasks(state: LoopState, verdict: CompletenessVerdict) -> None:
-    """Fold unmet success criteria into correction tasks on the graph (deduped, validated)."""
+    """Fold unmet success criteria into correction tasks on the graph. Validate PER-TASK so one bad or
+    duplicate criterion does not discard the whole batch."""
     existing = {t.get("id") for t in state.task_graph if isinstance(t, dict)}
-    new = [t for t in completeness_correction_tasks(verdict) if t["id"] not in existing]
-    if not new:
-        return
-    try:
-        tasks = parse_tasks(list(state.task_graph) + new)
-    except LoopTaskError:
-        return
-    state.task_graph = [t.to_dict() for t in tasks]
+    graph = list(state.task_graph)
+    for task in completeness_correction_tasks(verdict):
+        if task["id"] in existing:
+            continue
+        try:
+            parse_tasks([*graph, task])  # incremental validation
+        except LoopTaskError:
+            continue  # skip an invalid task, keep the rest
+        graph.append(task)
+        existing.add(task["id"])
+    state.task_graph = [t.to_dict() for t in parse_tasks(graph)]
 
 
 def _all_done(state: LoopState) -> bool:
@@ -152,6 +160,17 @@ def _all_done(state: LoopState) -> bool:
 
 def _execute(state: LoopState, ctx: LoopContext, directive: Directive) -> PhaseResult:
     if ctx.multi_agent and ctx.agent_runner is not None and state.task_graph:
+        # A ready task with NO declared ownership lane (empty allowed_paths) - e.g. an L8 completeness
+        # gap - is the loop's OWN work: the router cannot enforce a boundary for it (every edit would be
+        # a breach), so run it through the executor, never a bounded agent. Lane'd tasks go to the wave.
+        unbounded_ready = [t for t in ready_tasks(parse_tasks(state.task_graph)) if not t.allowed_paths]
+        if unbounded_ready:
+            observation = ctx.executor(state, directive)
+            status = (TaskStatus.DONE if observation in (Observation.SUCCESS, Observation.PROGRESS)
+                      else TaskStatus.FAILED)
+            for task in unbounded_ready:
+                set_status(state, task.id, status)
+            return PhaseResult(observation, "executed self-owned (unbounded) correction work")
         # DRAIN: dispatch waves until no ready task remains (deps unlock across waves), stopping on a
         # failure. The router marks each wave ACTIVE->DONE/FAILED; we never close a task no agent ran.
         outcomes = []
@@ -251,13 +270,15 @@ def step(state: LoopState, ctx: LoopContext) -> Transition | None:
         return None
     try:
         result = _dispatch(state, ctx)
-    except LoopObserveError as exc:
+    except (LoopObserveError, CompletenessError) as exc:
+        # An unusable assurance plane OR a misbehaving/erroring completeness critic escalates to a human
+        # (persisted) - it never crashes the loop mid-run.
         state.current_phase = Phase.ESCALATED
-        state.termination_reason = f"assurance plane unusable: {exc}"
+        state.termination_reason = f"unrecoverable: {exc}"
         if ctx.store_path is not None:
             save(state, ctx.store_path)
         return Transition(Decision.ESCALATE, Phase.ESCALATED, state.termination_reason,
-                          "escalated: cs_assure unusable")
+                          "escalated: assurance plane / critic unusable")
     if not isinstance(result.observation, Observation):
         raise LoopOrchestrateError(
             f"handler for {state.current_phase.value} returned {type(result.observation).__name__}, "
@@ -274,6 +295,15 @@ def run_loop(state: LoopState, ctx: LoopContext, *, max_steps: int = 200) -> Loo
     """Drive the fully-integrated loop to a terminal phase, a HOLD (paused on an external condition such
     as CI - the caller re-invokes when it may change), or a HARD step cap (independent of the attempt
     budget). Persists after each cycle when a store_path is set (crash-resumable)."""
+    if ctx.ledger_path is not None:
+        # CROSS-GOAL LEARNING: seed this loop with prior goals' dead ends. A malformed ledger escalates
+        # (fail-closed) rather than running blind.
+        try:
+            seed_known_dead_ends(state, ctx.ledger_path)
+        except CompletenessError as exc:
+            state.current_phase = Phase.ESCALATED
+            state.termination_reason = f"malformed learning ledger: {exc}"
+            return state
     steps = 0
     held = False
     while not state.is_terminal and steps < max_steps:
@@ -287,4 +317,6 @@ def run_loop(state: LoopState, ctx: LoopContext, *, max_steps: int = 200) -> Loo
         state.termination_reason = f"orchestrator hard step cap ({max_steps}) reached"
         if ctx.store_path is not None:
             save(state, ctx.store_path)
+    if state.is_terminal and ctx.ledger_path is not None:
+        record_outcome(state, ctx.ledger_path)  # this goal's dead ends feed the next
     return state
