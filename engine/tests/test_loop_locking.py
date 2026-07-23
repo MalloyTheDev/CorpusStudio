@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,17 @@ def test_a_stale_lock_is_broken(tmp_path: Path) -> None:
     os.utime(lockfile, (0, 0))  # force an ancient mtime
     with FileLock(tmp_path / "res", timeout=1, stale_after=1.0):
         pass  # acquires by breaking the stale lock
+
+
+def test_a_future_dated_lock_is_not_broken_as_stale(tmp_path: Path) -> None:
+    # A backward wall-clock jump makes an existing lock's mtime look like the future (negative age). That
+    # must NOT be treated as stale - the live lock is kept, so the waiter fails closed instead of stealing it.
+    lockfile = Path(str(tmp_path / "res") + ".lock")
+    lockfile.write_text("111 0")
+    future = time.time() + 3600
+    os.utime(lockfile, (future, future))
+    with pytest.raises(LockTimeout):
+        FileLock(tmp_path / "res", timeout=0.2, stale_after=1.0).acquire()
 
 
 def test_context_manager_releases_on_exit(tmp_path: Path) -> None:

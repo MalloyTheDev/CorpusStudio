@@ -12,6 +12,13 @@ unlinking it. Two guards keep a lock from wedging a campaign:
 This is best-effort ADVISORY mutual exclusion between cooperating loop processes (they all take the lock
 before a read-modify-write). It is not a kernel mandatory lock and does not defend against a process that
 writes the protected file without taking the lock.
+
+Staleness is deliberately CROSS-PROCESS, so it can only use wall-clock time (the lockfile's ``st_mtime``
+vs ``time.time()``) - a monotonic clock is per-process and not comparable between the holder and the
+waiter. That makes stale-breaking approximate and clock-dependent: a wall-clock jump forward (e.g. an NTP
+step) can age a live lock early, and coarse mtime resolution can delay it. Keep ``stale_after`` well above
+the longest legitimate hold (the default 60s dwarfs a ledger append), so only a genuinely crashed holder
+is broken; a backward clock jump yields a negative age and is treated as NOT stale (the lock is kept).
 """
 
 from __future__ import annotations
@@ -65,12 +72,15 @@ class FileLock:
             return self
 
     def _break_if_stale(self) -> None:
-        """Remove the lockfile if it is older than ``stale_after`` (its holder is presumed crashed)."""
+        """Remove the lockfile if it is older than ``stale_after`` (its holder is presumed crashed). The
+        age is wall-clock (``time.time()`` vs ``st_mtime``) because staleness is cross-process - see the
+        module docstring for the clock-skew caveat. A negative age (future mtime from a backward clock
+        step) is NOT stale, so the lock is kept rather than broken under a clock jump."""
         try:
             age = time.time() - self.lock_path.stat().st_mtime
         except FileNotFoundError:
             return  # already gone - the next O_EXCL create will win
-        if age > self.stale_after:
+        if age > self.stale_after:  # (a negative age never exceeds a positive stale_after -> kept)
             try:
                 self.lock_path.unlink()
             except FileNotFoundError:
