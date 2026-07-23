@@ -63,6 +63,21 @@ The interactive surface is **`scripts/cs_loop.py`** (`cs_loop init --goal … / 
 the case where the LLM is the executor: `next` says what to do this phase; you do it; `observe` runs the
 assurance gate and records the classified result; repeat until terminal.
 
+## Runtime adapters
+
+The controller is effect-free; a **runtime adapter** (`scripts/loop_adapters/`) is a
+`build_context(repo_root, base) -> LoopContext` that binds the injected seams to real effects, so
+`cs_loop run --adapters <file>` drives the loop against a live repo. Adapters are ordered by how much they
+may *do*:
+
+- **`dry_run.py` (read-only, propose-only).** Wires the real `cs_assure` read plane and read-only
+  `git`/`gh` building blocks (`git_changed_paths`, `read_only_gh`), with a proposal-recording executor. It
+  makes **no writes** — never pushes, merges, or spawns a write-capable agent — and ends at `ESCALATED`
+  (a dry run proposes; a human signs off). A `pr_ref` additionally exercises the real CI read + merge gate
+  but `dangerous=True` escalates before any merge. This is the safe way to see what the loop *would* do.
+- A **write-capable** adapter (real agent spawning + the autonomous merge path) is a later, review-gated
+  step; its seams (`verify_paths`, `expected_head`, `required_checks`, `context_for`) already exist.
+
 ## The fact / judgment seam
 
 `observe.py` emits only the observations that are **mechanically determinable** from assurance evidence
