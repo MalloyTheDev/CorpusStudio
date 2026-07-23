@@ -232,8 +232,8 @@ Use evaluation rows for held-out Evaluation Studio test sets. Keep these separat
 
 Save rows to a `.jsonl` file and run:
 
-```powershell
-.\engine\.venv\Scripts\python.exe -m corpus_studio.cli validate path\to\file.jsonl instruction
+```bash
+engine/.venv/bin/python -m corpus_studio.cli validate path/to/file.jsonl instruction
 ```
 
 Replace `instruction` with `raw_text`, `chat`, or `preference` for the other schemas.
