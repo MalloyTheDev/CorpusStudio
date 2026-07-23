@@ -69,7 +69,8 @@ def build_context(repo_root, base):
            "changeset": {"payload": {"changed_paths": []}}, "impact": {"payload": {"fired_obligations": []}},
            "doclint": {"finding_count": 0}}
     def gh(*a):
-        return (0, "merged", "") if len(a) >= 2 and a[1] == "merge" else (0, json.dumps([{"name": "pytest", "bucket": "pass"}]), "")
+        snap = json.dumps({"headRefOid": "sha1", "statusCheckRollup": [{"name": "pytest", "bucket": "pass"}]})
+        return (0, "merged", "") if len(a) >= 2 and a[1] == "merge" else (0, snap, "")
     # DETERMINISTIC criterion citing the verify record the OBSERVE step seals -> autonomous finalize.
     return LoopContext(repo_root=repo_root, executor=lambda s, d: Observation.SUCCESS, reviewer=lambda s: [],
                        critic=lambda s: [Criterion("c", "done", kind=CriterionKind.DETERMINISTIC,

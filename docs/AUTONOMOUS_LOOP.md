@@ -52,7 +52,7 @@ worker-lineage impact escalates rather than proceeding.
 | `tasks.py` | The task graph: owned tasks with dependencies and an `allowed_paths` **ownership boundary**; ready/blocked derivation; parallel-safe assignment. |
 | `router.py` | The agent router: a parallel-safe wave (≤10 agents), dispatch, and **boundary enforcement** — an agent that edits outside its lane is rejected regardless of what it claims. |
 | `review.py` | Review-feedback: accepted findings become **correction tasks** appended to the graph; a clean review advances to `INTEGRATE`. |
-| `integrate.py` | CI / PR continuation: observe CI, diagnose a failure into an `Observation`, and the **merge-authorization gate** (product auto-merges; self-modify / worker-lineage / dangerous escalate). |
+| `integrate.py` | CI / PR continuation: observe CI + the exact head it ran against in **one snapshot**, diagnose a failure into an `Observation`, and the **merge-authorization gate** whose risk is **derived from policy** - a fired obligation gates the merge if it is human-gated (self-modify / loop-controller / sealed / worker) *or* `blocking` and not candidate-satisfiable, so a **new** blocking obligation escalates by default (fail-closed). The merge is **head-bound** (`--match-head-commit`): a commit pushed since CI is never merged blind - it HOLDs to re-observe. |
 | `docs.py` | Docs-freshness: a code↔doc coupling check - a change that touches coupled code but not its docs is `CONTRACT_DRIFT` at OBSERVE (never let docs go stale). |
 | `completeness.py` | **L8 self-correction**: at VERIFY, a green gate is not "done" - the GOAL's success criteria must be MET, and each is **typed** (`CriterionKind`) so the *right evidence* is required: DETERMINISTIC / DOMAIN_AUTHORITY criteria count only if they cite a digest **bound to a sealed assurance record** (a bare `met=True` with no bound evidence becomes a correction task); MODEL_JUDGMENT is the model's opinion and can never *alone* close an autonomous finalize; HUMAN_APPROVAL is met only by a **recorded** `cs_loop authorize` grant. Routing: unmet gaps → CHANGES_REQUESTED (work them, via an executor-run correction task - unbounded correction work is never delegated to a boundary-enforced agent); a residual model-judged / human-approval gap → AUTHORIZATION_REQUIRED (escalate the human decision); a critic that errors escalates, never crashes the loop. Plus cross-goal **dead-end memory** (a ledger of exact failed-approach fingerprints, not generalized learning) wired into `run_loop` via `ctx.ledger_path` - it seeds prior goals' dead ends at the start and records this goal's at the end. |
 | `orchestrate.py` | **The capstone** - one integrated loop that dispatches each phase to its module (decompose→validate, assign, execute/wave, observe+docs, review, integrate w/ HOLD-on-CI + merge gate, verify+completeness) with every effect injected. |
@@ -98,6 +98,19 @@ not generalized learning (its cross-process writes are now lock-guarded, see `lo
 boundary enforcement trusts the agent's self-reported changed paths (not yet a worktree-derived diff) and
 `dispatch_wave` runs runners sequentially; and campaign isolation is a **seam** (`context_for`) with
 per-goal state + resume - absent a factory, goals still share one repo/working-tree/PR, and no concrete
-branch/worktree/PR factory is wired yet. The loop controller (`scripts/loop/**`,
-`cs_loop.py`, loop tests, this doc) is under the **`loop-controller-self-modify`** obligation, so a change
-to it cannot be admitted by the loop's own run - it needs independent review.
+branch/worktree/PR factory is wired yet.
+
+The **merge gate** derives risk from policy and is fail-closed, but two limits are honest to state: (1) the
+merge-gate obligations are computed from `cs_assure impact` on the local tree - a production runtime must
+pass `expected_head` (the commit it validated + pushed) so INTEGRATE refuses to merge a remote head it did
+not analyze; without it single-writer is assumed. (2) `ci_observation` has no built-in notion of which
+checks are *required* unless the runtime passes `required_checks`; GitHub **branch protection** (which
+`gh pr merge --match-head-commit` respects server-side) remains the authoritative required-check backstop -
+the loop does not replace it. A related **policy-coverage** gap is tracked separately: the assurance policy
+gates `.github/workflows/assurance.yml` (assurance-self-modify) but not the other CI workflows, so a change
+to `engine-tests.yml` fires no obligation - fixing that is an `obligations.json` (assurance-self-modify) PR,
+not a loop change.
+
+The loop controller (`scripts/loop/**`, `cs_loop.py`, loop tests, this doc) is under the
+**`loop-controller-self-modify`** obligation, so a change to it cannot be admitted by the loop's own run -
+it needs independent review.

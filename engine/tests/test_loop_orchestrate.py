@@ -34,7 +34,7 @@ def _cs_assure(*, verify_green: bool = True, obligations: tuple[str, ...] = (),
             "gate_passed": verify_green, "gate_steps": steps,
             "fired_obligations": [{"id": o} for o in obligations], "change_set_fingerprint": "cs:x"}},
         "changeset": {"payload": {"changed_paths": [{"path": p} for p in changed]}},
-        "impact": {"payload": {"fired_obligations": [{"id": o} for o in obligations]}},
+        "impact": {"payload": {"fired_obligations": [{"id": o, "severity": "blocking"} for o in obligations]}},
         "doclint": {"finding_count": 0},
     }
 
@@ -56,11 +56,12 @@ def _executor(task_dicts: list[dict] | None = None):
     return run
 
 
-def _gh(*, ci: str = "pass", merge_ok: bool = True):
+def _gh(*, ci: str = "pass", merge_ok: bool = True, head: str = "sha1"):
     def run(*argv: str) -> tuple[int, str, str]:
         if len(argv) >= 2 and argv[1] == "merge":
             return (0, "merged", "") if merge_ok else (1, "", "merge conflict")
-        return (0, json.dumps([{"name": "pytest", "bucket": ci}]), "")
+        # `pr view --json headRefOid,statusCheckRollup`: one snapshot of head + its checks.
+        return (0, json.dumps({"headRefOid": head, "statusCheckRollup": [{"name": "pytest", "bucket": ci}]}), "")
     return run
 
 
@@ -122,6 +123,35 @@ def test_integrate_self_modify_escalates_at_the_merge_gate() -> None:
     assert t.decision is Decision.ESCALATE
 
 
+def test_integrate_loop_controller_change_escalates_at_the_merge_gate() -> None:
+    # A loop-controller change must NOT be admitted by the loop's OWN merge gate (rule #666).
+    state = LoopState(current_phase=Phase.INTEGRATE)
+    t = step(state, _ctx(gh_runner=_gh(ci="pass"), pr_ref="1",
+                         run_cs_assure=_cs_assure(obligations=("loop-controller-self-modify",))))
+    assert t.decision is Decision.ESCALATE and state.current_phase is Phase.ESCALATED
+
+
+def test_integrate_unknown_blocking_obligation_escalates_fail_closed() -> None:
+    # RISK FROM POLICY: a blocking obligation the gate has never heard of escalates, not auto-merges.
+    state = LoopState(current_phase=Phase.INTEGRATE)
+    t = step(state, _ctx(gh_runner=_gh(ci="pass"), pr_ref="1",
+                         run_cs_assure=_cs_assure(obligations=("a-brand-new-blocking-rule",))))
+    assert t.decision is Decision.ESCALATE and state.current_phase is Phase.ESCALATED
+
+
+def test_integrate_holds_when_the_head_moved_between_ci_and_merge() -> None:
+    # CI is green and the change is a product change, but a commit landed since CI ran -> the head-bound
+    # merge is refused and the loop HOLDs to re-observe the new head, never merging the unvalidated diff.
+    def gh(*argv: str) -> tuple[int, str, str]:
+        if len(argv) >= 2 and argv[1] == "merge":
+            return (1, "", "Head branch was modified; it is not the most recent commit")
+        return (0, json.dumps({"headRefOid": "sha1",
+                               "statusCheckRollup": [{"name": "pytest", "bucket": "pass"}]}), "")
+    state = LoopState(current_phase=Phase.INTEGRATE)
+    t = step(state, _ctx(gh_runner=gh, pr_ref="1", run_cs_assure=_cs_assure(obligations=("contracts",))))
+    assert t.decision is Decision.HOLD and state.current_phase is Phase.INTEGRATE  # did not merge/advance
+
+
 def test_integrate_fails_closed_when_obligations_are_uncomputable() -> None:
     # cs_assure impact refuses (exit 2) -> must NOT be read as 'no obligations' and auto-merge.
     state = LoopState(current_phase=Phase.INTEGRATE)
@@ -140,6 +170,73 @@ def test_integrate_ci_failure_routes_to_fix() -> None:
     state = LoopState(current_phase=Phase.INTEGRATE)
     t = step(state, _ctx(gh_runner=_gh(ci="fail"), pr_ref="1"))
     assert t.decision is Decision.REVISE  # CI red -> back to EXECUTE
+
+
+def test_integrate_fails_closed_on_a_malformed_impact_record() -> None:
+    # cs_assure impact exits 0 but its record has no fired_obligations list (schema drift / corruption):
+    # must NOT be read as 'no obligations fired' and auto-merge - it escalates.
+    def cs_bad(_r, *a):
+        recs = {"impact": {"payload": {}}, "verify": {"record_digest": "sha256:v", "payload": {
+            "gate_passed": True, "gate_steps": [], "fired_obligations": [], "change_set_fingerprint": "x"}}}
+        return (0, json.dumps(recs.get(a[0] if a else "", {})), "")
+    state = LoopState(current_phase=Phase.INTEGRATE)
+    t = step(state, _ctx(gh_runner=_gh(ci="pass"), pr_ref="1", run_cs_assure=cs_bad))
+    assert t.decision is Decision.ESCALATE and state.current_phase is Phase.ESCALATED
+
+
+def test_integrate_escalates_rather_than_crashing_on_a_gh_read_error() -> None:
+    # A transient gh failure at INTEGRATE must fail closed to ESCALATED (persisted), never an uncaught crash.
+    def gh_err(*_a: str) -> tuple[int, str, str]:
+        return (1, "", "gh: could not resolve to a PullRequest / network error")
+    state = LoopState(current_phase=Phase.INTEGRATE)
+    t = step(state, _ctx(gh_runner=gh_err, pr_ref="1"))
+    assert t.decision is Decision.ESCALATE and state.current_phase is Phase.ESCALATED
+
+
+def test_integrate_escalates_when_an_effect_raises_oserror(tmp_path: Path) -> None:
+    # An injected effect that RAISES (a subprocess spawn failure - OSError) at INTEGRATE must escalate
+    # durably (persisted), not crash the loop mid-run.
+    from loop.store import load
+    def gh_boom(*_a: str) -> tuple[int, str, str]:
+        raise OSError("could not spawn gh: [Errno 11] Resource temporarily unavailable")
+    store = tmp_path / "loop.json"
+    state = LoopState(current_phase=Phase.INTEGRATE)
+    t = step(state, _ctx(gh_runner=gh_boom, pr_ref="1", store_path=store))
+    assert t.decision is Decision.ESCALATE and state.current_phase is Phase.ESCALATED
+    assert load(store).current_phase is Phase.ESCALATED  # persisted, not lost to a crash
+
+
+def test_integrate_holds_when_the_remote_head_is_not_the_validated_commit() -> None:
+    # expected_head binds the merge-gate to the commit we validated locally: if the PR's remote head is a
+    # DIFFERENT commit (whose obligations we never evaluated), HOLD - never merge it.
+    state = LoopState(current_phase=Phase.INTEGRATE)
+    t = step(state, _ctx(gh_runner=_gh(ci="pass", head="remoteZ"), pr_ref="1",
+                         run_cs_assure=_cs_assure(obligations=("contracts",)), expected_head="localX"))
+    assert t.decision is Decision.HOLD and state.current_phase is Phase.INTEGRATE
+
+
+def test_integrate_holds_until_a_required_check_reports() -> None:
+    # required_checks=("web",): an all-green rollup that only has pytest is not settled -> HOLD, no merge.
+    state = LoopState(current_phase=Phase.INTEGRATE)
+    t = step(state, _ctx(gh_runner=_gh(ci="pass"), pr_ref="1",
+                         run_cs_assure=_cs_assure(obligations=("contracts",)), required_checks=("web",)))
+    assert t.decision is Decision.HOLD and state.current_phase is Phase.INTEGRATE
+
+
+def test_integrate_merge_is_pinned_to_the_observed_head() -> None:
+    # The orchestrator must forward snapshot.head_sha to the merge as --match-head-commit (not a plain merge).
+    seen: list[tuple[str, ...]] = []
+
+    def gh(*argv: str) -> tuple[int, str, str]:
+        seen.append(argv)
+        if len(argv) >= 2 and argv[1] == "merge":
+            return (0, "merged", "")
+        return (0, json.dumps({"headRefOid": "HEADSHA9",
+                               "statusCheckRollup": [{"name": "pytest", "bucket": "pass"}]}), "")
+    state = LoopState(current_phase=Phase.INTEGRATE)
+    step(state, _ctx(gh_runner=gh, pr_ref="1", run_cs_assure=_cs_assure(obligations=("contracts",))))
+    merge_argv = next(a for a in seen if len(a) >= 2 and a[1] == "merge")
+    assert "--match-head-commit" in merge_argv and "HEADSHA9" in merge_argv
 
 
 # --------------------------------------------------------------------------- task lifecycle
