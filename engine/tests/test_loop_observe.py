@@ -101,6 +101,13 @@ def test_non_dict_verify_payload_fails_closed() -> None:
         classify_observation(["not", "a", "dict"])
 
 
+def test_non_bool_gate_passed_is_read_as_red() -> None:
+    # A truthy non-bool gate_passed (e.g. the string "false") must NOT read as green - only True is green.
+    payload = {"gate_passed": "false", "gate_steps": [_step("pytest", False, 1)], "fired_obligations": []}
+    obs, _ = classify_observation(payload)
+    assert obs is Observation.TEST_REGRESSION
+
+
 # --------------------------------------------------------------------------- runner + integration
 
 

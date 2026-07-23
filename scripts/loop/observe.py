@@ -66,7 +66,8 @@ def classify_observation(verify_payload: Any, doclint_payload: Any = None) -> tu
     steps = [s for s in (verify_payload.get("gate_steps") or []) if isinstance(s, dict)]
     obligations = {o["id"] for o in (verify_payload.get("fired_obligations") or [])
                    if isinstance(o, dict) and isinstance(o.get("id"), str)}
-    gate_passed = bool(verify_payload.get("gate_passed", False))
+    # Fail-closed on a non-bool: only a literal True is a green gate (a truthy "false"/1/[...] is red).
+    gate_passed = verify_payload.get("gate_passed") is True
 
     # A hung step is an environment/infra problem, not a code result - surface it even if the gate is red.
     for step in steps:

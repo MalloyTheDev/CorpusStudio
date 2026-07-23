@@ -50,8 +50,8 @@ def test_accepted_findings_become_correction_tasks_depending_on_the_reviewed_tas
         Finding(id="nit1", summary="cosmetic", accepted=False),
     ]), reviewed_task_id="impl")
     assert result.verdict is ReviewVerdict.CHANGES_REQUESTED
-    assert result.correction_task_ids == ["fix-bug1"]  # only the accepted finding
-    fix = next(t for t in state.task_graph if t["id"] == "fix-bug1")
+    assert result.correction_task_ids == ["fix-impl-bug1"]  # namespaced by the reviewed task
+    fix = next(t for t in state.task_graph if t["id"] == "fix-impl-bug1")
     assert fix["depends_on"] == ["impl"] and fix["allowed_paths"] == ["engine/x.py"]
     assert fix["success_criteria"] == ["guard None"]
     assert review_observation(result) is Observation.CHANGES_REQUESTED
@@ -63,14 +63,33 @@ def test_re_review_is_idempotent() -> None:
     finding = Finding(id="bug1", summary="x")
     review(state, _reviewer([finding]), reviewed_task_id="impl")
     review(state, _reviewer([finding]), reviewed_task_id="impl")  # again
-    assert sum(1 for t in state.task_graph if t["id"] == "fix-bug1") == 1  # not duplicated
+    assert sum(1 for t in state.task_graph if t["id"] == "fix-impl-bug1") == 1  # not duplicated
 
 
 def test_correction_is_standalone_when_reviewed_task_is_unknown() -> None:
     state = LoopState()  # empty graph
     review(state, _reviewer([Finding(id="bug1", summary="x")]), reviewed_task_id="ghost")
-    fix = next(t for t in state.task_graph if t["id"] == "fix-bug1")
+    fix = next(t for t in state.task_graph if t["id"] == "fix-ghost-bug1")
     assert fix["depends_on"] == []  # no dangling dependency on a non-existent task
+
+
+def test_review_surfaces_a_collision_with_an_unrelated_task() -> None:
+    # A pre-existing UNRELATED task whose id collides with a correction id must not silently swallow the
+    # finding - review() fails closed (ReviewError) rather than returning CHANGES_REQUESTED with nothing.
+    state = LoopState()
+    decompose(state, [{"id": "impl"}, {"id": "fix-impl-bug1", "description": "unrelated human task"}])
+    with pytest.raises(ReviewError, match="already exist"):
+        review(state, _reviewer([Finding(id="bug1", summary="x")]), reviewed_task_id="impl")
+
+
+def test_invalid_finding_path_raises_reviewerror_not_looptaskerror() -> None:
+    # A finding with an unsafe allowed_path must surface as the module's own ReviewError, not leak a
+    # foreign LoopTaskError (the documented fail-closed contract).
+    state = LoopState()
+    decompose(state, [{"id": "impl"}])
+    with pytest.raises(ReviewError):
+        review(state, _reviewer([Finding(id="bad", summary="x", allowed_paths=["/etc/passwd"])]),
+               reviewed_task_id="impl")
 
 
 def test_reviewer_returning_non_findings_fails_closed() -> None:

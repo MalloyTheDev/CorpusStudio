@@ -161,3 +161,13 @@ def test_tasks_conflict_pairwise() -> None:
     b = Task(id="b", allowed_paths=["engine/tests/x.py"])
     c = Task(id="c", allowed_paths=["scripts/"])
     assert tasks_conflict(a, b) and not tasks_conflict(a, c)
+
+
+def test_undeclared_ownership_conflicts_with_everything() -> None:
+    # A task with NO allowed_paths owns an undeclared lane -> conflicts with all, never co-scheduled.
+    from loop.tasks import next_assignable
+    a = Task(id="a", allowed_paths=["engine/"])
+    unbounded = Task(id="u", allowed_paths=[])
+    assert tasks_conflict(a, unbounded) and tasks_conflict(unbounded, a)
+    tasks = parse_tasks([_t("a", paths=["engine/"], status="ACTIVE"), _t("u", paths=[])])
+    assert next_assignable(tasks) is None  # 'u' is not assignable alongside the active 'a'

@@ -29,8 +29,10 @@ _CHECK_HINTS: tuple[tuple[tuple[str, ...], Observation], ...] = (
     (("pytest", "test", "cov"), Observation.TEST_REGRESSION),
     (("web", "build", "tsc", "npm", "node"), Observation.DEPENDENCY_FAILURE),
 )
-# Obligations that forbid an autonomous merge - the change must be admitted by a human.
-_HUMAN_GATED = frozenset({"sealed-research", "assurance-self-modify"})
+# Obligations that forbid an autonomous merge - the change must be admitted by a human. worker-closure
+# is here too: a worker-lineage change needs a fresh wheel/env via the human-gated worker workflow, the
+# same invariant observe.py enforces by routing worker-closure to WORKER_LINEAGE_IMPACT.
+_HUMAN_GATED = frozenset({"sealed-research", "assurance-self-modify", "worker-closure"})
 
 GhRunner = Callable[..., "tuple[int, str, str]"]
 
@@ -96,7 +98,10 @@ def ci_observation(status: CiStatus) -> tuple[Observation, str]:
     """Map a CI status to a loop Observation. Pending is PROGRESS (keep observing, do not treat 'not
     done' as done); a failure is classified by check name so it routes like the local gate."""
     if status.state == "none":
-        return Observation.SUCCESS, "no CI checks to satisfy"
+        # No checks reported YET (the window before Actions creates check runs, or a required check that
+        # has not reported) must not be read as 'done' - that would merge before CI validates the diff.
+        # Keep observing; a genuinely CI-less repo is the caller's explicit opt-in, not this default.
+        return Observation.PROGRESS, "no CI checks have reported yet (keep observing)"
     if status.state == "pending":
         return Observation.PROGRESS, f"CI in progress ({status.passed}/{status.total} settled)"
     if status.state == "passing":

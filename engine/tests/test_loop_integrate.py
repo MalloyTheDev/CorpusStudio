@@ -60,9 +60,10 @@ def test_ci_observation_pending_is_progress_not_done() -> None:
     assert obs is Observation.PROGRESS
 
 
-def test_ci_observation_green_and_none_are_success() -> None:
+def test_ci_observation_green_is_success_but_no_checks_is_progress() -> None:
     assert ci_observation(parse_ci_checks(_checks(("a", "pass"))))[0] is Observation.SUCCESS
-    assert ci_observation(parse_ci_checks([]))[0] is Observation.SUCCESS
+    # No checks reported yet must NOT read as done (would merge before CI validates the diff).
+    assert ci_observation(parse_ci_checks([]))[0] is Observation.PROGRESS
 
 
 def test_ci_observation_classifies_failure_by_check_name() -> None:
@@ -86,8 +87,10 @@ def test_merge_gate_allows_a_product_change() -> None:
     assert gate.authorized and gate.observation is Observation.SUCCESS
 
 
-def test_merge_gate_escalates_self_modify_and_sealed_research() -> None:
-    for ob in ("assurance-self-modify", "sealed-research"):
+def test_merge_gate_escalates_self_modify_sealed_and_worker_closure() -> None:
+    # worker-closure must gate the merge too - it needs the human-gated worker workflow (fresh wheel/env),
+    # matching observe.py's WORKER_LINEAGE_IMPACT routing.
+    for ob in ("assurance-self-modify", "sealed-research", "worker-closure"):
         gate = merge_gate([ob, "contracts"])
         assert not gate.authorized and gate.observation is Observation.AUTHORIZATION_REQUIRED
 

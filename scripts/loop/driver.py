@@ -26,6 +26,7 @@ from typing import Any, Callable
 from loop.controller import LoopState, Observation, Phase, Transition, apply
 from loop.observe import observe_and_apply
 from loop.store import save
+from loop.tasks import TaskStatus
 
 # The phases where the loop reads repository state ITSELF (via cs_assure) rather than asking the
 # executor - the mechanical observation points.
@@ -89,7 +90,7 @@ def _active_task_paths(state: LoopState) -> list[str]:
     """Allowed paths for the currently-active task, if the task graph names one (slice 4 populates it;
     until then this is empty = unconstrained)."""
     for task in state.task_graph:
-        if isinstance(task, dict) and task.get("status") == "active":
+        if isinstance(task, dict) and task.get("status") == TaskStatus.ACTIVE.value:
             paths = task.get("allowed_paths")
             if isinstance(paths, list):
                 return [p for p in paths if isinstance(p, str)]
@@ -145,8 +146,10 @@ def run(state: LoopState, repo_root: Path, executor: Executor, *, base: str = "m
     while not state.is_terminal and steps < max_steps:
         advance(state, repo_root, executor, base=base, observer=observer, store_path=store_path)
         steps += 1
-    if not state.is_terminal and state.termination_reason is None:
-        # Hit the hard cap without a controller-driven terminal state: stop fail-closed.
+    if not state.is_terminal:
+        # Hit the hard cap without a controller-driven terminal state: stop fail-closed, OVERWRITING any
+        # stale termination_reason (a resumed non-terminal state may carry a leftover reason - the cap
+        # must fire regardless, or run() could return a non-terminal state and the caller spins forever).
         state.current_phase = Phase.STOPPED
         state.termination_reason = f"driver hard step cap ({max_steps}) reached"
         if store_path is not None:

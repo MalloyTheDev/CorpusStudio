@@ -48,8 +48,16 @@ def test_within_and_check_boundary() -> None:
     task = Task(id="a", allowed_paths=["engine/corpus_studio/"])
     assert check_boundary(task, ["engine/corpus_studio/eval.py"]) == []
     assert check_boundary(task, ["engine/corpus_studio/eval.py", "docs/x.md"]) == ["docs/x.md"]
-    # a task with no declared boundary is unconstrained.
-    assert check_boundary(Task(id="b"), ["anything/at/all.py"]) == []
+    # a task with NO declared boundary owns nothing -> any edit is a breach (fail-closed).
+    assert check_boundary(Task(id="b"), ["anything/at/all.py"]) == ["anything/at/all.py"]
+
+
+def test_boundary_rejects_dotdot_traversal() -> None:
+    # A '..'-escaped path must NEVER score as in-lane, even when a prefix looks like the allowed dir.
+    assert not within_boundary("engine/../scripts/loop/evil.py", ["engine/"])
+    assert not within_boundary("/etc/passwd", ["engine/"])
+    task = Task(id="a", allowed_paths=["engine/"])
+    assert check_boundary(task, ["engine/ok.py", "engine/../scripts/evil.py"]) == ["engine/../scripts/evil.py"]
 
 
 # --------------------------------------------------------------------------- wave selection + cap

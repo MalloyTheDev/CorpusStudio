@@ -63,6 +63,15 @@ def test_gap_becomes_a_valid_correction_task() -> None:
     assert tasks[0].id == "docs-loopdoc" and tasks[0].allowed_paths == ["docs/AUTONOMOUS_LOOP.md"]
 
 
+def test_unrelated_file_under_a_doc_dir_does_not_satisfy_contracts_coupling() -> None:
+    # Touching contracts.py + an unrelated note under docs/contracts/ is STILL a gap - only a regenerated
+    # *.schema.json discharges the obligation (a dir-wide match would let a stray edit satisfy it).
+    assert any(g.coupling == "platform-contracts" for g in stale_docs(
+        ["engine/corpus_studio/platform/contracts.py", "docs/contracts/NOTE.md"], DEFAULT_COUPLINGS))
+    assert not any(g.coupling == "platform-contracts" for g in stale_docs(
+        ["engine/corpus_studio/platform/contracts.py", "docs/contracts/RunPlan.schema.json"], DEFAULT_COUPLINGS))
+
+
 def test_default_couplings_flag_a_loop_change_without_its_doc() -> None:
     # The real default set: touching the loop without its doc is a gap; touching both is clean.
     assert any(g.coupling == "autonomous-loop"

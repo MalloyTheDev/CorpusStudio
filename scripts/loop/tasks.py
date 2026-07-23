@@ -156,7 +156,12 @@ def paths_overlap(a: str, b: str) -> bool:
 
 
 def tasks_conflict(t1: Task, t2: Task) -> bool:
-    """Two tasks conflict if any of their allowed paths overlap - they could edit the same file."""
+    """Two tasks conflict if any of their allowed paths overlap - they could edit the same file. A task
+    with NO declared ownership (empty ``allowed_paths``) owns an undeclared lane and conflicts with
+    EVERYTHING, so it is never co-scheduled in parallel (fail-closed - an undeclared boundary must not be
+    treated as 'owns nothing')."""
+    if not t1.allowed_paths or not t2.allowed_paths:
+        return True
     return any(paths_overlap(pa, pb) for pa in t1.allowed_paths for pb in t2.allowed_paths)
 
 
