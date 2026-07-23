@@ -180,9 +180,11 @@ def glob_matches(glob: str, path: str) -> bool:
     """Boundary-correct match of a repo-relative POSIX ``path`` against a policy ``glob``.
 
     ``dir/**`` matches the directory itself or anything strictly under it (never a sibling that
-    merely shares the prefix). Other wildcards use case-sensitive ``fnmatchcase`` (a single ``*``
-    does not cross ``/`` for a literal path either way here). A literal glob is exact-path equality,
-    so a delete of that exact path still matches.
+    merely shares the prefix). Other wildcards use case-sensitive ``fnmatchcase`` - note this means a
+    ``*`` DOES cross ``/`` (fnmatch semantics), so a bare ``*``-glob would over-match; the shipped
+    policy therefore uses only literal paths, ``dir/**``, and precise ``file_*.py``-style globs where
+    over-crossing has no real target. A literal glob is exact-path equality, so a delete of that exact
+    path still matches.
     """
     if glob.endswith("/**"):
         prefix = glob[:-3]

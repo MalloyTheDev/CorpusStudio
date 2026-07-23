@@ -15,10 +15,15 @@ The record never says "verified" / "fit" / "release-ready" / "sealed"; it record
 workspace-level verdict. Discharging a fired obligation is a HUMAN act - the record lists what fired,
 it never asserts an obligation was discharged.
 
-Determinism: the sealed payload is the DECISIONS (per-step exit codes + pass/fail on the current
-tree), which are reproducible; no wall-clock timestamps or timing-laden output are sealed. A step
-that cannot be launched at all (missing interpreter) fails CLOSED as :class:`GateError` (exit 2) -
-distinct from a step that runs and returns non-zero (a red gate, exit 1).
+This record is honestly a MEASUREMENT (``provenance.is_measurement`` is true): the sealed payload is
+the per-step exit codes as OBSERVED on this host/toolchain, not a pure function of the tree - a flaky
+test or a bumped tool can flip ``gate_passed`` on a byte-identical tree. No wall-clock timestamps or
+timing-laden output are sealed, so a re-run on the same host+toolchain reproduces it, but that is a
+weaker promise than the deterministic change-set/impact records make. A step that cannot be launched
+at all (missing interpreter, embedded-NUL argv) fails CLOSED as :class:`GateError` (exit 2); a step
+that runs and returns a non-expected code is a red gate (exit 1); a step that TIMES OUT is bucketed
+red too (``passed=False`` + ``timed_out=True`` disambiguates it) - it ran but overran, which is
+nearer a failing run than an un-runnable one.
 
 Stdlib-only; no-shell (every step is an ``argv`` list, never a shell string); reuses the kernel
 verbatim (change set, canonical JSON, the sealed envelope) and the impact policy loader/matcher.
@@ -277,5 +282,8 @@ def build_verification_record(
         "gate_digest": gate.digest,
         "policy_path": policy.relpath,
         "policy_digest": policy.digest,
+        # The gate exit codes are observed on this host/toolchain (flaky-test/tool-version dependent),
+        # not a pure function of the tree - labelled honestly, matching status.py.
+        "is_measurement": True,
     }
     return seal_record(VERIFICATION_RECORD_TYPE, VERIFICATION_SCHEMA_VERSION, payload, provenance)

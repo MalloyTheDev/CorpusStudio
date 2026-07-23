@@ -204,6 +204,19 @@ def test_impact_fires_worker_closure_on_planted_change(tmp_path: Path) -> None:
     assert wc["triggers"][0]["path"] == "engine/corpus_studio/platform/worker.py"
 
 
+def test_impact_self_modify_covers_plugin_and_tests(tmp_path: Path) -> None:
+    # D3: the plugin config + the assurance tests ARE the judge - editing them must fire
+    # assurance-self-modify (was: zero signal). planner.py must fire worker-closure (D4).
+    repo = _repo_with_policy(tmp_path)
+    for rel in (".claude/rules/worker-closure.md", "engine/tests/test_assurance_obligations.py",
+                "engine/tests/test_plugin_hooks.py"):
+        _plant(repo, rel)
+    _plant(repo, "engine/corpus_studio/platform/planner.py")
+    fired = {f["id"] for f in build_impact_assessment(start_dir=repo, base_ref="HEAD")["payload"]["fired_obligations"]}
+    assert "assurance-self-modify" in fired  # .claude/** + test_assurance_*.py + test_plugin_hooks.py
+    assert "worker-closure" in fired  # planner.py is now a declared worker-reachable path
+
+
 def test_impact_dir_glob_and_unmatched(tmp_path: Path) -> None:
     repo = _repo_with_policy(tmp_path)
     _plant(repo, "docs/contracts/NEW.md")  # fires contracts (docs/contracts/**)

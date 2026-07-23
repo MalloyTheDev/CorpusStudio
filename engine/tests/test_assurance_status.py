@@ -131,6 +131,32 @@ def test_parse_area(title: str, area: str) -> None:
     assert github_issues.parse_area(title) == area
 
 
+def test_gather_issues_survives_weird_field_types(monkeypatch, tmp_path: Path) -> None:
+    # D8: a valid array of objects with weird field types (non-string title, non-int number) must NOT
+    # raise - _summarize_issues coerces defensively (the fail-soft sensor never raises).
+    payload = json.dumps([{"title": 123, "number": "x", "updatedAt": None}]).encode("utf-8")
+    monkeypatch.setattr(github_issues.subprocess, "run", lambda *a, **k: _Completed(0, payload))
+    result = github_issues.gather_issues(tmp_path, limit_recent=5)
+    assert result["available"] is True and result["total_open"] == 1
+    assert result["recent"][0]["area"] == "untagged" and result["recent"][0]["number"] == 0
+
+
+def test_current_branch_non_utf8_fails_closed(monkeypatch, tmp_path: Path) -> None:
+    # D7: a git-permitted non-UTF8 branch name must fail CLOSED (exit 2), not crash `status` with a
+    # traceback + exit 1. current_branch now routes through the fail-closed _decode_utf8 helper.
+    from assurance import git_state
+
+    ctx = git_state.GitContext(root=tmp_path, git_dir=tmp_path, head_oid="deadbeef", is_shallow=False)
+
+    class _NonUtf8:
+        returncode = 0
+        stdout = b"br-\xff-x"
+
+    monkeypatch.setattr(git_state, "_git", lambda *a, **k: _NonUtf8())
+    with pytest.raises(git_state.UnsupportedPathEncoding):
+        git_state.current_branch(ctx)
+
+
 # --------------------------------------------------------------------------- snapshot composition
 
 

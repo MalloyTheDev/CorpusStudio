@@ -5,7 +5,7 @@
   "obligations": [
     {
       "id": "assurance-self-modify",
-      "globs": ["scripts/assurance/**", "scripts/cs_assure.py"],
+      "globs": ["scripts/assurance/**", "scripts/cs_assure.py", ".claude/**", "engine/tests/test_assurance_*.py", "engine/tests/test_plugin_hooks.py"],
       "obligation": "BOOTSTRAP_SELF_MODIFIED: this change edits the tool that judges changes, so its own assurance output is candidate-local and provisional; admit only via the repo's pre-existing gate + CI + INDEPENDENT human review, never self-approve or self-merge, and keep the kernel stdlib-only and fail-closed (exit 2).",
       "authority": "the repo's pre-existing gate + CI + an independent human reviewer (NOT the assurance system's own output).",
       "severity": "blocking",
@@ -37,7 +37,7 @@
     },
     {
       "id": "worker-closure",
-      "globs": ["engine/corpus_studio/platform/worker.py", "engine/corpus_studio/platform/runners.py", "engine/corpus_studio/platform/artifacts.py", "engine/corpus_studio/platform/supervisor.py", "engine/corpus_studio/platform/execution_config.py", "engine/corpus_studio/training/trainer.py"],
+      "globs": ["engine/corpus_studio/platform/worker.py", "engine/corpus_studio/platform/runners.py", "engine/corpus_studio/platform/artifacts.py", "engine/corpus_studio/platform/supervisor.py", "engine/corpus_studio/platform/execution_config.py", "engine/corpus_studio/platform/planner.py", "engine/corpus_studio/training/trainer.py"],
       "obligation": "A change to worker-execution bytes needs a fresh pinned worker package + new environment locks; trace the import path and write the WORKER_CHANGE_REQUIRED vs control-plane-only verdict (this matcher flags only the DECLARED worker files, not lazily-reachable modules - the trace is still the engineer's).",
       "authority": "a written symbol-level import trace; a fresh pinned worker package + env locks (sealed research adds the amendment/matrix/reserved-id/rebuilt-wheel/-vN chain).",
       "severity": "blocking",

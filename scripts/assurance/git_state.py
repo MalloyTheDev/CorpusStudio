@@ -215,8 +215,10 @@ def current_branch(ctx: GitContext) -> str:
     if not ctx.head_oid:
         return ""
     proc = _git(ctx.root, "rev-parse", "--abbrev-ref", "HEAD", check=False)
-    name = proc.stdout.decode("utf-8").strip()
-    return "" if (proc.returncode != 0 or name == "HEAD") else name
+    if proc.returncode != 0:
+        return ""
+    name = _decode_utf8(proc.stdout, what="branch name").strip()  # a non-UTF8 ref fails closed, not exit 1
+    return "" if name == "HEAD" else name
 
 
 def recent_commits(ctx: GitContext, limit: int) -> list[dict[str, str]]:

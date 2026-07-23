@@ -155,6 +155,8 @@ def test_verify_green_gate(tmp_path: Path) -> None:
     assert record["payload"]["gate_passed"] is True
     assert record["payload"]["gate_passed_count"] == 2
     assert record["payload"]["completion_level"] == "WORKSPACE_GATE"
+    # The gate exit codes are a measurement (host/toolchain-dependent) - labelled honestly like status.
+    assert record["provenance"]["is_measurement"] is True
     assert verify_record(record)
 
 

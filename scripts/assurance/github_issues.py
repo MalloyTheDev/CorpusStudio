@@ -67,22 +67,42 @@ def _classify_failure(returncode: int, stderr_bytes: bytes) -> dict[str, Any]:
     return _unavailable(reason, f"gh exited {returncode}: {stderr.strip()[:180]}")
 
 
+def _issue_title(issue: dict[str, Any]) -> str:
+    title = issue.get("title")
+    return title if isinstance(title, str) else ""
+
+
+def _issue_number(issue: dict[str, Any]) -> int:
+    number = issue.get("number")
+    return number if isinstance(number, int) and not isinstance(number, bool) else 0
+
+
+def _issue_updated(issue: dict[str, Any]) -> str:
+    updated = issue.get("updatedAt")
+    return updated if isinstance(updated, str) else ""
+
+
 def _summarize_issues(raw: list[dict[str, Any]], limit_recent: int) -> dict[str, Any]:
-    """Bound the issue list to a summary. ``total_open``/``by_area`` cover ALL; only ``recent`` is capped."""
+    """Bound the issue list to a summary. ``total_open``/``by_area`` cover ALL; only ``recent`` is capped.
+
+    Field extraction is defensive: a weird gh payload (a non-string title, a non-int number) must not
+    raise - this is a fail-SOFT sensor.
+    """
     by_area: dict[str, int] = {}
     for issue in raw:
-        by_area[parse_area(issue.get("title", ""))] = by_area.get(parse_area(issue.get("title", "")), 0) + 1
+        area = parse_area(_issue_title(issue))
+        by_area[area] = by_area.get(area, 0) + 1
     # Select the N most-recently-updated (updatedAt is RFC3339-Z: lexicographic == chronological;
     # number desc breaks ties for a deterministic total order), then EMIT ordered by number desc.
-    ranked = sorted(raw, key=lambda it: (str(it.get("updatedAt", "")), it.get("number", 0)), reverse=True)
+    ranked = sorted(raw, key=lambda it: (_issue_updated(it), _issue_number(it)), reverse=True)
     chosen = ranked[: max(0, limit_recent)]
     recent = sorted(
         (
             {
-                "number": issue.get("number", 0),
-                "area": parse_area(issue.get("title", "")),
-                "title": (issue.get("title") or "")[:120],
-                "updatedAt": str(issue.get("updatedAt", "")),
+                "number": _issue_number(issue),
+                "area": parse_area(_issue_title(issue)),
+                "title": _issue_title(issue)[:120],
+                "updatedAt": _issue_updated(issue),
             }
             for issue in chosen
         ),
@@ -93,7 +113,8 @@ def _summarize_issues(raw: list[dict[str, Any]], limit_recent: int) -> dict[str,
         "available": True,
         "source": ISSUES_SOURCE,
         "total_open": len(raw),
-        # If the fetch hit the cap, total_open / by_area may undercount - flag it, never silently truncate.
+        # If the fetch hit the cap, ALL of total_open / by_area / recent_omitted_count are lower bounds
+        # (they cover only the fetched set) - this one flag says so; never a silently-exact undercount.
         "total_open_is_lower_bound": len(raw) >= GH_FETCH_LIMIT,
         "by_area": by_area,
         "recent_limit": limit_recent,
