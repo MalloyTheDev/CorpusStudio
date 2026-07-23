@@ -257,6 +257,25 @@ def test_multi_agent_execute_drains_the_whole_graph() -> None:
     assert t.decision is Decision.ADVANCE and all(x["status"] == "DONE" for x in state.task_graph)
 
 
+def test_multi_agent_execute_enforces_the_worktree_verifier() -> None:
+    # #8 end-to-end: ctx.verify_paths reaches the EXECUTE wave, so an agent that self-reports an in-lane
+    # edit but actually touched another lane is a POLICY_BLOCK (the wave does not clean-advance).
+    def runner(task):
+        return AgentResult(task.id, Observation.SUCCESS, changed_paths=["engine/ok.py"])  # clean claim
+    state = LoopState(current_phase=Phase.EXECUTE)
+    decompose(state, [{"id": "a", "allowed_paths": ["engine/"]}])
+    t = step(state, _ctx(multi_agent=True, agent_runner=runner,
+                         verify_paths=lambda _task, _r: ["engine/ok.py", "scripts/loop/evil.py"]))
+    assert t.decision is not Decision.ADVANCE  # the worktree diff caught the out-of-lane edit
+    assert next(x for x in state.task_graph if x["id"] == "a")["status"] == "FAILED"
+
+
+def test_verify_paths_without_multi_agent_fails_loud() -> None:
+    # A verify_paths set while multi_agent is off would silently do nothing -> construction must fail loud.
+    with pytest.raises(LoopOrchestrateError, match="verify_paths requires multi_agent"):
+        LoopContext(repo_root=REPO_ROOT, executor=_executor(), verify_paths=lambda _t, _r: [])
+
+
 def test_multi_agent_stuck_graph_escalates() -> None:
     # A task whose dep FAILED can never become ready -> the drain is stuck -> escalate, not a false SUCCESS.
     def runner(task):
