@@ -156,7 +156,9 @@ def load_gate(root: Path, gate_relpath: str = DEFAULT_GATE_RELPATH) -> LoadedGat
         raise GateError(f"gate spec could not be read ({gate_relpath}): {exc}") from exc
     try:
         raw = json.loads(raw_bytes.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError) as exc:
+    except (ValueError, UnicodeDecodeError, RecursionError) as exc:
+        # RecursionError (deeply-nested JSON) is NOT a ValueError - catch it so a hostile gate spec
+        # fails CLOSED (exit 2), never as a bare traceback + exit 1.
         raise GateError(f"gate spec is not valid UTF-8 JSON ({gate_relpath}): {exc}") from exc
     steps = parse_gate(raw)
     return LoadedGate(

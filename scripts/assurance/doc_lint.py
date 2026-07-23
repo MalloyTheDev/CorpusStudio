@@ -189,6 +189,9 @@ def load_registry(repo_root: Path) -> list[DocSource]:
         raise DocLintError(f"context-source registry not found at {REGISTRY_RELPATH}") from exc
     except json.JSONDecodeError as exc:
         raise DocLintError(f"context-source registry is not valid JSON: {exc}") from exc
+    except RecursionError as exc:
+        # Deeply-nested JSON: NOT a JSONDecodeError/ValueError - fail CLOSED, not exit-1 traceback.
+        raise DocLintError(f"context-source registry is nested too deeply to parse: {exc}") from exc
     except OSError as exc:
         # A registry path that is a directory / unreadable / otherwise un-openable fails CLOSED as a
         # structured refusal (exit 2), not an uncaught traceback (which would surface as exit 1 and
