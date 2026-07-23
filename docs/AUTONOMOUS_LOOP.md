@@ -75,8 +75,15 @@ may *do*:
   makes **no writes** — never pushes, merges, or spawns a write-capable agent — and ends at `ESCALATED`
   (a dry run proposes; a human signs off). A `pr_ref` additionally exercises the real CI read + merge gate
   but `dangerous=True` escalates before any merge. This is the safe way to see what the loop *would* do.
+
+  The `pr_ref` path has been validated against a **live** open PR (read-only): `build_context(repo, pr_ref=…)`
+  → `observe_ci` read the PR's real `statusCheckRollup` + `headRefOid` via `read_only_gh` (a real
+  `gh pr view`, parsed to a head-bound `CiSnapshot`: CI green 10/10), the merge gate escalated (no
+  autonomous merge), and a `gh pr merge` attempt was refused outright (exit 97). Real GitHub data, zero
+  writes. (Env-dependent on `gh` auth, so it is a manual validation, not a committed test.)
 - A **write-capable** adapter (real agent spawning + the autonomous merge path) is a later, review-gated
-  step; its seams (`verify_paths`, `expected_head`, `required_checks`, `context_for`) already exist.
+  step needing explicit human authorization; its seams (`verify_paths`, `expected_head`, `required_checks`,
+  `context_for`) already exist, and adapter code is under the `loop-controller-self-modify` obligation.
 
 ## The fact / judgment seam
 
