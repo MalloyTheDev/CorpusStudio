@@ -26,6 +26,7 @@ from loop.tasks import (
     parse_tasks,
     ready_tasks,
     set_status,
+    status_for,
     tasks_conflict,
 )
 
@@ -126,7 +127,7 @@ def dispatch_wave(state: LoopState, runner: AgentRunner, *,
             reason = f"agent for {task.id!r} edited outside its boundary: {sorted(outside)}"
         else:
             observation = result.observation
-            status = TaskStatus.DONE if observation in _OK else TaskStatus.FAILED
+            status = status_for(observation)  # SUCCESS->DONE, PROGRESS->PENDING, else FAILED (shared)
             reason = result.note or f"agent for {task.id!r} -> {observation.value}"
         set_status(state, task.id, status, evidence=result.evidence)
         outcomes.append(WaveOutcome(task.id, observation, status, reason))

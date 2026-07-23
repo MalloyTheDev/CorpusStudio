@@ -100,6 +100,16 @@ def test_dispatch_marks_status_and_records_evidence() -> None:
     assert graph["b"]["status"] == "FAILED"
 
 
+def test_progress_leaves_a_task_pending_not_done() -> None:
+    # A PROGRESS agent result means "moved forward, not done" -> the task stays PENDING (re-dispatchable),
+    # never DONE (no completion claim).
+    state = LoopState()
+    decompose(state, [_t("a", paths=["engine/"])])
+    outcomes = dispatch_wave(state, _runner({"a": AgentResult("a", Observation.PROGRESS, changed_paths=[])}))
+    assert outcomes[0].status is TaskStatus.PENDING
+    assert next(t for t in state.task_graph if t["id"] == "a")["status"] == "PENDING"
+
+
 def test_dispatch_rejects_a_boundary_breach_as_policy_block() -> None:
     state = LoopState()
     decompose(state, [_t("a", paths=["engine/"])])

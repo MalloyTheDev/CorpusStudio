@@ -51,7 +51,7 @@ from loop.observe import CsAssureRunner, LoopObserveError, _run_cs_assure, obser
 from loop.review import Reviewer, review, review_observation
 from loop.router import AgentRunner, aggregate_observation, dispatch_wave
 from loop.store import save
-from loop.tasks import LoopTaskError, TaskStatus, parse_tasks, ready_tasks, set_status
+from loop.tasks import LoopTaskError, TaskStatus, parse_tasks, ready_tasks, set_status, status_for
 
 # The executor (the LLM/agent) acts ON the state (it may set the task graph, make edits) and returns its
 # judged Observation - a richer signature than driver.Executor, which only sees the directive.
@@ -165,12 +165,15 @@ def _execute(state: LoopState, ctx: LoopContext, directive: Directive) -> PhaseR
         # a breach), so run it through the executor, never a bounded agent. Lane'd tasks go to the wave.
         unbounded_ready = [t for t in ready_tasks(parse_tasks(state.task_graph)) if not t.allowed_paths]
         if unbounded_ready:
-            observation = ctx.executor(state, directive)
-            status = (TaskStatus.DONE if observation in (Observation.SUCCESS, Observation.PROGRESS)
-                      else TaskStatus.FAILED)
-            for task in unbounded_ready:
-                set_status(state, task.id, status)
-            return PhaseResult(observation, "executed self-owned (unbounded) correction work")
+            # ONE task per executor call: a single executor result must NOT close several tasks (the
+            # remaining unbounded tasks are drained on subsequent EXECUTE cycles). Mark it ACTIVE and
+            # recompute the directive so the executor is explicitly given the task it is run for; then map
+            # its result via the shared status_for (SUCCESS->DONE, PROGRESS->PENDING, else FAILED).
+            task = unbounded_ready[0]
+            set_status(state, task.id, TaskStatus.ACTIVE)
+            observation = ctx.executor(state, next_directive(state))
+            set_status(state, task.id, status_for(observation))
+            return PhaseResult(observation, f"executed self-owned task {task.id!r}")
         # DRAIN: dispatch waves until no ready task remains (deps unlock across waves), stopping on a
         # failure. The router marks each wave ACTIVE->DONE/FAILED; we never close a task no agent ran.
         outcomes = []

@@ -19,7 +19,7 @@ from enum import Enum
 from pathlib import PurePosixPath
 from typing import Any
 
-from loop.controller import LoopState
+from loop.controller import LoopState, Observation
 
 
 class TaskStatus(str, Enum):
@@ -225,3 +225,14 @@ def set_status(state: LoopState, task_id: str, status: TaskStatus, *, evidence: 
     if evidence is not None:
         by_id[task_id].evidence.append(evidence)
     state.task_graph = [t.to_dict() for t in tasks]
+
+
+def status_for(observation: Observation) -> TaskStatus:
+    """The task status an execution observation implies - the SINGLE source of this mapping (shared by
+    the router and the orchestrator). Only SUCCESS completes a task; PROGRESS means 'moved forward, not
+    done' so the task stays PENDING (re-dispatchable, no completion claim); anything else fails it."""
+    if observation is Observation.SUCCESS:
+        return TaskStatus.DONE
+    if observation is Observation.PROGRESS:
+        return TaskStatus.PENDING
+    return TaskStatus.FAILED

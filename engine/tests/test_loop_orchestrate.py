@@ -250,6 +250,18 @@ def test_multi_agent_completeness_gap_is_executor_handled_not_delegated() -> Non
     assert next(x for x in state.task_graph if x["id"] == "meet-c1")["status"] == "DONE"
 
 
+def test_one_executor_result_closes_only_one_unbounded_task() -> None:
+    # Two unbounded (self-owned) completeness tasks + one executor SUCCESS must close exactly ONE - a
+    # single result cannot mark several tasks DONE.
+    from loop.tasks import decompose
+    state = LoopState(current_phase=Phase.EXECUTE)
+    decompose(state, [{"id": "meet-a", "allowed_paths": []}, {"id": "meet-b", "allowed_paths": []}])
+    step(state, _ctx(multi_agent=True,
+                     agent_runner=lambda t: AgentResult(t.id, Observation.SUCCESS, changed_paths=[])))
+    done = [t["id"] for t in state.task_graph if t["status"] == "DONE"]
+    assert done == ["meet-a"]  # exactly one, not both
+
+
 def test_critic_that_raises_escalates_not_crashes() -> None:
     def boom(_s: LoopState):
         raise RuntimeError("LLM judge timed out")

@@ -156,6 +156,15 @@ def test_is_complete_when_all_terminal() -> None:
     assert not is_complete(parse_tasks([_t("a", status="DONE"), _t("b")]))
 
 
+def test_status_for_is_the_single_observation_to_status_mapping() -> None:
+    from loop.controller import Observation
+    from loop.tasks import status_for
+    assert status_for(Observation.SUCCESS) is TaskStatus.DONE
+    assert status_for(Observation.PROGRESS) is TaskStatus.PENDING  # progress != done
+    assert status_for(Observation.TEST_REGRESSION) is TaskStatus.FAILED
+    assert status_for(Observation.POLICY_BLOCK) is TaskStatus.FAILED
+
+
 def test_tasks_conflict_pairwise() -> None:
     a = Task(id="a", allowed_paths=["engine/"])
     b = Task(id="b", allowed_paths=["engine/tests/x.py"])
