@@ -119,3 +119,49 @@ def test_attempt_fingerprint_is_deterministic_and_prefixed() -> None:
     a = attempt_fingerprint("f", "p")
     assert a == attempt_fingerprint("f", "p") and a.startswith("sha256:")
     assert a != attempt_fingerprint("f", "p2")
+
+
+# --------------------------------------------------------------------------- audit hardening (2026-07-23)
+
+
+def test_degenerate_budget_fails_closed_not_unbounded() -> None:
+    # A missing / zero / garbage max_attempts must STOP (fail-closed), never disable the cap and loop
+    # forever. Regression for the audit's headline fail-open finding.
+    for budgets in ({}, {"max_attempts": 0}, {"total_attempts": 3}, {"max_attempts": "oops"},
+                    {"max_attempts": -1}):
+        state = LoopState(current_phase=Phase.DIAGNOSE, budgets=dict(budgets))
+        t = route(state, Observation.TEST_REGRESSION)
+        assert t.decision is Decision.STOP and t.next_phase is Phase.STOPPED, budgets
+
+
+def test_repeated_approach_guard_covers_replan_and_reschedule() -> None:
+    # The dead-end guard is not REVISE-only: a repeated (failure, approach) fingerprint on
+    # REPLAN/RESCHEDULE escalates too, matching the module's documented BOUNDED invariant.
+    for obs in (Observation.WRONG_PLAN, Observation.OWNERSHIP_COLLISION, Observation.TEST_REGRESSION):
+        fp = attempt_fingerprint("same failure", "same approach")
+        state = LoopState(current_phase=Phase.DIAGNOSE, failed_approaches=[fp])
+        assert route(state, obs, fingerprint=fp).decision is Decision.ESCALATE, obs
+
+
+def test_replan_records_fingerprint_so_an_identical_repeat_escalates() -> None:
+    # apply() records re-entering fingerprints (aligned with the guard) so a second identical REPLAN is
+    # caught instead of grinding to the budget - and recording is scoped to re-entering decisions.
+    fp = attempt_fingerprint("wrong plan X", "same replan")
+    state = LoopState(current_phase=Phase.DIAGNOSE)
+    assert apply(state, Observation.WRONG_PLAN, fingerprint=fp).decision is Decision.REPLAN
+    assert fp in state.failed_approaches
+    state.current_phase = Phase.DIAGNOSE  # the executor replanned identically; back at diagnose
+    assert apply(state, Observation.WRONG_PLAN, fingerprint=fp).decision is Decision.ESCALATE
+
+
+def test_apply_is_idempotent_on_a_terminal_state() -> None:
+    # Feeding observations to a FINALIZED loop must not keep growing the durable lists (the entering
+    # transition still commits; replays are true no-ops).
+    state = LoopState(current_phase=Phase.VERIFY)
+    apply(state, Observation.SUCCESS)  # VERIFY -> FINALIZE, records the entering transition
+    assert state.current_phase is Phase.FINALIZE
+    n_obs = len(state.observations)
+    for _ in range(5):
+        apply(state, Observation.TEST_REGRESSION, fingerprint="sha256:x")
+    assert len(state.observations) == n_obs and state.failed_approaches == []
+    assert state.current_phase is Phase.FINALIZE

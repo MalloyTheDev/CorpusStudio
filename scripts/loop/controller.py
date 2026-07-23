@@ -5,8 +5,10 @@ Design invariants (mirror the assurance kernel so the two planes share a discipl
   * every transition is a PURE function of ``(state, observation)`` - deterministic and testable; no
     wall-clock, randomness, or I/O in the transition itself.
   * FAIL-CLOSED: an unrecognised observation ESCALATES; it never silently advances the loop.
-  * BOUNDED: a total-attempt budget caps the loop, and the SAME ``(failure, patch)`` fingerprint is
-    never retried - "same test failure, same stack trace, same patch -> do not retry".
+  * BOUNDED: a total-attempt budget caps the loop (a non-positive / missing / unparseable cap fails
+    CLOSED, it does NOT mean "unlimited"), and a re-entering decision that repeats a known-failed
+    ``(failure, approach)`` fingerprint escalates instead of retrying - "same failure, same approach
+    -> do not retry".
   * human approval is RETAINED: ``AUTHORIZATION_REQUIRED`` / ``POLICY_BLOCK`` escalate to a human; a
     worker-lineage impact leaves the ordinary loop for the (human-gated) worker workflow.
 
@@ -154,10 +156,20 @@ class Transition:
     note: str
 
 
+def _as_int(value: object, default: int) -> int:
+    """Coerce a durable/free-form budget value to int, defaulting on anything unparseable - a garbage
+    budget must degrade to a fail-closed number, never raise out of the pure transition."""
+    try:
+        return int(value)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return default
+
+
 def route(state: LoopState, observation: Observation, *, fingerprint: str | None = None) -> Transition:
     """Route one classified observation to a decision + next phase. PURE: no I/O, no mutation of
-    ``state``. Apply the budget guard (attempts >= max -> STOP), then the repeated-failure guard (a
-    known-failed fingerprint on a REVISE -> ESCALATE, because retrying the same patch is a dead end)."""
+    ``state``. Apply the budget guard (a non-positive/missing/unusable cap or used >= cap -> STOP), then
+    the repeated-approach guard (a re-entering decision that repeats a known-failed (failure, approach)
+    fingerprint -> ESCALATE, because grinding the same approach is a dead end)."""
     if state.is_terminal:
         return Transition(Decision.STOP, state.current_phase, state.termination_reason,
                           "already terminal; no further transition")
@@ -169,15 +181,19 @@ def route(state: LoopState, observation: Observation, *, fingerprint: str | None
                           "no route for observation; escalating fail-closed")
 
     if base in _RETRYING:
-        max_attempts = int(state.budgets.get("max_attempts", 0))
-        used = int(state.budgets.get("total_attempts", 0))
-        if max_attempts and used >= max_attempts:
-            return Transition(Decision.STOP, Phase.STOPPED, "attempt budget exhausted",
-                              f"{used}/{max_attempts} attempts used; stopping instead of looping")
-        # Repeated-failure guard: a REVISE that repeats a known-failed (failure, patch) is a dead end.
-        if base is Decision.REVISE and fingerprint is not None and fingerprint in state.failed_approaches:
+        max_attempts = _as_int(state.budgets.get("max_attempts"), 0)
+        used = _as_int(state.budgets.get("total_attempts"), 0)
+        # A non-positive / missing / unparseable cap is NOT "no cap" - it fails CLOSED (STOP). An
+        # unbounded loop is exactly what this controller exists to prevent.
+        if max_attempts <= 0 or used >= max_attempts:
+            stop_reason = "attempt budget exhausted" if max_attempts > 0 else "no usable attempt budget"
+            return Transition(Decision.STOP, Phase.STOPPED, stop_reason,
+                              f"{used}/{max_attempts} attempts; stopping (fail-closed), not looping")
+        # Repeated-approach guard: ANY re-entering decision (REVISE/REPLAN/RESCHEDULE) that repeats a
+        # known-failed (failure, approach) fingerprint is a dead end -> escalate instead of grinding.
+        if fingerprint is not None and fingerprint in state.failed_approaches:
             return Transition(Decision.ESCALATE, Phase.ESCALATED, "repeated failed approach",
-                              "same failure + same patch already failed; a new approach is required")
+                              "same failure + same approach already failed; a new approach is required")
 
     next_phase, reason, note = _phase_for(state.current_phase, base, observation)
     return Transition(base, next_phase, reason, note)
@@ -216,6 +232,11 @@ def apply(state: LoopState, observation: Observation, *, fingerprint: str | None
     observation, charge the attempt budget for a re-entering decision, record a failed fingerprint,
     move to the next phase, and set the terminal reason. Returns the taken :class:`Transition`."""
     transition = route(state, observation, fingerprint=fingerprint)
+    # Idempotent on a terminal state: route() already reports "no further transition", so a replay must
+    # not keep growing the durable observation / failed-approach lists. The transition that FIRST enters
+    # a terminal phase still commits, because current_phase is not yet terminal at that point.
+    if state.is_terminal:
+        return transition
     state.observations.append({
         "observation": observation.value,
         "decision": transition.decision.value,
@@ -225,9 +246,11 @@ def apply(state: LoopState, observation: Observation, *, fingerprint: str | None
         "note": note or transition.note,
     })
     if transition.decision in _RETRYING:
-        state.budgets["total_attempts"] = int(state.budgets.get("total_attempts", 0)) + 1
-    # A re-entering failure with a fingerprint records the dead end so it is never retried.
-    if fingerprint is not None and observation not in (Observation.SUCCESS, Observation.PROGRESS):
+        state.budgets["total_attempts"] = _as_int(state.budgets.get("total_attempts"), 0) + 1
+    # Record the dead-end fingerprint for exactly the decisions the guard consults (the re-entering
+    # ones), so recording and the repeated-approach guard stay aligned - no REPLAN/RESCHEDULE entry can
+    # pollute a later REVISE, and no re-entering dead end goes unrecorded.
+    if transition.decision in _RETRYING and fingerprint is not None:
         if fingerprint not in state.failed_approaches:
             state.failed_approaches.append(fingerprint)
     state.current_phase = transition.next_phase
