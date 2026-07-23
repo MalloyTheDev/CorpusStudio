@@ -8,6 +8,7 @@ from corpus_studio.model_backends.base import BackendGenerateRequest
 from corpus_studio.model_backends.in_process import (
     InProcessAdapterBackend,
     InProcessAdapterError,
+    _generation_kwargs,
     base_model_for_adapter,
 )
 
@@ -71,3 +72,22 @@ def test_build_backend_routes_in_process_and_requires_an_adapter():
 )
 def test_in_process_generate_end_to_end():  # pragma: no cover
     raise AssertionError("integration only")
+
+
+def test_generation_kwargs_applies_requested_temperature_and_top_p():
+    # The requested decode is now actually PASSED to model.generate, not merely recorded. Previously
+    # temperature/top_p were omitted, so a run claiming 0.7/0.9 silently decoded at the model defaults.
+    sampled = _generation_kwargs(
+        BackendGenerateRequest(temperature=0.7, top_p=0.9, max_tokens=50), 2048
+    )
+    assert sampled["do_sample"] is True
+    assert sampled["temperature"] == 0.7 and sampled["top_p"] == 0.9
+    assert sampled["max_new_tokens"] == 50
+
+
+def test_generation_kwargs_greedy_forwards_no_sampler_params():
+    # temperature 0 / None -> greedy deterministic decode; top_p is irrelevant and not forwarded.
+    greedy = _generation_kwargs(BackendGenerateRequest(temperature=0.0, top_p=0.9), 2048)
+    assert greedy["do_sample"] is False
+    assert "temperature" not in greedy and "top_p" not in greedy
+    assert greedy["max_new_tokens"] == 2048  # falls back to the backend default when request omits it
