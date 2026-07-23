@@ -198,12 +198,14 @@ def _execute(state: LoopState, ctx: LoopContext, directive: Directive) -> PhaseR
         for task in ready_tasks(parse_tasks(state.task_graph)):
             set_status(state, task.id, TaskStatus.ACTIVE)
             observation = ctx.executor(state, next_directive(state))
-            set_status(state, task.id, status_for(observation))
-            if status_for(observation) is TaskStatus.FAILED:
+            status = status_for(observation)
+            set_status(state, task.id, status)
+            if status is TaskStatus.FAILED:
                 return PhaseResult(observation, f"task {task.id!r} failed")
         if _all_done(state):
             return PhaseResult(Observation.SUCCESS, "all tasks executed")
-        return PhaseResult(Observation.CHANGES_REQUESTED, "more tasks remain to execute")
+        remaining = sorted(t.id for t in parse_tasks(state.task_graph) if t.status is not TaskStatus.DONE)
+        return PhaseResult(Observation.CHANGES_REQUESTED, f"{len(remaining)} task(s) remain: {remaining}")
 
     return PhaseResult(ctx.executor(state, directive), "executed the change")
 
