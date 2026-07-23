@@ -8,8 +8,9 @@ makes them inert; they never trap a session).
 ## Enabled by default: `finalize_reminder.py` (Stop hook)
 
 Wired in `.claude/settings.json`. It is a **no-op for ordinary sessions**. It only acts when the
-corpus-slice loop has written `phase="FINALIZE_REQUESTED"` (and no `stop_reason`) to its session state at
-`git rev-parse --git-path corpusstudio-assurance/sessions/<session-id>/slice.json` - then it asks Claude
+corpus-slice loop has written `phase="FINALIZE_REQUESTED"` (and no `stop_reason`) to its loop state at
+the FIXED `git rev-parse --git-path corpusstudio-assurance/current-slice.json` (not session-scoped -
+Claude cannot read its own harness session id) - then it asks Claude
 to run the verify gate and produce the completion record before stopping. It allows normal stopping in
 every other case (any other phase, an already-resolved stop, a malformed input, a missing state), and it
 honours the re-entrant `stop_hook_active` block-cap guard so it can never cause an infinite continue loop.

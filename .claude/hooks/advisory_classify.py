@@ -17,6 +17,9 @@ import sys
 # (path fragment, reminder). Matched against the edited file path.
 _SENSITIVE: tuple[tuple[str, str], ...] = (
     ("platform/contracts.py", "contracts changed -> regenerate schemas + TS and update the 3 contract-count assertions (test_platform_contracts)."),
+    ("platform/enums.py", "contracts trigger -> a contract enum change needs the schema/TS regen + the 3 count assertions (test_platform_contracts)."),
+    ("platform/execution_config.py", "worker-closure file -> a worker-byte change needs a fresh package + env locks; trace the import path."),
+    ("platform/planner.py", "worker-RUNTIME-reachable (lazy imports from worker.py/runners.py) -> classify RUNTIME_REACHABLE_REVIEW_REQUIRED, not control-plane by default."),
     ("platform/worker.py", "worker-closure file -> a worker-byte change needs a fresh package + env locks; trace the import path."),
     ("platform/runners.py", "worker-closure file -> worker code under platform/; classify WORKER_CHANGE_REQUIRED vs control-plane-only."),
     ("platform/artifacts.py", "worker-closure file -> worker code under platform/; success admission runs in the child."),

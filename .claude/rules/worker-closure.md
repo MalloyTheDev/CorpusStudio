@@ -5,6 +5,7 @@ paths:
   - "engine/corpus_studio/platform/artifacts.py"
   - "engine/corpus_studio/platform/supervisor.py"
   - "engine/corpus_studio/platform/execution_config.py"
+  - "engine/corpus_studio/platform/planner.py"
   - "engine/corpus_studio/training/trainer.py"
 ---
 

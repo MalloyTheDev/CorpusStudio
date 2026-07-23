@@ -2,6 +2,9 @@
 paths:
   - "scripts/assurance/**"
   - "scripts/cs_assure.py"
+  - ".claude/**"
+  - "engine/tests/test_assurance_*.py"
+  - "engine/tests/test_plugin_hooks.py"
 ---
 
 # Changing the assurance system is self-modification
