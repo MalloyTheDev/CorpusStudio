@@ -5,7 +5,7 @@
   "obligations": [
     {
       "id": "assurance-self-modify",
-      "globs": ["scripts/assurance/**", "scripts/cs_assure.py", ".claude/**", "engine/tests/test_assurance_*.py", "engine/tests/test_plugin_hooks.py", ".github/workflows/assurance.yml"],
+      "globs": ["scripts/assurance/**", "scripts/cs_assure.py", ".claude/**", "engine/tests/test_assurance_*.py", "engine/tests/test_plugin_hooks.py", ".github/workflows/**"],
       "obligation": "BOOTSTRAP_SELF_MODIFIED: this change edits the tool that judges changes, so its own assurance output is candidate-local and provisional; admit only via the repo's pre-existing gate + CI + INDEPENDENT human review, never self-approve or self-merge, and keep the kernel stdlib-only and fail-closed (exit 2).",
       "authority": "the repo's pre-existing gate + CI + an independent human reviewer (NOT the assurance system's own output).",
       "severity": "blocking",
