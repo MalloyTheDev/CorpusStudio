@@ -76,6 +76,7 @@ class Observation(str, Enum):
     WORKER_LINEAGE_IMPACT = "WORKER_LINEAGE_IMPACT"  # worker bytes changed -> fresh wheel/env workflow
     NONDETERMINISTIC_FAILURE = "NONDETERMINISTIC_FAILURE"  # flaky; a bounded retry may pass
     CHANGES_REQUESTED = "CHANGES_REQUESTED"          # a reviewer found real issues -> correction tasks
+    HOLD = "HOLD"                                    # wait on an external condition (e.g. CI) - do NOT advance
 
 
 class Decision(str, Enum):
@@ -88,6 +89,7 @@ class Decision(str, Enum):
     ESCALATE = "ESCALATE"                            # hard blocker / authorization -> human
     STOP = "STOP"                                    # budget exhausted / repeated dead end
     ENTER_WORKER_WORKFLOW = "ENTER_WORKER_WORKFLOW"  # leave the ordinary loop for the worker workflow
+    HOLD = "HOLD"                                    # stay in the CURRENT phase, waiting on an external condition
 
 
 # The base routing table: taxonomy -> decision BEFORE the budget/retry guards apply. A missing key is
@@ -110,6 +112,7 @@ _ROUTE: dict[Observation, Decision] = {
     Observation.POLICY_BLOCK: Decision.ESCALATE,
     Observation.AUTHORIZATION_REQUIRED: Decision.ESCALATE,
     Observation.WORKER_LINEAGE_IMPACT: Decision.ENTER_WORKER_WORKFLOW,
+    Observation.HOLD: Decision.HOLD,
 }
 
 # Decisions that re-enter the loop (and therefore consume budget / are subject to the retry guard).
@@ -214,6 +217,10 @@ def _phase_for(current: Phase, decision: Decision, observation: Observation) -> 
         return Phase.PLAN, None, "plan is wrong; replanning"
     if decision is Decision.RESCHEDULE:
         return Phase.ASSIGN, None, "re-entering task assignment (a collision or new correction work to schedule)"
+    if decision is Decision.HOLD:
+        # Stay in the current phase, waiting on an external condition (e.g. CI). Does NOT charge the
+        # retry budget - it is waiting, not retrying - so the caller polls / re-invokes when it may change.
+        return current, None, "holding for an external condition"
     if decision is Decision.ENTER_WORKER_WORKFLOW:
         return Phase.ESCALATED, "worker-lineage impact -> worker workflow (human-gated)", \
             "worker bytes changed; leaving the ordinary loop"

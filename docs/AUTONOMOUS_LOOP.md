@@ -27,9 +27,13 @@ boundary.
 
 ```
 RECEIVE_GOAL → RECON → DEFINE_SUCCESS → PLAN → DECOMPOSE → ASSIGN → EXECUTE → OBSERVE → DIAGNOSE
-   → { ADVANCE→REVIEW | REVISE→EXECUTE | REPLAN→PLAN | RESCHEDULE→ASSIGN | ESCALATE | STOP }
+   → { ADVANCE→REVIEW | REVISE→EXECUTE | REPLAN→PLAN | RESCHEDULE→ASSIGN | HOLD→(stay) | ESCALATE | STOP }
    → REVIEW → INTEGRATE → VERIFY → FINALIZE
 ```
+
+`HOLD` keeps the loop in the current phase, waiting on an external condition (e.g. CI that has not yet
+reported), without charging the retry budget — so `INTEGRATE` never advances *past* the merge gate on an
+unsettled CI, and the caller re-invokes when the condition may have changed.
 
 `FINALIZE` / `ESCALATED` / `STOPPED` are terminal. The loop is **bounded** (a per-goal attempt budget
 *and* a hard driver step cap) and **fails closed** (an unclassifiable observation escalates; a
