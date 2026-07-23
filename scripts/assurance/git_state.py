@@ -155,6 +155,16 @@ def merge_base(ctx: GitContext, base_commit: str) -> str:
     return oid
 
 
+def read_committed_file(ctx: GitContext, commit: str, relpath: str) -> bytes | None:
+    """The bytes of a repo-relative file AS COMMITTED at ``commit`` (read-only), or None if the path did
+    not exist at that commit. Fails closed (GitStateError) on a git error other than an absent path - so
+    a trusted-base file (e.g. an earlier policy) can be read without touching the working tree."""
+    proc = _git(ctx.root, "show", f"{commit}:{relpath}", check=False)
+    if proc.returncode != 0:
+        return None  # the path did not exist at that commit
+    return proc.stdout
+
+
 def changed_tracked_paths(root: Path, base_commit: str) -> list[str]:
     """Repository-relative paths of TRACKED files differing between ``base_commit`` and the tree.
 
