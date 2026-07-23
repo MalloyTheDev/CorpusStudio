@@ -230,3 +230,41 @@ def test_verify_does_not_finalize_a_green_gate_with_unmet_criteria() -> None:
     t = step(state, _ctx(critic=lambda _s: [Criterion("c1", "docs written", met=False)]))
     assert t.decision is not Decision.ADVANCE and state.current_phase is not Phase.FINALIZE
     assert any(task["id"] == "meet-c1" for task in state.task_graph)  # the gap became a correction task
+
+
+def test_multi_agent_completeness_gap_is_executor_handled_not_delegated() -> None:
+    # An unbounded completeness task (empty allowed_paths) must run via the executor, NOT a bounded agent
+    # (which would breach on every edit and deadlock the gap).
+    from loop.tasks import decompose
+    calls: list[str] = []
+
+    def runner(task):
+        calls.append(task.id)
+        return AgentResult(task.id, Observation.SUCCESS, changed_paths=[])
+
+    state = LoopState(current_phase=Phase.EXECUTE)
+    decompose(state, [{"id": "meet-c1", "allowed_paths": []}])
+    t = step(state, _ctx(multi_agent=True, agent_runner=runner))
+    assert calls == []  # the agent runner was NOT invoked for the unbounded task
+    assert t.decision is Decision.ADVANCE
+    assert next(x for x in state.task_graph if x["id"] == "meet-c1")["status"] == "DONE"
+
+
+def test_critic_that_raises_escalates_not_crashes() -> None:
+    def boom(_s: LoopState):
+        raise RuntimeError("LLM judge timed out")
+    state = LoopState(current_phase=Phase.VERIFY)
+    t = step(state, _ctx(critic=boom))
+    assert state.current_phase is Phase.ESCALATED and t.decision is Decision.ESCALATE
+
+
+def test_run_loop_seeds_and_records_the_learning_ledger(tmp_path: Path) -> None:
+    from loop.completeness import Criterion
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps([{"failed_approaches": ["sha256:prior-dead-end"]}]))
+    state = LoopState(goal="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _ctx(executor=_executor([{"id": "impl", "allowed_paths": ["engine/"]}]),
+                         reviewer=lambda _s: [], gh_runner=_gh(ci="pass"), pr_ref="1",
+                         critic=lambda _s: [Criterion("c", "done", met=True)], ledger_path=ledger))
+    assert "sha256:prior-dead-end" in state.failed_approaches  # seeded from the ledger
+    assert json.loads(ledger.read_text())[-1]["goal"] == "g1"  # this goal recorded for the next

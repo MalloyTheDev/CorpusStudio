@@ -65,6 +65,26 @@ def test_critic_returning_non_criteria_fails_closed() -> None:
         check_completeness(LoopState(), lambda _s: ["not a criterion"])  # type: ignore[arg-type,list-item]
 
 
+def test_critic_that_raises_fails_closed() -> None:
+    def boom(_s: LoopState) -> list[Criterion]:
+        raise RuntimeError("LLM judge timed out")
+    with pytest.raises(CompletenessError, match="critic raised"):
+        check_completeness(LoopState(), boom)
+
+
+def test_non_bool_met_is_not_treated_as_met() -> None:
+    # A truthy non-bool `met` (e.g. the string "yes") must NOT score the criterion as met.
+    verdict = check_completeness(LoopState(), _critic([Criterion("c1", "x", met="yes")]))  # type: ignore[arg-type]
+    assert not verdict.complete and [c.id for c in verdict.unmet] == ["c1"]
+
+
+def test_seed_ignores_a_non_list_failed_approaches(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps([{"failed_approaches": "sha256:not-a-list"}]))  # scalar, not a list
+    state = LoopState()
+    assert seed_known_dead_ends(state, ledger) == 0 and state.failed_approaches == []
+
+
 # --------------------------------------------------------------------------- cross-goal ledger
 
 
