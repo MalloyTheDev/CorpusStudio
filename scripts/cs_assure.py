@@ -348,6 +348,13 @@ def main(argv: list[str] | None = None) -> int:
         # Fail closed: a structured refusal on stderr, exit 2, and NO partial record on stdout.
         sys.stderr.write(f"cs_assure: {type(exc).__name__}: {exc}\n")
         return EXIT_FAIL_CLOSED
+    except Exception as exc:  # noqa: BLE001 - deliberate backstop; see below.
+        # Backstop: any error the typed handlers missed (e.g. a RecursionError from hostile deep JSON
+        # that slipped a loader) must still fail CLOSED at exit 2 - never a bare traceback aliased onto
+        # the exit-1 "not-clean" (doclint-stale / red-gate) rung. `Exception` excludes
+        # KeyboardInterrupt / SystemExit (BaseException), which must still propagate.
+        sys.stderr.write(f"cs_assure: UnexpectedRefusal: {type(exc).__name__}: {exc}\n")
+        return EXIT_FAIL_CLOSED
 
 
 if __name__ == "__main__":

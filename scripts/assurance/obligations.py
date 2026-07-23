@@ -164,7 +164,9 @@ def load_policy(root: Path, policy_relpath: str = DEFAULT_POLICY_RELPATH) -> Loa
         raise PolicyError(f"obligations policy could not be read ({policy_relpath}): {exc}") from exc
     try:
         raw = json.loads(raw_bytes.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError) as exc:
+    except (ValueError, UnicodeDecodeError, RecursionError) as exc:
+        # RecursionError (deeply-nested JSON) is NOT a ValueError - catch it so a hostile policy fails
+        # CLOSED (exit 2), never as a bare traceback + exit 1.
         raise PolicyError(f"obligations policy is not valid UTF-8 JSON ({policy_relpath}): {exc}") from exc
     obligations = parse_policy(raw)
     return LoadedPolicy(
