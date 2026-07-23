@@ -81,6 +81,20 @@ def test_full_integrated_loop_merges_and_reaches_finalize() -> None:
     assert state.current_phase is Phase.FINALIZE
     assert "sha256:v" in state.assurance_records
     assert any("merged" in o.get("note", "") for o in state.observations)  # the PR was actually merged
+    assert next(t for t in state.task_graph if t["id"] == "impl")["status"] == "DONE"  # #4: not left PENDING
+
+
+def test_single_agent_drains_a_multi_task_graph_before_finalizing() -> None:
+    # A single-agent loop with several tasks (one dependent) must finalize with EVERY task DONE - no task
+    # is left PENDING when the goal finalizes (external review #4).
+    state = LoopState(goal="multi", current_phase=Phase.RECEIVE_GOAL)
+    ctx = _ctx(executor=_executor([{"id": "a", "allowed_paths": ["engine/"]},
+                                   {"id": "b", "allowed_paths": ["scripts/"]},
+                                   {"id": "c", "allowed_paths": ["docs/"], "depends_on": ["a"]}]),
+               reviewer=lambda _s: [], gh_runner=_gh(ci="pass"), pr_ref="1")
+    run_loop(state, ctx)
+    assert state.current_phase is Phase.FINALIZE
+    assert all(t["status"] == "DONE" for t in state.task_graph)  # a, b, and the dependent c all DONE
 
 
 def test_integrate_holds_on_unsettled_ci_never_advancing_past_the_gate() -> None:
