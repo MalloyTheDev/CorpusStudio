@@ -30,7 +30,7 @@ from assurance.canonical_json import sha256_digest
 from assurance.doc_lint import REGISTRY_RELPATH, lint_repo, load_registry
 from assurance.git_state import current_branch, discover_git_context, recent_commits
 from assurance.github_issues import ISSUES_SOURCE, gather_issues
-from assurance.obligations import DEFAULT_POLICY_RELPATH, load_policy, match_obligations
+from assurance.obligations import DEFAULT_POLICY_RELPATH, load_effective_policy, match_obligations
 from assurance.records import RECORD_SCHEMA_VERSION, build_change_set_record, seal_record
 
 STATUS_RECORD_TYPE = "project_status"
@@ -73,7 +73,7 @@ def _summarize_change_set(cs_payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _summarize_impact(
-    fired: list[dict[str, Any]], unmatched_count: int, applicability_key: str
+    fired: list[dict[str, Any]], unmatched_count: int, applicability_key: str, base_policy_available: bool
 ) -> dict[str, Any]:
     by_severity: dict[str, int] = {}
     for obligation in fired:
@@ -82,6 +82,7 @@ def _summarize_impact(
         "obligation_count": len(fired),
         "unmatched_path_count": unmatched_count,
         "impact_applicability_key": applicability_key,
+        "base_policy_available": base_policy_available,
         "fired_obligations": [{"id": o["id"], "severity": o["severity"]} for o in fired],  # id-sorted
         "by_severity": by_severity,
     }
@@ -132,7 +133,9 @@ def build_status_record(
     cs_provenance = change_set["provenance"]
     changed_paths = [cp["path"] for cp in cs_payload["changed_paths"]]
 
-    policy = load_policy(ctx.root, policy_relpath)
+    # Effective policy = candidate UNION trusted-base (a candidate cannot weaken the policy it is judged
+    # against); consistent with the impact command so the two records' applicability keys still match.
+    policy, base_policy_available = load_effective_policy(ctx, base_ref, policy_relpath)
     fired, unmatched_count = match_obligations(changed_paths, list(policy.obligations))
     impact_key = sha256_digest(
         {"change_set_fingerprint": cs_payload["fingerprint"], "policy_digest": policy.digest}
@@ -148,7 +151,7 @@ def build_status_record(
         "scope": scope,
         "base_oid": cs_payload["base_oid"],
         "change_set": _summarize_change_set(cs_payload),
-        "impact": _summarize_impact(fired, unmatched_count, impact_key),
+        "impact": _summarize_impact(fired, unmatched_count, impact_key, base_policy_available),
         "doclint": _summarize_doclint(sources, findings),
         "branch": {
             "current_branch": current_branch(ctx),

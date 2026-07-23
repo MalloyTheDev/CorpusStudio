@@ -155,6 +155,23 @@ def merge_base(ctx: GitContext, base_commit: str) -> str:
     return oid
 
 
+def read_committed_file(ctx: GitContext, commit: str, relpath: str) -> bytes | None:
+    """The bytes of a repo-relative file AS COMMITTED at ``commit`` (read-only), or None ONLY if the path
+    did not exist at that commit. A genuine git error (bad commit, corruption, permissions) fails CLOSED
+    as GitStateError - it is NOT conflated with 'path absent', so a caller cannot silently fall back on a
+    real failure. Never touches the working tree."""
+    proc = _git(ctx.root, "show", f"{commit}:{relpath}", check=False)
+    if proc.returncode == 0:
+        return proc.stdout
+    stderr = proc.stderr.decode("utf-8", "replace")
+    lowered = stderr.lower()
+    # `git show <commit>:<path>` for an absent path: "fatal: path 'X' does not exist in 'C'" or
+    # "fatal: path 'X' exists on disk, but not in 'C'". Anything else (bad object, corruption) fails closed.
+    if "does not exist in" in lowered or "exists on disk, but not in" in lowered:
+        return None
+    raise GitStateError(f"git show {commit}:{relpath} failed (exit {proc.returncode}): {stderr.strip()}")
+
+
 def changed_tracked_paths(root: Path, base_commit: str) -> list[str]:
     """Repository-relative paths of TRACKED files differing between ``base_commit`` and the tree.
 

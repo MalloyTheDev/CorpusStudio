@@ -39,7 +39,7 @@ from typing import Any
 from assurance import KERNEL_VERSION
 from assurance.canonical_json import sha256_of_bytes
 from assurance.git_state import AssuranceError, discover_git_context
-from assurance.obligations import DEFAULT_POLICY_RELPATH, load_policy, match_obligations
+from assurance.obligations import DEFAULT_POLICY_RELPATH, load_effective_policy, match_obligations
 from assurance.records import RECORD_SCHEMA_VERSION, build_change_set_record, seal_record
 
 GATE_SCHEMA_VERSION = 1
@@ -226,7 +226,7 @@ def build_verification_record(
     """
     ctx = discover_git_context(start_dir)
     gate = load_gate(ctx.root, gate_relpath)
-    policy = load_policy(ctx.root, policy_relpath)
+    policy, base_policy_available = load_effective_policy(ctx, base_ref, policy_relpath)
     change_set = build_change_set_record(start_dir=start_dir, scope=scope, base_ref=base_ref)
     cs_payload = change_set["payload"]
     cs_provenance = change_set["provenance"]
@@ -258,6 +258,7 @@ def build_verification_record(
             for step in sorted(step_results, key=lambda s: s.name)
         ],
         "obligation_count": len(fired),
+        "base_policy_available": base_policy_available,
         "fired_obligations": [
             {
                 "id": f["id"],

@@ -27,13 +27,16 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from assurance.obligations import (  # noqa: E402
+    LoadedPolicy,
     Obligation,
     PolicyError,
     build_impact_assessment,
     glob_matches,
+    load_effective_policy,
     load_policy,
     match_obligations,
     parse_policy,
+    union_policy,
 )
 from assurance.records import verify_record  # noqa: E402
 
@@ -77,6 +80,49 @@ def impact(repo: Path) -> tuple[subprocess.CompletedProcess[str], dict]:
 
 def _ob(id_: str, globs: list[str], severity: str = "blocking") -> Obligation:
     return Obligation(id=id_, globs=tuple(globs), obligation="o", authority="a", severity=severity, source="s")
+
+
+def _loaded(obs: list[Obligation]) -> LoadedPolicy:
+    return LoadedPolicy(obligations=tuple(obs), digest="sha256:d", schema_version=1, relpath="p",
+                        obligation_count=len(obs))
+
+
+# --------------------------------------------------------------------------- trusted-base policy union (PR2)
+
+
+def test_union_policy_cannot_weaken_the_trusted_base() -> None:
+    base = _loaded([_ob("a", ["engine/**", "docs/**"], "blocking"), _ob("b", ["scripts/**"])])
+    # candidate WEAKENS 'a' (drops docs/**, lowers severity), REMOVES 'b', ADDS 'c'
+    cand = _loaded([_ob("a", ["engine/**"], "advisory"), _ob("c", ["new/**"], "info")])
+    by = {o.id: o for o in union_policy(cand, base).obligations}
+    assert set(by) == {"a", "b", "c"}                      # base-only 'b' preserved; candidate-only 'c' added
+    assert set(by["a"].globs) == {"engine/**", "docs/**"}  # the dropped base glob is restored (no shrink)
+    assert by["a"].severity == "blocking"                  # the lowered severity is restored (no weaken)
+    assert by["b"].globs == ("scripts/**",)                # the removed base obligation is fully preserved
+
+
+def test_load_effective_policy_falls_back_honestly_when_base_unreachable(tmp_path: Path) -> None:
+    from assurance.git_state import discover_git_context
+    ctx = discover_git_context(_repo_with_policy(tmp_path))
+    policy, available = load_effective_policy(ctx, "no-such-ref-xyz")
+    assert not available and policy.obligations  # candidate-only + honest flag, no crash
+
+
+def test_a_weakened_candidate_policy_still_fires_the_base_obligation(tmp_path: Path) -> None:
+    # THE POINT of PR2: a change that REMOVES a glob from the policy cannot escape firing it - the impact
+    # engine judges against candidate UNION trusted-merge-base, so the removed coverage is restored.
+    repo = _repo_with_policy(tmp_path, REAL_POLICY_TEXT)  # main has the real policy (contracts -> docs/contracts/**)
+    _git(repo, "checkout", "-q", "-b", "feat")
+    weakened = REAL_POLICY_TEXT.replace(', "docs/contracts/**"', "")  # drop that glob from 'contracts'
+    (repo / "scripts" / "assurance" / "policy" / "obligations.json").write_text(weakened)
+    _plant(repo, "docs/contracts/RunPlan.schema.json")   # a path only the REMOVED glob would catch
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "weaken the policy + touch a contracts doc")
+    proc = run_cli(repo, "impact", "--base", "main")
+    record = json.loads(proc.stdout)
+    fired = {f["id"] for f in record["payload"]["fired_obligations"]}
+    assert record["payload"]["base_policy_available"] is True
+    assert "contracts" in fired  # restored by the union - a candidate-only policy would NOT have fired it
 
 
 def _valid_ob(**over: object) -> dict:

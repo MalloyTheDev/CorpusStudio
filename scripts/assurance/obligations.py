@@ -24,13 +24,21 @@ from __future__ import annotations
 
 import fnmatch
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from assurance import KERNEL_VERSION
 from assurance.canonical_json import sha256_digest, sha256_of_bytes
-from assurance.git_state import AssuranceError, discover_git_context
+from assurance.git_state import (
+    AssuranceError,
+    GitContext,
+    NoMergeBase,
+    ShallowHistoryLimitation,
+    discover_git_context,
+    merge_base,
+    read_committed_file,
+)
 from assurance.records import RECORD_SCHEMA_VERSION, build_change_set_record, seal_record
 
 POLICY_SCHEMA_VERSION = 1
@@ -38,6 +46,10 @@ IMPACT_RECORD_TYPE = "impact_assessment"
 IMPACT_SCHEMA_VERSION = 1
 DEFAULT_POLICY_RELPATH = "scripts/assurance/policy/obligations.json"
 VALID_SEVERITIES = ("info", "advisory", "blocking")
+_SEVERITY_RANK = {"info": 0, "advisory": 1, "blocking": 2}
+# An UNKNOWN severity ranks above every known one, so it can never be silently weakened by a recognised
+# candidate severity (both sides are VALID_SEVERITIES post-parse; this keeps 'never weaken' robust anyway).
+_UNKNOWN_SEVERITY_RANK = len(VALID_SEVERITIES)
 
 _ALLOWED_TOP_KEYS = frozenset({"schema_version", "description", "severities", "obligations"})
 _ALLOWED_OBLIGATION_KEYS = frozenset({"id", "globs", "obligation", "authority", "severity", "source"})
@@ -178,6 +190,73 @@ def load_policy(root: Path, policy_relpath: str = DEFAULT_POLICY_RELPATH) -> Loa
     )
 
 
+def load_base_policy(ctx: GitContext, base_ref: str,
+                     policy_relpath: str = DEFAULT_POLICY_RELPATH) -> LoadedPolicy | None:
+    """The TRUSTED policy as committed at the merge-base of HEAD and ``base_ref`` (the last reviewed +
+    merged point). Returns None when the trusted base is unavailable - no merge base, the policy file was
+    absent there, a git error, or a malformed base policy - so the caller can honestly flag that the
+    no-weakening guarantee could not be applied (candidate-only) rather than crash or silently trust the
+    candidate. Never touches the working tree."""
+    try:
+        base_commit = merge_base(ctx, base_ref)
+    except (NoMergeBase, ShallowHistoryLimitation):
+        return None  # no trusted base to compare against (initial commit / shallow clone) - legitimate
+    # read_committed_file returns None for a genuinely absent policy, and RAISES (GitStateError) on a real
+    # git failure - which we deliberately let PROPAGATE so a broken repo fails closed, not candidate-only.
+    raw_bytes = read_committed_file(ctx, base_commit, policy_relpath)
+    if raw_bytes is None:
+        return None  # the policy file did not exist at the trusted base (a genuinely new policy)
+    try:
+        obligations = parse_policy(json.loads(raw_bytes.decode("utf-8")))
+    except (ValueError, UnicodeDecodeError, RecursionError, PolicyError):
+        return None  # a malformed committed base policy -> treat as unavailable (honest flag)
+    return LoadedPolicy(
+        obligations=tuple(obligations),
+        digest=sha256_of_bytes(raw_bytes),
+        schema_version=POLICY_SCHEMA_VERSION,
+        relpath=policy_relpath,
+        obligation_count=len(obligations),
+    )
+
+
+def _stronger_severity(a: str, b: str) -> str:
+    return a if (_SEVERITY_RANK.get(a, _UNKNOWN_SEVERITY_RANK)
+                 >= _SEVERITY_RANK.get(b, _UNKNOWN_SEVERITY_RANK)) else b
+
+
+def union_policy(candidate: LoadedPolicy, base: LoadedPolicy) -> LoadedPolicy:
+    """Effective policy = candidate UNION trusted-base. A candidate may STRENGTHEN (add obligations, add
+    globs, raise severity) but never WEAKEN: every base obligation is preserved (a candidate cannot remove
+    it), a shared id keeps the UNION of globs and the STRONGER severity, and a candidate-only obligation is
+    added. So the fired-obligation list can never be shrunk below the trusted base by editing the policy.
+    The digest binds BOTH source digests so the sealed record is honest about the effective policy used."""
+    by_base = {o.id: o for o in base.obligations}
+    by_cand = {o.id: o for o in candidate.obligations}
+    merged: list[Obligation] = []
+    for ob_id in sorted(set(by_base) | set(by_cand)):
+        b, c = by_base.get(ob_id), by_cand.get(ob_id)
+        if b is not None and c is not None:
+            merged.append(replace(c, globs=tuple(sorted(set(b.globs) | set(c.globs))),
+                                  severity=_stronger_severity(b.severity, c.severity)))
+        else:
+            merged.append(b if b is not None else c)  # type: ignore[arg-type]
+    digest = sha256_digest({"effective_policy_of": {"candidate": candidate.digest, "base": base.digest}})
+    return LoadedPolicy(obligations=tuple(merged), digest=digest, schema_version=candidate.schema_version,
+                        relpath=candidate.relpath, obligation_count=len(merged))
+
+
+def load_effective_policy(ctx: GitContext, base_ref: str,
+                          policy_relpath: str = DEFAULT_POLICY_RELPATH) -> tuple[LoadedPolicy, bool]:
+    """Return (effective_policy, base_policy_available). When the trusted base is available, the effective
+    policy is candidate UNION base (a candidate may strengthen, never weaken); otherwise it is the
+    candidate policy with base_policy_available=False so the record flags the un-applied guarantee."""
+    candidate = load_policy(ctx.root, policy_relpath)
+    base = load_base_policy(ctx, base_ref, policy_relpath)
+    if base is None:
+        return candidate, False
+    return union_policy(candidate, base), True
+
+
 def glob_matches(glob: str, path: str) -> bool:
     """Boundary-correct match of a repo-relative POSIX ``path`` against a policy ``glob``.
 
@@ -244,11 +323,13 @@ def build_impact_assessment(
 
     The change set is REFERENCED (by fingerprint + record digest + base/head oids), not re-embedded;
     the meaningful subset - the paths that fired an obligation - lives in each obligation's
-    ``triggers``. The policy is read from the working tree, so a change that edits the policy is
-    self-assessed against its own candidate policy (consistent with ``assurance-self-modify``).
+    ``triggers``. The policy is the EFFECTIVE policy: the candidate working-tree policy UNIONed with the
+    trusted merge-base policy, so a change that edits the policy can STRENGTHEN it but can never WEAKEN
+    (remove / shrink) a trusted-base obligation to escape firing it. ``base_policy_available`` records
+    whether that union could be applied (false = candidate-only, when no trusted base is reachable).
     """
     ctx = discover_git_context(start_dir)
-    policy = load_policy(ctx.root, policy_relpath)
+    policy, base_policy_available = load_effective_policy(ctx, base_ref, policy_relpath)
     change_set = build_change_set_record(start_dir=start_dir, scope=scope, base_ref=base_ref)
     cs_payload = change_set["payload"]
     cs_provenance = change_set["provenance"]
@@ -269,6 +350,7 @@ def build_impact_assessment(
         "obligation_count": len(fired),
         "unmatched_path_count": unmatched_path_count,
         "applicability_key": applicability_key,
+        "base_policy_available": base_policy_available,
         "fired_obligations": fired,
     }
     provenance = {
@@ -285,5 +367,6 @@ def build_impact_assessment(
         "policy_schema_version": policy.schema_version,
         "policy_digest": policy.digest,
         "policy_obligation_count": policy.obligation_count,
+        "base_policy_available": base_policy_available,
     }
     return seal_record(IMPACT_RECORD_TYPE, IMPACT_SCHEMA_VERSION, payload, provenance)

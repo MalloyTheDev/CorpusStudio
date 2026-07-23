@@ -524,3 +524,15 @@ def test_seal_and_verify_roundtrip() -> None:
 
 def test_verify_rejects_record_without_digest() -> None:
     assert verify_record({"record_type": "change_set", "payload": {}}) is False
+
+
+def test_read_committed_file_distinguishes_absent_from_error(tmp_path: Path) -> None:
+    from assurance.git_state import GitStateError, discover_git_context, read_committed_file
+    repo = init_repo(tmp_path / "repo")
+    (repo / "policy.txt").write_text("v1\n")
+    commit_all(repo, "seed")
+    ctx = discover_git_context(repo)
+    assert read_committed_file(ctx, "HEAD", "policy.txt") == b"v1\n"      # a committed file reads back
+    assert read_committed_file(ctx, "HEAD", "nope.txt") is None          # an ABSENT path -> None, not an error
+    with pytest.raises(GitStateError):                                   # an INVALID ref fails CLOSED, not 'absent'
+        read_committed_file(ctx, "notacommitref", "policy.txt")
