@@ -56,7 +56,7 @@ from loop.integrate import (
 )
 from loop.observe import CsAssureRunner, LoopObserveError, _run_cs_assure, observe
 from loop.review import Reviewer, review, review_observation
-from loop.router import AgentRunner, aggregate_observation, dispatch_wave
+from loop.router import AgentRunner, PathVerifier, aggregate_observation, dispatch_wave
 from loop.store import save
 from loop.tasks import LoopTaskError, TaskStatus, parse_tasks, ready_tasks, set_status, status_for
 
@@ -81,6 +81,9 @@ class LoopContext:
     reviewer: Reviewer | None = None
     critic: Critic | None = None
     agent_runner: AgentRunner | None = None
+    # An INDEPENDENT worktree-diff source for boundary enforcement. When set, a delegated agent's ownership
+    # boundary is checked against the real diff, not its self-reported changed_paths. None = trust-based.
+    verify_paths: PathVerifier | None = None
     gh_runner: GhRunner | None = None
     pr_ref: str | None = None
     dangerous: bool = False
@@ -99,6 +102,13 @@ class LoopContext:
     run_cs_assure: CsAssureRunner = _run_cs_assure
     store_path: Path | None = None
     ledger_path: Path | None = None  # cross-goal learning ledger (seed at start, record at terminal)
+
+    def __post_init__(self) -> None:
+        # verify_paths only takes effect on the DELEGATED multi-agent EXECUTE path. Setting it while
+        # multi_agent is off would silently do nothing (the single-agent executor runs unbounded), so an
+        # operator could believe boundary verification is active when it is not - fail LOUD instead.
+        if self.verify_paths is not None and not self.multi_agent:
+            raise LoopOrchestrateError("verify_paths requires multi_agent=True (it only bounds delegated agents)")
 
 
 @dataclass(frozen=True)
@@ -204,7 +214,7 @@ def _execute(state: LoopState, ctx: LoopContext, directive: Directive) -> PhaseR
         # failure. The router marks each wave ACTIVE->DONE/FAILED; we never close a task no agent ran.
         outcomes = []
         for _ in range(_MAX_WAVES):
-            wave = dispatch_wave(state, ctx.agent_runner)
+            wave = dispatch_wave(state, ctx.agent_runner, verify_paths=ctx.verify_paths)
             if not wave:
                 break
             outcomes.extend(wave)

@@ -45,9 +45,22 @@ class AgentResult:
 
     task_id: str
     observation: Observation                       # the agent's own result (SUCCESS / a failure class)
-    changed_paths: list[str] = field(default_factory=list)  # what it actually edited (for enforcement)
+    changed_paths: list[str] = field(default_factory=list)  # what it CLAIMS it edited (advisory only)
     evidence: str | None = None                    # an assurance record digest, if any
     note: str = ""
+
+
+# An INDEPENDENT source of the paths a task's agent ACTUALLY changed - a worktree git-diff, supplied by
+# the runtime. Given this, the router enforces the ownership boundary against the real diff, NOT the
+# agent's self-report (which an agent could understate to smuggle an out-of-lane edit). Returns the
+# repo-relative changed paths; a runtime implements it as e.g. `git -C <task-worktree> diff --name-only`.
+#
+# CONTRACT (load-bearing): it MUST diff the WHOLE task worktree (not a lane-scoped subset), and it MUST
+# RAISE on any diff failure - it must NEVER return [] to mean "could not tell". The router reads a raised
+# error / None / non-list[str] as "unverifiable -> breach" (fail-closed), but reads [] as "verified: the
+# agent changed nothing" (in-lane). A verifier that swallows its own error into [] would therefore turn an
+# out-of-lane edit into an accepted no-op - so the runtime's verifier must honor this contract.
+PathVerifier = Callable[[Task, "AgentResult"], "list[str]"]
 
 
 @dataclass(frozen=True)
@@ -104,12 +117,31 @@ def select_wave(tasks: list[Task], *, max_agents: int = MAX_FANOUT) -> list[Task
     return wave
 
 
-def dispatch_wave(state: LoopState, runner: AgentRunner, *,
+def _enforced_paths(task: Task, result: AgentResult,
+                    verify_paths: PathVerifier | None) -> tuple[list[str] | None, str]:
+    """The paths to ENFORCE the boundary against. With a ``verify_paths`` seam, the worktree-derived diff
+    is authoritative and the agent's self-report is ignored; a verifier that RAISES or returns a
+    non-``list[str]`` yields ``None`` (cannot confirm the lane -> treat as a breach, fail-closed). Without
+    a verifier we fall back to the agent's self-report (trust-based - the documented weaker mode)."""
+    if verify_paths is None:
+        return list(result.changed_paths), "self-reported (trust-based)"
+    try:
+        paths = verify_paths(task, result)
+    except Exception as exc:  # noqa: BLE001 - the injected verifier is untrusted; cannot verify -> breach
+        return None, f"path verifier raised {type(exc).__name__}: {exc}"
+    if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+        return None, "path verifier did not return a list[str]"
+    return paths, "worktree-derived"
+
+
+def dispatch_wave(state: LoopState, runner: AgentRunner, *, verify_paths: PathVerifier | None = None,
                   max_agents: int = MAX_FANOUT) -> list[WaveOutcome]:
     """Select a parallel-safe wave, mark it ACTIVE, run each task via ``runner``, ENFORCE each agent's
     ownership boundary, and record the resulting DONE/FAILED status + evidence on the loop state. An
     agent that edits outside its ``allowed_paths`` is a POLICY_BLOCK -> FAILED (escalate), whatever it
-    claimed. Returns one :class:`WaveOutcome` per dispatched task."""
+    claimed. When ``verify_paths`` is supplied the boundary is enforced against the INDEPENDENT
+    worktree diff (not the agent's self-report), and a verifier that cannot produce a diff is itself a
+    breach (fail-closed). Returns one :class:`WaveOutcome` per dispatched task."""
     tasks = parse_tasks(state.task_graph)
     wave = select_wave(tasks, max_agents=max_agents)
     by_id = {t.id: t for t in tasks}
@@ -120,16 +152,23 @@ def dispatch_wave(state: LoopState, runner: AgentRunner, *,
     outcomes: list[WaveOutcome] = []
     for task in wave:
         result = runner(task)
-        outside = check_boundary(task, result.changed_paths)
-        if outside:
+        changed, source = _enforced_paths(task, result, verify_paths)
+        if changed is None:  # the diff could not be independently verified -> do not trust the edit
             observation = Observation.POLICY_BLOCK
             status = TaskStatus.FAILED
-            reason = f"agent for {task.id!r} edited outside its boundary: {sorted(outside)}"
+            reason = f"cannot verify changed paths for {task.id!r} ({source}); refusing to trust the edit"
+        elif (outside := check_boundary(task, changed)):
+            observation = Observation.POLICY_BLOCK
+            status = TaskStatus.FAILED
+            reason = f"agent for {task.id!r} edited outside its boundary ({source}): {sorted(outside)}"
         else:
             observation = result.observation
             status = status_for(observation)  # SUCCESS->DONE, PROGRESS->PENDING, else FAILED (shared)
             reason = result.note or f"agent for {task.id!r} -> {observation.value}"
-        set_status(state, task.id, status, evidence=result.evidence)
+        # Do NOT attach the agent's self-reported evidence to a BOUNDARY-BREACHED task: we rejected the
+        # edit precisely because we do not trust the agent, so its claimed digest must not ride along.
+        evidence = None if observation is Observation.POLICY_BLOCK else result.evidence
+        set_status(state, task.id, status, evidence=evidence)
         outcomes.append(WaveOutcome(task.id, observation, status, reason))
     return outcomes
 

@@ -50,7 +50,7 @@ worker-lineage impact escalates rather than proceeding.
 | `observe.py` | Reads the repo via `cs_assure verify` + `doclint` and maps the sealed result to one **mechanical** `Observation` (gate step → failure class; obligations → human-gated / worker / drift). |
 | `driver.py` | The runnable cycle: emit a per-phase directive, run the executor (or the observer at the verify phases), route, persist. `run()` drives to a terminal phase or a hard step cap. |
 | `tasks.py` | The task graph: owned tasks with dependencies and an `allowed_paths` **ownership boundary**; ready/blocked derivation; parallel-safe assignment. |
-| `router.py` | The agent router: a parallel-safe wave (≤10 agents), dispatch, and **boundary enforcement** — an agent that edits outside its lane is rejected regardless of what it claims. |
+| `router.py` | The agent router: a parallel-safe wave (≤10 agents), dispatch, and **boundary enforcement** — an agent that edits outside its lane is rejected regardless of what it claims. With an injected **`verify_paths`** seam the boundary is checked against the **independent worktree diff**, not the agent's self-report, so an agent cannot under-report its edits to slip out of lane; a diff that can't be produced is itself a breach (fail-closed). |
 | `review.py` | Review-feedback: accepted findings become **correction tasks** appended to the graph; a clean review advances to `INTEGRATE`. |
 | `integrate.py` | CI / PR continuation: observe CI + the exact head it ran against in **one snapshot**, diagnose a failure into an `Observation`, and the **merge-authorization gate** whose risk is **derived from policy** - a fired obligation gates the merge if it is human-gated (self-modify / loop-controller / sealed / worker) *or* `blocking` and not candidate-satisfiable, so a **new** blocking obligation escalates by default (fail-closed). The merge is **head-bound** (`--match-head-commit`): a commit pushed since CI is never merged blind - it HOLDs to re-observe. |
 | `docs.py` | Docs-freshness: a code↔doc coupling check - a change that touches coupled code but not its docs is `CONTRACT_DRIFT` at OBSERVE (never let docs go stale). |
@@ -95,8 +95,9 @@ records, and a bare model judgment or a pending human approval **escalates** rat
 the *evaluators are still injected*, so the strength of a DETERMINISTIC check is only as good as the
 evidence the runtime seals into the assurance records. The cross-goal ledger is *exact dead-end memory*,
 not generalized learning (its cross-process writes are now lock-guarded, see `locking.py`); multi-agent
-boundary enforcement trusts the agent's self-reported changed paths (not yet a worktree-derived diff) and
-`dispatch_wave` runs runners sequentially; and campaign isolation is a **seam** (`context_for`) with
+boundary enforcement is worktree-derived when a runtime supplies `verify_paths` (else it falls back to the
+agent's self-report, the weaker trust-based mode) and `dispatch_wave` runs runners sequentially; and
+campaign isolation is a **seam** (`context_for`) with
 per-goal state + resume - absent a factory, goals still share one repo/working-tree/PR, and no concrete
 branch/worktree/PR factory is wired yet.
 

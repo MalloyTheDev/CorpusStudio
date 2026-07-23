@@ -121,6 +121,71 @@ def test_dispatch_rejects_a_boundary_breach_as_policy_block() -> None:
     assert outcomes[0].status is TaskStatus.FAILED and "outside its boundary" in outcomes[0].reason
 
 
+def test_verifier_catches_an_out_of_lane_edit_the_agent_under_reported() -> None:
+    # #8: an agent could UNDER-report its changed paths to smuggle an out-of-lane edit past enforcement.
+    # With a worktree-diff verifier, the boundary is checked against the REAL diff, not the agent's claim.
+    state = LoopState()
+    decompose(state, [_t("a", paths=["engine/"])])
+    honest_looking = _runner({"a": AgentResult("a", Observation.SUCCESS, changed_paths=["engine/ok.py"])})
+    worktree_diff = lambda _task, _result: ["engine/ok.py", "scripts/loop/evil.py"]  # noqa: E731 - the truth
+    outcomes = dispatch_wave(state, honest_looking, verify_paths=worktree_diff)
+    assert outcomes[0].observation is Observation.POLICY_BLOCK  # caught despite the clean self-report
+    assert "worktree-derived" in outcomes[0].reason and "scripts/loop/evil.py" in outcomes[0].reason
+
+
+def test_verifier_agreeing_lets_an_in_lane_agent_succeed() -> None:
+    state = LoopState()
+    decompose(state, [_t("a", paths=["engine/"])])
+    outcomes = dispatch_wave(state, _runner({"a": AgentResult("a", Observation.SUCCESS,
+                                                              changed_paths=["engine/a.py"])}),
+                             verify_paths=lambda _t, _r: ["engine/a.py"])
+    assert outcomes[0].status is TaskStatus.DONE
+
+
+def test_verifier_that_cannot_produce_a_diff_fails_closed() -> None:
+    # If the independent diff can't be produced (verifier raises or returns a non-list), we cannot confirm
+    # the agent stayed in its lane -> POLICY_BLOCK (never trust an unverifiable edit).
+    state = LoopState()
+    decompose(state, [_t("a", paths=["engine/"]), _t("b", paths=["scripts/"])])
+
+    def boom(_task: Task, _result: AgentResult) -> list[str]:
+        raise OSError("git diff failed")
+    out_a = dispatch_wave(state, _runner({"a": AgentResult("a", Observation.SUCCESS, changed_paths=[])}),
+                          verify_paths=boom)[0]
+    assert out_a.observation is Observation.POLICY_BLOCK and "cannot verify" in out_a.reason
+    state2 = LoopState()
+    decompose(state2, [_t("b", paths=["scripts/"])])
+    out_b = dispatch_wave(state2, _runner({"b": AgentResult("b", Observation.SUCCESS, changed_paths=[])}),
+                          verify_paths=lambda _t, _r: "not-a-list")[0]  # type: ignore[arg-type,return-value]
+    assert out_b.observation is Observation.POLICY_BLOCK
+
+
+def test_verifier_none_is_a_breach_but_empty_list_is_a_verified_no_change() -> None:
+    # Pin the None-vs-[] seam directly: None (verifier could not tell) -> POLICY_BLOCK; [] (verifier
+    # confirms nothing changed) -> the agent's own result stands (DONE).
+    state = LoopState()
+    decompose(state, [_t("a", paths=["engine/"])])
+    none_out = dispatch_wave(state, _runner({"a": AgentResult("a", Observation.SUCCESS, changed_paths=[])}),
+                             verify_paths=lambda _t, _r: None)[0]  # type: ignore[arg-type,return-value]
+    assert none_out.observation is Observation.POLICY_BLOCK
+    state2 = LoopState()
+    decompose(state2, [_t("a", paths=["engine/"])])
+    empty_out = dispatch_wave(state2, _runner({"a": AgentResult("a", Observation.SUCCESS, changed_paths=[])}),
+                              verify_paths=lambda _t, _r: [])[0]
+    assert empty_out.status is TaskStatus.DONE  # a genuinely empty diff is in-lane
+
+
+def test_a_breached_task_does_not_keep_the_agents_claimed_evidence() -> None:
+    # A rejected (boundary-breached) edit must not carry the agent's self-reported assurance digest.
+    state = LoopState()
+    decompose(state, [_t("a", paths=["engine/"])])
+    dispatch_wave(state, _runner({"a": AgentResult("a", Observation.SUCCESS, changed_paths=[],
+                                                   evidence="sha256:claimed")}),
+                  verify_paths=lambda _t, _r: ["scripts/loop/evil.py"])
+    task = next(t for t in state.task_graph if t["id"] == "a")
+    assert task["status"] == "FAILED" and task.get("evidence", []) == []  # no claimed evidence attached
+
+
 # --------------------------------------------------------------------------- aggregation
 
 
