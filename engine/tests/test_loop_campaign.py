@@ -18,7 +18,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from loop.campaign import CampaignError, Goal, run_campaign  # noqa: E402
-from loop.completeness import Criterion  # noqa: E402
+from loop.completeness import Criterion, CriterionKind  # noqa: E402
 from loop.controller import Observation  # noqa: E402
 from loop.orchestrate import LoopContext  # noqa: E402
 
@@ -39,7 +39,9 @@ def _gh():
 
 def _ctx(*, dangerous: bool = False, ledger_path: Path | None = None) -> LoopContext:
     return LoopContext(repo_root=REPO_ROOT, executor=lambda _s, _d: Observation.SUCCESS,
-                       reviewer=lambda _s: [], critic=lambda _s: [Criterion("c", "done", met=True)],
+                       reviewer=lambda _s: [],
+                       critic=lambda _s: [Criterion("c", "done", kind=CriterionKind.DETERMINISTIC,
+                                                    met=True, evidence="sha256:v")],
                        gh_runner=_gh(), pr_ref="1", dangerous=dangerous, run_cs_assure=_cs(),
                        ledger_path=ledger_path)
 

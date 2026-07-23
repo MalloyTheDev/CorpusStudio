@@ -60,7 +60,7 @@ _ADAPTER = """
 import json
 from loop.orchestrate import LoopContext
 from loop.controller import Observation
-from loop.completeness import Criterion
+from loop.completeness import Criterion, CriterionKind
 
 def build_context(repo_root, base):
     steps = [{"name": n, "passed": True, "exit_code": 0, "timed_out": False} for n in ("ruff", "mypy", "pytest")]
@@ -70,8 +70,10 @@ def build_context(repo_root, base):
            "doclint": {"finding_count": 0}}
     def gh(*a):
         return (0, "merged", "") if len(a) >= 2 and a[1] == "merge" else (0, json.dumps([{"name": "pytest", "bucket": "pass"}]), "")
+    # DETERMINISTIC criterion citing the verify record the OBSERVE step seals -> autonomous finalize.
     return LoopContext(repo_root=repo_root, executor=lambda s, d: Observation.SUCCESS, reviewer=lambda s: [],
-                       critic=lambda s: [Criterion("c", "done", met=True)], gh_runner=gh, pr_ref="1",
+                       critic=lambda s: [Criterion("c", "done", kind=CriterionKind.DETERMINISTIC,
+                                                   met=True, evidence="sha256:v")], gh_runner=gh, pr_ref="1",
                        run_cs_assure=lambda r, *a: (0, json.dumps(rec.get(a[0] if a else "", {})), ""))
 """
 
