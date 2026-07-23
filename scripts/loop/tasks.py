@@ -77,6 +77,13 @@ class Task:
                 raise LoopTaskError(f"task {task_id!r}: allowed path {p!r} must be a non-empty string")
             if PurePosixPath(p).is_absolute() or "\\" in p or ".." in PurePosixPath(p).parts:
                 raise LoopTaskError(f"task {task_id!r}: allowed path {p!r} must be repo-relative (no absolute/'..'/'\\')")
+            if not PurePosixPath(p).parts:
+                # '.', './' etc. normalise to the repo ROOT - a lane that owns everything, so no edit is
+                # ever out-of-lane and the boundary is meaningless. A genuinely repo-wide task must leave
+                # allowed_paths EMPTY (self-owned, run by the executor), not declare '.' as a bounded lane.
+                raise LoopTaskError(
+                    f"task {task_id!r}: allowed path {p!r} is the whole repo; declare a real lane or "
+                    "leave allowed_paths empty (self-owned)")
         deps = data.get("depends_on", []) or []
         if not isinstance(deps, list) or not all(isinstance(d, str) for d in deps):
             raise LoopTaskError(f"task {task_id!r}: depends_on must be a list of ids")

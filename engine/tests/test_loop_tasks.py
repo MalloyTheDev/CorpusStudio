@@ -76,6 +76,17 @@ def test_parse_rejects_bad_status_and_unsafe_paths() -> None:
         parse_tasks([_t("a", paths=["../secrets"])])
 
 
+def test_parse_rejects_a_whole_repo_lane() -> None:
+    # A declared lane of '.' / './' owns the entire repo -> no edit is ever out-of-lane, so the ownership
+    # boundary is meaningless. Reject it; a repo-wide task must use EMPTY allowed_paths (self-owned).
+    for whole_repo in (".", "./", ".//"):
+        with pytest.raises(LoopTaskError, match="whole repo"):
+            parse_tasks([_t("a", paths=[whole_repo])])
+    # empty allowed_paths (self-owned) and a real lane are both still fine
+    assert parse_tasks([_t("a", paths=[])])[0].allowed_paths == []
+    assert parse_tasks([_t("a", paths=["engine/"])])[0].allowed_paths == ["engine/"]
+
+
 # --------------------------------------------------------------------------- ready / blocked
 
 
