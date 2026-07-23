@@ -1,8 +1,9 @@
 """Tests for the integrated loop (scripts/loop/orchestrate.py, the capstone).
 
-Drives the WHOLE loop through injected fakes (executor / reviewer / agent runner / gh / cs_assure) and
-pins that each phase dispatches to its module: decompose+validate, assign, execute (single + wave),
-observe (cs_assure + docs-freshness + task-close), review, integrate (CI + merge gate), verify.
+Drives the WHOLE loop through injected fakes and pins the corrected composition (post capstone-audit):
+the INTEGRATE merge boundary (HOLD on unsettled CI, escalate self-modify/worker/dangerous/uncomputable,
+merge only authorized product), multi-agent wave DRAINING, and fail-closed handling (unobservable repo ->
+ESCALATED, non-Observation executor -> error, non-object cs_assure JSON -> no crash).
 """
 
 from __future__ import annotations
@@ -11,30 +12,39 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from loop.controller import Decision, LoopState, Observation, Phase  # noqa: E402
-from loop.orchestrate import LoopContext, run_loop, step  # noqa: E402
+from loop.orchestrate import LoopContext, LoopOrchestrateError, run_loop, step  # noqa: E402
 from loop.router import AgentResult  # noqa: E402
 from loop.tasks import decompose  # noqa: E402
 
 
-def _cs_assure(*, verify_green: bool = True, obligations: tuple[str, ...] = (), changed: tuple[str, ...] = ()):
+def _cs_assure(*, verify_green: bool = True, obligations: tuple[str, ...] = (),
+               changed: tuple[str, ...] = (), impact_fail: bool = False, changeset_out: str | None = None):
     steps = [{"name": n, "passed": verify_green, "exit_code": 0 if verify_green else 1, "timed_out": False}
              for n in ("ruff", "mypy", "pytest")]
-    verify = {"record_digest": "sha256:v", "payload": {
-        "gate_passed": verify_green, "gate_steps": steps,
-        "fired_obligations": [{"id": o} for o in obligations], "change_set_fingerprint": "cs:x"}}
-    changeset = {"payload": {"changed_paths": [{"path": p} for p in changed]}}
-    impact = {"payload": {"fired_obligations": [{"id": o} for o in obligations]}}
+    records = {
+        "verify": {"record_digest": "sha256:v", "payload": {
+            "gate_passed": verify_green, "gate_steps": steps,
+            "fired_obligations": [{"id": o} for o in obligations], "change_set_fingerprint": "cs:x"}},
+        "changeset": {"payload": {"changed_paths": [{"path": p} for p in changed]}},
+        "impact": {"payload": {"fired_obligations": [{"id": o} for o in obligations]}},
+        "doclint": {"finding_count": 0},
+    }
 
     def run(_repo: Path, *argv: str) -> tuple[int, str, str]:
         cmd = argv[0] if argv else ""
-        return (0, json.dumps({"verify": verify, "changeset": changeset, "impact": impact,
-                               "doclint": {"finding_count": 0}}.get(cmd, {})), "")
+        if cmd == "impact" and impact_fail:
+            return (2, "", "impact refused")
+        if cmd == "changeset" and changeset_out is not None:
+            return (0, changeset_out, "")
+        return (0, json.dumps(records.get(cmd, {})), "")
     return run
 
 
@@ -46,69 +56,158 @@ def _executor(task_dicts: list[dict] | None = None):
     return run
 
 
-def _gh(green: bool = True):
-    def run(*_argv: str) -> tuple[int, str, str]:
-        return (0, json.dumps([{"name": "pytest", "bucket": "pass" if green else "fail"}]), "")
+def _gh(*, ci: str = "pass", merge_ok: bool = True):
+    def run(*argv: str) -> tuple[int, str, str]:
+        if len(argv) >= 2 and argv[1] == "merge":
+            return (0, "merged", "") if merge_ok else (1, "", "merge conflict")
+        return (0, json.dumps([{"name": "pytest", "bucket": ci}]), "")
     return run
 
 
-def test_full_integrated_loop_reaches_finalize() -> None:
+def _ctx(**kw) -> LoopContext:
+    kw.setdefault("executor", _executor())
+    kw.setdefault("run_cs_assure", _cs_assure())
+    return LoopContext(repo_root=REPO_ROOT, **kw)
+
+
+# --------------------------------------------------------------------------- full run + merge boundary
+
+
+def test_full_integrated_loop_merges_and_reaches_finalize() -> None:
     state = LoopState(goal="add scorer", current_phase=Phase.RECEIVE_GOAL)
-    ctx = LoopContext(repo_root=REPO_ROOT, executor=_executor([{"id": "impl", "allowed_paths": ["engine/"]}]),
-                      reviewer=lambda _s: [], gh_runner=_gh(green=True), pr_ref="1",
-                      run_cs_assure=_cs_assure(verify_green=True))
+    ctx = _ctx(executor=_executor([{"id": "impl", "allowed_paths": ["engine/"]}]),
+               reviewer=lambda _s: [], gh_runner=_gh(ci="pass"), pr_ref="1")
     run_loop(state, ctx)
     assert state.current_phase is Phase.FINALIZE
-    assert any(t["id"] == "impl" and t["status"] == "DONE" for t in state.task_graph)  # task closed
-    assert "sha256:v" in state.assurance_records  # cs_assure evidence recorded on the state
+    assert "sha256:v" in state.assurance_records
+    assert any("merged" in o.get("note", "") for o in state.observations)  # the PR was actually merged
 
 
-def test_invalid_decompose_replans() -> None:
-    def bad(state: LoopState, _d) -> Observation:
-        state.task_graph = [{"id": "a", "depends_on": ["ghost"]}]  # dangling dependency
-        return Observation.SUCCESS
-    state = LoopState(current_phase=Phase.DECOMPOSE)
-    t = step(state, LoopContext(repo_root=REPO_ROOT, executor=bad, run_cs_assure=_cs_assure()))
-    assert t.decision is Decision.REPLAN and state.current_phase is Phase.PLAN
+def test_integrate_holds_on_unsettled_ci_never_advancing_past_the_gate() -> None:
+    state = LoopState(current_phase=Phase.INTEGRATE)
+    t = step(state, _ctx(gh_runner=_gh(ci="pending"), pr_ref="1"))
+    assert t.decision is Decision.HOLD and state.current_phase is Phase.INTEGRATE  # did NOT advance to VERIFY
 
 
-def test_observe_red_gate_revises() -> None:
-    state = LoopState(current_phase=Phase.OBSERVE)
-    t = step(state, LoopContext(repo_root=REPO_ROOT, executor=_executor(),
-                                run_cs_assure=_cs_assure(verify_green=False)))
-    assert t.decision is Decision.REVISE and state.current_phase is Phase.EXECUTE
+def test_run_loop_pauses_on_hold_rather_than_stopping(tmp_path: Path) -> None:
+    state = LoopState(current_phase=Phase.INTEGRATE)
+    run_loop(state, _ctx(gh_runner=_gh(ci="pending"), pr_ref="1"), max_steps=5)
+    assert state.current_phase is Phase.INTEGRATE and not state.is_terminal  # paused, not STOPPED
 
 
-def test_observe_flags_stale_docs_as_contract_drift() -> None:
-    # Green gate but loop code changed without its doc -> the OBSERVE handler folds in docs-freshness.
-    state = LoopState(current_phase=Phase.OBSERVE)
-    step(state, LoopContext(repo_root=REPO_ROOT, executor=_executor(),
-                            run_cs_assure=_cs_assure(verify_green=True, changed=("scripts/loop/x.py",))))
-    assert state.observations[-1]["observation"] == "CONTRACT_DRIFT"
+def test_integrate_dangerous_escalates_even_on_green_ci() -> None:
+    state = LoopState(current_phase=Phase.INTEGRATE)
+    t = step(state, _ctx(gh_runner=_gh(ci="pass"), pr_ref="1", dangerous=True))
+    assert t.decision is Decision.ESCALATE and state.current_phase is Phase.ESCALATED
 
 
 def test_integrate_self_modify_escalates_at_the_merge_gate() -> None:
     state = LoopState(current_phase=Phase.INTEGRATE)
-    t = step(state, LoopContext(repo_root=REPO_ROOT, executor=_executor(), gh_runner=_gh(green=True),
-                                pr_ref="1", run_cs_assure=_cs_assure(obligations=("assurance-self-modify",))))
+    t = step(state, _ctx(gh_runner=_gh(ci="pass"), pr_ref="1",
+                         run_cs_assure=_cs_assure(obligations=("assurance-self-modify",))))
+    assert t.decision is Decision.ESCALATE
+
+
+def test_integrate_fails_closed_when_obligations_are_uncomputable() -> None:
+    # cs_assure impact refuses (exit 2) -> must NOT be read as 'no obligations' and auto-merge.
+    state = LoopState(current_phase=Phase.INTEGRATE)
+    t = step(state, _ctx(gh_runner=_gh(ci="pass"), pr_ref="1", run_cs_assure=_cs_assure(impact_fail=True)))
     assert t.decision is Decision.ESCALATE and state.current_phase is Phase.ESCALATED
 
 
-def test_multi_agent_execute_dispatches_a_parallel_wave() -> None:
+def test_integrate_merges_an_authorized_product_change() -> None:
+    state = LoopState(current_phase=Phase.INTEGRATE)
+    t = step(state, _ctx(gh_runner=_gh(ci="pass", merge_ok=True), pr_ref="1",
+                         run_cs_assure=_cs_assure(obligations=("contracts",))))
+    assert t.decision is Decision.ADVANCE and "merged" in state.observations[-1]["note"]
+
+
+def test_integrate_ci_failure_routes_to_fix() -> None:
+    state = LoopState(current_phase=Phase.INTEGRATE)
+    t = step(state, _ctx(gh_runner=_gh(ci="fail"), pr_ref="1"))
+    assert t.decision is Decision.REVISE  # CI red -> back to EXECUTE
+
+
+# --------------------------------------------------------------------------- task lifecycle
+
+
+def test_multi_agent_execute_drains_the_whole_graph() -> None:
+    ran: list[str] = []
+
+    def runner(task):
+        ran.append(task.id)
+        return AgentResult(task.id, Observation.SUCCESS, changed_paths=[])
+
     state = LoopState(current_phase=Phase.EXECUTE)
-    decompose(state, [{"id": "a", "allowed_paths": ["engine/"]}, {"id": "b", "allowed_paths": ["scripts/"]}])
-    ctx = LoopContext(repo_root=REPO_ROOT, executor=_executor(), multi_agent=True,
-                      agent_runner=lambda task: AgentResult(task.id, Observation.SUCCESS, changed_paths=[]),
-                      run_cs_assure=_cs_assure())
-    t = step(state, ctx)
-    assert t.decision is Decision.ADVANCE  # wave all-success -> advance
-    assert all(x["status"] == "DONE" for x in state.task_graph)  # both tasks dispatched + done
+    decompose(state, [{"id": "a", "allowed_paths": ["engine/"]}, {"id": "b", "allowed_paths": ["scripts/"]},
+                      {"id": "c", "allowed_paths": ["docs/"], "depends_on": ["a"]}])
+    t = step(state, _ctx(multi_agent=True, agent_runner=runner))
+    assert set(ran) == {"a", "b", "c"}  # every task actually ran (incl. the dependent one, across waves)
+    assert t.decision is Decision.ADVANCE and all(x["status"] == "DONE" for x in state.task_graph)
+
+
+def test_multi_agent_stuck_graph_escalates() -> None:
+    # A task whose dep FAILED can never become ready -> the drain is stuck -> escalate, not a false SUCCESS.
+    def runner(task):
+        obs = Observation.SUCCESS if task.id == "a" else Observation.TEST_REGRESSION
+        return AgentResult(task.id, obs, changed_paths=[])
+
+    state = LoopState(current_phase=Phase.EXECUTE)
+    decompose(state, [{"id": "a", "allowed_paths": ["engine/"]},
+                      {"id": "b", "allowed_paths": ["scripts/"]},
+                      {"id": "c", "allowed_paths": ["docs/"], "depends_on": ["b"]}])
+    t = step(state, _ctx(multi_agent=True, agent_runner=runner))
+    assert t.decision is not Decision.ADVANCE  # b failed -> not a clean advance
+
+
+# --------------------------------------------------------------------------- fail-closed
+
+
+def test_unobservable_repo_escalates_not_crashes() -> None:
+    def bad(_r: Path, *argv: str) -> tuple[int, str, str]:
+        if argv and argv[0] == "verify":
+            return (0, json.dumps({"record_digest": "x", "payload": "NOT-AN-OBJECT"}), "")
+        return (0, "{}", "")
+    state = LoopState(current_phase=Phase.OBSERVE)
+    t = step(state, _ctx(run_cs_assure=bad))
+    assert state.current_phase is Phase.ESCALATED and t.decision is Decision.ESCALATE
+
+
+def test_non_observation_executor_fails_closed() -> None:
+    state = LoopState(current_phase=Phase.RECON)
+    with pytest.raises(LoopOrchestrateError):
+        step(state, _ctx(executor=lambda _s, _d: "SUCCESS"))  # type: ignore[arg-type,return-value]
+
+
+def test_observe_tolerates_non_object_changeset_json() -> None:
+    # A non-object top-level changeset ('[]') must not crash docs-freshness (advisory -> []).
+    state = LoopState(current_phase=Phase.OBSERVE)
+    t = step(state, _ctx(run_cs_assure=_cs_assure(verify_green=True, changeset_out="[]")))
+    assert t.decision is Decision.ADVANCE
+
+
+def test_invalid_decompose_replans() -> None:
+    def bad(state: LoopState, _d) -> Observation:
+        state.task_graph = [{"id": "a", "depends_on": ["ghost"]}]
+        return Observation.SUCCESS
+    state = LoopState(current_phase=Phase.DECOMPOSE)
+    assert step(state, _ctx(executor=bad)).decision is Decision.REPLAN
+
+
+def test_observe_red_gate_revises() -> None:
+    state = LoopState(current_phase=Phase.OBSERVE)
+    assert step(state, _ctx(run_cs_assure=_cs_assure(verify_green=False))).decision is Decision.REVISE
+
+
+def test_observe_flags_stale_docs_as_contract_drift() -> None:
+    state = LoopState(current_phase=Phase.OBSERVE)
+    step(state, _ctx(run_cs_assure=_cs_assure(verify_green=True, changed=("scripts/loop/x.py",))))
+    assert state.observations[-1]["observation"] == "CONTRACT_DRIFT"
 
 
 def test_step_persists_when_a_store_path_is_set(tmp_path: Path) -> None:
     from loop.store import load
     path = tmp_path / "loop.json"
     state = LoopState(current_phase=Phase.RECON)
-    step(state, LoopContext(repo_root=REPO_ROOT, executor=_executor(), run_cs_assure=_cs_assure(),
-                            store_path=path))
+    step(state, _ctx(store_path=path))
     assert load(path).current_phase is Phase.DEFINE_SUCCESS

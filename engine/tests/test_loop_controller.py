@@ -109,6 +109,14 @@ def test_success_does_not_charge_budget_or_record_deadend() -> None:
     assert state.budgets["total_attempts"] == 0 and state.failed_approaches == []
 
 
+def test_hold_stays_in_the_current_phase_without_charging_budget() -> None:
+    # HOLD waits on an external condition (e.g. CI): stay put, do NOT advance, do NOT charge the budget.
+    state = LoopState(current_phase=Phase.INTEGRATE, budgets={"total_attempts": 0, "max_attempts": 20})
+    t = apply(state, Observation.HOLD, note="waiting on CI")
+    assert t.decision is Decision.HOLD and state.current_phase is Phase.INTEGRATE
+    assert state.budgets["total_attempts"] == 0
+
+
 def test_terminal_phase_is_sticky() -> None:
     state = LoopState(current_phase=Phase.FINALIZE, termination_reason="done")
     t = route(state, Observation.TEST_REGRESSION)

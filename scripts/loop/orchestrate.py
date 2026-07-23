@@ -4,16 +4,18 @@ Slices 1-7 built the parts (controller/store/observe/driver/tasks/router/review/
 each in isolation. This wires them into ONE runnable loop where each phase does its real work:
 
     DECOMPOSE  -> the executor proposes a task graph; tasks.parse_tasks validates it (bad graph -> WRONG_PLAN)
-    ASSIGN     -> tasks.assign_next picks the next ready task (its ownership boundary flows to the directive)
-    EXECUTE    -> single executor, OR router.dispatch_wave for a parallel-safe multi-agent wave
-    OBSERVE    -> observe (cs_assure) + docs.stale_docs (docs-freshness); on success, close the active task
+    ASSIGN     -> a lightweight pass-through (the task graph is drained at EXECUTE / owned by the router)
+    EXECUTE    -> single executor, OR router.dispatch_wave DRAINED across waves for multi-agent work
+    OBSERVE    -> observe (cs_assure) + docs.stale_docs (docs-freshness)
     REVIEW     -> review.review folds findings into correction tasks (or the executor reviews)
-    INTEGRATE  -> integrate.observe_ci + merge_gate (product auto-merges; self-modify/worker/danger escalate)
+    INTEGRATE  -> integrate.observe_ci: HOLD while CI is unsettled, escalate/merge via merge_gate on green
     VERIFY     -> observe (cs_assure) end-to-end
     (goal/recon/define/plan/diagnose) -> the executor (the LLM) does the reasoning
 
 Every EFFECT is an injected callback on :class:`LoopContext` (executor / reviewer / agent runner / gh /
-cs_assure), so the whole integrated loop runs deterministically in tests without any of them. stdlib-only.
+cs_assure). FAIL-CLOSED throughout: an unusable assurance plane escalates (never crashes the loop), an
+uncomputable obligation set blocks the merge (never auto-merges), and CI that has not settled HOLDs at the
+merge gate instead of advancing past it. stdlib-only.
 """
 
 from __future__ import annotations
@@ -23,19 +25,33 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from loop.controller import LoopState, Observation, Phase, Transition, apply, attempt_fingerprint
+from loop.controller import (
+    Decision,
+    LoopState,
+    Observation,
+    Phase,
+    Transition,
+    apply,
+    attempt_fingerprint,
+)
 from loop.docs import DEFAULT_COUPLINGS, DocCoupling, docs_observation, stale_docs
 from loop.driver import Directive, next_directive
 from loop.integrate import GhRunner, ci_observation, merge_gate, observe_ci
-from loop.observe import CsAssureRunner, _run_cs_assure, observe
+from loop.observe import CsAssureRunner, LoopObserveError, _run_cs_assure, observe
 from loop.review import Reviewer, review, review_observation
 from loop.router import AgentRunner, aggregate_observation, dispatch_wave
 from loop.store import save
-from loop.tasks import LoopTaskError, TaskStatus, assign_next, is_complete, parse_tasks, set_status
+from loop.tasks import LoopTaskError, TaskStatus, parse_tasks
 
 # The executor (the LLM/agent) acts ON the state (it may set the task graph, make edits) and returns its
 # judged Observation - a richer signature than driver.Executor, which only sees the directive.
 PhaseExecutor = Callable[[LoopState, Directive], Observation]
+
+_MAX_WAVES = 100  # a hard bound on multi-agent wave draining, independent of the loop step cap.
+
+
+class LoopOrchestrateError(Exception):
+    """A phase handler produced a non-Observation, or an effect returned uncomputable evidence."""
 
 
 @dataclass
@@ -64,39 +80,96 @@ class PhaseResult:
     evidence: str | None = None
 
 
+def _payload(out: str) -> dict:
+    """Parse a cs_assure record's payload, tolerating any non-object shape (fail-closed to {})."""
+    try:
+        data = json.loads(out)
+    except (ValueError, RecursionError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    payload = data.get("payload")
+    return payload if isinstance(payload, dict) else {}
+
+
 def _changed_paths(ctx: LoopContext) -> list[str]:
-    """Best-effort change set for docs-freshness. A changeset failure yields [] (docs-freshness is
-    advisory - its absence must not block the mechanical observation)."""
+    """Best-effort change set for docs-freshness (advisory - any failure yields [])."""
     try:
         _code, out, _err = ctx.run_cs_assure(ctx.repo_root, "changeset", "--base", ctx.base)
-        payload = json.loads(out).get("payload", {})
-    except (ValueError, RecursionError, KeyError, TypeError):
+    except OSError:
         return []
-    entries = payload.get("changed_paths") if isinstance(payload, dict) else None
+    entries = _payload(out).get("changed_paths")
     if not isinstance(entries, list):
         return []
     return [c["path"] for c in entries if isinstance(c, dict) and isinstance(c.get("path"), str)]
 
 
 def _fired_obligations(ctx: LoopContext) -> list[str]:
-    """The obligation ids the change fires (via cs_assure impact) - the input to the merge gate."""
+    """The obligation ids the change fires (via cs_assure impact) - the input to the merge gate. FAIL-
+    CLOSED: a non-zero exit or an unusable record raises, so an UNCOMPUTABLE obligation set can never be
+    conflated with 'no obligations fired' at the merge button."""
+    code, out, err = ctx.run_cs_assure(ctx.repo_root, "impact", "--base", ctx.base)
+    if code != 0:
+        raise LoopOrchestrateError(f"cs_assure impact refused (exit {code}): {err.strip()[:120]}")
     try:
-        _code, out, _err = ctx.run_cs_assure(ctx.repo_root, "impact", "--base", ctx.base)
-        payload = json.loads(out).get("payload", {})
-    except (ValueError, RecursionError, KeyError, TypeError):
-        return []
-    fired = payload.get("fired_obligations") if isinstance(payload, dict) else None
+        data = json.loads(out)
+    except (ValueError, RecursionError) as exc:
+        raise LoopOrchestrateError(f"cs_assure impact produced no usable JSON: {exc}") from exc
+    payload = data.get("payload") if isinstance(data, dict) else None
+    if not isinstance(payload, dict):
+        raise LoopOrchestrateError("cs_assure impact record has no payload object")
+    fired = payload.get("fired_obligations")
     if not isinstance(fired, list):
         return []
     return [o["id"] for o in fired if isinstance(o, dict) and isinstance(o.get("id"), str)]
 
 
-def _active_task_id(state: LoopState) -> str | None:
-    for task in state.task_graph:
-        if isinstance(task, dict) and task.get("status") == TaskStatus.ACTIVE.value:
-            tid = task.get("id")
-            return tid if isinstance(tid, str) else None
-    return None
+def _all_done(state: LoopState) -> bool:
+    return bool(state.task_graph) and all(
+        isinstance(t, dict) and t.get("status") == TaskStatus.DONE.value for t in state.task_graph)
+
+
+def _execute(state: LoopState, ctx: LoopContext, directive: Directive) -> PhaseResult:
+    if ctx.multi_agent and ctx.agent_runner is not None and state.task_graph:
+        # DRAIN: dispatch waves until no ready task remains (deps unlock across waves), stopping on a
+        # failure. The router marks each wave ACTIVE->DONE/FAILED; we never close a task no agent ran.
+        outcomes = []
+        for _ in range(_MAX_WAVES):
+            wave = dispatch_wave(state, ctx.agent_runner)
+            if not wave:
+                break
+            outcomes.extend(wave)
+            if any(o.status is TaskStatus.FAILED for o in wave):
+                break
+        observation, note = aggregate_observation(outcomes)
+        if observation in (Observation.SUCCESS, Observation.PROGRESS) and not _all_done(state):
+            return PhaseResult(Observation.POLICY_BLOCK,
+                               "task graph is stuck: ready tasks exhausted but not all DONE")
+        return PhaseResult(observation, note)
+    return PhaseResult(ctx.executor(state, directive), "executed the change")
+
+
+def _integrate(state: LoopState, ctx: LoopContext, directive: Directive) -> PhaseResult:
+    if ctx.gh_runner is None or ctx.pr_ref is None:
+        return PhaseResult(ctx.executor(state, directive), "integrated the change")
+    observation, reason = ci_observation(observe_ci(ctx.gh_runner, ctx.pr_ref))
+    if observation is Observation.PROGRESS:
+        # CI has not settled (pending / not yet reported) - HOLD at INTEGRATE; never advance PAST the
+        # merge gate on an unsettled CI (that would FINALIZE unmerged / merge before CI validates).
+        return PhaseResult(Observation.HOLD, f"CI not settled: {reason}")
+    if observation is not Observation.SUCCESS:
+        return PhaseResult(observation, reason)  # CI failing -> route to fix
+    try:
+        fired = _fired_obligations(ctx)
+    except LoopOrchestrateError as exc:
+        return PhaseResult(Observation.AUTHORIZATION_REQUIRED, f"obligations uncomputable; escalating: {exc}")
+    gate = merge_gate(fired, dangerous=ctx.dangerous)
+    if not gate.authorized:
+        return PhaseResult(gate.observation, gate.reason)  # self-modify / worker / dangerous -> escalate
+    code, _out, err = ctx.gh_runner("pr", "merge", ctx.pr_ref, "--squash")
+    if code == 0:
+        return PhaseResult(Observation.SUCCESS, "merged (authorized product change)")
+    return PhaseResult(Observation.TEST_REGRESSION, f"authorized merge failed: {err.strip()[:120]}")
 
 
 def _dispatch(state: LoopState, ctx: LoopContext) -> PhaseResult:
@@ -112,21 +185,10 @@ def _dispatch(state: LoopState, ctx: LoopContext) -> PhaseResult:
         return PhaseResult(observation, "decomposed into a valid task graph")
 
     if phase is Phase.ASSIGN:
-        if not state.task_graph:
-            return PhaseResult(Observation.SUCCESS, "no task graph; proceeding single-track")
-        if is_complete(parse_tasks(state.task_graph)):
-            return PhaseResult(Observation.SUCCESS, "all tasks complete")
-        task = assign_next(state)
-        if task is not None:
-            return PhaseResult(Observation.SUCCESS, f"assigned task {task.id!r}")
-        return PhaseResult(Observation.OWNERSHIP_COLLISION, "no task ready (blocked/contended); rescheduling")
+        return PhaseResult(Observation.SUCCESS, "ready to execute")
 
     if phase is Phase.EXECUTE:
-        if ctx.multi_agent and ctx.agent_runner is not None and state.task_graph:
-            outcomes = dispatch_wave(state, ctx.agent_runner)
-            observation, note = aggregate_observation(outcomes)
-            return PhaseResult(observation, note)
-        return PhaseResult(ctx.executor(state, directive), "executed the active task")
+        return _execute(state, ctx, directive)
 
     if phase in (Phase.OBSERVE, Phase.VERIFY):
         result = observe(ctx.repo_root, ctx.base, run_cs_assure=ctx.run_cs_assure)
@@ -135,10 +197,6 @@ def _dispatch(state: LoopState, ctx: LoopContext) -> PhaseResult:
             gaps = stale_docs(_changed_paths(ctx), ctx.couplings)
             if observation is Observation.SUCCESS and gaps:
                 observation, reason = docs_observation(gaps)
-            if observation is Observation.SUCCESS:  # the active task passed the gate -> close it
-                active = _active_task_id(state)
-                if active is not None:
-                    set_status(state, active, TaskStatus.DONE, evidence=result.record_digest)
         fingerprint = None
         if observation not in (Observation.SUCCESS, Observation.PROGRESS) and result.change_set_fingerprint:
             fingerprint = attempt_fingerprint(f"{observation.value}:{reason}", result.change_set_fingerprint)
@@ -146,19 +204,13 @@ def _dispatch(state: LoopState, ctx: LoopContext) -> PhaseResult:
 
     if phase is Phase.REVIEW:
         if ctx.reviewer is not None:
-            review_result = review(state, ctx.reviewer, reviewed_task_id=_active_task_id(state))
+            # Goal-level review (the loop reviews the whole change, not a single task).
+            review_result = review(state, ctx.reviewer, reviewed_task_id=None)
             return PhaseResult(review_observation(review_result), f"review: {review_result.verdict.value}")
         return PhaseResult(ctx.executor(state, directive), "reviewed the change")
 
     if phase is Phase.INTEGRATE:
-        if ctx.gh_runner is not None and ctx.pr_ref is not None:
-            status = observe_ci(ctx.gh_runner, ctx.pr_ref)
-            observation, reason = ci_observation(status)
-            if observation is Observation.SUCCESS:
-                gate = merge_gate(_fired_obligations(ctx), dangerous=ctx.dangerous)
-                return PhaseResult(gate.observation, gate.reason)
-            return PhaseResult(observation, reason)
-        return PhaseResult(ctx.executor(state, directive), "integrated the change")
+        return _integrate(state, ctx, directive)
 
     # RECEIVE_GOAL / RECON / DEFINE_SUCCESS / PLAN / DIAGNOSE - the executor reasons.
     return PhaseResult(ctx.executor(state, directive), directive.action)
@@ -166,10 +218,23 @@ def _dispatch(state: LoopState, ctx: LoopContext) -> PhaseResult:
 
 def step(state: LoopState, ctx: LoopContext) -> Transition | None:
     """Run ONE integrated cycle: dispatch the current phase to its module/effect, record any sealed
-    evidence, route through the controller, and persist. Returns None if already terminal."""
+    evidence, route through the controller, and persist. Returns None if already terminal. FAIL-CLOSED:
+    an unusable assurance plane escalates to ESCALATED; a non-Observation handler result is a hard error."""
     if state.is_terminal:
         return None
-    result = _dispatch(state, ctx)
+    try:
+        result = _dispatch(state, ctx)
+    except LoopObserveError as exc:
+        state.current_phase = Phase.ESCALATED
+        state.termination_reason = f"assurance plane unusable: {exc}"
+        if ctx.store_path is not None:
+            save(state, ctx.store_path)
+        return Transition(Decision.ESCALATE, Phase.ESCALATED, state.termination_reason,
+                          "escalated: cs_assure unusable")
+    if not isinstance(result.observation, Observation):
+        raise LoopOrchestrateError(
+            f"handler for {state.current_phase.value} returned {type(result.observation).__name__}, "
+            "not an Observation")
     if result.evidence is not None and result.evidence not in state.assurance_records:
         state.assurance_records.append(result.evidence)
     transition = apply(state, result.observation, fingerprint=result.fingerprint, note=result.note)
@@ -179,13 +244,18 @@ def step(state: LoopState, ctx: LoopContext) -> Transition | None:
 
 
 def run_loop(state: LoopState, ctx: LoopContext, *, max_steps: int = 200) -> LoopState:
-    """Drive the fully-integrated loop to a terminal phase or a HARD step cap (independent of the attempt
+    """Drive the fully-integrated loop to a terminal phase, a HOLD (paused on an external condition such
+    as CI - the caller re-invokes when it may change), or a HARD step cap (independent of the attempt
     budget). Persists after each cycle when a store_path is set (crash-resumable)."""
     steps = 0
+    held = False
     while not state.is_terminal and steps < max_steps:
-        step(state, ctx)
+        transition = step(state, ctx)
         steps += 1
-    if not state.is_terminal:
+        if transition is not None and transition.decision is Decision.HOLD:
+            held = True  # paused waiting on an external condition; not a terminal state
+            break
+    if not state.is_terminal and not held:
         state.current_phase = Phase.STOPPED
         state.termination_reason = f"orchestrator hard step cap ({max_steps}) reached"
         if ctx.store_path is not None:
