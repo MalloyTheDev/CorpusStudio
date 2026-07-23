@@ -211,3 +211,22 @@ def test_step_persists_when_a_store_path_is_set(tmp_path: Path) -> None:
     state = LoopState(current_phase=Phase.RECON)
     step(state, _ctx(store_path=path))
     assert load(path).current_phase is Phase.DEFINE_SUCCESS
+
+
+# --------------------------------------------------------------------------- L8 completeness critic
+
+
+def test_verify_finalizes_only_when_success_criteria_are_met() -> None:
+    from loop.completeness import Criterion
+    state = LoopState(current_phase=Phase.VERIFY)
+    t = step(state, _ctx(critic=lambda _s: [Criterion("c1", "scorer works", met=True)]))
+    assert t.decision is Decision.ADVANCE and state.current_phase is Phase.FINALIZE
+
+
+def test_verify_does_not_finalize_a_green_gate_with_unmet_criteria() -> None:
+    # A green gate is not 'done' - an unmet goal criterion routes back to work the gap (self-correction).
+    from loop.completeness import Criterion
+    state = LoopState(current_phase=Phase.VERIFY)
+    t = step(state, _ctx(critic=lambda _s: [Criterion("c1", "docs written", met=False)]))
+    assert t.decision is not Decision.ADVANCE and state.current_phase is not Phase.FINALIZE
+    assert any(task["id"] == "meet-c1" for task in state.task_graph)  # the gap became a correction task

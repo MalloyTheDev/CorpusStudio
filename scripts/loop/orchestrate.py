@@ -25,6 +25,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from loop.completeness import (
+    CompletenessVerdict,
+    Critic,
+    check_completeness,
+    completeness_correction_tasks,
+    completeness_observation,
+)
 from loop.controller import (
     Decision,
     LoopState,
@@ -62,6 +69,7 @@ class LoopContext:
     executor: PhaseExecutor
     base: str = "main"
     reviewer: Reviewer | None = None
+    critic: Critic | None = None
     agent_runner: AgentRunner | None = None
     gh_runner: GhRunner | None = None
     pr_ref: str | None = None
@@ -122,6 +130,19 @@ def _fired_obligations(ctx: LoopContext) -> list[str]:
     if not isinstance(fired, list):
         return []
     return [o["id"] for o in fired if isinstance(o, dict) and isinstance(o.get("id"), str)]
+
+
+def _append_completeness_tasks(state: LoopState, verdict: CompletenessVerdict) -> None:
+    """Fold unmet success criteria into correction tasks on the graph (deduped, validated)."""
+    existing = {t.get("id") for t in state.task_graph if isinstance(t, dict)}
+    new = [t for t in completeness_correction_tasks(verdict) if t["id"] not in existing]
+    if not new:
+        return
+    try:
+        tasks = parse_tasks(list(state.task_graph) + new)
+    except LoopTaskError:
+        return
+    state.task_graph = [t.to_dict() for t in tasks]
 
 
 def _all_done(state: LoopState) -> bool:
@@ -197,6 +218,12 @@ def _dispatch(state: LoopState, ctx: LoopContext) -> PhaseResult:
             gaps = stale_docs(_changed_paths(ctx), ctx.couplings)
             if observation is Observation.SUCCESS and gaps:
                 observation, reason = docs_observation(gaps)
+        elif phase is Phase.VERIFY and observation is Observation.SUCCESS and ctx.critic is not None:
+            # L8 self-correction: a green gate is not 'done' - the GOAL's success criteria must be MET.
+            verdict = check_completeness(state, ctx.critic)
+            if not verdict.complete:
+                _append_completeness_tasks(state, verdict)
+                observation, reason = completeness_observation(verdict), verdict.note
         fingerprint = None
         if observation not in (Observation.SUCCESS, Observation.PROGRESS) and result.change_set_fingerprint:
             fingerprint = attempt_fingerprint(f"{observation.value}:{reason}", result.change_set_fingerprint)
