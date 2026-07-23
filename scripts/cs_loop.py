@@ -127,6 +127,7 @@ def _cmd_abort(args: argparse.Namespace) -> int:
     state = load(path)
     state.current_phase = Phase.STOPPED
     state.termination_reason = args.reason or "aborted by a human"
+    state.review_state.pop("paused", None)  # a STOPPED loop is unambiguous - never both terminal + paused
     save(state, path)
     _emit({"aborted": True, "phase": "STOPPED", "reason": state.termination_reason})
     return EXIT_OK
@@ -150,14 +151,28 @@ def _cmd_authorize(args: argparse.Namespace) -> int:
 def _load_adapters(path: str):  # noqa: ANN202 - a loaded module
     """Import an adapter module (by FILE PATH) that supplies the loop's injected effects. It must expose
     ``build_context(repo_root: Path, base: str)`` returning a ``loop.orchestrate.LoopContext`` (executor /
-    reviewer / agent runner / gh / critic). This is the seam a concrete Claude-Code runtime fills."""
+    reviewer / agent runner / gh / critic). This is the seam a concrete Claude-Code runtime fills.
+
+    The module is registered under a name DERIVED FROM ITS ABSOLUTE PATH (not a fixed ``cs_loop_adapters``),
+    so two different adapters loaded in one process (tests, an embedding runtime) do not collide, and it is
+    placed in ``sys.modules`` before execution per the importlib recipe so an adapter that defines
+    dataclasses or references itself resolves."""
+    import hashlib
     import importlib.util
-    spec = importlib.util.spec_from_file_location("cs_loop_adapters", path)
+    abs_path = str(Path(path).resolve())
+    mod_name = "cs_loop_adapters_" + hashlib.sha256(abs_path.encode("utf-8")).hexdigest()[:16]
+    spec = importlib.util.spec_from_file_location(mod_name, path)
     if spec is None or spec.loader is None:
         raise LoopStateError(f"cannot load adapter module: {path}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    sys.modules[mod_name] = module  # so self-reference / dataclasses in the adapter resolve
+    try:
+        spec.loader.exec_module(module)
+    except (OSError, SyntaxError, ImportError) as exc:
+        sys.modules.pop(mod_name, None)
+        raise LoopStateError(f"cannot load adapter module {path!r}: {type(exc).__name__}: {exc}") from exc
     if not hasattr(module, "build_context"):
+        sys.modules.pop(mod_name, None)
         raise LoopStateError(f"adapter module {path!r} must define build_context(repo_root, base)")
     return module
 
@@ -189,16 +204,38 @@ def _cmd_run(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _goals_from_json(goals_raw: object):  # noqa: ANN202 - a list[loop.campaign.Goal]
+    """Parse the goals JSON into Goal objects, fail-closed. Every entry must be an object; ``depends_on``
+    (if present) must be a list of strings. We do NOT coerce - ``list("g1")`` would silently become
+    ``['g','1']`` and read as a valid-looking dependency, so a mistyped config is rejected here with a
+    clear message instead of failing later with a confusing "unknown goal 'g'". No goal is silently
+    dropped (honesty: no silent truncation)."""
+    from loop.campaign import Goal
+    if not isinstance(goals_raw, list):
+        raise LoopStateError("goals file must be a JSON list of {goal, goal_id, depends_on?}")
+    goals = []
+    for index, g in enumerate(goals_raw):
+        if not isinstance(g, dict):
+            raise LoopStateError(f"goals[{index}] must be an object, got {type(g).__name__}")
+        deps_raw = g.get("depends_on", [])
+        if deps_raw is None:
+            deps_raw = []
+        if not isinstance(deps_raw, list) or not all(isinstance(d, str) for d in deps_raw):
+            raise LoopStateError(
+                f"goals[{index}] 'depends_on' must be a list of strings (or null), "
+                f"got {type(deps_raw).__name__}")
+        goals.append(Goal(goal=str(g.get("goal", "")), goal_id=str(g.get("goal_id", "")),
+                          depends_on=list(deps_raw)))
+    return goals
+
+
 def _cmd_campaign(args: argparse.Namespace) -> int:
-    from loop.campaign import Goal, run_campaign
+    from loop.campaign import run_campaign
     try:
         goals_raw = json.loads(Path(args.goals).read_text("utf-8"))
     except (OSError, ValueError, UnicodeDecodeError) as exc:
         raise LoopStateError(f"cannot read goals file {args.goals!r}: {exc}") from exc
-    if not isinstance(goals_raw, list):
-        raise LoopStateError("goals file must be a JSON list of {goal, goal_id, depends_on?}")
-    goals = [Goal(goal=str(g.get("goal", "")), goal_id=str(g.get("goal_id", "")),
-                  depends_on=list(g.get("depends_on", []))) for g in goals_raw if isinstance(g, dict)]
+    goals = _goals_from_json(goals_raw)
     store_dir = Path(args.store_dir) if args.store_dir else None
     outcomes = run_campaign(goals, _context(args), store_dir=store_dir, max_steps=args.max_steps)
     _emit({"outcomes": [{"goal_id": o.goal_id, "final_phase": o.final_phase, "finalized": o.finalized}

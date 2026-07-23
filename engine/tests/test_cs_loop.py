@@ -112,6 +112,42 @@ def test_inspect_pause_run_refused_resume_abort(tmp_path: Path) -> None:
     assert json.loads(_run(state, "abort", "--reason", "stop").stdout)["phase"] == "STOPPED"
 
 
+def test_abort_clears_a_pending_pause(tmp_path: Path) -> None:
+    # A paused-then-aborted loop must be unambiguously terminal, not "both STOPPED and paused".
+    state = tmp_path / "loop.json"
+    _run(state, "init", "--goal", "g")
+    _run(state, "pause")
+    _run(state, "abort", "--reason", "stop")
+    assert "paused" not in json.loads(_run(state, "inspect").stdout)["review_state"]
+
+
+def test_campaign_rejects_a_non_list_depends_on(tmp_path: Path) -> None:
+    # depends_on: "g1" must NOT be coerced to ['g','1'] - a mistyped config fails fast, clearly.
+    goals = tmp_path / "goals.json"
+    goals.write_text(json.dumps([{"goal": "a", "goal_id": "g1", "depends_on": "g0"}]))
+    proc = _run(tmp_path / "unused.json", "campaign", "--adapters", str(_adapter(tmp_path)),
+                "--goals", str(goals), "--repo-root", str(REPO_ROOT))
+    assert proc.returncode == 2 and "depends_on" in proc.stderr and "Traceback" not in proc.stderr
+
+
+def test_campaign_rejects_a_non_object_goal_entry(tmp_path: Path) -> None:
+    # A non-object entry is a config error - fail closed, never silently drop the goal.
+    goals = tmp_path / "goals.json"
+    goals.write_text(json.dumps([{"goal": "a", "goal_id": "g1"}, "oops"]))
+    proc = _run(tmp_path / "unused.json", "campaign", "--adapters", str(_adapter(tmp_path)),
+                "--goals", str(goals), "--repo-root", str(REPO_ROOT))
+    assert proc.returncode == 2 and "must be an object" in proc.stderr
+
+
+def test_run_refuses_an_unloadable_adapter(tmp_path: Path) -> None:
+    state = tmp_path / "loop.json"
+    _run(state, "init", "--goal", "g")
+    bad = tmp_path / "bad_adapter.py"
+    bad.write_text("this is not valid python :(\n")
+    proc = _run(state, "run", "--adapters", str(bad), "--repo-root", str(REPO_ROOT))
+    assert proc.returncode == 2 and "adapter module" in proc.stderr and "Traceback" not in proc.stderr
+
+
 def test_authorize_unescalates_a_blocked_loop(tmp_path: Path) -> None:
     state = tmp_path / "loop.json"
     _run(state, "init", "--goal", "g")
