@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from loop.controller import LoopState, Observation
+from loop.locking import FileLock, LockError
 
 
 _LEDGER_MAX_ENTRIES = 500  # bound the cross-goal ledger so it cannot grow without limit
@@ -217,21 +218,29 @@ def seed_known_dead_ends(state: LoopState, ledger_path: Path) -> int:
     return seeded
 
 
-def record_outcome(state: LoopState, ledger_path: Path, *, lessons: list[str] | None = None) -> None:
-    """Append this goal's outcome + dead ends to the cross-goal ledger (atomic write), so the next goal
-    starts from accumulated experience rather than a blank slate."""
-    entries = _load_ledger(ledger_path)
-    entries.append({
-        "goal": state.goal,
-        "goal_id": state.goal_id,
-        "outcome": state.current_phase.value,
-        "termination_reason": state.termination_reason,
-        "failed_approaches": copy.deepcopy(list(state.failed_approaches)),
-        "lessons": list(lessons or []),
-    })
-    if len(entries) > _LEDGER_MAX_ENTRIES:
-        entries = entries[-_LEDGER_MAX_ENTRIES:]  # bound the ledger; keep the most recent goals
-    ledger_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = ledger_path.with_name(f"{ledger_path.name}.tmp-{os.getpid()}")
-    tmp.write_text(json.dumps(entries, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(tmp, ledger_path)
+def record_outcome(state: LoopState, ledger_path: Path, *, lessons: list[str] | None = None,
+                   lock_timeout: float = 10.0) -> None:
+    """Append this goal's outcome + dead ends to the cross-goal ledger, so the next goal starts from
+    accumulated experience. The read-modify-write is guarded by a cross-process :class:`FileLock` so two
+    concurrent campaigns (or a campaign + a standalone run) sharing one ledger cannot LOSE each other's
+    append (a read-then-replace race). The write itself stays atomic (temp + os.replace). Fail-closed: if
+    the ledger cannot be locked within ``lock_timeout`` the outcome is NOT recorded (raises)."""
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)  # the lockfile lives beside the ledger
+    try:
+        with FileLock(ledger_path, timeout=lock_timeout):
+            entries = _load_ledger(ledger_path)
+            entries.append({
+                "goal": state.goal,
+                "goal_id": state.goal_id,
+                "outcome": state.current_phase.value,
+                "termination_reason": state.termination_reason,
+                "failed_approaches": copy.deepcopy(list(state.failed_approaches)),
+                "lessons": list(lessons or []),
+            })
+            if len(entries) > _LEDGER_MAX_ENTRIES:
+                entries = entries[-_LEDGER_MAX_ENTRIES:]  # bound the ledger; keep the most recent goals
+            tmp = ledger_path.with_name(f"{ledger_path.name}.tmp-{os.getpid()}")
+            tmp.write_text(json.dumps(entries, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            os.replace(tmp, ledger_path)
+    except LockError as exc:
+        raise CompletenessError(f"could not lock the learning ledger ({ledger_path}): {exc}") from exc
