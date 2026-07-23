@@ -33,8 +33,8 @@ def _cs():
 
 
 def _gh():
-    return lambda *a: (0, "merged", "") if len(a) >= 2 and a[1] == "merge" else \
-        (0, json.dumps([{"name": "pytest", "bucket": "pass"}]), "")
+    snapshot = json.dumps({"headRefOid": "sha1", "statusCheckRollup": [{"name": "pytest", "bucket": "pass"}]})
+    return lambda *a: (0, "merged", "") if len(a) >= 2 and a[1] == "merge" else (0, snapshot, "")
 
 
 def _ctx(*, dangerous: bool = False, ledger_path: Path | None = None) -> LoopContext:

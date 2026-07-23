@@ -46,7 +46,14 @@ from loop.controller import (
 )
 from loop.docs import DEFAULT_COUPLINGS, DocCoupling, docs_observation, stale_docs
 from loop.driver import Directive, next_directive
-from loop.integrate import GhRunner, ci_observation, merge_gate, observe_ci
+from loop.integrate import (
+    GhRunner,
+    IntegrateError,
+    ci_observation,
+    head_bound_merge,
+    merge_gate,
+    observe_ci,
+)
 from loop.observe import CsAssureRunner, LoopObserveError, _run_cs_assure, observe
 from loop.review import Reviewer, review, review_observation
 from loop.router import AgentRunner, aggregate_observation, dispatch_wave
@@ -77,6 +84,16 @@ class LoopContext:
     gh_runner: GhRunner | None = None
     pr_ref: str | None = None
     dangerous: bool = False
+    # The commit the loop validated + intends to merge (what `impact` analyzed). If set, INTEGRATE refuses
+    # to merge a PR whose observed head is not this commit - so the human-review gate (computed locally)
+    # can never be bound to a different remote head than the one being merged. None = single-writer trust.
+    expected_head: str | None = None
+    # CI checks that MUST have reported green before a merge (e.g. ("python-engine", "assurance")). An
+    # all-green rollup still MISSING one of these is treated as not-yet-settled (HOLD), so the loop never
+    # merges in the window before a required check has created its run. Empty = trust whatever reported.
+    # Names must EXACTLY match the check names gh reports; a name that never matches HOLDs indefinitely
+    # (fail-safe: never merges) and the HOLD reason names the missing check so the misconfig is visible.
+    required_checks: tuple[str, ...] = ()
     multi_agent: bool = False
     couplings: tuple[DocCoupling, ...] = DEFAULT_COUPLINGS
     run_cs_assure: CsAssureRunner = _run_cs_assure
@@ -116,10 +133,11 @@ def _changed_paths(ctx: LoopContext) -> list[str]:
     return [c["path"] for c in entries if isinstance(c, dict) and isinstance(c.get("path"), str)]
 
 
-def _fired_obligations(ctx: LoopContext) -> list[str]:
-    """The obligation ids the change fires (via cs_assure impact) - the input to the merge gate. FAIL-
-    CLOSED: a non-zero exit or an unusable record raises, so an UNCOMPUTABLE obligation set can never be
-    conflated with 'no obligations fired' at the merge button."""
+def _fired_obligations(ctx: LoopContext) -> list[dict[str, str]]:
+    """The obligations the change fires (via cs_assure impact) as ``{id, severity}`` - the input to the
+    merge gate, which derives merge RISK from the policy severity (not a caller bool). FAIL-CLOSED: a
+    non-zero exit or an unusable record raises, so an UNCOMPUTABLE obligation set can never be conflated
+    with 'no obligations fired' at the merge button."""
     code, out, err = ctx.run_cs_assure(ctx.repo_root, "impact", "--base", ctx.base)
     if code != 0:
         raise LoopOrchestrateError(f"cs_assure impact refused (exit {code}): {err.strip()[:120]}")
@@ -132,8 +150,16 @@ def _fired_obligations(ctx: LoopContext) -> list[str]:
         raise LoopOrchestrateError("cs_assure impact record has no payload object")
     fired = payload.get("fired_obligations")
     if not isinstance(fired, list):
-        return []
-    return [o["id"] for o in fired if isinstance(o, dict) and isinstance(o.get("id"), str)]
+        # A well-formed impact record ALWAYS has a (possibly empty) list here. A missing / non-list field
+        # is a malformed / schema-drifted record - fail CLOSED (do not conflate 'uncomputable' with 'none
+        # fired' at the merge button), like the payload check above.
+        raise LoopOrchestrateError("cs_assure impact record has no fired_obligations list")
+    items: list[dict[str, str]] = []
+    for o in fired:
+        if not isinstance(o, dict) or not isinstance(o.get("id"), str):
+            raise LoopOrchestrateError(f"cs_assure impact has a malformed fired obligation: {o!r}")
+        items.append({"id": o["id"], "severity": str(o.get("severity", ""))})
+    return items
 
 
 def _append_completeness_tasks(state: LoopState, verdict: CompletenessVerdict) -> None:
@@ -213,24 +239,32 @@ def _execute(state: LoopState, ctx: LoopContext, directive: Directive) -> PhaseR
 def _integrate(state: LoopState, ctx: LoopContext, directive: Directive) -> PhaseResult:
     if ctx.gh_runner is None or ctx.pr_ref is None:
         return PhaseResult(ctx.executor(state, directive), "integrated the change")
-    observation, reason = ci_observation(observe_ci(ctx.gh_runner, ctx.pr_ref))
+    snapshot = observe_ci(ctx.gh_runner, ctx.pr_ref)  # ONE read: checks + the head they ran against
+    observation, reason = ci_observation(snapshot.status, required=frozenset(ctx.required_checks))
     if observation is Observation.PROGRESS:
-        # CI has not settled (pending / not yet reported) - HOLD at INTEGRATE; never advance PAST the
-        # merge gate on an unsettled CI (that would FINALIZE unmerged / merge before CI validates).
+        # CI has not settled (pending / not yet reported / a required check missing) - HOLD at INTEGRATE;
+        # never advance PAST the merge gate on an unsettled CI (that would merge before CI validates).
         return PhaseResult(Observation.HOLD, f"CI not settled: {reason}")
     if observation is not Observation.SUCCESS:
         return PhaseResult(observation, reason)  # CI failing -> route to fix
+    if ctx.expected_head is not None and snapshot.head_sha is not None \
+            and snapshot.head_sha != ctx.expected_head:
+        # The remote PR head is NOT the commit we validated locally (the merge-gate obligations were
+        # computed against ctx.expected_head's tree). Do NOT merge a head whose obligations we never
+        # evaluated - HOLD to re-sync (re-observe + re-run impact on the new head).
+        return PhaseResult(Observation.HOLD,
+                           f"PR head {snapshot.head_sha[:12]} != validated commit {ctx.expected_head[:12]}; re-syncing")
     try:
         fired = _fired_obligations(ctx)
     except LoopOrchestrateError as exc:
         return PhaseResult(Observation.AUTHORIZATION_REQUIRED, f"obligations uncomputable; escalating: {exc}")
     gate = merge_gate(fired, dangerous=ctx.dangerous)
     if not gate.authorized:
-        return PhaseResult(gate.observation, gate.reason)  # self-modify / worker / dangerous -> escalate
-    code, _out, err = ctx.gh_runner("pr", "merge", ctx.pr_ref, "--squash")
-    if code == 0:
-        return PhaseResult(Observation.SUCCESS, "merged (authorized product change)")
-    return PhaseResult(Observation.TEST_REGRESSION, f"authorized merge failed: {err.strip()[:120]}")
+        return PhaseResult(gate.observation, gate.reason)  # self-modify / worker / policy-gated -> escalate
+    # Merge BOUND to the exact head CI validated: a commit pushed since is not merged blind (it HOLDs to
+    # re-observe the new head), so we never merge a diff CI never saw.
+    merge_obs, merge_reason = head_bound_merge(ctx.gh_runner, ctx.pr_ref, snapshot.head_sha)
+    return PhaseResult(merge_obs, merge_reason)
 
 
 def _dispatch(state: LoopState, ctx: LoopContext) -> PhaseResult:
@@ -291,15 +325,17 @@ def step(state: LoopState, ctx: LoopContext) -> Transition | None:
         return None
     try:
         result = _dispatch(state, ctx)
-    except (LoopObserveError, CompletenessError) as exc:
-        # An unusable assurance plane OR a misbehaving/erroring completeness critic escalates to a human
-        # (persisted) - it never crashes the loop mid-run.
+    except (LoopObserveError, CompletenessError, IntegrateError, OSError) as exc:
+        # An unusable assurance plane, a misbehaving completeness critic, an unusable CI/gh read at
+        # INTEGRATE, OR an injected effect that RAISES (e.g. a subprocess spawn failure - OSError:
+        # EAGAIN/EMFILE/ENOMEM - from gh_runner / run_cs_assure) escalates to a human (persisted). It
+        # fails CLOSED (no merge) and lands durably at ESCALATED, never as an uncaught crash mid-run.
         state.current_phase = Phase.ESCALATED
-        state.termination_reason = f"unrecoverable: {exc}"
+        state.termination_reason = f"unrecoverable: {type(exc).__name__}: {exc}"
         if ctx.store_path is not None:
             save(state, ctx.store_path)
         return Transition(Decision.ESCALATE, Phase.ESCALATED, state.termination_reason,
-                          "escalated: assurance plane / critic unusable")
+                          "escalated: assurance plane / critic / CI read / effect unusable")
     if not isinstance(result.observation, Observation):
         raise LoopOrchestrateError(
             f"handler for {state.current_phase.value} returned {type(result.observation).__name__}, "
