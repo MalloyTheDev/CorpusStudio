@@ -75,6 +75,7 @@ class Observation(str, Enum):
     AUTHORIZATION_REQUIRED = "AUTHORIZATION_REQUIRED"  # credential / dangerous / irreversible / release
     WORKER_LINEAGE_IMPACT = "WORKER_LINEAGE_IMPACT"  # worker bytes changed -> fresh wheel/env workflow
     NONDETERMINISTIC_FAILURE = "NONDETERMINISTIC_FAILURE"  # flaky; a bounded retry may pass
+    CHANGES_REQUESTED = "CHANGES_REQUESTED"          # a reviewer found real issues -> correction tasks
 
 
 class Decision(str, Enum):
@@ -104,6 +105,7 @@ _ROUTE: dict[Observation, Decision] = {
     Observation.NONDETERMINISTIC_FAILURE: Decision.REVISE,
     Observation.WRONG_PLAN: Decision.REPLAN,
     Observation.OWNERSHIP_COLLISION: Decision.RESCHEDULE,
+    Observation.CHANGES_REQUESTED: Decision.RESCHEDULE,
     Observation.ENVIRONMENT_FAILURE: Decision.ESCALATE,
     Observation.POLICY_BLOCK: Decision.ESCALATE,
     Observation.AUTHORIZATION_REQUIRED: Decision.ESCALATE,
@@ -211,7 +213,7 @@ def _phase_for(current: Phase, decision: Decision, observation: Observation) -> 
     if decision is Decision.REPLAN:
         return Phase.PLAN, None, "plan is wrong; replanning"
     if decision is Decision.RESCHEDULE:
-        return Phase.ASSIGN, None, "ownership collision; rescheduling task assignment"
+        return Phase.ASSIGN, None, "re-entering task assignment (a collision or new correction work to schedule)"
     if decision is Decision.ENTER_WORKER_WORKFLOW:
         return Phase.ESCALATED, "worker-lineage impact -> worker workflow (human-gated)", \
             "worker bytes changed; leaving the ordinary loop"
