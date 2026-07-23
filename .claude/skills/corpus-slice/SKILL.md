@@ -76,6 +76,10 @@ never an authority - the completion record and green gate are what actually fina
   contracts rule).
 - `cs_assure changeset --scope workspace --base main` - confirm the change set matches `planned_paths`
   (unexpected paths = ownership creep, a stop condition). `cs_assure doclint` if you touched docs.
+- `cs_assure impact --base main` - the change set mapped onto the obligations policy: it lists which
+  obligations your change fires (worker-closure, contracts, sealed-research, evaluation-honesty,
+  assurance-self-modify) so you discharge each one. Observation-only - it reports, you act; a fired
+  `blocking` obligation you have not discharged is a stop condition, not a green light.
 - Optionally run the `assurance-reviewer` for an advisory pass - a `MODEL_REVIEW`, which is NOT human
   review or CI.
 

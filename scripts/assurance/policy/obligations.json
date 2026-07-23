@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "description": "cs_assure impact policy: repo-relative path globs -> obligations that FIRE when a matching path appears in the change set. OBSERVATION-ONLY - fired obligations are reported for the engineer/agent to discharge; the engine never enforces, gates, auto-fixes, or blocks. Each obligation id equals a .claude/rules/<id>.md filename stem and its globs are kept EQUAL to that rule's `paths:` front-matter by test_impact_policy_matches_rules, so the machine change->obligation map and the read-time rules never drift. Invariant-derived (AGENTS.md/CLAUDE.md) obligations that are not yet backed by a rule file are a documented future extension (promote them to a real rule first, then add them here under the same equality test).",
+  "severities": ["info", "advisory", "blocking"],
+  "obligations": [
+    {
+      "id": "assurance-self-modify",
+      "globs": ["scripts/assurance/**", "scripts/cs_assure.py", ".claude/**", "engine/tests/test_assurance_*.py", "engine/tests/test_plugin_hooks.py"],
+      "obligation": "BOOTSTRAP_SELF_MODIFIED: this change edits the tool that judges changes, so its own assurance output is candidate-local and provisional; admit only via the repo's pre-existing gate + CI + INDEPENDENT human review, never self-approve or self-merge, and keep the kernel stdlib-only and fail-closed (exit 2).",
+      "authority": "the repo's pre-existing gate + CI + an independent human reviewer (NOT the assurance system's own output).",
+      "severity": "blocking",
+      "source": ".claude/rules/assurance-self-modify.md"
+    },
+    {
+      "id": "contracts",
+      "globs": ["engine/corpus_studio/platform/contracts.py", "engine/corpus_studio/platform/enums.py", "docs/contracts/**"],
+      "obligation": "Regenerate the JSON schemas + TS types and update the three contract-count assertions in tests/test_platform_contracts.py in the same change; keep every foundational contract dense-safe / MoE-compatible.",
+      "authority": "CI diffs the regenerated output; a trigger-independent backstop test byte-compares the committed schemas + TS types.",
+      "severity": "blocking",
+      "source": ".claude/rules/contracts.md"
+    },
+    {
+      "id": "evaluation-honesty",
+      "globs": ["engine/corpus_studio/evaluation/**"],
+      "obligation": "An unavailable metric is null-with-typed-reason, never a fabricated 0.0; exclude infrastructure-failure rows from the quality denominator so a broken backend never reads as a bad model.",
+      "authority": "the honesty invariant upheld across the scorers, the aggregate report, and the model card.",
+      "severity": "blocking",
+      "source": ".claude/rules/evaluation-honesty.md"
+    },
+    {
+      "id": "sealed-research",
+      "globs": ["research/ieee-linux-training/**", "docs/paper/**"],
+      "obligation": "Append-only, immutable, auth-gated overlay: never edit a frozen protocol/amendment/matrix in place, never reword sealed<->exploratory, and on a spec/on-disk conflict STOP and escalate rather than reconcile.",
+      "authority": "validate_protocol.py green; explicit human authorization per auth-gated action; escalation to the research authority.",
+      "severity": "blocking",
+      "source": ".claude/rules/sealed-research.md"
+    },
+    {
+      "id": "worker-closure",
+      "globs": ["engine/corpus_studio/platform/worker.py", "engine/corpus_studio/platform/runners.py", "engine/corpus_studio/platform/artifacts.py", "engine/corpus_studio/platform/supervisor.py", "engine/corpus_studio/platform/execution_config.py", "engine/corpus_studio/platform/planner.py", "engine/corpus_studio/training/trainer.py"],
+      "obligation": "A change to worker-execution bytes needs a fresh pinned worker package + new environment locks; trace the import path and write the WORKER_CHANGE_REQUIRED vs control-plane-only verdict (this matcher flags only the DECLARED worker files, not lazily-reachable modules - the trace is still the engineer's).",
+      "authority": "a written symbol-level import trace; a fresh pinned worker package + env locks (sealed research adds the amendment/matrix/reserved-id/rebuilt-wheel/-vN chain).",
+      "severity": "blocking",
+      "source": ".claude/rules/worker-closure.md"
+    }
+  ]
+}
