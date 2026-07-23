@@ -1,0 +1,61 @@
+name: Assurance Loop
+
+# Runs the deterministic assurance sensors on every push/PR so the loop is ENFORCED, not just
+# available when someone remembers to invoke it. cs_assure is stdlib-only (no install, any python3):
+#   - doclint --strict  : FAILS the build if any registered doc has gone stale (the doc-trust gate).
+#   - impact            : OBSERVATION-ONLY - lists which obligations the change fires, in the job
+#                         summary, so a reviewer sees "this touches worker-closure / evaluation-honesty"
+#                         without remembering to look. It never fails the build.
+# The engine gate (ruff/mypy/pytest) already lives in engine-tests.yml, so `verify` is not re-run here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  assurance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history so cs_assure can resolve merge-base(HEAD, base) for the change set.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Doc-trust gate (cs_assure doclint --strict)
+        # Exit 1 on any staleness finding -> fails the build. main is doc-lint clean, so a PR only
+        # fails if IT introduces staleness (or leaves an existing one unfixed).
+        run: python3 scripts/cs_assure.py doclint --strict
+
+      - name: Impact (obligations this change fires)
+        # Observation-only + best-effort: runs even if the doc-trust gate failed, never fails the
+        # build itself. Writes a summary a reviewer sees on the PR's Checks tab.
+        if: ${{ always() && github.event_name == 'pull_request' }}
+        run: |
+          python3 scripts/cs_assure.py impact --base "origin/${{ github.base_ref }}" > impact.json 2> impact.err || true
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          print("## Assurance impact\n")
+          try:
+              payload = json.load(open("impact.json"))["payload"]
+          except Exception as exc:  # never fail the summary step
+              print(f"_impact could not be computed ({exc})._")
+          else:
+              fired = payload["fired_obligations"]
+              print(f"Change set: **{payload['changed_path_count']}** path(s) vs the base.\n")
+              if not fired:
+                  print("_No obligations fire - a plain change._")
+              else:
+                  print("Discharge each before merge:\n")
+                  print("| obligation | severity | what it obliges |")
+                  print("|---|---|---|")
+                  for f in fired:
+                      print(f"| `{f['id']}` | {f['severity']} | {f['obligation'][:100]} |")
+          PY
