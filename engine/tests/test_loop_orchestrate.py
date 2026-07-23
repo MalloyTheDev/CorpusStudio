@@ -231,17 +231,28 @@ def test_step_persists_when_a_store_path_is_set(tmp_path: Path) -> None:
 
 
 def test_verify_finalizes_only_when_success_criteria_are_met() -> None:
+    from loop.completeness import Criterion, CriterionKind
+    # A DETERMINISTIC criterion citing a SEALED assurance record (pre-seeded here) lets VERIFY finalize.
+    state = LoopState(current_phase=Phase.VERIFY, assurance_records=["sha256:proof"])
+    t = step(state, _ctx(critic=lambda _s: [Criterion("c1", "scorer works",
+                         kind=CriterionKind.DETERMINISTIC, met=True, evidence="sha256:proof")]))
+    assert t.decision is Decision.ADVANCE and state.current_phase is Phase.FINALIZE
+
+
+def test_verify_escalates_on_a_bare_model_judgment() -> None:
+    # A green gate + a MODEL_JUDGMENT 'met' is not an autonomous finalize - it escalates for human authority.
     from loop.completeness import Criterion
     state = LoopState(current_phase=Phase.VERIFY)
-    t = step(state, _ctx(critic=lambda _s: [Criterion("c1", "scorer works", met=True)]))
-    assert t.decision is Decision.ADVANCE and state.current_phase is Phase.FINALIZE
+    t = step(state, _ctx(critic=lambda _s: [Criterion("c1", "looks done", met=True)]))
+    assert t.decision is Decision.ESCALATE and state.current_phase is Phase.ESCALATED
 
 
 def test_verify_does_not_finalize_a_green_gate_with_unmet_criteria() -> None:
     # A green gate is not 'done' - an unmet goal criterion routes back to work the gap (self-correction).
-    from loop.completeness import Criterion
+    from loop.completeness import Criterion, CriterionKind
     state = LoopState(current_phase=Phase.VERIFY)
-    t = step(state, _ctx(critic=lambda _s: [Criterion("c1", "docs written", met=False)]))
+    t = step(state, _ctx(critic=lambda _s: [Criterion("c1", "docs written",
+                         kind=CriterionKind.DETERMINISTIC, met=False)]))
     assert t.decision is not Decision.ADVANCE and state.current_phase is not Phase.FINALIZE
     assert any(task["id"] == "meet-c1" for task in state.task_graph)  # the gap became a correction task
 
@@ -285,12 +296,15 @@ def test_critic_that_raises_escalates_not_crashes() -> None:
 
 
 def test_run_loop_seeds_and_records_the_learning_ledger(tmp_path: Path) -> None:
-    from loop.completeness import Criterion
+    from loop.completeness import Criterion, CriterionKind
     ledger = tmp_path / "ledger.json"
     ledger.write_text(json.dumps([{"failed_approaches": ["sha256:prior-dead-end"]}]))
     state = LoopState(goal="g1", current_phase=Phase.RECEIVE_GOAL)
+    # A DETERMINISTIC criterion citing the verify record ("sha256:v") the OBSERVE step seals -> it finalizes.
     run_loop(state, _ctx(executor=_executor([{"id": "impl", "allowed_paths": ["engine/"]}]),
                          reviewer=lambda _s: [], gh_runner=_gh(ci="pass"), pr_ref="1",
-                         critic=lambda _s: [Criterion("c", "done", met=True)], ledger_path=ledger))
+                         critic=lambda _s: [Criterion("c", "done", kind=CriterionKind.DETERMINISTIC,
+                                                      met=True, evidence="sha256:v")], ledger_path=ledger))
+    assert state.current_phase is Phase.FINALIZE  # finalized on evidence-bound completion
     assert "sha256:prior-dead-end" in state.failed_approaches  # seeded from the ledger
     assert json.loads(ledger.read_text())[-1]["goal"] == "g1"  # this goal recorded for the next

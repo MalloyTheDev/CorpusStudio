@@ -54,7 +54,7 @@ worker-lineage impact escalates rather than proceeding.
 | `review.py` | Review-feedback: accepted findings become **correction tasks** appended to the graph; a clean review advances to `INTEGRATE`. |
 | `integrate.py` | CI / PR continuation: observe CI, diagnose a failure into an `Observation`, and the **merge-authorization gate** (product auto-merges; self-modify / worker-lineage / dangerous escalate). |
 | `docs.py` | Docs-freshness: a code↔doc coupling check - a change that touches coupled code but not its docs is `CONTRACT_DRIFT` at OBSERVE (never let docs go stale). |
-| `completeness.py` | **L8 self-correction**: at VERIFY, a green gate is not "done" - the GOAL's success criteria must be MET (a completeness critic; a critic that errors escalates, never crashes the loop); an unmet criterion folds into a correction task run by the executor (unbounded correction work is never delegated to a boundary-enforced agent). Plus cross-goal **dead-end memory** (a ledger of exact failed-approach fingerprints, not generalized learning) wired into `run_loop` via `ctx.ledger_path` - it seeds prior goals' dead ends at the start and records this goal's at the end. |
+| `completeness.py` | **L8 self-correction**: at VERIFY, a green gate is not "done" - the GOAL's success criteria must be MET, and each is **typed** (`CriterionKind`) so the *right evidence* is required: DETERMINISTIC / DOMAIN_AUTHORITY criteria count only if they cite a digest **bound to a sealed assurance record** (a bare `met=True` with no bound evidence becomes a correction task); MODEL_JUDGMENT is the model's opinion and can never *alone* close an autonomous finalize; HUMAN_APPROVAL is met only by a **recorded** `cs_loop authorize` grant. Routing: unmet gaps → CHANGES_REQUESTED (work them, via an executor-run correction task - unbounded correction work is never delegated to a boundary-enforced agent); a residual model-judged / human-approval gap → AUTHORIZATION_REQUIRED (escalate the human decision); a critic that errors escalates, never crashes the loop. Plus cross-goal **dead-end memory** (a ledger of exact failed-approach fingerprints, not generalized learning) wired into `run_loop` via `ctx.ledger_path` - it seeds prior goals' dead ends at the start and records this goal's at the end. |
 | `orchestrate.py` | **The capstone** - one integrated loop that dispatches each phase to its module (decompose→validate, assign, execute/wave, observe+docs, review, integrate w/ HOLD-on-CI + merge gate, verify+completeness) with every effect injected. |
 | `campaign.py` | **Multi-goal orchestration**: a queue of goals, each its own `run_loop`, sharing the learning ledger; dependency-ordered (a goal whose prerequisite did not finalize is skipped) and stop-on-blocker. |
 
@@ -83,14 +83,17 @@ CorpusStudio implements the **L4-L7 controller architecture** (executable single
 recovery → coordinated multi-agent task graph → CI/review/integration autonomy) and **experimental L8
 long-horizon mechanisms** (a completeness critic, cross-goal dead-end memory, and topologically-scheduled
 multi-goal campaigns). It is **not** yet a production-complete L8 autonomous system: that still requires
-trusted controller self-governance, concrete Claude-Code executor/reviewer/critic/agent adapters,
-evidence-bound (not model-asserted) completion, isolated per-agent execution (git worktrees), per-goal
-campaign isolation (branch/worktree/PR), and race-safe head-bound GitHub integration. The controller is a
-control plane *on top of* the assurance plane, not a replacement for it.
+concrete Claude-Code executor/reviewer/critic/agent adapters, isolated per-agent execution (git
+worktrees), per-goal campaign isolation (branch/worktree/PR), and race-safe head-bound GitHub integration.
+The controller is a control plane *on top of* the assurance plane, not a replacement for it.
 
-**Known scope limits (do not overstate):** the completeness critic is model-assisted (a `met=True` is a
-model judgment, not bound to a test/artifact/authority); the cross-goal ledger is *exact dead-end memory*,
+**Known scope limits (do not overstate):** completion is now **typed and evidence-bound** (see
+`completeness.py`) - autonomous finalize needs DETERMINISTIC / DOMAIN_AUTHORITY criteria bound to sealed
+records, and a bare model judgment or a pending human approval **escalates** rather than finalizing - but
+the *evaluators are still injected*, so the strength of a DETERMINISTIC check is only as good as the
+evidence the runtime seals into the assurance records. The cross-goal ledger is *exact dead-end memory*,
 not generalized learning; multi-agent boundary enforcement trusts the agent's self-reported changed paths
 (not yet a worktree-derived diff) and `dispatch_wave` runs runners sequentially; campaigns share one
-repo/working-tree/PR (only per-goal state files differ); and the loop controller (`scripts/loop/**`,
-`cs_loop.py`) is **not yet under a self-modification obligation** - see the trust-boundary work item.
+repo/working-tree/PR (only per-goal state files differ). The loop controller (`scripts/loop/**`,
+`cs_loop.py`, loop tests, this doc) is under the **`loop-controller-self-modify`** obligation, so a change
+to it cannot be admitted by the loop's own run - it needs independent review.

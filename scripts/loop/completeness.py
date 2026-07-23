@@ -3,8 +3,15 @@
 Two capabilities that make the loop a self-correcting, long-horizon system rather than a one-shot pass:
 
   * COMPLETENESS CRITIC - at VERIFY, do not FINALIZE just because the gate is green; check the GOAL's
-    own success criteria are actually MET. An unmet criterion is a CHANGES_REQUESTED that folds into a
-    correction task, so the loop keeps working until the goal is genuinely achieved, not merely compiling.
+    own success criteria are actually MET, and require the RIGHT KIND of evidence for each. A criterion
+    is TYPED (:class:`CriterionKind`): a DETERMINISTIC or DOMAIN_AUTHORITY criterion counts as met only if
+    it cites evidence BOUND to a sealed assurance record (a model asserting ``met=True`` with no bound
+    digest is NOT proven -> it becomes a correction task); a MODEL_JUDGMENT criterion is the model's own
+    opinion and can NEVER by itself close an autonomous finalize -> it needs human authority; a
+    HUMAN_APPROVAL criterion is met only by a RECORDED human authorization (the critic cannot self-grant).
+    An unmet criterion is a CHANGES_REQUESTED that folds into a correction task (keep working the gap); a
+    criterion that is "met" only on model opinion / awaits a human is AUTHORIZATION_REQUIRED (escalate the
+    residual human decision). So the loop never autonomously declares a goal done on a bare model claim.
   * CROSS-GOAL LEARNING - a durable ledger of prior goals' dead ends (failed-approach fingerprints).
     Seeding a new loop from it means the same (failure, approach) another goal already exhausted is
     recognised as a dead end immediately, so effort accumulates across goals/sessions instead of resetting.
@@ -19,6 +26,7 @@ import copy
 import json
 import os
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable
 
@@ -32,12 +40,27 @@ class CompletenessError(Exception):
     """The critic returned a non-Criterion result / raised, or the ledger is malformed (fail-closed)."""
 
 
+class CriterionKind(str, Enum):
+    """How a success criterion is PROVEN - which determines what evidence lets it close an AUTONOMOUS
+    finalize. The default is the WEAKEST (``MODEL_JUDGMENT``), so an untyped criterion is never silently
+    trusted as machine-proven."""
+
+    DETERMINISTIC = "DETERMINISTIC"        # a re-runnable check (gate/test/digest); needs BOUND evidence
+    DOMAIN_AUTHORITY = "DOMAIN_AUTHORITY"  # an authoritative offline record (cs_assure); needs BOUND evidence
+    MODEL_JUDGMENT = "MODEL_JUDGMENT"      # the LLM's opinion; NEVER enough alone -> human authority
+    HUMAN_APPROVAL = "HUMAN_APPROVAL"      # met only by a RECORDED human authorization (grant == id)
+
+
 @dataclass(frozen=True)
 class Criterion:
-    """One goal success criterion and whether the critic judged it MET (with the evidence it cited)."""
+    """One goal success criterion: its KIND (how it is proven), whether the critic judged it met, and the
+    evidence it cites. For DETERMINISTIC / DOMAIN_AUTHORITY, ``evidence`` must be a digest bound to a sealed
+    assurance record for ``met`` to count. For HUMAN_APPROVAL, ``met`` is IGNORED - the criterion is met
+    only by a recorded authorization whose grant equals this criterion's ``id``."""
 
     id: str
     description: str
+    kind: CriterionKind = CriterionKind.MODEL_JUDGMENT
     met: bool = False
     evidence: str = ""
 
@@ -45,7 +68,8 @@ class Criterion:
 @dataclass(frozen=True)
 class CompletenessVerdict:
     complete: bool
-    unmet: list[Criterion]
+    unmet: list[Criterion]            # not proven / met=False -> correction tasks (keep working the gap)
+    needs_authority: list[Criterion]  # model-judged-met or human-approval-pending -> escalate to a human
     note: str
 
 
@@ -53,10 +77,37 @@ class CompletenessVerdict:
 Critic = Callable[[LoopState], "list[Criterion]"]
 
 
+def _evidence_is_bound(evidence: str, state: LoopState) -> bool:
+    """True only if ``evidence`` is a non-empty digest present in the loop's SEALED assurance records - so
+    a deterministic/authority criterion cannot score as met on a digest the loop never actually recorded."""
+    return bool(evidence) and evidence in state.assurance_records
+
+
+def _human_granted(criterion: Criterion, state: LoopState) -> bool:
+    """True if a human authorization for this criterion has been RECORDED (``cs_loop authorize --grant``
+    stores ``{grant, note}`` on ``review_state['authorizations']``). The critic cannot self-grant."""
+    auths = state.review_state.get("authorizations", [])
+    if not isinstance(auths, list):
+        return False
+    return any(isinstance(a, dict) and a.get("grant") == criterion.id for a in auths)
+
+
 def check_completeness(state: LoopState, critic: Critic) -> CompletenessVerdict:
-    """Run the critic and reduce it to a verdict. Fail-closed on a non-Criterion result. A goal with NO
-    declared success criteria is INCOMPLETE by default (a goal must define what 'done' means) unless the
-    critic explicitly returns criteria - so the loop never declares an unmeasured goal complete."""
+    """Run the critic and reduce it to an EVIDENCE-BOUND, KIND-AWARE verdict (fail-closed on a non-Criterion
+    result). A goal with NO declared success criteria is not complete - a human must define/approve 'done'.
+    Each criterion is classed by :class:`CriterionKind`:
+
+      * DETERMINISTIC / DOMAIN_AUTHORITY - met only if the critic says met AND cites evidence bound to a
+        sealed assurance record; otherwise it is UNMET (asserted without proof -> a correction task).
+      * MODEL_JUDGMENT - met=True is the model's opinion; it can never by ITSELF close an autonomous
+        finalize -> NEEDS_AUTHORITY, unless a human has RATIFIED it with a recorded grant (grant == id),
+        which counts it met. met=False -> UNMET.
+      * HUMAN_APPROVAL - met only by a recorded authorization (grant == id); otherwise NEEDS_AUTHORITY.
+
+    A criterion awaiting authority is thus satisfied by ``cs_loop authorize --grant <criterion-id>`` - the
+    universal "a human ratifies this specific criterion" mechanism that resolves the escalation.
+
+    ``complete`` requires every criterion met with sufficient evidence and none awaiting human authority."""
     try:
         criteria = critic(state)
     except CompletenessError:
@@ -66,21 +117,53 @@ def check_completeness(state: LoopState, critic: Critic) -> CompletenessVerdict:
     if not isinstance(criteria, list) or not all(isinstance(c, Criterion) for c in criteria):
         raise CompletenessError("critic must return a list[Criterion]")
     if not criteria:
-        return CompletenessVerdict(False, [], "no success criteria were evaluated; goal completion is unproven")
-    # A criterion is met ONLY if `met` is exactly True (a truthy non-bool must not score as met).
-    unmet = [c for c in criteria if c.met is not True]
-    if unmet:
-        return CompletenessVerdict(False, unmet, f"{len(unmet)}/{len(criteria)} success criteria unmet")
-    return CompletenessVerdict(True, [], f"all {len(criteria)} success criteria met")
+        return CompletenessVerdict(
+            False, [], [], "no success criteria were evaluated; a human must define/approve what 'done' means")
+    unmet: list[Criterion] = []
+    needs_authority: list[Criterion] = []
+    for c in criteria:
+        if c.kind is CriterionKind.HUMAN_APPROVAL:
+            if not _human_granted(c, state):
+                needs_authority.append(c)  # awaits a recorded human grant; the critic cannot self-grant
+            # else: met by a recorded authorization (counted as met - falls through)
+        elif c.kind in (CriterionKind.DETERMINISTIC, CriterionKind.DOMAIN_AUTHORITY):
+            # met ONLY if exactly True (a truthy non-bool must not score) AND the evidence is bound.
+            if c.met is True and _evidence_is_bound(c.evidence, state):
+                continue
+            unmet.append(c)  # asserted without bound evidence is NOT proven -> work it
+        else:  # MODEL_JUDGMENT
+            if c.met is not True:
+                unmet.append(c)
+            elif _human_granted(c, state):
+                continue  # a human RATIFIED the model's judgment (grant == id) -> met
+            else:
+                needs_authority.append(c)  # model opinion awaiting human ratification
+    complete = not unmet and not needs_authority
+    if complete:
+        note = f"all {len(criteria)} success criteria met with sufficient evidence"
+    elif unmet:
+        note = f"{len(unmet)}/{len(criteria)} success criteria unmet"
+        if needs_authority:
+            note += f"; {len(needs_authority)} await human authority"
+    else:
+        note = (f"{len(needs_authority)}/{len(criteria)} success criteria await human authority "
+                "(model-judged or human-approval); an autonomous finalize is not permitted")
+    return CompletenessVerdict(complete, unmet, needs_authority, note)
 
 
 def completeness_observation(verdict: CompletenessVerdict) -> Observation:
-    """Complete -> SUCCESS (the loop may FINALIZE); otherwise CHANGES_REQUESTED (keep working the gaps)."""
-    return Observation.SUCCESS if verdict.complete else Observation.CHANGES_REQUESTED
+    """Complete -> SUCCESS (the loop may FINALIZE). Unmet gaps -> CHANGES_REQUESTED (work them first).
+    Otherwise the only thing left is a human decision -> AUTHORIZATION_REQUIRED (escalate)."""
+    if verdict.complete:
+        return Observation.SUCCESS
+    if verdict.unmet:
+        return Observation.CHANGES_REQUESTED
+    return Observation.AUTHORIZATION_REQUIRED
 
 
 def completeness_correction_tasks(verdict: CompletenessVerdict) -> list[dict[str, Any]]:
-    """Turn each unmet criterion into a correction task (a goal-completion gap to close)."""
+    """Turn each unmet criterion into a correction task (a goal-completion gap to close). Criteria awaiting
+    human authority are NOT turned into tasks - they are a human decision, surfaced via escalation."""
     return [
         {
             "id": f"meet-{c.id}",
