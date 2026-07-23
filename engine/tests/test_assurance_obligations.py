@@ -160,7 +160,7 @@ def test_load_policy_happy_is_sorted_and_digest_stable(tmp_path: Path) -> None:
     p2 = load_policy(tmp_path)
     assert [o.id for o in p1.obligations] == sorted(o.id for o in p1.obligations)
     assert p1.digest == p2.digest and p1.digest.startswith("sha256:")
-    assert p1.obligation_count == len(p1.obligations) == 5
+    assert p1.obligation_count == len(p1.obligations) == 6
 
 
 # --------------------------------------------------------------------------- match_obligations
