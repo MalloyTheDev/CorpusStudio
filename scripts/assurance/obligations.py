@@ -33,19 +33,23 @@ from assurance.canonical_json import sha256_digest, sha256_of_bytes
 from assurance.git_state import (
     AssuranceError,
     GitContext,
+    NoMergeBase,
+    ShallowHistoryLimitation,
     discover_git_context,
     merge_base,
     read_committed_file,
 )
 from assurance.records import RECORD_SCHEMA_VERSION, build_change_set_record, seal_record
 
-_SEVERITY_RANK = {"info": 0, "advisory": 1, "blocking": 2}
-
 POLICY_SCHEMA_VERSION = 1
 IMPACT_RECORD_TYPE = "impact_assessment"
 IMPACT_SCHEMA_VERSION = 1
 DEFAULT_POLICY_RELPATH = "scripts/assurance/policy/obligations.json"
 VALID_SEVERITIES = ("info", "advisory", "blocking")
+_SEVERITY_RANK = {"info": 0, "advisory": 1, "blocking": 2}
+# An UNKNOWN severity ranks above every known one, so it can never be silently weakened by a recognised
+# candidate severity (both sides are VALID_SEVERITIES post-parse; this keeps 'never weaken' robust anyway).
+_UNKNOWN_SEVERITY_RANK = len(VALID_SEVERITIES)
 
 _ALLOWED_TOP_KEYS = frozenset({"schema_version", "description", "severities", "obligations"})
 _ALLOWED_OBLIGATION_KEYS = frozenset({"id", "globs", "obligation", "authority", "severity", "source"})
@@ -195,15 +199,17 @@ def load_base_policy(ctx: GitContext, base_ref: str,
     candidate. Never touches the working tree."""
     try:
         base_commit = merge_base(ctx, base_ref)
-        raw_bytes = read_committed_file(ctx, base_commit, policy_relpath)
-    except AssuranceError:
-        return None
+    except (NoMergeBase, ShallowHistoryLimitation):
+        return None  # no trusted base to compare against (initial commit / shallow clone) - legitimate
+    # read_committed_file returns None for a genuinely absent policy, and RAISES (GitStateError) on a real
+    # git failure - which we deliberately let PROPAGATE so a broken repo fails closed, not candidate-only.
+    raw_bytes = read_committed_file(ctx, base_commit, policy_relpath)
     if raw_bytes is None:
-        return None
+        return None  # the policy file did not exist at the trusted base (a genuinely new policy)
     try:
         obligations = parse_policy(json.loads(raw_bytes.decode("utf-8")))
     except (ValueError, UnicodeDecodeError, RecursionError, PolicyError):
-        return None
+        return None  # a malformed committed base policy -> treat as unavailable (honest flag)
     return LoadedPolicy(
         obligations=tuple(obligations),
         digest=sha256_of_bytes(raw_bytes),
@@ -214,7 +220,8 @@ def load_base_policy(ctx: GitContext, base_ref: str,
 
 
 def _stronger_severity(a: str, b: str) -> str:
-    return a if _SEVERITY_RANK.get(a, 0) >= _SEVERITY_RANK.get(b, 0) else b
+    return a if (_SEVERITY_RANK.get(a, _UNKNOWN_SEVERITY_RANK)
+                 >= _SEVERITY_RANK.get(b, _UNKNOWN_SEVERITY_RANK)) else b
 
 
 def union_policy(candidate: LoadedPolicy, base: LoadedPolicy) -> LoadedPolicy:
