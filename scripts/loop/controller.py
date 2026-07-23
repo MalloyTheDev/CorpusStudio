@@ -1,0 +1,236 @@
+"""The deterministic controller kernel: phases, the failure taxonomy, and the bounded transition.
+
+Design invariants (mirror the assurance kernel so the two planes share a discipline):
+  * stdlib-only; runs under any ``python3``; imports nothing from ``corpus_studio`` and no torch.
+  * every transition is a PURE function of ``(state, observation)`` - deterministic and testable; no
+    wall-clock, randomness, or I/O in the transition itself.
+  * FAIL-CLOSED: an unrecognised observation ESCALATES; it never silently advances the loop.
+  * BOUNDED: a total-attempt budget caps the loop, and the SAME ``(failure, patch)`` fingerprint is
+    never retried - "same test failure, same stack trace, same patch -> do not retry".
+  * human approval is RETAINED: ``AUTHORIZATION_REQUIRED`` / ``POLICY_BLOCK`` escalate to a human; a
+    worker-lineage impact leaves the ordinary loop for the (human-gated) worker workflow.
+
+This is slice 1 (L3 -> L4): the routing brain. Action emission bound to a task graph, agent ownership,
+and the ``cs_assure`` observe/verify wiring are later slices; the durable :class:`LoopState` already
+carries the fields those slices fill in so its on-disk shape does not churn.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from dataclasses import dataclass, field
+from enum import Enum
+
+
+class Phase(str, Enum):
+    """The operational state machine. FINALIZE / ESCALATED / STOPPED are terminal."""
+
+    RECEIVE_GOAL = "RECEIVE_GOAL"
+    RECON = "RECON"
+    DEFINE_SUCCESS = "DEFINE_SUCCESS"
+    PLAN = "PLAN"
+    DECOMPOSE = "DECOMPOSE"
+    ASSIGN = "ASSIGN"
+    EXECUTE = "EXECUTE"
+    OBSERVE = "OBSERVE"
+    DIAGNOSE = "DIAGNOSE"
+    REVIEW = "REVIEW"
+    INTEGRATE = "INTEGRATE"
+    VERIFY = "VERIFY"
+    FINALIZE = "FINALIZE"      # terminal: success, completion criteria met
+    ESCALATED = "ESCALATED"    # terminal: needs a human (blocker / authorization / worker workflow)
+    STOPPED = "STOPPED"        # terminal: budget exhausted or a repeated-failure dead end
+
+
+# The forward pipeline used when a step SUCCEEDS. The loop is not purely linear - DIAGNOSE branches -
+# but a clean step advances one position along this spine.
+_PIPELINE: tuple[Phase, ...] = (
+    Phase.RECEIVE_GOAL, Phase.RECON, Phase.DEFINE_SUCCESS, Phase.PLAN, Phase.DECOMPOSE,
+    Phase.ASSIGN, Phase.EXECUTE, Phase.OBSERVE, Phase.DIAGNOSE, Phase.REVIEW,
+    Phase.INTEGRATE, Phase.VERIFY, Phase.FINALIZE,
+)
+TERMINAL: frozenset[Phase] = frozenset({Phase.FINALIZE, Phase.ESCALATED, Phase.STOPPED})
+
+
+class Observation(str, Enum):
+    """The CLASSIFIED result of an executed step - the failure taxonomy plus the two non-failures.
+
+    The executor (LLM/agent) runs the step and reports a raw result; classification into one of these
+    is what lets the controller ROUTE each failure differently instead of blindly re-running."""
+
+    SUCCESS = "SUCCESS"                              # the step met its success criteria
+    PROGRESS = "PROGRESS"                            # forward movement, not yet complete
+    SYNTAX_FAILURE = "SYNTAX_FAILURE"
+    TYPE_FAILURE = "TYPE_FAILURE"
+    TEST_REGRESSION = "TEST_REGRESSION"
+    DEPENDENCY_FAILURE = "DEPENDENCY_FAILURE"        # a missing/incompatible package - code-fixable
+    ENVIRONMENT_FAILURE = "ENVIRONMENT_FAILURE"      # broken venv / host / GPU - usually not code-fixable
+    CONTRACT_DRIFT = "CONTRACT_DRIFT"                # schemas/TS/count assertions out of sync
+    WRONG_HYPOTHESIS = "WRONG_HYPOTHESIS"            # the fix theory was wrong; a new one is needed
+    WRONG_PLAN = "WRONG_PLAN"                        # the decomposition itself is wrong
+    OWNERSHIP_COLLISION = "OWNERSHIP_COLLISION"      # two tasks/agents contend for the same files
+    POLICY_BLOCK = "POLICY_BLOCK"                    # an obligation/honesty invariant forbids this
+    AUTHORIZATION_REQUIRED = "AUTHORIZATION_REQUIRED"  # credential / dangerous / irreversible / release
+    WORKER_LINEAGE_IMPACT = "WORKER_LINEAGE_IMPACT"  # worker bytes changed -> fresh wheel/env workflow
+    NONDETERMINISTIC_FAILURE = "NONDETERMINISTIC_FAILURE"  # flaky; a bounded retry may pass
+
+
+class Decision(str, Enum):
+    """How the controller routes an observation."""
+
+    ADVANCE = "ADVANCE"                              # step succeeded -> next phase on the spine
+    REVISE = "REVISE"                                # recoverable -> new hypothesis, re-EXECUTE
+    REPLAN = "REPLAN"                                # the plan is wrong -> back to PLAN
+    RESCHEDULE = "RESCHEDULE"                        # ownership conflict -> re-ASSIGN
+    ESCALATE = "ESCALATE"                            # hard blocker / authorization -> human
+    STOP = "STOP"                                    # budget exhausted / repeated dead end
+    ENTER_WORKER_WORKFLOW = "ENTER_WORKER_WORKFLOW"  # leave the ordinary loop for the worker workflow
+
+
+# The base routing table: taxonomy -> decision BEFORE the budget/retry guards apply. A missing key is
+# treated as ESCALATE by :func:`route` (fail-closed), so adding an Observation without a route cannot
+# silently advance the loop.
+_ROUTE: dict[Observation, Decision] = {
+    Observation.SUCCESS: Decision.ADVANCE,
+    Observation.PROGRESS: Decision.ADVANCE,
+    Observation.SYNTAX_FAILURE: Decision.REVISE,
+    Observation.TYPE_FAILURE: Decision.REVISE,
+    Observation.TEST_REGRESSION: Decision.REVISE,
+    Observation.DEPENDENCY_FAILURE: Decision.REVISE,
+    Observation.CONTRACT_DRIFT: Decision.REVISE,
+    Observation.WRONG_HYPOTHESIS: Decision.REVISE,
+    Observation.NONDETERMINISTIC_FAILURE: Decision.REVISE,
+    Observation.WRONG_PLAN: Decision.REPLAN,
+    Observation.OWNERSHIP_COLLISION: Decision.RESCHEDULE,
+    Observation.ENVIRONMENT_FAILURE: Decision.ESCALATE,
+    Observation.POLICY_BLOCK: Decision.ESCALATE,
+    Observation.AUTHORIZATION_REQUIRED: Decision.ESCALATE,
+    Observation.WORKER_LINEAGE_IMPACT: Decision.ENTER_WORKER_WORKFLOW,
+}
+
+# Decisions that re-enter the loop (and therefore consume budget / are subject to the retry guard).
+_RETRYING: frozenset[Decision] = frozenset({Decision.REVISE, Decision.REPLAN, Decision.RESCHEDULE})
+
+
+def attempt_fingerprint(failure_signature: str, patch_signature: str) -> str:
+    """A stable id for "this failure, addressed this way". Two attempts with the same fingerprint are
+    the same dead end; the controller refuses to retry one it has already seen fail."""
+    payload = f"{failure_signature}\x00{patch_signature}".encode()
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+@dataclass
+class LoopState:
+    """The durable loop runtime. Slice 1 fills the control fields; the task-graph / agent / evidence
+    fields exist now so later slices populate them without changing the on-disk shape."""
+
+    goal: str = ""
+    goal_id: str = ""
+    success_criteria: list[str] = field(default_factory=list)
+    current_phase: Phase = Phase.RECEIVE_GOAL
+    task_graph: list[dict] = field(default_factory=list)
+    active_agents: list[dict] = field(default_factory=list)
+    observations: list[dict] = field(default_factory=list)
+    hypotheses: list[dict] = field(default_factory=list)
+    failed_approaches: list[str] = field(default_factory=list)  # attempt fingerprints that failed
+    budgets: dict = field(default_factory=lambda: {"total_attempts": 0, "max_attempts": 20})
+    assurance_records: list[str] = field(default_factory=list)  # sealed cs_assure record digests
+    review_state: dict = field(default_factory=dict)
+    blockers: list[dict] = field(default_factory=list)
+    termination_reason: str | None = None
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.current_phase in TERMINAL
+
+
+@dataclass(frozen=True)
+class Transition:
+    """The pure result of routing one observation: what to decide, where to go, and why."""
+
+    decision: Decision
+    next_phase: Phase
+    termination_reason: str | None
+    note: str
+
+
+def route(state: LoopState, observation: Observation, *, fingerprint: str | None = None) -> Transition:
+    """Route one classified observation to a decision + next phase. PURE: no I/O, no mutation of
+    ``state``. Apply the budget guard (attempts >= max -> STOP), then the repeated-failure guard (a
+    known-failed fingerprint on a REVISE -> ESCALATE, because retrying the same patch is a dead end)."""
+    if state.is_terminal:
+        return Transition(Decision.STOP, state.current_phase, state.termination_reason,
+                          "already terminal; no further transition")
+
+    base = _ROUTE.get(observation, Decision.ESCALATE)  # fail-closed default
+    if observation not in _ROUTE:
+        return Transition(Decision.ESCALATE, Phase.ESCALATED,
+                          f"unclassified observation {observation!r}",
+                          "no route for observation; escalating fail-closed")
+
+    if base in _RETRYING:
+        max_attempts = int(state.budgets.get("max_attempts", 0))
+        used = int(state.budgets.get("total_attempts", 0))
+        if max_attempts and used >= max_attempts:
+            return Transition(Decision.STOP, Phase.STOPPED, "attempt budget exhausted",
+                              f"{used}/{max_attempts} attempts used; stopping instead of looping")
+        # Repeated-failure guard: a REVISE that repeats a known-failed (failure, patch) is a dead end.
+        if base is Decision.REVISE and fingerprint is not None and fingerprint in state.failed_approaches:
+            return Transition(Decision.ESCALATE, Phase.ESCALATED, "repeated failed approach",
+                              "same failure + same patch already failed; a new approach is required")
+
+    next_phase, reason, note = _phase_for(state.current_phase, base, observation)
+    return Transition(base, next_phase, reason, note)
+
+
+def _phase_for(current: Phase, decision: Decision, observation: Observation) -> tuple[Phase, str | None, str]:
+    """Map a decision to the next phase (and terminal reason, if any)."""
+    if decision is Decision.ADVANCE:
+        nxt = _advance(current)
+        if nxt is Phase.FINALIZE:
+            return Phase.FINALIZE, "completion criteria satisfied", "advancing to FINALIZE"
+        return nxt, None, f"advancing {current.value} -> {nxt.value}"
+    if decision is Decision.REVISE:
+        return Phase.EXECUTE, None, "revise hypothesis and re-execute"
+    if decision is Decision.REPLAN:
+        return Phase.PLAN, None, "plan is wrong; replanning"
+    if decision is Decision.RESCHEDULE:
+        return Phase.ASSIGN, None, "ownership collision; rescheduling task assignment"
+    if decision is Decision.ENTER_WORKER_WORKFLOW:
+        return Phase.ESCALATED, "worker-lineage impact -> worker workflow (human-gated)", \
+            "worker bytes changed; leaving the ordinary loop"
+    if decision is Decision.STOP:
+        return Phase.STOPPED, "stopped", "stopping"
+    # ESCALATE
+    return Phase.ESCALATED, f"escalated on {observation.value}", "escalating to a human"
+
+
+def _advance(current: Phase) -> Phase:
+    idx = _PIPELINE.index(current)
+    return _PIPELINE[min(idx + 1, len(_PIPELINE) - 1)]
+
+
+def apply(state: LoopState, observation: Observation, *, fingerprint: str | None = None,
+          note: str = "") -> Transition:
+    """Route the observation AND commit it to ``state`` (the one mutating entry point): append the
+    observation, charge the attempt budget for a re-entering decision, record a failed fingerprint,
+    move to the next phase, and set the terminal reason. Returns the taken :class:`Transition`."""
+    transition = route(state, observation, fingerprint=fingerprint)
+    state.observations.append({
+        "observation": observation.value,
+        "decision": transition.decision.value,
+        "from_phase": state.current_phase.value,
+        "to_phase": transition.next_phase.value,
+        "fingerprint": fingerprint,
+        "note": note or transition.note,
+    })
+    if transition.decision in _RETRYING:
+        state.budgets["total_attempts"] = int(state.budgets.get("total_attempts", 0)) + 1
+    # A re-entering failure with a fingerprint records the dead end so it is never retried.
+    if fingerprint is not None and observation not in (Observation.SUCCESS, Observation.PROGRESS):
+        if fingerprint not in state.failed_approaches:
+            state.failed_approaches.append(fingerprint)
+    state.current_phase = transition.next_phase
+    if transition.termination_reason is not None and state.current_phase in TERMINAL:
+        state.termination_reason = transition.termination_reason
+    return transition
