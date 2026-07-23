@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""cs_assure - CorpusStudio Assurance Loop CLI (Phase 1: change-set kernel only).
+
+Usage::
+
+    python3 scripts/cs_assure.py changeset --scope workspace --base main --format json
+
+Subcommands:
+    changeset  snapshot the selected Git state and print a deterministic, rename-free,
+               content-addressed ChangeSetRecord vs merge-base(HEAD, --base) (Phase 1 kernel).
+    doclint    lint the documentation context plane for staleness against the context-source
+               registry (detect-only; edits nothing) - the doc-trust sub-loop's sensor.
+
+Exit-code contract:
+    0  success (an empty change set on a clean tree, or a doclint run, is still 0),
+    1  doclint --strict found staleness (gate mode only),
+    2  a fail-closed refusal (not a repo, missing base ref, no merge base, shallow-history
+       limitation, unsupported special file, non-UTF-8 path, tree moved mid-collection, or a
+       malformed context-source registry).
+
+Both subcommands are read-only: cs_assure never mutates the repository's committed state - the
+object store, refs, the committed tree, or the working tree (a read may refresh the content-neutral
+index stat-cache; see ``assurance/git_state.py``). Later phases add impact / verification / gate /
+evidence subcommands.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+# Make the sibling ``assurance`` package importable whether run as a script, via -m, or from a
+# subprocess. When run as ``python scripts/cs_assure.py`` this dir is already sys.path[0]; the
+# explicit insert makes the other invocation paths robust too.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from assurance import KERNEL_VERSION  # noqa: E402 - must follow the sys.path bootstrap above.
+from assurance.canonical_json import CanonicalJsonError  # noqa: E402
+from assurance.git_state import AssuranceError  # noqa: E402
+from assurance.records import build_change_set_record  # noqa: E402
+
+EXIT_OK = 0
+EXIT_LINT_FINDINGS = 1
+EXIT_FAIL_CLOSED = 2
+
+
+def _cmd_changeset(args: argparse.Namespace) -> int:
+    start_dir = Path(args.start_dir) if args.start_dir else Path.cwd()
+    record = build_change_set_record(start_dir=start_dir, scope=args.scope, base_ref=args.base)
+    # Pretty, key-sorted JSON for human/tooling readability. The embedded record_digest is
+    # computed over the CANONICAL (compact) form, so re-verification always re-canonicalizes the
+    # parsed object rather than re-hashing these display bytes.
+    sys.stdout.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    return EXIT_OK
+
+
+def _cmd_doclint(args: argparse.Namespace) -> int:
+    from assurance.doc_lint import load_registry, lint_repo  # noqa: PLC0415
+    from assurance.git_state import discover_git_context  # noqa: PLC0415
+
+    start_dir = Path(args.start_dir) if args.start_dir else Path.cwd()
+    ctx = discover_git_context(start_dir)
+    sources = load_registry(ctx.root)
+    findings = lint_repo(ctx.root, sources)
+    if args.format == "json":
+        payload = {
+            "tool": "cs_assure doclint",
+            "registry_source_count": len(sources),
+            "finding_count": len(findings),
+            "findings": [f.to_record() for f in findings],
+        }
+        sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    else:
+        _print_doclint_summary(len(sources), findings)
+    # Detect-only by default (exit 0). --strict turns it into a gate (exit 1 on any finding).
+    if args.strict and findings:
+        return EXIT_LINT_FINDINGS
+    return EXIT_OK
+
+
+def _print_doclint_summary(source_count: int, findings: list) -> None:
+    out = sys.stdout
+    out.write(f"cs_assure doclint - {source_count} registered sources, {len(findings)} findings\n")
+    if not findings:
+        out.write("  no staleness findings\n")
+        return
+    by_rule: dict[str, int] = {}
+    by_file: dict[str, int] = {}
+    for finding in findings:
+        by_rule[finding.rule] = by_rule.get(finding.rule, 0) + 1
+        by_file[finding.path] = by_file.get(finding.path, 0) + 1
+    out.write("  by rule:\n")
+    for rule in sorted(by_rule):
+        out.write(f"    {rule}: {by_rule[rule]}\n")
+    out.write("  by file:\n")
+    for path in sorted(by_file):
+        out.write(f"    {path}: {by_file[path]}\n")
+    out.write("  findings (path:line [rule] excerpt):\n")
+    for finding in findings:
+        out.write(f"    {finding.path}:{finding.line} [{finding.rule}] {finding.excerpt}\n")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="cs_assure", description=__doc__.splitlines()[0])
+    parser.add_argument("--version", action="version", version=f"cs_assure {KERNEL_VERSION}")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    changeset = subparsers.add_parser(
+        "changeset", help="compute a sealed change-set record for a selected Git state"
+    )
+    changeset.add_argument(
+        "--scope",
+        default="workspace",
+        choices=["workspace"],
+        help="which Git state to snapshot (Phase 1 implements the workspace scope only)",
+    )
+    changeset.add_argument(
+        "--base",
+        default="main",
+        help="base ref; the change set is computed against merge-base(HEAD, base)",
+    )
+    changeset.add_argument(
+        "--format",
+        default="json",
+        choices=["json"],
+        help="output format (Phase 1: json)",
+    )
+    changeset.add_argument(
+        "--start-dir",
+        default=None,
+        help="directory to resolve the repository from (default: current directory)",
+    )
+    changeset.set_defaults(func=_cmd_changeset)
+
+    doclint = subparsers.add_parser(
+        "doclint",
+        help="lint the documentation context plane for staleness (detect-only; edits nothing)",
+    )
+    doclint.add_argument(
+        "--format",
+        default="summary",
+        choices=["summary", "json"],
+        help="summary = human counts + findings; json = full deterministic list",
+    )
+    doclint.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit 1 if any findings are reported (for CI gating); default is detect-only exit 0",
+    )
+    doclint.add_argument(
+        "--start-dir",
+        default=None,
+        help="directory to resolve the repository from (default: current directory)",
+    )
+    doclint.set_defaults(func=_cmd_doclint)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return args.func(args)
+    except (AssuranceError, CanonicalJsonError) as exc:
+        # Fail closed: a structured refusal on stderr, exit 2, and NO partial record on stdout.
+        sys.stderr.write(f"cs_assure: {type(exc).__name__}: {exc}\n")
+        return EXIT_FAIL_CLOSED
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

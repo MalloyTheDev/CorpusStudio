@@ -4,13 +4,14 @@ Instructions for AI coding agents (Codex, Claude, etc.) working in this repo.
 **Full session state + roadmap: read [`HANDOFF.md`](HANDOFF.md) first.**
 
 ## Where you are
-- Work from **`/mnt/training-nvme/repos/CorpusStudio`** - the native-Linux RTX 5070 host (Ubuntu 24.04).
-  Verified host facts (paths, GPU, managed environment): [`docs/HOST_STATE.md`](docs/HOST_STATE.md).
-- Engine venv: `/mnt/training-nvme/repos/CorpusStudio/engine/.venv` (CPython 3.12.3, torch-free core + `[dev]`).
-- History (mounted, do not work from): this repo previously lived on Windows `F:` (USB) then `C:`
-  (migrated 2026-07-13). The filesystems are mounted read-write at `/mnt/windows-f` and
-  `/mnt/windows-c` (e.g. old `C:\CorpusStudio` -> `/mnt/windows-c/CorpusStudio`), but project policy is
-  history-only: do not develop from or write to those stale fallbacks because they will drift.
+- This is the **CorpusStudio** repository. Resolve the checkout root with `git rev-parse --show-toplevel`;
+  host paths are not hardcoded here.
+- Verified host facts - the checkout path, GPU, the managed environment, and exactly what it does and does
+  not prove - live in [`docs/HOST_STATE.md`](docs/HOST_STATE.md); read it before anything hardware-adjacent.
+  Run the engine gate from `engine/` using the project venv.
+- History: this repo previously lived on Windows (`F:` then `C:`; migrated 2026-07-13); its old mounts are
+  read-only, drifting fallbacks - never develop from or write to them. That migration evidence is
+  preserved in HOST_STATE.md, not current guidance.
 
 ## What this is
 CorpusStudio is a **local-first, end-to-end AI development ecosystem and IDE** covering the complete model
@@ -63,11 +64,11 @@ From `engine/` with the venv:
 .venv/bin/python -m pytest -q --no-header --basetemp=.pytest_tmp
 ```
 CI runs on **Linux / Python 3.11** with `pytest --cov=corpus_studio --cov-fail-under=88` + the web job.
-- **Coverage**: this host is native Linux, so `storage_profiler`'s Linux-only detection now runs
-  locally - the old ~0.3% Windows-run under-measurement no longer applies; the CI floor is 88%.
+- **Coverage**: the CI floor is **88%** (`--cov=corpus_studio`); run the repo-defined gate and never
+  weaken the floor.
 - **After editing any `platform/` contract**, regenerate schemas:
   `python -c "from corpus_studio.platform.schema_export import export_json_schemas; export_json_schemas('../docs/contracts')"`
-  and update the two counts in `tests/test_platform_contracts.py`.
+  and update the three contract-count assertions in `tests/test_platform_contracts.py`.
 
 ## Rules — do not break
 - **Dependency-light boundary**: `import corpus_studio.platform` and the engine core must pull **no
@@ -77,26 +78,25 @@ CI runs on **Linux / Python 3.11** with `pytest --cov=corpus_studio --cov-fail-u
   "installed ≠ supported"; no silent target truncation; predicted fit is never `NATIVE_SAFE` (only a
   measured run is); single-writer `examples.jsonl`.
 - **Blackwell / sm_120**: the **math** attention path is the verified-safe default (fused flash-SDPA
-  deadlocks on native Windows WDDM; on this native-Linux host the env hardware probe verified the math
-  path). An **exploratory product run** (not a sealed IEEE cell) has since trained 7B QLoRA at seq 4096
-  here with flash SDPA + liger fused-CE + bnb paged-8bit-AdamW + `max_split_size_mb:128` (envelope: math
-  <= 2048, flash <= 3072, flash+liger+paged = 4096); bare-Linux flash-for-the-workload is still not a
-  **sealed** claim. Unsloth is refused on Windows/WDDM.
-- **ASCII in CLI-facing strings** (Windows console UTF-8 — no `—`, use `-`).
+  deadlocks on native Windows/WDDM; the env hardware probe verified the math path). An **exploratory
+  product run** (not a sealed IEEE cell) has since trained 7B QLoRA at seq 4096 with flash SDPA + liger
+  fused-CE + paged 8-bit AdamW - exploratory evidence, not a **sealed** claim; the measured sequence
+  envelope and winning config live in HOST_STATE.md. Unsloth is refused on Windows/WDDM.
+- **ASCII in CLI-facing strings** (console portability): use `-`, not the em dash; no non-ASCII in
+  `typer` help or error messages.
 - **Contracts are the boundary**: change `platform/contracts.py` (pydantic) → regenerate
   `docs/contracts/*.schema.json` → the TS types in `apps/web/src/contracts/` derive from those.
 - **One training authority**: shipping clients use `platform-plan` → `platform-run`; they never invoke
   the development-only `train-run` compatibility command. Every execution gets a fresh run ID and a
   run-scoped output directory; runner identity derives from the pinned backend manifest.
-- **Hardware claims stay evidence-bound**: the native-Linux RTX 5070 host is now assembled and the
-  managed `backend-corpus-studio` environment is `HARDWARE_VERIFIED` (env-manager CUDA alloc + 4-bit
-  construction + minimal GPU fwd/bwd + math SDPA - see [`docs/HOST_STATE.md`](docs/HOST_STATE.md)). That
-  environment-probe level is NOT a workload result. An exploratory product run has since trained 7B QLoRA
-  at seq 4096 on this host (above), but still do not claim full-sequence 7B success **as a sealed research
-  cell**, nor claim DeepSpeed/FSDP/CPU/NVMe offload, real offload fit, PCIe/NVMe throughput or endurance,
-  bare-Linux FlashAttention for the real workload **as a sealed result**, or MoE runtime capability.
-  Contracts, fake workers, CI, and a passing env hardware probe are not proof of the sealed 7B claim, and
-  an exploratory run does not amend the paper's immutable sealed ladder.
+- **Hardware claims stay evidence-bound**: the managed `backend-corpus-studio` environment is
+  `HARDWARE_VERIFIED` (an env-manager probe - CUDA alloc + 4-bit construction + minimal GPU fwd/bwd +
+  math SDPA; see [`docs/HOST_STATE.md`](docs/HOST_STATE.md)); that probe level is NOT a workload result.
+  Do not claim full-sequence 7B success **as a sealed research cell**, DeepSpeed/FSDP/CPU/NVMe offload,
+  real offload fit, PCIe/NVMe throughput or endurance, bare-Linux FlashAttention for the real workload
+  **as a sealed result**, or MoE runtime capability, without a measured run. Contracts, fake workers, CI,
+  and a passing env probe are not proof of a sealed 7B claim; an exploratory product run does not amend
+  the paper's immutable sealed ladder. Current measured host/env status lives in HOST_STATE.md + HANDOFF.md.
 
 ## Process
 - Branch first (`git checkout -b feat/<slice>`), one coherent CI-green PR per slice.

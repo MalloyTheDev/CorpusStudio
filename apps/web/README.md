@@ -18,7 +18,8 @@ engine (Python)  ──JSON-Schema contracts──►  TS types  ──►  Reac
   `npm run gen:contracts` — never hand-edit them. CI diffs the regenerated output to catch drift.
 - **Nocturne tokens.** `src/theme/nocturne.css` is the web half of
   [`docs/design/nocturne-tokens.json`](../../docs/design/nocturne-tokens.json) — the same token set
-  the Avalonia head uses as brushes. Theme = a `data-theme` swap (dark / light).
+  the former Avalonia head consumed as brushes (the desktop head was removed, #545). Theme = a
+  `data-theme` swap (dark / light).
 - **Engine as the source of truth.** The Tauri commands in `src-tauri/src/lib.rs` shell out to
   `corpus-studio platform-*` and return the parsed contract. The shell contains **no platform logic**.
 

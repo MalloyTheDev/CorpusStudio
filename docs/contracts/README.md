@@ -15,7 +15,7 @@ corpus-studio platform-schemas --out docs/contracts
 # or: python -m corpus_studio.cli platform-schemas --out docs/contracts
 ```
 
-`index.json` lists all **28 root contracts** and their shared `contract_version`.
+`index.json` lists all **31 root contracts** and their shared `contract_version`.
 
 ## The contracts
 
@@ -41,8 +41,12 @@ corpus-studio platform-schemas --out docs/contracts
 | `BackendManifest` | A backend's **static** declaration of what it can do (OS/device/precision/quant/adapter/attn/loss plus placement/offload/parallelism/communication axes, deps + conflicts, known-failure modes, probes). |
 | `CapabilityReport` | The **measured** counterpart — per-probe outcomes on a specific host (declared ∩ proven). |
 | `RunPlan` | The **immutable, fully-resolved** execution plan (`plan_hash`-sealed), including concrete physical resources, state placements, offload rules, and rank/group bindings; accumulation target is in **supervised tokens**. |
+| `ResolvedExecutionConfiguration` | The hash-sealed, fully-resolved execution configuration consumed **directly** by an isolated worker - every execution-affecting default; a worker may refuse it but never silently fill in or override it. |
 | `RunManifest` | A durable run **instance** + state machine + reconciliation. |
 | `RunEvent` | The **streamed telemetry** envelope (stage markers + metrics incl. **dedicated vs shared** GPU memory). |
+| `TelemetrySample` | One raw, append-only environmental sample (`<run-dir>/TelemetrySamples.jsonl`); the authoritative per-tick series the summary is derived from. |
+| `RunTelemetrySummary` | The single paper-facing summary of a run's measurement; every field is **DERIVED** from the raw `RunEvent`/`TelemetrySample`/`RunManifest` records it names. |
+| `CheckpointManifest` | A single hash-sealed checkpoint instance; `complete` is the atomic completion marker, so a torn write is never mistaken for a resumable checkpoint. |
 | `ArtifactManifest` | A produced weight artifact (two-tier integrity, `reload_verified`). |
 | `EvaluationResult` | Eval outcome with an explicit **as-served vs raw** distinction + gate verdict. |
 | `FailureRecord` | Classified terminal outcome (`FailureTaxonomy`: OOM / KERNEL_STALL / ACCIDENTAL_SPILL / …). |
