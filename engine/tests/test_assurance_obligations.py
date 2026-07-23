@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -303,15 +304,41 @@ def test_impact_policy_matches_rules_exactly() -> None:
         assert o.id in rule_stems, f"obligation {o.id!r} has no .claude/rules/{o.id}.md anchor"
 
 
-def test_impact_policy_covers_advisory_hook_fragments() -> None:
-    # Every write-time advisory-hook fragment must be covered by a policy glob (hook is a subset).
+def _load_hook() -> ModuleType:
     hook = REPO_ROOT / ".claude" / "hooks" / "advisory_classify.py"
     spec = importlib.util.spec_from_file_location("advisory_classify_under_test", hook)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def _representative_path(glob: str) -> str:
+    """A concrete example path that lives under a policy glob (``**`` / ``*`` -> a literal segment)."""
+    return glob.replace("**/", "x/").replace("**", "x").replace("*", "x")
+
+
+def test_impact_policy_covers_advisory_hook_fragments() -> None:
+    # SOUNDNESS (leg 1): every write-time advisory-hook fragment is covered by a policy glob - the hook
+    # never nudges on something the policy does not flag.
+    module = _load_hook()
     all_globs = [g for o in load_policy(REPO_ROOT).obligations for g in o.globs]
     for fragment, _reminder in module._SENSITIVE:
         assert any(fragment in glob for glob in all_globs), (
             f"advisory fragment {fragment!r} is not covered by any policy glob"
         )
+
+
+def test_advisory_hook_covers_every_policy_glob() -> None:
+    # COMPLETENESS (leg 2 - the third leg of the seam): every path the policy flags ALSO produces a
+    # write-time nudge, exercised through the hook's REAL classifier (reminder_for), not a proxy. This
+    # is the assertion that catches a policy glob added without a matching hook fragment (the gap R3
+    # closed for .claude/**, the assurance tests, docs/contracts/**, and .github/workflows/assurance.yml).
+    module = _load_hook()
+    for obligation in load_policy(REPO_ROOT).obligations:
+        for glob in obligation.globs:
+            example = _representative_path(glob)
+            assert module.reminder_for(example) is not None, (
+                f"obligation {obligation.id!r} glob {glob!r} (e.g. {example!r}) has no advisory-hook "
+                "coverage; add a fragment to advisory_classify._SENSITIVE or narrow the policy glob"
+            )

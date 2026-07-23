@@ -18,6 +18,7 @@ import sys
 _SENSITIVE: tuple[tuple[str, str], ...] = (
     ("platform/contracts.py", "contracts changed -> regenerate schemas + TS and update the 3 contract-count assertions (test_platform_contracts)."),
     ("platform/enums.py", "contracts trigger -> a contract enum change needs the schema/TS regen + the 3 count assertions (test_platform_contracts)."),
+    ("docs/contracts/", "generated schema -> do not hand-edit; regenerate via schema_export and update the 3 count assertions (test_platform_contracts)."),
     ("platform/execution_config.py", "worker-closure file -> a worker-byte change needs a fresh package + env locks; trace the import path."),
     ("platform/planner.py", "worker-RUNTIME-reachable (lazy imports from worker.py/runners.py) -> classify RUNTIME_REACHABLE_REVIEW_REQUIRED, not control-plane by default."),
     ("platform/worker.py", "worker-closure file -> a worker-byte change needs a fresh package + env locks; trace the import path."),
@@ -29,8 +30,26 @@ _SENSITIVE: tuple[tuple[str, str], ...] = (
     ("docs/paper/", "research paper -> frozen snapshot evidence; do not rewrite for product advances."),
     ("scripts/assurance/", "ASSURANCE SELF-MODIFY (BOOTSTRAP_SELF_MODIFIED) -> provisional; needs trusted-base CI + independent review."),
     ("scripts/cs_assure.py", "ASSURANCE SELF-MODIFY (BOOTSTRAP_SELF_MODIFIED) -> provisional; needs trusted-base CI + independent review."),
+    (".claude/", "ASSURANCE SELF-MODIFY (BOOTSTRAP_SELF_MODIFIED) -> the plugin/policy/rules/hooks are candidate-controlled; needs independent review."),
+    ("engine/tests/test_assurance_", "ASSURANCE SELF-MODIFY (BOOTSTRAP_SELF_MODIFIED) -> a change here alters the assurance system's own proofs; needs independent review."),
+    ("engine/tests/test_plugin_hooks", "ASSURANCE SELF-MODIFY (BOOTSTRAP_SELF_MODIFIED) -> a change here alters the plugin-hook proofs; needs independent review."),
+    (".github/workflows/assurance.yml", "ASSURANCE SELF-MODIFY (BOOTSTRAP_SELF_MODIFIED) -> this CI job ENFORCES the gate; weakening it (drop --strict / non-required) defangs the judge. Independent review."),
     ("corpus_studio/evaluation/", "evaluation path -> an unavailable metric is null-with-reason, never a fabricated 0."),
 )
+
+
+def reminder_for(file_path: str) -> str | None:
+    """Return the advisory reminder for an edited path, or None if the path is not sensitive. Pure and
+    the SINGLE source of the match semantics (segment-boundary substring) - shared by main() and the
+    3-way policy<->rules<->hook conformance test, so the two can never drift apart."""
+    norm = file_path.replace("\\", "/")
+    # Segment-boundary match: prepend "/" to both sides so a fragment matches only at a path
+    # boundary ("training/trainer.py" must NOT match "myproj_training/trainer.py").
+    haystack = "/" + norm
+    for fragment, reminder in _SENSITIVE:
+        if ("/" + fragment) in haystack:
+            return reminder
+    return None
 
 
 def main() -> None:
@@ -41,17 +60,12 @@ def main() -> None:
     # An explicit "tool_input": null must not crash (None.get -> AttributeError); default to {}.
     tool_input = payload.get("tool_input") if isinstance(payload, dict) else None
     path = str((tool_input if isinstance(tool_input, dict) else {}).get("file_path") or "")
-    norm = path.replace("\\", "/")
-    # Segment-boundary match: prepend "/" to both sides so a fragment matches only at a path
-    # boundary ("training/trainer.py" must NOT match "myproj_training/trainer.py").
-    haystack = "/" + norm
-    for fragment, reminder in _SENSITIVE:
-        if ("/" + fragment) in haystack:
-            name = norm.rsplit("/", 1)[-1] or norm
-            # Strip control chars: file_path is caller-influenced; never inject ANSI/newlines here.
-            safe = "".join(ch if ch.isprintable() and ch not in "\r\n\t" else "?" for ch in name)
-            sys.stderr.write(f"[corpus-assure] {safe}: {reminder}\n")
-            break
+    reminder = reminder_for(path)
+    if reminder is not None:
+        name = path.replace("\\", "/").rsplit("/", 1)[-1] or path
+        # Strip control chars: file_path is caller-influenced; never inject ANSI/newlines here.
+        safe = "".join(ch if ch.isprintable() and ch not in "\r\n\t" else "?" for ch in name)
+        sys.stderr.write(f"[corpus-assure] {safe}: {reminder}\n")
     sys.exit(0)
 
 
