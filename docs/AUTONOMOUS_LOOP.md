@@ -56,6 +56,7 @@ worker-lineage impact escalates rather than proceeding.
 | `docs.py` | Docs-freshness: a code↔doc coupling check - a change that touches coupled code but not its docs is `CONTRACT_DRIFT` at OBSERVE (never let docs go stale). |
 | `completeness.py` | **L8 self-correction**: at VERIFY, a green gate is not "done" - the GOAL's success criteria must be MET (a completeness critic; a critic that errors escalates, never crashes the loop); an unmet criterion folds into a correction task run by the executor (unbounded correction work is never delegated to a boundary-enforced agent). Plus a cross-goal **learning ledger** wired into `run_loop` via `ctx.ledger_path` - it seeds prior goals' dead ends at the start and records this goal's at the end. |
 | `orchestrate.py` | **The capstone** - one integrated loop that dispatches each phase to its module (decompose→validate, assign, execute/wave, observe+docs, review, integrate w/ HOLD-on-CI + merge gate, verify+completeness) with every effect injected. |
+| `campaign.py` | **Multi-goal orchestration**: a queue of goals, each its own `run_loop`, sharing the learning ledger; dependency-ordered (a goal whose prerequisite did not finalize is skipped) and stop-on-blocker. |
 
 The interactive surface is **`scripts/cs_loop.py`** (`cs_loop init --goal … / next / status / observe`) for
 the case where the LLM is the executor: `next` says what to do this phase; you do it; `observe` runs the
@@ -79,8 +80,8 @@ effects, which keeps the whole loop testable without any of them.
 ## Maturity
 
 L4 (executable single-agent loop) → L5 (adaptive recovery) → L6 (coordinated multi-agent task graph)
-→ L7 (CI/review/integration autonomy) are implemented, and L8 (long-horizon self-correction) has landed
-its first layer: the completeness critic (the loop verifies the goal is genuinely met, not just the gate)
-and the cross-goal learning ledger (dead ends accumulate across goals). Multi-goal campaign orchestration
-is the remaining L8 piece. The controller is a control plane *on top of* the assurance plane, not a
-replacement for it.
+→ L7 (CI/review/integration autonomy) → **L8 (long-horizon self-correction)** are all implemented: the
+completeness critic (the loop verifies the goal is genuinely met, not just the gate), the cross-goal
+learning ledger (dead ends accumulate across goals), and multi-goal campaign orchestration (a
+dependency-ordered backlog sharing the ledger). The controller is a control plane *on top of* the
+assurance plane, not a replacement for it.
