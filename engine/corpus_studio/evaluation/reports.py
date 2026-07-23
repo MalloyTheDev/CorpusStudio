@@ -82,8 +82,14 @@ class EvaluationReport(BaseModel):
     # never present the number as a quality score without saying what it measures.
     metric: str = "keyword_overlap"
     examples_tested: int
+    # Average over MEASURED examples only. Rows whose backend or scorer failed (recorded as scored-0
+    # with notes backend_error/scorer_error) are UNAVAILABLE, not measured, and are excluded here - an
+    # unavailable metric must not be folded into the quality mean as a fabricated zero.
     average_score: float
     failed_examples: int
+    # How many examples were unavailable (backend_error/scorer_error) rather than measured; excluded
+    # from average_score's denominator but still counted in failed_examples.
+    unavailable_examples: int = 0
     weak_tags: list[str] = Field(default_factory=list)
     tag_summary: list[EvaluationTagSummary] = Field(default_factory=list)
     failure_reason_summary: list[EvaluationFailureReasonSummary] = Field(
@@ -107,9 +113,12 @@ class EvaluationReport(BaseModel):
         """Create a report summary from per-example results."""
 
         examples_tested = len(results)
+        # Exclude infrastructure-failure rows (backend/scorer errors recorded as scored-0) from the
+        # quality mean - "we could not evaluate this row" is not "the model answered maximally wrong".
+        measured = [result for result in results if _is_measured(result)]
         average_score = (
-            round(sum(result.score for result in results) / examples_tested, 2)
-            if examples_tested
+            round(sum(result.score for result in measured) / len(measured), 2)
+            if measured
             else 0.0
         )
         failed_results = [result for result in results if not result.passed]
@@ -125,6 +134,7 @@ class EvaluationReport(BaseModel):
             examples_tested=examples_tested,
             average_score=average_score,
             failed_examples=len(failed_results),
+            unavailable_examples=examples_tested - len(measured),
             weak_tags=weak_tags,
             tag_summary=_build_tag_summary(results),
             failure_reason_summary=_build_failure_reason_summary(failed_results),
@@ -239,3 +249,14 @@ def _average_score(results: list[EvaluationExampleResult]) -> float:
         return 0.0
 
     return round(sum(result.score for result in results) / len(results), 2)
+
+
+# Rows whose backend or scorer failed are UNAVAILABLE, not measured. They are recorded as scored-0 so
+# one bad call never aborts the run, but folding that 0 into the quality mean would fabricate a zero
+# (AGENTS.md honesty invariant: an unavailable metric is null-with-reason, never a plausible zero).
+_UNAVAILABLE_NOTES = frozenset({"backend_error", "scorer_error"})
+
+
+def _is_measured(result: EvaluationExampleResult) -> bool:
+    """True unless the row's backend or scorer failed (an unavailable metric, not a real score)."""
+    return (result.notes or "").strip() not in _UNAVAILABLE_NOTES
