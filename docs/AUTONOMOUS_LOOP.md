@@ -54,7 +54,7 @@ worker-lineage impact escalates rather than proceeding.
 | `review.py` | Review-feedback: accepted findings become **correction tasks** appended to the graph; a clean review advances to `INTEGRATE`. |
 | `integrate.py` | CI / PR continuation: observe CI, diagnose a failure into an `Observation`, and the **merge-authorization gate** (product auto-merges; self-modify / worker-lineage / dangerous escalate). |
 | `docs.py` | Docs-freshness: a code↔doc coupling check - a change that touches coupled code but not its docs is `CONTRACT_DRIFT` at OBSERVE (never let docs go stale). |
-| `completeness.py` | **L8 self-correction**: at VERIFY, a green gate is not "done" - the GOAL's success criteria must be MET (a completeness critic; a critic that errors escalates, never crashes the loop); an unmet criterion folds into a correction task run by the executor (unbounded correction work is never delegated to a boundary-enforced agent). Plus a cross-goal **learning ledger** wired into `run_loop` via `ctx.ledger_path` - it seeds prior goals' dead ends at the start and records this goal's at the end. |
+| `completeness.py` | **L8 self-correction**: at VERIFY, a green gate is not "done" - the GOAL's success criteria must be MET (a completeness critic; a critic that errors escalates, never crashes the loop); an unmet criterion folds into a correction task run by the executor (unbounded correction work is never delegated to a boundary-enforced agent). Plus cross-goal **dead-end memory** (a ledger of exact failed-approach fingerprints, not generalized learning) wired into `run_loop` via `ctx.ledger_path` - it seeds prior goals' dead ends at the start and records this goal's at the end. |
 | `orchestrate.py` | **The capstone** - one integrated loop that dispatches each phase to its module (decompose→validate, assign, execute/wave, observe+docs, review, integrate w/ HOLD-on-CI + merge gate, verify+completeness) with every effect injected. |
 | `campaign.py` | **Multi-goal orchestration**: a queue of goals, each its own `run_loop`, sharing the learning ledger; dependency-ordered (a goal whose prerequisite did not finalize is skipped) and stop-on-blocker. |
 
@@ -79,9 +79,18 @@ effects, which keeps the whole loop testable without any of them.
 
 ## Maturity
 
-L4 (executable single-agent loop) → L5 (adaptive recovery) → L6 (coordinated multi-agent task graph)
-→ L7 (CI/review/integration autonomy) → **L8 (long-horizon self-correction)** are all implemented: the
-completeness critic (the loop verifies the goal is genuinely met, not just the gate), the cross-goal
-learning ledger (dead ends accumulate across goals), and multi-goal campaign orchestration (a
-dependency-ordered backlog sharing the ledger). The controller is a control plane *on top of* the
-assurance plane, not a replacement for it.
+CorpusStudio implements the **L4-L7 controller architecture** (executable single-agent loop → adaptive
+recovery → coordinated multi-agent task graph → CI/review/integration autonomy) and **experimental L8
+long-horizon mechanisms** (a completeness critic, cross-goal dead-end memory, and topologically-scheduled
+multi-goal campaigns). It is **not** yet a production-complete L8 autonomous system: that still requires
+trusted controller self-governance, concrete Claude-Code executor/reviewer/critic/agent adapters,
+evidence-bound (not model-asserted) completion, isolated per-agent execution (git worktrees), per-goal
+campaign isolation (branch/worktree/PR), and race-safe head-bound GitHub integration. The controller is a
+control plane *on top of* the assurance plane, not a replacement for it.
+
+**Known scope limits (do not overstate):** the completeness critic is model-assisted (a `met=True` is a
+model judgment, not bound to a test/artifact/authority); the cross-goal ledger is *exact dead-end memory*,
+not generalized learning; multi-agent boundary enforcement trusts the agent's self-reported changed paths
+(not yet a worktree-derived diff) and `dispatch_wave` runs runners sequentially; campaigns share one
+repo/working-tree/PR (only per-goal state files differ); and the loop controller (`scripts/loop/**`,
+`cs_loop.py`) is **not yet under a self-modification obligation** - see the trust-boundary work item.
