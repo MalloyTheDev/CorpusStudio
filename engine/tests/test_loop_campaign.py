@@ -50,6 +50,10 @@ def _goals(*ids: str) -> list[Goal]:
     return [Goal(goal=f"do {i}", goal_id=i) for i in ids]
 
 
+def _boom(_goal: Goal) -> LoopContext:
+    raise RuntimeError("factory blew up")
+
+
 def test_campaign_runs_a_queue_of_goals_to_finalize() -> None:
     outcomes = run_campaign(_goals("g1", "g2", "g3"), _ctx())
     assert [o.goal_id for o in outcomes] == ["g1", "g2", "g3"]
@@ -91,6 +95,56 @@ def test_shared_ledger_records_each_goal(tmp_path: Path) -> None:
 def test_per_goal_state_isolation(tmp_path: Path) -> None:
     run_campaign(_goals("g1", "g2"), _ctx(), store_dir=tmp_path)
     assert (tmp_path / "g1.json").is_file() and (tmp_path / "g2.json").is_file()  # separate state files
+
+
+def test_context_for_factory_isolates_each_goal(tmp_path: Path) -> None:
+    # With a context_for factory, each goal gets its OWN context (here: its own state file in its own
+    # per-goal directory) - the isolation seam a runtime fills with a per-goal branch/worktree/PR.
+    from dataclasses import replace as _replace
+    seen: list[str] = []
+
+    def context_for(goal: Goal) -> LoopContext:
+        seen.append(goal.goal_id)
+        goal_dir = tmp_path / goal.goal_id
+        goal_dir.mkdir()
+        return _replace(_ctx(), store_path=goal_dir / "state.json")
+
+    outcomes = run_campaign(_goals("g1", "g2"), context_for=context_for)
+    assert all(o.finalized for o in outcomes) and seen == ["g1", "g2"]
+    assert (tmp_path / "g1" / "state.json").is_file() and (tmp_path / "g2" / "state.json").is_file()
+
+
+def test_a_misbehaving_factory_fails_closed() -> None:
+    with pytest.raises(CampaignError, match="must return a LoopContext"):
+        run_campaign(_goals("g1"), context_for=lambda _g: "not a context")  # type: ignore[arg-type,return-value]
+    with pytest.raises(CampaignError, match="raised RuntimeError"):
+        run_campaign(_goals("g1"), context_for=_boom)
+
+
+def test_needs_a_ctx_or_a_factory() -> None:
+    with pytest.raises(CampaignError, match="base ctx or a context_for"):
+        run_campaign(_goals("g1"))  # neither given
+
+
+def test_a_finished_goal_is_resumed_not_rerun(tmp_path: Path) -> None:
+    # A goal whose state file already shows FINALIZE is RESUMED (reported), never re-executed - the executor
+    # must not be called, and the ledger must not double-record it.
+    from loop.store import save
+    from loop.controller import LoopState, Phase
+    done = LoopState(goal="do g1", goal_id="g1", current_phase=Phase.FINALIZE)
+    save(done, tmp_path / "g1.json")
+    ledger = tmp_path / "ledger.json"
+
+    def explode(_s: LoopState, _d: object) -> Observation:
+        raise AssertionError("a resumed, already-finished goal must not be executed")
+
+    ctx = LoopContext(repo_root=REPO_ROOT, executor=explode, reviewer=lambda _s: [],
+                      critic=lambda _s: [Criterion("c", "done", kind=CriterionKind.DETERMINISTIC,
+                                                   met=True, evidence="sha256:v")],
+                      gh_runner=_gh(), pr_ref="1", run_cs_assure=_cs(), ledger_path=ledger)
+    outcomes = run_campaign([Goal("do g1", "g1")], ctx, store_dir=tmp_path)
+    assert outcomes[0].finalized  # reported as finished
+    assert not ledger.exists()  # a resumed-terminal goal is not re-recorded to the ledger
 
 
 def test_validation_fails_closed() -> None:

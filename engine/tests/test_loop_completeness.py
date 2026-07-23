@@ -178,6 +178,23 @@ def test_record_then_seed_round_trips(tmp_path: Path) -> None:
     assert seed_known_dead_ends(fresh, ledger) == 1 and fresh.failed_approaches == ["sha256:deadend"]
 
 
+def test_record_outcome_fails_closed_when_the_ledger_is_locked(tmp_path: Path) -> None:
+    # A concurrent holder of the ledger lock must make record_outcome FAIL rather than lose its append to a
+    # read-modify-write race - it raises within lock_timeout instead of clobbering the other writer.
+    from loop.locking import FileLock
+    ledger = tmp_path / "ledger.json"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    held = FileLock(ledger, timeout=5).acquire()
+    try:
+        with pytest.raises(CompletenessError, match="could not lock"):
+            record_outcome(LoopState(goal="g", current_phase=Phase.FINALIZE), ledger, lock_timeout=0.2)
+    finally:
+        held.release()
+    # once the lock is free, it records normally
+    record_outcome(LoopState(goal="g", current_phase=Phase.FINALIZE), ledger, lock_timeout=5)
+    assert json.loads(ledger.read_text())[-1]["goal"] == "g"
+
+
 def test_malformed_ledger_fails_closed(tmp_path: Path) -> None:
     ledger = tmp_path / "ledger.json"
     ledger.write_text("{not json")
