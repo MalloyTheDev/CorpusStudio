@@ -29,7 +29,7 @@
     },
     {
       "id": "loop-controller-self-modify",
-      "globs": ["scripts/loop/**", "scripts/cs_loop.py", "engine/tests/test_loop_*.py", "engine/tests/test_cs_loop.py", "docs/AUTONOMOUS_LOOP.md"],
+      "globs": ["scripts/loop/**", "scripts/loop_adapters/**", "scripts/cs_loop.py", "engine/tests/test_loop_*.py", "engine/tests/test_cs_loop.py", "docs/AUTONOMOUS_LOOP.md"],
       "obligation": "LOOP_CONTROLLER_SELF_MODIFIED: this change edits the autonomous loop controller, which itself decides retry / stop / escalate / hold / merge / finalize - so the loop's own run is NOT independent verification of a change to it. Admit only via trusted-base controller tests + CI + INDEPENDENT human review; NO autonomous merge and no self-approval (a loop-controller change never merges via the loop's own merge gate); keep the controller stdlib-only, fail-closed, and injected-effect (no real effect hardcoded).",
       "authority": "trusted-base controller tests + CI + an independent human reviewer (NOT the loop's own run / merge gate).",
       "severity": "blocking",
