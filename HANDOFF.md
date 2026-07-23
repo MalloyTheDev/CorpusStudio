@@ -326,7 +326,7 @@ regeneration drift checks) and Python CodeQL.
   .venv/bin/python -c "from corpus_studio.platform.schema_export import export_json_schemas; export_json_schemas('../docs/contracts')"
   ```
   then fix the two counts in `tests/test_platform_contracts.py` (`len(ROOT_CONTRACTS)` + the export
-  test). This branch exports **28 root contracts**.
+  test). This branch exports **31 root contracts**.
 
 ## 5. Workflow / process conventions (the user cares about these)
 
@@ -416,7 +416,7 @@ regeneration drift checks) and Python CodeQL.
 
 ## 9. Repository map
 
-- **Platform contracts**: `engine/corpus_studio/platform/contracts.py` (28 root contracts) + `enums.py`
+- **Platform contracts**: `engine/corpus_studio/platform/contracts.py` (31 root contracts) + `enums.py`
   + `common.py`; `schema_export.py` → `docs/contracts/*.schema.json` (language-neutral, consumed by
   `apps/web`).
 - **Lifecycle**: `platform/{profiler, probes, planner, calibrator, supervisor, runners, watchdog,

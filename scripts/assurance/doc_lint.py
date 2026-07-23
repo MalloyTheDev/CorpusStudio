@@ -87,9 +87,28 @@ _GITHUB_SETTING = re.compile(
     r"|admin[- ]merge|standing authorization|merge queue|merge-queue",
     re.IGNORECASE,
 )
-_COUNT_DRIFT = re.compile(r"\b28\b[^\n]{0,40}\bcontracts\b", re.IGNORECASE)
+# The stated root-contract count in prose. The actual count is DERIVED from the committed schema
+# index (count_root_contracts) - never hardcoded here - so this rule tracks the real number as it
+# changes instead of going stale itself. The digits must DIRECTLY quantify "root contracts" (adjacent,
+# not merely within N chars) so a nearby date ("2026-06-28 ... root contracts") or an unrelated count
+# ("28 enums and 31 root contracts") is not mis-captured as the contract count (false-positive drift).
+_ROOT_CONTRACT_COUNT = re.compile(r"\b(\d{1,3})\s+root contracts\b", re.IGNORECASE)
 
 _MAX_EXCERPT = 160
+# A registered doc is guidance prose/JSON; the largest today is ~44 KiB. Bound the read so a registry
+# entry that (by accident or malice) points at a huge or binary file cannot exhaust memory. A file
+# over the bound is surfaced as drift, never silently truncated-and-linted (that would skip content).
+_MAX_DOC_BYTES = 4 * 1024 * 1024
+
+
+def _sanitize_excerpt(text: str) -> str:
+    """Replace C0/C1 control characters (NUL, ANSI/terminal-escape and other non-printing bytes) with
+    U+FFFD, keeping tab. The excerpt is a display of UNTRUSTED doc content; a hostile registered line
+    must not be able to inject terminal control sequences into the human-readable report."""
+    return "".join(
+        ch if ch == "\t" or (ch >= "\x20" and not ("\x7f" <= ch <= "\x9f")) else "\ufffd"
+        for ch in text
+    )
 
 
 class DocLintError(AssuranceError):
@@ -189,6 +208,10 @@ def load_registry(repo_root: Path) -> list[DocSource]:
         raise DocLintError(f"context-source registry not found at {REGISTRY_RELPATH}") from exc
     except json.JSONDecodeError as exc:
         raise DocLintError(f"context-source registry is not valid JSON: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        # Invalid UTF-8 bytes: a ValueError but NOT a JSONDecodeError - catch it explicitly (as the
+        # sibling loaders do) so it fails CLOSED as a typed DocLintError, not an untyped leak.
+        raise DocLintError(f"context-source registry is not valid UTF-8 ({REGISTRY_RELPATH}): {exc}") from exc
     except RecursionError as exc:
         # Deeply-nested JSON: NOT a JSONDecodeError/ValueError - fail CLOSED, not exit-1 traceback.
         raise DocLintError(f"context-source registry is nested too deeply to parse: {exc}") from exc
@@ -208,14 +231,37 @@ def _finding(rule: str, severity: str, classification: str, source: DocSource, l
         classification=classification,
         path=source.path,
         line=line_no,
-        excerpt=line.strip()[:_MAX_EXCERPT],
+        excerpt=_sanitize_excerpt(line.strip())[:_MAX_EXCERPT],
         superseding_authority=authority,
         message=message,
     )
 
 
-def scan_source(source: DocSource, lines: list[str]) -> list[Finding]:
-    """Apply the mode-aware rules to one source's lines. Pure; no filesystem access."""
+_CONTRACT_INDEX_RELPATH = "docs/contracts/index.json"
+
+
+def count_root_contracts(repo_root: Path) -> int | None:
+    """Derive the current root-contract count from the committed schema index (stdlib-only; imports
+    nothing from corpus_studio). Returns None when the index is absent or malformed so the count-drift
+    rule degrades to a silent no-op rather than emitting a finding off a bad derive - the AUTHORITATIVE
+    check is the pytest ``len(ROOT_CONTRACTS)`` assertion; this prose rule is an advisory tripwire."""
+    index_path = repo_root / _CONTRACT_INDEX_RELPATH
+    try:
+        data = json.loads(index_path.read_text("utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError, RecursionError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    contracts = data.get("contracts")
+    if not isinstance(contracts, list):
+        return None
+    return len(contracts)
+
+
+def scan_source(source: DocSource, lines: list[str], contract_count: int | None = None) -> list[Finding]:
+    """Apply the mode-aware rules to one source's lines. Pure; no filesystem access. ``contract_count``
+    is the DERIVED root-contract count (from :func:`count_root_contracts`); when None the count-drift
+    rule is a no-op."""
     findings: list[Finding] = []
     ui_in_scope = source.mode in _CURRENTISH_MODES or source.stable_guidance
     historical = source.mode in _HISTORICAL_MODES
@@ -259,21 +305,42 @@ def scan_source(source: DocSource, lines: list[str]) -> list[Finding]:
                     "branch-protection/required-check/merge-authorization asserted as fact; these "
                     "are authenticated GitHub settings, not repository facts",
                 ))
-        # R5 - the known root-contract count drift. Scoped to durable current guidance: a dated log
+        # R5 - root-contract count drift, checked against the DERIVED count (never a hardcoded number,
+        # so the rule cannot itself go stale). Scoped to durable current guidance: a dated log
         # (VOLATILE_CURRENT) or a frozen record legitimately preserves the count it had when written.
-        if source.mode in _CURRENTISH_MODES and _COUNT_DRIFT.search(line):
-            findings.append(_finding(
-                "known-count-drift", "low", "COUNT_DRIFT", source, line_no, line,
-                "schema_export.ROOT_CONTRACTS (31) + tests/test_platform_contracts.py",
-                "'28 ... contracts' understates the actual 31 root contracts",
-            ))
+        if source.mode in _CURRENTISH_MODES and contract_count is not None:
+            count_match = _ROOT_CONTRACT_COUNT.search(line)
+            if count_match is not None and int(count_match.group(1)) != contract_count:
+                findings.append(_finding(
+                    "root-contract-count-drift", "low", "COUNT_DRIFT", source, line_no, line,
+                    "docs/contracts/index.json + tests/test_platform_contracts.py",
+                    f"stated '{count_match.group(1)} root contracts' does not match the "
+                    f"{contract_count} exported root contracts",
+                ))
     return findings
+
+
+def _unreadable_finding(source: DocSource, exc: Exception) -> Finding:
+    # A present-but-unreadable doc must not be silently dropped (the doc-trust sensor would then read
+    # as "clean" while a registered doc went unchecked). Surface it as drift.
+    return Finding(
+        rule="registry-unreadable-file",
+        severity="low",
+        classification="REGISTRY_STALE",
+        path=source.path,
+        line=0,
+        excerpt="",
+        superseding_authority="the repository tree",
+        message=f"registered doc could not be read ({type(exc).__name__}); "
+                "the sensor must not silently skip a registered doc",
+    )
 
 
 def lint_repo(repo_root: Path, sources: list[DocSource]) -> list[Finding]:
     """Run the lint over every registered source. A registered path that is missing is itself a
     finding (registry drift). Findings are returned sorted for deterministic output."""
     findings: list[Finding] = []
+    contract_count = count_root_contracts(repo_root)
     for source in sources:
         target = repo_root / source.path
         if not target.exists():
@@ -288,7 +355,10 @@ def lint_repo(repo_root: Path, sources: list[DocSource]) -> list[Finding]:
                 message="registered doc does not exist (registry drift); update the registry",
             ))
             continue
-        if target.is_dir():
+        if not target.is_file():
+            # is_file() follows the symlink and is False for a directory / device / FIFO / socket, so
+            # this rejects a registered path repointed at /dev/zero or a blocking FIFO BEFORE open() -
+            # a bounded read alone would still block on a FIFO. (A broken symlink was caught by exists.)
             findings.append(Finding(
                 rule="registry-not-a-file",
                 severity="low",
@@ -297,26 +367,34 @@ def lint_repo(repo_root: Path, sources: list[DocSource]) -> list[Finding]:
                 line=0,
                 excerpt="",
                 superseding_authority="the repository tree",
-                message="registered path is a directory, not a lintable file; fix the registry",
+                message="registered path is not a regular file (directory / device / FIFO / symlink "
+                        "to one); fix the registry",
             ))
             continue
         try:
-            text = target.read_text("utf-8")
-        except (UnicodeDecodeError, OSError) as exc:
-            # A present-but-unreadable doc must not be silently dropped (the doc-trust sensor would
-            # then read as "clean" while a registered doc went unchecked). Surface it as drift.
+            with target.open("rb") as handle:
+                raw_bytes = handle.read(_MAX_DOC_BYTES + 1)
+        except OSError as exc:
+            findings.append(_unreadable_finding(source, exc))
+            continue
+        if len(raw_bytes) > _MAX_DOC_BYTES:
             findings.append(Finding(
-                rule="registry-unreadable-file",
+                rule="registry-oversized-file",
                 severity="low",
                 classification="REGISTRY_STALE",
                 path=source.path,
                 line=0,
                 excerpt="",
                 superseding_authority="the repository tree",
-                message=f"registered doc could not be read ({type(exc).__name__}); "
-                        "the sensor must not silently skip a registered doc",
+                message=f"registered doc exceeds the {_MAX_DOC_BYTES // (1024 * 1024)} MiB lint bound; "
+                        "the sensor must not read an unbounded file into memory",
             ))
             continue
-        findings.extend(scan_source(source, text.splitlines()))
+        try:
+            text = raw_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            findings.append(_unreadable_finding(source, exc))
+            continue
+        findings.extend(scan_source(source, text.splitlines(), contract_count))
     findings.sort(key=lambda f: (f.path, f.line, f.rule))
     return findings

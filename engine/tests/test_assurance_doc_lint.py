@@ -8,6 +8,7 @@ shrink to zero as the docs are cleaned) and check structure + determinism instea
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -43,8 +44,8 @@ def _src(mode: str = "CURRENT", *, stable_guidance: bool = False, authority: str
     )
 
 
-def _rules(source: DocSource, lines: list[str]) -> set[str]:
-    return {f.rule for f in scan_source(source, lines)}
+def _rules(source: DocSource, lines: list[str], contract_count: int | None = None) -> set[str]:
+    return {f.rule for f in scan_source(source, lines, contract_count)}
 
 
 def run_cli(start_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -106,13 +107,81 @@ def test_github_setting_asserted_as_fact_is_flagged() -> None:
     assert any(f.classification == "AUTHENTICATED_GITHUB_SETTING_REQUIRED" for f in found)
 
 
-def test_known_count_drift_scoped_to_durable_current_docs() -> None:
-    line = ["this branch exports 28 root contracts"]
-    assert "known-count-drift" in _rules(_src("CURRENT"), line)
-    assert "known-count-drift" in _rules(_src("MIXED_CURRENT_AND_HISTORY"), line)
-    # a dated log or a frozen record legitimately preserves the count it had when written.
-    assert "known-count-drift" not in _rules(_src("VOLATILE_CURRENT"), line)
-    assert "known-count-drift" not in _rules(_src("FROZEN_EVIDENCE"), line)
+def test_root_contract_count_drift_is_index_derived_and_scoped() -> None:
+    stale = ["this branch exports 28 root contracts"]
+    # A durable-current doc whose stated count != the DERIVED count is drift...
+    assert "root-contract-count-drift" in _rules(_src("CURRENT"), stale, contract_count=31)
+    assert "root-contract-count-drift" in _rules(_src("MIXED_CURRENT_AND_HISTORY"), stale, contract_count=31)
+    # ...but a line that MATCHES the derived count is clean (no hardcoded "28"->"31" - it tracks).
+    assert "root-contract-count-drift" not in _rules(_src("CURRENT"), ["31 root contracts exported"], contract_count=31)
+    assert "root-contract-count-drift" in _rules(_src("CURRENT"), ["31 root contracts exported"], contract_count=32)
+    # ...a dated log or a frozen record legitimately preserves the count it had when written...
+    assert "root-contract-count-drift" not in _rules(_src("VOLATILE_CURRENT"), stale, contract_count=31)
+    assert "root-contract-count-drift" not in _rules(_src("FROZEN_EVIDENCE"), stale, contract_count=31)
+    # ...and when the count cannot be derived, the advisory rule is a silent no-op (never a false find).
+    assert "root-contract-count-drift" not in _rules(_src("CURRENT"), stale, contract_count=None)
+
+
+def test_excerpt_sanitizes_control_characters() -> None:
+    # A hostile registered doc line must not inject terminal-escape / NUL bytes into the report.
+    from assurance.doc_lint import _sanitize_excerpt
+
+    assert _sanitize_excerpt("clean\x1b[31mred\x00end\ttab") == "clean\ufffd[31mred\ufffdend\ttab"
+    found = scan_source(_src("CURRENT"), ["the \x1bWPF\x07 desktop is present"])
+    ui = [f for f in found if f.rule == "removed-ui-present-tense"]
+    assert ui and "\x1b" not in ui[0].excerpt and "\x07" not in ui[0].excerpt
+
+
+def test_oversized_registered_doc_is_bounded_drift(tmp_path: Path) -> None:
+    # A registry entry pointing at a huge/binary file must be surfaced as drift, never read unbounded
+    # into memory nor silently truncated-and-linted (that would skip content).
+    from assurance.doc_lint import _MAX_DOC_BYTES
+
+    big = tmp_path / "huge.md"
+    big.write_bytes(b"the WPF desktop is present\n" + b"a" * (_MAX_DOC_BYTES + 8))
+    src = DocSource(path="huge.md", mode="CURRENT", authority="canonical", always_loaded=False,
+                    stable_guidance=False, superseded_by=None, note="")
+    findings = lint_repo(tmp_path, [src])
+    rules = {f.rule for f in findings}
+    assert "registry-oversized-file" in rules
+    assert "removed-ui-present-tense" not in rules  # the oversized file is NOT linted past the bound
+
+
+# --------------------------------------------------------------------------- audit hardening (2026-07-23)
+
+
+def test_count_drift_ignores_dates_and_unrelated_counts() -> None:
+    # The tightened regex requires the digits to DIRECTLY quantify "root contracts", so a nearby date
+    # or an unrelated count is not mis-flagged as drift (that would fail CI on a CORRECT doc).
+    for line in ("As of 2026-06-28, index.json lists 31 root contracts.",
+                 "we ship 28 enums and 31 root contracts"):
+        assert "root-contract-count-drift" not in _rules(_src("CURRENT"), [line], contract_count=31), line
+    # ...but a genuinely wrong ADJACENT count is still caught.
+    assert "root-contract-count-drift" in _rules(_src("CURRENT"), ["exports 28 root contracts"], contract_count=31)
+
+
+def test_load_registry_fails_closed_on_invalid_utf8(tmp_path: Path) -> None:
+    # Invalid UTF-8 in the registry must fail CLOSED as a typed DocLintError (symmetry with the sibling
+    # loaders), not leak an untyped UnicodeDecodeError to the CLI backstop.
+    policy = tmp_path / "scripts" / "assurance" / "policy"
+    policy.mkdir(parents=True)
+    (policy / "context_sources.json").write_bytes(b"\xff\xfe not valid utf-8")
+    with pytest.raises(DocLintError, match="UTF-8"):
+        load_registry(tmp_path)
+
+
+def test_non_regular_registered_path_is_drift_not_a_hang(tmp_path: Path) -> None:
+    # A registered path that is a directory / FIFO / device-symlink must be surfaced as drift BEFORE any
+    # open() - is_file() rejects it, so a blocking FIFO cannot hang the sensor.
+    (tmp_path / "adir").mkdir()
+    names = ["adir"]
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(tmp_path / "afifo")
+        names.append("afifo")
+    srcs = [DocSource(path=n, mode="CURRENT", authority="canonical", always_loaded=False,
+                      stable_guidance=False, superseded_by=None, note="") for n in names]
+    rules = {f.rule for f in lint_repo(tmp_path, srcs)}
+    assert rules == {"registry-not-a-file"}
 
 
 # --------------------------------------------------------------------------- registry validation
