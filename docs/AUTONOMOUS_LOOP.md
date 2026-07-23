@@ -48,7 +48,13 @@ worker-lineage impact escalates rather than proceeding.
 | `tasks.py` | The task graph: owned tasks with dependencies and an `allowed_paths` **ownership boundary**; ready/blocked derivation; parallel-safe assignment. |
 | `router.py` | The agent router: a parallel-safe wave (≤10 agents), dispatch, and **boundary enforcement** — an agent that edits outside its lane is rejected regardless of what it claims. |
 | `review.py` | Review-feedback: accepted findings become **correction tasks** appended to the graph; a clean review advances to `INTEGRATE`. |
-| `integrate.py` | CI / PR continuation: observe CI, diagnose a failure into an `Observation`, and the **merge-authorization gate** (product auto-merges; self-modify / dangerous escalate). |
+| `integrate.py` | CI / PR continuation: observe CI, diagnose a failure into an `Observation`, and the **merge-authorization gate** (product auto-merges; self-modify / worker-lineage / dangerous escalate). |
+| `docs.py` | Docs-freshness: a code↔doc coupling check - a change that touches coupled code but not its docs is `CONTRACT_DRIFT` at OBSERVE (never let docs go stale). |
+| `orchestrate.py` | **The capstone** - one integrated loop that dispatches each phase to its module (decompose→validate, assign, execute/wave, observe+docs+task-close, review, integrate, verify) with every effect injected. |
+
+The interactive surface is **`scripts/cs_loop.py`** (`cs_loop init --goal … / next / status / observe`) for
+the case where the LLM is the executor: `next` says what to do this phase; you do it; `observe` runs the
+assurance gate and records the classified result; repeat until terminal.
 
 ## The fact / judgment seam
 
