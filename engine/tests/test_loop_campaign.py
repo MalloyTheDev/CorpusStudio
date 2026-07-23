@@ -64,9 +64,17 @@ def test_dependency_skips_when_an_upstream_goal_did_not_finalize() -> None:
 
 
 def test_stop_on_escalate_halts_the_campaign() -> None:
-    goals = _goals("g1", "g2", "g3")
-    outcomes = run_campaign(goals, _ctx(dangerous=True), stop_on_escalate=True)
-    assert len(outcomes) == 1 and outcomes[0].final_phase == "ESCALATED"  # g2, g3 never run
+    outcomes = run_campaign(_goals("g1", "g2", "g3"), _ctx(dangerous=True), stop_on_escalate=True)
+    by = {o.goal_id: o.final_phase for o in outcomes}
+    assert by["g1"] == "ESCALATED" and by["g2"] == "SKIPPED" and by["g3"] == "SKIPPED"  # g2/g3 not run
+
+
+def test_topological_scheduling_runs_dependency_before_dependent_regardless_of_order() -> None:
+    # gB is listed BEFORE its dependency gA; topological scheduling must run gA first, then gB - never
+    # skip gB just because it appeared before its prerequisite in the input.
+    goals = [Goal("depends on A", "gB", depends_on=["gA"]), Goal("prereq", "gA")]
+    outcomes = {o.goal_id: o for o in run_campaign(goals, _ctx())}
+    assert outcomes["gA"].finalized and outcomes["gB"].finalized
 
 
 def test_shared_ledger_records_each_goal(tmp_path: Path) -> None:
@@ -88,5 +96,14 @@ def test_validation_fails_closed() -> None:
         run_campaign([Goal("a", "g1"), Goal("b", "g1")], _ctx())
     with pytest.raises(CampaignError, match="unknown goal"):
         run_campaign([Goal("a", "g1", depends_on=["ghost"])], _ctx())
-    with pytest.raises(CampaignError, match="non-empty"):
-        run_campaign([Goal("a", "")], _ctx())
+    with pytest.raises(CampaignError, match="unsafe goal_id"):
+        run_campaign([Goal("a", "")], _ctx())  # empty id
+    with pytest.raises(CampaignError, match="cycle"):
+        run_campaign([Goal("a", "g1", depends_on=["g2"]), Goal("b", "g2", depends_on=["g1"])], _ctx())
+
+
+def test_unsafe_goal_id_is_rejected_before_it_can_escape_the_store_dir(tmp_path: Path) -> None:
+    # A goal_id names a per-goal state file; a traversal id must be refused, never written outside store_dir.
+    for bad in ("../../etc/pwned", "a/b", "..", "with space", "x" * 65):
+        with pytest.raises(CampaignError, match="unsafe goal_id"):
+            run_campaign([Goal("x", bad)], _ctx(), store_dir=tmp_path)
