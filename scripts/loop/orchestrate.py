@@ -189,6 +189,22 @@ def _execute(state: LoopState, ctx: LoopContext, directive: Directive) -> PhaseR
             return PhaseResult(Observation.POLICY_BLOCK,
                                "task graph is stuck: ready tasks exhausted but not all DONE")
         return PhaseResult(observation, note)
+
+    if state.task_graph:
+        # SINGLE-AGENT: execute each currently-ready task via the executor, binding execution to that task
+        # (mark it ACTIVE, recompute the directive) and marking it via status_for. Newly-unblocked or
+        # still-in-PROGRESS tasks are handled on the next EXECUTE cycle (CHANGES_REQUESTED -> re-assign),
+        # so the loop NEVER advances / finalizes with a task left PENDING (external review #4).
+        for task in ready_tasks(parse_tasks(state.task_graph)):
+            set_status(state, task.id, TaskStatus.ACTIVE)
+            observation = ctx.executor(state, next_directive(state))
+            set_status(state, task.id, status_for(observation))
+            if status_for(observation) is TaskStatus.FAILED:
+                return PhaseResult(observation, f"task {task.id!r} failed")
+        if _all_done(state):
+            return PhaseResult(Observation.SUCCESS, "all tasks executed")
+        return PhaseResult(Observation.CHANGES_REQUESTED, "more tasks remain to execute")
+
     return PhaseResult(ctx.executor(state, directive), "executed the change")
 
 
