@@ -16,7 +16,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from loop.controller import Observation
+from loop.controller import HUMAN_GATED_OBLIGATIONS, Observation
 
 # gh's check "bucket" (or a raw state/conclusion) normalised to pass / fail / pending.
 _PASS = frozenset({"pass", "success", "neutral", "skipping", "skipped"})
@@ -31,13 +31,11 @@ _CHECK_HINTS: tuple[tuple[tuple[str, ...], Observation], ...] = (
     (("web", "build", "tsc", "npm", "node"), Observation.DEPENDENCY_FAILURE),
 )
 # Obligations that ALWAYS forbid an autonomous merge - the change must be admitted by an INDEPENDENT human
-# (the candidate/loop cannot self-verify a change to itself). worker-closure is here too: a worker-lineage
-# change needs a fresh wheel/env via the human-gated worker workflow, the same invariant observe.py
-# enforces by routing worker-closure to WORKER_LINEAGE_IMPACT. loop-controller-self-modify is here because
-# a change to the loop controller must not be admitted by the loop's OWN merge gate (its rule #666).
-_HUMAN_GATED = frozenset({
-    "sealed-research", "assurance-self-modify", "worker-closure", "loop-controller-self-modify",
-})
+# (the candidate/loop cannot self-verify a change to itself). This is the SHARED source of truth with
+# observe.py (imported, not re-declared, so the two planes cannot drift): worker-closure needs a fresh
+# wheel/env via the human-gated worker workflow, and loop-controller-self-modify must not be admitted by
+# the loop's OWN merge gate.
+_HUMAN_GATED = HUMAN_GATED_OBLIGATIONS
 # Severities that do NOT by themselves gate a merge. Any obligation whose severity is not one of these
 # (blocking, unknown, or absent) escalates unless a resolution record proves it discharged - so a missing
 # or non-canonical severity fails CLOSED (escalate) instead of silently authorizing.

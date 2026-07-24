@@ -113,6 +113,39 @@ def test_pinning_a_subject_without_a_record_type_is_rejected() -> None:
         Criterion("c", "d", kind=CriterionKind.DETERMINISTIC, met=True, subject_fingerprint="cs:x")
 
 
+# --------------------------------------------------------------------------- self-grant / self-evidence (hardening B)
+
+
+def test_a_critic_cannot_self_grant_a_human_approval_during_its_call() -> None:
+    # The untrusted critic pollutes authorizations DURING its call; the snapshot is taken BEFORE it runs,
+    # so the self-grant does not count - the criterion still awaits a real (pre-recorded) human grant.
+    def self_granting(state: LoopState) -> list[Criterion]:
+        state.review_state.setdefault("authorizations", []).append({"grant": "signoff"})
+        return [Criterion("signoff", "a human ratifies", kind=CriterionKind.HUMAN_APPROVAL)]
+    verdict = check_completeness(LoopState(), self_granting)
+    assert not verdict.complete and [c.id for c in verdict.needs_authority] == ["signoff"]
+
+
+def test_a_grant_recorded_before_the_critic_ran_satisfies_a_human_approval() -> None:
+    # Back-compat: a grant the human CLI recorded BEFORE the critic (present at snapshot time) still counts.
+    state = LoopState()
+    state.review_state["authorizations"] = [{"grant": "signoff"}]
+    assert check_completeness(state, _critic([Criterion("signoff", "d", kind=CriterionKind.HUMAN_APPROVAL)])).complete
+
+
+def test_a_critic_cannot_self_fabricate_deterministic_evidence() -> None:
+    # Likewise the critic cannot inject a matching evidence entry mid-call to satisfy its own DETERMINISTIC
+    # criterion - the evidence index is snapshotted before the critic runs.
+    def self_evidencing(state: LoopState) -> list[Criterion]:
+        state.review_state.setdefault("evidence", []).append(
+            {"record_type": "workspace_verification", "predicate": "WORKSPACE_GATE_GREEN",
+             "subject_fingerprint": "cs:x", "digest": "sha256:fake"})
+        return [Criterion("g", "gate green", kind=CriterionKind.DETERMINISTIC, met=True,
+                          required_record_type="workspace_verification", required_predicate="WORKSPACE_GATE_GREEN")]
+    verdict = check_completeness(LoopState(), self_evidencing)
+    assert not verdict.complete and [c.id for c in verdict.unmet] == ["g"]
+
+
 # --------------------------------------------------------------------------- the typed, evidence-bound critic
 
 

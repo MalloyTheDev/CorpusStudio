@@ -79,6 +79,17 @@ class Observation(str, Enum):
     HOLD = "HOLD"                                    # wait on an external condition (e.g. CI) - do NOT advance
 
 
+# Obligations that REQUIRE A HUMAN before a change can be admitted - the loop can NEVER self-admit these
+# (.claude/rules/{assurance,loop-controller}-self-modify.md). Single source of truth shared by observe
+# (OBSERVE/VERIFY classification) and integrate (the merge gate) so the two planes cannot drift; a test
+# pins every id to the obligations policy. Note: observe routes ``worker-closure`` to its own
+# WORKER_LINEAGE_IMPACT signal (still human-gated, just a distinct label), so it peels that one off before
+# mapping the rest to AUTHORIZATION_REQUIRED - the SET is shared, the per-id labelling is each plane's.
+HUMAN_GATED_OBLIGATIONS: frozenset[str] = frozenset({
+    "sealed-research", "assurance-self-modify", "worker-closure", "loop-controller-self-modify",
+})
+
+
 class Decision(str, Enum):
     """How the controller routes an observation."""
 

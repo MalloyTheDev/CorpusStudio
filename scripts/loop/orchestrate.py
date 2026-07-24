@@ -20,6 +20,7 @@ merge gate instead of advancing past it. stdlib-only.
 
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -385,12 +386,37 @@ def _dispatch(state: LoopState, ctx: LoopContext) -> PhaseResult:
     return PhaseResult(ctx.executor(state, directive), directive.action)
 
 
+_ABSENT = object()  # sentinel: the authorizations key was absent before dispatch
+
+
+def _snapshot_authorizations(state: LoopState) -> Any:
+    """Deep-copy ``review_state['authorizations']`` (or the ABSENT sentinel) before an untrusted callback."""
+    rs = state.review_state
+    if not isinstance(rs, dict) or "authorizations" not in rs:
+        return _ABSENT
+    return copy.deepcopy(rs["authorizations"])
+
+
+def _restore_authorizations(state: LoopState, snapshot: Any) -> None:
+    """Reset ``review_state['authorizations']`` to the pre-dispatch snapshot. The loop NEVER writes it
+    in-process (only the human-run ``cs_loop authorize`` does, between runs), so discarding any in-step
+    change closes the vector where an injected callback persists a fabricated grant to self-authorize a
+    human-gated criterion in a later step. No legitimate write is lost."""
+    if not isinstance(state.review_state, dict):
+        return
+    if snapshot is _ABSENT:
+        state.review_state.pop("authorizations", None)
+    else:
+        state.review_state["authorizations"] = snapshot
+
+
 def step(state: LoopState, ctx: LoopContext) -> Transition | None:
     """Run ONE integrated cycle: dispatch the current phase to its module/effect, record any sealed
     evidence, route through the controller, and persist. Returns None if already terminal. FAIL-CLOSED:
     an unusable assurance plane escalates to ESCALATED; a non-Observation handler result is a hard error."""
     if state.is_terminal:
         return None
+    auth_snapshot = _snapshot_authorizations(state)  # control-plane-owned; no callback may persist a grant
     try:
         result = _dispatch(state, ctx)
     except (LoopObserveError, CompletenessError, IntegrateError, OSError) as exc:
@@ -398,12 +424,14 @@ def step(state: LoopState, ctx: LoopContext) -> Transition | None:
         # INTEGRATE, OR an injected effect that RAISES (e.g. a subprocess spawn failure - OSError:
         # EAGAIN/EMFILE/ENOMEM - from gh_runner / run_cs_assure) escalates to a human (persisted). It
         # fails CLOSED (no merge) and lands durably at ESCALATED, never as an uncaught crash mid-run.
+        _restore_authorizations(state, auth_snapshot)
         state.current_phase = Phase.ESCALATED
         state.termination_reason = f"unrecoverable: {type(exc).__name__}: {exc}"
         if ctx.store_path is not None:
             save(state, ctx.store_path)
         return Transition(Decision.ESCALATE, Phase.ESCALATED, state.termination_reason,
                           "escalated: assurance plane / critic / CI read / effect unusable")
+    _restore_authorizations(state, auth_snapshot)
     if not isinstance(result.observation, Observation):
         raise LoopOrchestrateError(
             f"handler for {state.current_phase.value} returned {type(result.observation).__name__}, "

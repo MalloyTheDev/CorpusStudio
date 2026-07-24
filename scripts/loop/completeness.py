@@ -109,43 +109,61 @@ class CompletenessVerdict:
 Critic = Callable[[LoopState], "list[Criterion]"]
 
 
-def _evidence_is_bound(evidence: str, state: LoopState) -> bool:
-    """True only if ``evidence`` is a non-empty digest present in the loop's SEALED assurance records - so
+@dataclass(frozen=True)
+class _TrustedReview:
+    """A snapshot of the control-plane fields the completeness verdict reads, captured BEFORE the untrusted
+    critic runs. The verdict is computed against THIS snapshot, never the live state, so a critic that
+    pollutes ``review_state['authorizations']`` / ``review_state['evidence']`` / ``assurance_records``
+    DURING its own call cannot satisfy its own criteria (self-grant / self-evidence) - only records that
+    existed before the critic ran count. (A residual cross-STEP vector - an untrusted EXECUTOR seeding the
+    evidence index in a prior step - is closed separately: step() restores authorizations after every
+    dispatch, and the #7 write-runtime must give the executor a restricted state for the evidence index.)"""
+
+    authorizations: tuple[dict[str, Any], ...]
+    evidence: tuple[dict[str, Any], ...]
+    assurance_records: tuple[str, ...]
+
+
+def _snapshot_review(state: LoopState) -> _TrustedReview:
+    """Copy the three control-plane fields the verdict reads - before any untrusted callback can touch them."""
+    rs = state.review_state if isinstance(state.review_state, dict) else {}
+
+    def _dicts(value: Any) -> tuple[dict[str, Any], ...]:
+        return tuple(e for e in value if isinstance(e, dict)) if isinstance(value, list) else ()
+
+    records = (tuple(r for r in state.assurance_records if isinstance(r, str))
+               if isinstance(state.assurance_records, list) else ())
+    return _TrustedReview(_dicts(rs.get("authorizations")), _dicts(rs.get("evidence")), records)
+
+
+def _evidence_is_bound(evidence: str, trusted: _TrustedReview) -> bool:
+    """True only if ``evidence`` is a non-empty digest present in the SEALED assurance records snapshot - so
     a deterministic/authority criterion cannot score as met on a digest the loop never actually recorded."""
-    return bool(evidence) and evidence in state.assurance_records
+    return bool(evidence) and evidence in trusted.assurance_records
 
 
-def _evidence_index(state: LoopState) -> list[dict[str, Any]]:
-    """The loop's STRUCTURED evidence entries ({record_type, predicate, subject_fingerprint, digest}),
-    recorded by observe when it seals a green gate. Distinct from the flat digest list in assurance_records."""
-    index = state.review_state.get("evidence")
-    return [e for e in index if isinstance(e, dict)] if isinstance(index, list) else []
-
-
-def _evidence_supports(criterion: Criterion, state: LoopState) -> bool:
-    """Does the loop's recorded evidence SUPPORT this criterion? A criterion that names a
-    ``required_record_type`` is matched SEMANTICALLY - the evidence index must hold an entry of that record
-    type, asserting ``required_predicate``, about ``subject_fingerprint`` (if the criterion pins one) - so a
-    record of the wrong type / predicate / subject cannot satisfy the claim. A criterion with NO semantic
-    fields falls back to digest MEMBERSHIP (the weaker slice-1 mode)."""
+def _evidence_supports(criterion: Criterion, trusted: _TrustedReview) -> bool:
+    """Does the recorded evidence SUPPORT this criterion? A criterion that names a ``required_record_type``
+    is matched SEMANTICALLY - the evidence snapshot must hold an entry of that record type, asserting
+    ``required_predicate``, about ``subject_fingerprint`` (if the criterion pins one) - so a record of the
+    wrong type / predicate / subject cannot satisfy the claim. A criterion with NO semantic fields falls
+    back to digest MEMBERSHIP (the weaker slice-1 mode)."""
     if criterion.required_record_type:
         return any(
             e.get("record_type") == criterion.required_record_type
             and e.get("predicate") == criterion.required_predicate
             and (not criterion.subject_fingerprint
                  or e.get("subject_fingerprint") == criterion.subject_fingerprint)
-            for e in _evidence_index(state)
+            for e in trusted.evidence
         )
-    return _evidence_is_bound(criterion.evidence, state)
+    return _evidence_is_bound(criterion.evidence, trusted)
 
 
-def _human_granted(criterion: Criterion, state: LoopState) -> bool:
-    """True if a human authorization for this criterion has been RECORDED (``cs_loop authorize --grant``
-    stores ``{grant, note}`` on ``review_state['authorizations']``). The critic cannot self-grant."""
-    auths = state.review_state.get("authorizations", [])
-    if not isinstance(auths, list):
-        return False
-    return any(isinstance(a, dict) and a.get("grant") == criterion.id for a in auths)
+def _human_granted(criterion: Criterion, trusted: _TrustedReview) -> bool:
+    """True if a human authorization for this criterion was RECORDED (``cs_loop authorize --grant`` stores
+    ``{grant, note}`` on ``review_state['authorizations']``) BEFORE the critic ran. The critic cannot
+    self-grant - the snapshot is taken before it is invoked."""
+    return any(a.get("grant") == criterion.id for a in trusted.authorizations)
 
 
 def check_completeness(state: LoopState, critic: Critic) -> CompletenessVerdict:
@@ -164,6 +182,10 @@ def check_completeness(state: LoopState, critic: Critic) -> CompletenessVerdict:
     universal "a human ratifies this specific criterion" mechanism that resolves the escalation.
 
     ``complete`` requires every criterion met with sufficient evidence and none awaiting human authority."""
+    # Snapshot the control-plane fields the verdict reads BEFORE the untrusted critic runs, so a critic
+    # that appends a grant / fabricates an evidence entry during its own call cannot satisfy its own
+    # criteria (self-grant / self-evidence). The verdict below reads ONLY this snapshot.
+    trusted = _snapshot_review(state)
     try:
         criteria = critic(state)
     except CompletenessError:
@@ -186,20 +208,20 @@ def check_completeness(state: LoopState, critic: Critic) -> CompletenessVerdict:
         except ValueError as exc:
             raise CompletenessError(f"criterion {c.id!r} has an unknown kind {c.kind!r}") from exc
         if kind is CriterionKind.HUMAN_APPROVAL:
-            if not _human_granted(c, state):
+            if not _human_granted(c, trusted):
                 needs_authority.append(c)  # awaits a recorded human grant; the critic cannot self-grant
             # else: met by a recorded authorization (counted as met - falls through)
         elif kind in (CriterionKind.DETERMINISTIC, CriterionKind.DOMAIN_AUTHORITY):
             # met ONLY if exactly True (a truthy non-bool must not score) AND the recorded evidence
             # SEMANTICALLY supports it (right record type / predicate / subject), or - for a bare-digest
             # criterion - the cited digest was recorded.
-            if c.met is True and _evidence_supports(c, state):
+            if c.met is True and _evidence_supports(c, trusted):
                 continue
             unmet.append(c)  # asserted without supporting evidence is NOT proven -> work it
         else:  # MODEL_JUDGMENT (the only remaining valid kind)
             if c.met is not True:
                 unmet.append(c)
-            elif _human_granted(c, state):
+            elif _human_granted(c, trusted):
                 continue  # a human RATIFIED the model's judgment (grant == id) -> met
             else:
                 needs_authority.append(c)  # model opinion awaiting human ratification
