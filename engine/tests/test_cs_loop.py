@@ -198,12 +198,40 @@ def test_run_refuses_an_unloadable_adapter(tmp_path: Path) -> None:
     assert proc.returncode == 2 and "adapter module" in proc.stderr and "Traceback" not in proc.stderr
 
 
-def test_authorize_unescalates_a_blocked_loop(tmp_path: Path) -> None:
-    state = tmp_path / "loop.json"
-    _run(state, "init", "--goal", "g")
+def _escalate(state: Path, reason: str) -> None:
     data = json.loads(state.read_text())
     data["current_phase"] = "ESCALATED"
-    data["termination_reason"] = "blocked"
+    data["termination_reason"] = reason
     state.write_text(json.dumps(data))
-    out = json.loads(_run(state, "authorize", "--grant", "merge-ok", "--note", "reviewed").stdout)
-    assert out["unescalated"] is True and out["phase"] == "DIAGNOSE"
+
+
+def test_authorize_shows_the_pending_request_then_grants_it(tmp_path: Path) -> None:
+    state = tmp_path / "loop.json"
+    _run(state, "init", "--goal", "g")
+    _escalate(state, "needs independent human review")
+    # No --request: SHOW the pending request so the human learns its id (never a blanket un-escalate).
+    shown = json.loads(_run(state, "authorize").stdout)["pending_authorization"]
+    assert shown["request_id"].startswith("auth-") and shown["capability"] == "needs independent human review"
+    # Grant THAT specific request -> un-escalate to DIAGNOSE + record the decision.
+    out = json.loads(_run(state, "authorize", "--request", shown["request_id"], "--grant", "signoff").stdout)
+    assert out["authorized"] == shown["request_id"] and out["phase"] == "DIAGNOSE"
+    auths = json.loads(_run(state, "inspect").stdout)["review_state"]["authorizations"]
+    assert auths[-1]["request_id"] == shown["request_id"] and auths[-1]["grant"] == "signoff"
+
+
+def test_authorize_refuses_a_request_that_does_not_match_the_current_blocker(tmp_path: Path) -> None:
+    # A grant must name the CURRENT blocker; a wrong/stale request id never universally un-escalates.
+    state = tmp_path / "loop.json"
+    _run(state, "init", "--goal", "g")
+    _escalate(state, "blocker A")
+    refused = _run(state, "authorize", "--request", "auth-deadbeefdeadbeef")
+    assert refused.returncode == 2 and "does not match the pending request" in refused.stderr
+    assert json.loads(_run(state, "inspect").stdout)["phase"] == "ESCALATED"  # still blocked
+
+
+def test_authorize_refuses_when_not_escalated(tmp_path: Path) -> None:
+    state = tmp_path / "loop.json"
+    _run(state, "init", "--goal", "g")  # RECEIVE_GOAL, not escalated
+    assert json.loads(_run(state, "authorize").stdout)["pending_authorization"] is None
+    refused = _run(state, "authorize", "--request", "auth-whatever")
+    assert refused.returncode == 2 and "not ESCALATED" in refused.stderr
