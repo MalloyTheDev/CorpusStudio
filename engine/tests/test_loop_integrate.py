@@ -126,12 +126,22 @@ def test_merge_gate_rejects_a_stale_untrusted_or_unresolved_resolution() -> None
     assert not merge_gate(["contracts"], resolutions=[_resolution("contracts", fp="")], subject_fingerprint="").authorized
 
 
+def test_merge_gate_fails_closed_on_a_non_sequence_resolutions_value() -> None:
+    # A resolutions value that is not a sequence (a bare dict, or a non-iterable) must ESCALATE, never
+    # crash the loop or iterate a dict's keys - the never-crash invariant reaches the merge button.
+    for bad in (_resolution("contracts"), 5, "resolved", None):
+        gate = merge_gate(["contracts"], resolutions=bad, subject_fingerprint=_FP)  # type: ignore[arg-type]
+        assert not gate.authorized and gate.observation is Observation.AUTHORIZATION_REQUIRED, bad
+
+
 def test_merge_gate_escalates_every_human_gated_obligation_even_with_a_resolution() -> None:
     # worker-closure needs the human-gated worker workflow (fresh wheel/env); loop-controller-self-modify
     # must NOT be admitted by the loop's own merge gate (rule #666). A resolution can never discharge these.
     for ob in ("assurance-self-modify", "sealed-research", "worker-closure", "loop-controller-self-modify"):
         gate = merge_gate([ob], resolutions=[_resolution(ob)], subject_fingerprint=_FP)
         assert not gate.authorized and gate.observation is Observation.AUTHORIZATION_REQUIRED, ob
+        verdict = gate.evaluation.verdicts[0]
+        assert verdict.disposition == "HUMAN_GATED" and verdict.satisfied is False, ob  # a resolution can't help
 
 
 def test_merge_gate_fails_closed_on_an_unknown_blocking_obligation() -> None:

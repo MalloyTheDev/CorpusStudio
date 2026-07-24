@@ -12,6 +12,7 @@ Deterministic core here (parse CI checks -> status -> Observation; the merge-aut
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -52,6 +53,14 @@ _RESOLVED = "RESOLVED"
 # (A candidate-controlled result would let a change vouch for itself - the same reason self-modify is
 # human-gated.) Kept deliberately small + fail-closed; a producing runtime widens it under review.
 _TRUSTED_RESOLUTION_AUTHORITIES = frozenset({"trusted-base-ci", "independent-human-review"})
+
+# The verdict a fired obligation gets at the gate (single source of truth for the serialized labels, so
+# merge_gate / GateEvaluation.to_record / tests / consumers never drift). Only *_SATISFIED_* clear the gate.
+_DISP_HUMAN_GATED = "HUMAN_GATED"    # a human-gated obligation: never dischargeable by the loop
+_DISP_LOW_SEVERITY = "LOW_SEVERITY"  # info/advisory: does not gate a merge
+_DISP_RESOLVED = "RESOLVED"          # a blocking obligation with a trusted, current resolution record
+_DISP_UNRESOLVED = "UNRESOLVED"      # a blocking obligation with no such record -> escalate
+_DISP_MALFORMED = "MALFORMED"        # an unparseable obligation entry -> escalate
 
 GhRunner = Callable[..., "tuple[int, str, str]"]
 
@@ -117,15 +126,19 @@ class MergeGate:
     evaluation: "GateEvaluation | None" = None
 
 
-def _resolution_supports(obligation_id: str, subject_fingerprint: str, resolutions: Any) -> bool:
+def _resolution_supports(
+    obligation_id: str, subject_fingerprint: str, resolutions: "Iterable[Mapping[str, Any]] | None"
+) -> bool:
     """True iff some resolution proves ``obligation_id`` was discharged for THIS change set: RESOLVED
     (status), CURRENT + APPLICABLE_TO_HEAD (its ``subject_fingerprint`` equals the one the gate is bound
     to), and TRUSTED (a trusted authority, never the candidate). A blank bound fingerprint matches nothing
-    (fail-closed: an unbound gate can accept no resolution). Malformed resolution entries are ignored."""
-    if not subject_fingerprint:
+    (fail-closed: an unbound gate can accept no resolution). Malformed resolution ENTRIES are ignored; a
+    ``resolutions`` value that is not a sequence at all is treated as empty (fail-closed: escalate rather
+    than iterate a dict's keys or crash the loop on a non-iterable)."""
+    if not subject_fingerprint or not isinstance(resolutions, (list, tuple)):
         return False
-    for r in resolutions or []:
-        if (isinstance(r, dict)
+    for r in resolutions:
+        if (isinstance(r, Mapping)
                 and r.get("obligation_id") == obligation_id
                 and r.get("status") == _RESOLVED
                 and r.get("subject_fingerprint") == subject_fingerprint
@@ -200,7 +213,7 @@ def ci_observation(status: CiStatus, *, required: "frozenset[str]" = frozenset()
     return Observation.TEST_REGRESSION, f"CI failing: {sorted(status.failing_checks)}"
 
 
-def merge_gate(fired_obligations: Any, *, resolutions: Any = None,
+def merge_gate(fired_obligations: Any, *, resolutions: "Iterable[Mapping[str, Any]] | None" = None,
                subject_fingerprint: str = "", dangerous: bool = False) -> MergeGate:
     """Decide whether the loop may merge autonomously - RISK DERIVED FROM POLICY + EVIDENCE, not identity.
     FAIL-CLOSED. Each fired obligation is dispositioned: a known human-gated one always escalates; a
@@ -222,19 +235,19 @@ def merge_gate(fired_obligations: Any, *, resolutions: Any = None,
         elif isinstance(o, dict) and isinstance(o.get("id"), str):
             oid, severity = o["id"], str(o.get("severity", ""))
         else:  # an unparseable obligation entry: we cannot assess its risk -> fail closed (escalate)
-            verdicts.append(ObligationVerdict(repr(o), "MALFORMED", False))
+            verdicts.append(ObligationVerdict(repr(o), _DISP_MALFORMED, False))
             return MergeGate(False, Observation.AUTHORIZATION_REQUIRED,
                              f"malformed fired obligation {o!r}; cannot assess merge risk (escalating)",
                              GateEvaluation(subject_fingerprint, False, tuple(verdicts)))
         if oid in _HUMAN_GATED:
-            verdicts.append(ObligationVerdict(oid, "HUMAN_GATED", False))
+            verdicts.append(ObligationVerdict(oid, _DISP_HUMAN_GATED, False))
             gated.append(oid)
         elif severity.lower() in _LOW_SEVERITY:
-            verdicts.append(ObligationVerdict(oid, "LOW_SEVERITY", True))
+            verdicts.append(ObligationVerdict(oid, _DISP_LOW_SEVERITY, True))
         elif _resolution_supports(oid, subject_fingerprint, resolutions):
-            verdicts.append(ObligationVerdict(oid, "RESOLVED", True))
+            verdicts.append(ObligationVerdict(oid, _DISP_RESOLVED, True))
         else:
-            verdicts.append(ObligationVerdict(oid, "UNRESOLVED", False))
+            verdicts.append(ObligationVerdict(oid, _DISP_UNRESOLVED, False))
             gated.append(oid)
     evaluation = GateEvaluation(subject_fingerprint, not gated, tuple(verdicts))
     if gated:

@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from loop.completeness import (
     CompletenessError,
@@ -105,8 +105,10 @@ class LoopContext:
     # Obligation-resolution records (injected, plain dicts) proving each blocking obligation was discharged
     # for the change set being merged. Empty by default -> a blocking obligation with no resolution ESCALATES
     # (re-review #14: never auto-merge on obligation identity). A producing runtime supplies these, each
-    # bound to the impact change-set fingerprint + a trusted authority; see integrate.merge_gate.
-    obligation_resolutions: tuple[dict[str, str], ...] = ()
+    # bound to the impact change-set fingerprint + a trusted authority; see integrate.merge_gate. Values
+    # may carry richer authority-specific metadata (timestamps, nested evidence), so the value type is Any;
+    # the required-key contract (obligation_id / status / subject_fingerprint / authority) is enforced there.
+    obligation_resolutions: tuple[dict[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         # verify_paths only takes effect on the DELEGATED multi-agent EXECUTE path. Setting it while
@@ -192,7 +194,10 @@ def _impact_assessment(ctx: LoopContext) -> PolicyAssessment:
     if not isinstance(fingerprint, str) or not fingerprint:
         # The change-set fingerprint binds each resolution to THIS commit; a missing one is a malformed /
         # schema-drifted impact record - fail CLOSED (an unbindable gate must not authorize a merge).
-        raise LoopOrchestrateError("cs_assure impact record has no change_set_fingerprint")
+        raise LoopOrchestrateError(
+            "cs_assure impact record payload has no usable 'change_set_fingerprint' string "
+            f"(got {type(fingerprint).__name__}); cannot bind obligation resolutions to this commit - "
+            "the record is malformed or schema-drifted")
     return PolicyAssessment(
         fired_obligations=items,
         base_policy_available=payload.get("base_policy_available") is True,  # missing/non-True -> not available
