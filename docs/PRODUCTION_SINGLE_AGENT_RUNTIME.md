@@ -152,6 +152,14 @@ separately-authorized PR under `loop-controller-self-modify`:
     merges only on green. Local dynamic assurance in a hardened local sandbox (container / nsjail, network
     off, sanitized env) is a **7.1.5** option. *(Publish still happens inside EXECUTE, now gated on the
     static candidate assurance.)*
+  - **The candidate is analyzed by the TRUSTED tool, never its own copy.** A second adversarial pass found
+    that invoking `<candidate>/scripts/cs_assure.py` puts `<candidate>/scripts` on `sys.path[0]`, so a
+    candidate that merely *adds* `scripts/argparse.py` (or `json.py` / `sitecustomize.py`) gets it
+    **imported and executed as the operator** before any analysis runs — full filesystem + network access,
+    so a sanitized env does not stop it reading credential *files* (`~/.config/gh/hosts.yml`, `~/.aws/…`,
+    `~/.ssh/id_*`). Verified empirically. Two independent layers now close it: the runner always executes
+    the **trusted dev-tree** `cs_assure.py` and points it at the candidate with **`--start-dir`**, and the
+    **entire `scripts/` tree** is denied pre-apply so such a file can never reach the candidate at all.
 - **7.1.2b — deferred.** A **persistent** candidate worktree with a loop-native observe→diagnose→**correct**
   loop (iterating in the worktree rather than re-proposing from scratch) + an **independent REAL reviewer**
   over the candidate. Needs the worktree lifecycle (create/reuse/dispose across phases) that 7.1.4 builds;
@@ -165,7 +173,9 @@ separately-authorized PR under `loop-controller-self-modify`:
 - **7.1.5 — live canary** with fault injection at every boundary before any unattended use.
 - **Sensitive-path denial** (initially deny) — **shipped in 7.1.2a**: `.env*`, `*.pem`, `*.key`, credential
   stores, GitHub workflow / permission changes, sealed research, `docs/paper/**`, submodules, symlinks,
-  mode/binary changes, over-large changes, assurance code, and loop-controller code are refused pre-apply.
+  mode/binary changes, over-large changes, gate-affecting config (`conftest.py`, `pyproject.toml`,
+  `pytest.ini`, …), and the **entire `scripts/` tree** (loop controller + assurance + any shadow-import
+  module) are refused pre-apply.
   (Historical-evidence and release-credential dirs live outside the repo tree, so they never appear in a
   candidate diff; the in-repo `research/**` + `docs/paper/**` denial covers the sealed-research surface.)
 
@@ -179,9 +189,10 @@ main tree's `git status` is clean); the agent runs confined (cwd = a disposable 
 bounded output); a diff that won't apply / a drifted apply fails closed; a **human-gated candidate
 obligation**, a **worker-closure candidate**, a **sensitive path** (incl. gate-config), and a **secret in
 the diff** each publish **nothing** (no push, no PR) and the candidate outcome is recorded; a **clear
-candidate** publishes by refspec from a detached worktree; candidate assurance is proven to run against the
-**candidate worktree, not the dev tree**; the default cs_assure runner sanitizes the env; `INTEGRATE`
-escalates rather than merges; a self-modify-shaped change still escalates.
+candidate** publishes by refspec from a detached worktree; candidate assurance is proven to *analyze* the
+**candidate worktree** while *executing* the **trusted dev-tree tool** (`--start-dir`, never the
+candidate's own `cs_assure.py`); a new top-level `scripts/` file is denied; the default cs_assure runner
+sanitizes the env; `INTEGRATE` escalates rather than merges; a self-modify-shaped change still escalates.
 
 **Real-run caveat:** the tests drive candidate assurance with an injected fake `run_cs_assure`; the real
 default runner runs `cs_assure impact` (static, fast) inside the candidate worktree. The loop's own

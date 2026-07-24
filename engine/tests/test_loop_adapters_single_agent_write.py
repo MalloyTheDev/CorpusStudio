@@ -223,21 +223,54 @@ def test_a_clear_candidate_publishes_and_records_the_assurance(tmp_path: Path) -
 
 
 def test_candidate_assurance_targets_the_candidate_worktree_not_the_dev_tree(tmp_path: Path) -> None:
-    # the whole point of 7.1.2: `impact` must be run against the CANDIDATE worktree, never the dev tree.
+    # the whole point of 7.1.2: `impact` must ANALYZE the CANDIDATE worktree, never the dev tree. The
+    # trusted-tool wrapper passes the candidate via --start-dir, so assert on that argument.
     seen: list = []
     base = _assure_runner()
 
     def recording(root, *a):
         if a and a[0] == "impact":
-            seen.append(str(root))
+            seen.append((str(root), list(a)))
         return base(root, *a)
     root, _remote = _repo_with_remote(tmp_path)
     ctx = _build(tmp_path, root, _StubAgent(), [], assure=recording)
     run_loop(LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL), ctx)
-    assert seen, "candidate impact was never run"
-    for observed in seen:
-        assert (tmp_path / "wt").resolve() in Path(observed).resolve().parents  # the isolated worktree...
-        assert Path(observed).resolve() != root.resolve()                       # ...never the dev tree
+    candidate_runs = [(r, a) for r, a in seen if "--start-dir" in a]
+    assert candidate_runs, "candidate impact was never run against a candidate worktree"
+    for run_root, argv in candidate_runs:
+        target = Path(argv[argv.index("--start-dir") + 1]).resolve()
+        assert (tmp_path / "wt").resolve() in target.parents   # analyzes the isolated worktree...
+        assert target != root.resolve()                        # ...never the dev tree
+        assert Path(run_root).resolve() == root.resolve()      # ...but EXECUTES the trusted dev-tree tool
+
+
+def test_the_candidates_own_cs_assure_is_never_executed(tmp_path: Path) -> None:
+    # HIGH (adversarial review): running the CANDIDATE's scripts/cs_assure.py puts <candidate>/scripts on
+    # sys.path[0], so a candidate-added `scripts/argparse.py` would be imported+executed as the operator.
+    # The wrapper must always run the TRUSTED dev-tree tool and merely POINT it at the candidate.
+    root, _remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    wrapped = saw._trusted_cs_assure(root, lambda r, *a: calls.append((str(r), list(a))) or (0, "{}", ""))
+    candidate = tmp_path / "wt" / "apply-xyz"
+    wrapped(candidate, "impact", "--base", "main")
+    run_root, argv = calls[-1]
+    assert Path(run_root) == root                                    # the TRUSTED tool is what executes
+    assert argv[argv.index("--start-dir") + 1] == str(candidate)     # the candidate is only the SUBJECT
+    # a dev-tree call is passed through untouched (no redundant --start-dir)
+    wrapped(root, "verify", "--base", "main")
+    assert calls[-1] == (str(root), ["verify", "--base", "main"])
+
+
+def test_a_new_top_level_script_is_denied(tmp_path: Path) -> None:
+    # the independent second layer: the whole scripts/ tree is denied, so a shadow stdlib module
+    # (scripts/argparse.py) can never reach the candidate worktree in the first place.
+    root, remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    agent = _StubAgent({"unified_diff": _denied_diff("scripts/argparse.py"), "rationale": "r"})
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, agent, calls), max_steps=25)
+    assert ("pr", "create") not in [c[:2] for c in calls]
+    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
 
 
 def test_a_sensitive_path_is_denied_before_apply(tmp_path: Path) -> None:
@@ -268,7 +301,10 @@ def test_classify_sensitive_paths_denies_protected_and_credential_shaped() -> No
     assert saw._classify_sensitive_paths(["README.md", "docs/x.md"], _DIFF) == []
     for denied in ("scripts/loop/x.py", "scripts/loop_adapters/y.py", "scripts/assurance/z.py",
                    "scripts/cs_assure.py", "scripts/cs_loop.py", ".claude/settings.json",
-                   ".github/workflows/ci.yml", "research/paper.tex", "docs/paper/fig.py", ".gitmodules"):
+                   ".github/workflows/ci.yml", "research/paper.tex", "docs/paper/fig.py", ".gitmodules",
+                   # the whole scripts/ tree: a shadow stdlib module would be executed by an assurance
+                   # subprocess resolving imports from <candidate>/scripts (sys.path[0]).
+                   "scripts/argparse.py", "scripts/json.py", "scripts/sitecustomize.py", "scripts/new.py"):
         assert saw._classify_sensitive_paths([denied], _DIFF), denied
     for cred in ("config/.env", ".env.local", "certs/tls.pem", "secrets/app.key", "home/id_rsa"):
         assert saw._classify_sensitive_paths([cred], _DIFF), cred

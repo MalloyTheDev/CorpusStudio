@@ -99,7 +99,9 @@ may *do*:
   DETACHED `git worktree`** (never the developer's tree, never the confined propose checkout), verifies the
   applied change matches the sealed proposal, scans the added lines for secrets, commits, and **ASSURES THE
   CANDIDATE STATICALLY** - `cs_assure impact` (self-modify / sealed-research / worker-closure / policy)
-  runs against the **candidate worktree, not the dev tree** (7.1.2), with a **sanitized env**. It pushes
+  ANALYZES the **candidate worktree, not the dev tree** (7.1.2) while EXECUTING the **trusted dev-tree
+  tool** (via `--start-dir`, never the candidate's own `scripts/cs_assure.py`, which would import+execute a
+  candidate-added shadow stdlib module), with a **sanitized env**. It pushes
   the branch (by refspec) + opens a PR **only when the candidate classifies clear**; a human-gated / worker
   / policy obligation publishes **nothing** and returns the classified observation so the loop escalates.
   The **dynamic** gate (ruff/mypy/**pytest**) is deliberately NOT run locally - pytest would EXECUTE the

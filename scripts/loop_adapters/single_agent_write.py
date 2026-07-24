@@ -22,8 +22,11 @@ Safety (why this is the least-capable *write* rung):
     applied change is verified to match the sealed proposal's ``changed_paths`` (integrity, fail closed),
     and the added lines are scanned for apparent secrets (defense-in-depth; CI gitleaks is the backstop).
   * CANDIDATE ASSURANCE (phase 7.1.2, STATIC): the candidate worktree is classified via ``cs_assure
-    impact`` (self-modify / sealed-research / worker-closure / policy obligations) - a STATIC analysis that
-    does NOT import or execute the candidate's code. The branch is pushed + the PR opened ONLY when the
+    impact`` (self-modify / sealed-research / worker-closure / policy obligations) - a STATIC analysis run
+    by the TRUSTED dev-tree tool pointed at the candidate with ``--start-dir`` (never the candidate's own
+    ``scripts/cs_assure.py``, which would execute a candidate-added shadow stdlib module off
+    ``sys.path[0]``; the wholesale ``scripts/`` denial is the independent second layer). No untrusted
+    candidate code is imported or executed. The branch is pushed + the PR opened ONLY when the
     candidate classifies clear; a human-gated / worker / policy obligation publishes NOTHING and returns the
     classified observation so the loop escalates. Because the apply worktree is DETACHED and the branch is
     created by refspec only on a clear candidate, a blocked candidate leaves no orphaned local branch.
@@ -105,14 +108,36 @@ def _sanitized_cs_assure(root: Path | str, *argv: str) -> tuple[int, str, str]:
         return (2, "", f"cs_assure could not run: {type(exc).__name__}: {exc}")
     return proc.returncode, proc.stdout, proc.stderr
 
+
+def _trusted_cs_assure(repo_root: Path, run_cs_assure: Any):  # noqa: ANN202
+    """Wrap an assurance runner so a CANDIDATE analysis always executes the TRUSTED dev-tree
+    ``scripts/cs_assure.py`` and merely POINTS it at the candidate via ``--start-dir``.
+
+    Why: running the candidate worktree's OWN ``scripts/cs_assure.py`` puts ``<candidate>/scripts`` on
+    ``sys.path[0]``, so a candidate that adds e.g. ``scripts/argparse.py`` (or ``json.py`` /
+    ``sitecustomize.py``) gets that file IMPORTED AND EXECUTED as the operator before any analysis runs -
+    local arbitrary code execution with filesystem + network access (a sanitized env does not stop it
+    reading credential FILES). Analyzing the candidate with the trusted tool closes that path; the bare
+    ``scripts/`` denial in :func:`_classify_sensitive_paths` is the second, independent layer."""
+
+    def run(root: Path | str, *argv: str) -> tuple[int, str, str]:
+        if Path(root) == repo_root:
+            return run_cs_assure(root, *argv)  # the dev tree IS the trusted tree - nothing to redirect
+        return run_cs_assure(repo_root, *argv, "--start-dir", str(root))
+
+    return run
+
 # ---------------------------------------------------------------- sensitive-path denial (7.1.2, pre-apply)
 # Paths the write adapter REFUSES to create/modify autonomously; a human must make these edits. Matched
 # against every changed path BEFORE the diff is applied - a single hit denies the whole proposal (fail
 # closed). This is the "initially deny" list from the 7.1 review: credentials / key material, CI +
 # supply-chain, the loop-controller + assurance + agent config (the self-modify class), and sealed research.
 _DENIED_DIR_PREFIXES: tuple[str, ...] = (
-    "scripts/loop/", "scripts/loop_adapters/", "scripts/assurance/", ".claude/",
-    ".github/", "research/", "docs/paper/",
+    # `scripts/` is denied WHOLESALE: it holds the loop controller + assurance tooling, and it is the
+    # directory an assurance subprocess resolves imports from - a candidate-added `scripts/argparse.py`
+    # (or json.py / sitecustomize.py) would be imported and EXECUTED as the operator. Denying the whole
+    # tree is the independent second layer behind `_trusted_cs_assure`.
+    "scripts/", ".claude/", ".github/", "research/", "docs/paper/",
 )
 _DENIED_EXACT: frozenset[str] = frozenset({
     "scripts/cs_loop.py", "scripts/cs_assure.py", ".gitmodules", ".gitattributes",
@@ -248,9 +273,16 @@ def _apply_worktree(repo_root: Path, base_oid: str, worktrees_dir: Path) -> Iter
 
 def _assure_candidate(wt: Path, base: str, run_cs_assure: Any) -> tuple[Observation, str, str | None]:
     """STATIC candidate assurance: classify the candidate via ``cs_assure impact`` (obligation / policy
-    analysis over the diff - it does NOT import or execute the candidate's code) and return
-    ``(observation, reason, impact_record_digest)``. ``SUCCESS`` = clear to publish; a human-gated /
-    worker-closure / other blocking obligation returns the routing observation so the loop escalates.
+    analysis over the diff) and return ``(observation, reason, impact_record_digest)``. ``SUCCESS`` = clear
+    to publish; a human-gated / worker-closure / other blocking obligation returns the routing observation
+    so the loop escalates.
+
+    NO UNTRUSTED CODE RUNS. Two independent layers:
+      * ``run_cs_assure`` must be the :func:`_trusted_cs_assure` wrapper, so the TRUSTED dev-tree
+        ``cs_assure.py`` analyzes the candidate via ``--start-dir`` - never the candidate's own copy (which
+        would put ``<candidate>/scripts`` on ``sys.path[0]`` and execute a shadow stdlib module);
+      * the whole ``scripts/`` tree is denied pre-apply, so no such file can reach the candidate anyway.
+    ``impact`` itself only reads git state + the policy bundle; it does not import the analyzed tree.
 
     Why static, not the full gate: running ``cs_assure verify`` here would run ruff/mypy/PYTEST inside the
     candidate worktree, and pytest COLLECTION EXECUTES the untrusted agent's committed code with the
@@ -413,8 +445,9 @@ def build_context(repo_root: Path | str, base: str = "main", *, agent_client: Ag
     gh = gh_runner or write_gh(root)
     # The SAME assurance runner drives BOTH the candidate assurance (static `impact` in the executor,
     # against the candidate worktree) and the loop's own OBSERVE/VERIFY (against the dev tree). Default to
-    # the SANITIZED-env cs_assure runner so no assurance subprocess inherits secrets.
-    assure = run_cs_assure if run_cs_assure is not None else _sanitized_cs_assure
+    # the SANITIZED-env cs_assure runner so no assurance subprocess inherits secrets, and WRAP it so a
+    # candidate is always analyzed by the TRUSTED dev-tree tool (never the candidate's own scripts/).
+    assure = _trusted_cs_assure(root, run_cs_assure if run_cs_assure is not None else _sanitized_cs_assure)
     kwargs: dict[str, Any] = {
         "repo_root": root, "base": base,
         "executor": _make_write_executor(client, root, base, pdir, wdir, gh, branch_prefix, assure),
