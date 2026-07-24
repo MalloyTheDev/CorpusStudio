@@ -30,7 +30,13 @@ CS_ASSURE = SCRIPTS_DIR / "cs_assure.py"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from assurance.git_state import MergeCandidateConflicted  # noqa: E402
+from assurance import git_state  # noqa: E402
+from assurance.git_state import (  # noqa: E402
+    GitStateError,
+    MergeCandidateConflicted,
+    MergeTreeUnsupported,
+    write_merge_tree,
+)
 from assurance.records import (  # noqa: E402
     ScopeUnavailable,
     build_change_set_record,
@@ -121,6 +127,17 @@ def test_head_scope_pins_the_candidate_oid_to_head(tmp_path: Path) -> None:
     assert verify_record(rec)
 
 
+def test_workspace_records_never_carry_a_candidate_oid(tmp_path: Path) -> None:
+    # Back-compat guarantee: only the tree scopes pin candidate_oid; the workspace record must stay
+    # byte-shape-identical to the pre-#15 kernel so existing consumers never see schema drift.
+    root = base_repo(tmp_path)
+    (root / "a.txt").write_text("dirty\n")
+    _proc, rec = cli_changeset(root, "workspace")
+    assert rec["payload"]["changed_path_count"] == 1
+    assert "candidate_oid" not in rec["payload"]
+    assert "candidate_oid" not in rec["provenance"]
+
+
 def test_head_scope_is_stable_across_runs(tmp_path: Path) -> None:
     root = base_repo(tmp_path)
     _git(root, "checkout", "-q", "-b", "feat")
@@ -180,6 +197,30 @@ def test_merge_candidate_conflict_via_library(tmp_path: Path) -> None:
     _git(root, "checkout", "-q", "feat")
     with pytest.raises(MergeCandidateConflicted):
         build_change_set_record(start_dir=root, scope="merge_candidate", base_ref="main")
+
+
+def _fake_git_returning(returncode: int, stdout: bytes = b"", stderr: bytes = b""):
+    def fake(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(list(args), returncode, stdout=stdout, stderr=stderr)
+    return fake
+
+
+def test_write_merge_tree_reports_an_old_git_as_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A git that lacks --write-tree names the flag / prints "unknown option" -> MergeTreeUnsupported.
+    monkeypatch.setattr(git_state, "_git",
+                        _fake_git_returning(129, stderr=b"error: unknown option `write-tree'\nusage: git ..."))
+    with pytest.raises(MergeTreeUnsupported):
+        write_merge_tree(Path("/nonexistent"), "base", "head")
+
+
+def test_write_merge_tree_does_not_mislabel_a_generic_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A real invocation error (bad object) must NOT be reported as version incompatibility - it fails
+    # closed as a plain GitStateError, honestly labeled (the tightened classification, Sourcery #692).
+    monkeypatch.setattr(git_state, "_git",
+                        _fake_git_returning(128, stderr=b"fatal: not a valid object name 'base'"))
+    with pytest.raises(GitStateError) as excinfo:
+        write_merge_tree(Path("/nonexistent"), "base", "head")
+    assert not isinstance(excinfo.value, (MergeTreeUnsupported, MergeCandidateConflicted))
 
 
 # --------------------------------------------------------------------------- guards

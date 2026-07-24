@@ -229,7 +229,11 @@ def write_merge_tree(root: Path, base_commit: str, head_commit: str) -> str:
         )
     stderr = proc.stderr.decode("utf-8", "replace")
     lowered = stderr.lower()
-    if "unknown option" in lowered or "--write-tree" in lowered or "usage:" in lowered:
+    # Only an error that names the flag itself proves this git lacks --write-tree. A bare "usage:" is
+    # too broad - a genuine invocation error (bad object, missing commit) also prints usage, and must
+    # not be misreported as version incompatibility. Everything else fails closed as a generic error
+    # (still exit 2, but honestly labeled).
+    if "--write-tree" in lowered or "unknown option" in lowered:
         raise MergeTreeUnsupported(
             "git merge-tree --write-tree is unavailable (needs git >= 2.38); "
             f"cannot compute a merge-candidate tree: {stderr.strip()}"
