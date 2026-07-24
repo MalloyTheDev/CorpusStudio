@@ -26,7 +26,8 @@ from loop.tasks import decompose  # noqa: E402
 
 
 def _cs_assure(*, verify_green: bool = True, obligations: tuple[str, ...] = (),
-               changed: tuple[str, ...] = (), impact_fail: bool = False, changeset_out: str | None = None):
+               changed: tuple[str, ...] = (), impact_fail: bool = False, changeset_out: str | None = None,
+               base_policy_available: bool = True):
     steps = [{"name": n, "passed": verify_green, "exit_code": 0 if verify_green else 1, "timed_out": False}
              for n in ("ruff", "mypy", "pytest")]
     records = {
@@ -35,7 +36,8 @@ def _cs_assure(*, verify_green: bool = True, obligations: tuple[str, ...] = (),
                                "fired_obligations": [{"id": o} for o in obligations],
                                "change_set_fingerprint": "cs:x"}},
         "changeset": {"payload": {"changed_paths": [{"path": p} for p in changed]}},
-        "impact": {"payload": {"fired_obligations": [{"id": o, "severity": "blocking"} for o in obligations]}},
+        "impact": {"payload": {"fired_obligations": [{"id": o, "severity": "blocking"} for o in obligations],
+                               "base_policy_available": base_policy_available}},
         "doclint": {"finding_count": 0},
     }
 
@@ -129,6 +131,15 @@ def test_integrate_loop_controller_change_escalates_at_the_merge_gate() -> None:
     state = LoopState(current_phase=Phase.INTEGRATE)
     t = step(state, _ctx(gh_runner=_gh(ci="pass"), pr_ref="1",
                          run_cs_assure=_cs_assure(obligations=("loop-controller-self-modify",))))
+    assert t.decision is Decision.ESCALATE and state.current_phase is Phase.ESCALATED
+
+
+def test_integrate_escalates_when_trusted_base_policy_is_unavailable() -> None:
+    # A candidate-only impact assessment (base_policy_available=false: shallow clone / no merge base) must
+    # NOT authorize an autonomous merge - the candidate could have weakened the policy unseen -> escalate.
+    state = LoopState(current_phase=Phase.INTEGRATE)
+    t = step(state, _ctx(gh_runner=_gh(ci="pass"), pr_ref="1",
+                         run_cs_assure=_cs_assure(base_policy_available=False)))
     assert t.decision is Decision.ESCALATE and state.current_phase is Phase.ESCALATED
 
 

@@ -30,7 +30,7 @@ def _green_cs_assure():
     rec = {"verify": {"record_type": "workspace_verification", "schema_version": 2, "record_digest": "sha256:v",
            "payload": {"gate_passed": True, "gate_steps": steps, "workspace_stable": True,
            "fired_obligations": [], "change_set_fingerprint": "cs:x"}},
-           "changeset": {"payload": {"changed_paths": []}}, "impact": {"payload": {"fired_obligations": []}},
+           "changeset": {"payload": {"changed_paths": []}}, "impact": {"payload": {"fired_obligations": [], "base_policy_available": True}},
            "doclint": {"finding_count": 0}}
     return lambda _r, *a: (0, json.dumps(rec.get(a[0] if a else "", {})), "")
 
