@@ -44,13 +44,13 @@ from typing import Iterator  # noqa: E402
 
 from loop.controller import LoopState, Phase  # noqa: E402
 from loop.driver import next_directive  # noqa: E402
-from loop.locking import FileLock  # noqa: E402 - single-writer enforcement on the state file
+from loop.locking import DEFAULT_LOCK_TIMEOUT, FileLock  # noqa: E402 - single-writer state-file lock
 from loop.observe import LoopObserveError, observe_and_apply  # noqa: E402
 from loop.store import LoopStateError, load, save  # noqa: E402
 
 
 @contextmanager
-def _state_write_lock(path: Path, *, timeout: float = 10.0) -> "Iterator[None]":
+def _state_write_lock(path: Path, *, timeout: float = DEFAULT_LOCK_TIMEOUT) -> "Iterator[None]":
     """Hold the single-writer lock while a command READ-MODIFY-WRITES the state file, so a concurrent
     writer (e.g. a ``cs_loop run`` in progress, which holds this same lock) FAILS CLOSED rather than
     silently clobbering the other's update. A LockError propagates to main() -> exit 2 (fail-closed)."""

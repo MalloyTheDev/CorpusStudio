@@ -56,7 +56,7 @@ from loop.integrate import (
     merge_gate,
     observe_ci,
 )
-from loop.locking import FileLock, LockError
+from loop.locking import DEFAULT_LOCK_TIMEOUT, FileLock, LockError
 from loop.observe import CsAssureRunner, LoopObserveError, _run_cs_assure, observe, record_evidence
 from loop.review import ReviewError, Reviewer, review, review_observation
 from loop.router import AgentRunner, PathVerifier, aggregate_observation, dispatch_wave
@@ -105,7 +105,7 @@ class LoopContext:
     run_cs_assure: CsAssureRunner = _run_cs_assure
     store_path: Path | None = None
     ledger_path: Path | None = None  # cross-goal learning ledger (seed at start, record at terminal)
-    lock_timeout: float = 10.0  # seconds to wait for the single-writer state-file lock before failing closed
+    lock_timeout: float = DEFAULT_LOCK_TIMEOUT  # wait for the single-writer state-file lock before failing closed
     # Obligation-resolution records (injected, plain dicts) proving each blocking obligation was discharged
     # for the change set being merged. Empty by default -> a blocking obligation with no resolution ESCALATES
     # (re-review #14: never auto-merge on obligation identity). A producing runtime supplies these, each

@@ -33,6 +33,11 @@ from pathlib import Path
 from types import TracebackType
 
 
+# The single source of truth for the default lock-acquisition wait (seconds), shared by FileLock,
+# LoopContext.lock_timeout, and cs_loop's _state_write_lock so the three cannot diverge.
+DEFAULT_LOCK_TIMEOUT = 10.0
+
+
 class LockError(Exception):
     """Base class for lock failures (fail-closed)."""
 
@@ -48,7 +53,7 @@ class FileLock:
             ...  # read-modify-write the protected file
     """
 
-    def __init__(self, path: Path | str, *, timeout: float = 10.0, poll: float = 0.05,
+    def __init__(self, path: Path | str, *, timeout: float = DEFAULT_LOCK_TIMEOUT, poll: float = 0.05,
                  stale_after: float = 60.0) -> None:
         self.lock_path = Path(f"{path}.lock")
         self.timeout = timeout
