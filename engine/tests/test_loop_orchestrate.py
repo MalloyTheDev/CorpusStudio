@@ -77,10 +77,17 @@ def _ctx(**kw) -> LoopContext:
 # --------------------------------------------------------------------------- full run + merge boundary
 
 
+def _met_critic(_s):
+    # A completeness evaluator whose single criterion is met with bound evidence (the verify record digest
+    # the OBSERVE step seals). MANDATORY completion means a full loop must define 'done' to finalize.
+    from loop.completeness import Criterion, CriterionKind
+    return [Criterion("done", "goal achieved", kind=CriterionKind.DETERMINISTIC, met=True, evidence="sha256:v")]
+
+
 def test_full_integrated_loop_merges_and_reaches_finalize() -> None:
     state = LoopState(goal="add scorer", current_phase=Phase.RECEIVE_GOAL)
     ctx = _ctx(executor=_executor([{"id": "impl", "allowed_paths": ["engine/"]}]),
-               reviewer=lambda _s: [], gh_runner=_gh(ci="pass"), pr_ref="1")
+               reviewer=lambda _s: [], critic=_met_critic, gh_runner=_gh(ci="pass"), pr_ref="1")
     run_loop(state, ctx)
     assert state.current_phase is Phase.FINALIZE
     assert "sha256:v" in state.assurance_records
@@ -95,7 +102,7 @@ def test_single_agent_drains_a_multi_task_graph_before_finalizing() -> None:
     ctx = _ctx(executor=_executor([{"id": "a", "allowed_paths": ["engine/"]},
                                    {"id": "b", "allowed_paths": ["scripts/"]},
                                    {"id": "c", "allowed_paths": ["docs/"], "depends_on": ["a"]}]),
-               reviewer=lambda _s: [], gh_runner=_gh(ci="pass"), pr_ref="1")
+               reviewer=lambda _s: [], critic=_met_critic, gh_runner=_gh(ci="pass"), pr_ref="1")
     run_loop(state, ctx)
     assert state.current_phase is Phase.FINALIZE
     assert all(t["status"] == "DONE" for t in state.task_graph)  # a, b, and the dependent c all DONE
@@ -365,6 +372,14 @@ def test_verify_finalizes_only_when_success_criteria_are_met() -> None:
     t = step(state, _ctx(critic=lambda _s: [Criterion("c1", "scorer works",
                          kind=CriterionKind.DETERMINISTIC, met=True, evidence="sha256:proof")]))
     assert t.decision is Decision.ADVANCE and state.current_phase is Phase.FINALIZE
+
+
+def test_verify_without_a_critic_escalates_rather_than_finalizing() -> None:
+    # MANDATORY completion (#6): a green gate with NO completeness evaluator is NOT 'done' - goal
+    # completion is unproven, so the loop escalates instead of autonomously finalizing on the gate alone.
+    state = LoopState(current_phase=Phase.VERIFY)
+    t = step(state, _ctx())  # no critic
+    assert t.decision is Decision.ESCALATE and state.current_phase is Phase.ESCALATED
 
 
 def test_verify_escalates_on_a_bare_model_judgment() -> None:

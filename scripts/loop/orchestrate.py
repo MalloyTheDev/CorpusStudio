@@ -326,12 +326,19 @@ def _dispatch(state: LoopState, ctx: LoopContext) -> PhaseResult:
             gaps = stale_docs(_changed_paths(ctx), ctx.couplings)
             if observation is Observation.SUCCESS and gaps:
                 observation, reason = docs_observation(gaps)
-        elif phase is Phase.VERIFY and observation is Observation.SUCCESS and ctx.critic is not None:
-            # L8 self-correction: a green gate is not 'done' - the GOAL's success criteria must be MET.
-            verdict = check_completeness(state, ctx.critic)
-            if not verdict.complete:
-                _append_completeness_tasks(state, verdict)
-                observation, reason = completeness_observation(verdict), verdict.note
+        elif phase is Phase.VERIFY and observation is Observation.SUCCESS:
+            # L8 self-correction: a green gate is NOT 'done' - the GOAL's success criteria must be MET.
+            if ctx.critic is None:
+                # MANDATORY completion: with no completeness evaluator, goal completion is UNPROVEN. A
+                # green workspace gate must NEVER be the implicit definition of 'goal complete' - escalate
+                # for a human to define/confirm completion rather than autonomously finalizing.
+                observation, reason = (Observation.AUTHORIZATION_REQUIRED,
+                                       "gate green but no completeness evaluator - goal completion is unproven")
+            else:
+                verdict = check_completeness(state, ctx.critic)
+                if not verdict.complete:
+                    _append_completeness_tasks(state, verdict)
+                    observation, reason = completeness_observation(verdict), verdict.note
         fingerprint = None
         if observation not in (Observation.SUCCESS, Observation.PROGRESS) and result.change_set_fingerprint:
             fingerprint = attempt_fingerprint(f"{observation.value}:{reason}", result.change_set_fingerprint)
