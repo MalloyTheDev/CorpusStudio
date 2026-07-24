@@ -19,6 +19,10 @@ Subcommands:
                WorkspaceVerification record binding the real exit codes + the fired obligations to
                the change set. Green == WORKSPACE_GATE only - never fit / commit / PR / release /
                sealed / CI. Exit 1 if the gate is red.
+    worker-reachability
+               two-sided static import-reachability from the worker entrypoints: which repo modules
+               the worker ACTUALLY imports (base vs candidate graphs, delta, the modules the declared
+               worker-closure list misses, and unresolved dynamic imports). OBSERVATION-ONLY.
     status     gather + seal a project_status snapshot ("where are we": change set, fired
                obligations, doc staleness, branch + recent commits, and a FAIL-SOFT open-issue
                summary + authority-doc pointers). OBSERVATION-ONLY; the "what's next" judgment is the
@@ -126,6 +130,17 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     # not be evaluated). Green is WORKSPACE_GATE only - the record never claims more.
     sys.stdout.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
     return EXIT_OK if record["payload"]["gate_passed"] else EXIT_GATE_RED
+
+
+def _cmd_worker_reachability(args: argparse.Namespace) -> int:
+    from assurance.worker_reachability import build_worker_reachability_record  # noqa: PLC0415
+
+    start_dir = Path(args.start_dir) if args.start_dir else Path.cwd()
+    record = build_worker_reachability_record(start_dir=start_dir, scope=args.scope, base_ref=args.base)
+    # Observation-only: exit 0 once the analysis is produced (even when it finds undeclared reachable
+    # modules - reporting the gap is the point). Pretty display bytes; the record_digest is canonical.
+    sys.stdout.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    return EXIT_OK
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
@@ -295,6 +310,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="directory to resolve the repository from (default: current directory)",
     )
     verify.set_defaults(func=_cmd_verify)
+
+    worker_reach = subparsers.add_parser(
+        "worker-reachability",
+        help="two-sided static worker import-reachability (which modules the worker actually imports; "
+        "observation-only, never gates)",
+    )
+    worker_reach.add_argument(
+        "--scope",
+        default="workspace",
+        choices=["workspace", "head"],
+        help="candidate side to analyze against the merge-base: workspace (working tree) or head",
+    )
+    worker_reach.add_argument(
+        "--base",
+        default="main",
+        help="base ref; the base graph is computed at merge-base(HEAD, base)",
+    )
+    worker_reach.add_argument(
+        "--format",
+        default="json",
+        choices=["json"],
+        help="output format (json)",
+    )
+    worker_reach.add_argument(
+        "--start-dir",
+        default=None,
+        help="directory to resolve the repository from (default: current directory)",
+    )
+    worker_reach.set_defaults(func=_cmd_worker_reachability)
 
     status = subparsers.add_parser(
         "status",
