@@ -70,6 +70,7 @@ class ObservationResult:
     gate_passed: bool
     record_digest: str | None
     change_set_fingerprint: str | None
+    record_type: str | None = None  # the validated record's type (for the semantic evidence index)
 
 
 def classify_observation(verify_payload: Any, doclint_payload: Any = None) -> tuple[Observation, str]:
@@ -197,7 +198,40 @@ def observe(repo_root: Path, base: str = "main", *,
         gate_passed=bool(payload.get("gate_passed", False)),
         record_digest=record.get("record_digest"),
         change_set_fingerprint=payload.get("change_set_fingerprint"),
+        record_type=record.get("record_type"),
     )
+
+
+# The predicate a GREEN workspace gate asserts - the semantic claim a DETERMINISTIC criterion matches on.
+GATE_GREEN_PREDICATE = "WORKSPACE_GATE_GREEN"
+
+
+def evidence_entry(result: ObservationResult) -> dict[str, Any] | None:
+    """A STRUCTURED evidence entry for a GREEN-gate observation (else None): the record type + the
+    predicate it asserts + the subject (change-set fingerprint) it is about + its digest. This is the
+    semantic input the completeness layer matches criteria against - so a criterion is proven by evidence
+    of the RIGHT TYPE about the RIGHT SUBJECT, not by any digest that happens to be recorded."""
+    if not (result.gate_passed and result.record_digest and result.change_set_fingerprint):
+        return None
+    return {
+        "record_type": result.record_type or "workspace_verification",
+        "predicate": GATE_GREEN_PREDICATE,
+        "subject_fingerprint": result.change_set_fingerprint,
+        "digest": result.record_digest,
+    }
+
+
+def record_evidence(state: LoopState, result: ObservationResult) -> None:
+    """Append the structured evidence entry for a green gate to the loop's evidence index (deduped by
+    digest+predicate). A non-green observation records nothing (a red gate is not completion evidence)."""
+    entry = evidence_entry(result)
+    if entry is None:
+        return
+    index = state.review_state.setdefault("evidence", [])
+    if isinstance(index, list) and not any(
+            isinstance(e, dict) and e.get("digest") == entry["digest"]
+            and e.get("predicate") == entry["predicate"] for e in index):
+        index.append(entry)
 
 
 def observe_and_apply(state: LoopState, repo_root: Path, base: str = "main", *,
@@ -208,6 +242,7 @@ def observe_and_apply(state: LoopState, repo_root: Path, base: str = "main", *,
     result = observe(repo_root, base, run_cs_assure=run_cs_assure)
     if result.record_digest is not None and result.record_digest not in state.assurance_records:
         state.assurance_records.append(result.record_digest)
+    record_evidence(state, result)  # structured evidence for the semantic completeness check
     fingerprint: str | None = None
     if result.observation not in (Observation.SUCCESS, Observation.PROGRESS) and result.change_set_fingerprint:
         fingerprint = attempt_fingerprint(f"{result.observation.value}:{result.reason}",

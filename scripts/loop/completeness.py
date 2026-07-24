@@ -55,15 +55,46 @@ class CriterionKind(str, Enum):
 @dataclass(frozen=True)
 class Criterion:
     """One goal success criterion: its KIND (how it is proven), whether the critic judged it met, and the
-    evidence it cites. For DETERMINISTIC / DOMAIN_AUTHORITY, ``evidence`` must be a digest bound to a sealed
-    assurance record for ``met`` to count. For HUMAN_APPROVAL, ``met`` is IGNORED - the criterion is met
-    only by a recorded authorization whose grant equals this criterion's ``id``."""
+    evidence that must SUPPORT it. For DETERMINISTIC / DOMAIN_AUTHORITY there are two evidence modes:
+
+      * SEMANTIC (preferred): name ``required_record_type`` AND ``required_predicate`` (and optionally a
+        ``subject_fingerprint`` to pin the subject). The criterion is met only if the loop's recorded
+        evidence holds an entry of that record type, asserting that predicate, about that subject - so a
+        workspace-verification digest can never satisfy a 'docs complete' claim. The predicate is
+        REQUIRED here (an empty predicate is rejected at construction, not treated as a wildcard: a
+        wildcard would reintroduce the 'any record of this type counts' vagueness this mode removes).
+      * DIGEST (the weaker slice-1 fallback, when no ``required_record_type`` is set): ``evidence`` must be
+        a digest present in the loop's sealed assurance records - proves the digest was recorded, but not
+        that it SUPPORTS this specific claim.
+
+    For HUMAN_APPROVAL, ``met`` is IGNORED - the criterion is met only by a recorded authorization whose
+    grant equals this criterion's ``id``."""
 
     id: str
     description: str
     kind: CriterionKind = CriterionKind.MODEL_JUDGMENT
     met: bool = False
-    evidence: str = ""
+    evidence: str = ""                 # digest-membership fallback (used only when required_record_type == "")
+    required_record_type: str = ""     # SEMANTIC: the evidence record type that must exist (e.g. workspace_verification)
+    required_predicate: str = ""       # ...asserting this predicate (e.g. WORKSPACE_GATE_GREEN); required if type is set
+    subject_fingerprint: str = ""      # ...about this subject (a change-set fingerprint); "" = any subject
+
+    def __post_init__(self) -> None:
+        # Reject silently-unsatisfiable / no-op semantic criteria LOUDLY at construction (the critic path
+        # turns this into a fail-closed escalation) rather than letting a goal never complete for a reason
+        # nobody can see:
+        #   - a record type with no predicate would match only an empty-predicate entry, which the loop
+        #     never records (it always asserts a concrete predicate) -> unsatisfiable;
+        #   - a pinned subject with no record type does nothing (the digest fallback ignores it) -> a no-op
+        #     the author almost certainly did not intend.
+        if self.required_record_type and not self.required_predicate:
+            raise ValueError(
+                f"criterion {self.id!r} sets required_record_type={self.required_record_type!r} but no "
+                "required_predicate; a semantic criterion must pin the predicate it asserts")
+        if self.subject_fingerprint and not self.required_record_type:
+            raise ValueError(
+                f"criterion {self.id!r} pins subject_fingerprint without a required_record_type; "
+                "subject pinning only constrains semantic (record-type) matching")
 
 
 @dataclass(frozen=True)
@@ -82,6 +113,30 @@ def _evidence_is_bound(evidence: str, state: LoopState) -> bool:
     """True only if ``evidence`` is a non-empty digest present in the loop's SEALED assurance records - so
     a deterministic/authority criterion cannot score as met on a digest the loop never actually recorded."""
     return bool(evidence) and evidence in state.assurance_records
+
+
+def _evidence_index(state: LoopState) -> list[dict[str, Any]]:
+    """The loop's STRUCTURED evidence entries ({record_type, predicate, subject_fingerprint, digest}),
+    recorded by observe when it seals a green gate. Distinct from the flat digest list in assurance_records."""
+    index = state.review_state.get("evidence")
+    return [e for e in index if isinstance(e, dict)] if isinstance(index, list) else []
+
+
+def _evidence_supports(criterion: Criterion, state: LoopState) -> bool:
+    """Does the loop's recorded evidence SUPPORT this criterion? A criterion that names a
+    ``required_record_type`` is matched SEMANTICALLY - the evidence index must hold an entry of that record
+    type, asserting ``required_predicate``, about ``subject_fingerprint`` (if the criterion pins one) - so a
+    record of the wrong type / predicate / subject cannot satisfy the claim. A criterion with NO semantic
+    fields falls back to digest MEMBERSHIP (the weaker slice-1 mode)."""
+    if criterion.required_record_type:
+        return any(
+            e.get("record_type") == criterion.required_record_type
+            and e.get("predicate") == criterion.required_predicate
+            and (not criterion.subject_fingerprint
+                 or e.get("subject_fingerprint") == criterion.subject_fingerprint)
+            for e in _evidence_index(state)
+        )
+    return _evidence_is_bound(criterion.evidence, state)
 
 
 def _human_granted(criterion: Criterion, state: LoopState) -> bool:
@@ -135,10 +190,12 @@ def check_completeness(state: LoopState, critic: Critic) -> CompletenessVerdict:
                 needs_authority.append(c)  # awaits a recorded human grant; the critic cannot self-grant
             # else: met by a recorded authorization (counted as met - falls through)
         elif kind in (CriterionKind.DETERMINISTIC, CriterionKind.DOMAIN_AUTHORITY):
-            # met ONLY if exactly True (a truthy non-bool must not score) AND the evidence is bound.
-            if c.met is True and _evidence_is_bound(c.evidence, state):
+            # met ONLY if exactly True (a truthy non-bool must not score) AND the recorded evidence
+            # SEMANTICALLY supports it (right record type / predicate / subject), or - for a bare-digest
+            # criterion - the cited digest was recorded.
+            if c.met is True and _evidence_supports(c, state):
                 continue
-            unmet.append(c)  # asserted without bound evidence is NOT proven -> work it
+            unmet.append(c)  # asserted without supporting evidence is NOT proven -> work it
         else:  # MODEL_JUDGMENT (the only remaining valid kind)
             if c.met is not True:
                 unmet.append(c)

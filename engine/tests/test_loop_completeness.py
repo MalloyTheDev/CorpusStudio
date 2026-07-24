@@ -40,6 +40,79 @@ def _proven(cid: str, desc: str, digest: str) -> Criterion:
     return Criterion(cid, desc, kind=CriterionKind.DETERMINISTIC, met=True, evidence=digest)
 
 
+def _state_with_evidence(*entries: dict) -> LoopState:
+    state = LoopState()
+    state.review_state["evidence"] = list(entries)
+    return state
+
+
+def _gate_green_evidence(subject: str = "cs:x", digest: str = "sha256:v") -> dict:
+    return {"record_type": "workspace_verification", "predicate": "WORKSPACE_GATE_GREEN",
+            "subject_fingerprint": subject, "digest": digest}
+
+
+# --------------------------------------------------------------------------- semantic evidence (#6 slice 2)
+
+
+def test_semantic_criterion_is_met_by_matching_evidence() -> None:
+    state = _state_with_evidence(_gate_green_evidence())
+    crit = Criterion("gate", "the workspace gate is green", kind=CriterionKind.DETERMINISTIC, met=True,
+                     required_record_type="workspace_verification", required_predicate="WORKSPACE_GATE_GREEN")
+    assert check_completeness(state, _critic([crit])).complete
+    # ...and with the subject pinned + matching
+    pinned = Criterion("gate", "green for this change", kind=CriterionKind.DETERMINISTIC, met=True,
+                       required_record_type="workspace_verification", required_predicate="WORKSPACE_GATE_GREEN",
+                       subject_fingerprint="cs:x")
+    assert check_completeness(state, _critic([pinned])).complete
+
+
+def test_a_verification_digest_cannot_satisfy_an_unrelated_claim() -> None:
+    # The reviewer's exact case: a 'docs complete' criterion must NOT be satisfied by a recorded
+    # workspace-verification digest - the record type / predicate must actually MATCH the claim.
+    state = _state_with_evidence(_gate_green_evidence())
+    docs = Criterion("docs", "documentation is complete", kind=CriterionKind.DETERMINISTIC, met=True,
+                     required_record_type="docs_check", required_predicate="DOCS_COMPLETE")
+    verdict = check_completeness(state, _critic([docs]))
+    assert not verdict.complete and [c.id for c in verdict.unmet] == ["docs"]
+
+
+def test_semantic_criterion_rejects_a_wrong_predicate_or_subject() -> None:
+    state = _state_with_evidence(_gate_green_evidence(subject="cs:x"))
+    wrong_pred = Criterion("c", "d", kind=CriterionKind.DETERMINISTIC, met=True,
+                           required_record_type="workspace_verification", required_predicate="SOMETHING_ELSE")
+    assert not check_completeness(state, _critic([wrong_pred])).complete
+    wrong_subj = Criterion("c", "d", kind=CriterionKind.DETERMINISTIC, met=True,
+                           required_record_type="workspace_verification", required_predicate="WORKSPACE_GATE_GREEN",
+                           subject_fingerprint="cs:OTHER")
+    assert not check_completeness(state, _critic([wrong_subj])).complete
+
+
+def test_bare_digest_criterion_still_uses_membership_fallback() -> None:
+    # Back-compat: a criterion with NO semantic fields falls back to slice-1 digest membership.
+    state = LoopState(assurance_records=["sha256:v"])
+    assert check_completeness(state, _critic([_proven("c", "done", "sha256:v")])).complete
+    assert not check_completeness(state, _critic([_proven("c", "done", "sha256:UNRECORDED")])).complete
+
+
+def test_a_semantic_criterion_without_a_predicate_is_rejected_at_construction() -> None:
+    # A record type with no predicate would be silently unsatisfiable (no recorded entry has an empty
+    # predicate) - reject it LOUDLY instead of letting the goal never complete.
+    with pytest.raises(ValueError, match="required_predicate"):
+        Criterion("c", "d", kind=CriterionKind.DETERMINISTIC, met=True, required_record_type="workspace_verification")
+    # ...and the critic path surfaces it as a fail-closed CompletenessError, not a crash.
+    def bad_critic(_state: LoopState) -> list[Criterion]:
+        return [Criterion("c", "d", kind=CriterionKind.DETERMINISTIC, met=True,
+                          required_record_type="workspace_verification")]
+    with pytest.raises(CompletenessError):
+        check_completeness(LoopState(), bad_critic)
+
+
+def test_pinning_a_subject_without_a_record_type_is_rejected() -> None:
+    # subject pinning only constrains semantic matching; with no record type it silently does nothing.
+    with pytest.raises(ValueError, match="subject_fingerprint"):
+        Criterion("c", "d", kind=CriterionKind.DETERMINISTIC, met=True, subject_fingerprint="cs:x")
+
+
 # --------------------------------------------------------------------------- the typed, evidence-bound critic
 
 

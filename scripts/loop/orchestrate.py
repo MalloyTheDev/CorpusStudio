@@ -54,7 +54,7 @@ from loop.integrate import (
     merge_gate,
     observe_ci,
 )
-from loop.observe import CsAssureRunner, LoopObserveError, _run_cs_assure, observe
+from loop.observe import CsAssureRunner, LoopObserveError, _run_cs_assure, observe, record_evidence
 from loop.review import Reviewer, review, review_observation
 from loop.router import AgentRunner, PathVerifier, aggregate_observation, dispatch_wave
 from loop.store import save
@@ -338,6 +338,7 @@ def _dispatch(state: LoopState, ctx: LoopContext) -> PhaseResult:
 
     if phase in (Phase.OBSERVE, Phase.VERIFY):
         result = observe(ctx.repo_root, ctx.base, run_cs_assure=ctx.run_cs_assure)
+        record_evidence(state, result)  # structured evidence for the semantic completeness check
         observation, reason = result.observation, result.reason
         if phase is Phase.OBSERVE:
             gaps = stale_docs(_changed_paths(ctx), ctx.couplings)

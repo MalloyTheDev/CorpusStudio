@@ -22,8 +22,10 @@ from loop.controller import Decision, LoopState, Observation, Phase  # noqa: E40
 from loop.observe import (  # noqa: E402
     LoopObserveError,
     classify_observation,
+    evidence_entry,
     observe,
     observe_and_apply,
+    record_evidence,
 )
 
 
@@ -157,6 +159,36 @@ def test_observe_and_apply_success_advances_without_a_fingerprint() -> None:
     t = observe_and_apply(state, REPO_ROOT, "main", run_cs_assure=_runner(record))
     assert t.decision is Decision.ADVANCE and state.failed_approaches == []
     assert "sha256:ok" in state.assurance_records
+
+
+# --------------------------------------------------------------------------- structured evidence (#6 slice 2)
+
+
+def test_observe_and_apply_records_structured_evidence_for_a_green_gate() -> None:
+    state = LoopState(current_phase=Phase.DIAGNOSE)
+    observe_and_apply(state, REPO_ROOT, "main", run_cs_assure=_runner(_record(_payload(True, _GREEN), "sha256:g")))
+    index = state.review_state["evidence"]
+    assert index == [{"record_type": "workspace_verification", "predicate": "WORKSPACE_GATE_GREEN",
+                      "subject_fingerprint": "cs:abc123", "digest": "sha256:g"}]
+
+
+def test_a_red_gate_records_no_completion_evidence() -> None:
+    from loop.observe import ObservationResult
+    red = ObservationResult(Observation.TEST_REGRESSION, "gate red", gate_passed=False,
+                            record_digest="sha256:r", change_set_fingerprint="cs:x",
+                            record_type="workspace_verification")
+    assert evidence_entry(red) is None  # a red gate is not completion evidence
+    state = LoopState()
+    record_evidence(state, red)
+    assert state.review_state.get("evidence", []) == []
+
+
+def test_record_evidence_dedupes_repeat_observations() -> None:
+    state = LoopState(current_phase=Phase.DIAGNOSE)
+    runner = _runner(_record(_payload(True, _GREEN), "sha256:g"))
+    observe_and_apply(state, REPO_ROOT, "main", run_cs_assure=runner)
+    observe_and_apply(state, REPO_ROOT, "main", run_cs_assure=runner)  # same evidence again
+    assert len(state.review_state["evidence"]) == 1  # deduped by digest+predicate
 
 
 # --------------------------------------------------------------------------- record validation (#3)
