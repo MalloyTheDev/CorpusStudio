@@ -37,15 +37,21 @@ _CHECK_HINTS: tuple[tuple[tuple[str, ...], Observation], ...] = (
 _HUMAN_GATED = frozenset({
     "sealed-research", "assurance-self-modify", "worker-closure", "loop-controller-self-modify",
 })
-# Blocking obligations a green PRODUCT change discharges WITHOUT a human: they are satisfied by
-# regeneration + the CI diff gate (contracts) or by test-enforced invariants (evaluation-honesty). Every
-# OTHER blocking obligation defaults to human review (fail-closed), so a NEW blocking obligation added to
-# the policy escalates automatically instead of silently auto-merging.
-_AUTO_MERGEABLE = frozenset({"contracts", "evaluation-honesty"})
 # Severities that do NOT by themselves gate a merge. Any obligation whose severity is not one of these
-# (blocking, unknown, or absent) and is not on the auto-mergeable allowlist escalates - so a missing or
-# non-canonical severity fails CLOSED (escalate) instead of silently authorizing.
+# (blocking, unknown, or absent) escalates unless a resolution record proves it discharged - so a missing
+# or non-canonical severity fails CLOSED (escalate) instead of silently authorizing.
 _LOW_SEVERITY = frozenset({"info", "advisory"})
+
+# An obligation-resolution record proves a specific blocking obligation was ACTUALLY discharged for a
+# specific change set, by a TRUSTED authority - not merely that it is "usually CI-satisfiable" (re-review
+# #14: obligation IDENTITY must not be equated with "this obligation was satisfied for this commit"). A
+# resolution is an injected plain dict (the loop is stdlib-only; a producing runtime seals it separately):
+#   {"obligation_id": str, "status": "RESOLVED", "subject_fingerprint": <change-set fp>, "authority": str}
+_RESOLVED = "RESOLVED"
+# The candidate CANNOT self-resolve an obligation: only these authorities are trusted to discharge one.
+# (A candidate-controlled result would let a change vouch for itself - the same reason self-modify is
+# human-gated.) Kept deliberately small + fail-closed; a producing runtime widens it under review.
+_TRUSTED_RESOLUTION_AUTHORITIES = frozenset({"trusted-base-ci", "independent-human-review"})
 
 GhRunner = Callable[..., "tuple[int, str, str]"]
 
@@ -73,10 +79,59 @@ class CiSnapshot:
 
 
 @dataclass(frozen=True)
+class ObligationVerdict:
+    """One blocking obligation's disposition at the merge gate."""
+
+    obligation_id: str
+    disposition: str  # HUMAN_GATED | LOW_SEVERITY | RESOLVED | UNRESOLVED | MALFORMED
+    satisfied: bool
+
+
+@dataclass(frozen=True)
+class GateEvaluation:
+    """The FINAL merge-gate record (re-review #14): the change set the decision bound to, a per-obligation
+    verdict, and the overall authorization. A merge is authorized only if EVERY fired obligation is
+    satisfied - human-gated ones never are, and a blocking one is satisfied only by a trusted, current
+    resolution record. Serializable for a producing runtime to seal alongside the merge."""
+
+    subject_fingerprint: str
+    authorized: bool
+    verdicts: tuple[ObligationVerdict, ...]
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "subject_fingerprint": self.subject_fingerprint,
+            "authorized": self.authorized,
+            "verdicts": [
+                {"obligation_id": v.obligation_id, "disposition": v.disposition, "satisfied": v.satisfied}
+                for v in self.verdicts
+            ],
+        }
+
+
+@dataclass(frozen=True)
 class MergeGate:
     authorized: bool
     observation: Observation
     reason: str
+    evaluation: "GateEvaluation | None" = None
+
+
+def _resolution_supports(obligation_id: str, subject_fingerprint: str, resolutions: Any) -> bool:
+    """True iff some resolution proves ``obligation_id`` was discharged for THIS change set: RESOLVED
+    (status), CURRENT + APPLICABLE_TO_HEAD (its ``subject_fingerprint`` equals the one the gate is bound
+    to), and TRUSTED (a trusted authority, never the candidate). A blank bound fingerprint matches nothing
+    (fail-closed: an unbound gate can accept no resolution). Malformed resolution entries are ignored."""
+    if not subject_fingerprint:
+        return False
+    for r in resolutions or []:
+        if (isinstance(r, dict)
+                and r.get("obligation_id") == obligation_id
+                and r.get("status") == _RESOLVED
+                and r.get("subject_fingerprint") == subject_fingerprint
+                and r.get("authority") in _TRUSTED_RESOLUTION_AUTHORITIES):
+            return True
+    return False
 
 
 def _bucket(check: dict[str, Any]) -> str:
@@ -145,17 +200,21 @@ def ci_observation(status: CiStatus, *, required: "frozenset[str]" = frozenset()
     return Observation.TEST_REGRESSION, f"CI failing: {sorted(status.failing_checks)}"
 
 
-def merge_gate(fired_obligations: Any, *, dangerous: bool = False) -> MergeGate:
-    """Decide whether the loop may merge autonomously - RISK DERIVED FROM POLICY, not from the caller.
-    FAIL-CLOSED: a fired obligation forbids an autonomous merge unless it is provably safe - i.e. it
-    escalates if it is a known human-gated one, OR it is NOT on the candidate-satisfiable allowlist and
-    its severity is not a low (info/advisory) one. So a blocking obligation, an obligation with an unknown
-    or MISSING severity, or a malformed entry all escalate by default; only a no-obligation change or one
-    whose obligations are all allowlisted / low-severity auto-merges. ``dangerous`` is a ONE-WAY caller
-    override - it can only FORCE escalation (belt-and-suspenders), never authorize a policy-gated merge."""
+def merge_gate(fired_obligations: Any, *, resolutions: Any = None,
+               subject_fingerprint: str = "", dangerous: bool = False) -> MergeGate:
+    """Decide whether the loop may merge autonomously - RISK DERIVED FROM POLICY + EVIDENCE, not identity.
+    FAIL-CLOSED. Each fired obligation is dispositioned: a known human-gated one always escalates; a
+    low-severity (info/advisory) one does not gate; ANY OTHER blocking obligation is satisfied ONLY by a
+    trusted, current resolution record proving it was discharged for THIS change set (re-review #14 - no
+    obligation is auto-mergeable on identity alone, so 'usually CI-satisfiable' is never equated with
+    'satisfied for this commit'). A blocking obligation with no such resolution, an unknown/missing
+    severity, or a malformed entry all escalate. Returns a :class:`GateEvaluation` recording every
+    verdict. ``dangerous`` is a ONE-WAY caller override - it only FORCES escalation, never authorizes."""
     if dangerous:
         return MergeGate(False, Observation.AUTHORIZATION_REQUIRED,
-                         "caller forced human authorization (dangerous / irreversible / release)")
+                         "caller forced human authorization (dangerous / irreversible / release)",
+                         GateEvaluation(subject_fingerprint, False, ()))
+    verdicts: list[ObligationVerdict] = []
     gated: list[str] = []
     for o in fired_obligations or []:
         if isinstance(o, str):
@@ -163,15 +222,27 @@ def merge_gate(fired_obligations: Any, *, dangerous: bool = False) -> MergeGate:
         elif isinstance(o, dict) and isinstance(o.get("id"), str):
             oid, severity = o["id"], str(o.get("severity", ""))
         else:  # an unparseable obligation entry: we cannot assess its risk -> fail closed (escalate)
+            verdicts.append(ObligationVerdict(repr(o), "MALFORMED", False))
             return MergeGate(False, Observation.AUTHORIZATION_REQUIRED,
-                             f"malformed fired obligation {o!r}; cannot assess merge risk (escalating)")
-        if oid in _HUMAN_GATED or (oid not in _AUTO_MERGEABLE and severity.lower() not in _LOW_SEVERITY):
+                             f"malformed fired obligation {o!r}; cannot assess merge risk (escalating)",
+                             GateEvaluation(subject_fingerprint, False, tuple(verdicts)))
+        if oid in _HUMAN_GATED:
+            verdicts.append(ObligationVerdict(oid, "HUMAN_GATED", False))
             gated.append(oid)
+        elif severity.lower() in _LOW_SEVERITY:
+            verdicts.append(ObligationVerdict(oid, "LOW_SEVERITY", True))
+        elif _resolution_supports(oid, subject_fingerprint, resolutions):
+            verdicts.append(ObligationVerdict(oid, "RESOLVED", True))
+        else:
+            verdicts.append(ObligationVerdict(oid, "UNRESOLVED", False))
+            gated.append(oid)
+    evaluation = GateEvaluation(subject_fingerprint, not gated, tuple(verdicts))
     if gated:
         return MergeGate(False, Observation.AUTHORIZATION_REQUIRED,
                          f"policy-gated, needs independent human review (no self-merge): "
-                         f"{', '.join(sorted(set(gated)))}")
-    return MergeGate(True, Observation.SUCCESS, "product change - auto-mergeable on standing authorization")
+                         f"{', '.join(sorted(set(gated)))}", evaluation)
+    return MergeGate(True, Observation.SUCCESS,
+                     "product change - every blocking obligation resolved for this commit", evaluation)
 
 
 def observe_ci(gh_runner: GhRunner, pr_ref: str) -> CiSnapshot:
