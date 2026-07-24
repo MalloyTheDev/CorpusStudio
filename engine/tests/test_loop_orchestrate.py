@@ -362,11 +362,13 @@ def test_non_observation_executor_fails_closed() -> None:
         step(state, _ctx(executor=lambda _s, _d: "SUCCESS"))  # type: ignore[arg-type,return-value]
 
 
-def test_observe_tolerates_non_object_changeset_json() -> None:
-    # A non-object top-level changeset ('[]') must not crash docs-freshness (advisory -> []).
+def test_observe_escalates_on_a_malformed_changeset_rather_than_advancing() -> None:
+    # Hardening L: a changeset that could not be produced (here a non-object '[]' -> no changed_paths list)
+    # must NOT be read as 'nothing changed' on a green gate (which would advance past a possibly-stale
+    # coupled doc). It fails closed -> escalate, not a silent ADVANCE.
     state = LoopState(current_phase=Phase.OBSERVE)
     t = step(state, _ctx(run_cs_assure=_cs_assure(verify_green=True, changeset_out="[]")))
-    assert t.decision is Decision.ADVANCE
+    assert t.decision is Decision.ESCALATE and state.current_phase is Phase.ESCALATED
 
 
 def test_invalid_decompose_replans() -> None:
@@ -432,6 +434,45 @@ def test_verify_does_not_finalize_a_green_gate_with_unmet_criteria() -> None:
                          kind=CriterionKind.DETERMINISTIC, met=False)]))
     assert t.decision is not Decision.ADVANCE and state.current_phase is not Phase.FINALIZE
     assert any(task["id"] == "meet-c1" for task in state.task_graph)  # the gap became a correction task
+
+
+def test_step_escalates_durably_when_an_injected_effect_raises() -> None:
+    # Hardening J: an injected effect that RAISES a non-OSError (executor / reviewer / agent) must land the
+    # loop durably at ESCALATED (persisted), not crash mid-run or leave a non-terminal phase. A RuntimeError
+    # is UNEXPECTED (controller-bug-shaped): flagged distinctly + its traceback kept for post-mortem.
+    def boom(_state: LoopState, _directive) -> Observation:
+        raise RuntimeError("executor blew up")
+    state = LoopState(current_phase=Phase.PLAN)
+    t = step(state, _ctx(executor=boom))
+    assert t.decision is Decision.ESCALATE and state.current_phase is Phase.ESCALATED
+    assert "UNEXPECTED RuntimeError" in (state.termination_reason or "")
+    assert state.review_state.get("_unexpected_tracebacks")  # traceback captured for a likely bug
+
+
+def test_an_expected_operational_refusal_is_not_flagged_as_a_controller_bug() -> None:
+    # An EXPECTED operational refusal (here a LoopTaskError) still escalates, but is NOT labelled UNEXPECTED
+    # and keeps no bug-traceback - so real bugs stay distinguishable from ordinary fail-closed refusals.
+    from loop.tasks import LoopTaskError
+    def refuse(_state: LoopState, _directive) -> Observation:
+        raise LoopTaskError("bad graph")
+    state = LoopState(current_phase=Phase.PLAN)
+    t = step(state, _ctx(executor=refuse))
+    assert t.decision is Decision.ESCALATE and "UNEXPECTED" not in (state.termination_reason or "")
+    assert "_unexpected_tracebacks" not in state.review_state
+
+
+def test_multi_agent_self_owned_task_does_not_advance_while_others_remain() -> None:
+    # Hardening K: a self-owned (unbounded) task completing must NOT advance past EXECUTE while another
+    # task is still PENDING - it re-enters (CHANGES_REQUESTED -> RESCHEDULE), symmetric with single-agent.
+    from loop.tasks import decompose
+    def runner(task):
+        return AgentResult(task.id, Observation.SUCCESS, changed_paths=[])
+    state = LoopState(current_phase=Phase.EXECUTE)
+    decompose(state, [{"id": "gap1", "allowed_paths": []}, {"id": "laned", "allowed_paths": ["engine/"]}])
+    t = step(state, _ctx(multi_agent=True, agent_runner=runner))
+    assert t.decision is not Decision.ADVANCE  # did NOT advance with 'laned' still pending
+    assert next(x for x in state.task_graph if x["id"] == "gap1")["status"] == "DONE"
+    assert next(x for x in state.task_graph if x["id"] == "laned")["status"] != "DONE"
 
 
 def test_multi_agent_completeness_gap_is_executor_handled_not_delegated() -> None:
