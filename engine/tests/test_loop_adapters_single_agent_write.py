@@ -19,6 +19,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import loop_adapters.single_agent as sa  # noqa: E402
 import loop_adapters.single_agent_write as saw  # noqa: E402
 from loop.controller import LoopState, Phase  # noqa: E402
 from loop.orchestrate import run_loop  # noqa: E402
@@ -29,8 +30,14 @@ _DIFF = "--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n"
 class _StubAgent:
     def __init__(self, response: dict | None = None) -> None:
         self.response = response if response is not None else {"unified_diff": _DIFF, "rationale": "make it new"}
+        self.seen_cwd: str | None = None
+        self.cwd_was_dir: bool | None = None
 
     def propose(self, request: dict) -> dict:
+        # Record how the executor CONFINED us: the cwd it handed us, and whether it existed AT CALL TIME
+        # (the disposable worktree is removed after we return, so this is the only chance to observe it).
+        self.seen_cwd = request.get("_cwd")
+        self.cwd_was_dir = bool(self.seen_cwd) and Path(self.seen_cwd).is_dir()
         return self.response
 
 
@@ -114,6 +121,21 @@ def test_write_run_applies_in_a_worktree_pushes_a_branch_opens_a_pr_and_leaves_m
     assert "cs-agent" not in _g(root, "worktree", "list").stdout
 
 
+def test_the_agent_is_confined_to_a_disposable_worktree_not_the_repo(tmp_path: Path) -> None:
+    root, _remote = _repo_with_remote(tmp_path)
+    agent = _StubAgent()
+    state = LoopState(goal="tidy", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, agent, []))
+    # the propose ran with cwd inside a REAL directory (a worktree), under worktrees_dir, and NOT the repo...
+    assert agent.cwd_was_dir is True
+    assert agent.seen_cwd is not None
+    seen = Path(agent.seen_cwd).resolve()
+    assert (tmp_path / "wt").resolve() in seen.parents
+    assert seen != root.resolve()
+    # ...and that disposable propose worktree is gone afterwards (only the branch worktree ever pushes).
+    assert not seen.exists()
+
+
 def test_a_diff_that_does_not_apply_fails_closed_and_writes_nothing(tmp_path: Path) -> None:
     root, remote = _repo_with_remote(tmp_path)
     bad = _StubAgent({"unified_diff": "--- a/README.md\n+++ b/README.md\n@@ -9 +9 @@\n-nope\n+x\n", "rationale": "r"})
@@ -156,13 +178,14 @@ class _FakeProc:
 
 
 def test_default_worktrees_dir_resolves_the_git_path_and_falls_back(tmp_path, monkeypatch) -> None:
-    # inside a repo: the isolated-worktree dir is under the git dir (outside the working tree)...
-    monkeypatch.setattr(saw.subprocess, "run",
+    # the worktrees-dir resolver is now the SHARED helper in single_agent (write reuses it); it internally
+    # calls single_agent.subprocess, so patch THAT module. inside a repo: under the git dir (outside the tree)...
+    monkeypatch.setattr(sa.subprocess, "run",
                         lambda *a, **k: _FakeProc(0, "/abs/git/corpusstudio-loop/worktrees\n"))
-    assert saw._default_worktrees_dir(tmp_path) == Path("/abs/git/corpusstudio-loop/worktrees")
+    assert saw.default_worktrees_dir(tmp_path) == Path("/abs/git/corpusstudio-loop/worktrees")
     # ...and outside a repo it falls back to a worktree-local path (never inside the working tree implicitly).
-    monkeypatch.setattr(saw.subprocess, "run", lambda *a, **k: _FakeProc(128, "", "not a git repo"))
-    assert saw._default_worktrees_dir(tmp_path) == tmp_path / ".corpusstudio-loop-worktrees"
+    monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: _FakeProc(128, "", "not a git repo"))
+    assert saw.default_worktrees_dir(tmp_path) == tmp_path / ".corpusstudio-loop-worktrees"
 
 
 def test_git_helper_fails_closed_on_a_nonzero_exit(tmp_path) -> None:

@@ -86,17 +86,24 @@ may *do*:
   injected `AgentClient`, whose real transport is an out-of-process fixed-argv `claude` subprocess with a
   framed JSON contract) to PROPOSE a unified diff; the untrusted response is validated fail-closed and
   sealed as a tamper-evident `agent_proposal` record written **outside** the working tree; nothing is ever
-  applied. It declares `capabilities=frozenset()` (read-only, so the capability gate runs it with no
-  opt-in), makes **no writes**, and ends `ESCALATED` (a human decides whether to apply the proposal). See
+  applied. The agent is **confined (7.1.1)**: it runs with cwd inside a **disposable, detached worktree**
+  at `base` (never the developer's tree), a **sanitized (secret-free) environment**, a version-pinned
+  **read-only tool policy** (`Read,Grep,Glob`; edit/write/bash/nested-agents/net denied), and **bounded
+  output** - so a mis-behaving agent cannot edit the working tree even while "just proposing". It declares
+  `capabilities=frozenset()` (read-only, so the capability gate runs it with no opt-in), makes **no
+  writes**, and ends `ESCALATED` (a human decides whether to apply the proposal). See
   [`docs/PRODUCTION_SINGLE_AGENT_RUNTIME.md`](PRODUCTION_SINGLE_AGENT_RUNTIME.md).
 - **`single_agent_write.py` (Phase 7.1: write-capable single agent, GATED).** The agent still PROPOSES a
-  sealed diff (7.0 behaviour); 7.1 then APPLIES that exact diff in an **isolated, disposable `git worktree`**
-  (never the developer's tree), verifies the applied change matches the sealed proposal, commits it on a
-  fresh branch, pushes, and opens a PR. It declares **`capabilities={"write"}`** (so `cs_loop run` REFUSES
-  it without `--allow-capabilities write`) and **never merges**: `write_gh` allows `pr create` + reads but
-  refuses `pr merge` (and every other mutation), and `dangerous=True` escalates the merge gate - a human
-  reviews + merges the PR. Any failure (a diff that won't apply, a drifted apply, a failed PR-create) fails
-  closed and the worktree is disposed; the main tree is left pristine.
+  sealed diff (7.0 behaviour, run under the same 7.1.1 confinement); 7.1 then APPLIES that exact diff in a
+  **separate, pristine, disposable `git worktree`** (never the developer's tree, never the confined propose
+  checkout), verifies the applied change matches the sealed proposal, commits it on a fresh branch, pushes,
+  and opens a PR. It declares **`capabilities={"write"}`** (so `cs_loop run` REFUSES it without
+  `--allow-capabilities write`) and **never merges**: `write_gh` allows `pr create` + reads but refuses
+  `pr merge` (and every other mutation), and `dangerous=True` escalates the merge gate - a human reviews +
+  merges the PR. Any failure (a diff that won't apply, a drifted apply, a failed PR-create) fails closed
+  and both worktrees are disposed; the main tree is left pristine. **Not yet production-safe:** candidate
+  assurance, exact candidate identity, crash recovery, draft PRs, and sensitive-path denial are deferred
+  hardening (7.1.2 - 7.1.5) that must land before 7.1 runs against a real repository.
 - The **autonomous merge** path (Phase 7.2) - evidence-bound `merge_gate` + the obligation-resolution
   producer - remains future, review-gated, and needs its own explicit authorization; its seams
   (`expected_head`, `required_checks`, the head-scope impact) already exist. All adapter code is under the
