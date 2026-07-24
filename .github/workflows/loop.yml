@@ -47,8 +47,10 @@ jobs:
 
       - name: Tests + coverage (loop tree)
         # The loop tests add scripts/ to sys.path and import loop.* / loop_adapters.* only - no engine
-        # install required. test_loop_stdlib_only enforces the stdlib-only import boundary. The floor sits
-        # below the current ~95% to catch a real drop without flapping on a line or two.
+        # install required. `--noconftest` skips engine/tests/conftest.py (its one autouse fixture patches
+        # corpus_studio tokenization, which the loop tests never use) so the job stays engine-free.
+        # test_loop_stdlib_only enforces the stdlib-only import boundary. The floor sits below the current
+        # ~95% to catch a real drop without flapping on a line or two.
         run: |
-          pytest engine/tests/test_loop_*.py engine/tests/test_cs_loop.py \
+          pytest engine/tests/test_loop_*.py engine/tests/test_cs_loop.py --noconftest \
             --cov=scripts/loop --cov=scripts/loop_adapters --cov-report=term-missing --cov-fail-under=90
