@@ -92,6 +92,18 @@ def test_a_finalized_goal_reports_status_finalized() -> None:
     assert all(o.status == "FINALIZED" for o in outcomes)
 
 
+def test_campaign_survives_a_goal_whose_effect_raises() -> None:
+    # Hardening J: a goal whose executor RAISES must land that goal ESCALATED (persisted) and the campaign
+    # must still return outcomes - one goal's raise never crashes the whole run (was: it propagated).
+    def boom(_s, _d):
+        raise RuntimeError("executor blew up")
+    ctx = LoopContext(repo_root=REPO_ROOT, executor=boom, reviewer=lambda _s: [], critic=lambda _s: [],
+                      gh_runner=_gh(), pr_ref="1", run_cs_assure=_cs())
+    outcomes = run_campaign(_goals("g1"), ctx)
+    assert len(outcomes) == 1
+    assert outcomes[0].final_phase == "ESCALATED" and not outcomes[0].finalized
+
+
 def test_stop_on_escalate_halts_the_campaign() -> None:
     outcomes = run_campaign(_goals("g1", "g2", "g3"), _ctx(dangerous=True), stop_on_escalate=True)
     by = {o.goal_id: o.final_phase for o in outcomes}

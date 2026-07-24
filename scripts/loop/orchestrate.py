@@ -49,13 +49,12 @@ from loop.docs import DEFAULT_COUPLINGS, DocCoupling, docs_observation, stale_do
 from loop.driver import Directive, next_directive
 from loop.integrate import (
     GhRunner,
-    IntegrateError,
     ci_observation,
     head_bound_merge,
     merge_gate,
     observe_ci,
 )
-from loop.observe import CsAssureRunner, LoopObserveError, _run_cs_assure, observe, record_evidence
+from loop.observe import CsAssureRunner, _run_cs_assure, observe, record_evidence
 from loop.review import Reviewer, review, review_observation
 from loop.router import AgentRunner, PathVerifier, aggregate_observation, dispatch_wave
 from loop.store import save
@@ -140,14 +139,17 @@ def _payload(out: str) -> dict:
 
 
 def _changed_paths(ctx: LoopContext) -> list[str]:
-    """Best-effort change set for docs-freshness (advisory - any failure yields [])."""
-    try:
-        _code, out, _err = ctx.run_cs_assure(ctx.repo_root, "changeset", "--base", ctx.base)
-    except OSError:
-        return []
+    """The change set for the docs-freshness coupling check. FAIL-CLOSED, like ``_impact_assessment``: a
+    changeset that could not be produced (non-zero exit / unparseable output / spawn error) must NOT be
+    read as 'nothing changed' - that would let OBSERVE advance past a possibly-stale coupled doc. It raises
+    instead, so ``step`` escalates rather than silently advancing (an OSError from the spawn propagates the
+    same way)."""
+    code, out, err = ctx.run_cs_assure(ctx.repo_root, "changeset", "--base", ctx.base)
+    if code != 0:
+        raise LoopOrchestrateError(f"cs_assure changeset refused (exit {code}): {err.strip()[:120]}")
     entries = _payload(out).get("changed_paths")
     if not isinstance(entries, list):
-        return []
+        raise LoopOrchestrateError("cs_assure changeset record has no changed_paths list (malformed record)")
     return [c["path"] for c in entries if isinstance(c, dict) and isinstance(c.get("path"), str)]
 
 
@@ -253,15 +255,24 @@ def _execute(state: LoopState, ctx: LoopContext, directive: Directive) -> PhaseR
         # a breach), so run it through the executor, never a bounded agent. Lane'd tasks go to the wave.
         unbounded_ready = [t for t in ready_tasks(parse_tasks(state.task_graph)) if not t.allowed_paths]
         if unbounded_ready:
-            # ONE task per executor call: a single executor result must NOT close several tasks (the
-            # remaining unbounded tasks are drained on subsequent EXECUTE cycles). Mark it ACTIVE and
-            # recompute the directive so the executor is explicitly given the task it is run for; then map
-            # its result via the shared status_for (SUCCESS->DONE, PROGRESS->PENDING, else FAILED).
+            # ONE task per executor call: a single executor result must NOT close several tasks. Mark it
+            # ACTIVE and recompute the directive so the executor is explicitly given the task it is run for;
+            # then map its result via the shared status_for (SUCCESS->DONE, PROGRESS->PENDING, else FAILED).
             task = unbounded_ready[0]
             set_status(state, task.id, TaskStatus.ACTIVE)
             observation = ctx.executor(state, next_directive(state))
-            set_status(state, task.id, status_for(observation))
-            return PhaseResult(observation, f"executed self-owned task {task.id!r}")
+            status = status_for(observation)
+            set_status(state, task.id, status)
+            if status is TaskStatus.FAILED:
+                return PhaseResult(observation, f"self-owned task {task.id!r} failed")
+            # SYMMETRIC with the single-agent path: re-enter EXECUTE (CHANGES_REQUESTED) while ANY task
+            # remains, so a self-owned SUCCESS never advances past EXECUTE with the other unbounded / lane'd
+            # tasks still PENDING (they are drained on subsequent cycles; empty unbounded -> the wave below).
+            if _all_done(state):
+                return PhaseResult(Observation.SUCCESS, f"self-owned task {task.id!r} done; all tasks complete")
+            remaining = sorted(t.id for t in parse_tasks(state.task_graph) if t.status is not TaskStatus.DONE)
+            return PhaseResult(Observation.CHANGES_REQUESTED,
+                               f"self-owned task {task.id!r} done; {len(remaining)} task(s) remain: {remaining}")
         # DRAIN: dispatch waves until no ready task remains (deps unlock across waves), stopping on a
         # failure. The router marks each wave ACTIVE->DONE/FAILED; we never close a task no agent ran.
         outcomes = []
@@ -361,9 +372,12 @@ def _dispatch(state: LoopState, ctx: LoopContext) -> PhaseResult:
         result = observe(ctx.repo_root, ctx.base, run_cs_assure=ctx.run_cs_assure)
         record_evidence(state, result)  # structured evidence for the semantic completeness check
         observation, reason = result.observation, result.reason
-        if phase is Phase.OBSERVE:
+        if phase is Phase.OBSERVE and observation is Observation.SUCCESS:
+            # Docs-coupling can only OVERRIDE a green gate, so compute the change set only then - and a
+            # changeset that cannot be produced now fails closed (raises -> escalate), never silently
+            # advances past a possibly-stale coupled doc. A red gate routes on its own signal, untouched.
             gaps = stale_docs(_changed_paths(ctx), ctx.couplings)
-            if observation is Observation.SUCCESS and gaps:
+            if gaps:
                 observation, reason = docs_observation(gaps)
         elif phase is Phase.VERIFY and observation is Observation.SUCCESS:
             observation, reason = _verify_completeness(state, ctx, observation, reason)
@@ -419,11 +433,14 @@ def step(state: LoopState, ctx: LoopContext) -> Transition | None:
     auth_snapshot = _snapshot_authorizations(state)  # control-plane-owned; no callback may persist a grant
     try:
         result = _dispatch(state, ctx)
-    except (LoopObserveError, CompletenessError, IntegrateError, OSError) as exc:
-        # An unusable assurance plane, a misbehaving completeness critic, an unusable CI/gh read at
-        # INTEGRATE, OR an injected effect that RAISES (e.g. a subprocess spawn failure - OSError:
-        # EAGAIN/EMFILE/ENOMEM - from gh_runner / run_cs_assure) escalates to a human (persisted). It
-        # fails CLOSED (no merge) and lands durably at ESCALATED, never as an uncaught crash mid-run.
+    except Exception as exc:  # noqa: BLE001 - deliberate fail-closed backstop; see below.
+        # ANY exception a dispatched phase raises - a misbehaving completeness critic, an unusable
+        # assurance/CI/gh read, a reviewer that raises ReviewError, an executor / agent runner that raises
+        # anything, a LoopTaskError from a malformed graph, a subprocess spawn OSError - escalates to a
+        # human, PERSISTED. It fails CLOSED (no merge) and lands durably at ESCALATED, so a raising injected
+        # effect never crashes the loop mid-run and never dies a whole campaign on one goal's raise
+        # ("a refusal never crashes the loop"). BaseException (KeyboardInterrupt / SystemExit) still
+        # propagates; the post-dispatch non-Observation guard below is a distinct internal invariant.
         _restore_authorizations(state, auth_snapshot)
         state.current_phase = Phase.ESCALATED
         state.termination_reason = f"unrecoverable: {type(exc).__name__}: {exc}"
