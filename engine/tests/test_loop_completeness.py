@@ -94,6 +94,25 @@ def test_bare_digest_criterion_still_uses_membership_fallback() -> None:
     assert not check_completeness(state, _critic([_proven("c", "done", "sha256:UNRECORDED")])).complete
 
 
+def test_a_semantic_criterion_without_a_predicate_is_rejected_at_construction() -> None:
+    # A record type with no predicate would be silently unsatisfiable (no recorded entry has an empty
+    # predicate) - reject it LOUDLY instead of letting the goal never complete.
+    with pytest.raises(ValueError, match="required_predicate"):
+        Criterion("c", "d", kind=CriterionKind.DETERMINISTIC, met=True, required_record_type="workspace_verification")
+    # ...and the critic path surfaces it as a fail-closed CompletenessError, not a crash.
+    def bad_critic(_state: LoopState) -> list[Criterion]:
+        return [Criterion("c", "d", kind=CriterionKind.DETERMINISTIC, met=True,
+                          required_record_type="workspace_verification")]
+    with pytest.raises(CompletenessError):
+        check_completeness(LoopState(), bad_critic)
+
+
+def test_pinning_a_subject_without_a_record_type_is_rejected() -> None:
+    # subject pinning only constrains semantic matching; with no record type it silently does nothing.
+    with pytest.raises(ValueError, match="subject_fingerprint"):
+        Criterion("c", "d", kind=CriterionKind.DETERMINISTIC, met=True, subject_fingerprint="cs:x")
+
+
 # --------------------------------------------------------------------------- the typed, evidence-bound critic
 
 

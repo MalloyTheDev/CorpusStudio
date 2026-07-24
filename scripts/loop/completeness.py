@@ -57,10 +57,12 @@ class Criterion:
     """One goal success criterion: its KIND (how it is proven), whether the critic judged it met, and the
     evidence that must SUPPORT it. For DETERMINISTIC / DOMAIN_AUTHORITY there are two evidence modes:
 
-      * SEMANTIC (preferred): name ``required_record_type`` (+ ``required_predicate``, and optionally a
+      * SEMANTIC (preferred): name ``required_record_type`` AND ``required_predicate`` (and optionally a
         ``subject_fingerprint`` to pin the subject). The criterion is met only if the loop's recorded
         evidence holds an entry of that record type, asserting that predicate, about that subject - so a
-        workspace-verification digest can never satisfy a 'docs complete' claim.
+        workspace-verification digest can never satisfy a 'docs complete' claim. The predicate is
+        REQUIRED here (an empty predicate is rejected at construction, not treated as a wildcard: a
+        wildcard would reintroduce the 'any record of this type counts' vagueness this mode removes).
       * DIGEST (the weaker slice-1 fallback, when no ``required_record_type`` is set): ``evidence`` must be
         a digest present in the loop's sealed assurance records - proves the digest was recorded, but not
         that it SUPPORTS this specific claim.
@@ -74,8 +76,25 @@ class Criterion:
     met: bool = False
     evidence: str = ""                 # digest-membership fallback (used only when required_record_type == "")
     required_record_type: str = ""     # SEMANTIC: the evidence record type that must exist (e.g. workspace_verification)
-    required_predicate: str = ""       # ...asserting this predicate (e.g. WORKSPACE_GATE_GREEN)
+    required_predicate: str = ""       # ...asserting this predicate (e.g. WORKSPACE_GATE_GREEN); required if type is set
     subject_fingerprint: str = ""      # ...about this subject (a change-set fingerprint); "" = any subject
+
+    def __post_init__(self) -> None:
+        # Reject silently-unsatisfiable / no-op semantic criteria LOUDLY at construction (the critic path
+        # turns this into a fail-closed escalation) rather than letting a goal never complete for a reason
+        # nobody can see:
+        #   - a record type with no predicate would match only an empty-predicate entry, which the loop
+        #     never records (it always asserts a concrete predicate) -> unsatisfiable;
+        #   - a pinned subject with no record type does nothing (the digest fallback ignores it) -> a no-op
+        #     the author almost certainly did not intend.
+        if self.required_record_type and not self.required_predicate:
+            raise ValueError(
+                f"criterion {self.id!r} sets required_record_type={self.required_record_type!r} but no "
+                "required_predicate; a semantic criterion must pin the predicate it asserts")
+        if self.subject_fingerprint and not self.required_record_type:
+            raise ValueError(
+                f"criterion {self.id!r} pins subject_fingerprint without a required_record_type; "
+                "subject pinning only constrains semantic (record-type) matching")
 
 
 @dataclass(frozen=True)
