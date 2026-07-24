@@ -327,8 +327,8 @@ def _cmd_campaign(args: argparse.Namespace) -> int:
     goals = _goals_from_json(goals_raw)
     outcomes = run_campaign(goals, _context(args), store_dir=_campaign_store_dir(args),
                             max_steps=args.max_steps)
-    _emit({"outcomes": [{"goal_id": o.goal_id, "final_phase": o.final_phase, "finalized": o.finalized}
-                        for o in outcomes]})
+    _emit({"outcomes": [{"goal_id": o.goal_id, "final_phase": o.final_phase, "finalized": o.finalized,
+                         "status": o.status} for o in outcomes]})
     return EXIT_OK
 
 

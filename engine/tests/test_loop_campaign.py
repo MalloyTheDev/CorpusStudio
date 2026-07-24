@@ -38,13 +38,19 @@ def _gh():
     return lambda *a: (0, "merged", "") if len(a) >= 2 and a[1] == "merge" else (0, snapshot, "")
 
 
-def _ctx(*, dangerous: bool = False, ledger_path: Path | None = None) -> LoopContext:
+def _ctx(*, dangerous: bool = False, ledger_path: Path | None = None, gh=None) -> LoopContext:
     return LoopContext(repo_root=REPO_ROOT, executor=lambda _s, _d: Observation.SUCCESS,
                        reviewer=lambda _s: [],
                        critic=lambda _s: [Criterion("c", "done", kind=CriterionKind.DETERMINISTIC,
                                                     met=True, evidence="sha256:v")],
-                       gh_runner=_gh(), pr_ref="1", dangerous=dangerous, run_cs_assure=_cs(),
+                       gh_runner=gh or _gh(), pr_ref="1", dangerous=dangerous, run_cs_assure=_cs(),
                        ledger_path=ledger_path)
+
+
+def _gh_pending():
+    # CI reports a still-pending check -> INTEGRATE HOLDs (never merges); run_loop returns non-terminal.
+    snap = json.dumps({"headRefOid": "sha1", "statusCheckRollup": [{"name": "pytest", "bucket": "pending"}]})
+    return lambda *a: (0, snap, "")
 
 
 def _goals(*ids: str) -> list[Goal]:
@@ -68,6 +74,21 @@ def test_dependency_skips_when_an_upstream_goal_did_not_finalize() -> None:
     by_id = {o.goal_id: o for o in outcomes}
     assert by_id["g1"].final_phase == "ESCALATED" and not by_id["g1"].finalized
     assert by_id["g2"].final_phase == "SKIPPED"
+
+
+def test_a_held_goal_pauses_the_campaign_not_fails_its_dependents() -> None:
+    # A goal waiting on CI (HOLD -> run_loop returns non-terminal) is NOT a failure: the campaign PAUSES,
+    # and its dependent is left 'not reached', NOT skipped-as-if-a-prerequisite-failed. Re-running resumes it.
+    goals = [Goal("waits on CI", "g1"), Goal("needs g1", "g2", depends_on=["g1"])]
+    outcomes = {o.goal_id: o for o in run_campaign(goals, _ctx(gh=_gh_pending()))}
+    assert outcomes["g1"].status == "HELD" and not outcomes["g1"].finalized
+    assert outcomes["g2"].status == "SKIPPED" and "not reached" in (outcomes["g2"].termination_reason or "")
+    # (contrast: a genuinely FAILED prerequisite marks the dependent "an upstream goal did not finalize")
+
+
+def test_a_finalized_goal_reports_status_finalized() -> None:
+    outcomes = run_campaign(_goals("g1", "g2"), _ctx())
+    assert all(o.status == "FINALIZED" for o in outcomes)
 
 
 def test_stop_on_escalate_halts_the_campaign() -> None:

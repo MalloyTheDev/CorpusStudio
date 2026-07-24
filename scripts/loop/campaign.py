@@ -48,6 +48,7 @@ class GoalOutcome:
     final_phase: str
     termination_reason: str | None
     finalized: bool
+    status: str = "SKIPPED"  # FINALIZED | ESCALATED | STOPPED | HELD | SKIPPED - HELD is NOT a failure
 
 
 def _validate(goals: list[Goal]) -> None:
@@ -128,8 +129,11 @@ def run_campaign(goals: list[Goal], ctx: LoopContext | None = None, *,
     dependency did NOT finalize is SKIPPED; an ESCALATION halts the campaign when ``stop_on_escalate``.
     Each goal's context comes from the injected ``context_for`` factory (isolated branch/worktree/PR/state)
     or, absent one, the shared ``ctx`` with a per-goal state file. A goal with an existing state file is
-    RESUMED. Returns one outcome per goal (input order). Fail-closed on a malformed goal graph or a
-    misbehaving factory."""
+    RESUMED. Each outcome carries a ``status`` (FINALIZED / ESCALATED / STOPPED / HELD / SKIPPED). A HELD
+    goal - one that run_loop returned WITHOUT a terminal phase because it is waiting on an external
+    condition (e.g. CI) - is NOT a failure: it PAUSES the campaign (its dependents are left 'not reached',
+    never skipped-as-failed), so re-running the campaign resumes it and its downstream. Returns one outcome
+    per goal (input order). Fail-closed on a malformed goal graph or a misbehaving factory."""
     if ctx is None and context_for is None:
         raise CampaignError("run_campaign needs a base ctx or a context_for factory")
     _validate(goals)
@@ -144,7 +148,7 @@ def run_campaign(goals: list[Goal], ctx: LoopContext | None = None, *,
         blocked = [g for g in pending if any(d in failed for d in g.depends_on)]
         for g in blocked:  # a dependency failed -> this goal can never run
             outcomes[g.goal_id] = GoalOutcome(g.goal_id, g.goal, "SKIPPED",
-                                              "an upstream goal did not finalize", False)
+                                              "an upstream goal did not finalize", False, status="SKIPPED")
             failed.add(g.goal_id)
         if not ready:
             break  # nothing runnable (remaining are all blocked, now skipped)
@@ -154,14 +158,30 @@ def run_campaign(goals: list[Goal], ctx: LoopContext | None = None, *,
         if not state.is_terminal:
             run_loop(state, goal_ctx, max_steps=max_steps)  # shares ledger_path -> cross-goal memory
         # else: a resumed, already-finished goal - report it; do NOT re-run or double-record the ledger.
-        is_final = state.current_phase is Phase.FINALIZE
-        (finalized if is_final else failed).add(goal.goal_id)
-        outcomes[goal.goal_id] = GoalOutcome(goal.goal_id, goal.goal, state.current_phase.value,
-                                             state.termination_reason, is_final)
-        if not is_final and state.current_phase is Phase.ESCALATED and stop_on_escalate:
-            halted = True  # a hard blocker halts the campaign - the rest wait for a human
+        phase = state.current_phase
+        is_final = phase is Phase.FINALIZE
+        if is_final:
+            finalized.add(goal.goal_id)
+            status = "FINALIZED"
+        elif not state.is_terminal:
+            # HELD: run_loop returned WITHOUT a terminal phase (waiting on an external condition, e.g. CI).
+            # HOLD is NOT failure - do NOT mark the goal failed (which would SKIP its dependents as if a
+            # prerequisite had failed). PAUSE the campaign; re-running it resumes this goal + downstream.
+            status = "HELD"
+            halted = True
+        elif phase is Phase.ESCALATED:
+            failed.add(goal.goal_id)
+            status = "ESCALATED"
+            if stop_on_escalate:
+                halted = True  # a hard blocker halts the campaign - the rest wait for a human
+        else:  # Phase.STOPPED (budget / dead end)
+            failed.add(goal.goal_id)
+            status = "STOPPED"
+        outcomes[goal.goal_id] = GoalOutcome(goal.goal_id, goal.goal, phase.value,
+                                             state.termination_reason, is_final, status=status)
 
     for g in goals:  # anything unrun (campaign halted / unreachable) is reported SKIPPED
         outcomes.setdefault(g.goal_id, GoalOutcome(g.goal_id, g.goal, "SKIPPED",
-                                                   "not reached (campaign halted or blocked)", False))
+                                                   "not reached (campaign halted or blocked)", False,
+                                                   status="SKIPPED"))
     return [outcomes[g.goal_id] for g in goals]
