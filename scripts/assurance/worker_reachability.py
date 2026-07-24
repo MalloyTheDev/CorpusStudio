@@ -208,10 +208,11 @@ def reachable_from(roots: tuple[str, ...], read: ReadBytes, *,
                 stack.append((name, path, is_pkg))
 
     for root in roots:  # a root absent in this view is handled by the delta on the other side
-        if path_to_module(root, package_root=package_root) is None:
+        resolved = path_to_module(root, package_root=package_root)
+        if resolved is None:
             raise WorkerReachabilityError(f"worker root {root!r} is not a module under {package_root!r}")
         if read(root) is not None:
-            _enqueue(path_to_module(root, package_root=package_root)[0])  # type: ignore[index]
+            _enqueue(resolved[0])
 
     while stack:
         module, path, is_package = stack.pop()
