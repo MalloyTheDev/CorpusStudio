@@ -86,12 +86,10 @@ class FileLock:
             self._fd, self._token = fd, token  # own it only AFTER the token is durably written
             return self
 
-    def _holder_pid(self) -> int | None:
-        """The PID recorded in the lockfile (``'<pid> <ts> <token>'``), or None if absent / malformed."""
-        try:
-            fields = self.lock_path.read_text("ascii").split()
-        except (FileNotFoundError, OSError, UnicodeDecodeError):
-            return None
+    @staticmethod
+    def _pid_from(content: bytes) -> int | None:
+        """The PID in a ``'<pid> <ts> <token>'`` lockfile body, or None if malformed."""
+        fields = content.split()
         if len(fields) != 3:
             return None
         try:
@@ -103,7 +101,9 @@ class FileLock:
     def _pid_is_alive(pid: int) -> bool:
         """Whether a SAME-HOST holder process is still alive (``os.kill(pid, 0)``). This lets a live holder
         keep its lock even past ``stale_after`` (a long-running writer is never wrongly broken). A holder on
-        another host (shared FS) cannot be probed and is handled by the mtime fallback in the caller."""
+        another host (shared FS) cannot be probed and is handled by the mtime fallback in the caller. On a
+        non-Unix host ``os.kill(pid, 0)`` semantics differ; any error OTHER than ProcessLookupError errs
+        toward ALIVE (fail-safe: never break a possibly-live lock)."""
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
@@ -113,15 +113,22 @@ class FileLock:
         return True
 
     def _break_if_stale(self) -> None:
-        """Break a lock ONLY when its holder is genuinely gone, and break it ATOMICALLY.
+        """Break a lock ONLY when its holder is genuinely gone, and break ONLY that exact lock, atomically.
 
-        Liveness first: if the recorded PID is ALIVE on this host, keep the lock at any age (a live
-        long-running writer must not be broken). Break only when the PID is DEAD (crashed), or - when the
-        PID is unknowable (malformed / cross-host holder) - when the wall-clock mtime is older than
-        ``stale_after`` (a negative age from a backward clock step is NOT stale). The break itself is atomic
-        (:meth:`_atomic_break`), fixing the TOCTOU where two waiters both ``unlink`` and the second deletes
-        a lock a third process just freshly created."""
-        pid = self._holder_pid()
+        Read the lockfile body ONCE as its identity. Liveness first: if the recorded PID is ALIVE on this
+        host, keep the lock at any age (a live long-running writer must not be broken). Break only when the
+        PID is DEAD (crashed), or - when the PID is unknowable (malformed / cross-host holder) - when the
+        wall-clock mtime is older than ``stale_after`` (a negative age from a backward clock step is NOT
+        stale). :meth:`_atomic_break` then breaks ONLY the exact bytes just judged stale (identified by the
+        per-acquisition token, which is immune to PID reuse), so a lock freshly re-created in the race window
+        is restored, never broken; and it claims atomically so two waiters can never both delete."""
+        try:
+            identity = self.lock_path.read_bytes()
+        except FileNotFoundError:
+            return  # already gone - the next O_EXCL create will win
+        except OSError:
+            identity = b""  # present but unreadable -> judge by mtime, break only if it stays this way
+        pid = self._pid_from(identity)
         if pid is not None:
             if self._pid_is_alive(pid):
                 return  # live holder -> keep; the waiter times out (LockTimeout) rather than break it
@@ -130,42 +137,39 @@ class FileLock:
             try:
                 stale = (time.time() - self.lock_path.stat().st_mtime) > self.stale_after
             except FileNotFoundError:
-                return  # already gone - the next O_EXCL create will win
+                return
         if stale:
-            self._atomic_break()
+            self._atomic_break(identity)
 
-    def _atomic_break(self) -> None:
-        """Remove a confirmed-stale lockfile by ATOMICALLY CLAIMING it first: rename it to a unique name.
-        ``os.rename`` is atomic, so exactly one racing waiter wins the claim; a loser's rename fails
-        (source gone) and it never deletes anyone's lock. If the claimed file turns out to be a LIVE lock
-        freshly re-created in the race window, it is restored (via an ``O_EXCL`` create that will not
-        clobber a newer lock) rather than broken."""
+    def _atomic_break(self, expected: bytes) -> None:
+        """Break ONLY the exact lock whose body is ``expected`` (the one just judged stale). Rename-to-claim
+        first: ``os.rename`` is atomic, so exactly one racing waiter wins the claim; a loser's rename fails
+        (source gone) and it never deletes anyone's lock. Then break the claimed file ONLY if its content
+        still EQUALS ``expected`` - so a lock freshly re-created in the race window (a DIFFERENT unique
+        token, so PID reuse cannot fool the check) is RESTORED via an ``O_EXCL`` create-only, never broken."""
         claimed = self.lock_path.with_name(f"{self.lock_path.name}.stale-{secrets.token_hex(8)}")
         try:
             os.rename(self.lock_path, claimed)  # only ONE waiter wins this; the rest fail here (safe)
         except (FileNotFoundError, OSError):
             return  # already claimed / broken by another waiter - do not touch the current lock
         try:
-            pid = int(claimed.read_text("ascii").split()[0])
-        except (OSError, UnicodeDecodeError, ValueError, IndexError):
-            pid = -1  # unreadable/malformed -> treat as not-alive -> safe to discard
-        if pid >= 0 and self._pid_is_alive(pid):
-            # rare fresh/live capture: restore it WITHOUT clobbering a newer lock (O_EXCL create-only).
-            try:
-                content = claimed.read_bytes()
-            except OSError:
-                content = b""
+            actual = claimed.read_bytes()
+        except OSError:
+            actual = b""
+        if actual and actual != expected:
+            # a DIFFERENT lock is here now (re-created in the window; distinct token) -> restore it WITHOUT
+            # clobbering a still-newer lock (O_EXCL create-only), rather than break a lock we never judged.
             try:
                 fd = os.open(str(self.lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
             except FileExistsError:
                 pass  # a newer lock already holds the slot - leave it
             else:
                 try:
-                    os.write(fd, content)
+                    os.write(fd, actual)
                 finally:
                     os.close(fd)
         try:
-            claimed.unlink()
+            claimed.unlink()  # remove our claim (the judged-stale bytes, or the leftover after a restore)
         except FileNotFoundError:
             pass
 

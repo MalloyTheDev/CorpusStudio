@@ -90,6 +90,26 @@ def test_a_dead_holders_lock_is_broken_even_when_mtime_is_fresh(tmp_path: Path) 
         assert lock._token is not None and lockfile.exists()  # we acquired a fresh lock
 
 
+def test_atomic_break_removes_only_the_exact_bytes_it_judged_stale(tmp_path: Path) -> None:
+    # PID-reuse immunity: _atomic_break identifies the stale lock by its exact (per-acquisition-token)
+    # bytes, not by PID. It breaks the file only when its content still equals what was judged stale.
+    lk = FileLock(tmp_path / "res")
+    judged = b"12345 6.7 deadbeefdeadbeef\n"
+    lk.lock_path.write_bytes(judged)
+    lk._atomic_break(expected=judged)  # matches what's on disk -> break it
+    assert not lk.lock_path.exists()
+
+
+def test_atomic_break_restores_a_lock_re_created_in_the_race_window(tmp_path: Path) -> None:
+    # If the on-disk lock differs from the judged bytes (a fresh lock re-created in the race - a different
+    # token, immune to PID reuse), it is RESTORED, never broken - so no live lock is deleted.
+    lk = FileLock(tmp_path / "res")
+    fresh = b"999 1.0 aFRESHtokenNOTtheStaleOne\n"
+    lk.lock_path.write_bytes(fresh)
+    lk._atomic_break(expected=b"the-stale-bytes-i-judged 0 oldtoken\n")  # differs from what's on disk now
+    assert lk.lock_path.read_bytes() == fresh  # restored intact, not deleted
+
+
 def test_release_only_removes_a_lock_we_still_own(tmp_path: Path) -> None:
     # #12: if another process broke our stale lock and re-created its OWN, our LATE release must not delete
     # that new lock. Simulate it: acquire, then overwrite the lockfile with a different owner token.
