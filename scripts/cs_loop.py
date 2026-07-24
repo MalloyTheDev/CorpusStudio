@@ -28,6 +28,7 @@ stdlib-only; fail-closed (a refusal exits 2, never a bare traceback), mirroring 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess  # noqa: S404 - fixed-argv `git rev-parse` only; never a shell string.
 import sys
@@ -174,7 +175,10 @@ def _pending_authorization(state: LoopState) -> dict[str, str] | None:
     the loop later escalates for a different reason (the id changes)."""
     if state.current_phase is not Phase.ESCALATED:
         return None
-    import hashlib
+    # The id is DETERMINISTIC on (goal, blocker) BY DESIGN: re-escalating for the same blocker yields the
+    # same id, so a valid grant persists and is idempotent; a different blocker (reason) yields a new id
+    # (staleness). No timestamp/step index - that would break both idempotency and the loop's no-wall-clock
+    # determinism. The finer per-subject discriminator (change_set_fingerprint / head) is #5 slice 2.
     reason = state.termination_reason or "(no reason recorded)"
     rid = "auth-" + hashlib.sha256(f"{state.goal_id}\x00{reason}".encode("utf-8")).hexdigest()[:16]
     return {"request_id": rid, "goal_id": state.goal_id, "capability": reason}
