@@ -129,10 +129,33 @@ The features below were listed here as "lands in 7.1" but were **deferred** — 
 7.1 must **not** be run against the real CorpusStudio repository until they land. Each is a distinct,
 separately-authorized PR under `loop-controller-self-modify`:
 
-- **7.1.2 — candidate assurance.** Assurance (`cs_assure verify/impact`, secret scan, sensitive-path
-  policy classification, worker-reachability) must run against the **candidate worktree**, not the
-  developer tree; a REAL reviewer + an observe→diagnose→review→correct loop over the candidate, so a
-  publish is not the *only* thing EXECUTE does.
+- **7.1.2a — candidate assurance gates the publish. ✅ SHIPPED.** The candidate worktree is classified by
+  **`cs_assure impact`** (self-modify / sealed-research / **worker-closure** / policy obligations) — a
+  **STATIC** analysis that does **not** import or execute the candidate's code; the branch is pushed + the
+  PR opened **only** when the candidate classifies clear; a human-gated / worker / policy obligation
+  publishes **nothing** and returns the classified observation so the loop escalates. **Sensitive-path
+  denial** (pre-apply, fail-closed): the sealed diff is refused if it touches a protected path
+  (loop-controller / assurance / agent config, `.github/**`, sealed research), a credential-shaped file
+  (`.env*`, `*.pem`, `*.key`, …), **gate-affecting config** (`conftest.py`, `pyproject.toml`, `pytest.ini`,
+  … — so an agent's diff cannot neutralize the gate), a symlink / mode / binary change, or too many files.
+  **Secret scan** over the added lines (defense-in-depth; CI gitleaks is the backstop). Every cs_assure
+  subprocess runs with a **sanitized (secret-free) environment**. The apply worktree is **detached** and
+  the branch is created by refspec only on a clear candidate, so a blocked candidate leaves no orphaned
+  local branch. Worker-reachability is covered by the candidate `worker-closure` classification (→
+  `WORKER_LINEAGE_IMPACT` → escalate).
+  - **Why static, not the full gate (a security decision, not a shortcut):** running `cs_assure verify`
+    against the candidate would run ruff/mypy/**pytest**, and *pytest collection executes the untrusted
+    agent's committed code with the operator's environment* — arbitrary code execution + secret exposure,
+    the very thing 7.1.1 confinement prevents for the propose step (an adversarial-review workflow found
+    this in the first draft, which naively ran the full gate). The **dynamic** gate — which must execute
+    the candidate — is therefore delegated to **CI's isolated sandbox** on the opened PR, where a human
+    merges only on green. Local dynamic assurance in a hardened local sandbox (container / nsjail, network
+    off, sanitized env) is a **7.1.5** option. *(Publish still happens inside EXECUTE, now gated on the
+    static candidate assurance.)*
+- **7.1.2b — deferred.** A **persistent** candidate worktree with a loop-native observe→diagnose→**correct**
+  loop (iterating in the worktree rather than re-proposing from scratch) + an **independent REAL reviewer**
+  over the candidate. Needs the worktree lifecycle (create/reuse/dispose across phases) that 7.1.4 builds;
+  the current adapter's coarse correction is "re-propose on a routed observation", bounded by the step cap.
 - **7.1.3 — exact candidate identity.** Record `candidate_tree_oid` + a staged-patch digest;
   `git commit-tree`/head verification so the pushed commit is provably the assured candidate; wire
   `cs_assure impact --scope head` bound to the pushed commit (`--match-head-commit`).
@@ -140,10 +163,11 @@ separately-authorized PR under `loop-controller-self-modify`:
   branch/PR reuse, orphan-branch cleanup (a failed `pr create` currently leaves a pushed branch), a
   **DRAFT** PR, validated remote/PR identity, and a cleanup/gc command.
 - **7.1.5 — live canary** with fault injection at every boundary before any unattended use.
-- **Sensitive-path denial** (initially deny / require separate authorization): `.env*`, `*.pem`, `*.key`,
-  credential stores, GitHub workflow permission changes, sealed research, historical evidence, release
-  credentials, submodules, symlinks, binary/large generated artifacts, assurance code, loop-controller
-  code.
+- **Sensitive-path denial** (initially deny) — **shipped in 7.1.2a**: `.env*`, `*.pem`, `*.key`, credential
+  stores, GitHub workflow / permission changes, sealed research, `docs/paper/**`, submodules, symlinks,
+  mode/binary changes, over-large changes, assurance code, and loop-controller code are refused pre-apply.
+  (Historical-evidence and release-credential dirs live outside the repo tree, so they never appear in a
+  candidate diff; the in-repo `research/**` + `docs/paper/**` denial covers the sealed-research surface.)
 
 **Not a worker-lineage change.** The adapter is control-plane code (`scripts/loop_adapters/`), not worker
 execution bytes, so it does **not** force a fresh worker wheel/env — but it IS under
@@ -152,8 +176,19 @@ review (the maintainer; Sourcery is advisory, not the independent gate), never t
 
 **Verification (as shipped):** tests assert edits appear **only** under the isolated worktree path (the
 main tree's `git status` is clean); the agent runs confined (cwd = a disposable worktree, sanitized env,
-bounded output); a diff that won't apply / a drifted apply fails closed; `INTEGRATE` escalates rather than
-merges; a self-modify-shaped change still escalates.
+bounded output); a diff that won't apply / a drifted apply fails closed; a **human-gated candidate
+obligation**, a **worker-closure candidate**, a **sensitive path** (incl. gate-config), and a **secret in
+the diff** each publish **nothing** (no push, no PR) and the candidate outcome is recorded; a **clear
+candidate** publishes by refspec from a detached worktree; candidate assurance is proven to run against the
+**candidate worktree, not the dev tree**; the default cs_assure runner sanitizes the env; `INTEGRATE`
+escalates rather than merges; a self-modify-shaped change still escalates.
+
+**Real-run caveat:** the tests drive candidate assurance with an injected fake `run_cs_assure`; the real
+default runner runs `cs_assure impact` (static, fast) inside the candidate worktree. The loop's own
+dev-tree OBSERVE/VERIFY still runs the full ruff/mypy/pytest gate, but on the **trusted** dev tree (never
+the untrusted candidate), which must stay `workspace_stable` (pytest caches must be gitignored). End-to-end
+validation against a live candidate — and any *local* dynamic (test) assurance — is the 7.1.5 canary /
+sandbox.
 
 ## 6. Phase 7.2 — autonomous merge (SEPARATELY gated)
 

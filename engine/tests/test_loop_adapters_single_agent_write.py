@@ -8,6 +8,7 @@ apply) fails closed. A local bare remote makes ``git push`` work offline; ``gh``
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -41,18 +42,32 @@ class _StubAgent:
         return self.response
 
 
-def _cs_assure_green():
-    import json
+def _green_verify():
+    # for the loop's OWN dev-tree OBSERVE/VERIFY (trusted, always green in these tests)
     steps = [{"name": n, "passed": True, "exit_code": 0, "timed_out": False} for n in ("ruff", "mypy", "pytest")]
+    return {"record_type": "workspace_verification", "schema_version": 2, "record_digest": "sha256:v",
+            "payload": {"gate_passed": True, "gate_steps": steps, "workspace_stable": True,
+                        "fired_obligations": [], "change_set_fingerprint": "cs:x"}}
+
+
+def _assure_runner(*, obligations=()):
+    """A fake cs_assure. `impact` drives the STATIC CANDIDATE assurance in the executor (fired obligations
+    block/route the publish); `verify`/`doclint`/`changeset` drive the loop's own dev-tree OBSERVE/VERIFY.
+    `impact` executes NO code - candidate assurance is deliberately static (no untrusted pytest locally)."""
     rec = {
-        "verify": {"record_type": "workspace_verification", "schema_version": 2, "record_digest": "sha256:v",
-                   "payload": {"gate_passed": True, "gate_steps": steps, "workspace_stable": True,
-                               "fired_obligations": [], "change_set_fingerprint": "cs:x"}},
+        "impact": {"record_digest": "sha256:imp",
+                   "payload": {"fired_obligations": [{"id": o, "severity": "blocking"} for o in obligations],
+                               "base_policy_available": True, "change_set_fingerprint": "cs:x"},
+                   "provenance": {"policy_digest": "sha256:p"}},
+        "verify": _green_verify(),
         "changeset": {"payload": {"changed_paths": []}},
-        "impact": {"payload": {"fired_obligations": [], "base_policy_available": True, "change_set_fingerprint": "cs:x"}},
         "doclint": {"finding_count": 0},
     }
     return lambda _r, *a: (0, json.dumps(rec.get(a[0] if a else "", {})), "")
+
+
+def _cs_assure_green():
+    return _assure_runner()
 
 
 def _g(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -83,10 +98,10 @@ def _fake_gh(calls: list):
     return run
 
 
-def _build(tmp_path: Path, root: Path, agent: _StubAgent, calls: list):
+def _build(tmp_path: Path, root: Path, agent: _StubAgent, calls: list, assure=None):
     return saw.build_context(root, "main", agent_client=agent, proposals_dir=tmp_path / "prop",
                              worktrees_dir=tmp_path / "wt", gh_runner=_fake_gh(calls),
-                             run_cs_assure=_cs_assure_green())
+                             run_cs_assure=assure or _cs_assure_green())
 
 
 # --------------------------------------------------------------------------- the write path + isolation
@@ -158,6 +173,145 @@ def test_a_pr_create_failure_fails_closed(tmp_path: Path) -> None:
     run_loop(state, ctx)
     assert state.current_phase is Phase.ESCALATED  # a failed PR-create escalates; the worktree is still disposed
     assert "cs-agent" not in _g(root, "worktree", "list").stdout
+
+
+# ------------------------------------------------------------------ candidate assurance gates the publish (7.1.2)
+
+
+def _denied_diff(path: str) -> str:
+    return f"--- /dev/null\n+++ b/{path}\n@@ -0,0 +1 @@\n+content\n"
+
+
+def test_a_human_gated_candidate_escalates_and_publishes_nothing(tmp_path: Path) -> None:
+    root, remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    # the candidate's static impact fires a self-modify obligation -> AUTHORIZATION_REQUIRED (a human).
+    assure = _assure_runner(obligations=("loop-controller-self-modify",))
+    ctx = _build(tmp_path, root, _StubAgent(), calls, assure=assure)
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, ctx, max_steps=25)
+    assert state.current_phase is Phase.ESCALATED
+    assert ("pr", "create") not in [c[:2] for c in calls]
+    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
+    ca = state.review_state["candidate_assurance"]
+    assert ca["published"] is False and ca["observation"] == "AUTHORIZATION_REQUIRED"
+
+
+def test_a_worker_touching_candidate_escalates_and_publishes_nothing(tmp_path: Path) -> None:
+    root, remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    # the candidate's static impact fires worker-closure -> WORKER_LINEAGE_IMPACT (human-gated workflow).
+    ctx = _build(tmp_path, root, _StubAgent(), calls, assure=_assure_runner(obligations=("worker-closure",)))
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, ctx, max_steps=25)
+    assert ("pr", "create") not in [c[:2] for c in calls]
+    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
+    ca = state.review_state["candidate_assurance"]
+    assert ca["published"] is False and ca["observation"] == "WORKER_LINEAGE_IMPACT"
+
+
+def test_a_clear_candidate_publishes_and_records_the_assurance(tmp_path: Path) -> None:
+    root, remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    state = LoopState(goal="tidy", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, _StubAgent(), calls))
+    # a clear candidate publishes (branch pushed by refspec from a DETACHED apply worktree) + records it
+    assert _g(remote, "show", "cs-agent/g1:README.md").stdout == "new\n"
+    ca = state.review_state["candidate_assurance"]
+    assert ca["published"] is True and ca["observation"] == "SUCCESS"
+    assert "sha256:imp" in state.assurance_records  # the candidate impact digest is on the audit trail
+
+
+def test_candidate_assurance_targets_the_candidate_worktree_not_the_dev_tree(tmp_path: Path) -> None:
+    # the whole point of 7.1.2: `impact` must be run against the CANDIDATE worktree, never the dev tree.
+    seen: list = []
+    base = _assure_runner()
+
+    def recording(root, *a):
+        if a and a[0] == "impact":
+            seen.append(str(root))
+        return base(root, *a)
+    root, _remote = _repo_with_remote(tmp_path)
+    ctx = _build(tmp_path, root, _StubAgent(), [], assure=recording)
+    run_loop(LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL), ctx)
+    assert seen, "candidate impact was never run"
+    for observed in seen:
+        assert (tmp_path / "wt").resolve() in Path(observed).resolve().parents  # the isolated worktree...
+        assert Path(observed).resolve() != root.resolve()                       # ...never the dev tree
+
+
+def test_a_sensitive_path_is_denied_before_apply(tmp_path: Path) -> None:
+    root, remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    # a diff touching a CI-workflow path is refused pre-apply: no apply worktree, no push, no PR.
+    agent = _StubAgent({"unified_diff": _denied_diff(".github/workflows/ci.yml"), "rationale": "r"})
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, agent, calls), max_steps=25)
+    assert ("pr", "create") not in [c[:2] for c in calls]
+    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
+    assert "apply-" not in _g(root, "worktree", "list").stdout
+    assert state.review_state.get("agent_proposals") in (None, [])
+
+
+def test_a_secret_in_the_diff_blocks_the_publish(tmp_path: Path) -> None:
+    root, remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    secret_diff = "--- a/README.md\n+++ b/README.md\n@@ -1 +1,2 @@\n old\n+AKIAIOSFODNN7EXAMPLE\n"
+    agent = _StubAgent({"unified_diff": secret_diff, "rationale": "r"})
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, agent, calls), max_steps=25)
+    assert ("pr", "create") not in [c[:2] for c in calls]
+    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
+
+
+def test_classify_sensitive_paths_denies_protected_and_credential_shaped() -> None:
+    assert saw._classify_sensitive_paths(["README.md", "docs/x.md"], _DIFF) == []
+    for denied in ("scripts/loop/x.py", "scripts/loop_adapters/y.py", "scripts/assurance/z.py",
+                   "scripts/cs_assure.py", "scripts/cs_loop.py", ".claude/settings.json",
+                   ".github/workflows/ci.yml", "research/paper.tex", "docs/paper/fig.py", ".gitmodules"):
+        assert saw._classify_sensitive_paths([denied], _DIFF), denied
+    for cred in ("config/.env", ".env.local", "certs/tls.pem", "secrets/app.key", "home/id_rsa"):
+        assert saw._classify_sensitive_paths([cred], _DIFF), cred
+    # GATE-AFFECTING config is denied so an agent can't neutralize the ruff/mypy/pytest gate (local or CI).
+    for cfg in ("engine/tests/conftest.py", "conftest.py", "engine/pyproject.toml", "pytest.ini",
+                "setup.cfg", "tox.ini", "ruff.toml", "mypy.ini", ".gitignore"):
+        assert saw._classify_sensitive_paths([cfg], _DIFF), cfg
+    # structural refusals: a symlink / mode / binary change in the raw diff
+    assert saw._classify_sensitive_paths(["a"], "new file mode 120000\n")
+    assert saw._classify_sensitive_paths(["a"], "GIT binary patch\n")
+    # an over-large change is refused wholesale
+    assert saw._classify_sensitive_paths([f"f{i}.py" for i in range(60)], _DIFF)
+
+
+def test_scan_secrets_flags_added_lines_only() -> None:
+    assert saw._scan_secrets(_DIFF) == []                                  # clean
+    assert saw._scan_secrets("+AKIAIOSFODNN7EXAMPLE\n")                    # AWS key on an added line
+    assert saw._scan_secrets("+ghp_" + "a" * 36 + "\n")                    # GitHub token
+    assert saw._scan_secrets('+password = "hunter2-not-a-real-secret"\n')  # hardcoded credential
+    assert saw._scan_secrets("-AKIAIOSFODNN7EXAMPLE\n") == []             # a REMOVED line is not flagged
+    assert saw._scan_secrets("+++ b/AKIAIOSFODNN7EXAMPLE\n") == []        # the +++ header is not content
+
+
+def test_the_default_cs_assure_runner_sanitizes_the_environment(tmp_path, monkeypatch) -> None:
+    # candidate assurance (and the dev-tree gate) must run cs_assure with NO secrets in the environment.
+    monkeypatch.setenv("GITHUB_TOKEN", "should-not-leak")
+    captured: dict = {}
+
+    def fake_run(*a, **k):
+        captured.update(k)
+        return _FakeProc(0, "{}")
+    monkeypatch.setattr(saw.subprocess, "run", fake_run)
+    saw._sanitized_cs_assure(tmp_path, "impact", "--base", "main")
+    assert "GITHUB_TOKEN" not in captured["env"]  # secret-free
+    assert captured["cwd"] == str(tmp_path)
+
+
+def test_assure_candidate_fails_closed_on_a_refused_impact(tmp_path) -> None:
+    # an unusable / refused impact record raises (the loop escalates) - never a silent publish.
+    with pytest.raises(saw.WriteAdapterError):
+        saw._assure_candidate(tmp_path, "main", lambda _r, *a: (2, "", "boom"))
+    with pytest.raises(saw.WriteAdapterError):
+        saw._assure_candidate(tmp_path, "main", lambda _r, *a: (0, "not json", ""))
 
 
 # --------------------------------------------------------------------------- the gh boundary (no merge)
