@@ -338,12 +338,13 @@ def _cmd_campaign(args: argparse.Namespace) -> int:
     goals = _goals_from_json(goals_raw)
     store_dir = _campaign_store_dir(args)
     ledger = _default_ledger(args)
-    if hasattr(module, "build_context_for_goal"):
+    factory = getattr(module, "build_context_for_goal", None)
+    if callable(factory):  # callable, not merely present - a non-callable attribute is not a factory
         # PER-GOAL ISOLATION: the adapter exposes a factory, so each goal gets its OWN LoopContext (the
         # seam a runtime fills with a per-goal branch / worktree / PR / state). Required for a
         # write-capable multi-goal campaign, where a shared working tree would let goals clobber each other.
         def context_for(goal):  # noqa: ANN001,ANN202 - a LoopContext
-            gctx = module.build_context_for_goal(goal, Path(args.repo_root), args.base, store_dir)
+            gctx = factory(goal, Path(args.repo_root), args.base, store_dir)
             return _wire_ledger(gctx, ledger)
         outcomes = run_campaign(goals, context_for=context_for, store_dir=store_dir, max_steps=args.max_steps)
     else:

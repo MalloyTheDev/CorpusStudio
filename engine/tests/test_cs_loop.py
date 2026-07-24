@@ -174,6 +174,19 @@ def test_campaign_uses_the_per_goal_context_factory_when_present(tmp_path: Path)
     assert (camp / "g1" / "state.json").is_file() and (camp / "g2" / "state.json").is_file()
 
 
+def test_campaign_ignores_a_non_callable_build_context_for_goal(tmp_path: Path) -> None:
+    # A non-callable attribute named build_context_for_goal is NOT a factory - fall back to the shared
+    # build_context (never try to call a string), so the campaign still runs.
+    goals = tmp_path / "goals.json"
+    goals.write_text(json.dumps([{"goal": "a", "goal_id": "g1"}]))
+    adapter = tmp_path / "bad_factory_adapter.py"
+    adapter.write_text(_ADAPTER + '\nbuild_context_for_goal = "not callable"\n')
+    out = _run(tmp_path / "unused.json", "campaign", "--adapters", str(adapter), "--goals", str(goals),
+               "--repo-root", str(REPO_ROOT))
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout)["outcomes"][0]["finalized"]  # fell back to build_context
+
+
 def test_campaign_runs_a_dependency_ordered_backlog(tmp_path: Path) -> None:
     goals = tmp_path / "goals.json"
     goals.write_text(json.dumps([{"goal": "b", "goal_id": "g2", "depends_on": ["g1"]},
