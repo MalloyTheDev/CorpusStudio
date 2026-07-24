@@ -55,6 +55,15 @@ class ConcurrentStateWrite(LoopStateError):
     writer moved it. Fail closed rather than clobber the other writer's update (reload, then re-apply)."""
 
 
+class CorruptStateFile(LoopStateError):
+    """A state file EXISTS but is unreadable / not valid JSON / wrong-shaped. Distinct from an ABSENT file
+    (which is a normal first-write): a CAS writer must NOT silently overwrite corruption as if it were a
+    fresh file (revision 0), nor misreport it as a concurrent-writer conflict."""
+
+
+_ABSENT = object()  # sentinel returned by _read_doc for a genuinely non-existent file (vs corrupt -> None)
+
+
 def to_dict(state: LoopState) -> dict[str, Any]:
     """Serialise a LoopState to a JSON-native dict (the Phase enum becomes its string value)."""
     data: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "current_phase": state.current_phase.value}
@@ -116,12 +125,36 @@ def loads(text: str) -> LoopState:
     return from_dict(data)
 
 
-def save(state: LoopState, path: Path) -> None:
-    """Atomically write the state to ``path`` (temp sibling + os.replace); creates parent dirs."""
+def _atomic_write(path: Path, text: str) -> None:
+    """Durably + atomically write ``text`` to ``path``. A temp sibling is written and ``fsync``'d (so its
+    bytes are on disk), then ``os.replace``'d (atomic - no torn/truncated file), then the parent directory
+    is ``fsync``'d (so the rename itself survives a power-loss crash rather than silently rolling back to
+    the prior revision). Directory fsync is best-effort (some platforms disallow it)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}")
-    tmp.write_text(dumps(state), encoding="utf-8")
+    fd = os.open(str(tmp), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o644)
+    try:
+        os.write(fd, text.encode("utf-8"))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
     os.replace(tmp, path)  # atomic on POSIX + Windows
+    try:
+        dir_fd = os.open(str(path.parent), os.O_RDONLY)
+    except OSError:
+        return  # cannot open the directory to fsync it (e.g. Windows) - the replace is still atomic
+    try:
+        os.fsync(dir_fd)
+    except OSError:
+        pass
+    finally:
+        os.close(dir_fd)
+
+
+def save(state: LoopState, path: Path) -> None:
+    """Durably + atomically write the state to ``path`` (fsync'd temp + os.replace + dir fsync); creates
+    parent dirs. A crash cannot leave a torn/truncated file, nor silently roll back the last transition."""
+    _atomic_write(path, dumps(state))
 
 
 def load(path: Path) -> LoopState:
@@ -145,19 +178,34 @@ def _content_digest(state: LoopState) -> str:
     return "sha256:" + hashlib.sha256(dumps(state).encode("utf-8")).hexdigest()
 
 
-def _read_doc(path: Path) -> dict[str, Any] | None:
+def _read_doc(path: Path) -> Any:
+    """Return the parsed dict, the ``_ABSENT`` sentinel (the file does not exist - a normal first-write),
+    or ``None`` (the file EXISTS but is unreadable / not valid JSON / wrong-shaped - i.e. CORRUPT). The
+    absent-vs-corrupt distinction is what keeps a CAS writer from overwriting corruption as a fresh file."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, UnicodeDecodeError):
-        return None
-    return data if isinstance(data, dict) else None
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return _ABSENT
+    except (OSError, UnicodeDecodeError):
+        return None  # present but unreadable -> corrupt, NOT absent
+    try:
+        data = json.loads(text)
+    except (ValueError, RecursionError):
+        return None  # present but not valid JSON -> corrupt
+    return data if isinstance(data, dict) else None  # present but wrong shape -> corrupt
 
 
 def state_revision(path: Path) -> int:
-    """The persisted ``state_revision`` of a state file (0 if absent / unversioned / unreadable). This is
-    the value a concurrent writer passes back to :func:`save_cas` as ``expected_revision``."""
+    """The persisted ``state_revision`` of a state file: 0 for an ABSENT file (a first write is revision 1),
+    or the stored revision. A present-but-CORRUPT file raises :class:`CorruptStateFile` (a CAS writer must
+    not silently treat corruption as revision 0 and overwrite it, nor misreport it as a concurrent write).
+    This is the value a concurrent writer passes back to :func:`save_cas` as ``expected_revision``."""
     doc = _read_doc(path)
-    rev = doc.get("state_revision") if doc is not None else None
+    if doc is _ABSENT:
+        return 0
+    if not isinstance(doc, dict):
+        raise CorruptStateFile(f"state file {path} exists but is unreadable/corrupt; refusing to write over it")
+    rev = doc.get("state_revision")
     return rev if isinstance(rev, int) and not isinstance(rev, bool) and rev >= 0 else 0
 
 
@@ -178,16 +226,13 @@ def save_cas(state: LoopState, path: Path, expected_revision: int, *, writer_id:
                     f"state at {path} is revision {current}, not the expected {expected_revision} "
                     "(a concurrent writer moved it); reload before writing")
             prior = _read_doc(path)
-            previous_digest = prior.get("state_digest") if prior is not None else None
+            previous_digest = prior.get("state_digest") if isinstance(prior, dict) else None
             doc = to_dict(state)
             doc["state_revision"] = expected_revision + 1
             doc["writer_id"] = writer_id
             doc["previous_state_digest"] = previous_digest if isinstance(previous_digest, str) else None
             doc["state_digest"] = _content_digest(state)
-            tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}")
-            tmp.write_text(json.dumps(doc, sort_keys=True, ensure_ascii=True, indent=2) + "\n",
-                           encoding="utf-8")
-            os.replace(tmp, path)
+            _atomic_write(path, json.dumps(doc, sort_keys=True, ensure_ascii=True, indent=2) + "\n")
             return expected_revision + 1
     except LockError as exc:
         raise ConcurrentStateWrite(f"could not lock state {path} for a CAS write: {exc}") from exc

@@ -62,6 +62,34 @@ def test_a_future_dated_lock_is_not_broken_as_stale(tmp_path: Path) -> None:
         FileLock(tmp_path / "res", timeout=0.2, stale_after=1.0).acquire()
 
 
+def _a_dead_pid() -> int:
+    import subprocess  # a child that has EXITED -> its PID is not alive (until reused, unlikely in a test)
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    return proc.pid
+
+
+def test_a_live_holders_lock_is_not_broken_even_when_old(tmp_path: Path) -> None:
+    # Hardening D: PID-liveness - a lock whose recorded PID is ALIVE must NOT be broken, even past
+    # stale_after. So this lock is safe to hold across a long run; a waiter fails closed, never steals it.
+    lockfile = Path(str(tmp_path / "res") + ".lock")
+    lockfile.write_text(f"{os.getpid()} 1.0 {'a' * 32}\n")  # our own (live) PID, 3-field
+    ancient = time.time() - 10_000
+    os.utime(lockfile, (ancient, ancient))  # mtime far older than stale_after
+    with pytest.raises(LockTimeout):
+        FileLock(tmp_path / "res", timeout=0.2, stale_after=1.0).acquire()
+    assert lockfile.exists()  # the live holder's lock was kept, not broken
+
+
+def test_a_dead_holders_lock_is_broken_even_when_mtime_is_fresh(tmp_path: Path) -> None:
+    # PID-liveness also breaks a crashed holder PROMPTLY, without waiting for stale_after: a fresh-mtime
+    # lock whose PID is dead is broken so the next process is not deadlocked by a crash.
+    lockfile = Path(str(tmp_path / "res") + ".lock")
+    lockfile.write_text(f"{_a_dead_pid()} {time.time()} {'b' * 32}\n")  # dead PID, FRESH mtime
+    with FileLock(tmp_path / "res", timeout=1.0, stale_after=3600) as lock:  # broken despite the big bound
+        assert lock._token is not None and lockfile.exists()  # we acquired a fresh lock
+
+
 def test_release_only_removes_a_lock_we_still_own(tmp_path: Path) -> None:
     # #12: if another process broke our stale lock and re-created its OWN, our LATE release must not delete
     # that new lock. Simulate it: acquire, then overwrite the lockfile with a different owner token.

@@ -19,6 +19,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 from loop.controller import LoopState, Observation, Phase, apply  # noqa: E402
 from loop.store import (  # noqa: E402
     ConcurrentStateWrite,
+    CorruptStateFile,
     LoopStateError,
     dumps,
     from_dict,
@@ -157,3 +158,22 @@ def test_load_ignores_cas_metadata(tmp_path: Path) -> None:
     restored = load(p)  # the metadata keys are not LoopState content
     assert restored.goal == s.goal and restored.current_phase is s.current_phase
     assert restored.observations == s.observations
+
+
+def test_state_revision_distinguishes_absent_from_corrupt(tmp_path: Path) -> None:
+    # Hardening (rev-0): an ABSENT file is a normal first-write (revision 0); a present-but-CORRUPT file
+    # must NOT masquerade as revision 0 (which would let a CAS writer silently overwrite the corruption).
+    assert state_revision(tmp_path / "none.json") == 0  # absent -> first write
+    corrupt = tmp_path / "bad.json"
+    corrupt.write_text("{ not valid json", encoding="utf-8")
+    with pytest.raises(CorruptStateFile):
+        state_revision(corrupt)
+
+
+def test_save_cas_refuses_to_overwrite_a_corrupt_file(tmp_path: Path) -> None:
+    # A CAS writer over a corrupt file fails closed (CorruptStateFile) rather than clobbering it as a
+    # fresh revision-0 write or misreporting a concurrent conflict.
+    path = tmp_path / "s.json"
+    path.write_text("garbage{", encoding="utf-8")
+    with pytest.raises(CorruptStateFile):
+        save_cas(_mid_loop_state(), path, expected_revision=0, writer_id="w1")

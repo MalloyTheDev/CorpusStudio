@@ -6,19 +6,22 @@ unlinking it. Two guards keep a lock from wedging a campaign:
 
   * ``timeout`` bounds acquisition - a LIVE contended holder makes the waiter fail closed
     (:class:`LockTimeout`) rather than block forever.
-  * ``stale_after`` breaks a lock whose file is older than the bound - a holder that CRASHED without
-    releasing cannot deadlock the next process.
+  * a crashed holder is broken so it cannot deadlock the next process - but ONLY when it is genuinely
+    gone. Stale-breaking is PID-liveness first: the lockfile records the holder's PID, and a waiter breaks
+    the lock only if that PID is DEAD on this host (``os.kill(pid, 0)`` -> ``ProcessLookupError``). A LIVE
+    holder is never broken, even a long-running one whose file has aged past ``stale_after`` - so this lock
+    is safe to hold across a whole loop run, not just a quick ledger append.
 
 This is best-effort ADVISORY mutual exclusion between cooperating loop processes (they all take the lock
 before a read-modify-write). It is not a kernel mandatory lock and does not defend against a process that
 writes the protected file without taking the lock.
 
-Staleness is deliberately CROSS-PROCESS, so it can only use wall-clock time (the lockfile's ``st_mtime``
-vs ``time.time()``) - a monotonic clock is per-process and not comparable between the holder and the
-waiter. That makes stale-breaking approximate and clock-dependent: a wall-clock jump forward (e.g. an NTP
-step) can age a live lock early, and coarse mtime resolution can delay it. Keep ``stale_after`` well above
-the longest legitimate hold (the default 60s dwarfs a ledger append), so only a genuinely crashed holder
-is broken; a backward clock jump yields a negative age and is treated as NOT stale (the lock is kept).
+PID-liveness assumes a SAME-HOST holder (the loop's operational state lives on the local host). When the
+PID cannot be probed (a malformed lockfile, or a holder on another host over a shared FS), stale-breaking
+falls back to the wall-clock ``st_mtime`` vs ``time.time()`` bound - approximate and clock-dependent (an
+NTP step forward can age it early; a backward jump yields a negative age and is treated as NOT stale).
+Keep ``stale_after`` well above the longest legitimate hold. The break itself is ATOMIC (rename-to-claim),
+so two waiters can never both break a lock and the second delete a lock a third process just re-created.
 """
 
 from __future__ import annotations
@@ -83,20 +86,88 @@ class FileLock:
             self._fd, self._token = fd, token  # own it only AFTER the token is durably written
             return self
 
-    def _break_if_stale(self) -> None:
-        """Remove the lockfile if it is older than ``stale_after`` (its holder is presumed crashed). The
-        age is wall-clock (``time.time()`` vs ``st_mtime``) because staleness is cross-process - see the
-        module docstring for the clock-skew caveat. A negative age (future mtime from a backward clock
-        step) is NOT stale, so the lock is kept rather than broken under a clock jump."""
+    def _holder_pid(self) -> int | None:
+        """The PID recorded in the lockfile (``'<pid> <ts> <token>'``), or None if absent / malformed."""
         try:
-            age = time.time() - self.lock_path.stat().st_mtime
-        except FileNotFoundError:
-            return  # already gone - the next O_EXCL create will win
-        if age > self.stale_after:  # (a negative age never exceeds a positive stale_after -> kept)
+            fields = self.lock_path.read_text("ascii").split()
+        except (FileNotFoundError, OSError, UnicodeDecodeError):
+            return None
+        if len(fields) != 3:
+            return None
+        try:
+            return int(fields[0])
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _pid_is_alive(pid: int) -> bool:
+        """Whether a SAME-HOST holder process is still alive (``os.kill(pid, 0)``). This lets a live holder
+        keep its lock even past ``stale_after`` (a long-running writer is never wrongly broken). A holder on
+        another host (shared FS) cannot be probed and is handled by the mtime fallback in the caller."""
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False           # the holder crashed / exited without releasing
+        except (PermissionError, OSError):
+            return True            # PID exists (other user) / unknown -> fail SAFE: never break a live lock
+        return True
+
+    def _break_if_stale(self) -> None:
+        """Break a lock ONLY when its holder is genuinely gone, and break it ATOMICALLY.
+
+        Liveness first: if the recorded PID is ALIVE on this host, keep the lock at any age (a live
+        long-running writer must not be broken). Break only when the PID is DEAD (crashed), or - when the
+        PID is unknowable (malformed / cross-host holder) - when the wall-clock mtime is older than
+        ``stale_after`` (a negative age from a backward clock step is NOT stale). The break itself is atomic
+        (:meth:`_atomic_break`), fixing the TOCTOU where two waiters both ``unlink`` and the second deletes
+        a lock a third process just freshly created."""
+        pid = self._holder_pid()
+        if pid is not None:
+            if self._pid_is_alive(pid):
+                return  # live holder -> keep; the waiter times out (LockTimeout) rather than break it
+            stale = True  # holder PID is dead: crashed without releasing
+        else:
             try:
-                self.lock_path.unlink()
+                stale = (time.time() - self.lock_path.stat().st_mtime) > self.stale_after
             except FileNotFoundError:
-                pass  # someone else broke or released it first
+                return  # already gone - the next O_EXCL create will win
+        if stale:
+            self._atomic_break()
+
+    def _atomic_break(self) -> None:
+        """Remove a confirmed-stale lockfile by ATOMICALLY CLAIMING it first: rename it to a unique name.
+        ``os.rename`` is atomic, so exactly one racing waiter wins the claim; a loser's rename fails
+        (source gone) and it never deletes anyone's lock. If the claimed file turns out to be a LIVE lock
+        freshly re-created in the race window, it is restored (via an ``O_EXCL`` create that will not
+        clobber a newer lock) rather than broken."""
+        claimed = self.lock_path.with_name(f"{self.lock_path.name}.stale-{secrets.token_hex(8)}")
+        try:
+            os.rename(self.lock_path, claimed)  # only ONE waiter wins this; the rest fail here (safe)
+        except (FileNotFoundError, OSError):
+            return  # already claimed / broken by another waiter - do not touch the current lock
+        try:
+            pid = int(claimed.read_text("ascii").split()[0])
+        except (OSError, UnicodeDecodeError, ValueError, IndexError):
+            pid = -1  # unreadable/malformed -> treat as not-alive -> safe to discard
+        if pid >= 0 and self._pid_is_alive(pid):
+            # rare fresh/live capture: restore it WITHOUT clobbering a newer lock (O_EXCL create-only).
+            try:
+                content = claimed.read_bytes()
+            except OSError:
+                content = b""
+            try:
+                fd = os.open(str(self.lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            except FileExistsError:
+                pass  # a newer lock already holds the slot - leave it
+            else:
+                try:
+                    os.write(fd, content)
+                finally:
+                    os.close(fd)
+        try:
+            claimed.unlink()
+        except FileNotFoundError:
+            pass
 
     def release(self) -> None:
         if self._fd is not None:
