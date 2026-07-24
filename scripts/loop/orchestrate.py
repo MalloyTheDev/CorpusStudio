@@ -56,6 +56,7 @@ from loop.integrate import (
     merge_gate,
     observe_ci,
 )
+from loop.locking import FileLock, LockError
 from loop.observe import CsAssureRunner, LoopObserveError, _run_cs_assure, observe, record_evidence
 from loop.review import ReviewError, Reviewer, review, review_observation
 from loop.router import AgentRunner, PathVerifier, aggregate_observation, dispatch_wave
@@ -104,6 +105,7 @@ class LoopContext:
     run_cs_assure: CsAssureRunner = _run_cs_assure
     store_path: Path | None = None
     ledger_path: Path | None = None  # cross-goal learning ledger (seed at start, record at terminal)
+    lock_timeout: float = 10.0  # seconds to wait for the single-writer state-file lock before failing closed
     # Obligation-resolution records (injected, plain dicts) proving each blocking obligation was discharged
     # for the change set being merged. Empty by default -> a blocking obligation with no resolution ESCALATES
     # (re-review #14: never auto-merge on obligation identity). A producing runtime supplies these, each
@@ -480,9 +482,29 @@ def step(state: LoopState, ctx: LoopContext) -> Transition | None:
 
 
 def run_loop(state: LoopState, ctx: LoopContext, *, max_steps: int = 200) -> LoopState:
-    """Drive the fully-integrated loop to a terminal phase, a HOLD (paused on an external condition such
-    as CI - the caller re-invokes when it may change), or a HARD step cap (independent of the attempt
-    budget). Persists after each cycle when a store_path is set (crash-resumable)."""
+    """Drive the fully-integrated loop to a terminal phase, a HOLD, or a HARD step cap, persisting after
+    each cycle when a store_path is set (crash-resumable).
+
+    SINGLE-WRITER: when a store_path is set, the whole run is held under a :class:`FileLock` on the state
+    file, so a SECOND concurrent writer on the same file (another ``cs_loop run``, a campaign with a
+    duplicate goal id, a ``cs_loop observe/pause/...``) FAILS CLOSED instead of silently clobbering this
+    run's updates (the finding the CAS machinery was built for, now enforced on the live path). The lock is
+    safe to hold across a long run: ``locking.py`` uses PID-liveness, so a live holder is never broken.
+    A writer that cannot acquire escalates (in memory only; nothing was written) rather than run blind."""
+    if ctx.store_path is None:
+        return _drive_loop(state, ctx, max_steps)
+    try:
+        with FileLock(ctx.store_path, timeout=ctx.lock_timeout):
+            return _drive_loop(state, ctx, max_steps)
+    except LockError as exc:
+        state.current_phase = Phase.ESCALATED
+        state.termination_reason = f"state file {ctx.store_path} is locked by another writer: {exc}"
+        return state
+
+
+def _drive_loop(state: LoopState, ctx: LoopContext, max_steps: int) -> LoopState:
+    """The run body (under the single-writer lock when a store_path is set): seed cross-goal dead ends,
+    step to a terminal/HOLD/cap, and record this goal's dead ends."""
     if ctx.ledger_path is not None:
         # CROSS-GOAL LEARNING: seed this loop with prior goals' dead ends. A malformed ledger escalates
         # (fail-closed) rather than running blind.

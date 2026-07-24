@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CS_LOOP = REPO_ROOT / "scripts" / "cs_loop.py"
 if str(REPO_ROOT / "scripts") not in sys.path:
@@ -282,3 +284,17 @@ def test_authorize_refuses_when_not_escalated(tmp_path: Path) -> None:
     assert json.loads(_run(state, "authorize").stdout)["pending_authorization"] is None
     refused = _run(state, "authorize", "--request", "auth-whatever")
     assert refused.returncode == 2 and "not ESCALATED" in refused.stderr
+
+
+def test_state_write_lock_fails_closed_under_contention(tmp_path) -> None:
+    # Hardening E: the single-writer lock a mutating cs_loop command holds makes a concurrent writer fail
+    # closed (LockTimeout) rather than clobber - the load-modify-write is serialized on the state file.
+    from loop.locking import FileLock, LockTimeout
+    path = tmp_path / "s.json"
+    held = FileLock(path, timeout=1).acquire()  # simulate a `cs_loop run` already holding the state file
+    try:
+        with pytest.raises(LockTimeout):
+            with cs_loop._state_write_lock(path, timeout=0.2):
+                pass  # the command's read-modify-write never runs while another writer holds the file
+    finally:
+        held.release()
