@@ -298,3 +298,48 @@ def test_state_write_lock_fails_closed_under_contention(tmp_path) -> None:
                 pass  # the command's read-modify-write never runs while another writer holds the file
     finally:
         held.release()
+
+
+# Adapter variants for the capability gate (H) and exit-code taxonomy (I).
+_WRITE_ADAPTER = _ADAPTER.replace('pr_ref="1",', 'pr_ref="1", capabilities=frozenset({"write"}),')
+_DANGEROUS_ADAPTER = _ADAPTER.replace('pr_ref="1",', 'pr_ref="1", dangerous=True,')  # -> ESCALATED
+_HOLD_ADAPTER = _ADAPTER.replace('"bucket": "pass"', '"bucket": "pending"')          # -> HELD (CI pending)
+
+
+def test_run_refuses_a_write_capable_adapter_without_explicit_opt_in(tmp_path: Path) -> None:
+    # Hardening H: a write-capable adapter cannot be loaded/empowered without --allow-capabilities.
+    state = tmp_path / "loop.json"
+    _run(state, "init", "--goal", "g")
+    adapter = tmp_path / "w.py"
+    adapter.write_text(_WRITE_ADAPTER)
+    refused = _run(state, "run", "--adapters", str(adapter), "--repo-root", str(REPO_ROOT))
+    assert refused.returncode == 2 and "capabilities" in refused.stderr  # fail closed, nothing run
+    ok = _run(state, "run", "--adapters", str(adapter), "--repo-root", str(REPO_ROOT),
+              "--allow-capabilities", "write")
+    assert ok.returncode == 0, ok.stderr  # with the explicit opt-in it runs (finalizes)
+
+
+def test_run_exit_codes_distinguish_the_outcome(tmp_path: Path) -> None:
+    # Hardening I: FINALIZE 0 / ESCALATED 4 / STOPPED 5 / HELD 3 - the outcome no longer hides in stdout.
+    def run_case(name: str, src: str, *extra: str) -> int:
+        state = tmp_path / f"{name}.json"
+        _run(state, "init", "--goal", "g")
+        adapter = tmp_path / f"{name}.py"
+        adapter.write_text(src)
+        return _run(state, "run", "--adapters", str(adapter), "--repo-root", str(REPO_ROOT), *extra).returncode
+    assert run_case("fin", _ADAPTER) == 0                        # FINALIZE
+    assert run_case("esc", _DANGEROUS_ADAPTER) == 4              # ESCALATED (dangerous -> merge gate)
+    assert run_case("stp", _ADAPTER, "--max-steps", "1") == 5    # STOPPED (hard step cap)
+    assert run_case("held", _HOLD_ADAPTER) == 3                  # HELD (CI pending -> HOLD)
+
+
+def test_campaign_with_an_unfinalized_goal_exits_partial(tmp_path: Path) -> None:
+    # Hardening I: a campaign where not every goal finalized exits 6 (PARTIAL_CAMPAIGN), not 0.
+    goals = tmp_path / "goals.json"
+    goals.write_text(json.dumps([{"goal": "a", "goal_id": "g1"}]))
+    adapter = tmp_path / "d.py"
+    adapter.write_text(_DANGEROUS_ADAPTER)  # the goal ESCALATES, never finalizes
+    out = _run(tmp_path / "unused.json", "campaign", "--adapters", str(adapter), "--goals", str(goals),
+               "--repo-root", str(REPO_ROOT), "--store-dir", str(tmp_path / "camp"))
+    assert out.returncode == 6
+    assert not any(o["finalized"] for o in json.loads(out.stdout)["outcomes"])

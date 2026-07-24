@@ -57,8 +57,18 @@ def _state_write_lock(path: Path, *, timeout: float = DEFAULT_LOCK_TIMEOUT) -> "
     with FileLock(path, timeout=timeout):
         yield
 
-EXIT_OK = 0
-EXIT_FAIL_CLOSED = 2
+EXIT_OK = 0                 # FINALIZE - the goal completed
+EXIT_FAIL_CLOSED = 2        # a malformed / fail-closed invocation (refusal)
+EXIT_HOLD = 3              # non-terminal: paused on an external condition (e.g. CI) - re-invoke later
+EXIT_ESCALATED = 4        # terminal: needs a human (authorization / blocker / worker workflow)
+EXIT_STOPPED = 5          # terminal: budget exhausted / repeated dead end
+EXIT_PARTIAL_CAMPAIGN = 6  # a campaign where not every goal FINALIZED
+
+# A run's terminal phase -> its distinct exit code, so a supervisor/automation can tell FINALIZE from
+# ESCALATED / STOPPED without parsing stdout (the honesty-invariant footgun the re-review flagged).
+_TERMINAL_EXIT: "dict[Phase, int]" = {
+    Phase.FINALIZE: EXIT_OK, Phase.ESCALATED: EXIT_ESCALATED, Phase.STOPPED: EXIT_STOPPED,
+}
 # The loop's operational state (state file, per-goal campaign states, the learning ledger, and - since
 # they live inside the state - the proposal log + authorization records) defaults UNDER THE GIT DIR, not
 # in the worktree. A state file in the worktree would be a non-ignored untracked file that the change-set
@@ -139,7 +149,9 @@ def _cmd_observe(args: argparse.Namespace) -> int:
         "note": transition.note, "terminal": state.is_terminal,
         "termination_reason": state.termination_reason,
     })
-    return EXIT_OK
+    # A single OBSERVE step that reached a terminal phase gets the terminal exit code; a still-progressing
+    # loop is EXIT_OK (the caller re-invokes) - unlike `run`, a non-terminal step is not a HOLD.
+    return _TERMINAL_EXIT.get(state.current_phase, EXIT_OK) if state.is_terminal else EXIT_OK
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:
@@ -298,9 +310,31 @@ def _wire_ledger(ctx, ledger):  # noqa: ANN001,ANN202 - a LoopContext
     return ctx
 
 
+def _allowed_capabilities(args: argparse.Namespace) -> "frozenset[str]":
+    return frozenset(getattr(args, "allow_capabilities", None) or [])
+
+
+def _enforce_capabilities(ctx, allowed):  # noqa: ANN001,ANN202 - a LoopContext
+    """FAIL CLOSED if the adapter's context DECLARES an effect capability the operator did not permit via
+    ``--allow-capabilities``. A read-only / propose-only adapter declares none and always passes; a
+    write-capable adapter (e.g. ``capabilities={"write"}``) cannot be loaded and empowered without an
+    explicit operator opt-in - the machine-checkable boundary the #7 write-runtime is gated behind (it
+    complements, never replaces, the merge gate). A non-LoopContext is left to the run/campaign layer's
+    own fail-closed validation."""
+    from loop.orchestrate import LoopContext
+    if isinstance(ctx, LoopContext):
+        undeclared = frozenset(ctx.capabilities) - allowed
+        if undeclared:
+            raise LoopStateError(
+                f"adapter declares effect capabilities {sorted(undeclared)} not permitted by "
+                f"--allow-capabilities {sorted(allowed)}; a write-capable adapter needs explicit operator "
+                "opt-in (fail-closed - this is the write-runtime boundary)")
+    return ctx
+
+
 def _context(args: argparse.Namespace):  # noqa: ANN202 - a LoopContext
     ctx = _load_adapters(args.adapters).build_context(Path(args.repo_root), args.base)
-    return _wire_ledger(ctx, _default_ledger(args))
+    return _enforce_capabilities(_wire_ledger(ctx, _default_ledger(args)), _allowed_capabilities(args))
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -319,7 +353,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
            "termination_reason": state.termination_reason, "observations": len(state.observations),
            "tasks": [{"id": t.get("id"), "status": t.get("status")} for t in state.task_graph
                      if isinstance(t, dict)]})
-    return EXIT_OK
+    # Distinct exit code so automation can tell FINALIZE (0) from ESCALATED (4) / STOPPED (5) / HELD (3)
+    # without parsing stdout - a non-terminal run means it HOLDs on an external condition.
+    return _TERMINAL_EXIT.get(state.current_phase, EXIT_OK) if state.is_terminal else EXIT_HOLD
 
 
 def _goals_from_json(goals_raw: object):  # noqa: ANN202 - a list[loop.campaign.Goal]
@@ -357,6 +393,7 @@ def _cmd_campaign(args: argparse.Namespace) -> int:
     goals = _goals_from_json(goals_raw)
     store_dir = _campaign_store_dir(args)
     ledger = _default_ledger(args)
+    allowed = _allowed_capabilities(args)
     factory = getattr(module, "build_context_for_goal", None)
     if callable(factory):  # callable, not merely present - a non-callable attribute is not a factory
         # PER-GOAL ISOLATION: the adapter exposes a factory, so each goal gets its OWN LoopContext (the
@@ -364,14 +401,17 @@ def _cmd_campaign(args: argparse.Namespace) -> int:
         # write-capable multi-goal campaign, where a shared working tree would let goals clobber each other.
         def context_for(goal):  # noqa: ANN001,ANN202 - a LoopContext
             gctx = factory(goal, Path(args.repo_root), args.base, store_dir)
-            return _wire_ledger(gctx, ledger)
+            return _enforce_capabilities(_wire_ledger(gctx, ledger), allowed)  # per-goal capability gate
         outcomes = run_campaign(goals, context_for=context_for, store_dir=store_dir, max_steps=args.max_steps)
     else:
-        ctx = _wire_ledger(module.build_context(Path(args.repo_root), args.base), ledger)
+        ctx = _enforce_capabilities(_wire_ledger(module.build_context(Path(args.repo_root), args.base),
+                                                 ledger), allowed)
         outcomes = run_campaign(goals, ctx, store_dir=store_dir, max_steps=args.max_steps)
     _emit({"outcomes": [{"goal_id": o.goal_id, "final_phase": o.final_phase, "finalized": o.finalized,
                          "status": o.status} for o in outcomes]})
-    return EXIT_OK
+    # A campaign is a success only if EVERY goal finalized; otherwise it's a partial campaign (distinct
+    # exit code) so a supervisor sees that some goal escalated / was held / skipped.
+    return EXIT_OK if all(o.finalized for o in outcomes) else EXIT_PARTIAL_CAMPAIGN
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -421,6 +461,10 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--ledger", default="",
                        help="cross-goal learning ledger JSON (default: <git-dir>/corpusstudio-loop/ledger.json)")
         p.add_argument("--max-steps", type=int, default=200)
+        p.add_argument("--allow-capabilities", nargs="*", default=[], metavar="CAP",
+                       help="effect capabilities the adapter is PERMITTED to declare (e.g. write merge); "
+                            "empty = read-only/propose-only only. A write-capable adapter is REFUSED "
+                            "without the matching opt-in (fail-closed) - the write-runtime boundary")
         if name == "campaign":
             p.add_argument("--goals", required=True, help="JSON list of {goal, goal_id, depends_on?}")
             p.add_argument("--store-dir", default="",

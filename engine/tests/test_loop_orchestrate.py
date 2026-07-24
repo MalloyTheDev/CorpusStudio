@@ -338,6 +338,20 @@ def test_multi_agent_execute_enforces_the_worktree_verifier() -> None:
     assert next(x for x in state.task_graph if x["id"] == "a")["status"] == "FAILED"
 
 
+def test_write_capable_multi_agent_wave_requires_independent_verify_paths() -> None:
+    # Hardening H: a write-capable delegated wave must NOT fall back to agent self-report - construction
+    # refuses a write-capable + multi_agent context with no verify_paths (the boundary #7 relies on).
+    from loop.orchestrate import CAP_WRITE
+    def runner(task):
+        return AgentResult(task.id, Observation.SUCCESS, changed_paths=[])
+    with pytest.raises(LoopOrchestrateError, match="verify_paths"):
+        LoopContext(repo_root=REPO_ROOT, executor=_executor(), capabilities=frozenset({CAP_WRITE}),
+                    multi_agent=True, agent_runner=runner)  # no verify_paths -> refused
+    # with an independent verify_paths it is allowed (and a read-only wave never needs it)
+    LoopContext(repo_root=REPO_ROOT, executor=_executor(), capabilities=frozenset({CAP_WRITE}),
+                multi_agent=True, agent_runner=runner, verify_paths=lambda base: [])
+
+
 def test_verify_paths_without_multi_agent_fails_loud() -> None:
     # A verify_paths set while multi_agent is off would silently do nothing -> construction must fail loud.
     with pytest.raises(LoopOrchestrateError, match="verify_paths requires multi_agent"):
