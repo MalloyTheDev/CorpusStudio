@@ -84,6 +84,16 @@ may *do*:
 - A **write-capable** adapter (real agent spawning + the autonomous merge path) is a later, review-gated
   step needing explicit human authorization; its seams (`verify_paths`, `expected_head`, `required_checks`,
   `context_for`) already exist, and adapter code is under the `loop-controller-self-modify` obligation.
+- **Capability gate (machine-checkable).** An adapter's `LoopContext` DECLARES its effect
+  `capabilities` (empty = read-only / propose-only, the default). `cs_loop run` / `campaign` **refuse**
+  (exit 2, fail-closed) to run a context that declares a capability the operator did not permit via
+  `--allow-capabilities` — so a write-capable adapter cannot be loaded and empowered silently; it is the
+  boundary the #7 write-runtime is gated behind (it complements, never replaces, the merge gate).
+  Additionally, a **write-capable + multi-agent** context with no `verify_paths` is refused at
+  construction (a delegated wave that can write must not fall back to agent self-report).
+- **Exit-code taxonomy** (so automation reads the outcome without parsing stdout): `cs_loop run` →
+  `0` FINALIZE, `3` HELD (paused on CI), `4` ESCALATED, `5` STOPPED; `campaign` → `6` when not every goal
+  finalized; `2` is a fail-closed refusal throughout.
 
 ## The fact / judgment seam
 

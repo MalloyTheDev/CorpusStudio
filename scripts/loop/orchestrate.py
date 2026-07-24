@@ -74,6 +74,15 @@ class LoopOrchestrateError(Exception):
     """A phase handler produced a non-Observation, or an effect returned uncomputable evidence."""
 
 
+# Declared adapter EFFECT CAPABILITIES. An adapter's build_context sets LoopContext.capabilities; the empty
+# default is READ-ONLY / propose-only (the shipped dry-run adapter). A capability that can mutate the repo
+# or remote is "write-like" - a machine-checkable declaration a runtime (cs_loop) refuses to run without an
+# explicit operator opt-in (least-capable-first; complements, never replaces, the merge gate).
+CAP_WRITE = "write"   # edits source / commits / pushes / opens or mutates PRs (a write-capable runner)
+CAP_MERGE = "merge"   # performs an autonomous merge
+WRITE_CAPABILITIES: frozenset[str] = frozenset({CAP_WRITE, CAP_MERGE})
+
+
 @dataclass
 class LoopContext:
     """The injected effects + config for one integrated loop run."""
@@ -84,6 +93,10 @@ class LoopContext:
     reviewer: Reviewer | None = None
     critic: Critic | None = None
     agent_runner: AgentRunner | None = None
+    # The effect capabilities this adapter's context DECLARES (empty = read-only / propose-only). A runtime
+    # (cs_loop) refuses to run a context declaring a capability the operator did not explicitly permit, so a
+    # write-capable adapter cannot be loaded and empowered silently. See CAP_WRITE / CAP_MERGE.
+    capabilities: frozenset[str] = frozenset()
     # An INDEPENDENT worktree-diff source for boundary enforcement. When set, a delegated agent's ownership
     # boundary is checked against the real diff, not its self-reported changed_paths. None = trust-based.
     verify_paths: PathVerifier | None = None
@@ -120,6 +133,13 @@ class LoopContext:
         # operator could believe boundary verification is active when it is not - fail LOUD instead.
         if self.verify_paths is not None and not self.multi_agent:
             raise LoopOrchestrateError("verify_paths requires multi_agent=True (it only bounds delegated agents)")
+        # WRITE-CAPABLE MULTI-AGENT needs INDEPENDENT boundary enforcement: a delegated wave that can write
+        # must not fall back to the agent's SELF-REPORTED changed paths (an agent could under-report to edit
+        # out of lane). Refuse the config at construction rather than silently trust self-report.
+        if self.capabilities & WRITE_CAPABILITIES and self.multi_agent and self.verify_paths is None:
+            raise LoopOrchestrateError(
+                "a write-capable multi-agent context requires an independent verify_paths (boundary "
+                "enforcement must not fall back to agent self-report when agents can write)")
 
 
 @dataclass(frozen=True)
