@@ -37,7 +37,7 @@ from typing import Any, Iterator, Protocol
 from loop.completeness import Criterion, CriterionKind
 from loop.controller import LoopState, Observation, Phase
 from loop.driver import Directive
-from loop.orchestrate import LoopContext
+from loop.orchestrate import LoopContext, LoopOrchestrateError
 from loop_adapters.dry_run import read_only_gh  # the same default-deny read-only gh the dry run uses
 
 _AGENT_TIMEOUT_S = 300  # a bounded, killable agent call - never an unbounded hang
@@ -121,8 +121,11 @@ class AgentClient(Protocol):
         ...
 
 
-class AgentError(RuntimeError):
-    """The agent transport failed or returned output the adapter refuses to trust (fail-closed)."""
+class AgentError(LoopOrchestrateError):
+    """The agent transport failed or returned output the adapter refuses to trust (fail-closed).
+
+    Subclasses :class:`LoopOrchestrateError` so a routine transport/validation refusal escalates as an
+    EXPECTED operational failure rather than being labelled a likely controller bug with a traceback."""
 
 
 def _validate_proposal(raw: Any) -> tuple[str, str]:

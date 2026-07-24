@@ -53,15 +53,19 @@ def _green_verify():
                         "fired_obligations": [], "change_set_fingerprint": "cs:x"}}
 
 
-def _assure_runner(*, obligations=()):
-    """A fake cs_assure. `impact` drives the STATIC CANDIDATE assurance in the executor (fired obligations
-    block/route the publish); `verify`/`doclint`/`changeset` drive the loop's own dev-tree OBSERVE/VERIFY.
-    `impact` executes NO code - candidate assurance is deliberately static (no untrusted pytest locally)."""
+def _assure_runner(*, obligations=(), worker_reachable=()):
+    """A fake cs_assure. `impact` + `worker-reachability` drive the STATIC CANDIDATE assurance in the
+    executor (a fired obligation, or a changed path inside the worker import closure, blocks/routes the
+    publish); `verify`/`doclint`/`changeset` drive the loop's own dev-tree OBSERVE/VERIFY. Neither
+    candidate subcommand executes candidate code - assurance is deliberately static."""
     rec = {
         "impact": {"record_digest": "sha256:imp",
                    "payload": {"fired_obligations": [{"id": o, "severity": "blocking"} for o in obligations],
                                "base_policy_available": True, "change_set_fingerprint": "cs:x"},
                    "provenance": {"policy_digest": "sha256:p"}},
+        "worker-reachability": {"payload": {"undeclared_reachable": list(worker_reachable),
+                                            "worker_roots": [], "added_reachable": [],
+                                            "distribution_impacting_paths": []}},
         "verify": _green_verify(),
         "changeset": {"payload": {"changed_paths": []}},
         "doclint": {"finding_count": 0},
@@ -229,7 +233,9 @@ def test_a_clear_candidate_publishes_and_records_the_assurance(tmp_path: Path) -
     assert _g(remote, "show", f"cs-agent/g1:{_TARGET}").stdout == "new = 2\n"
     ca = state.review_state["candidate_assurance"]
     assert ca["published"] is True and ca["observation"] == "SUCCESS"
-    assert "sha256:imp" in state.assurance_records  # the candidate impact digest is on the audit trail
+    # the candidate impact digest is an AUDIT field only - deliberately NOT in assurance_records, which
+    # feeds the completeness check (see test_the_candidates_own_analysis_is_not_completeness_evidence)
+    assert ca["impact_record_digest"] == "sha256:imp"
 
 
 def test_candidate_assurance_targets_the_candidate_worktree_not_the_dev_tree(tmp_path: Path) -> None:
@@ -412,3 +418,62 @@ def test_branch_suffix_is_sanitized_to_a_safe_ref() -> None:
     assert saw._sanitize_branch_suffix("a..b") == "a-b" and ".." not in saw._sanitize_branch_suffix("a..b")
     assert saw._sanitize_branch_suffix("") == "goal" and saw._sanitize_branch_suffix("...--__") == "goal"
     assert len(saw._sanitize_branch_suffix("x" * 100)) <= 40
+
+
+def test_the_worker_import_closure_blocks_the_publish(tmp_path: Path) -> None:
+    # HIGH (4th pass): the worker-closure OBLIGATION only flags the 7 DECLARED worker files, but the
+    # worker's REAL import closure is far wider (43 undeclared-reachable modules on this repo) and those
+    # sit INSIDE the writable surface - so editing one changes worker bytes with the lineage gate silent.
+    root, remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    assure = _assure_runner(worker_reachable=[_TARGET])   # the candidate's file IS worker-reachable
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, _StubAgent(), calls, assure=assure), max_steps=25)
+    assert ("pr", "create") not in [c[:2] for c in calls]
+    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
+    assert state.review_state["candidate_assurance"]["observation"] == "WORKER_LINEAGE_IMPACT"
+
+
+def test_an_unusable_worker_reachability_record_fails_closed(tmp_path: Path) -> None:
+    # an uncomputable closure must never read as "touches no worker code"
+    with pytest.raises(saw.WriteAdapterError):
+        saw._worker_reachable_paths(tmp_path, "main", lambda _r, *a: (2, "", "refused"))
+    with pytest.raises(saw.WriteAdapterError):
+        saw._worker_reachable_paths(tmp_path, "main", lambda _r, *a: (0, "not json", ""))
+
+
+def test_the_candidates_own_analysis_is_not_completeness_evidence(tmp_path: Path) -> None:
+    # The candidate's OWN static analysis must NOT enter state.assurance_records: that index feeds the
+    # semantic completeness check, and seeding it lets an untrusted executor supply the evidence a later
+    # DETERMINISTIC criterion is proven by (the cross-step self-certification vector).
+    root, _remote = _repo_with_remote(tmp_path)
+    state = LoopState(goal="tidy", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, _StubAgent(), []))
+    assert state.review_state["candidate_assurance"]["impact_record_digest"] == "sha256:imp"  # audited...
+    assert "sha256:imp" not in state.assurance_records                                        # ...not evidence
+
+
+def test_an_allowlist_refusal_is_an_expected_operational_error() -> None:
+    # A denied path is this adapter's PRIMARY SAFETY MECHANISM and normal operation - it must escalate
+    # labelled as an operational refusal, not as "UNEXPECTED ... (a likely controller bug)" with a traceback.
+    from loop.orchestrate import _EXPECTED_DISPATCH_ERRORS
+    assert issubclass(saw.WriteAdapterError, _EXPECTED_DISPATCH_ERRORS)
+    assert issubclass(saw.AgentError, _EXPECTED_DISPATCH_ERRORS)
+
+
+def test_a_gh_failure_after_the_push_still_records_the_live_branch(tmp_path: Path) -> None:
+    # The push already put an agent-authored branch on the remote (CI may be running on it). A human
+    # triaging the escalation must SEE that, not an empty review_state.
+    root, remote = _repo_with_remote(tmp_path)
+
+    def gh_fails(*argv: str) -> tuple[int, str, str]:
+        return (1, "", "boom") if argv[:2] == ("pr", "create") else (0, "", "")
+    ctx = saw.build_context(root, "main", agent_client=_StubAgent(), proposals_dir=tmp_path / "p",
+                            worktrees_dir=tmp_path / "wt", gh_runner=gh_fails,
+                            run_cs_assure=_cs_assure_green())
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, ctx, max_steps=25)
+    assert state.current_phase is Phase.ESCALATED
+    assert "cs-agent/g1" in _g(remote, "branch", "--list", "cs-agent/g1").stdout   # the branch IS live...
+    ca = state.review_state["candidate_assurance"]                                  # ...and it is recorded
+    assert ca["published"] is True and "PR not yet opened" in ca["reason"]

@@ -63,7 +63,7 @@ from typing import Any, Callable, Iterator
 
 from loop.controller import HUMAN_GATED_OBLIGATIONS, LoopState, Observation, Phase
 from loop.driver import Directive
-from loop.orchestrate import CAP_WRITE, LoopContext
+from loop.orchestrate import CAP_WRITE, LoopContext, LoopOrchestrateError
 from loop_adapters.single_agent import (
     AgentClient,
     AgentError,
@@ -439,8 +439,13 @@ _GH_WRITE_ALLOWED = frozenset({
 })
 
 
-class WriteAdapterError(RuntimeError):
-    """A git/gh write effect failed or produced output the adapter refuses to trust (fail-closed)."""
+class WriteAdapterError(LoopOrchestrateError):
+    """A git/gh write effect failed, or the adapter REFUSED the candidate (fail-closed).
+
+    Subclasses :class:`LoopOrchestrateError` so the controller counts it among its EXPECTED operational
+    refusals. An allowlist refusal is this adapter's PRIMARY SAFETY MECHANISM and normal operation - it
+    must escalate labelled as an operational refusal, not as "unrecoverable UNEXPECTED ... (a likely
+    controller bug)" with a traceback accumulated in ``review_state`` on every denied path."""
 
 
 def write_gh(repo_root: Path | str) -> Callable[..., "tuple[int, str, str]"]:
@@ -501,7 +506,32 @@ def _apply_worktree(repo_root: Path, base_oid: str, worktrees_dir: Path) -> Iter
             pass  # best-effort disposal; a leftover worktree is GC-able, never data loss
 
 
-def _assure_candidate(wt: Path, base: str, run_cs_assure: Any) -> tuple[Observation, str, str | None]:
+def _worker_reachable_paths(wt: Path, base: str, run_cs_assure: Any) -> frozenset[str]:
+    """Every path in the WORKER'S REAL IMPORT CLOSURE for the candidate (declared + undeclared-reachable),
+    via ``cs_assure worker-reachability``. FAIL-CLOSED: a refusal / unusable record raises, so an
+    uncomputable closure never reads as "touches no worker code"."""
+    code, out, err = run_cs_assure(wt, "worker-reachability", "--base", base)
+    if code != 0:
+        raise WriteAdapterError(f"candidate worker-reachability refused (exit {code}): {err.strip()[:200]}")
+    try:
+        payload = json.loads(out).get("payload")
+    except (ValueError, RecursionError, AttributeError) as exc:
+        raise WriteAdapterError(f"candidate worker-reachability produced no usable JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise WriteAdapterError("candidate worker-reachability record has no payload object")
+    paths: set[str] = set()
+    for key in ("undeclared_reachable", "worker_roots", "added_reachable", "distribution_impacting_paths"):
+        entries = payload.get(key)
+        if entries is None:
+            continue
+        if not isinstance(entries, list):
+            raise WriteAdapterError(f"worker-reachability {key!r} is not a list (malformed record)")
+        paths.update(e for e in entries if isinstance(e, str))
+    return frozenset(paths)
+
+
+def _assure_candidate(wt: Path, base: str, run_cs_assure: Any,
+                      changed_paths: list[str]) -> tuple[Observation, str, str | None]:
     """STATIC candidate assurance: classify the candidate via ``cs_assure impact`` (obligation / policy
     analysis over the diff) and return ``(observation, reason, impact_record_digest)``. ``SUCCESS`` = clear
     to publish; a human-gated / worker-closure / other blocking obligation returns the routing observation
@@ -543,6 +573,16 @@ def _assure_candidate(wt: Path, base: str, run_cs_assure: Any) -> tuple[Observat
         return Observation.AUTHORIZATION_REQUIRED, f"candidate fires {', '.join(human)} (human review)", digest
     if "worker-closure" in ids:
         return Observation.WORKER_LINEAGE_IMPACT, "candidate touches worker-execution bytes", digest
+    # The worker-closure OBLIGATION only flags the 7 DECLARED worker files - the policy says so itself.
+    # But the worker's REAL import closure is far wider (measured: 43 undeclared-reachable modules on this
+    # repo, e.g. platform/worker_protocol.py and platform/backends.py, imported at module level by
+    # platform/worker.py) and those sit INSIDE the writable surface. Editing one changes worker execution
+    # bytes with the lineage gate silent, so consult the reachability analysis too and route it the same way.
+    reach = _worker_reachable_paths(wt, base, run_cs_assure)
+    hit = sorted(p for p in changed_paths if p in reach)
+    if hit:
+        return (Observation.WORKER_LINEAGE_IMPACT,
+                f"candidate touches the worker import closure: {', '.join(hit[:4])}", digest)
     blocking = sorted(o["id"] for o in fired if isinstance(o, dict)
                       and o.get("severity") == "blocking" and isinstance(o.get("id"), str))
     if blocking:
@@ -556,8 +596,11 @@ def _record_candidate_assurance(state: LoopState, record: dict[str, Any], branch
     impact classified for the candidate worktree, why, whether it was published, and the sealed impact
     digest. Kept OUT of the completeness ``evidence`` index (a clean candidate is not a human sign-off - the
     merge stays human-gated via the critic)."""
-    if impact_digest and impact_digest not in state.assurance_records:
-        state.assurance_records.append(impact_digest)
+    # DELIBERATELY NOT appended to state.assurance_records: that index feeds the semantic completeness
+    # check, and this digest is the CANDIDATE'S OWN static self-analysis. Seeding it would let an untrusted
+    # executor supply the evidence a DETERMINISTIC criterion is later proven by - exactly the cross-step
+    # self-certification vector completeness.py says the #7 write runtime must not open. It is recorded
+    # below as an audit field only.
     state.review_state["candidate_assurance"] = {
         "record_digest": record["record_digest"], "branch": branch,
         "observation": observation.value, "reason": reason,
@@ -626,7 +669,8 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
             # code-executing gate (running the untrusted candidate's pytest locally would be arbitrary code
             # execution with the operator's env; the dynamic gate is CI's job on the opened PR). A refusal
             # raises here -> the loop escalates (fail closed).
-            observation, reason, impact_digest = _assure_candidate(wt, base, run_cs_assure)
+            realized = [r.path for r in _realized_changes(wt, base_oid) if r.path]
+            observation, reason, impact_digest = _assure_candidate(wt, base, run_cs_assure, realized)
             if observation is not Observation.SUCCESS:
                 # The candidate is NOT clear -> publish NOTHING. Record the block and return the classified
                 # observation so the controller routes it (human-gated / worker / policy -> escalate).
@@ -643,6 +687,12 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
             # detached HEAD - no local branch was ever created) and open a PR. NEVER merges. CI runs the
             # dynamic gate on the PR in its sandbox; a human merges only on green.
             _git(wt, "push", "-u", "origin", f"HEAD:refs/heads/{branch}")
+            # Record the PUSH immediately: the branch is now live on the remote (and CI may already be
+            # running on it). If `gh pr create` fails below we raise, and the human triaging that escalation
+            # must be able to SEE the orphaned branch rather than find an empty review_state.
+            _record_candidate_assurance(state, record, branch, observation,
+                                        f"{reason}; branch pushed, PR not yet opened", impact_digest,
+                                        published=True)
             code, pr_out, err = gh_runner("pr", "create", "--head", branch, "--base", base,
                                           "--title", (state.goal or "agent change")[:120],
                                           "--body", rationale or "Opened by the single-agent write runtime (7.1).")
