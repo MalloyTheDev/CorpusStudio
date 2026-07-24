@@ -141,10 +141,17 @@ def _trusted_cs_assure(repo_root: Path, run_cs_assure: Any):  # noqa: ANN202
 #   * NO CREATES AT ALL (status must be `M`). A new file is how every remaining execution trick lands: a
 #     `conftest.py` is auto-executed by pytest; `engine/tests` has NO `__init__.py`, so pytest puts it on
 #     `sys.path[0]` and a new `engine/tests/json.py` would shadow stdlib for the whole process.
-#   * `engine/tests/test_*.py` is deliberately NOT writable yet, even though "add a missing test" is a
-#     named first target: CI triggers on a bare `push:` with no `persist-credentials: false` anywhere in
-#     `.github/`, so an agent-authored test would EXECUTE on the runner with a GITHUB_TOKEN readable from
-#     `.git/config` before any human sees the PR. Allowing it needs that CI hardening first (its own PR).
+#   * `engine/tests/test_*.py` is NOT writable yet even though "add a missing test" is a named first
+#     target - a new test file is a CREATE, and creates are refused wholesale here.
+#
+# HONEST CAVEAT about CI (an adversarial pass caught the earlier version of this comment being wrong):
+# pushing ANY candidate hands it to CI, which EXECUTES it - `engine-tests.yml` triggers on a bare `push:`
+# and runs `pytest --cov=corpus_studio`, and the suite imports the product modules, so a modified
+# `engine/corpus_studio/**` file runs at collection. That is the SAME pre-review execution exposure the
+# comment previously cited to exclude `engine/tests/**`; it applies to the allowed surface too, and
+# "a human merges only on green" does not undo code that already ran. So the exposure is now a
+# MACHINE-ENFORCED PRECONDITION, not a caveat: `_ci_executes_candidates_with_credentials` refuses to
+# publish until every workflow checks out with `persist-credentials: false`.
 _WRITABLE_GLOBS: tuple[str, ...] = (
     "engine/corpus_studio/**/*.py",
 )
@@ -157,10 +164,20 @@ _SAFE_BASENAME = re.compile(r"[a-z0-9][a-z0-9_]*\.py\Z")
 _MODE_REGULAR = "100644"
 
 # Bounds. The stated first target is a SINGLE-file change; a merge-sized diff is not something a human
-# reviewer skims, so it is refused outright rather than published.
+# reviewer skims, so it is refused outright rather than published. BYTES are bounded as well as LINES:
+# a line count alone is trivially evaded by putting ~1 MiB on ONE physical line (measured: a 990 KB
+# single-line payload reported as "1 insertion(+)"), which defeats the whole point of the bound.
 _MAX_CHANGED_PATHS = 2
 _MAX_CHANGED_LINES = 60
-_MAX_BLOB_BYTES = 1 << 20  # never slurp an untrusted blob larger than 1 MiB into memory
+_MAX_CHANGED_BYTES = 8 * 1024   # total added bytes across the candidate - a human-skimmable change
+_MAX_LINE_BYTES = 400           # no single line may hide a payload
+_MAX_BLOB_BYTES = 1 << 20       # never slurp an untrusted blob larger than 1 MiB into memory
+_MAX_RATIONALE_BYTES = 4096     # agent prose reaches the commit message + PR body; bound it
+
+# Control characters that must never appear in candidate content or agent prose: bidi overrides can make
+# the rendered diff differ from the executed source, and a lone CR fakes line counts in a review UI.
+_FORBIDDEN_CONTROLS = re.compile(
+    "[‪-‮⁦-⁩​-‏﻿\r\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 # Credential SHAPES scanned in the candidate's REALIZED BLOB CONTENT (never the diff's `+` lines: a
 # `copy from secrets/deploy.pem` delivers the bytes with zero `+` lines, and `.gitattributes` eol
@@ -177,6 +194,57 @@ _SECRET_PATTERNS: tuple[tuple["re.Pattern[str]", str], ...] = (
     (re.compile(r"""(?i)(?:secret|password|passwd|api[_-]?key|access[_-]?token)\s*[=:]\s*['"][^'"]{12,}['"]"""),
      "a hardcoded credential"),
 )
+
+
+def _scan_text(text: str, what: str) -> list[str]:
+    """Reasons a piece of AGENT-CONTROLLED PROSE must not be published (empty = clear).
+
+    The rationale reaches the pushed commit message AND the ``gh pr create --body`` verbatim, so it leaves
+    the machine exactly like file content does - but it is not a blob, so the blob scan never sees it.
+    Measured: moving a ``.pem``'s bytes from the diff into the rationale published a private key to the
+    remote and the PR while every content check passed. Prose is therefore bounded and scanned with the
+    SAME credential patterns."""
+    reasons: list[str] = []
+    if len(text.encode("utf-8", "replace")) > _MAX_RATIONALE_BYTES:
+        reasons.append(f"{what} exceeds {_MAX_RATIONALE_BYTES} bytes")
+    if _FORBIDDEN_CONTROLS.search(text):
+        reasons.append(f"{what} contains bidi/control characters")
+    for pat, label in _SECRET_PATTERNS:
+        if pat.search(text):
+            reasons.append(f"{what} contains {label}")
+            break
+    return reasons
+
+
+def _ci_executes_candidates_with_credentials(repo_root: Path) -> str | None:
+    """A REFUSAL REASON if this repo's CI would execute an agent-authored change with credentials before a
+    human reviews it, else None. Read from the TRUSTED dev tree.
+
+    Why this is a gate and not a caveat: the whole "delegate the dynamic gate to CI's isolated sandbox"
+    story assumes CI runs the candidate *safely*. Measured on this repo, it does not - ``engine-tests.yml``
+    triggers on a bare ``push:`` (no branch filter), runs ``pytest --cov=corpus_studio`` (and the tests
+    import the product modules, so a candidate's code executes at collection), checks out with
+    ``actions/checkout`` and NO ``persist-credentials: false`` (leaving the token in ``.git/config``), and
+    the same job holds ``secrets.CODECOV_TOKEN``. So pushing runs untrusted code in a secret-bearing
+    environment STRICTLY BEFORE review, and declining to merge does not undo it.
+
+    Rather than document that as a known gap, the adapter REFUSES TO PUBLISH until the repo is hardened -
+    the prerequisite becomes machine-enforced and fail-closed. stdlib-only, so this is a conservative text
+    scan (no YAML parser): every checkout step must opt out of credential persistence."""
+    wf_dir = repo_root / ".github" / "workflows"
+    if not wf_dir.is_dir():
+        return None  # no CI at all -> nothing auto-executes the candidate
+    for wf in sorted(wf_dir.glob("*.yml")) + sorted(wf_dir.glob("*.yaml")):
+        try:
+            text = wf.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return f"cannot read {wf.name} to verify CI safety: {exc}"  # fail closed
+        if "uses: actions/checkout" not in text:
+            continue
+        if text.count("uses: actions/checkout") > text.count("persist-credentials: false"):
+            return (f".github/workflows/{wf.name} checks out without 'persist-credentials: false', so a "
+                    "pushed candidate would execute with a credential-bearing checkout before review")
+    return None
 
 
 def _compile_pathglob(glob: str) -> "re.Pattern[str]":
@@ -331,6 +399,15 @@ def _classify_candidate_changes(wt: Path, base_oid: str) -> list[str]:
         if content is None:
             reasons.append(f"{rec.path} (binary or non-UTF-8 content)")
             continue
+        # A single enormous line is how a ~1 MiB payload hides behind "1 insertion(+)", and bidi /
+        # control characters make the RENDERED diff differ from the EXECUTED source.
+        longest = max((len(line.encode("utf-8", "replace")) for line in content.splitlines()), default=0)
+        if longest > _MAX_LINE_BYTES:
+            reasons.append(f"{rec.path} has a {longest}-byte line (> {_MAX_LINE_BYTES})")
+            continue
+        if _FORBIDDEN_CONTROLS.search(content):
+            reasons.append(f"{rec.path} contains bidi/control characters")
+            continue
         for pat, label in _SECRET_PATTERNS:
             if pat.search(content):
                 reasons.append(f"{rec.path} contains {label}")
@@ -345,6 +422,11 @@ def _classify_candidate_changes(wt: Path, base_oid: str) -> list[str]:
         touched += int(added) + int(removed)
     if touched > _MAX_CHANGED_LINES:
         reasons.append(f"changes {touched} lines (> {_MAX_CHANGED_LINES}; needs human review)")
+    # BYTES as well as lines: `git diff --cached` is the patch a reviewer actually reads, and a line
+    # count alone does not bound it (measured: ~990 KB on one physical line reports "1 insertion(+)").
+    patch_bytes = len(_git(wt, "diff", "--cached", "--no-renames", base_oid).stdout.encode("utf-8", "replace"))
+    if patch_bytes > _MAX_CHANGED_BYTES:
+        reasons.append(f"the patch is {patch_bytes} bytes (> {_MAX_CHANGED_BYTES}; needs human review)")
     return reasons
 
 # gh subcommands the WRITE adapter permits: the read-only allowlist PLUS ``pr create``. Everything else -
@@ -532,6 +614,9 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
             #    bounds + a secret scan over realized BLOB CONTENT. This is the layer that sees a
             #    `rename from` source (as its own D record) and a `copy from` payload (as blob bytes).
             violations = _classify_candidate_changes(wt, base_oid)
+            # The rationale is agent-controlled prose that reaches the commit message AND the PR body
+            # verbatim - it leaves the machine like content does, so it gets the same scan + bounds.
+            violations += _scan_text(rationale, "the rationale") + _scan_text(state.goal or "", "the goal")
             if violations:
                 raise WriteAdapterError("refusing the candidate: " + "; ".join(violations[:8]))
             _git(wt, "-c", "user.name=corpusstudio-agent", "-c", "user.email=agent@corpusstudio.local",
@@ -548,6 +633,12 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
                 _record_candidate_assurance(state, record, branch, observation, reason, impact_digest,
                                             published=False)
                 return observation
+            # PREFLIGHT: pushing hands the candidate to CI, which EXECUTES it. Refuse if this repo's CI
+            # would run it with a credential-bearing checkout before a human reviews it - fail closed
+            # rather than rely on "a human merges only on green" (merging later does not un-run the code).
+            unsafe_ci = _ci_executes_candidates_with_credentials(repo_root)
+            if unsafe_ci:
+                raise WriteAdapterError(f"refusing to publish: {unsafe_ci}")
             # CLEAR candidate -> PUBLISH: push the committed candidate to the branch (by refspec, from the
             # detached HEAD - no local branch was ever created) and open a PR. NEVER merges. CI runs the
             # dynamic gate on the PR in its sandbox; a human merges only on green.

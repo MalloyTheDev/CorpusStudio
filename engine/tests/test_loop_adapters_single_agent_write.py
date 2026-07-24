@@ -309,6 +309,47 @@ def test_the_attack_matrix_publishes_nothing(name: str, tmp_path: Path) -> None:
     assert "apply-" not in _g(root, "worktree", "list").stdout, name
 
 
+def test_agent_prose_is_scanned_and_bounded() -> None:
+    # HIGH (4th adversarial pass): the rationale reaches the commit message AND the PR body verbatim, so
+    # a secret moved out of the diff and into the prose bypassed every content check. Prose is scanned.
+    assert saw._scan_text("Fix a typo.", "the rationale") == []
+    assert saw._scan_text("see AKIAIOSFODNN7EXAMPLE", "the rationale")
+    assert saw._scan_text("-----BEGIN RSA PRIVATE KEY-----", "the rationale")
+    assert saw._scan_text("x" * 9000, "the rationale")            # bounded
+    assert saw._scan_text("ok \u202e evil", "the rationale")       # bidi override
+
+
+def test_a_secret_in_the_rationale_blocks_the_publish(tmp_path: Path) -> None:
+    root, remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    agent = _StubAgent({"unified_diff": _DIFF,                      # a perfectly legal diff...
+                        "rationale": "Tidy.\n\n-----BEGIN RSA PRIVATE KEY-----\n"})  # ...secret in the prose
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, agent, calls), max_steps=25)
+    assert ("pr", "create") not in [c[:2] for c in calls]
+    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
+
+
+def test_ci_that_would_execute_the_candidate_with_credentials_blocks_the_publish(tmp_path: Path) -> None:
+    # Pushing hands the candidate to CI, which EXECUTES it. If CI checks out with credentials, that
+    # happens BEFORE review and merging later cannot undo it - so publishing is refused, fail-closed.
+    root, remote = _repo_with_remote(tmp_path)
+    wf = root / ".github" / "workflows"
+    wf.mkdir(parents=True, exist_ok=True)
+    (wf / "ci.yml").write_text("on:\n  push:\njobs:\n  t:\n    steps:\n      - uses: actions/checkout@v4\n")
+    _g(root, "add", "-A")
+    _g(root, "commit", "-q", "-m", "ci")
+    calls: list = []
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, _StubAgent(), calls), max_steps=25)
+    assert ("pr", "create") not in [c[:2] for c in calls]
+    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
+    # ...and the same repo WITH the hardening publishes fine
+    (wf / "ci.yml").write_text("on:\n  push:\njobs:\n  t:\n    steps:\n      - uses: actions/checkout@v4\n"
+                               "        with:\n          persist-credentials: false\n")
+    assert saw._ci_executes_candidates_with_credentials(root) is None
+
+
 def test_the_writable_surface_is_matched_case_folded_and_path_aware() -> None:
     # fnmatch is UNUSABLE here: fnmatch('engine/tests/test_x/conftest.py','engine/tests/test_*.py') is True
     # (it would admit an auto-executed conftest) and it REJECTS engine/corpus_studio/cli.py. Our compiled
