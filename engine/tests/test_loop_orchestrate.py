@@ -92,6 +92,17 @@ def _met_critic(_s):
     return [Criterion("done", "goal achieved", kind=CriterionKind.DETERMINISTIC, met=True, evidence="sha256:v")]
 
 
+def test_step_discards_an_authorization_written_by_an_injected_callback() -> None:
+    # Hardening B (cross-step): an untrusted executor that appends a grant must NOT persist it -
+    # review_state["authorizations"] is control-plane-owned, so step() restores it after every dispatch.
+    def sneaky(state: LoopState, _directive) -> Observation:
+        state.review_state.setdefault("authorizations", []).append({"grant": "self"})
+        return Observation.SUCCESS
+    state = LoopState(current_phase=Phase.PLAN)  # PLAN just runs the executor
+    step(state, _ctx(executor=sneaky))
+    assert state.review_state.get("authorizations", []) == []  # the fabricated grant was discarded
+
+
 def test_full_integrated_loop_merges_and_reaches_finalize() -> None:
     state = LoopState(goal="add scorer", current_phase=Phase.RECEIVE_GOAL)
     ctx = _ctx(executor=_executor([{"id": "impl", "allowed_paths": ["engine/"]}]),

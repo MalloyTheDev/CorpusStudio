@@ -88,6 +88,25 @@ def test_green_gate_human_gated_obligations_require_authorization() -> None:
         assert obs is Observation.AUTHORIZATION_REQUIRED, ob
 
 
+def test_green_gate_loop_controller_self_modify_requires_authorization() -> None:
+    # Hardening finding A: a change to the loop controller fires loop-controller-self-modify; the OBSERVE
+    # plane must escalate it (was: it fell through to SUCCESS, letting the loop admit a change to itself).
+    obs, reason = classify_observation(_payload(True, _GREEN, obligations=("loop-controller-self-modify",)))
+    assert obs is Observation.AUTHORIZATION_REQUIRED and "loop-controller-self-modify" in reason
+
+
+def test_observe_and_integrate_share_one_human_gated_set_pinned_to_policy() -> None:
+    # The two planes must never disagree about what needs a human, and every id must be a real obligation.
+    import loop.integrate as integrate_mod  # noqa: PLC0415
+    import loop.observe as observe_mod  # noqa: PLC0415
+    from loop.controller import HUMAN_GATED_OBLIGATIONS  # noqa: PLC0415
+    assert observe_mod._HUMAN_GATED is HUMAN_GATED_OBLIGATIONS
+    assert integrate_mod._HUMAN_GATED is HUMAN_GATED_OBLIGATIONS
+    policy = json.loads((SCRIPTS_DIR / "assurance" / "policy" / "obligations.json").read_text())
+    policy_ids = {o["id"] for o in policy["obligations"]}
+    assert HUMAN_GATED_OBLIGATIONS <= policy_ids  # no human-gated id can be a typo / removed obligation
+
+
 def test_green_gate_worker_closure_is_worker_lineage_impact() -> None:
     obs, _ = classify_observation(_payload(True, _GREEN, obligations=("worker-closure",)))
     assert obs is Observation.WORKER_LINEAGE_IMPACT
@@ -170,6 +189,16 @@ def test_observe_and_apply_records_structured_evidence_for_a_green_gate() -> Non
     index = state.review_state["evidence"]
     assert index == [{"record_type": "workspace_verification", "predicate": "WORKSPACE_GATE_GREEN",
                       "subject_fingerprint": "cs:abc123", "digest": "sha256:g"}]
+
+
+def test_a_non_bool_gate_passed_records_no_green_evidence() -> None:
+    # Hardening finding C: classify reads a string "false" as RED (`is True`); the ObservationResult field
+    # must AGREE (also `is True`), so a red/malformed gate can never record GATE_GREEN completion evidence.
+    payload = {"gate_passed": "false", "gate_steps": _GREEN, "fired_obligations": [],
+               "change_set_fingerprint": "cs:x", "workspace_stable": True}
+    result = observe(REPO_ROOT, "main", run_cs_assure=_runner(_record(payload)))
+    assert result.gate_passed is False               # not bool("false") == True
+    assert evidence_entry(result) is None            # so NO green evidence is emitted
 
 
 def test_a_red_gate_records_no_completion_evidence() -> None:

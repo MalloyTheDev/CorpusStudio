@@ -28,7 +28,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from loop.controller import LoopState, Observation, Transition, apply, attempt_fingerprint
+from loop.controller import (
+    HUMAN_GATED_OBLIGATIONS,
+    LoopState,
+    Observation,
+    Transition,
+    apply,
+    attempt_fingerprint,
+)
 
 # Gate step name -> the observation for its failure, in the order the gate runs them (first failure wins).
 _GATE_ORDER: tuple[tuple[str, Observation], ...] = (
@@ -36,8 +43,12 @@ _GATE_ORDER: tuple[tuple[str, Observation], ...] = (
     ("mypy", Observation.TYPE_FAILURE),
     ("pytest", Observation.TEST_REGRESSION),
 )
-# Obligations that, on an otherwise-green gate, require a human before the change can be admitted.
-_HUMAN_GATED = frozenset({"sealed-research", "assurance-self-modify"})
+# Obligations that, on an otherwise-green gate, require a human before the change can be admitted. SHARED
+# with integrate's merge gate (loop.controller.HUMAN_GATED_OBLIGATIONS) so the OBSERVE plane and the merge
+# gate can never disagree about what needs a human - a drift here previously let a loop-controller change
+# read SUCCESS at OBSERVE. worker-closure is handled by its own WORKER_LINEAGE_IMPACT branch below (still
+# human-gated, distinct label), so it is peeled off before the AUTHORIZATION_REQUIRED mapping.
+_HUMAN_GATED = HUMAN_GATED_OBLIGATIONS
 
 # The verify CLI exit contract (scripts/cs_assure.py): 0 = green gate, 1 = RED gate (still a valid record),
 # >=2 = a fail-closed REFUSAL that emits NO record. So a record is trustworthy only for exit 0 or 1.
@@ -99,7 +110,9 @@ def classify_observation(verify_payload: Any, doclint_payload: Any = None) -> tu
         return Observation.TEST_REGRESSION, "gate failed with no identifiable step"
 
     # Gate GREEN -> the change is code-clean; surface human-gated / structural signals in priority order.
-    human = sorted(obligations & _HUMAN_GATED)
+    # worker-closure has its own WORKER_LINEAGE_IMPACT signal, so peel it off; the rest of the shared
+    # human-gated set (sealed-research / assurance-self-modify / loop-controller-self-modify) escalates.
+    human = sorted((obligations & _HUMAN_GATED) - {"worker-closure"})
     if human:
         return Observation.AUTHORIZATION_REQUIRED, f"gate green but {', '.join(human)} requires human review"
     if "worker-closure" in obligations:
@@ -195,7 +208,10 @@ def observe(repo_root: Path, base: str = "main", *,
     return ObservationResult(
         observation=observation,
         reason=reason,
-        gate_passed=bool(payload.get("gate_passed", False)),
+        # STRICT (matches classify_observation): only a real ``True`` is green. A truthy non-bool (the
+        # string "false", 1, a non-empty list) must NOT record GATE_GREEN completion evidence for a gate
+        # that classify read as RED - the two paths must agree, and both fail closed.
+        gate_passed=payload.get("gate_passed") is True,
         record_digest=record.get("record_digest"),
         change_set_fingerprint=payload.get("change_set_fingerprint"),
         record_type=record.get("record_type"),
