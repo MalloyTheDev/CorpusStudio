@@ -170,11 +170,21 @@ def test_changed_paths_of_ignores_dev_null() -> None:
     assert sa._changed_paths_of(diff) == ["added.py", "kept.py", "removed.py"]
 
 
-def test_claude_subprocess_client_fails_closed_on_a_missing_binary() -> None:
+def test_claude_subprocess_client_fails_closed_on_a_missing_binary(tmp_path: Path) -> None:
     # a non-existent transport binary raises AgentError (fail-closed), never a silent empty proposal.
     client = sa.ClaudeSubprocessClient(argv=("definitely-not-a-real-binary-xyz",), timeout=5)
     with pytest.raises(sa.AgentError):
-        client.propose({"goal": "x"})
+        client.propose({"goal": "x", "_cwd": str(tmp_path)})
+
+
+def test_claude_subprocess_client_refuses_to_run_unconfined() -> None:
+    # confinement is mandatory at the transport: a missing / non-directory _cwd fails closed rather than
+    # running the agent in the process's own cwd (the developer's tree).
+    client = sa.ClaudeSubprocessClient()
+    with pytest.raises(sa.AgentError, match="unconfined"):
+        client.propose({"goal": "x"})                                  # no _cwd at all
+    with pytest.raises(sa.AgentError, match="unconfined"):
+        client.propose({"goal": "x", "_cwd": "/no/such/worktree/here"})  # _cwd is not a directory
 
 
 def test_read_only_gh_is_wired_and_refuses_a_merge(tmp_path: Path) -> None:
@@ -191,22 +201,26 @@ class _FakeProc:
         self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
 
 
-def test_claude_subprocess_client_parses_and_validates_a_good_response(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_claude_subprocess_client_parses_and_validates_a_good_response(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     good = json.dumps({"unified_diff": "d", "rationale": "r", "extra": "ignored"})
     monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: _FakeProc(0, good))
-    assert sa.ClaudeSubprocessClient().propose({"goal": "g"}) == {"unified_diff": "d", "rationale": "r"}
+    got = sa.ClaudeSubprocessClient().propose({"goal": "g", "_cwd": str(tmp_path)})
+    assert got == {"unified_diff": "d", "rationale": "r"}
 
 
-def test_claude_subprocess_client_fails_closed_on_a_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_claude_subprocess_client_fails_closed_on_a_nonzero_exit(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: _FakeProc(2, "", "boom"))
     with pytest.raises(sa.AgentError, match="exited 2"):
-        sa.ClaudeSubprocessClient().propose({"goal": "g"})
+        sa.ClaudeSubprocessClient().propose({"goal": "g", "_cwd": str(tmp_path)})
 
 
-def test_claude_subprocess_client_fails_closed_on_unparseable_output(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_claude_subprocess_client_fails_closed_on_unparseable_output(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: _FakeProc(0, "not json at all"))
     with pytest.raises(sa.AgentError, match="no usable JSON"):
-        sa.ClaudeSubprocessClient().propose({"goal": "g"})
+        sa.ClaudeSubprocessClient().propose({"goal": "g", "_cwd": str(tmp_path)})
 
 
 def test_default_proposals_dir_falls_back_when_not_a_git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -257,9 +271,10 @@ def test_the_subprocess_client_runs_with_a_sanitized_env_and_the_confined_cwd(
     assert "GITHUB_TOKEN" not in captured["env"]               # secret-free env
 
 
-def test_the_subprocess_client_fails_closed_on_oversized_output(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_subprocess_client_fails_closed_on_oversized_output(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     huge = json.dumps({"unified_diff": "x" * 64, "rationale": "r"})
     monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: _FakeProc(0, huge))
     client = sa.ClaudeSubprocessClient(max_output_bytes=8)  # cap below the output size
     with pytest.raises(sa.AgentError, match="oversized"):
-        client.propose({"goal": "g"})
+        client.propose({"goal": "g", "_cwd": str(tmp_path)})

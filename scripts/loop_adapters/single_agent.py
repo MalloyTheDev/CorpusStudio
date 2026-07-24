@@ -29,6 +29,7 @@ import hashlib
 import json
 import os
 import subprocess  # noqa: S404 - fixed-argv git / claude only; never a shell string.
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Protocol
@@ -83,7 +84,9 @@ def _detached_worktree(repo_root: Path, base_oid: str, worktrees_dir: Path) -> I
     the main working tree) - the confined checkout the agent runs in for a read/propose. Removed on exit
     (best-effort); anything the agent writes here is thrown away."""
     worktrees_dir.mkdir(parents=True, exist_ok=True)
-    wt = worktrees_dir / f"propose-{base_oid[:12]}-{os.getpid()}"
+    # A per-invocation UNIQUE name: pid + a random suffix, so a leftover directory from a best-effort
+    # disposal that failed can never collide with a later propose for the SAME base in the SAME process.
+    wt = worktrees_dir / f"propose-{base_oid[:12]}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
     _git(repo_root, "worktree", "add", "--detach", str(wt), base_oid)
     try:
         yield wt
@@ -153,7 +156,8 @@ class ClaudeSubprocessClient:
     worktree and a sanitized environment, feed the request as JSON on stdin, and read one JSON object with
     ``unified_diff`` / ``rationale`` from stdout. Confinement:
       * ``cwd`` = ``request['_cwd']`` (the isolated worktree the executor created) - the agent operates on a
-        throwaway checkout, never the developer's tree;
+        throwaway checkout, never the developer's tree. This is REQUIRED: a missing / non-directory ``_cwd``
+        fails closed (the transport refuses to run UNCONFINED), so isolation cannot be bypassed by omission;
       * ``env`` = :func:`_sanitized_env` - no GitHub / cloud / release / registry secrets are inherited;
       * a read-only tool policy (``argv`` default) denies edit/write/bash/nested-agents/net (defence in depth);
       * the call is bounded by a timeout AND ``max_output_bytes`` (killable) - an oversized/hung agent fails
@@ -168,7 +172,12 @@ class ClaudeSubprocessClient:
         self.max_output_bytes = max_output_bytes
 
     def propose(self, request: dict[str, Any]) -> dict[str, Any]:
+        # Confinement is MANDATORY at the transport, not merely a convention the executor follows: a
+        # missing / non-directory `_cwd` would run the agent in the process's OWN cwd (the developer's
+        # tree) with no isolation. Refuse it - fail closed rather than silently run UNCONFINED.
         cwd = request.get("_cwd")  # the isolated worktree; the agent runs THERE, not the developer's tree
+        if not isinstance(cwd, str) or not cwd or not Path(cwd).is_dir():
+            raise AgentError("refusing to run the agent unconfined: request['_cwd'] must be an existing worktree")
         try:
             proc = subprocess.run(  # noqa: S603 - fixed argv, no shell, bounded timeout, confined cwd+env.
                 list(self.argv), input=json.dumps(request), text=True, capture_output=True,
