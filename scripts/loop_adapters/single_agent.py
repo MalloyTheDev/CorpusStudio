@@ -115,6 +115,16 @@ def _seal_proposal(payload: dict[str, Any]) -> dict[str, Any]:
     return {**envelope, "record_digest": f"sha256:{digest}"}
 
 
+def _write_proposal_record(proposals_dir: Path, record: dict[str, Any]) -> Path:
+    """Persist a sealed proposal to a CONTENT-ADDRESSED file (named by its record digest) OUTSIDE the
+    working tree, and return the path. Content-addressing makes the name collision-free and idempotent -
+    no dependence on directory state or a run counter."""
+    proposals_dir.mkdir(parents=True, exist_ok=True)
+    out = proposals_dir / f"{record['record_digest'].split(':', 1)[-1]}.json"
+    out.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return out
+
+
 def _resolve_base_oid(repo_root: Path, base: str) -> str:
     """The 40-hex commit the proposal is against (read-only ``git rev-parse``); '' if it cannot resolve."""
     try:
@@ -150,11 +160,8 @@ def _make_executor(agent_client: AgentClient, repo_root: Path, base: str, propos
         diff, rationale = _validate_proposal(result)
         record = _seal_proposal({"goal_id": state.goal_id, "base_oid": base_oid, "unified_diff": diff,
                                  "changed_paths": _changed_paths_of(diff), "rationale": rationale})
-        # Persist the sealed proposal OUTSIDE the working tree and reference it on the state.
-        proposals_dir.mkdir(parents=True, exist_ok=True)
-        index = len([p for p in proposals_dir.glob("*.json")])
-        out = proposals_dir / f"{state.goal_id or 'goal'}-{index}.json"
-        out.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        # Persist the sealed proposal OUTSIDE the working tree (content-addressed) and reference it.
+        out = _write_proposal_record(proposals_dir, record)
         # Invariant: a written proposal is ALWAYS referenced on the state. Normalize a missing/corrupt
         # value to a list (never silently skip the append and leave disk + state disagreeing).
         refs = state.review_state.get("agent_proposals")

@@ -169,3 +169,11 @@ def test_git_helper_fails_closed_on_a_nonzero_exit(tmp_path) -> None:
     root, _remote = _repo_with_remote(tmp_path)
     with pytest.raises(saw.WriteAdapterError):
         saw._git(root, "rev-parse", "--verify", "does-not-exist")
+
+
+def test_branch_suffix_is_sanitized_to_a_safe_ref() -> None:
+    # a messy goal id can never yield an invalid git ref (spaces / punctuation / '..' / case / length).
+    assert saw._sanitize_branch_suffix("Fix bug #5 (README)!") == "fix-bug-5-readme"
+    assert saw._sanitize_branch_suffix("a..b") == "a-b" and ".." not in saw._sanitize_branch_suffix("a..b")
+    assert saw._sanitize_branch_suffix("") == "goal" and saw._sanitize_branch_suffix("...--__") == "goal"
+    assert len(saw._sanitize_branch_suffix("x" * 100)) <= 40

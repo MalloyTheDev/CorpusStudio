@@ -23,6 +23,7 @@ building blocks (the agent client, proposal sealing, diff parsing).
 
 from __future__ import annotations
 
+import re
 import subprocess  # noqa: S404 - fixed-argv git / gh only; never a shell string.
 from contextlib import contextmanager
 from pathlib import Path
@@ -41,7 +42,17 @@ from loop_adapters.single_agent import (
     _seal_proposal,
     _signoff_critic,
     _validate_proposal,
+    _write_proposal_record,
 )
+
+
+def _sanitize_branch_suffix(goal_id: str) -> str:
+    """A SAFE git branch suffix from a goal id: lowercase, any run of non-``[a-z0-9]`` -> ``-``, leading/
+    trailing ``-`` stripped, truncated. So a goal id with spaces / uppercase / punctuation / ``..`` can
+    never produce an invalid ref or violate a remote policy; the original goal id stays in the sealed
+    proposal record + the PR body for traceability."""
+    slug = re.sub(r"[^a-z0-9]+", "-", (goal_id or "").lower()).strip("-")
+    return slug[:40].strip("-") or "goal"
 
 _GIT_TIMEOUT_S = 120
 _GH_TIMEOUT_S = 60
@@ -136,11 +147,9 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
         diff, rationale = _validate_proposal(agent_client.propose(request))  # RAISES -> fail-closed
         record = _seal_proposal({"goal_id": state.goal_id, "base_oid": base_oid, "unified_diff": diff,
                                  "changed_paths": _changed_paths_of(diff), "rationale": rationale})
-        proposals_dir.mkdir(parents=True, exist_ok=True)
-        (proposals_dir / f"{state.goal_id or 'goal'}-{len(list(proposals_dir.glob('*.json')))}.json").write_text(
-            _dumps(record), encoding="utf-8")
+        proposal_path = _write_proposal_record(proposals_dir, record)  # content-addressed, OUTSIDE the tree
 
-        branch = f"{branch_prefix}{state.goal_id or 'goal'}"
+        branch = f"{branch_prefix}{_sanitize_branch_suffix(state.goal_id)}"
         with _worktree(repo_root, base_oid, branch, worktrees_dir) as wt:
             # Apply the agent's OWN sealed diff, staged. A diff that does not apply cleanly fails closed.
             _git(wt, "apply", "--index", "-", stdin=diff)
@@ -152,25 +161,20 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
             _git(wt, "-c", "user.name=corpusstudio-agent", "-c", "user.email=agent@corpusstudio.local",
                  "commit", "-m", f"{state.goal or 'agent change'}\n\n{rationale}\n\n[single-agent proposal, human-reviewed]")
             _git(wt, "push", "-u", "origin", branch)
-            code, out, err = gh_runner("pr", "create", "--head", branch, "--base", base,
-                                       "--title", (state.goal or "agent change")[:120],
-                                       "--body", rationale or "Opened by the single-agent write runtime (7.1).")
+            code, pr_out, err = gh_runner("pr", "create", "--head", branch, "--base", base,
+                                          "--title", (state.goal or "agent change")[:120],
+                                          "--body", rationale or "Opened by the single-agent write runtime (7.1).")
             if code != 0:
                 raise WriteAdapterError(f"gh pr create failed (exit {code}): {err.strip()[:200]}")
 
         refs = state.review_state.get("agent_proposals")
         if not isinstance(refs, list):
             refs = state.review_state["agent_proposals"] = []
-        refs.append({"record_digest": record["record_digest"], "branch": branch,
-                     "changed_paths": record["payload"]["changed_paths"], "pr": out.strip()})
+        refs.append({"record_digest": record["record_digest"], "branch": branch, "path": str(proposal_path),
+                     "changed_paths": record["payload"]["changed_paths"], "pr": pr_out.strip()})
         return Observation.SUCCESS
 
     return execute
-
-
-def _dumps(record: dict[str, Any]) -> str:
-    import json  # noqa: PLC0415 - local to keep the module import light
-    return json.dumps(record, indent=2, sort_keys=True) + "\n"
 
 
 def build_context(repo_root: Path | str, base: str = "main", *, agent_client: AgentClient | None = None,
