@@ -48,6 +48,11 @@ _VALID_VERIFY_EXITS = frozenset({0, 1})
 _VERIFY_RECORD_TYPE = "workspace_verification"
 _MIN_VERIFY_SCHEMA = 2
 
+# Explicit doc-trust authority states - a doclint that could NOT run must never be silently read as clean.
+_DOCLINT_CLEAN = "CLEAN"
+_DOCLINT_FINDINGS = "FINDINGS"
+_DOCLINT_UNAVAILABLE = "UNAVAILABLE"
+
 # A cs_assure runner: (repo_root, *argv) -> (returncode, stdout, stderr). Injectable for testing.
 CsAssureRunner = Callable[..., "tuple[int, str, str]"]
 
@@ -175,16 +180,16 @@ def observe(repo_root: Path, base: str = "main", *,
     # Doc-trust is ADVISORY, but its status must be EXPLICIT: a doclint that could not run must not be
     # silently read as "no findings" (clean). CLEAN / FINDINGS / UNAVAILABLE are distinguished.
     doclint_payload: dict[str, Any] | None = None
-    doclint_status = "CLEAN"
+    doclint_status = _DOCLINT_CLEAN
     try:
         _dc, dout, derr = run_cs_assure(repo_root, "doclint", "--format", "json")
         doclint_payload = _parse(dout, derr, "doclint")
-        doclint_status = "FINDINGS" if _finding_count(doclint_payload) > 0 else "CLEAN"
+        doclint_status = _DOCLINT_FINDINGS if _finding_count(doclint_payload) > 0 else _DOCLINT_CLEAN
     except LoopObserveError:
-        doclint_status = "UNAVAILABLE"  # NOT silently clean - surfaced honestly in the reason below
+        doclint_status = _DOCLINT_UNAVAILABLE  # NOT silently clean - surfaced honestly in the reason below
 
     observation, reason = classify_observation(payload, doclint_payload)
-    if doclint_status == "UNAVAILABLE" and observation is Observation.SUCCESS:
+    if doclint_status == _DOCLINT_UNAVAILABLE and observation is Observation.SUCCESS:
         reason = f"{reason}; NOTE docs UNVERIFIED (doclint unavailable)"
     return ObservationResult(
         observation=observation,
