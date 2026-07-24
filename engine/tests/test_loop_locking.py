@@ -62,6 +62,30 @@ def test_a_future_dated_lock_is_not_broken_as_stale(tmp_path: Path) -> None:
         FileLock(tmp_path / "res", timeout=0.2, stale_after=1.0).acquire()
 
 
+def test_release_only_removes_a_lock_we_still_own(tmp_path: Path) -> None:
+    # #12: if another process broke our stale lock and re-created its OWN, our LATE release must not delete
+    # that new lock. Simulate it: acquire, then overwrite the lockfile with a different owner token.
+    lockfile = Path(str(tmp_path / "res") + ".lock")
+    ours = FileLock(tmp_path / "res", timeout=2).acquire()
+    lockfile.write_text("99999 0 SOMEONE_ELSES_TOKEN\n")  # a different process now owns it
+    ours.release()
+    assert lockfile.exists() and "SOMEONE_ELSES_TOKEN" in lockfile.read_text()  # not deleted by us
+    lockfile.unlink()
+    again = FileLock(tmp_path / "res", timeout=2).acquire()  # a normal acquire/release still cleans up
+    again.release()
+    assert not lockfile.exists()
+
+
+def test_release_matches_the_owner_token_exactly_not_as_a_substring(tmp_path: Path) -> None:
+    # A lockfile whose token field only CONTAINS our token as a substring (e.g. "<token>X") is a
+    # different owner - release() must compare the token field exactly and keep it.
+    lockfile = Path(str(tmp_path / "res") + ".lock")
+    held = FileLock(tmp_path / "res", timeout=2).acquire()
+    lockfile.write_text(f"123 456 {held._token}X\n")  # token is a substring, not the exact field
+    held.release()
+    assert lockfile.exists()  # not deleted - the exact token did not match
+
+
 def test_context_manager_releases_on_exit(tmp_path: Path) -> None:
     with FileLock(tmp_path / "res", timeout=1):
         pass
