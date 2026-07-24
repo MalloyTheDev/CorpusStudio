@@ -9,11 +9,57 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CS_LOOP = REPO_ROOT / "scripts" / "cs_loop.py"
+if str(REPO_ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+import cs_loop  # noqa: E402
 
 
 def _run(state: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run([sys.executable, str(CS_LOOP), "--state", str(state), *args],
                           capture_output=True, text=True)
+
+
+# --------------------------------------------------------------------------- operational state location (#1)
+
+
+def _argv(**kw: object):
+    import argparse
+    return argparse.Namespace(**kw)
+
+
+def test_default_state_is_under_the_git_dir_not_the_worktree(tmp_path: Path) -> None:
+    # The default operational state must live under the git dir (invisible to the change-set kernel), so a
+    # save never contaminates the assurance fingerprint - not as a non-ignored untracked worktree file.
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    op = cs_loop._operational_dir(str(tmp_path))
+    assert op is not None and op.name == "corpusstudio-loop"
+    assert (tmp_path / ".git") in op.parents  # under .git, i.e. OUTSIDE the tracked worktree
+    state = cs_loop._state_path(_argv(state="", repo_root=str(tmp_path)))
+    assert state == op / "state.json"
+
+
+def test_explicit_state_path_still_wins(tmp_path: Path) -> None:
+    explicit = tmp_path / "custom" / "loop.json"
+    assert cs_loop._state_path(_argv(state=str(explicit), repo_root=str(tmp_path))) == explicit
+
+
+def test_state_path_falls_back_when_not_in_a_git_repo(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # Outside a git repo there is no change set to contaminate -> _operational_dir is None and the state
+    # path falls back to a worktree-local .loop/state.json (deterministic via a stubbed _operational_dir).
+    monkeypatch.setattr(cs_loop, "_operational_dir", lambda *_a, **_k: None)
+    assert cs_loop._state_path(_argv(state="", repo_root=".")) == Path(".loop") / "state.json"
+
+
+def test_a_state_file_under_the_git_dir_is_invisible_to_the_change_set(tmp_path: Path) -> None:
+    # The whole point: a state file at the default location is NOT a tracked/untracked worktree change.
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    op = cs_loop._operational_dir(str(tmp_path))
+    assert op is not None
+    op.mkdir(parents=True, exist_ok=True)
+    (op / "state.json").write_text("{}")
+    others = subprocess.run(["git", "-C", str(tmp_path), "ls-files", "--others", "--exclude-standard"],
+                            capture_output=True, text=True).stdout
+    assert "corpusstudio-loop" not in others  # the change-set kernel never sees it
 
 
 def test_init_next_status_flow(tmp_path: Path) -> None:
