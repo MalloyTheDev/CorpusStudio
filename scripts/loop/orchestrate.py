@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from loop.completeness import (
     CompletenessError,
@@ -102,6 +102,13 @@ class LoopContext:
     run_cs_assure: CsAssureRunner = _run_cs_assure
     store_path: Path | None = None
     ledger_path: Path | None = None  # cross-goal learning ledger (seed at start, record at terminal)
+    # Obligation-resolution records (injected, plain dicts) proving each blocking obligation was discharged
+    # for the change set being merged. Empty by default -> a blocking obligation with no resolution ESCALATES
+    # (re-review #14: never auto-merge on obligation identity). A producing runtime supplies these, each
+    # bound to the impact change-set fingerprint + a trusted authority; see integrate.merge_gate. Values
+    # may carry richer authority-specific metadata (timestamps, nested evidence), so the value type is Any;
+    # the required-key contract (obligation_id / status / subject_fingerprint / authority) is enforced there.
+    obligation_resolutions: tuple[dict[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         # verify_paths only takes effect on the DELEGATED multi-agent EXECUTE path. Setting it while
@@ -152,6 +159,7 @@ class PolicyAssessment:
     fired_obligations: list[dict[str, str]]
     base_policy_available: bool
     effective_policy_digest: str | None
+    change_set_fingerprint: str  # the change set the obligations were computed against (binds resolutions)
 
 
 def _impact_assessment(ctx: LoopContext) -> PolicyAssessment:
@@ -182,10 +190,19 @@ def _impact_assessment(ctx: LoopContext) -> PolicyAssessment:
         items.append({"id": o["id"], "severity": str(o.get("severity", ""))})
     provenance = data.get("provenance") if isinstance(data, dict) else None
     digest = provenance.get("policy_digest") if isinstance(provenance, dict) else None
+    fingerprint = payload.get("change_set_fingerprint")
+    if not isinstance(fingerprint, str) or not fingerprint:
+        # The change-set fingerprint binds each resolution to THIS commit; a missing one is a malformed /
+        # schema-drifted impact record - fail CLOSED (an unbindable gate must not authorize a merge).
+        raise LoopOrchestrateError(
+            "cs_assure impact record payload has no usable 'change_set_fingerprint' string "
+            f"(got {type(fingerprint).__name__}); cannot bind obligation resolutions to this commit - "
+            "the record is malformed or schema-drifted")
     return PolicyAssessment(
         fired_obligations=items,
         base_policy_available=payload.get("base_policy_available") is True,  # missing/non-True -> not available
         effective_policy_digest=digest if isinstance(digest, str) else None,
+        change_set_fingerprint=fingerprint,
     )
 
 
@@ -309,7 +326,10 @@ def _integrate(state: LoopState, ctx: LoopContext, directive: Directive) -> Phas
         # exception is an explicit bootstrap reviewed under the repo's pre-existing controls, done off-band).
         return PhaseResult(Observation.AUTHORIZATION_REQUIRED,
                            "trusted-base policy unavailable; a candidate-only assessment cannot authorize an autonomous merge")
-    gate = merge_gate(impact.fired_obligations, dangerous=ctx.dangerous)
+    gate = merge_gate(impact.fired_obligations, resolutions=ctx.obligation_resolutions,
+                      subject_fingerprint=impact.change_set_fingerprint, dangerous=ctx.dangerous)
+    if gate.evaluation is not None:  # persist the final gate record (re-review #14) for evidence/audit
+        state.review_state.setdefault("gate_evaluations", []).append(gate.evaluation.to_record())
     if not gate.authorized:
         return PhaseResult(gate.observation, gate.reason)  # self-modify / worker / policy-gated -> escalate
     # Merge BOUND to the exact head CI validated: a commit pushed since is not merged blind (it HOLDs to

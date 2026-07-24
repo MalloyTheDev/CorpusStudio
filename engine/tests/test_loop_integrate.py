@@ -89,26 +89,70 @@ def test_ci_observation_classifies_failure_by_check_name() -> None:
 # --------------------------------------------------------------------------- merge authorization
 
 
-def test_merge_gate_allows_a_product_change() -> None:
-    gate = merge_gate(["contracts", "evaluation-honesty"])
+_FP = "sha256:cs-under-test"
+
+
+def _resolution(oid: str, *, fp: str = _FP, authority: str = "trusted-base-ci", status: str = "RESOLVED") -> dict:
+    return {"obligation_id": oid, "status": status, "subject_fingerprint": fp, "authority": authority}
+
+
+def test_merge_gate_escalates_a_blocking_obligation_without_a_resolution() -> None:
+    # re-review #14: a blocking obligation is NOT auto-mergeable on identity. Absent a resolution record
+    # proving it was discharged for THIS commit, even contracts / evaluation-honesty escalate (fail-closed).
+    gate = merge_gate(["contracts", "evaluation-honesty"], subject_fingerprint=_FP)
+    assert not gate.authorized and gate.observation is Observation.AUTHORIZATION_REQUIRED
+    assert {v.obligation_id: v.disposition for v in gate.evaluation.verdicts} == {
+        "contracts": "UNRESOLVED", "evaluation-honesty": "UNRESOLVED"}
+
+
+def test_merge_gate_authorizes_a_blocking_obligation_with_a_trusted_current_resolution() -> None:
+    resolutions = [_resolution("contracts"), _resolution("evaluation-honesty")]
+    gate = merge_gate(["contracts", "evaluation-honesty"], resolutions=resolutions, subject_fingerprint=_FP)
     assert gate.authorized and gate.observation is Observation.SUCCESS
+    assert all(v.disposition == "RESOLVED" and v.satisfied for v in gate.evaluation.verdicts)
 
 
-def test_merge_gate_escalates_every_human_gated_obligation() -> None:
+def test_merge_gate_rejects_a_stale_untrusted_or_unresolved_resolution() -> None:
+    # A resolution must be RESOLVED + CURRENT (fingerprint matches) + TRUSTED (authority), or it escalates.
+    for bad in (
+        _resolution("contracts", fp="sha256:some-other-commit"),   # stale: bound to a different change set
+        _resolution("contracts", authority="the-candidate"),        # untrusted authority (self-resolution)
+        _resolution("contracts", status="ATTEMPTED"),               # not RESOLVED
+        {"obligation_id": "contracts"},                             # malformed (ignored) -> unresolved
+    ):
+        gate = merge_gate(["contracts"], resolutions=[bad], subject_fingerprint=_FP)
+        assert not gate.authorized, bad
+    # ...and a gate with NO bound fingerprint can accept no resolution at all (fail-closed).
+    assert not merge_gate(["contracts"], resolutions=[_resolution("contracts", fp="")], subject_fingerprint="").authorized
+
+
+def test_merge_gate_fails_closed_on_a_non_sequence_resolutions_value() -> None:
+    # A resolutions value that is not a sequence (a bare dict, or a non-iterable) must ESCALATE, never
+    # crash the loop or iterate a dict's keys - the never-crash invariant reaches the merge button.
+    for bad in (_resolution("contracts"), 5, "resolved", None):
+        gate = merge_gate(["contracts"], resolutions=bad, subject_fingerprint=_FP)  # type: ignore[arg-type]
+        assert not gate.authorized and gate.observation is Observation.AUTHORIZATION_REQUIRED, bad
+
+
+def test_merge_gate_escalates_every_human_gated_obligation_even_with_a_resolution() -> None:
     # worker-closure needs the human-gated worker workflow (fresh wheel/env); loop-controller-self-modify
-    # must NOT be admitted by the loop's own merge gate (rule #666) - both escalate, like self-modify/sealed.
+    # must NOT be admitted by the loop's own merge gate (rule #666). A resolution can never discharge these.
     for ob in ("assurance-self-modify", "sealed-research", "worker-closure", "loop-controller-self-modify"):
-        gate = merge_gate([ob, "contracts"])
+        gate = merge_gate([ob], resolutions=[_resolution(ob)], subject_fingerprint=_FP)
         assert not gate.authorized and gate.observation is Observation.AUTHORIZATION_REQUIRED, ob
+        verdict = gate.evaluation.verdicts[0]
+        assert verdict.disposition == "HUMAN_GATED" and verdict.satisfied is False, ob  # a resolution can't help
 
 
 def test_merge_gate_fails_closed_on_an_unknown_blocking_obligation() -> None:
     # RISK FROM POLICY: a NEW blocking obligation the gate has never heard of must escalate by default,
     # not silently auto-merge. A non-blocking (advisory/info) unknown obligation does not gate.
-    assert not merge_gate([{"id": "brand-new-rule", "severity": "blocking"}]).authorized
+    assert not merge_gate([{"id": "brand-new-rule", "severity": "blocking"}], subject_fingerprint=_FP).authorized
     assert merge_gate([{"id": "some-advisory", "severity": "advisory"}]).authorized
-    # contracts / evaluation-honesty are blocking but candidate-satisfiable when CI is green -> auto-merge.
-    assert merge_gate([{"id": "contracts", "severity": "blocking"}]).authorized
+    # contracts is blocking: candidate-satisfiable ONLY with a trusted resolution, never on identity.
+    assert not merge_gate([{"id": "contracts", "severity": "blocking"}], subject_fingerprint=_FP).authorized
+    assert merge_gate([{"id": "contracts", "severity": "blocking"}],
+                      resolutions=[_resolution("contracts")], subject_fingerprint=_FP).authorized
 
 
 def test_merge_gate_fails_closed_on_unknown_or_missing_severity() -> None:

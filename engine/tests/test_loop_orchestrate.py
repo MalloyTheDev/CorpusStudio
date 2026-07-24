@@ -37,7 +37,8 @@ def _cs_assure(*, verify_green: bool = True, obligations: tuple[str, ...] = (),
                                "change_set_fingerprint": "cs:x"}},
         "changeset": {"payload": {"changed_paths": [{"path": p} for p in changed]}},
         "impact": {"payload": {"fired_obligations": [{"id": o, "severity": "blocking"} for o in obligations],
-                               "base_policy_available": base_policy_available}},
+                               "base_policy_available": base_policy_available,
+                               "change_set_fingerprint": "cs:x"}},
         "doclint": {"finding_count": 0},
     }
 
@@ -72,6 +73,13 @@ def _ctx(**kw) -> LoopContext:
     kw.setdefault("executor", _executor())
     kw.setdefault("run_cs_assure", _cs_assure())
     return LoopContext(repo_root=REPO_ROOT, **kw)
+
+
+def _res(oid: str) -> dict:
+    # A resolution record proving `oid` was discharged for the fake impact's change set ("cs:x") by a
+    # trusted authority - what a producing runtime would inject so the merge gate can authorize (#14).
+    return {"obligation_id": oid, "status": "RESOLVED", "subject_fingerprint": "cs:x",
+            "authority": "trusted-base-ci"}
 
 
 # --------------------------------------------------------------------------- full run + merge boundary
@@ -167,7 +175,8 @@ def test_integrate_holds_when_the_head_moved_between_ci_and_merge() -> None:
         return (0, json.dumps({"headRefOid": "sha1",
                                "statusCheckRollup": [{"name": "pytest", "bucket": "pass"}]}), "")
     state = LoopState(current_phase=Phase.INTEGRATE)
-    t = step(state, _ctx(gh_runner=gh, pr_ref="1", run_cs_assure=_cs_assure(obligations=("contracts",))))
+    t = step(state, _ctx(gh_runner=gh, pr_ref="1", run_cs_assure=_cs_assure(obligations=("contracts",)),
+                         obligation_resolutions=(_res("contracts"),)))  # gate authorizes -> reaches head-bound merge
     assert t.decision is Decision.HOLD and state.current_phase is Phase.INTEGRATE  # did not merge/advance
 
 
@@ -178,11 +187,24 @@ def test_integrate_fails_closed_when_obligations_are_uncomputable() -> None:
     assert t.decision is Decision.ESCALATE and state.current_phase is Phase.ESCALATED
 
 
-def test_integrate_merges_an_authorized_product_change() -> None:
+def test_integrate_merges_a_product_change_with_a_resolved_obligation() -> None:
+    # #14: an autonomous merge of a blocking-obligation change requires a trusted resolution record bound
+    # to this commit; with one, the gate authorizes and the head-bound merge proceeds.
+    state = LoopState(current_phase=Phase.INTEGRATE)
+    t = step(state, _ctx(gh_runner=_gh(ci="pass", merge_ok=True), pr_ref="1",
+                         run_cs_assure=_cs_assure(obligations=("contracts",)),
+                         obligation_resolutions=(_res("contracts"),)))
+    assert t.decision is Decision.ADVANCE and "merged" in state.observations[-1]["note"]
+    assert state.review_state["gate_evaluations"][-1]["authorized"] is True  # final gate record persisted
+
+
+def test_integrate_escalates_a_blocking_obligation_without_a_resolution() -> None:
+    # #14: the same change WITHOUT a resolution record is not proven discharged for this commit -> escalate.
     state = LoopState(current_phase=Phase.INTEGRATE)
     t = step(state, _ctx(gh_runner=_gh(ci="pass", merge_ok=True), pr_ref="1",
                          run_cs_assure=_cs_assure(obligations=("contracts",))))
-    assert t.decision is Decision.ADVANCE and "merged" in state.observations[-1]["note"]
+    assert t.decision is Decision.ESCALATE and state.current_phase is Phase.ESCALATED
+    assert state.review_state["gate_evaluations"][-1]["authorized"] is False
 
 
 def test_integrate_ci_failure_routes_to_fix() -> None:
@@ -253,7 +275,8 @@ def test_integrate_merge_is_pinned_to_the_observed_head() -> None:
         return (0, json.dumps({"headRefOid": "HEADSHA9",
                                "statusCheckRollup": [{"name": "pytest", "bucket": "pass"}]}), "")
     state = LoopState(current_phase=Phase.INTEGRATE)
-    step(state, _ctx(gh_runner=gh, pr_ref="1", run_cs_assure=_cs_assure(obligations=("contracts",))))
+    step(state, _ctx(gh_runner=gh, pr_ref="1", run_cs_assure=_cs_assure(obligations=("contracts",)),
+                     obligation_resolutions=(_res("contracts"),)))
     merge_argv = next(a for a in seen if len(a) >= 2 and a[1] == "merge")
     assert "--match-head-commit" in merge_argv and "HEADSHA9" in merge_argv
 
