@@ -3,7 +3,9 @@
 
 For the case where the LLM/human is the executor: ``cs_loop next`` prints what to do this phase (+ its
 constraints); you do it; ``cs_loop observe`` runs the assurance gate and records the classified result;
-repeat until the loop is terminal. Deterministic state lives in a JSON file (default ``.loop/state.json``).
+repeat until the loop is terminal. Deterministic state lives in a JSON file that defaults UNDER THE GIT DIR
+(``<git-dir>/corpusstudio-loop/state.json``), OUTSIDE the worktree, so it never contaminates the assurance
+change-set fingerprint; pass ``--state`` to override.
 
   cs_loop init --goal "add a scorer"     # create a loop for a goal
   cs_loop status | inspect               # where the loop is (summary | full state dump)
@@ -27,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess  # noqa: S404 - fixed-argv `git rev-parse` only; never a shell string.
 import sys
 from pathlib import Path
 
@@ -39,15 +42,46 @@ from loop.store import LoopStateError, load, save  # noqa: E402
 
 EXIT_OK = 0
 EXIT_FAIL_CLOSED = 2
-DEFAULT_STATE = ".loop/state.json"
+# The loop's operational state (state file, per-goal campaign states, the learning ledger, and - since
+# they live inside the state - the proposal log + authorization records) defaults UNDER THE GIT DIR, not
+# in the worktree. A state file in the worktree would be a non-ignored untracked file that the change-set
+# kernel folds into the assurance fingerprint, so every save (including after an assurance observation)
+# would immediately stale the record it just produced. Placing it at `git rev-parse --git-path` keeps it
+# out of the change set and isolates it per (linked) worktree.
+_OP_DIR_NAME = "corpusstudio-loop"
+_WORKTREE_FALLBACK = ".loop"  # only used when the target is not inside a git repo (then there is no gate)
 
 
 def _emit(obj: object) -> None:
     sys.stdout.write(json.dumps(obj, indent=2, sort_keys=True) + "\n")
 
 
+def _operational_dir(repo_root: str = ".") -> Path | None:
+    """The directory for the loop's operational state, OUTSIDE the worktree (under the git dir). Returns
+    None if ``repo_root`` is not inside a git repo (then there is no assurance change set to contaminate)."""
+    try:
+        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell.
+            ["git", "-C", repo_root, "rev-parse", "--git-path", _OP_DIR_NAME],
+            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    rel = proc.stdout.strip()
+    if proc.returncode != 0 or not rel:
+        return None
+    return (Path(repo_root) / rel).resolve()  # join handles both a relative and an absolute git-path result
+
+
+def _state_path(args: argparse.Namespace) -> Path:
+    """Resolve the loop state file: an explicit ``--state`` wins; otherwise default under the git dir
+    (``<git-dir>/corpusstudio-loop/state.json``), falling back to ``.loop/state.json`` only outside a repo."""
+    if args.state:
+        return Path(args.state)
+    op = _operational_dir(getattr(args, "repo_root", ".") or ".")
+    return (op / "state.json") if op is not None else Path(_WORKTREE_FALLBACK) / "state.json"
+
+
 def _cmd_init(args: argparse.Namespace) -> int:
-    path = Path(args.state)
+    path = _state_path(args)
     if path.exists() and not args.force:
         raise LoopStateError(f"{path} already exists (use --force to overwrite)")
     state = LoopState(goal=args.goal, goal_id=args.goal_id or "", current_phase=Phase.RECEIVE_GOAL)
@@ -57,7 +91,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
-    state = load(Path(args.state))
+    state = load(_state_path(args))
     tasks = [{"id": t.get("id"), "status": t.get("status")} for t in state.task_graph if isinstance(t, dict)]
     _emit({
         "goal": state.goal, "phase": state.current_phase.value, "terminal": state.is_terminal,
@@ -69,13 +103,13 @@ def _cmd_status(args: argparse.Namespace) -> int:
 
 
 def _cmd_next(args: argparse.Namespace) -> int:
-    state = load(Path(args.state))
+    state = load(_state_path(args))
     _emit(next_directive(state).to_dict())
     return EXIT_OK
 
 
 def _cmd_observe(args: argparse.Namespace) -> int:
-    path = Path(args.state)
+    path = _state_path(args)
     state = load(path)
     if state.is_terminal:
         raise LoopStateError(f"loop is already terminal ({state.current_phase.value}); nothing to observe")
@@ -90,7 +124,7 @@ def _cmd_observe(args: argparse.Namespace) -> int:
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:
-    state = load(Path(args.state))
+    state = load(_state_path(args))
     _emit({
         "goal": state.goal, "goal_id": state.goal_id, "phase": state.current_phase.value,
         "terminal": state.is_terminal, "termination_reason": state.termination_reason,
@@ -104,7 +138,7 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
 
 
 def _cmd_pause(args: argparse.Namespace) -> int:
-    path = Path(args.state)
+    path = _state_path(args)
     state = load(path)
     state.review_state["paused"] = True
     save(state, path)
@@ -113,7 +147,7 @@ def _cmd_pause(args: argparse.Namespace) -> int:
 
 
 def _cmd_resume(args: argparse.Namespace) -> int:
-    path = Path(args.state)
+    path = _state_path(args)
     state = load(path)
     state.review_state.pop("paused", None)
     save(state, path)
@@ -123,7 +157,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
 
 
 def _cmd_abort(args: argparse.Namespace) -> int:
-    path = Path(args.state)
+    path = _state_path(args)
     state = load(path)
     state.current_phase = Phase.STOPPED
     state.termination_reason = args.reason or "aborted by a human"
@@ -136,7 +170,7 @@ def _cmd_abort(args: argparse.Namespace) -> int:
 def _cmd_authorize(args: argparse.Namespace) -> int:
     # Record a human authorization (audit trail). If the loop ESCALATED waiting for one, move it back to
     # DIAGNOSE so it can be re-driven now that a human has granted the pending decision.
-    path = Path(args.state)
+    path = _state_path(args)
     state = load(path)
     state.review_state.setdefault("authorizations", []).append({"grant": args.grant, "note": args.note or ""})
     unescalated = state.current_phase is Phase.ESCALATED
@@ -177,11 +211,30 @@ def _load_adapters(path: str):  # noqa: ANN202 - a loaded module
     return module
 
 
+def _default_ledger(args: argparse.Namespace) -> Path | None:
+    """The cross-goal learning ledger path: an explicit ``--ledger`` wins; otherwise default under the git
+    dir (OUTSIDE the worktree). None only when not inside a git repo (then no ledger is wired)."""
+    if args.ledger:
+        return Path(args.ledger)
+    op = _operational_dir(getattr(args, "repo_root", ".") or ".")
+    return (op / "ledger.json") if op is not None else None
+
+
+def _campaign_store_dir(args: argparse.Namespace) -> Path | None:
+    """The per-goal campaign state directory: an explicit ``--store-dir`` wins; otherwise default under the
+    git dir (OUTSIDE the worktree), so per-goal state files never enter the change set."""
+    if args.store_dir:
+        return Path(args.store_dir)
+    op = _operational_dir(getattr(args, "repo_root", ".") or ".")
+    return (op / "campaigns") if op is not None else None
+
+
 def _context(args: argparse.Namespace):  # noqa: ANN202 - a LoopContext
     from dataclasses import replace
     ctx = _load_adapters(args.adapters).build_context(Path(args.repo_root), args.base)
-    if args.ledger:
-        ctx = replace(ctx, ledger_path=Path(args.ledger))
+    ledger = _default_ledger(args)
+    if ledger is not None:
+        ctx = replace(ctx, ledger_path=ledger)
     return ctx
 
 
@@ -189,7 +242,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     from dataclasses import replace
 
     from loop.orchestrate import run_loop
-    path = Path(args.state)
+    path = _state_path(args)
     state = load(path)
     if state.review_state.get("paused"):
         raise LoopStateError("loop is paused; `cs_loop resume` before running")
@@ -236,8 +289,8 @@ def _cmd_campaign(args: argparse.Namespace) -> int:
     except (OSError, ValueError, UnicodeDecodeError) as exc:
         raise LoopStateError(f"cannot read goals file {args.goals!r}: {exc}") from exc
     goals = _goals_from_json(goals_raw)
-    store_dir = Path(args.store_dir) if args.store_dir else None
-    outcomes = run_campaign(goals, _context(args), store_dir=store_dir, max_steps=args.max_steps)
+    outcomes = run_campaign(goals, _context(args), store_dir=_campaign_store_dir(args),
+                            max_steps=args.max_steps)
     _emit({"outcomes": [{"goal_id": o.goal_id, "final_phase": o.final_phase, "finalized": o.finalized}
                         for o in outcomes]})
     return EXIT_OK
@@ -245,7 +298,8 @@ def _cmd_campaign(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="cs_loop", description="Autonomous-loop CLI.")
-    parser.add_argument("--state", default=DEFAULT_STATE, help="loop state file (default: .loop/state.json)")
+    parser.add_argument("--state", default="",
+                        help="loop state file (default: <git-dir>/corpusstudio-loop/state.json, outside the worktree)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_init = sub.add_parser("init", help="create a loop for a goal")
@@ -283,11 +337,13 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--adapters", required=True, help="path to a module exposing build_context(repo_root, base)")
         p.add_argument("--base", default="main")
         p.add_argument("--repo-root", default=".")
-        p.add_argument("--ledger", default="", help="cross-goal learning ledger JSON (optional)")
+        p.add_argument("--ledger", default="",
+                       help="cross-goal learning ledger JSON (default: <git-dir>/corpusstudio-loop/ledger.json)")
         p.add_argument("--max-steps", type=int, default=200)
         if name == "campaign":
             p.add_argument("--goals", required=True, help="JSON list of {goal, goal_id, depends_on?}")
-            p.add_argument("--store-dir", default="", help="dir for per-goal state files (optional)")
+            p.add_argument("--store-dir", default="",
+                           help="per-goal state dir (default: <git-dir>/corpusstudio-loop/campaigns)")
         p.set_defaults(func=cmd)
 
     args = parser.parse_args(argv)
