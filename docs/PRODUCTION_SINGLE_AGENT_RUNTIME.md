@@ -186,3 +186,49 @@ escalates; a self-modify / assurance / worker / sealed PR **never** merges regar
 At no point does the candidate self-merge a controller / assurance / research / worker / dangerous change;
 an independent reviewer merges. This design changes none of the honesty invariants — it wires real effects
 into seams that already fail closed.
+
+## 10. Chosen defaults + contracts (agreed this review)
+
+The robustness decisions for §8, and the concrete contracts 7.0 implements:
+
+- **Agent invocation = an injected `AgentClient` callback backed by an out-of-process, fixed-argv `claude`
+  subprocess with a framed JSON contract over stdio.** NOT the Agent SDK (it violates the adapter
+  stdlib-only rule and runs the untrusted agent in-process). The callback is the loop-level seam; the
+  subprocess is a swappable transport (a stub is injected in tests). This matches the target
+  "out-of-process protocol, not PyO3" architecture, keeps the agent killable/bounded, and honors no-shell.
+- **Agent output is untrusted, validated fail-closed** into a sealed record — never trusted as free-form
+  text (the same discipline `observe.py` applies to a `cs_assure` record).
+- **Worktree isolation lands in 7.1, not 7.0.** 7.0 is propose-only and writes nothing, so it needs no
+  checkout — it proposes a unified diff against `base` read from the object store. The **ephemeral,
+  disposable, one-per-run** worktree is introduced with the write step (7.1), where it actually isolates
+  edits from the developer's tree.
+- **7.1 authorization** = a sealed `AuthorizationRequest` bound to `(goal_id, capability, subject =
+  head_sha / change-set fingerprint)`, one-time, stale-on-subject-change (no replay).
+- **First 7.1 product target** = a single-file, deterministically-gated change firing **zero** human-gated
+  obligations (a docstring / typo / lint fix or a missing-test add); never a `scripts/loop`,
+  `scripts/assurance`, `.github`, or worker path.
+
+### `AgentClient` protocol (7.0)
+
+```python
+class AgentClient(Protocol):
+    def propose(self, request: dict) -> dict:
+        """Given {goal, goal_id, base_oid, directive, repo_root}, return
+        {"unified_diff": str, "rationale": str}. RAISES on transport/output failure (fail-closed)."""
+```
+
+The real `ClaudeSubprocessClient` runs `["claude", "-p", "--output-format", "json", ...]` (fixed argv, no
+shell, bounded timeout), feeds the request as JSON on stdin, and validates the JSON response shape before
+returning; a bad exit / unparseable / wrong-shaped response raises. Tests inject a deterministic stub.
+
+### `agent_proposal` sealed record (7.0)
+
+```
+{ "record_type": "agent_proposal", "schema_version": 1,
+  "payload": { "goal_id", "base_oid", "unified_diff", "changed_paths", "rationale" },
+  "record_digest": "sha256:<over the record minus this field>" }
+```
+
+Written under the operational dir (`<git-dir>/corpusstudio-loop/proposals/<run-id>.json`), **outside** the
+working tree. It is the reviewable, tamper-evident artifact a human inspects; 7.0 **applies nothing** and
+ends `ESCALATED`.
