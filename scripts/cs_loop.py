@@ -12,7 +12,7 @@ change-set fingerprint; pass ``--state`` to override.
   cs_loop next                           # the next directive (phase, action, allowed paths, budget)
   cs_loop observe [--base main]          # run cs_assure, classify, route, persist (one interactive step)
   cs_loop pause | resume | abort         # lifecycle control
-  cs_loop authorize --grant "..."        # record a human authorization; un-escalate a blocked loop
+  cs_loop authorize [--request <id>]     # show the pending escalation, or grant that SPECIFIC request
 
 For the AUTONOMOUS surface, the loop's effects (executor / reviewer / agents / gh / critic) are supplied
 by an INJECTED adapter module - the seam a concrete Claude-Code runtime fills:
@@ -28,6 +28,7 @@ stdlib-only; fail-closed (a refusal exits 2, never a bare traceback), mirroring 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess  # noqa: S404 - fixed-argv `git rev-parse` only; never a shell string.
 import sys
@@ -167,18 +168,53 @@ def _cmd_abort(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _pending_authorization(state: LoopState) -> dict[str, str] | None:
+    """The pending human-authorization REQUEST for an ESCALATED loop (else None). Its ``request_id`` is
+    the deterministic identity of the CURRENT blocker (goal + termination reason), so a grant must name
+    THIS specific request - it never universally un-escalates an unrelated blocker, and it goes STALE if
+    the loop later escalates for a different reason (the id changes)."""
+    if state.current_phase is not Phase.ESCALATED:
+        return None
+    # The id is DETERMINISTIC on (goal, blocker) BY DESIGN: re-escalating for the same blocker yields the
+    # same id, so a valid grant persists and is idempotent; a different blocker (reason) yields a new id
+    # (staleness). No timestamp/step index - that would break both idempotency and the loop's no-wall-clock
+    # determinism. The finer per-subject discriminator (change_set_fingerprint / head) is #5 slice 2.
+    reason = state.termination_reason or "(no reason recorded)"
+    rid = "auth-" + hashlib.sha256(f"{state.goal_id}\x00{reason}".encode("utf-8")).hexdigest()[:16]
+    return {"request_id": rid, "goal_id": state.goal_id, "capability": reason}
+
+
 def _cmd_authorize(args: argparse.Namespace) -> int:
-    # Record a human authorization (audit trail). If the loop ESCALATED waiting for one, move it back to
-    # DIAGNOSE so it can be re-driven now that a human has granted the pending decision.
+    # A human authorizes a SPECIFIC pending request by its id (not a free-form blanket un-escalate). With
+    # no --request, SHOW the pending request so the human learns its id; with a matching --request, record
+    # the decision (bound to the request + any completeness --grant) and un-escalate ONLY that blocker.
     path = _state_path(args)
     state = load(path)
-    state.review_state.setdefault("authorizations", []).append({"grant": args.grant, "note": args.note or ""})
-    unescalated = state.current_phase is Phase.ESCALATED
-    if unescalated:
-        state.current_phase = Phase.DIAGNOSE
-        state.termination_reason = None
+    pending = _pending_authorization(state)
+    if not args.request:
+        if pending is None:
+            _emit({"pending_authorization": None,
+                   "note": "the loop is not ESCALATED; there is nothing to authorize"})
+        else:
+            _emit({"pending_authorization": pending,
+                   "note": "re-run: cs_loop authorize --request <request_id> [--grant <criterion-id>]"})
+        return EXIT_OK
+    if pending is None:
+        raise LoopStateError("the loop is not ESCALATED; there is no pending authorization request")
+    if args.request != pending["request_id"]:
+        raise LoopStateError(
+            f"request {args.request!r} does not match the pending request {pending['request_id']!r} - a "
+            "grant must name the CURRENT blocker (it never universally un-escalates an unrelated one)")
+    # Keep a `grant` field (the completeness criterion id, if any) so a HUMAN_APPROVAL criterion is still
+    # satisfied by grant == criterion.id; add the request binding + the capability it authorized.
+    state.review_state.setdefault("authorizations", []).append({
+        "request_id": pending["request_id"], "capability": pending["capability"],
+        "grant": args.grant or "", "note": args.note or "", "granted": True})
+    state.current_phase = Phase.DIAGNOSE
+    state.termination_reason = None
     save(state, path)
-    _emit({"authorized": args.grant, "unescalated": unescalated, "phase": state.current_phase.value})
+    _emit({"authorized": pending["request_id"], "grant": args.grant or "",
+           "phase": state.current_phase.value})
     return EXIT_OK
 
 
@@ -324,8 +360,11 @@ def main(argv: list[str] | None = None) -> int:
     p_abort.add_argument("--reason", default="")
     p_abort.set_defaults(func=_cmd_abort)
 
-    p_auth = sub.add_parser("authorize", help="record a human authorization; un-escalate a blocked loop")
-    p_auth.add_argument("--grant", required=True, help="what is being authorized (audit label)")
+    p_auth = sub.add_parser("authorize",
+                            help="show the pending authorization request, or grant it by --request <id>")
+    p_auth.add_argument("--request", default="",
+                        help="the request_id of the pending escalation to authorize (run `authorize` with no args to see it)")
+    p_auth.add_argument("--grant", default="", help="a completeness criterion id this authorization satisfies (optional)")
     p_auth.add_argument("--note", default="")
     p_auth.set_defaults(func=_cmd_authorize)
 
