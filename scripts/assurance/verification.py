@@ -226,6 +226,15 @@ def build_verification_record(
     (with distinct ``before_fingerprint`` / ``after_fingerprint``) when a gate step mutated the tree
     during the run, so the record cannot be read as validating the pre-run state.
     """
+    if scope != "workspace":
+        # verify RUNS the gate against the checked-out WORKING TREE, so it can only honestly bind to
+        # the workspace scope; a head / merge_candidate record would claim a tree the gate never ran
+        # against. Verifying a committed tree needs an isolated worktree checkout (a later runtime
+        # step), so this fails closed rather than seal a mislabeled record.
+        raise GateError(
+            f"verify supports only the 'workspace' scope (got {scope!r}); running the gate against a "
+            "committed head / merge_candidate tree needs an isolated-worktree checkout"
+        )
     ctx = discover_git_context(start_dir)
     gate = load_gate(ctx.root, gate_relpath)
     policy, base_policy_available = load_effective_policy(ctx, base_ref, policy_relpath)

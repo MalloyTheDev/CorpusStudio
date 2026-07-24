@@ -6,8 +6,10 @@ Usage::
     python3 scripts/cs_assure.py changeset --scope workspace --base main --format json
 
 Subcommands:
-    changeset  snapshot the selected Git state and print a deterministic, rename-free,
-               content-addressed ChangeSetRecord vs merge-base(HEAD, --base) (Phase 1 kernel).
+    changeset  snapshot the selected Git --scope and print a deterministic, rename-free,
+               content-addressed ChangeSetRecord: workspace (working tree vs merge-base), head (the
+               committed HEAD tree vs merge-base), or merge_candidate (the tree merging HEAD into
+               --base would produce, vs that base tip; a conflicted merge fails closed).
     doclint    lint the documentation context plane for staleness against the context-source
                registry (detect-only; edits nothing) - the doc-trust sub-loop's sensor.
     impact     map the change set onto the obligations policy and print a sealed ImpactAssessment
@@ -178,8 +180,9 @@ def build_parser() -> argparse.ArgumentParser:
     changeset.add_argument(
         "--scope",
         default="workspace",
-        choices=["workspace"],
-        help="which Git state to snapshot (Phase 1 implements the workspace scope only)",
+        choices=["workspace", "head", "merge_candidate"],
+        help="which Git state to snapshot: workspace (working tree), head (the committed HEAD tree "
+        "vs merge-base), or merge_candidate (the tree merging HEAD into --base would produce)",
     )
     changeset.add_argument(
         "--base",
@@ -228,8 +231,9 @@ def build_parser() -> argparse.ArgumentParser:
     impact.add_argument(
         "--scope",
         default="workspace",
-        choices=["workspace"],
-        help="which Git state to assess (inherits the kernel's workspace-only scope)",
+        choices=["workspace", "head", "merge_candidate"],
+        help="which Git state to assess: workspace, head (bind obligations to the exact committed "
+        "HEAD), or merge_candidate (obligations of what merging HEAD into --base would introduce)",
     )
     impact.add_argument(
         "--base",
@@ -299,8 +303,8 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument(
         "--scope",
         default="workspace",
-        choices=["workspace"],
-        help="which Git state to bind the snapshot to (workspace only)",
+        choices=["workspace", "head", "merge_candidate"],
+        help="which Git state to bind the snapshot to (workspace, head, or merge_candidate)",
     )
     status.add_argument(
         "--base",

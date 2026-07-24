@@ -72,14 +72,19 @@ class FileState:
 
 
 class GitTreeSourceView:
-    """The state of a path as recorded in a committed git tree (read via the object store)."""
+    """The state of a path as recorded in a committed git TREE-ISH (read via the object store).
 
-    def __init__(self, root: Path, tree_commit: str) -> None:
+    ``tree_ish`` may be a commit OID (the ``head`` / base-tip scopes) or a bare tree OID (the
+    ``merge_candidate`` scope's synthesized merge tree); ``git ls-tree`` / ``cat-file`` accept both,
+    so the same view serves every tree-vs-tree scope with no checkout.
+    """
+
+    def __init__(self, root: Path, tree_ish: str) -> None:
         self.root = root
-        self.tree_commit = tree_commit
+        self.tree_ish = tree_ish
 
     def state(self, path: str) -> FileState | None:
-        entry = tree_entry(self.root, self.tree_commit, path)
+        entry = tree_entry(self.root, self.tree_ish, path)
         if entry is None:
             return None
         if entry.type == "commit" or entry.mode == _MODE_GITLINK:
@@ -92,7 +97,7 @@ class GitTreeSourceView:
             return FileState(kind="regular", mode=entry.mode, content_digest=sha256_of_bytes(data))
         if entry.type == "tree":
             raise UnsupportedSpecialFile(
-                f"{path} is a directory in {self.tree_commit[:12]}, not a single file"
+                f"{path} is a directory in {self.tree_ish[:12]}, not a single file"
             )
         raise UnsupportedSpecialFile(f"unsupported git mode {entry.mode} for {path}")
 

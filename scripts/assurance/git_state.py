@@ -51,6 +51,18 @@ class UnsupportedPathEncoding(GitStateError):
     """A path (or symlink target) is not valid UTF-8; assurance records require UTF-8."""
 
 
+class MergeCandidateConflicted(GitStateError):
+    """A 3-way merge of HEAD into the base tip conflicts; the merge candidate cannot be assessed.
+
+    A conflicted merge has no single well-defined resulting tree to gate against, so the kernel
+    refuses rather than assess an ``ours``/``theirs``-guessed tree that no real merge would produce.
+    """
+
+
+class MergeTreeUnsupported(GitStateError):
+    """This git is too old for ``git merge-tree --write-tree`` (needs git >= 2.38)."""
+
+
 @dataclass(frozen=True)
 class GitContext:
     """The resolved identity of the working tree the kernel was pointed at."""
@@ -180,6 +192,49 @@ def changed_tracked_paths(root: Path, base_commit: str) -> list[str]:
     """
     proc = _git(root, "diff", "--raw", "-z", "--no-renames", base_commit, "--")
     return _parse_diff_raw_z(proc.stdout)
+
+
+def changed_paths_between(root: Path, base_tree_ish: str, candidate_tree_ish: str) -> list[str]:
+    """Repository-relative paths differing between two COMMITTED tree-ishes (no working tree read).
+
+    The tree-vs-tree analogue of :func:`changed_tracked_paths`: it powers the ``head`` and
+    ``merge_candidate`` scopes, whose candidate side is a committed tree, not the working copy (so
+    there are no untracked files to consider). Renames stay disabled for the same canonical
+    delete+add modelling.
+    """
+    proc = _git(root, "diff", "--raw", "-z", "--no-renames", base_tree_ish, candidate_tree_ish, "--")
+    return _parse_diff_raw_z(proc.stdout)
+
+
+def write_merge_tree(root: Path, base_commit: str, head_commit: str) -> str:
+    """Return the tree OID of a 3-way merge of ``head_commit`` INTO ``base_commit`` (read-only).
+
+    Uses ``git merge-tree --write-tree`` (git >= 2.38): it computes the merge base of the two
+    commits, performs a real 3-way merge, and writes the resulting tree to the object store WITHOUT
+    touching any ref or the working tree. Exit 0 is a clean merge (stdout's first line is the tree
+    OID); exit 1 is a conflicted merge (``MergeCandidateConflicted`` - a conflicted candidate has no
+    single tree to gate against); an older git that lacks ``--write-tree`` fails closed as
+    ``MergeTreeUnsupported``; any other failure fails closed as ``GitStateError``.
+    """
+    proc = _git(root, "merge-tree", "--write-tree", base_commit, head_commit, check=False)
+    if proc.returncode == 0:
+        oid = proc.stdout.decode("utf-8", "replace").strip().splitlines()[0].strip() if proc.stdout else ""
+        if len(oid) in (40, 64) and all(c in "0123456789abcdef" for c in oid):
+            return oid
+        raise GitStateError(f"git merge-tree --write-tree returned an unrecognized tree oid: {oid!r}")
+    if proc.returncode == 1:
+        raise MergeCandidateConflicted(
+            f"merging HEAD ({head_commit[:12]}) into the base tip ({base_commit[:12]}) conflicts; "
+            "a conflicted merge candidate cannot be assessed - resolve the merge first"
+        )
+    stderr = proc.stderr.decode("utf-8", "replace")
+    lowered = stderr.lower()
+    if "unknown option" in lowered or "--write-tree" in lowered or "usage:" in lowered:
+        raise MergeTreeUnsupported(
+            "git merge-tree --write-tree is unavailable (needs git >= 2.38); "
+            f"cannot compute a merge-candidate tree: {stderr.strip()}"
+        )
+    raise GitStateError(f"git merge-tree --write-tree failed (exit {proc.returncode}): {stderr.strip()}")
 
 
 def _parse_diff_raw_z(raw: bytes) -> list[str]:
