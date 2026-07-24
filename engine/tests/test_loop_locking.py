@@ -62,6 +62,14 @@ def test_a_future_dated_lock_is_not_broken_as_stale(tmp_path: Path) -> None:
         FileLock(tmp_path / "res", timeout=0.2, stale_after=1.0).acquire()
 
 
+def test_lock_creates_a_missing_parent_directory(tmp_path: Path) -> None:
+    # A lock on a NEW resource whose directory does not exist yet (e.g. run_loop taking the state-file
+    # lock before the first save() creates the dir) must create the dir and acquire, not FileNotFoundError.
+    target = tmp_path / "deep" / "nested" / "state.json"  # parents do not exist
+    with FileLock(target, timeout=1) as lock:
+        assert lock._token is not None and lock.lock_path.exists()
+
+
 def _a_dead_pid() -> int:
     import subprocess  # a child that has EXITED -> its PID is not alive (until reused, unlikely in a test)
     proc = subprocess.Popen([sys.executable, "-c", "pass"])

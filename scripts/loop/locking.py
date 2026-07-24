@@ -63,6 +63,10 @@ class FileLock:
         self._token: str | None = None  # a per-acquisition owner token, so release removes only OUR lock
 
     def acquire(self) -> "FileLock":
+        # The lockfile's parent dir must exist to O_EXCL-create it. A caller may lock a NEW resource whose
+        # directory has not been written yet (e.g. run_loop takes the state-file lock BEFORE the first
+        # save() would create the dir), so create it here - mkdir(exist_ok) is a no-op when it already does.
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         deadline = time.monotonic() + self.timeout
         while True:
             try:
