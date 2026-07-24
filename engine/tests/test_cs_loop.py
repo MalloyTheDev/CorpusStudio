@@ -132,6 +132,22 @@ def _adapter(tmp_path: Path) -> Path:
     return p
 
 
+# An adapter that ALSO exposes the per-goal isolation factory (re-review #10). Each goal gets its own
+# LoopContext with its own state file, and drops a marker so the test can prove the factory ran per goal.
+_FACTORY_ADAPTER = _ADAPTER + '''
+def build_context_for_goal(goal, repo_root, base, campaign_dir):
+    from dataclasses import replace as _replace
+    from pathlib import Path as _Path
+    ctx = build_context(repo_root, base)
+    if campaign_dir is not None:
+        d = _Path(campaign_dir) / goal.goal_id
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "GOAL").write_text(goal.goal_id)          # proof the factory ran for THIS goal
+        ctx = _replace(ctx, store_path=d / "state.json")
+    return ctx
+'''
+
+
 def test_run_drives_the_integrated_loop_to_finalize(tmp_path: Path) -> None:
     state = tmp_path / "loop.json"
     _run(state, "init", "--goal", "ship it")
@@ -139,6 +155,36 @@ def test_run_drives_the_integrated_loop_to_finalize(tmp_path: Path) -> None:
     assert out.returncode == 0, out.stderr
     result = json.loads(out.stdout)
     assert result["phase"] == "FINALIZE" and result["terminal"] is True
+
+
+def test_campaign_uses_the_per_goal_context_factory_when_present(tmp_path: Path) -> None:
+    # #10: an adapter exposing build_context_for_goal drives per-goal ISOLATION through the CLI - each
+    # goal gets its own context + state file (the seam a runtime fills with a per-goal branch/worktree/PR).
+    goals = tmp_path / "goals.json"
+    goals.write_text(json.dumps([{"goal": "a", "goal_id": "g1"}, {"goal": "b", "goal_id": "g2"}]))
+    adapter = tmp_path / "factory_adapter.py"
+    adapter.write_text(_FACTORY_ADAPTER)
+    camp = tmp_path / "camp"
+    out = _run(tmp_path / "unused.json", "campaign", "--adapters", str(adapter), "--goals", str(goals),
+               "--repo-root", str(REPO_ROOT), "--store-dir", str(camp))
+    assert out.returncode == 0, out.stderr
+    assert all(o["finalized"] for o in json.loads(out.stdout)["outcomes"])
+    # the factory ran PER GOAL: each goal got its own dir + marker + state file
+    assert (camp / "g1" / "GOAL").read_text() == "g1" and (camp / "g2" / "GOAL").read_text() == "g2"
+    assert (camp / "g1" / "state.json").is_file() and (camp / "g2" / "state.json").is_file()
+
+
+def test_campaign_ignores_a_non_callable_build_context_for_goal(tmp_path: Path) -> None:
+    # A non-callable attribute named build_context_for_goal is NOT a factory - fall back to the shared
+    # build_context (never try to call a string), so the campaign still runs.
+    goals = tmp_path / "goals.json"
+    goals.write_text(json.dumps([{"goal": "a", "goal_id": "g1"}]))
+    adapter = tmp_path / "bad_factory_adapter.py"
+    adapter.write_text(_ADAPTER + '\nbuild_context_for_goal = "not callable"\n')
+    out = _run(tmp_path / "unused.json", "campaign", "--adapters", str(adapter), "--goals", str(goals),
+               "--repo-root", str(REPO_ROOT))
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout)["outcomes"][0]["finalized"]  # fell back to build_context
 
 
 def test_campaign_runs_a_dependency_ordered_backlog(tmp_path: Path) -> None:

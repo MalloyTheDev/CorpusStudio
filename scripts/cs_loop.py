@@ -21,6 +21,9 @@ by an INJECTED adapter module - the seam a concrete Claude-Code runtime fills:
   cs_loop campaign --adapters path/to/adapters.py --goals goals.json [--store-dir D]
 
 An adapter module exposes ``build_context(repo_root: Path, base: str) -> loop.orchestrate.LoopContext``.
+For a campaign it MAY also expose ``build_context_for_goal(goal, repo_root, base, campaign_dir) ->
+LoopContext`` - a PER-GOAL isolation factory (each goal its own branch/worktree/PR/state); when present,
+``cs_loop campaign`` uses it instead of one shared context.
 
 stdlib-only; fail-closed (a refusal exits 2, never a bare traceback), mirroring cs_assure.
 """
@@ -265,13 +268,20 @@ def _campaign_store_dir(args: argparse.Namespace) -> Path | None:
     return (op / "campaigns") if op is not None else None
 
 
-def _context(args: argparse.Namespace):  # noqa: ANN202 - a LoopContext
+def _wire_ledger(ctx, ledger):  # noqa: ANN001,ANN202 - a LoopContext
+    """Give a LoopContext the shared cross-goal ledger, unless the adapter already set one. A non-
+    LoopContext is returned untouched so the campaign layer's fail-closed validation reports it clearly."""
     from dataclasses import replace
-    ctx = _load_adapters(args.adapters).build_context(Path(args.repo_root), args.base)
-    ledger = _default_ledger(args)
-    if ledger is not None:
-        ctx = replace(ctx, ledger_path=ledger)
+
+    from loop.orchestrate import LoopContext
+    if ledger is not None and isinstance(ctx, LoopContext) and ctx.ledger_path is None:
+        return replace(ctx, ledger_path=ledger)
     return ctx
+
+
+def _context(args: argparse.Namespace):  # noqa: ANN202 - a LoopContext
+    ctx = _load_adapters(args.adapters).build_context(Path(args.repo_root), args.base)
+    return _wire_ledger(ctx, _default_ledger(args))
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -324,9 +334,22 @@ def _cmd_campaign(args: argparse.Namespace) -> int:
         goals_raw = json.loads(Path(args.goals).read_text("utf-8"))
     except (OSError, ValueError, UnicodeDecodeError) as exc:
         raise LoopStateError(f"cannot read goals file {args.goals!r}: {exc}") from exc
+    module = _load_adapters(args.adapters)
     goals = _goals_from_json(goals_raw)
-    outcomes = run_campaign(goals, _context(args), store_dir=_campaign_store_dir(args),
-                            max_steps=args.max_steps)
+    store_dir = _campaign_store_dir(args)
+    ledger = _default_ledger(args)
+    factory = getattr(module, "build_context_for_goal", None)
+    if callable(factory):  # callable, not merely present - a non-callable attribute is not a factory
+        # PER-GOAL ISOLATION: the adapter exposes a factory, so each goal gets its OWN LoopContext (the
+        # seam a runtime fills with a per-goal branch / worktree / PR / state). Required for a
+        # write-capable multi-goal campaign, where a shared working tree would let goals clobber each other.
+        def context_for(goal):  # noqa: ANN001,ANN202 - a LoopContext
+            gctx = factory(goal, Path(args.repo_root), args.base, store_dir)
+            return _wire_ledger(gctx, ledger)
+        outcomes = run_campaign(goals, context_for=context_for, store_dir=store_dir, max_steps=args.max_steps)
+    else:
+        ctx = _wire_ledger(module.build_context(Path(args.repo_root), args.base), ledger)
+        outcomes = run_campaign(goals, ctx, store_dir=store_dir, max_steps=args.max_steps)
     _emit({"outcomes": [{"goal_id": o.goal_id, "final_phase": o.final_phase, "finalized": o.finalized,
                          "status": o.status} for o in outcomes]})
     return EXIT_OK
