@@ -4,9 +4,10 @@ The ``worker-closure`` obligation flags only a DECLARED list of worker files - i
 modules the worker entrypoints actually IMPORT. So a change to a module the worker imports but that is
 not on the list (e.g. ``platform/backends.py``) fires no obligation, even though it ships in the worker
 package. This module computes the real graph: from the worker roots, follow intra-repo ``import`` /
-``from ... import`` edges (via the stdlib ``ast``) to the transitive closure of reachable modules, on
-BOTH the base and candidate sides, and report the union, the delta, the modules the declared list
-misses, and the dynamic imports the static graph cannot resolve.
+``from ... import`` edges (via the stdlib ``ast``) to the transitive closure of reachable modules (a
+worklist walk - the reachable set is order-independent), on BOTH the base and candidate sides, and
+report the union, the delta, the modules the declared list misses, and the dynamic imports the static
+graph cannot resolve.
 
 It is pure + fail-closed: a module that cannot be read or parsed is RECORDED (never silently dropped),
 and a dynamically-computed import target (``importlib.import_module(x)`` for a non-literal ``x``,
@@ -172,14 +173,16 @@ def _dynamic_import_target(node: ast.Call) -> tuple[str | None, str] | None:
 def reachable_from(roots: tuple[str, ...], read: ReadBytes, *,
                    package_root: str = DEFAULT_PACKAGE_ROOT, top_package: str = DEFAULT_TOP_PACKAGE
                    ) -> Reachability:
-    """BFS the intra-repo import graph from ``roots`` (repo paths) over one view's ``read``. A root or
-    reachable module missing from this view is simply not in the graph (it may be added/removed on the
-    other side); one that is present but unreadable/unparseable is RECORDED (fail-closed)."""
+    """Traverse the intra-repo import graph from ``roots`` (repo paths) over one view's ``read``, returning
+    the reachable module SET. The traversal is a simple worklist (a stack; order is irrelevant - a closure
+    is the same set whichever order it is walked). A root or reachable module missing from this view is
+    simply not in the graph (it may be added/removed on the other side); one that is present but
+    unreadable/unparseable is RECORDED (fail-closed)."""
     seen_paths: set[str] = set()
     dynamic: list[dict[str, str]] = []
     unreadable: list[dict[str, str]] = []
-    # Seed the queue with the roots that resolve in this view (a root absent here is handled by the delta).
-    queue: list[tuple[str, str, bool]] = []  # (module, path, is_package)
+    # Seed the worklist with the roots that resolve in this view (a root absent here is handled by the delta).
+    stack: list[tuple[str, str, bool]] = []  # (module, path, is_package)
     for root in roots:
         resolved = path_to_module(root, package_root=package_root)
         if resolved is None:
@@ -187,10 +190,10 @@ def reachable_from(roots: tuple[str, ...], read: ReadBytes, *,
         module, is_package = resolved
         if read(root) is not None and root not in seen_paths:
             seen_paths.add(root)
-            queue.append((module, root, is_package))
+            stack.append((module, root, is_package))
 
-    while queue:
-        module, path, is_package = queue.pop()
+    while stack:
+        module, path, is_package = stack.pop()
         source = read(path)
         if source is None:  # a path we enqueued because it resolved; a race/read failure is fail-closed
             unreadable.append({"path": path, "detail": "could not be read"})
@@ -208,7 +211,7 @@ def reachable_from(roots: tuple[str, ...], read: ReadBytes, *,
             target_path, target_is_pkg = resolved
             if target_path not in seen_paths:
                 seen_paths.add(target_path)
-                queue.append((target, target_path, target_is_pkg))
+                stack.append((target, target_path, target_is_pkg))
 
     # De-duplicate dynamic records deterministically (same target imported from many sites -> one entry).
     dyn_unique = sorted({(d["kind"], d["detail"]): d for d in dynamic}.values(),

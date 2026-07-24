@@ -106,6 +106,16 @@ def test_dynamic_imports_literal_resolved_nonliteral_recorded() -> None:
     assert kinds == {"dynamic_import"} and len(r.unresolved_dynamic) >= 1  # non-literal targets recorded
 
 
+def test_relative_import_escaping_the_top_package_is_recorded_not_followed() -> None:
+    # `from ....far import x` from corpus_studio.pkg.mod climbs above the top package -> unresolvable.
+    # It must be RECORDED (relative_escapes_package) and never treated as reachable, without crashing.
+    files = dict([_mod("pkg/mod.py", "from ....far import x\n"), _mod("pkg/__init__.py", "")])
+    r = reachable_from((f"{PKG}/pkg/mod.py",), _reader(files))
+    assert f"{PKG}/pkg/mod.py" in r.reachable
+    assert {d["kind"] for d in r.unresolved_dynamic} == {"relative_escapes_package"}
+    assert all("far" not in path for path in r.reachable)  # the escaped target is not followed
+
+
 def test_unparseable_module_is_recorded_not_dropped() -> None:
     files = dict([_mod("root.py", "def broken(:\n")])  # a syntax error
     r = reachable_from((f"{PKG}/root.py",), _reader(files))
