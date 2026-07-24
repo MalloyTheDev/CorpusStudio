@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import copy
 import json
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -49,13 +50,14 @@ from loop.docs import DEFAULT_COUPLINGS, DocCoupling, docs_observation, stale_do
 from loop.driver import Directive, next_directive
 from loop.integrate import (
     GhRunner,
+    IntegrateError,
     ci_observation,
     head_bound_merge,
     merge_gate,
     observe_ci,
 )
-from loop.observe import CsAssureRunner, _run_cs_assure, observe, record_evidence
-from loop.review import Reviewer, review, review_observation
+from loop.observe import CsAssureRunner, LoopObserveError, _run_cs_assure, observe, record_evidence
+from loop.review import ReviewError, Reviewer, review, review_observation
 from loop.router import AgentRunner, PathVerifier, aggregate_observation, dispatch_wave
 from loop.store import save
 from loop.tasks import LoopTaskError, TaskStatus, parse_tasks, ready_tasks, set_status, status_for
@@ -400,6 +402,16 @@ def _dispatch(state: LoopState, ctx: LoopContext) -> PhaseResult:
     return PhaseResult(ctx.executor(state, directive), directive.action)
 
 
+# The EXPECTED operational refusals a dispatched phase can raise (assurance/CI/gh unusable, a critic error,
+# a malformed graph, a reviewer refusal, a subprocess spawn error). step() still fail-closes on ANY
+# exception, but an exception OUTSIDE this set is treated as an UNEXPECTED controller bug: it is labelled
+# distinctly and its traceback is kept, so a genuine bug is not blurred into an operational refusal and
+# stays debuggable (Sourcery #696).
+_EXPECTED_DISPATCH_ERRORS: tuple[type[Exception], ...] = (
+    LoopObserveError, CompletenessError, IntegrateError, LoopOrchestrateError, LoopTaskError,
+    ReviewError, OSError,
+)
+
 _ABSENT = object()  # sentinel: the authorizations key was absent before dispatch
 
 
@@ -434,16 +446,22 @@ def step(state: LoopState, ctx: LoopContext) -> Transition | None:
     try:
         result = _dispatch(state, ctx)
     except Exception as exc:  # noqa: BLE001 - deliberate fail-closed backstop; see below.
-        # ANY exception a dispatched phase raises - a misbehaving completeness critic, an unusable
-        # assurance/CI/gh read, a reviewer that raises ReviewError, an executor / agent runner that raises
-        # anything, a LoopTaskError from a malformed graph, a subprocess spawn OSError - escalates to a
-        # human, PERSISTED. It fails CLOSED (no merge) and lands durably at ESCALATED, so a raising injected
-        # effect never crashes the loop mid-run and never dies a whole campaign on one goal's raise
-        # ("a refusal never crashes the loop"). BaseException (KeyboardInterrupt / SystemExit) still
-        # propagates; the post-dispatch non-Observation guard below is a distinct internal invariant.
+        # ANY exception a dispatched phase raises escalates to a human, PERSISTED. It fails CLOSED (no
+        # merge) and lands durably at ESCALATED, so a raising injected effect never crashes the loop
+        # mid-run and never dies a whole campaign on one goal's raise ("a refusal never crashes the loop").
+        # An EXPECTED operational refusal is reported plainly; an UNEXPECTED exception (a likely controller
+        # bug) is labelled distinctly and its traceback is kept in review_state["_unexpected_tracebacks"]
+        # (NOT in termination_reason, which feeds the authorization request-id), so debugging stays
+        # tractable without blurring bugs into operational failures. BaseException (KeyboardInterrupt /
+        # SystemExit) still propagates; the post-dispatch non-Observation guard below is a distinct invariant.
         _restore_authorizations(state, auth_snapshot)
         state.current_phase = Phase.ESCALATED
-        state.termination_reason = f"unrecoverable: {type(exc).__name__}: {exc}"
+        if isinstance(exc, _EXPECTED_DISPATCH_ERRORS):
+            state.termination_reason = f"unrecoverable: {type(exc).__name__}: {exc}"
+        else:
+            state.termination_reason = f"unrecoverable UNEXPECTED {type(exc).__name__}: {exc}"
+            if isinstance(state.review_state, dict):  # bounded post-mortem trace for a controller bug
+                state.review_state.setdefault("_unexpected_tracebacks", []).append(traceback.format_exc()[-4000:])
         if ctx.store_path is not None:
             save(state, ctx.store_path)
         return Transition(Decision.ESCALATE, Phase.ESCALATED, state.termination_reason,

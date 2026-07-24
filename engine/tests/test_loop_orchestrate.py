@@ -438,13 +438,27 @@ def test_verify_does_not_finalize_a_green_gate_with_unmet_criteria() -> None:
 
 def test_step_escalates_durably_when_an_injected_effect_raises() -> None:
     # Hardening J: an injected effect that RAISES a non-OSError (executor / reviewer / agent) must land the
-    # loop durably at ESCALATED (persisted), not crash mid-run or leave a non-terminal phase.
+    # loop durably at ESCALATED (persisted), not crash mid-run or leave a non-terminal phase. A RuntimeError
+    # is UNEXPECTED (controller-bug-shaped): flagged distinctly + its traceback kept for post-mortem.
     def boom(_state: LoopState, _directive) -> Observation:
         raise RuntimeError("executor blew up")
     state = LoopState(current_phase=Phase.PLAN)
     t = step(state, _ctx(executor=boom))
     assert t.decision is Decision.ESCALATE and state.current_phase is Phase.ESCALATED
-    assert "RuntimeError" in (state.termination_reason or "")
+    assert "UNEXPECTED RuntimeError" in (state.termination_reason or "")
+    assert state.review_state.get("_unexpected_tracebacks")  # traceback captured for a likely bug
+
+
+def test_an_expected_operational_refusal_is_not_flagged_as_a_controller_bug() -> None:
+    # An EXPECTED operational refusal (here a LoopTaskError) still escalates, but is NOT labelled UNEXPECTED
+    # and keeps no bug-traceback - so real bugs stay distinguishable from ordinary fail-closed refusals.
+    from loop.tasks import LoopTaskError
+    def refuse(_state: LoopState, _directive) -> Observation:
+        raise LoopTaskError("bad graph")
+    state = LoopState(current_phase=Phase.PLAN)
+    t = step(state, _ctx(executor=refuse))
+    assert t.decision is Decision.ESCALATE and "UNEXPECTED" not in (state.termination_reason or "")
+    assert "_unexpected_tracebacks" not in state.review_state
 
 
 def test_multi_agent_self_owned_task_does_not_advance_while_others_remain() -> None:
