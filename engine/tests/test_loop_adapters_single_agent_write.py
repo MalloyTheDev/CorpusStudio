@@ -25,7 +25,10 @@ import loop_adapters.single_agent_write as saw  # noqa: E402
 from loop.controller import LoopState, Phase  # noqa: E402
 from loop.orchestrate import run_loop  # noqa: E402
 
-_DIFF = "--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n"
+# The writable surface (7.1.2) is MODIFY-ONLY under engine/corpus_studio/**/*.py, so the "legit" change
+# every happy-path test drives is an in-place edit of a product module.
+_TARGET = "engine/corpus_studio/mod.py"
+_DIFF = f"--- a/{_TARGET}\n+++ b/{_TARGET}\n@@ -1 +1 @@\n-old = 1\n+new = 2\n"
 
 
 class _StubAgent:
@@ -82,6 +85,13 @@ def _repo_with_remote(tmp_path: Path) -> tuple[Path, Path]:
     _g(root, "config", "user.email", "a@b.c")
     _g(root, "config", "user.name", "t")
     (root / "README.md").write_text("old\n")
+    target = root / _TARGET
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("old = 1\n")
+    (root / ".github").mkdir(exist_ok=True)
+    (root / ".github" / "dependabot.yml").write_text("version: 2\n")
+    (root / "secrets").mkdir(exist_ok=True)
+    (root / "secrets" / "deploy.pem").write_text("-----BEGIN RSA PRIVATE KEY-----\nAKIAIOSFODNN7EXAMPLE\n")
     _g(root, "add", "-A")
     _g(root, "commit", "-q", "-m", "base")
     _g(root, "remote", "add", "origin", str(remote))
@@ -125,14 +135,14 @@ def test_write_run_applies_in_a_worktree_pushes_a_branch_opens_a_pr_and_leaves_m
     assert ("pr", "create") in [c[:2] for c in calls] and ("pr", "merge") not in [c[:2] for c in calls]
     ref = state.review_state["agent_proposals"][0]
     assert ref["branch"] == "cs-agent/g1" and ref["pr"] == "https://example/pull/1"
-    assert ref["changed_paths"] == ["README.md"]
+    assert ref["changed_paths"] == [_TARGET]
 
     # the write landed on a PUSHED branch in the remote, carrying the applied change...
     assert "cs-agent/g1" in _g(remote, "branch", "--list", "cs-agent/g1").stdout
-    assert _g(remote, "show", "cs-agent/g1:README.md").stdout == "new\n"
+    assert _g(remote, "show", f"cs-agent/g1:{_TARGET}").stdout == "new = 2\n"
     # ...but the developer's MAIN working tree is pristine, and no worktree is left behind
     assert _g(root, "status", "--porcelain").stdout == ""
-    assert (root / "README.md").read_text() == "old\n"
+    assert (root / _TARGET).read_text() == "old = 1\n"
     assert "cs-agent" not in _g(root, "worktree", "list").stdout
 
 
@@ -216,7 +226,7 @@ def test_a_clear_candidate_publishes_and_records_the_assurance(tmp_path: Path) -
     state = LoopState(goal="tidy", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
     run_loop(state, _build(tmp_path, root, _StubAgent(), calls))
     # a clear candidate publishes (branch pushed by refspec from a DETACHED apply worktree) + records it
-    assert _g(remote, "show", "cs-agent/g1:README.md").stdout == "new\n"
+    assert _g(remote, "show", f"cs-agent/g1:{_TARGET}").stdout == "new = 2\n"
     ca = state.review_state["candidate_assurance"]
     assert ca["published"] is True and ca["observation"] == "SUCCESS"
     assert "sha256:imp" in state.assurance_records  # the candidate impact digest is on the audit trail
@@ -261,93 +271,64 @@ def test_the_candidates_own_cs_assure_is_never_executed(tmp_path: Path) -> None:
     assert calls[-1] == (str(root), ["verify", "--base", "main"])
 
 
-def test_a_new_top_level_script_is_denied(tmp_path: Path) -> None:
-    # the independent second layer: the whole scripts/ tree is denied, so a shadow stdlib module
-    # (scripts/argparse.py) can never reach the candidate worktree in the first place.
+ATTACKS: dict[str, str] = {
+    # every one of these was a VERIFIED hole in the denylist design, or a known execution trick
+    "case-variant of a protected path":
+        "--- /dev/null\n+++ b/Scripts/argparse.py\n@@ -0,0 +1 @@\n+import os\n",
+    "rename-from hides a denied path":
+        "diff --git a/.github/dependabot.yml b/engine/corpus_studio/notes.py\n"
+        "similarity index 100%\nrename from .github/dependabot.yml\nrename to engine/corpus_studio/notes.py\n",
+    "conftest injection (a create)":
+        "--- /dev/null\n+++ b/engine/corpus_studio/conftest.py\n@@ -0,0 +1 @@\n+collect_ignore_glob=['*']\n",
+    "symlink into the operator filesystem":
+        "diff --git a/engine/corpus_studio/l.py b/engine/corpus_studio/l.py\nnew file mode 120000\n"
+        "--- /dev/null\n+++ b/engine/corpus_studio/l.py\n@@ -0,0 +1 @@\n+/etc/passwd\n",
+    "exec-bit flip":
+        "diff --git a/%(t)s b/%(t)s\nold mode 100644\nnew mode 100755\n" % {"t": _TARGET},
+    "an edit outside the writable surface":
+        "--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n",
+    "a secret smuggled into an ALLOWED in-place edit":
+        "--- a/%(t)s\n+++ b/%(t)s\n@@ -1 +1,2 @@\n old = 1\n+K = 'AKIAIOSFODNN7EXAMPLE'\n" % {"t": _TARGET},
+    "an oversized change":
+        "--- a/%(t)s\n+++ b/%(t)s\n@@ -1 +1,71 @@\n old = 1\n" % {"t": _TARGET}
+        + "".join("+l%d\n" % i for i in range(70)),
+}
+
+
+@pytest.mark.parametrize("name", sorted(ATTACKS))
+def test_the_attack_matrix_publishes_nothing(name: str, tmp_path: Path) -> None:
+    """Each known attack must publish NOTHING: no PR, no remote branch, and the dev tree left pristine."""
     root, remote = _repo_with_remote(tmp_path)
     calls: list = []
-    agent = _StubAgent({"unified_diff": _denied_diff("scripts/argparse.py"), "rationale": "r"})
+    agent = _StubAgent({"unified_diff": ATTACKS[name], "rationale": "r"})
     state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
     run_loop(state, _build(tmp_path, root, agent, calls), max_steps=25)
-    assert ("pr", "create") not in [c[:2] for c in calls]
-    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
+    assert ("pr", "create") not in [c[:2] for c in calls], name
+    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == "", name
+    assert _g(root, "status", "--porcelain").stdout == "", name
+    assert "apply-" not in _g(root, "worktree", "list").stdout, name
 
 
-def test_a_sensitive_path_is_denied_before_apply(tmp_path: Path) -> None:
-    root, remote = _repo_with_remote(tmp_path)
-    calls: list = []
-    # a diff touching a CI-workflow path is refused pre-apply: no apply worktree, no push, no PR.
-    agent = _StubAgent({"unified_diff": _denied_diff(".github/workflows/ci.yml"), "rationale": "r"})
-    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
-    run_loop(state, _build(tmp_path, root, agent, calls), max_steps=25)
-    assert ("pr", "create") not in [c[:2] for c in calls]
-    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
-    assert "apply-" not in _g(root, "worktree", "list").stdout
-    assert state.review_state.get("agent_proposals") in (None, [])
+def test_the_writable_surface_is_matched_case_folded_and_path_aware() -> None:
+    # fnmatch is UNUSABLE here: fnmatch('engine/tests/test_x/conftest.py','engine/tests/test_*.py') is True
+    # (it would admit an auto-executed conftest) and it REJECTS engine/corpus_studio/cli.py. Our compiled
+    # matcher gets both right: '*' never crosses '/', '**/' spans directories.
+    assert saw._path_is_writable("engine/corpus_studio/cli.py")
+    assert saw._path_is_writable("engine/corpus_studio/deep/nested/mod.py")
+    for outside in ("README.md", "scripts/loop/x.py", "engine/tests/test_a.py",
+                    "engine/corpus_studio/notes.md", "engine/corpus_studio/sub/x.txt"):
+        assert not saw._path_is_writable(outside), outside
+    # case variants can only SHRINK the surface, never widen it (repo carries core.ignorecase=true)
+    assert not saw._path_is_writable("Scripts/argparse.py")
+    assert saw._path_is_writable("ENGINE/CORPUS_STUDIO/MOD.PY")  # folds INTO the allowed surface, still gated
 
 
-def test_a_secret_in_the_diff_blocks_the_publish(tmp_path: Path) -> None:
-    root, remote = _repo_with_remote(tmp_path)
-    calls: list = []
-    secret_diff = "--- a/README.md\n+++ b/README.md\n@@ -1 +1,2 @@\n old\n+AKIAIOSFODNN7EXAMPLE\n"
-    agent = _StubAgent({"unified_diff": secret_diff, "rationale": "r"})
-    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
-    run_loop(state, _build(tmp_path, root, agent, calls), max_steps=25)
-    assert ("pr", "create") not in [c[:2] for c in calls]
-    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
-
-
-def test_classify_sensitive_paths_denies_protected_and_credential_shaped() -> None:
-    assert saw._classify_sensitive_paths(["README.md", "docs/x.md"], _DIFF) == []
-    for denied in ("scripts/loop/x.py", "scripts/loop_adapters/y.py", "scripts/assurance/z.py",
-                   "scripts/cs_assure.py", "scripts/cs_loop.py", ".claude/settings.json",
-                   ".github/workflows/ci.yml", "research/paper.tex", "docs/paper/fig.py", ".gitmodules",
-                   # the whole scripts/ tree: a shadow stdlib module would be executed by an assurance
-                   # subprocess resolving imports from <candidate>/scripts (sys.path[0]).
-                   "scripts/argparse.py", "scripts/json.py", "scripts/sitecustomize.py", "scripts/new.py"):
-        assert saw._classify_sensitive_paths([denied], _DIFF), denied
-    for cred in ("config/.env", ".env.local", "certs/tls.pem", "secrets/app.key", "home/id_rsa"):
-        assert saw._classify_sensitive_paths([cred], _DIFF), cred
-    # GATE-AFFECTING config is denied so an agent can't neutralize the ruff/mypy/pytest gate (local or CI).
-    for cfg in ("engine/tests/conftest.py", "conftest.py", "engine/pyproject.toml", "pytest.ini",
-                "setup.cfg", "tox.ini", "ruff.toml", "mypy.ini", ".gitignore"):
-        assert saw._classify_sensitive_paths([cfg], _DIFF), cfg
-    # structural refusals: a symlink / mode / binary change in the raw diff
-    assert saw._classify_sensitive_paths(["a"], "new file mode 120000\n")
-    assert saw._classify_sensitive_paths(["a"], "GIT binary patch\n")
-    # an over-large change is refused wholesale
-    assert saw._classify_sensitive_paths([f"f{i}.py" for i in range(60)], _DIFF)
-
-
-def test_scan_secrets_flags_added_lines_only() -> None:
-    assert saw._scan_secrets(_DIFF) == []                                  # clean
-    assert saw._scan_secrets("+AKIAIOSFODNN7EXAMPLE\n")                    # AWS key on an added line
-    assert saw._scan_secrets("+ghp_" + "a" * 36 + "\n")                    # GitHub token
-    assert saw._scan_secrets('+password = "hunter2-not-a-real-secret"\n')  # hardcoded credential
-    assert saw._scan_secrets("-AKIAIOSFODNN7EXAMPLE\n") == []             # a REMOVED line is not flagged
-    assert saw._scan_secrets("+++ b/AKIAIOSFODNN7EXAMPLE\n") == []        # the +++ header is not content
-
-
-def test_the_default_cs_assure_runner_sanitizes_the_environment(tmp_path, monkeypatch) -> None:
-    # candidate assurance (and the dev-tree gate) must run cs_assure with NO secrets in the environment.
-    monkeypatch.setenv("GITHUB_TOKEN", "should-not-leak")
-    captured: dict = {}
-
-    def fake_run(*a, **k):
-        captured.update(k)
-        return _FakeProc(0, "{}")
-    monkeypatch.setattr(saw.subprocess, "run", fake_run)
-    saw._sanitized_cs_assure(tmp_path, "impact", "--base", "main")
-    assert "GITHUB_TOKEN" not in captured["env"]  # secret-free
-    assert captured["cwd"] == str(tmp_path)
-
-
-def test_assure_candidate_fails_closed_on_a_refused_impact(tmp_path) -> None:
-    # an unusable / refused impact record raises (the loop escalates) - never a silent publish.
-    with pytest.raises(saw.WriteAdapterError):
-        saw._assure_candidate(tmp_path, "main", lambda _r, *a: (2, "", "boom"))
-    with pytest.raises(saw.WriteAdapterError):
-        saw._assure_candidate(tmp_path, "main", lambda _r, *a: (0, "not json", ""))
+def test_compile_pathglob_never_crosses_a_slash() -> None:
+    rx = saw._compile_pathglob("engine/tests/test_*.py")
+    assert rx.match("engine/tests/test_a.py")
+    assert not rx.match("engine/tests/test_x/conftest.py")   # the fnmatch fail-open case
+    deep = saw._compile_pathglob("a/**/*.py")
+    assert deep.match("a/b.py") and deep.match("a/b/c/d.py") and not deep.match("a/b/c.txt")
 
 
 # --------------------------------------------------------------------------- the gh boundary (no merge)

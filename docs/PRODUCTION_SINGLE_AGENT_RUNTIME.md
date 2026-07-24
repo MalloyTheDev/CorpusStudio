@@ -133,16 +133,45 @@ separately-authorized PR under `loop-controller-self-modify`:
   **`cs_assure impact`** (self-modify / sealed-research / **worker-closure** / policy obligations) — a
   **STATIC** analysis that does **not** import or execute the candidate's code; the branch is pushed + the
   PR opened **only** when the candidate classifies clear; a human-gated / worker / policy obligation
-  publishes **nothing** and returns the classified observation so the loop escalates. **Sensitive-path
-  denial** (pre-apply, fail-closed): the sealed diff is refused if it touches a protected path
-  (loop-controller / assurance / agent config, `.github/**`, sealed research), a credential-shaped file
-  (`.env*`, `*.pem`, `*.key`, …), **gate-affecting config** (`conftest.py`, `pyproject.toml`, `pytest.ini`,
-  … — so an agent's diff cannot neutralize the gate), a symlink / mode / binary change, or too many files.
-  **Secret scan** over the added lines (defense-in-depth; CI gitleaks is the backstop). Every cs_assure
-  subprocess runs with a **sanitized (secret-free) environment**. The apply worktree is **detached** and
-  the branch is created by refspec only on a clear candidate, so a blocked candidate leaves no orphaned
-  local branch. Worker-reachability is covered by the candidate `worker-closure` classification (→
-  `WORKER_LINEAGE_IMPACT` → escalate).
+  publishes **nothing** and returns the classified observation so the loop escalates. Every cs_assure
+  subprocess runs with a **sanitized (secret-free) environment**, and every git invocation pins hooks off
+  (`-c core.hooksPath=/dev/null` — measured: `worktree add` runs `post-checkout` and `commit` runs
+  `pre-commit`, so an in-tree hook dir like husky's would otherwise execute candidate content). The apply
+  worktree is **detached** and the branch is created by refspec only on a clear candidate, so a blocked
+  candidate leaves no orphaned local branch. Worker-reachability is covered by the candidate
+  `worker-closure` classification (→ `WORKER_LINEAGE_IMPACT` → escalate).
+  - **ALLOWLIST, not denylist — and git is the authority on what changed.** A denylist of protected paths
+    was built first and failed three adversarial passes (case variants like `Scripts/argparse.py` slipped
+    the case-sensitive matcher; a `rename from` header hid a denied source from the hand-rolled
+    `---`/`+++` parser and published a diff deleting `.github/dependabot.yml`; a `copy from
+    secrets/deploy.pem` delivered credential bytes with **zero `+` lines**, invisible to both the filename
+    denial and the added-line secret scan). Both root causes are unbounded by construction: a denylist
+    enumerates badness, and a hand-rolled diff parser disagrees with git's real semantics. The rewrite:
+    - **Writable surface = `engine/corpus_studio/**/*.py`, MODIFY-ONLY.** Anything not positively matched
+      is refused, so an unforeseen path is denied by default and a case variant simply fails to match
+      (matching is **case-folded**; the repo carries `core.ignorecase=true`). **No creates at all** —
+      a create is how `conftest.py` injection and stdlib shadowing land.
+    - **`engine/tests/test_*.py` is deliberately NOT writable yet**, though "add a missing test" is a
+      named first target: CI triggers on a bare `push:` with **no `persist-credentials: false` anywhere**
+      in `.github/`, so an agent-authored test would execute on the runner with a `GITHUB_TOKEN` readable
+      from `.git/config` *before any human sees the PR*. Allowing it needs that CI hardening first.
+    - **Globs are compiled, never `fnmatch`.** Measured: `fnmatch('engine/tests/test_x/conftest.py',
+      'engine/tests/test_*.py')` is **True** (an fnmatch allowlist would admit an auto-executed conftest)
+      while `fnmatch('engine/corpus_studio/cli.py', 'engine/corpus_studio/**/*.py')` is **False** — wrong
+      in both directions. `_compile_pathglob` gives `**/` = zero-or-more segments and `*`/`?` that never
+      cross `/`.
+    - **The change set comes from `git diff-index --cached -r --no-renames -z <base>`** (plumbing, so it
+      ignores `diff.renames` config; raw format carries **modes and blob OIDs**). `--no-renames` is passed
+      **alone** — measured, `--no-renames -M0 -C0` still prints `R100` because `-M0` means "detect renames
+      at 0% similarity", i.e. it *re-enables* detection. With detection off a rename decomposes into
+      `D <source>` + `A <dest>`, which is the only way the deleted source becomes visible.
+    - **Status must be `M` and both modes `100644`**, so symlinks (120000), submodules (160000) and
+      exec-bit flips are refused *structurally* rather than by sniffing diff text.
+    - **Secrets are scanned in the realized blob** (`git cat-file`, size-capped, NUL-tested for binary),
+      not in `+` lines — the only layer that catches a `copy from`, since a copy leaves its source
+      untouched and git reports only the allowed destination. (`.gitattributes` eol normalization also
+      means committed bytes can differ from the diff text.)
+    - Bounds: ≤2 changed paths, ≤60 changed lines, ≤1 MiB per blob.
   - **Why static, not the full gate (a security decision, not a shortcut):** running `cs_assure verify`
     against the candidate would run ruff/mypy/**pytest**, and *pytest collection executes the untrusted
     agent's committed code with the operator's environment* — arbitrary code execution + secret exposure,
@@ -171,20 +200,32 @@ separately-authorized PR under `loop-controller-self-modify`:
   branch/PR reuse, orphan-branch cleanup (a failed `pr create` currently leaves a pushed branch), a
   **DRAFT** PR, validated remote/PR identity, and a cleanup/gc command.
 - **7.1.5 — live canary** with fault injection at every boundary before any unattended use.
-- **Sensitive-path denial** (initially deny) — **shipped in 7.1.2a**: `.env*`, `*.pem`, `*.key`, credential
-  stores, GitHub workflow / permission changes, sealed research, `docs/paper/**`, submodules, symlinks,
-  mode/binary changes, over-large changes, gate-affecting config (`conftest.py`, `pyproject.toml`,
-  `pytest.ini`, …), and the **entire `scripts/` tree** (loop controller + assurance + any shadow-import
-  module) are refused pre-apply.
-  (Historical-evidence and release-credential dirs live outside the repo tree, so they never appear in a
-  candidate diff; the in-repo `research/**` + `docs/paper/**` denial covers the sealed-research surface.)
+- **Sensitive-path denial** (the review's "initially deny" list) — **superseded and subsumed by the 7.1.2a
+  ALLOWLIST**, which is strictly stronger: `.env*`, `*.pem`, `*.key`, credential stores, workflow /
+  permission changes, sealed research, submodules, symlinks, mode/binary changes, over-large changes,
+  gate-affecting config, assurance code and loop-controller code are all outside
+  `engine/corpus_studio/**/*.py`, so they are refused *by not being allowed* rather than by being
+  enumerated. Nothing needs adding to a denylist when a new sensitive path appears.
+- **Two follow-ups this work surfaced** (each its own PR, NOT bundled here):
+  1. **`.github/workflows/*` needs `persist-credentials: false`** — prerequisite before `engine/tests/**`
+     can ever join the writable surface.
+  2. **The `cs_assure` policy matcher is case-sensitive** (`assurance/obligations.py::glob_matches` —
+     measured: `Scripts/loop/x.py`, `.GitHub/workflows/e.yml` and `Research/…` fire **zero** obligations).
+     That is an assurance-plane bug affecting every `cs_assure` user, not just the loop; fixing it fires
+     `assurance-self-modify` and needs its own review. The 7.1.2 allowlist is robust to it regardless,
+     since a positive gate does not depend on an obligation firing.
 
 **Not a worker-lineage change.** The adapter is control-plane code (`scripts/loop_adapters/`), not worker
 execution bytes, so it does **not** force a fresh worker wheel/env — but it IS under
 `loop-controller-self-modify`, so it is admitted only by trusted-base tests + CI + independent human
 review (the maintainer; Sourcery is advisory, not the independent gate), never the loop's own gate.
 
-**Verification (as shipped):** tests assert edits appear **only** under the isolated worktree path (the
+**Verification (as shipped):** an **attack matrix** drives each verified hole end-to-end through the real
+git path and asserts it publishes **nothing** (no PR, no remote branch, dev tree pristine): a case-variant
+protected path, a `rename from` hiding a denied source, a `conftest.py` create, a symlink, an exec-bit
+flip, an edit outside the surface, a secret smuggled into an *allowed* in-place edit, and an oversized
+change. Plus: the compiled glob matcher is proven path-aware where `fnmatch` fails open; tests assert edits
+appear **only** under the isolated worktree path (the
 main tree's `git status` is clean); the agent runs confined (cwd = a disposable worktree, sanitized env,
 bounded output); a diff that won't apply / a drifted apply fails closed; a **human-gated candidate
 obligation**, a **worker-closure candidate**, a **sensitive path** (incl. gate-config), and a **secret in

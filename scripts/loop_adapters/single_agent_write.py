@@ -50,7 +50,6 @@ building blocks (the agent client, proposal sealing, diff parsing) and the loop'
 
 from __future__ import annotations
 
-import fnmatch
 import json
 import os
 import re
@@ -58,6 +57,7 @@ import subprocess  # noqa: S404 - fixed-argv git / gh / cs_assure only; never a 
 import sys
 import uuid
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -127,46 +127,51 @@ def _trusted_cs_assure(repo_root: Path, run_cs_assure: Any):  # noqa: ANN202
 
     return run
 
-# ---------------------------------------------------------------- sensitive-path denial (7.1.2, pre-apply)
-# Paths the write adapter REFUSES to create/modify autonomously; a human must make these edits. Matched
-# against every changed path BEFORE the diff is applied - a single hit denies the whole proposal (fail
-# closed). This is the "initially deny" list from the 7.1 review: credentials / key material, CI +
-# supply-chain, the loop-controller + assurance + agent config (the self-modify class), and sealed research.
-_DENIED_DIR_PREFIXES: tuple[str, ...] = (
-    # `scripts/` is denied WHOLESALE: it holds the loop controller + assurance tooling, and it is the
-    # directory an assurance subprocess resolves imports from - a candidate-added `scripts/argparse.py`
-    # (or json.py / sitecustomize.py) would be imported and EXECUTED as the operator. Denying the whole
-    # tree is the independent second layer behind `_trusted_cs_assure`.
-    "scripts/", ".claude/", ".github/", "research/", "docs/paper/",
-)
-_DENIED_EXACT: frozenset[str] = frozenset({
-    "scripts/cs_loop.py", "scripts/cs_assure.py", ".gitmodules", ".gitattributes",
-    ".npmrc", ".pypirc", ".netrc",
-})
-_DENIED_NAME_GLOBS: tuple[str, ...] = (
-    # credential / key material (by filename, anywhere)
-    ".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "*.pkcs12", "*.keystore", "*.jks",
-    "id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*", "*.ppk", "*.gpg", "*.asc", "credentials",
-    # GATE-AFFECTING config - denied so an agent's own diff cannot NEUTRALIZE the ruff/mypy/pytest gate
-    # (local or CI): e.g. a `conftest.py` with `collect_ignore_glob=['*']`, or a permissive tool config.
-    "conftest.py", "pyproject.toml", "pytest.ini", "tox.ini", "setup.cfg", "setup.py",
-    "ruff.toml", ".ruff.toml", "mypy.ini", ".mypy.ini", ".flake8", ".coveragerc",
-    ".pre-commit-config.yaml", ".gitignore",
-)
-# Raw-diff markers that indicate a change the adapter refuses to make autonomously (symlink / mode / binary).
-_STRUCTURAL_DENY_MARKERS: tuple[tuple[str, str], ...] = (
-    ("mode 120000", "a symlink"), ("old mode ", "a file-mode change"),
-    ("mode 100755", "an executable-bit change"),
-    ("GIT binary patch", "a binary patch"), ("Binary files ", "a binary file"),
+# ============================================================ the writable surface (7.1.2, ALLOWLIST)
+# A DENYLIST of protected paths was tried first and failed three adversarial reviews: it is case-sensitive
+# (`Scripts/argparse.py` slipped through), it is blind to `rename from` / `copy from` extended headers, and
+# it can never enumerate every future bad path. This is the inverse: an ALLOWLIST of the (tiny) surface an
+# autonomous agent may touch. Anything not positively matched is REFUSED, so a path nobody thought of is
+# denied by construction - and a case variant simply fails to match.
+#
+# Rung 7.1 surface = MODIFY-ONLY, one product tree:
+#   * `engine/corpus_studio/**/*.py` is the one surface gated end-to-end by ruff + mypy + pytest with an
+#     88% coverage floor, and it is where the design doc's stated first target (a docstring / typo / lint
+#     fix) lives.
+#   * NO CREATES AT ALL (status must be `M`). A new file is how every remaining execution trick lands: a
+#     `conftest.py` is auto-executed by pytest; `engine/tests` has NO `__init__.py`, so pytest puts it on
+#     `sys.path[0]` and a new `engine/tests/json.py` would shadow stdlib for the whole process.
+#   * `engine/tests/test_*.py` is deliberately NOT writable yet, even though "add a missing test" is a
+#     named first target: CI triggers on a bare `push:` with no `persist-credentials: false` anywhere in
+#     `.github/`, so an agent-authored test would EXECUTE on the runner with a GITHUB_TOKEN readable from
+#     `.git/config` before any human sees the PR. Allowing it needs that CI hardening first (its own PR).
+_WRITABLE_GLOBS: tuple[str, ...] = (
+    "engine/corpus_studio/**/*.py",
 )
 
-# Credential SHAPES scanned in the diff's ADDED lines (defense-in-depth; CI gitleaks is the backstop). A hit
-# refuses the candidate rather than committing an apparent secret.
+# Every changed path's basename must be an ordinary, importable, non-shadowing module name.
+_SAFE_BASENAME = re.compile(r"[a-z0-9][a-z0-9_]*\.py\Z")
+
+# git's raw mode for an ordinary file. A symlink (120000), a gitlink/submodule (160000) and an
+# executable (100755) are refused STRUCTURALLY rather than by sniffing the diff text.
+_MODE_REGULAR = "100644"
+
+# Bounds. The stated first target is a SINGLE-file change; a merge-sized diff is not something a human
+# reviewer skims, so it is refused outright rather than published.
+_MAX_CHANGED_PATHS = 2
+_MAX_CHANGED_LINES = 60
+_MAX_BLOB_BYTES = 1 << 20  # never slurp an untrusted blob larger than 1 MiB into memory
+
+# Credential SHAPES scanned in the candidate's REALIZED BLOB CONTENT (never the diff's `+` lines: a
+# `copy from secrets/deploy.pem` delivers the bytes with zero `+` lines, and `.gitattributes` eol
+# normalization means the staged blob can differ from the diff text anyway). CI gitleaks is the backstop.
 _SECRET_PATTERNS: tuple[tuple["re.Pattern[str]", str], ...] = (
     (re.compile(r"AKIA[0-9A-Z]{16}"), "an AWS access key id"),
     (re.compile(r"ghp_[A-Za-z0-9]{36}"), "a GitHub token"),
     (re.compile(r"github_pat_[A-Za-z0-9_]{50,}"), "a GitHub fine-grained PAT"),
     (re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}"), "a Slack token"),
+    (re.compile(r"hf_[A-Za-z0-9]{34}"), "a HuggingFace token"),
+    (re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"), "an Anthropic API key"),
     (re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"), "a private key block"),
     (re.compile(r"(?i)aws_secret_access_key\s*[=:]\s*[A-Za-z0-9/+]{40}"), "an AWS secret access key"),
     (re.compile(r"""(?i)(?:secret|password|passwd|api[_-]?key|access[_-]?token)\s*[=:]\s*['"][^'"]{12,}['"]"""),
@@ -174,37 +179,173 @@ _SECRET_PATTERNS: tuple[tuple["re.Pattern[str]", str], ...] = (
 )
 
 
-def _classify_sensitive_paths(changed_paths: list[str], unified_diff: str) -> list[str]:
-    """Reasons the sealed proposal must NOT be written autonomously (empty = clear). Fail-closed pre-apply
-    denial: a protected path, a credential-shaped filename, a symlink / mode / binary change, or too many
-    files each denies the whole proposal so a human makes the edit instead."""
+def _compile_pathglob(glob: str) -> "re.Pattern[str]":
+    """Compile a repo-relative path glob with EXPLICIT, path-aware semantics:
+    ``**/`` = zero or more directory segments, ``*``/``?`` NEVER cross ``/``, everything else literal.
+
+    Deliberately NOT :mod:`fnmatch` - measured, fnmatch is wrong in both directions for an allowlist:
+    ``fnmatch('engine/tests/test_x/conftest.py', 'engine/tests/test_*.py')`` is **True** (it would admit an
+    auto-executed pytest conftest - full code execution), while
+    ``fnmatch('engine/corpus_studio/cli.py', 'engine/corpus_studio/**/*.py')`` is **False**.
+    (``PurePosixPath.full_match`` would do, but it is 3.13+ and this repo targets 3.11.)"""
+    out, i = [], 0
+    while i < len(glob):
+        if glob.startswith("**/", i):
+            out.append(r"(?:[^/]+/)*")
+            i += 3
+        elif glob[i] == "*":
+            out.append(r"[^/]*")
+            i += 1
+        elif glob[i] == "?":
+            out.append(r"[^/]")
+            i += 1
+        else:
+            out.append(re.escape(glob[i]))
+            i += 1
+    return re.compile("".join(out) + r"\Z")
+
+
+_WRITABLE_RES: tuple["re.Pattern[str]", ...] = tuple(_compile_pathglob(g.casefold()) for g in _WRITABLE_GLOBS)
+
+
+def _path_is_writable(path: str) -> bool:
+    """Is ``path`` inside the allowed writable surface? Matched CASE-FOLDED, so `Engine/`, `SCRIPTS/` and
+    every other case variant can only ever SHRINK the surface, never widen it (the repo carries
+    ``core.ignorecase=true``, so on a case-insensitive checkout a variant IS the real path)."""
+    folded = path.replace("\\", "/").casefold()
+    return any(rx.match(folded) for rx in _WRITABLE_RES)
+
+
+@dataclass(frozen=True)
+class _ChangeRecord:
+    """One realized change, as GIT reports it - not as the diff text claims."""
+
+    status: str      # A C D M R T (U/X are refused)
+    src_mode: str    # "000000" for an addition
+    dst_mode: str    # "000000" for a deletion
+    dst_oid: str     # the realized blob OID ("000...0" for a deletion)
+    path: str        # raw bytes decoded; for R/C this is the DESTINATION
+    src_path: str    # "" unless the record carries a distinct source
+
+
+def _realized_changes(wt: Path, base_oid: str) -> list[_ChangeRecord]:
+    """The change set GIT actually realized in the candidate worktree, via PLUMBING:
+
+        git diff-index --cached -r --no-renames -z <base_oid>
+
+    Every element of that command is load-bearing (all measured on git 2.43.0):
+      * ``diff-index`` (plumbing) IGNORES ``diff.renames`` config; porcelain ``git diff`` honours it, so a
+        repo/global ``diff.renames=copies`` would silently change what we see.
+      * ``--no-renames`` is passed ALONE. ``--no-renames -M0 -C0`` still prints ``R100 <src> <dst>`` because
+        ``-M0`` means "detect a rename at 0% similarity" - it RE-ENABLES detection. With detection off, a
+        rename decomposes into ``D <source>`` + ``A <dest>``, which is the ONLY way the deleted source of a
+        ``rename from`` becomes visible (the hole that published a diff deleting `.github/dependabot.yml`).
+      * ``-r`` recurses into subtrees; ``-z`` gives RAW path bytes so ``core.quotepath`` never applies.
+      * the raw format carries MODES and full blob OIDs in one pass, so symlinks (120000), submodules
+        (160000) and exec-bit flips (100755) are refused structurally instead of by sniffing diff text.
+
+    Never parses the unified diff: extended headers (``rename from`` / ``copy from`` / mode / binary) are
+    invisible to a ``---``/``+++`` scanner, which is exactly how three separate holes got through."""
+    proc = _git(wt, "diff-index", "--cached", "-r", "--no-renames", "-z", base_oid)
+    fields = proc.stdout.split("\0")
+    records: list[_ChangeRecord] = []
+    i = 0
+    while i < len(fields):
+        meta = fields[i]
+        if not meta:
+            i += 1
+            continue
+        if not meta.startswith(":"):
+            raise WriteAdapterError(f"unparseable git diff-index record {meta!r} (refusing to guess)")
+        parts = meta[1:].split()
+        if len(parts) < 5:
+            raise WriteAdapterError(f"malformed git diff-index record {meta!r}")
+        src_mode, dst_mode, _src_oid, dst_oid, status = parts[0], parts[1], parts[2], parts[3], parts[4]
+        letter = status[0]
+        # R/C carry TWO path fields; with --no-renames they should never appear, but parse defensively
+        # rather than mis-align the whole stream if a future git emits them.
+        if letter in ("R", "C"):
+            src_path, path, consumed = fields[i + 1], fields[i + 2], 3
+        else:
+            src_path, path, consumed = "", fields[i + 1], 2
+        records.append(_ChangeRecord(letter, src_mode, dst_mode, dst_oid, path, src_path))
+        i += consumed
+    return records
+
+
+def _read_blob(wt: Path, oid: str, path: str) -> str | None:
+    """The realized blob's text, or None when it is binary / unreadable as text. Bounded: an untrusted blob
+    larger than :data:`_MAX_BLOB_BYTES` is refused rather than slurped. Reads the OBJECT (not the worktree
+    file), because `.gitattributes` eol normalization means the committed bytes can differ from both the
+    worktree and the diff text."""
+    size_out = _git(wt, "cat-file", "-s", oid).stdout.strip()
+    try:
+        size = int(size_out)
+    except ValueError as exc:
+        raise WriteAdapterError(f"cannot size blob for {path}: {size_out!r}") from exc
+    if size > _MAX_BLOB_BYTES:
+        raise WriteAdapterError(f"{path} is {size} bytes (> {_MAX_BLOB_BYTES}); refusing an oversized blob")
+    raw = subprocess.run(  # noqa: S603 - fixed argv, no shell; bytes because the blob is untrusted.
+        ["git", "-C", str(wt), "-c", "core.hooksPath=/dev/null", "cat-file", "blob", oid],
+        capture_output=True, timeout=_GIT_TIMEOUT_S).stdout
+    if b"\0" in raw:
+        return None  # binary (NUL test - immune to a candidate-supplied .gitattributes)
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _classify_candidate_changes(wt: Path, base_oid: str) -> list[str]:
+    """Reasons the realized candidate must NOT be published (empty = clear). Runs against what GIT actually
+    staged, so rename sources, copy destinations, mode flips and binary payloads are all visible.
+
+    Refuses, fail-closed: a status other than ``M``; a non-regular file mode (symlink / submodule / exec
+    bit); a path outside the case-folded writable ALLOWLIST; an unsafe basename; too many changed paths or
+    lines; and any apparent secret in the REALIZED BLOB CONTENT (which is the only layer that catches a
+    ``copy from`` - a copy leaves its source untouched, so git reports only the allowed destination)."""
     reasons: list[str] = []
-    if len(changed_paths) > _MAX_CANDIDATE_FILES:
-        reasons.append(f"touches {len(changed_paths)} files (> {_MAX_CANDIDATE_FILES}; needs human review)")
-    for p in changed_paths:
-        posix = p.replace("\\", "/")
-        name = posix.rsplit("/", 1)[-1]
-        if posix in _DENIED_EXACT or any(posix.startswith(pre) for pre in _DENIED_DIR_PREFIXES):
-            reasons.append(f"{p} (protected path - not an autonomous edit)")
-        elif any(fnmatch.fnmatch(name, g) for g in _DENIED_NAME_GLOBS):
-            reasons.append(f"{p} (credential-shaped file)")
-    for marker, why in _STRUCTURAL_DENY_MARKERS:
-        if marker in unified_diff:
-            reasons.append(f"diff contains {why}")
-    return reasons
-
-
-def _scan_secrets(unified_diff: str) -> list[str]:
-    """Apparent secrets in the diff's ADDED lines (empty = none). Defense-in-depth over the pre-apply path
-    denial; the CI gitleaks job is the backstop on the opened PR."""
-    hits: set[str] = set()
-    for line in unified_diff.splitlines():
-        if not line.startswith("+") or line.startswith("+++"):
+    records = _realized_changes(wt, base_oid)
+    if not records:
+        return ["the candidate changed nothing"]
+    if len(records) > _MAX_CHANGED_PATHS:
+        reasons.append(f"touches {len(records)} paths (> {_MAX_CHANGED_PATHS}; needs human review)")
+    for rec in records:
+        shown = rec.path or rec.src_path
+        # MODIFY-ONLY. A create/delete/rename/copy/typechange is refused outright: creates are how
+        # conftest injection and stdlib shadowing land, and a delete/rename is how a protected file
+        # disappears (the `rename from` hole).
+        if rec.status != "M":
+            reasons.append(f"{shown} (status {rec.status}: only in-place modification is allowed)")
+            continue
+        if rec.src_mode != _MODE_REGULAR or rec.dst_mode != _MODE_REGULAR:
+            reasons.append(f"{shown} (mode {rec.src_mode}->{rec.dst_mode}: not an ordinary file)")
+            continue
+        if not _path_is_writable(rec.path):
+            reasons.append(f"{rec.path} (outside the writable surface)")
+            continue
+        if not _SAFE_BASENAME.match(rec.path.rsplit("/", 1)[-1]):
+            reasons.append(f"{rec.path} (unsafe module basename)")
+            continue
+        content = _read_blob(wt, rec.dst_oid, rec.path)
+        if content is None:
+            reasons.append(f"{rec.path} (binary or non-UTF-8 content)")
             continue
         for pat, label in _SECRET_PATTERNS:
-            if pat.search(line[1:]):
-                hits.add(label)
-    return sorted(hits)
+            if pat.search(content):
+                reasons.append(f"{rec.path} contains {label}")
+                break
+    numstat = _git(wt, "diff", "--cached", "--numstat", "--no-renames", base_oid).stdout
+    touched = 0
+    for line in numstat.splitlines():
+        added, removed = line.split("\t", 2)[:2]
+        if added == "-" or removed == "-":
+            reasons.append("the candidate contains a binary change")
+            continue
+        touched += int(added) + int(removed)
+    if touched > _MAX_CHANGED_LINES:
+        reasons.append(f"changes {touched} lines (> {_MAX_CHANGED_LINES}; needs human review)")
+    return reasons
 
 # gh subcommands the WRITE adapter permits: the read-only allowlist PLUS ``pr create``. Everything else -
 # and crucially ``pr merge`` / ``pr close`` / ``pr edit`` / ``pr review`` / any ``api`` write - is REFUSED,
@@ -240,11 +381,18 @@ def write_gh(repo_root: Path | str) -> Callable[..., "tuple[int, str, str]"]:
 
 
 def _git(cwd: Path, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
-    """Run ``git -C <cwd> <args>`` (fixed argv, no shell, bounded). Raises :class:`WriteAdapterError` on a
-    non-zero exit or an un-runnable git."""
+    """Run ``git -C <cwd> <args>`` (fixed argv, no shell, bounded) with HOOKS PINNED OFF. Raises
+    :class:`WriteAdapterError` on a non-zero exit or an un-runnable git.
+
+    ``-c core.hooksPath=/dev/null`` on EVERY invocation: a linked worktree shares the main repo's hooks, and
+    it was measured that ``git worktree add`` runs ``post-checkout`` and ``git commit`` runs ``pre-commit``.
+    Whether a hook exists (and whether ``core.hooksPath`` points at an in-tree directory like husky's
+    ``.husky/``) is operator config the adapter must not depend on - so no hook ever runs over untrusted
+    candidate content with the operator's environment."""
     try:
-        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell.
-            ["git", "-C", str(cwd), *args], input=stdin, capture_output=True, text=True, timeout=_GIT_TIMEOUT_S)
+        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell, hooks disabled.
+            ["git", "-C", str(cwd), "-c", "core.hooksPath=/dev/null", *args],
+            input=stdin, capture_output=True, text=True, timeout=_GIT_TIMEOUT_S)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise WriteAdapterError(f"git {' '.join(args[:2])} could not run: {exc}") from exc
     if proc.returncode != 0:
@@ -339,13 +487,12 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
                          worktrees_dir: Path, gh_runner: Callable[..., "tuple[int, str, str]"],
                          branch_prefix: str, run_cs_assure: Any):  # noqa: ANN202
     """The write executor. At EXECUTE: PROPOSE (agent, CONFINED to a disposable detached worktree) -> seal
-    -> DENY sensitive/credential paths (pre-apply, fail closed) -> APPLY the exact diff in a SEPARATE,
-    pristine detached worktree -> verify the applied change matches the proposal -> scan for secrets ->
-    commit -> ASSURE THE CANDIDATE (run the real gate + impact against the candidate worktree, not the dev
-    tree) -> publish (push the branch + open a PR) ONLY IF the candidate is green. A non-green candidate
-    publishes NOTHING and returns the classified observation so the loop routes it (gate-red -> revise;
-    worker/self-modify/policy -> escalate). At DECOMPOSE it installs one self-owned task. Integrity /
-    security violations raise (-> the loop escalates)."""
+    -> APPLY the exact diff in a SEPARATE, pristine detached worktree -> CLASSIFY WHAT GIT REALIZED against
+    the writable ALLOWLIST (status/mode/path/basename/bounds + a secret scan over blob content) -> commit ->
+    ASSURE THE CANDIDATE statically (`cs_assure impact`, run by the TRUSTED dev-tree tool) -> publish (push
+    the branch + open a PR) ONLY IF the candidate is clear. A blocked candidate publishes NOTHING; a policy
+    obligation returns the classified observation so the loop routes it (human-gated -> escalate), and an
+    allowlist violation raises (-> the loop escalates). At DECOMPOSE it installs one self-owned task."""
 
     def execute(state: LoopState, directive: Directive) -> Observation:
         if state.current_phase is Phase.DECOMPOSE and not state.task_graph:
@@ -369,30 +516,24 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
                        "directive": {"phase": directive.phase, "action": directive.action,
                                      "allowed_paths": list(directive.allowed_paths)}}
             diff, rationale = _validate_proposal(agent_client.propose(request))  # RAISES -> fail-closed
-        changed_paths = _changed_paths_of(diff)
         record = _seal_proposal({"goal_id": state.goal_id, "base_oid": base_oid, "unified_diff": diff,
-                                 "changed_paths": changed_paths, "rationale": rationale})
+                                 "changed_paths": _changed_paths_of(diff),  # descriptive ONLY - never a gate
+                                 "rationale": rationale})
         proposal_path = _write_proposal_record(proposals_dir, record)  # content-addressed, OUTSIDE the tree
 
-        # 2) SENSITIVE-PATH DENIAL (pre-apply, fail closed): refuse to write protected / credential-shaped
-        #    paths, symlink/mode/binary changes, or an over-large change - a human makes those edits.
-        denials = _classify_sensitive_paths(changed_paths, diff)
-        if denials:
-            raise WriteAdapterError("refusing to write denied path(s): " + "; ".join(denials[:8]))
-
         branch = f"{branch_prefix}{_sanitize_branch_suffix(state.goal_id)}"
-        # 3) APPLY + ASSURE in a pristine DETACHED worktree the agent never touched, so the commit is
-        #    deterministically the sealed diff and nothing else; publish only if the candidate is green.
+        # 2) APPLY + CLASSIFY + ASSURE in a pristine DETACHED worktree the agent never touched, so the
+        #    commit is deterministically the sealed diff and nothing else; publish only if it is clear.
         with _apply_worktree(repo_root, base_oid, worktrees_dir) as wt:
+            # `git apply` itself refuses `../`, `.git/`, `.GIT/`, `git~1/` and beyond-a-symlink paths, so a
+            # candidate cannot write outside the worktree (we never pass --directory/--unsafe-paths/-p0).
             _git(wt, "apply", "--index", "-", stdin=diff)  # a diff that does not apply cleanly fails closed
-            # INTEGRITY: the staged change must be exactly what the sealed proposal described.
-            applied = sorted(p for p in _git(wt, "diff", "--cached", "--name-only").stdout.splitlines() if p)
-            if applied != record["payload"]["changed_paths"]:
-                raise WriteAdapterError(
-                    f"applied paths {applied} != proposed {record['payload']['changed_paths']} (diff drift)")
-            secrets = _scan_secrets(diff)  # defense-in-depth over the path denial (CI gitleaks is the backstop)
-            if secrets:
-                raise WriteAdapterError("refusing: the candidate adds " + ", ".join(secrets))
+            # 3) CLASSIFY WHAT GIT REALIZED (never the diff text): allowlist + status + mode + basename +
+            #    bounds + a secret scan over realized BLOB CONTENT. This is the layer that sees a
+            #    `rename from` source (as its own D record) and a `copy from` payload (as blob bytes).
+            violations = _classify_candidate_changes(wt, base_oid)
+            if violations:
+                raise WriteAdapterError("refusing the candidate: " + "; ".join(violations[:8]))
             _git(wt, "-c", "user.name=corpusstudio-agent", "-c", "user.email=agent@corpusstudio.local",
                  "commit", "-m", f"{state.goal or 'agent change'}\n\n{rationale}\n\n[single-agent proposal, human-reviewed]")
             # CANDIDATE ASSURANCE (STATIC): classify the CANDIDATE worktree via `cs_assure impact`

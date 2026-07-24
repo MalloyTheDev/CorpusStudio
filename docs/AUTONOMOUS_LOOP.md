@@ -94,10 +94,13 @@ may *do*:
   writes**, and ends `ESCALATED` (a human decides whether to apply the proposal). See
   [`docs/PRODUCTION_SINGLE_AGENT_RUNTIME.md`](PRODUCTION_SINGLE_AGENT_RUNTIME.md).
 - **`single_agent_write.py` (Phase 7.1: write-capable single agent, GATED).** The agent still PROPOSES a
-  sealed diff (7.0 behaviour, run under the same 7.1.1 confinement); 7.1 then DENIES sensitive/credential/
-  gate-config paths (pre-apply, fail closed), APPLIES that exact diff in a **separate, pristine, disposable
-  DETACHED `git worktree`** (never the developer's tree, never the confined propose checkout), verifies the
-  applied change matches the sealed proposal, scans the added lines for secrets, commits, and **ASSURES THE
+  sealed diff (7.0 behaviour, run under the same 7.1.1 confinement); 7.1 then APPLIES that exact diff in a
+  **separate, pristine, disposable DETACHED `git worktree`** (never the developer's tree, never the
+  confined propose checkout), CLASSIFIES **what git actually realized** (`diff-index --no-renames -z`, so a
+  `rename from` source appears as its own `D`) against a case-folded **ALLOWLIST** -
+  `engine/corpus_studio/**/*.py`, **modify-only**, ordinary-file modes only - scans the realized **blob
+  content** for secrets (the only layer that catches a `copy from`, which carries no `+` lines), commits
+  with git **hooks pinned off**, and **ASSURES THE
   CANDIDATE STATICALLY** - `cs_assure impact` (self-modify / sealed-research / worker-closure / policy)
   ANALYZES the **candidate worktree, not the dev tree** (7.1.2) while EXECUTING the **trusted dev-tree
   tool** (via `--start-dir`, never the candidate's own `scripts/cs_assure.py`, which would import+execute a
