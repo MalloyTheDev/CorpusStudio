@@ -206,6 +206,23 @@ def _append_completeness_tasks(state: LoopState, verdict: CompletenessVerdict) -
     state.task_graph = [t.to_dict() for t in parse_tasks(graph)]
 
 
+def _verify_completeness(state: LoopState, ctx: LoopContext, observation: Observation,
+                         reason: str) -> tuple[Observation, str]:
+    """VERIFY on a green gate: a green gate is NOT 'done' - prove goal COMPLETION. MANDATORY: with no
+    completeness evaluator, completion is UNPROVEN -> escalate (a green gate is never the implicit
+    definition of done). With a critic, the typed evidence-bound criteria must all be met; any gap folds
+    into correction tasks (CHANGES_REQUESTED) or escalates a residual human decision. Returns the
+    (observation, reason) - the passed-through green result when completion is proven."""
+    if ctx.critic is None:
+        return (Observation.AUTHORIZATION_REQUIRED,
+                "gate green but no completeness evaluator - goal completion is unproven")
+    verdict = check_completeness(state, ctx.critic)
+    if not verdict.complete:
+        _append_completeness_tasks(state, verdict)
+        return completeness_observation(verdict), verdict.note
+    return observation, reason  # completion proven - keep the gate's green result
+
+
 def _all_done(state: LoopState) -> bool:
     return bool(state.task_graph) and all(
         isinstance(t, dict) and t.get("status") == TaskStatus.DONE.value for t in state.task_graph)
@@ -326,12 +343,8 @@ def _dispatch(state: LoopState, ctx: LoopContext) -> PhaseResult:
             gaps = stale_docs(_changed_paths(ctx), ctx.couplings)
             if observation is Observation.SUCCESS and gaps:
                 observation, reason = docs_observation(gaps)
-        elif phase is Phase.VERIFY and observation is Observation.SUCCESS and ctx.critic is not None:
-            # L8 self-correction: a green gate is not 'done' - the GOAL's success criteria must be MET.
-            verdict = check_completeness(state, ctx.critic)
-            if not verdict.complete:
-                _append_completeness_tasks(state, verdict)
-                observation, reason = completeness_observation(verdict), verdict.note
+        elif phase is Phase.VERIFY and observation is Observation.SUCCESS:
+            observation, reason = _verify_completeness(state, ctx, observation, reason)
         fingerprint = None
         if observation not in (Observation.SUCCESS, Observation.PROGRESS) and result.change_set_fingerprint:
             fingerprint = attempt_fingerprint(f"{observation.value}:{reason}", result.change_set_fingerprint)
