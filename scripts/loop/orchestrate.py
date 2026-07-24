@@ -143,11 +143,22 @@ def _changed_paths(ctx: LoopContext) -> list[str]:
     return [c["path"] for c in entries if isinstance(c, dict) and isinstance(c.get("path"), str)]
 
 
-def _fired_obligations(ctx: LoopContext) -> list[dict[str, str]]:
-    """The obligations the change fires (via cs_assure impact) as ``{id, severity}`` - the input to the
-    merge gate, which derives merge RISK from the policy severity (not a caller bool). FAIL-CLOSED: a
-    non-zero exit or an unusable record raises, so an UNCOMPUTABLE obligation set can never be conflated
-    with 'no obligations fired' at the merge button."""
+@dataclass(frozen=True)
+class PolicyAssessment:
+    """The merge-gate input from ``cs_assure impact``: the fired obligations, whether the TRUSTED-BASE
+    policy was available (a candidate-only assessment must not authorize an autonomous merge, since the
+    candidate could have weakened the policy unseen), and the effective policy digest that was assessed."""
+
+    fired_obligations: list[dict[str, str]]
+    base_policy_available: bool
+    effective_policy_digest: str | None
+
+
+def _impact_assessment(ctx: LoopContext) -> PolicyAssessment:
+    """The change's policy assessment (via cs_assure impact): fired obligations as ``{id, severity}`` plus
+    the trusted-base-policy availability. FAIL-CLOSED: a non-zero exit, an unusable record, or a malformed
+    fired-obligations list raises, so an UNCOMPUTABLE assessment is never conflated with 'safe to merge';
+    a MISSING / non-True base_policy_available reads as NOT available (a candidate-only assessment)."""
     code, out, err = ctx.run_cs_assure(ctx.repo_root, "impact", "--base", ctx.base)
     if code != 0:
         raise LoopOrchestrateError(f"cs_assure impact refused (exit {code}): {err.strip()[:120]}")
@@ -169,7 +180,13 @@ def _fired_obligations(ctx: LoopContext) -> list[dict[str, str]]:
         if not isinstance(o, dict) or not isinstance(o.get("id"), str):
             raise LoopOrchestrateError(f"cs_assure impact has a malformed fired obligation: {o!r}")
         items.append({"id": o["id"], "severity": str(o.get("severity", ""))})
-    return items
+    provenance = data.get("provenance") if isinstance(data, dict) else None
+    digest = provenance.get("policy_digest") if isinstance(provenance, dict) else None
+    return PolicyAssessment(
+        fired_obligations=items,
+        base_policy_available=payload.get("base_policy_available") is True,  # missing/non-True -> not available
+        effective_policy_digest=digest if isinstance(digest, str) else None,
+    )
 
 
 def _append_completeness_tasks(state: LoopState, verdict: CompletenessVerdict) -> None:
@@ -265,10 +282,17 @@ def _integrate(state: LoopState, ctx: LoopContext, directive: Directive) -> Phas
         return PhaseResult(Observation.HOLD,
                            f"PR head {snapshot.head_sha[:12]} != validated commit {ctx.expected_head[:12]}; re-syncing")
     try:
-        fired = _fired_obligations(ctx)
+        impact = _impact_assessment(ctx)
     except LoopOrchestrateError as exc:
         return PhaseResult(Observation.AUTHORIZATION_REQUIRED, f"obligations uncomputable; escalating: {exc}")
-    gate = merge_gate(fired, dangerous=ctx.dangerous)
+    if not impact.base_policy_available:
+        # The TRUSTED-BASE policy could not be loaded (shallow clone / no merge base / read failure), so
+        # this is a CANDIDATE-ONLY assessment: the candidate could have weakened the policy unseen. A
+        # candidate-only assessment must NOT authorize an autonomous merge - escalate for a human (the only
+        # exception is an explicit bootstrap reviewed under the repo's pre-existing controls, done off-band).
+        return PhaseResult(Observation.AUTHORIZATION_REQUIRED,
+                           "trusted-base policy unavailable; a candidate-only assessment cannot authorize an autonomous merge")
+    gate = merge_gate(impact.fired_obligations, dangerous=ctx.dangerous)
     if not gate.authorized:
         return PhaseResult(gate.observation, gate.reason)  # self-modify / worker / policy-gated -> escalate
     # Merge BOUND to the exact head CI validated: a commit pushed since is not merged blind (it HOLDs to
