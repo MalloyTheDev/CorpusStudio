@@ -65,7 +65,9 @@ EXIT_STOPPED = 5          # terminal: budget exhausted / repeated dead end
 EXIT_PARTIAL_CAMPAIGN = 6  # a campaign where not every goal FINALIZED
 
 # A run's terminal phase -> its distinct exit code, so a supervisor/automation can tell FINALIZE from
-# ESCALATED / STOPPED without parsing stdout (the honesty-invariant footgun the re-review flagged).
+# ESCALATED / STOPPED without parsing stdout (the honesty-invariant footgun the re-review flagged). It
+# covers EVERY terminal phase (a test pins this); an unmapped terminal phase FAILS CLOSED (EXIT_FAIL_CLOSED)
+# rather than silently reading as success, so adding a terminal phase without a code is caught, not masked.
 _TERMINAL_EXIT: "dict[Phase, int]" = {
     Phase.FINALIZE: EXIT_OK, Phase.ESCALATED: EXIT_ESCALATED, Phase.STOPPED: EXIT_STOPPED,
 }
@@ -149,9 +151,10 @@ def _cmd_observe(args: argparse.Namespace) -> int:
         "note": transition.note, "terminal": state.is_terminal,
         "termination_reason": state.termination_reason,
     })
-    # A single OBSERVE step that reached a terminal phase gets the terminal exit code; a still-progressing
-    # loop is EXIT_OK (the caller re-invokes) - unlike `run`, a non-terminal step is not a HOLD.
-    return _TERMINAL_EXIT.get(state.current_phase, EXIT_OK) if state.is_terminal else EXIT_OK
+    # A single OBSERVE step that reached a terminal phase gets the terminal exit code (an unmapped terminal
+    # phase fails closed); a still-progressing loop is EXIT_OK (the caller re-invokes) - unlike `run`, a
+    # non-terminal step is not a HOLD.
+    return _TERMINAL_EXIT.get(state.current_phase, EXIT_FAIL_CLOSED) if state.is_terminal else EXIT_OK
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:
@@ -354,8 +357,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
            "tasks": [{"id": t.get("id"), "status": t.get("status")} for t in state.task_graph
                      if isinstance(t, dict)]})
     # Distinct exit code so automation can tell FINALIZE (0) from ESCALATED (4) / STOPPED (5) / HELD (3)
-    # without parsing stdout - a non-terminal run means it HOLDs on an external condition.
-    return _TERMINAL_EXIT.get(state.current_phase, EXIT_OK) if state.is_terminal else EXIT_HOLD
+    # without parsing stdout - a non-terminal run means it HOLDs on an external condition. An unmapped
+    # terminal phase fails closed (EXIT_FAIL_CLOSED), never silently 0.
+    return _TERMINAL_EXIT.get(state.current_phase, EXIT_FAIL_CLOSED) if state.is_terminal else EXIT_HOLD
 
 
 def _goals_from_json(goals_raw: object):  # noqa: ANN202 - a list[loop.campaign.Goal]

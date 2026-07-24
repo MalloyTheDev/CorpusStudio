@@ -343,3 +343,10 @@ def test_campaign_with_an_unfinalized_goal_exits_partial(tmp_path: Path) -> None
                "--repo-root", str(REPO_ROOT), "--store-dir", str(tmp_path / "camp"))
     assert out.returncode == 6
     assert not any(o["finalized"] for o in json.loads(out.stdout)["outcomes"])
+
+
+def test_terminal_exit_map_covers_every_terminal_phase() -> None:
+    # The exit-code map must be exhaustive over TERMINAL phases so no terminal outcome falls through to the
+    # fail-closed default; adding a terminal phase without a code is caught here, not silently masked.
+    from loop.controller import TERMINAL
+    assert set(cs_loop._TERMINAL_EXIT) == set(TERMINAL)
