@@ -30,9 +30,10 @@ def _cs_assure(*, verify_green: bool = True, obligations: tuple[str, ...] = (),
     steps = [{"name": n, "passed": verify_green, "exit_code": 0 if verify_green else 1, "timed_out": False}
              for n in ("ruff", "mypy", "pytest")]
     records = {
-        "verify": {"record_digest": "sha256:v", "payload": {
-            "gate_passed": verify_green, "gate_steps": steps,
-            "fired_obligations": [{"id": o} for o in obligations], "change_set_fingerprint": "cs:x"}},
+        "verify": {"record_type": "workspace_verification", "schema_version": 2, "record_digest": "sha256:v",
+                   "payload": {"gate_passed": verify_green, "gate_steps": steps, "workspace_stable": True,
+                               "fired_obligations": [{"id": o} for o in obligations],
+                               "change_set_fingerprint": "cs:x"}},
         "changeset": {"payload": {"changed_paths": [{"path": p} for p in changed]}},
         "impact": {"payload": {"fired_obligations": [{"id": o, "severity": "blocking"} for o in obligations]}},
         "doclint": {"finding_count": 0},

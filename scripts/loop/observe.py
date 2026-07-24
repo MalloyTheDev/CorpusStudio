@@ -39,6 +39,15 @@ _GATE_ORDER: tuple[tuple[str, Observation], ...] = (
 # Obligations that, on an otherwise-green gate, require a human before the change can be admitted.
 _HUMAN_GATED = frozenset({"sealed-research", "assurance-self-modify"})
 
+# The verify CLI exit contract (scripts/cs_assure.py): 0 = green gate, 1 = RED gate (still a valid record),
+# >=2 = a fail-closed REFUSAL that emits NO record. So a record is trustworthy only for exit 0 or 1.
+_VALID_VERIFY_EXITS = frozenset({0, 1})
+# The sealed WorkspaceVerification contract (assurance.verification), mirrored here so the loop stays
+# stdlib-only and does not import the assurance library. workspace_stable + the post-gate resnapshot were
+# added in payload schema v2, so a record must be >= v2 to carry the stability guarantee this loop needs.
+_VERIFY_RECORD_TYPE = "workspace_verification"
+_MIN_VERIFY_SCHEMA = 2
+
 # A cs_assure runner: (repo_root, *argv) -> (returncode, stdout, stderr). Injectable for testing.
 CsAssureRunner = Callable[..., "tuple[int, str, str]"]
 
@@ -89,15 +98,20 @@ def classify_observation(verify_payload: Any, doclint_payload: Any = None) -> tu
         return Observation.AUTHORIZATION_REQUIRED, f"gate green but {', '.join(human)} requires human review"
     if "worker-closure" in obligations:
         return Observation.WORKER_LINEAGE_IMPACT, "gate green but the change touches worker-execution bytes"
-    findings = 0
-    if isinstance(doclint_payload, dict):
-        try:
-            findings = int(doclint_payload.get("finding_count", 0) or 0)
-        except (TypeError, ValueError):
-            findings = 0
+    findings = _finding_count(doclint_payload)
     if findings > 0:
         return Observation.CONTRACT_DRIFT, f"gate green but {findings} doc-trust finding(s); docs out of sync"
     return Observation.SUCCESS, "gate green, no blocking obligations, docs clean"
+
+
+def _finding_count(doclint_payload: Any) -> int:
+    """The doclint finding count, tolerating a non-dict / non-int payload (-> 0)."""
+    if not isinstance(doclint_payload, dict):
+        return 0
+    try:
+        return int(doclint_payload.get("finding_count", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _run_cs_assure(repo_root: Path, *argv: str) -> tuple[int, str, str]:
@@ -118,25 +132,60 @@ def _parse(stdout: str, stderr: str, what: str) -> dict[str, Any]:
     return data
 
 
+def _validate_verify_record(record: dict[str, Any], payload: dict[str, Any]) -> None:
+    """Fail-closed structural validation of a sealed WorkspaceVerification BEFORE it is trusted. The loop
+    must consume a VALIDATED record, not raw JSON: a wrong record_type, an unsupported schema, a missing
+    change-set fingerprint, or a workspace that MUTATED during the gate (workspace_stable != True ->
+    CHANGE_SET_MUTATED_DURING_VERIFICATION, so the gate does not apply to a stable state) each raise.
+
+    (Note: cryptographic record_digest re-derivation is deliberately NOT done here - it would couple the
+    stdlib-only loop to the assurance canonical-JSON library; it belongs behind a future cs_assure
+    ``verify-record`` subcommand that preserves the CLI boundary.)"""
+    rtype = record.get("record_type")
+    if rtype != _VERIFY_RECORD_TYPE:
+        raise LoopObserveError(f"verify record_type {rtype!r} is not {_VERIFY_RECORD_TYPE!r}")
+    version = record.get("schema_version")
+    if not isinstance(version, int) or isinstance(version, bool) or version < _MIN_VERIFY_SCHEMA:
+        raise LoopObserveError(f"unsupported verify schema_version {version!r} (need >= {_MIN_VERIFY_SCHEMA})")
+    fingerprint = payload.get("change_set_fingerprint")
+    if not isinstance(fingerprint, str) or not fingerprint:
+        raise LoopObserveError("verify record has no change_set_fingerprint")
+    if payload.get("workspace_stable") is not True:
+        raise LoopObserveError(
+            "verify record workspace_stable is not True (the workspace mutated during the gate - "
+            "CHANGE_SET_MUTATED_DURING_VERIFICATION); the gate does not apply to a stable change set")
+
+
 def observe(repo_root: Path, base: str = "main", *,
             run_cs_assure: CsAssureRunner = _run_cs_assure) -> ObservationResult:
     """Run the assurance plane and classify the result. Fail-closed: if cs_assure refuses or emits no
     usable record, raise :class:`LoopObserveError` (the caller escalates - an unobservable repo is not
     a silent SUCCESS)."""
-    _code, out, err = run_cs_assure(repo_root, "verify", "--base", base)
+    code, out, err = run_cs_assure(repo_root, "verify", "--base", base)
+    if code not in _VALID_VERIFY_EXITS:
+        # exit >= 2 is a fail-closed refusal that emits NO record - never read a leftover/partial stdout
+        # as evidence. (exit 0/1 both carry a valid record: a green vs a red gate.)
+        raise LoopObserveError(f"cs_assure verify refused (exit {code}); stderr: {err.strip()[:200]}")
     record = _parse(out, err, "verify")
     payload = record.get("payload")
     if not isinstance(payload, dict):
         raise LoopObserveError("cs_assure verify record has no payload object")
+    _validate_verify_record(record, payload)
 
+    # Doc-trust is ADVISORY, but its status must be EXPLICIT: a doclint that could not run must not be
+    # silently read as "no findings" (clean). CLEAN / FINDINGS / UNAVAILABLE are distinguished.
     doclint_payload: dict[str, Any] | None = None
+    doclint_status = "CLEAN"
     try:
         _dc, dout, derr = run_cs_assure(repo_root, "doclint", "--format", "json")
         doclint_payload = _parse(dout, derr, "doclint")
+        doclint_status = "FINDINGS" if _finding_count(doclint_payload) > 0 else "CLEAN"
     except LoopObserveError:
-        doclint_payload = None  # doc-trust is advisory; its absence must not block the observation
+        doclint_status = "UNAVAILABLE"  # NOT silently clean - surfaced honestly in the reason below
 
     observation, reason = classify_observation(payload, doclint_payload)
+    if doclint_status == "UNAVAILABLE" and observation is Observation.SUCCESS:
+        reason = f"{reason}; NOTE docs UNVERIFIED (doclint unavailable)"
     return ObservationResult(
         observation=observation,
         reason=reason,

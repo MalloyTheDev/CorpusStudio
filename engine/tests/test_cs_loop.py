@@ -110,7 +110,8 @@ from loop.completeness import Criterion, CriterionKind
 
 def build_context(repo_root, base):
     steps = [{"name": n, "passed": True, "exit_code": 0, "timed_out": False} for n in ("ruff", "mypy", "pytest")]
-    rec = {"verify": {"record_digest": "sha256:v", "payload": {"gate_passed": True, "gate_steps": steps,
+    rec = {"verify": {"record_type": "workspace_verification", "schema_version": 2, "record_digest": "sha256:v",
+           "payload": {"gate_passed": True, "gate_steps": steps, "workspace_stable": True,
            "fired_obligations": [], "change_set_fingerprint": "cs:x"}},
            "changeset": {"payload": {"changed_paths": []}}, "impact": {"payload": {"fired_obligations": []}},
            "doclint": {"finding_count": 0}}
