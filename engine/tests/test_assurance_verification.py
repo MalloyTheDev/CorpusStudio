@@ -186,6 +186,26 @@ def test_verify_record_is_deterministic(tmp_path: Path) -> None:
     assert r1["record_digest"] == r2["record_digest"]  # no timestamps sealed
 
 
+def test_verify_stable_workspace_is_flagged_stable(tmp_path: Path) -> None:
+    # A gate that does not touch the tree -> before == after -> workspace_stable=true.
+    record = build_verification_record(start_dir=_repo(tmp_path, _gate(_step("a", 0))), base_ref="HEAD")
+    p = record["payload"]
+    assert p["workspace_stable"] is True and p["before_fingerprint"] == p["after_fingerprint"]
+
+
+def test_verify_resnapshots_and_flags_a_mutating_gate(tmp_path: Path) -> None:
+    # A gate step that writes a new (non-ignored) file mutates the tree DURING the gate. The gate can
+    # still be green, but the record must report workspace_stable=false (before != after) so a consumer
+    # refuses to treat the pre-run change set as validated (CHANGE_SET_MUTATED_DURING_VERIFICATION).
+    mutate = {"name": "mutate", "argv": [sys.executable, "-c", "open('gate-artifact.txt','w').write('x')"],
+              "cwd": ".", "expected_exit": 0}
+    record = build_verification_record(start_dir=_repo(tmp_path, _gate(mutate)), base_ref="HEAD")
+    p = record["payload"]
+    assert p["gate_passed"] is True           # the gate itself "passed"...
+    assert p["workspace_stable"] is False      # ...but the workspace changed under it
+    assert p["before_fingerprint"] != p["after_fingerprint"]
+
+
 # --------------------------------------------------------------------------- CLI (exit contract)
 
 
