@@ -81,8 +81,17 @@ may *do*:
   `gh pr view`, parsed to a head-bound `CiSnapshot`: CI green 10/10), the merge gate escalated (no
   autonomous merge), and a `gh pr merge` attempt was refused outright (exit 97). Real GitHub data, zero
   writes. (Env-dependent on `gh` auth, so it is a manual validation, not a committed test.)
-- A **write-capable** adapter (real agent spawning + the autonomous merge path) is a later, review-gated
-  step needing explicit human authorization; its seams (`verify_paths`, `expected_head`, `required_checks`,
+- **`single_agent.py` (Phase 7.0: real agent, read/propose-only).** The first adapter that wires a **real
+  Claude-Code agent** into the loop - but strictly propose-only. At EXECUTE it asks the agent (through an
+  injected `AgentClient`, whose real transport is an out-of-process fixed-argv `claude` subprocess with a
+  framed JSON contract) to PROPOSE a unified diff; the untrusted response is validated fail-closed and
+  sealed as a tamper-evident `agent_proposal` record written **outside** the working tree; nothing is ever
+  applied. It declares `capabilities=frozenset()` (read-only, so the capability gate runs it with no
+  opt-in), makes **no writes**, and ends `ESCALATED` (a human decides whether to apply the proposal). See
+  [`docs/PRODUCTION_SINGLE_AGENT_RUNTIME.md`](PRODUCTION_SINGLE_AGENT_RUNTIME.md).
+- A **write-capable** adapter (Phase 7.1+: the agent edits/commits/opens a PR in an isolated worktree; the
+  autonomous merge path) is a later, review-gated step needing explicit human authorization; its seams
+  (`capabilities` + `--allow-capabilities`, `verify_paths`, `expected_head`, `required_checks`,
   `context_for`) already exist, and adapter code is under the `loop-controller-self-modify` obligation.
 - **Capability gate (machine-checkable).** An adapter's `LoopContext` DECLARES its effect
   `capabilities` (empty = read-only / propose-only, the default). `cs_loop run` / `campaign` **refuse**
