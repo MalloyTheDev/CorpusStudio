@@ -39,10 +39,23 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from contextlib import contextmanager  # noqa: E402
+from typing import Iterator  # noqa: E402
+
 from loop.controller import LoopState, Phase  # noqa: E402
 from loop.driver import next_directive  # noqa: E402
+from loop.locking import DEFAULT_LOCK_TIMEOUT, FileLock  # noqa: E402 - single-writer state-file lock
 from loop.observe import LoopObserveError, observe_and_apply  # noqa: E402
 from loop.store import LoopStateError, load, save  # noqa: E402
+
+
+@contextmanager
+def _state_write_lock(path: Path, *, timeout: float = DEFAULT_LOCK_TIMEOUT) -> "Iterator[None]":
+    """Hold the single-writer lock while a command READ-MODIFY-WRITES the state file, so a concurrent
+    writer (e.g. a ``cs_loop run`` in progress, which holds this same lock) FAILS CLOSED rather than
+    silently clobbering the other's update. A LockError propagates to main() -> exit 2 (fail-closed)."""
+    with FileLock(path, timeout=timeout):
+        yield
 
 EXIT_OK = 0
 EXIT_FAIL_CLOSED = 2
@@ -86,10 +99,11 @@ def _state_path(args: argparse.Namespace) -> Path:
 
 def _cmd_init(args: argparse.Namespace) -> int:
     path = _state_path(args)
-    if path.exists() and not args.force:
-        raise LoopStateError(f"{path} already exists (use --force to overwrite)")
-    state = LoopState(goal=args.goal, goal_id=args.goal_id or "", current_phase=Phase.RECEIVE_GOAL)
-    save(state, path)
+    with _state_write_lock(path):
+        if path.exists() and not args.force:
+            raise LoopStateError(f"{path} already exists (use --force to overwrite)")
+        state = LoopState(goal=args.goal, goal_id=args.goal_id or "", current_phase=Phase.RECEIVE_GOAL)
+        save(state, path)
     _emit({"initialized": str(path), "goal": state.goal, "phase": state.current_phase.value})
     return EXIT_OK
 
@@ -114,11 +128,12 @@ def _cmd_next(args: argparse.Namespace) -> int:
 
 def _cmd_observe(args: argparse.Namespace) -> int:
     path = _state_path(args)
-    state = load(path)
-    if state.is_terminal:
-        raise LoopStateError(f"loop is already terminal ({state.current_phase.value}); nothing to observe")
-    transition = observe_and_apply(state, Path(args.repo_root), args.base)
-    save(state, path)
+    with _state_write_lock(path):
+        state = load(path)
+        if state.is_terminal:
+            raise LoopStateError(f"loop is already terminal ({state.current_phase.value}); nothing to observe")
+        transition = observe_and_apply(state, Path(args.repo_root), args.base)
+        save(state, path)
     _emit({
         "decision": transition.decision.value, "phase": state.current_phase.value,
         "note": transition.note, "terminal": state.is_terminal,
@@ -143,18 +158,20 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
 
 def _cmd_pause(args: argparse.Namespace) -> int:
     path = _state_path(args)
-    state = load(path)
-    state.review_state["paused"] = True
-    save(state, path)
+    with _state_write_lock(path):
+        state = load(path)
+        state.review_state["paused"] = True
+        save(state, path)
     _emit({"paused": True, "phase": state.current_phase.value})
     return EXIT_OK
 
 
 def _cmd_resume(args: argparse.Namespace) -> int:
     path = _state_path(args)
-    state = load(path)
-    state.review_state.pop("paused", None)
-    save(state, path)
+    with _state_write_lock(path):
+        state = load(path)
+        state.review_state.pop("paused", None)
+        save(state, path)
     _emit({"paused": False, "phase": state.current_phase.value,
            "next": None if state.is_terminal else next_directive(state).to_dict()})
     return EXIT_OK
@@ -162,11 +179,12 @@ def _cmd_resume(args: argparse.Namespace) -> int:
 
 def _cmd_abort(args: argparse.Namespace) -> int:
     path = _state_path(args)
-    state = load(path)
-    state.current_phase = Phase.STOPPED
-    state.termination_reason = args.reason or "aborted by a human"
-    state.review_state.pop("paused", None)  # a STOPPED loop is unambiguous - never both terminal + paused
-    save(state, path)
+    with _state_write_lock(path):
+        state = load(path)
+        state.current_phase = Phase.STOPPED
+        state.termination_reason = args.reason or "aborted by a human"
+        state.review_state.pop("paused", None)  # a STOPPED loop is unambiguous - never both terminal + paused
+        save(state, path)
     _emit({"aborted": True, "phase": "STOPPED", "reason": state.termination_reason})
     return EXIT_OK
 
@@ -192,30 +210,31 @@ def _cmd_authorize(args: argparse.Namespace) -> int:
     # no --request, SHOW the pending request so the human learns its id; with a matching --request, record
     # the decision (bound to the request + any completeness --grant) and un-escalate ONLY that blocker.
     path = _state_path(args)
-    state = load(path)
-    pending = _pending_authorization(state)
-    if not args.request:
+    with _state_write_lock(path):
+        state = load(path)
+        pending = _pending_authorization(state)
+        if not args.request:
+            if pending is None:
+                _emit({"pending_authorization": None,
+                       "note": "the loop is not ESCALATED; there is nothing to authorize"})
+            else:
+                _emit({"pending_authorization": pending,
+                       "note": "re-run: cs_loop authorize --request <request_id> [--grant <criterion-id>]"})
+            return EXIT_OK
         if pending is None:
-            _emit({"pending_authorization": None,
-                   "note": "the loop is not ESCALATED; there is nothing to authorize"})
-        else:
-            _emit({"pending_authorization": pending,
-                   "note": "re-run: cs_loop authorize --request <request_id> [--grant <criterion-id>]"})
-        return EXIT_OK
-    if pending is None:
-        raise LoopStateError("the loop is not ESCALATED; there is no pending authorization request")
-    if args.request != pending["request_id"]:
-        raise LoopStateError(
-            f"request {args.request!r} does not match the pending request {pending['request_id']!r} - a "
-            "grant must name the CURRENT blocker (it never universally un-escalates an unrelated one)")
-    # Keep a `grant` field (the completeness criterion id, if any) so a HUMAN_APPROVAL criterion is still
-    # satisfied by grant == criterion.id; add the request binding + the capability it authorized.
-    state.review_state.setdefault("authorizations", []).append({
-        "request_id": pending["request_id"], "capability": pending["capability"],
-        "grant": args.grant or "", "note": args.note or "", "granted": True})
-    state.current_phase = Phase.DIAGNOSE
-    state.termination_reason = None
-    save(state, path)
+            raise LoopStateError("the loop is not ESCALATED; there is no pending authorization request")
+        if args.request != pending["request_id"]:
+            raise LoopStateError(
+                f"request {args.request!r} does not match the pending request {pending['request_id']!r} - a "
+                "grant must name the CURRENT blocker (it never universally un-escalates an unrelated one)")
+        # Keep a `grant` field (the completeness criterion id, if any) so a HUMAN_APPROVAL criterion is
+        # still satisfied by grant == criterion.id; add the request binding + the capability authorized.
+        state.review_state.setdefault("authorizations", []).append({
+            "request_id": pending["request_id"], "capability": pending["capability"],
+            "grant": args.grant or "", "note": args.note or "", "granted": True})
+        state.current_phase = Phase.DIAGNOSE
+        state.termination_reason = None
+        save(state, path)
     _emit({"authorized": pending["request_id"], "grant": args.grant or "",
            "phase": state.current_phase.value})
     return EXIT_OK

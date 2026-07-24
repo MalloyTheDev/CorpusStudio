@@ -92,6 +92,21 @@ def _met_critic(_s):
     return [Criterion("done", "goal achieved", kind=CriterionKind.DETERMINISTIC, met=True, evidence="sha256:v")]
 
 
+def test_run_loop_fails_closed_when_the_state_file_is_locked(tmp_path) -> None:
+    # Hardening E (single-writer): a run whose state file is already held by another writer must NOT run
+    # and clobber it - it escalates (in memory only; nothing written) after failing to acquire the lock.
+    from loop.locking import FileLock
+    path = tmp_path / "state.json"
+    held = FileLock(path, timeout=1).acquire()  # a live concurrent holder
+    try:
+        state = LoopState(current_phase=Phase.PLAN)
+        run_loop(state, _ctx(store_path=path, lock_timeout=0.2))
+        assert state.current_phase is Phase.ESCALATED and "locked by another writer" in (state.termination_reason or "")
+        assert not path.exists()  # we never wrote over the other writer's (unwritten) file
+    finally:
+        held.release()
+
+
 def test_step_discards_an_authorization_written_by_an_injected_callback() -> None:
     # Hardening B (cross-step): an untrusted executor that appends a grant must NOT persist it -
     # review_state["authorizations"] is control-plane-owned, so step() restores it after every dispatch.
