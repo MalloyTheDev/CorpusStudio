@@ -44,7 +44,7 @@ from assurance.records import RECORD_SCHEMA_VERSION, build_change_set_record, se
 
 GATE_SCHEMA_VERSION = 1
 VERIFICATION_RECORD_TYPE = "workspace_verification"
-VERIFICATION_SCHEMA_VERSION = 1
+VERIFICATION_SCHEMA_VERSION = 2  # v2 adds before/after fingerprints + workspace_stable (post-gate resnapshot)
 DEFAULT_GATE_RELPATH = "scripts/assurance/policy/gate.json"
 COMPLETION_LEVEL = "WORKSPACE_GATE"
 _DEFAULT_STEP_TIMEOUT_S = 3600
@@ -222,7 +222,9 @@ def build_verification_record(
 
     ``gate_passed`` is workspace-level ONLY (see the module honesty ceiling). ``fired_obligations``
     are those the impact policy fires on this change set - listed for the human to discharge, never
-    asserted discharged.
+    asserted discharged. The change set is RESNAPSHOTTED after the gate: ``workspace_stable`` is false
+    (with distinct ``before_fingerprint`` / ``after_fingerprint``) when a gate step mutated the tree
+    during the run, so the record cannot be read as validating the pre-run state.
     """
     ctx = discover_git_context(start_dir)
     gate = load_gate(ctx.root, gate_relpath)
@@ -238,11 +240,25 @@ def build_verification_record(
     step_results = run_gate(ctx.root, gate, timeout)
     gate_passed = all(step.passed for step in step_results)
 
+    # RESNAPSHOT after the gate. A gate step may rewrite a generated output, format a source file, create
+    # a (tracked or untracked) artifact, race with another process, or partially mutate the tree before
+    # failing. A record bound only to the PRE-run change set would then vouch for a workspace that no
+    # longer exists. Re-derive the change-set fingerprint and compare: workspace_stable=false means the
+    # verification does NOT apply to a stable state, and a consumer (the loop) must refuse to treat the
+    # gate as satisfying the original state (CHANGE_SET_MUTATED_DURING_VERIFICATION).
+    change_set_after = build_change_set_record(start_dir=start_dir, scope=scope, base_ref=base_ref)
+    before_fingerprint = cs_payload["fingerprint"]
+    after_fingerprint = change_set_after["payload"]["fingerprint"]
+    workspace_stable = before_fingerprint == after_fingerprint
+
     payload = {
         "scope": scope,
         "completion_level": COMPLETION_LEVEL,
         "base_oid": cs_payload["base_oid"],
-        "change_set_fingerprint": cs_payload["fingerprint"],
+        "change_set_fingerprint": before_fingerprint,  # == before_fingerprint (kept for back-compat)
+        "before_fingerprint": before_fingerprint,
+        "after_fingerprint": after_fingerprint,
+        "workspace_stable": workspace_stable,
         "changed_path_count": cs_payload["changed_path_count"],
         "gate_passed": gate_passed,
         "gate_step_count": len(step_results),
@@ -280,6 +296,7 @@ def build_verification_record(
         "head_oid": cs_provenance["head_oid"],
         "is_shallow": cs_provenance["is_shallow"],
         "change_set_digest": change_set["record_digest"],
+        "change_set_digest_after": change_set_after["record_digest"],
         "gate_path": gate.relpath,
         "gate_schema_version": gate.schema_version,
         "gate_digest": gate.digest,
