@@ -70,9 +70,17 @@ class FileLock:
             token = secrets.token_hex(16)  # unforgeable owner id for this acquisition
             try:
                 os.write(fd, f"{os.getpid()} {time.time()} {token}\n".encode("ascii"))
-            finally:
-                self._fd = fd  # own it even if the diagnostic write fails, so release() cleans up
-                self._token = token
+            except OSError:
+                # The write failed, so the lockfile would carry no token and release() could never clean
+                # it up (a leaked lock). Treat this as a FAILED acquisition: drop the empty lockfile we
+                # created and propagate - never own a lock we cannot later prove is ours.
+                os.close(fd)
+                try:
+                    self.lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+                raise
+            self._fd, self._token = fd, token  # own it only AFTER the token is durably written
             return self
 
     def _break_if_stale(self) -> None:
@@ -99,13 +107,14 @@ class FileLock:
             return
         # Remove the lockfile ONLY if we still OWN it. If another process broke our stale lock and
         # re-created its own, the lockfile now carries THAT owner's token - our late release must not
-        # delete it. (Best-effort advisory: the read+unlink window is tiny and the token match makes a
-        # wrong-delete practically impossible.)
+        # delete it. Parse the lockfile ("<pid> <timestamp> <token>") and compare the token field EXACTLY
+        # (not a substring, which could match the wrong line); a malformed lockfile is not treated as ours.
         try:
             content = self.lock_path.read_text("ascii")
         except (FileNotFoundError, OSError):
             return  # already gone / unreadable - nothing of ours to remove
-        if token in content:
+        fields = content.split()
+        if len(fields) == 3 and fields[2] == token:
             try:
                 self.lock_path.unlink()
             except FileNotFoundError:

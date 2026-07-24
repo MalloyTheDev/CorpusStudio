@@ -76,6 +76,16 @@ def test_release_only_removes_a_lock_we_still_own(tmp_path: Path) -> None:
     assert not lockfile.exists()
 
 
+def test_release_matches_the_owner_token_exactly_not_as_a_substring(tmp_path: Path) -> None:
+    # A lockfile whose token field only CONTAINS our token as a substring (e.g. "<token>X") is a
+    # different owner - release() must compare the token field exactly and keep it.
+    lockfile = Path(str(tmp_path / "res") + ".lock")
+    held = FileLock(tmp_path / "res", timeout=2).acquire()
+    lockfile.write_text(f"123 456 {held._token}X\n")  # token is a substring, not the exact field
+    held.release()
+    assert lockfile.exists()  # not deleted - the exact token did not match
+
+
 def test_context_manager_releases_on_exit(tmp_path: Path) -> None:
     with FileLock(tmp_path / "res", timeout=1):
         pass
