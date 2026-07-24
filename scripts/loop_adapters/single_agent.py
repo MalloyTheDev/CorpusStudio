@@ -155,10 +155,13 @@ def _make_executor(agent_client: AgentClient, repo_root: Path, base: str, propos
         index = len([p for p in proposals_dir.glob("*.json")])
         out = proposals_dir / f"{state.goal_id or 'goal'}-{index}.json"
         out.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        refs = state.review_state.setdefault("agent_proposals", [])
-        if isinstance(refs, list):
-            refs.append({"record_digest": record["record_digest"], "path": str(out),
-                         "changed_paths": record["payload"]["changed_paths"]})
+        # Invariant: a written proposal is ALWAYS referenced on the state. Normalize a missing/corrupt
+        # value to a list (never silently skip the append and leave disk + state disagreeing).
+        refs = state.review_state.get("agent_proposals")
+        if not isinstance(refs, list):
+            refs = state.review_state["agent_proposals"] = []
+        refs.append({"record_digest": record["record_digest"], "path": str(out),
+                     "changed_paths": record["payload"]["changed_paths"]})
         return Observation.SUCCESS
 
     return execute

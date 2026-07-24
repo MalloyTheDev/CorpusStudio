@@ -102,6 +102,19 @@ def test_a_run_proposes_a_sealed_diff_escalates_and_writes_nothing(tmp_path: Pat
     assert (root / "README.md").read_text() == "old\n"  # the proposed diff was NOT applied
 
 
+def test_a_corrupt_agent_proposals_field_is_normalized_not_silently_skipped(tmp_path: Path) -> None:
+    # If review_state["agent_proposals"] is present but not a list, the ref must still be recorded (the
+    # invariant "a written proposal is referenced" holds) - normalize, never silently skip.
+    root = _repo(tmp_path)
+    ctx = sa.build_context(root, "main", agent_client=_StubAgent(), proposals_dir=tmp_path / "proposals",
+                           run_cs_assure=_cs_assure_green())
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    state.review_state["agent_proposals"] = "corrupt-not-a-list"
+    run_loop(state, ctx)
+    refs = state.review_state["agent_proposals"]
+    assert isinstance(refs, list) and len(refs) == 1 and refs[0]["changed_paths"] == ["README.md"]
+
+
 def test_the_sealed_proposal_record_verifies(tmp_path: Path) -> None:
     state = _run(tmp_path, _StubAgent())
     record = json.loads(Path(state.review_state["agent_proposals"][0]["path"]).read_text())
