@@ -39,9 +39,10 @@ Exit-code contract:
        launched at all).
 
 Verify RUNS external gate commands (declared argv, no shell); every other subcommand is read-only.
-cs_assure itself never mutates the repository's committed state - the object store, refs, the
-committed tree, or the working tree (a read may refresh the content-neutral index stat-cache; see
-``assurance/git_state.py``). Later phases add gate / evidence subcommands.
+cs_assure itself never changes any REF, the committed tree, or the working tree (the ``merge_candidate``
+scope writes UNREFERENCED, gc-able objects into the object store via ``git merge-tree --write-tree`` - no
+ref points at them, so nothing the repo represents changes; and a read may refresh the content-neutral
+index stat-cache; see ``assurance/git_state.py``). Later phases add gate / evidence subcommands.
 """
 
 from __future__ import annotations

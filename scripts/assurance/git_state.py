@@ -1,9 +1,11 @@
 """Read-only Git plumbing for the assurance change-set kernel (Phase 1).
 
 Every git call is a fixed ``argv`` list run with ``git -C <root>`` - never a shell string. These
-calls READ repository state: none mutates the object database, the refs, the committed tree, or the
-working tree, so the committed content the repository represents - and the computed change set - are
-never altered. (One content-neutral exception is honest to state: a read such as ``git diff`` may
+calls do not change any REF, the committed tree, or the working tree, so the committed content the
+repository represents - and the computed change set - are never altered. (Two honest exceptions: the
+``merge_candidate`` scope's ``git merge-tree --write-tree`` writes UNREFERENCED, gc-able tree/blob
+objects into the object database - no ref points at them, so nothing the repository represents changes;
+and a read such as ``git diff`` may
 refresh the index's cached stat metadata - mtime/size - to reflect the current working tree; this
 changes no tracked bytes, no tree, and no change-set result. ``GIT_OPTIONAL_LOCKS=0`` is set to
 avoid the optional-lock, status-style refreshes; a plumbing ``diff`` still refreshes the stat-cache,

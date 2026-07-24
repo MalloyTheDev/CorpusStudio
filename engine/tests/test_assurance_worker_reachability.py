@@ -129,6 +129,75 @@ def test_star_import_does_not_crash_and_follows_the_module() -> None:
     assert f"{PKG}/helpers.py" in r.reachable
 
 
+# --------------------------------------------------------------------------- hardening fixes (audit #16)
+
+
+def test_ancestor_package_inits_are_reachable_via_a_deep_import() -> None:
+    # #1 (false-negative fix): `import corpus_studio.pkg.leaf` names only the leaf, but Python runs
+    # pkg/__init__.py AND corpus_studio/__init__.py to import it - so those ancestor inits are reachable too
+    # (a change to either ships in the worker package; the old walk missed them).
+    files = dict([
+        _mod("root.py", "import corpus_studio.pkg.leaf"),
+        _mod("pkg/__init__.py", "x = 1"),
+        _mod("pkg/leaf.py", "y = 2"),
+        _mod("__init__.py", ""),
+    ])
+    r = reachable_from((f"{PKG}/root.py",), _reader(files))
+    assert {f"{PKG}/pkg/__init__.py", f"{PKG}/__init__.py", f"{PKG}/pkg/leaf.py"} <= set(r.reachable)
+
+
+def test_a_reachable_ancestor_init_has_its_own_imports_followed() -> None:
+    # A reachable ancestor __init__.py is traversed, so what IT imports is reachable too.
+    files = dict([
+        _mod("root.py", "import corpus_studio.pkg.leaf"),
+        _mod("pkg/__init__.py", "from corpus_studio import sidecar"),
+        _mod("pkg/leaf.py", ""),
+        _mod("sidecar.py", "z = 1"),
+        _mod("__init__.py", ""),
+    ])
+    r = reachable_from((f"{PKG}/root.py",), _reader(files))
+    assert f"{PKG}/sidecar.py" in r.reachable  # reached only via pkg/__init__.py's import
+
+
+def test_relative_import_at_the_top_package_boundary_is_recorded() -> None:
+    # #3 (off-by-one): `from ...x import y` from corpus_studio.pkg.mod climbs EXACTLY to the top-package
+    # boundary (climb == len(base)) -> escapes -> recorded, not silently dropped (was: > instead of >=).
+    files = dict([_mod("pkg/mod.py", "from ...x import y\n"), _mod("pkg/__init__.py", ""), _mod("__init__.py", "")])
+    r = reachable_from((f"{PKG}/pkg/mod.py",), _reader(files))
+    assert {d["kind"] for d in r.unresolved_dynamic} == {"relative_escapes_package"}
+
+
+def test_bare_name_import_module_is_handled() -> None:
+    # #4a: `from importlib import import_module` then a BARE import_module(...) - the literal target is
+    # followed and a non-literal is recorded (before, the bare-name form was neither).
+    files = dict([
+        _mod("root.py",
+             "from importlib import import_module\n"
+             "import_module('corpus_studio.dyn')\n"
+             "name = 'x'\n"
+             "import_module(name)\n"),
+        _mod("dyn.py", "z = 1"),
+        _mod("__init__.py", ""),
+    ])
+    r = reachable_from((f"{PKG}/root.py",), _reader(files))
+    assert f"{PKG}/dyn.py" in r.reachable                                     # bare-name literal followed
+    assert any(d["kind"] == "dynamic_import" for d in r.unresolved_dynamic)   # non-literal recorded
+
+
+def test_a_null_byte_module_is_recorded_and_the_walk_continues() -> None:
+    # #4b: a NUL byte makes ast.parse raise ValueError (not SyntaxError). It must be RECORDED as unreadable
+    # and the walk CONTINUE (other modules still found), not abort the whole analysis at exit 2.
+    files = {
+        f"{PKG}/root.py": b"import corpus_studio.bad\nimport corpus_studio.good\n",
+        f"{PKG}/bad.py": b"x = 1\x00y = 2\n",   # NUL byte -> ValueError in ast.parse
+        f"{PKG}/good.py": b"ok = 1\n",
+        f"{PKG}/__init__.py": b"",
+    }
+    r = reachable_from((f"{PKG}/root.py",), _reader(files))
+    assert f"{PKG}/good.py" in r.reachable                            # the walk continued past the bad module
+    assert any("unparseable" in u["detail"] for u in r.unreadable)    # the NUL-byte module was recorded
+
+
 # --------------------------------------------------------------------------- two-sided delta
 
 
