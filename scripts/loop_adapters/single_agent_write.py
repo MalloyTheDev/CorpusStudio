@@ -1,19 +1,24 @@
 """Phase 7.1 runtime adapter: write-capable single agent (GATED - needs an explicit operator opt-in).
 
 The write step of the Production Single-Agent Runtime (docs/PRODUCTION_SINGLE_AGENT_RUNTIME.md). The agent
-still PROPOSES a unified diff (exactly the 7.0 behaviour, sealed as an ``agent_proposal`` record); 7.1 then
-APPLIES that exact sealed diff in an ISOLATED, throwaway ``git worktree`` - never the developer's working
-tree - commits it on a fresh branch, pushes the branch, and opens a PR. It NEVER merges (the merge gate
-escalates; a human merges the PR).
+still PROPOSES a unified diff (exactly the 7.0 behaviour, sealed as an ``agent_proposal`` record) - now run
+CONFINED to a disposable, detached worktree with a secret-free environment; 7.1 then APPLIES that exact
+sealed diff in a SEPARATE, pristine ``git worktree`` - never the developer's working tree - commits it on a
+fresh branch, pushes the branch, and opens a PR. It NEVER merges (the merge gate escalates; a human merges
+the PR).
 
 Safety (why this is the least-capable *write* rung):
   * ``capabilities = {"write"}`` - the capability gate REFUSES to run it without ``--allow-capabilities
     write``. The read-only 7.0 adapter is untouched; this write path is a separate, separately-reviewed file.
-  * The unit of change is the agent's OWN sealed diff, applied deterministically with ``git apply`` - the
-    agent does not edit arbitrarily. After applying, the worktree's real staged diff is verified to match
-    the sealed proposal's ``changed_paths`` (integrity), and a mismatch fails closed.
+  * The untrusted agent runs CONFINED (phase 7.1.1): cwd inside a disposable, detached worktree at ``base``
+    (never the developer's tree, never the apply worktree) with a sanitized (secret-free) environment and a
+    read-only tool policy. Whatever it writes there is discarded; only the diff it RETURNS is used.
+  * The unit of change is the agent's OWN sealed diff, applied deterministically with ``git apply`` into a
+    SEPARATE pristine worktree the agent never touched - the agent does not edit arbitrarily. After
+    applying, that worktree's real staged diff is verified to match the sealed proposal's ``changed_paths``
+    (integrity), and a mismatch fails closed.
   * All edits/commits happen in an isolated worktree created from ``base``; the main working tree is never
-    touched. The worktree is disposed on exit (the pushed branch persists as the PR head).
+    touched. Both worktrees are disposed on exit (the pushed branch persists as the PR head).
   * NO autonomous merge: the ``gh`` runner allows ``pr create`` + reads but REFUSES ``pr merge`` (and every
     other mutation), and ``dangerous=True`` escalates the merge gate; a human reviews + merges the PR.
 
@@ -38,11 +43,13 @@ from loop_adapters.single_agent import (
     ClaudeSubprocessClient,
     _changed_paths_of,
     _default_proposals_dir,
+    _detached_worktree,
     _resolve_base_oid,
     _seal_proposal,
     _signoff_critic,
     _validate_proposal,
     _write_proposal_record,
+    default_worktrees_dir,
 )
 
 
@@ -123,9 +130,10 @@ def _worktree(repo_root: Path, base_oid: str, branch: str, worktrees_dir: Path) 
 def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, proposals_dir: Path,
                          worktrees_dir: Path, gh_runner: Callable[..., "tuple[int, str, str]"],
                          branch_prefix: str):  # noqa: ANN202
-    """The write executor: at EXECUTE, PROPOSE (agent) -> seal -> APPLY the exact diff in an isolated
-    worktree -> verify the applied change matches the proposal -> commit -> push the branch -> open a PR.
-    At DECOMPOSE it installs one self-owned task. Every step fails closed (raises -> the loop escalates)."""
+    """The write executor: at EXECUTE, PROPOSE (agent, CONFINED to a disposable detached worktree) -> seal
+    -> APPLY the exact diff in a SEPARATE, pristine branch worktree -> verify the applied change matches the
+    proposal -> commit -> push the branch -> open a PR. At DECOMPOSE it installs one self-owned task. Every
+    step fails closed (raises -> the loop escalates)."""
 
     def execute(state: LoopState, directive: Directive) -> Observation:
         if state.current_phase is Phase.DECOMPOSE and not state.task_graph:
@@ -140,16 +148,22 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
         base_oid = _resolve_base_oid(repo_root, base)
         if not base_oid:
             raise WriteAdapterError(f"cannot resolve base {base!r} to a commit to branch from")
-        request = {"goal": state.goal, "goal_id": state.goal_id, "base_oid": base_oid,
-                   "repo_root": str(repo_root),
-                   "directive": {"phase": directive.phase, "action": directive.action,
-                                 "allowed_paths": list(directive.allowed_paths)}}
-        diff, rationale = _validate_proposal(agent_client.propose(request))  # RAISES -> fail-closed
+        # 1) PROPOSE - run the UNTRUSTED agent CONFINED: cwd inside a disposable, detached worktree at base
+        #    (never the developer's tree AND never the apply worktree) with a secret-free env. Whatever it
+        #    writes into that throwaway checkout is discarded on exit; only the diff it RETURNS is used.
+        with _detached_worktree(repo_root, base_oid, worktrees_dir) as propose_wt:
+            request = {"goal": state.goal, "goal_id": state.goal_id, "base_oid": base_oid,
+                       "repo_root": str(repo_root), "_cwd": str(propose_wt),
+                       "directive": {"phase": directive.phase, "action": directive.action,
+                                     "allowed_paths": list(directive.allowed_paths)}}
+            diff, rationale = _validate_proposal(agent_client.propose(request))  # RAISES -> fail-closed
         record = _seal_proposal({"goal_id": state.goal_id, "base_oid": base_oid, "unified_diff": diff,
                                  "changed_paths": _changed_paths_of(diff), "rationale": rationale})
         proposal_path = _write_proposal_record(proposals_dir, record)  # content-addressed, OUTSIDE the tree
 
         branch = f"{branch_prefix}{_sanitize_branch_suffix(state.goal_id)}"
+        # 2) APPLY the exact sealed diff in a SEPARATE, pristine branch worktree at base - the agent never
+        #    touched this tree, so the commit is deterministically the sealed diff and nothing else.
         with _worktree(repo_root, base_oid, branch, worktrees_dir) as wt:
             # Apply the agent's OWN sealed diff, staged. A diff that does not apply cleanly fails closed.
             _git(wt, "apply", "--index", "-", stdin=diff)
@@ -189,7 +203,7 @@ def build_context(repo_root: Path | str, base: str = "main", *, agent_client: Ag
     root = Path(repo_root)
     client = agent_client if agent_client is not None else ClaudeSubprocessClient()
     pdir = Path(proposals_dir) if proposals_dir is not None else _default_proposals_dir(root)
-    wdir = Path(worktrees_dir) if worktrees_dir is not None else _default_worktrees_dir(root)
+    wdir = Path(worktrees_dir) if worktrees_dir is not None else default_worktrees_dir(root)
     gh = gh_runner or write_gh(root)
     kwargs: dict[str, Any] = {
         "repo_root": root, "base": base,
@@ -208,20 +222,6 @@ def build_context(repo_root: Path | str, base: str = "main", *, agent_client: Ag
     return LoopContext(**kwargs)
 
 
-def _default_worktrees_dir(repo_root: Path) -> Path:
-    """``<git-dir>/corpusstudio-loop/worktrees`` (OUTSIDE the working tree), or a fallback when not in a repo."""
-    try:
-        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell.
-            ["git", "-C", str(repo_root), "rev-parse", "--git-path", "corpusstudio-loop/worktrees"],
-            capture_output=True, text=True, timeout=_GIT_TIMEOUT_S)
-    except (OSError, subprocess.TimeoutExpired):
-        return repo_root / ".corpusstudio-loop-worktrees"
-    if proc.returncode != 0:
-        return repo_root / ".corpusstudio-loop-worktrees"
-    rel = proc.stdout.strip()
-    p = Path(rel)
-    return p if p.is_absolute() else repo_root / rel
-
-
-# Re-export so `AgentError` is catchable via this module too (the executor may surface either).
-__all__ = ["AgentError", "WriteAdapterError", "build_context", "write_gh"]
+# Re-export so `AgentError` (the confined-propose transport error) and the shared worktree-dir resolver are
+# reachable via this module too - the executor may surface either error, and callers/tests use the resolver.
+__all__ = ["AgentError", "WriteAdapterError", "build_context", "default_worktrees_dir", "write_gh"]

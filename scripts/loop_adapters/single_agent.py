@@ -14,8 +14,10 @@ Design (docs/PRODUCTION_SINGLE_AGENT_RUNTIME.md, phase 7.0):
     adapter's stdlib-only rule and run the untrusted agent in-process); no shell.
   * The agent's output is UNTRUSTED: it is validated fail-closed into the sealed record; a bad transport /
     unparseable / wrong-shaped response raises, which escalates the loop (never a silent advance).
-  * Worktree isolation is a 7.1 concern (there is nothing to isolate when nothing is written); 7.0 proposes
-    a diff against ``base`` and stores the sealed record OUTSIDE the working tree.
+  * The agent is CONFINED even while it only proposes (phase 7.1.1): the executor runs it with cwd inside a
+    disposable, detached worktree at ``base`` (never the developer's tree) and a sanitized (secret-free)
+    environment, and the propose diff is stored as a sealed record OUTSIDE the working tree. Whatever the
+    agent writes into the throwaway worktree is discarded; only the unified diff it RETURNS is used.
 
 stdlib-only; every git/gh read and the agent transport fail closed. Read-only ``gh`` + the whole-tree diff
 building block are reused from the dry-run adapter.
@@ -25,9 +27,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess  # noqa: S404 - fixed-argv git / claude only; never a shell string.
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Iterator, Protocol
 
 from loop.completeness import Criterion, CriterionKind
 from loop.controller import LoopState, Observation, Phase
@@ -37,6 +41,71 @@ from loop_adapters.dry_run import read_only_gh  # the same default-deny read-onl
 
 _AGENT_TIMEOUT_S = 300  # a bounded, killable agent call - never an unbounded hang
 _GIT_TIMEOUT_S = 60
+_MAX_AGENT_OUTPUT_BYTES = 8 * 1024 * 1024  # 8 MiB cap on agent output - a proposal diff is far smaller
+
+# Environment variables that MUST NOT reach the untrusted agent subprocess: anything credential-shaped, plus
+# known VCS / cloud / registry auth. Stripped from the inherited env (an explicit allowlist is stronger
+# still; this denylist is the fail-safer floor, and PATH / HOME / locale survive).
+_SECRET_ENV_SUBSTRINGS = ("TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "PRIVATE_KEY", "APIKEY",
+                          "API_KEY", "ACCESS_KEY", "SECRET_KEY", "AUTH", "COOKIE", "SESSION")
+_SECRET_ENV_PREFIXES = ("GITHUB_", "GH_", "AWS_", "GOOGLE_", "GCP_", "AZURE_", "OPENAI_", "ANTHROPIC_",
+                        "HF_", "HUGGINGFACE_", "NPM_", "PYPI_", "TWINE_", "DOCKER_", "SSH_", "GPG_")
+
+
+def _sanitized_env() -> dict[str, str]:
+    """A copy of the environment with credential-shaped variables STRIPPED, so the untrusted agent
+    subprocess never inherits GitHub / cloud / release / registry secrets."""
+    clean: dict[str, str] = {}
+    for key, value in os.environ.items():
+        upper = key.upper()
+        if any(s in upper for s in _SECRET_ENV_SUBSTRINGS) or any(upper.startswith(p) for p in _SECRET_ENV_PREFIXES):
+            continue
+        clean[key] = value
+    return clean
+
+
+def _git(cwd: Path, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    """Run ``git -C <cwd> <args>`` (fixed argv, no shell, bounded). Raises :class:`AgentError` on a non-zero
+    exit / un-runnable git - shared by the read (propose) and write adapters."""
+    try:
+        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell.
+            ["git", "-C", str(cwd), *args], input=stdin, capture_output=True, text=True, timeout=_GIT_TIMEOUT_S)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise AgentError(f"git {' '.join(args[:2])} could not run: {exc}") from exc
+    if proc.returncode != 0:
+        raise AgentError(f"git {' '.join(args[:2])} failed (exit {proc.returncode}): {proc.stderr.strip()[:200]}")
+    return proc
+
+
+@contextmanager
+def _detached_worktree(repo_root: Path, base_oid: str, worktrees_dir: Path) -> Iterator[Path]:
+    """An ISOLATED, disposable, DETACHED ``git worktree`` at ``base_oid`` under ``worktrees_dir`` (outside
+    the main working tree) - the confined checkout the agent runs in for a read/propose. Removed on exit
+    (best-effort); anything the agent writes here is thrown away."""
+    worktrees_dir.mkdir(parents=True, exist_ok=True)
+    wt = worktrees_dir / f"propose-{base_oid[:12]}-{os.getpid()}"
+    _git(repo_root, "worktree", "add", "--detach", str(wt), base_oid)
+    try:
+        yield wt
+    finally:
+        try:
+            _git(repo_root, "worktree", "remove", "--force", str(wt))
+        except AgentError:
+            pass  # best-effort disposal; a leftover worktree is GC-able, never data loss
+
+
+def default_worktrees_dir(repo_root: Path) -> Path:
+    """``<git-dir>/corpusstudio-loop/worktrees`` (OUTSIDE the working tree), or a fallback when not in a repo."""
+    try:
+        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell.
+            ["git", "-C", str(repo_root), "rev-parse", "--git-path", "corpusstudio-loop/worktrees"],
+            capture_output=True, text=True, timeout=_GIT_TIMEOUT_S)
+    except (OSError, subprocess.TimeoutExpired):
+        return repo_root / ".corpusstudio-loop-worktrees"
+    if proc.returncode != 0:
+        return repo_root / ".corpusstudio-loop-worktrees"
+    rel = proc.stdout.strip()
+    return Path(rel) if Path(rel).is_absolute() else repo_root / rel
 
 
 class AgentClient(Protocol):
@@ -67,25 +136,47 @@ def _validate_proposal(raw: Any) -> tuple[str, str]:
     return diff, rationale
 
 
-class ClaudeSubprocessClient:
-    """The real transport: run ``claude`` OUT OF PROCESS with a fixed argv (no shell), feed the request as
-    JSON on stdin, and read one JSON object with ``unified_diff`` / ``rationale`` from stdout. The call is
-    bounded by a timeout (killable); a non-zero exit, an un-runnable binary, or an unparseable / wrong-shaped
-    response raises :class:`AgentError`. The exact prompt/flags are operator-tunable via ``argv``; the
-    OUTPUT CONTRACT is what the adapter validates. Live behaviour is env-dependent (like ``gh`` auth)."""
+# The read-only tool policy for the PROPOSE phase: the agent may inspect the checkout but not edit it, run
+# shell, spawn nested agents, or mutate git/network. Passed to ``claude`` as a DEFAULT; the flag names are
+# version-sensitive, so ``argv`` is operator-tunable and MUST be verified against the installed CLI. NOTE:
+# prompt/tool restrictions are DEFENCE-IN-DEPTH, not process isolation - the load-bearing confinement is
+# that the agent runs with cwd inside a DISPOSABLE worktree with a sanitized (secret-free) environment.
+_READONLY_TOOL_ARGV: tuple[str, ...] = (
+    "claude", "-p", "--output-format", "json",
+    "--allowedTools", "Read,Grep,Glob",
+    "--disallowedTools", "Edit,Write,Bash,Task,WebFetch,WebSearch,NotebookEdit",
+)
 
-    def __init__(self, *, argv: tuple[str, ...] = ("claude", "-p", "--output-format", "json"),
-                 timeout: float = _AGENT_TIMEOUT_S) -> None:
+
+class ClaudeSubprocessClient:
+    """The real transport: run ``claude`` OUT OF PROCESS (fixed argv, no shell), CONFINED to a disposable
+    worktree and a sanitized environment, feed the request as JSON on stdin, and read one JSON object with
+    ``unified_diff`` / ``rationale`` from stdout. Confinement:
+      * ``cwd`` = ``request['_cwd']`` (the isolated worktree the executor created) - the agent operates on a
+        throwaway checkout, never the developer's tree;
+      * ``env`` = :func:`_sanitized_env` - no GitHub / cloud / release / registry secrets are inherited;
+      * a read-only tool policy (``argv`` default) denies edit/write/bash/nested-agents/net (defence in depth);
+      * the call is bounded by a timeout AND ``max_output_bytes`` (killable) - an oversized/hung agent fails
+        closed, never hangs the loop or exhausts memory.
+    A non-zero exit / un-runnable binary / unparseable / wrong-shaped / oversized response raises
+    :class:`AgentError`. Live behaviour is env-dependent (the CLI must exist + honour the argv)."""
+
+    def __init__(self, *, argv: tuple[str, ...] = _READONLY_TOOL_ARGV, timeout: float = _AGENT_TIMEOUT_S,
+                 max_output_bytes: int = _MAX_AGENT_OUTPUT_BYTES) -> None:
         self.argv = argv
         self.timeout = timeout
+        self.max_output_bytes = max_output_bytes
 
     def propose(self, request: dict[str, Any]) -> dict[str, Any]:
+        cwd = request.get("_cwd")  # the isolated worktree; the agent runs THERE, not the developer's tree
         try:
-            proc = subprocess.run(  # noqa: S603 - fixed argv, no shell, bounded timeout.
+            proc = subprocess.run(  # noqa: S603 - fixed argv, no shell, bounded timeout, confined cwd+env.
                 list(self.argv), input=json.dumps(request), text=True, capture_output=True,
-                timeout=self.timeout)
+                timeout=self.timeout, cwd=cwd, env=_sanitized_env())
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise AgentError(f"claude could not run: {type(exc).__name__}: {exc}") from exc
+            raise AgentError(f"claude could not run / timed out: {type(exc).__name__}: {exc}") from exc
+        if len(proc.stdout.encode("utf-8", "replace")) > self.max_output_bytes:
+            raise AgentError(f"claude output exceeded {self.max_output_bytes} bytes; refusing oversized output")
         if proc.returncode != 0:
             raise AgentError(f"claude exited {proc.returncode}: {proc.stderr.strip()[:200]}")
         try:
@@ -136,10 +227,11 @@ def _resolve_base_oid(repo_root: Path, base: str) -> str:
     return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
-def _make_executor(agent_client: AgentClient, repo_root: Path, base: str, proposals_dir: Path):  # noqa: ANN202
-    """Build the propose-only executor. At EXECUTE it asks the agent for a diff and seals it; at DECOMPOSE
-    it installs one self-owned placeholder task (so the graph phases proceed without a delegated,
-    write-capable sub-agent); at every other executor phase it records the directive and advances."""
+def _make_executor(agent_client: AgentClient, repo_root: Path, base: str, proposals_dir: Path,
+                   worktrees_dir: Path):  # noqa: ANN202
+    """Build the propose-only executor. At EXECUTE it runs the agent CONFINED to a disposable worktree and
+    seals the returned diff; at DECOMPOSE it installs one self-owned placeholder task (so the graph phases
+    proceed without a delegated, write-capable sub-agent); at every other executor phase it advances."""
 
     def execute(state: LoopState, directive: Directive) -> Observation:
         if state.current_phase is Phase.DECOMPOSE and not state.task_graph:
@@ -152,11 +244,17 @@ def _make_executor(agent_client: AgentClient, repo_root: Path, base: str, propos
             return Observation.SUCCESS  # reasoning phases: advance (nothing to propose yet)
 
         base_oid = _resolve_base_oid(repo_root, base)
-        request = {"goal": state.goal, "goal_id": state.goal_id, "base_oid": base_oid,
-                   "repo_root": str(repo_root),
-                   "directive": {"phase": directive.phase, "action": directive.action,
-                                 "allowed_paths": list(directive.allowed_paths)}}
-        result = agent_client.propose(request)  # RAISES on failure -> step escalates (fail-closed)
+        if not base_oid:
+            raise AgentError(f"cannot resolve base {base!r} to a commit for the confined worktree")
+        # CONFINE the agent: run it with cwd inside a disposable, detached worktree at base (never the
+        # developer's tree) + a secret-free env. Anything it writes there is discarded; we use only its
+        # returned diff. So even a mis-behaving agent cannot edit the working tree while "proposing".
+        with _detached_worktree(repo_root, base_oid, worktrees_dir) as wt:
+            request = {"goal": state.goal, "goal_id": state.goal_id, "base_oid": base_oid,
+                       "repo_root": str(repo_root), "_cwd": str(wt),
+                       "directive": {"phase": directive.phase, "action": directive.action,
+                                     "allowed_paths": list(directive.allowed_paths)}}
+            result = agent_client.propose(request)  # RAISES on failure -> step escalates (fail-closed)
         diff, rationale = _validate_proposal(result)
         record = _seal_proposal({"goal_id": state.goal_id, "base_oid": base_oid, "unified_diff": diff,
                                  "changed_paths": _changed_paths_of(diff), "rationale": rationale})
@@ -182,20 +280,22 @@ def _signoff_critic(_state: LoopState) -> list[Criterion]:
 
 
 def build_context(repo_root: Path | str, base: str = "main", *, agent_client: AgentClient | None = None,
-                  proposals_dir: Path | str | None = None, pr_ref: str | None = None,
-                  run_cs_assure: Any = None, gh_runner: Any = None) -> LoopContext:
+                  proposals_dir: Path | str | None = None, worktrees_dir: Path | str | None = None,
+                  pr_ref: str | None = None, run_cs_assure: Any = None, gh_runner: Any = None) -> LoopContext:
     """A READ-ONLY, propose-only :class:`LoopContext` driven by a real single agent. ``capabilities`` is
-    EMPTY (the capability gate runs it with no opt-in). The executor asks ``agent_client`` (defaulting to
-    the out-of-process :class:`ClaudeSubprocessClient`) for a proposed diff at EXECUTE and seals it; nothing
-    is ever applied, pushed, or merged. Pass a stub ``agent_client`` + a ``proposals_dir`` in tests. A
-    ``pr_ref`` additionally exercises the real CI read + merge gate, still guaranteed not to merge
-    (``dangerous=True`` escalates first and the gh runner refuses mutations)."""
+    EMPTY (the capability gate runs it with no opt-in). The executor runs ``agent_client`` (defaulting to
+    the out-of-process :class:`ClaudeSubprocessClient`) CONFINED to a disposable, detached worktree at
+    ``base`` (never the developer's tree) and seals the diff it returns; nothing is ever applied, pushed,
+    or merged. Pass a stub ``agent_client`` + a ``proposals_dir`` in tests. A ``pr_ref`` additionally
+    exercises the real CI read + merge gate, still guaranteed not to merge (``dangerous=True`` escalates
+    first and the gh runner refuses mutations)."""
     root = Path(repo_root)
     client = agent_client if agent_client is not None else ClaudeSubprocessClient()
     pdir = Path(proposals_dir) if proposals_dir is not None else _default_proposals_dir(root)
+    wtdir = Path(worktrees_dir) if worktrees_dir is not None else default_worktrees_dir(root)
     kwargs: dict[str, Any] = {
         "repo_root": root, "base": base,
-        "executor": _make_executor(client, root, base, pdir),
+        "executor": _make_executor(client, root, base, pdir, wtdir),
         "reviewer": lambda _state: [],
         "critic": _signoff_critic,
         "multi_agent": False,                 # single-agent: no delegated (write-capable) sub-agents

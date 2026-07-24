@@ -103,32 +103,57 @@ after the run, (2) the proposal artifact is produced, (3) the run ESCALATES (nev
 **Goal:** the agent actually *edits* files, commits, pushes a branch, and opens a PR — **in the isolated
 worktree only** — but **does not merge**. A human merges the PR.
 
+### 5a. What 7.1 shipped (#703) + confinement (7.1.1)
+
 - **`capabilities = frozenset({CAP_WRITE})`**; the operator must pass **`--allow-capabilities write`** or
   the runtime refuses (exit 2). This is the machine-checkable opt-in.
-- **`verify_paths` REQUIRED.** For a delegated (multi-agent) wave the `__post_init__` guard already
-  enforces this; for the single-agent write path the adapter supplies an independent worktree-diff
-  verifier so the agent's edits are checked against the *real* diff, never its self-report. A diff that
-  can't be produced is itself a breach (fail-closed).
-- **Effects gain write, but NOT merge:** `gh_runner` may `git push` a branch + `gh pr create`; it must
-  **refuse `gh pr merge`**. Source edits + commits happen in the **isolated worktree**; the main tree is
-  never touched.
-- **#15b wiring (deferred, lands here):** `INTEGRATE` runs `cs_assure impact --scope head` bound to the
-  **pushed commit** (`expected_head`), so the merge-gate obligations are evaluated against the exact
-  commit — not the local tree. `head_bound_merge`'s `--match-head-commit` already refuses a moved head.
-- **#5-slice-2 wiring (deferred, lands here):** an `AuthorizationRequest` bound to `(goal, capability,
-  subject = change-set fingerprint / head)`, and a grant that becomes stale when its subject changes — so
-  a grant for one blocker can't discharge a later, different one.
-- **Merge stays human:** the merge gate escalates (`AUTHORIZATION_REQUIRED`); a human reviews and merges
-  the PR. 7.1 proves the *write* half end-to-end with the merge button still human-held.
+- **Effects gain write, but NOT merge:** `write_gh` may `git push` a branch + `gh pr create`; it
+  **refuses `gh pr merge`** (and every other mutation). Source edits + commits happen in an **isolated,
+  disposable worktree**; the developer's main tree is never touched.
+- **The unit of change is the agent's OWN sealed diff.** The agent proposes a unified diff (sealed as the
+  7.0 `agent_proposal` record); the executor applies *that exact diff* deterministically with `git apply`
+  into a **separate, pristine** branch worktree, verifies the applied `changed_paths` match the sealed
+  proposal, then commits/pushes/opens the PR. A drifted apply fails closed.
+- **Agent confinement (7.1.1):** the untrusted agent runs with **cwd inside a disposable, detached
+  worktree** at `base` (never the developer's tree, never the apply worktree), a **sanitized (secret-free)
+  environment** (no `*TOKEN*`/`*SECRET*`/cloud/registry/VCS auth reaches it), a **version-pinned read-only
+  tool policy** (`Read,Grep,Glob` allowed; `Edit,Write,Bash,Task,WebFetch,WebSearch,NotebookEdit` denied),
+  and a **bounded output** cap. Whatever it writes into that throwaway checkout is discarded; only the
+  diff it *returns* is used.
+- **Merge stays human:** the merge gate escalates (`AUTHORIZATION_REQUIRED` via `dangerous=True`); a human
+  reviews and merges the PR. 7.1 proves the *write* half end-to-end with the merge button still human-held.
+
+### 5b. Remaining hardening before 7.1 runs against a real repo (7.1.2 – 7.1.5)
+
+The features below were listed here as "lands in 7.1" but were **deferred** — they are **not** in #703 and
+7.1 must **not** be run against the real CorpusStudio repository until they land. Each is a distinct,
+separately-authorized PR under `loop-controller-self-modify`:
+
+- **7.1.2 — candidate assurance.** Assurance (`cs_assure verify/impact`, secret scan, sensitive-path
+  policy classification, worker-reachability) must run against the **candidate worktree**, not the
+  developer tree; a REAL reviewer + an observe→diagnose→review→correct loop over the candidate, so a
+  publish is not the *only* thing EXECUTE does.
+- **7.1.3 — exact candidate identity.** Record `candidate_tree_oid` + a staged-patch digest;
+  `git commit-tree`/head verification so the pushed commit is provably the assured candidate; wire
+  `cs_assure impact --scope head` bound to the pushed commit (`--match-head-commit`).
+- **7.1.4 — crash recovery + safe publish.** A write-ahead effect journal (crash-resumable), idempotent
+  branch/PR reuse, orphan-branch cleanup (a failed `pr create` currently leaves a pushed branch), a
+  **DRAFT** PR, validated remote/PR identity, and a cleanup/gc command.
+- **7.1.5 — live canary** with fault injection at every boundary before any unattended use.
+- **Sensitive-path denial** (initially deny / require separate authorization): `.env*`, `*.pem`, `*.key`,
+  credential stores, GitHub workflow permission changes, sealed research, historical evidence, release
+  credentials, submodules, symlinks, binary/large generated artifacts, assurance code, loop-controller
+  code.
 
 **Not a worker-lineage change.** The adapter is control-plane code (`scripts/loop_adapters/`), not worker
 execution bytes, so it does **not** force a fresh worker wheel/env — but it IS under
 `loop-controller-self-modify`, so it is admitted only by trusted-base tests + CI + independent human
-review, never the loop's own gate. (To confirm in review.)
+review (the maintainer; Sourcery is advisory, not the independent gate), never the loop's own gate.
 
-**Verification:** tests assert edits appear **only** under the isolated worktree path (the main tree's
-`git status` is clean); a boundary breach (edit outside lane / undiff-able) fails closed; `INTEGRATE`
-escalates rather than merges; a self-modify-shaped change still escalates.
+**Verification (as shipped):** tests assert edits appear **only** under the isolated worktree path (the
+main tree's `git status` is clean); the agent runs confined (cwd = a disposable worktree, sanitized env,
+bounded output); a diff that won't apply / a drifted apply fails closed; `INTEGRATE` escalates rather than
+merges; a self-modify-shaped change still escalates.
 
 ## 6. Phase 7.2 — autonomous merge (SEPARATELY gated)
 
@@ -198,12 +223,15 @@ The robustness decisions for §8, and the concrete contracts 7.0 implements:
   "out-of-process protocol, not PyO3" architecture, keeps the agent killable/bounded, and honors no-shell.
 - **Agent output is untrusted, validated fail-closed** into a sealed record — never trusted as free-form
   text (the same discipline `observe.py` applies to a `cs_assure` record).
-- **Worktree isolation lands in 7.1, not 7.0.** 7.0 is propose-only and writes nothing, so it needs no
-  checkout — it proposes a unified diff against `base` read from the object store. The **ephemeral,
-  disposable, one-per-run** worktree is introduced with the write step (7.1), where it actually isolates
-  edits from the developer's tree.
-- **7.1 authorization** = a sealed `AuthorizationRequest` bound to `(goal_id, capability, subject =
-  head_sha / change-set fingerprint)`, one-time, stale-on-subject-change (no replay).
+- **Two kinds of worktree, both disposable.** *Agent confinement* (7.1.1) applies in **both** adapters:
+  the untrusted agent always runs with cwd inside a disposable, detached worktree at `base` (never the
+  developer's tree), even when only proposing — the original "7.0 needs no checkout" plan was upgraded so
+  a mis-behaving agent cannot edit the working tree while "just proposing". *Write isolation* — applying
+  the sealed diff, committing, pushing — happens in a **separate, pristine** branch worktree that only the
+  write step (7.1) creates, and only the returned diff (never the confined checkout) crosses into it.
+- **7.1 authorization** (subject-bound, deferred to 7.1.3/7.2) = a sealed `AuthorizationRequest` bound to
+  `(goal_id, capability, subject = head_sha / change-set fingerprint)`, one-time, stale-on-subject-change
+  (no replay). Not in #703: the shipped opt-in is the coarse `--allow-capabilities write` gate only.
 - **First 7.1 product target** = a single-file, deterministically-gated change firing **zero** human-gated
   obligations (a docstring / typo / lint fix or a missing-test add); never a `scripts/loop`,
   `scripts/assurance`, `.github`, or worker path.
@@ -213,13 +241,19 @@ The robustness decisions for §8, and the concrete contracts 7.0 implements:
 ```python
 class AgentClient(Protocol):
     def propose(self, request: dict) -> dict:
-        """Given {goal, goal_id, base_oid, directive, repo_root}, return
-        {"unified_diff": str, "rationale": str}. RAISES on transport/output failure (fail-closed)."""
+        """Given {goal, goal_id, base_oid, directive, repo_root, _cwd}, return
+        {"unified_diff": str, "rationale": str}. RAISES on transport/output failure (fail-closed).
+        `_cwd` is the disposable, confined worktree the transport runs the agent in (7.1.1)."""
 ```
 
-The real `ClaudeSubprocessClient` runs `["claude", "-p", "--output-format", "json", ...]` (fixed argv, no
-shell, bounded timeout), feeds the request as JSON on stdin, and validates the JSON response shape before
-returning; a bad exit / unparseable / wrong-shaped response raises. Tests inject a deterministic stub.
+The real `ClaudeSubprocessClient` runs `["claude", "-p", "--output-format", "json", "--allowedTools",
+"Read,Grep,Glob", "--disallowedTools", "Edit,Write,Bash,Task,WebFetch,WebSearch,NotebookEdit"]` (fixed
+argv, no shell) **confined** to `cwd = request["_cwd"]` (the disposable worktree) with a **sanitized
+(secret-free) environment**, feeds the request as JSON on stdin, and validates the JSON response shape
+before returning; a bad exit / unparseable / **oversized** / wrong-shaped response raises (bounded by both
+a timeout and a max-output-bytes cap). The tool-policy flag names are version-sensitive, so `argv` is an
+operator-tunable default — process-level confinement (worktree cwd + sanitized env) is the load-bearing
+boundary; the tool policy is defence-in-depth. Tests inject a deterministic stub.
 
 ### `agent_proposal` sealed record (7.0)
 

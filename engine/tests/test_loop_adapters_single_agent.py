@@ -32,10 +32,15 @@ class _StubAgent:
     def __init__(self, response: dict | None = None) -> None:
         self.response = response if response is not None else {"unified_diff": _DIFF, "rationale": "tweak"}
         self.calls = 0
+        self.seen_cwd: str | None = None
+        self.cwd_was_dir: bool | None = None
 
     def propose(self, request: dict) -> dict:
         self.calls += 1
         self.last_request = request
+        # observe the confinement AT CALL TIME (the disposable worktree is removed once we return)
+        self.seen_cwd = request.get("_cwd")
+        self.cwd_was_dir = bool(self.seen_cwd) and Path(self.seen_cwd).is_dir()
         return self.response
 
 
@@ -100,6 +105,22 @@ def test_a_run_proposes_a_sealed_diff_escalates_and_writes_nothing(tmp_path: Pat
     assert _git(root, "status", "--porcelain").stdout == ""
     assert _git(root, "rev-list", "--count", "HEAD").stdout.strip() == "1"
     assert (root / "README.md").read_text() == "old\n"  # the proposed diff was NOT applied
+
+
+def test_the_propose_agent_is_confined_to_a_disposable_worktree(tmp_path: Path) -> None:
+    # Even PROPOSE-only, the untrusted agent runs with cwd inside a throwaway worktree (never the dev tree),
+    # so a mis-behaving agent cannot edit the working tree while "just proposing".
+    agent = _StubAgent()
+    root = _repo(tmp_path)
+    ctx = sa.build_context(root, "main", agent_client=agent, proposals_dir=tmp_path / "proposals",
+                           worktrees_dir=tmp_path / "wt", run_cs_assure=_cs_assure_green())
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, ctx)
+    assert agent.cwd_was_dir is True and agent.seen_cwd is not None
+    seen = Path(agent.seen_cwd).resolve()
+    assert (tmp_path / "wt").resolve() in seen.parents and seen != root.resolve()
+    assert not seen.exists()  # disposed after the propose
+    assert _git(root, "status", "--porcelain").stdout == ""  # dev tree still pristine
 
 
 def test_a_corrupt_agent_proposals_field_is_normalized_not_silently_skipped(tmp_path: Path) -> None:
@@ -191,3 +212,54 @@ def test_claude_subprocess_client_fails_closed_on_unparseable_output(monkeypatch
 def test_default_proposals_dir_falls_back_when_not_a_git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: _FakeProc(128, "", "not a git repo"))
     assert sa._default_proposals_dir(tmp_path) == tmp_path / ".corpusstudio-loop-proposals"
+
+
+# --------------------------------------------------------------------------- confinement (7.1.1)
+
+
+def test_sanitized_env_strips_credential_shaped_variables(monkeypatch: pytest.MonkeyPatch) -> None:
+    # secrets by SUBSTRING and by known auth PREFIX are stripped; benign vars (PATH/HOME/locale) survive.
+    for k in ("GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "HF_TOKEN", "MY_API_KEY", "DB_PASSWORD",
+              "SESSION_ID", "npm_config_registry_AUTH", "ANTHROPIC_API_KEY", "SSH_AUTH_SOCK"):
+        monkeypatch.setenv(k, "secret")
+    for k in ("PATH", "HOME", "LANG", "CORPUS_STUDIO_MODE"):
+        monkeypatch.setenv(k, "ok")
+    clean = sa._sanitized_env()
+    assert not any(bad in clean for bad in (
+        "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "HF_TOKEN", "MY_API_KEY", "DB_PASSWORD", "SESSION_ID",
+        "ANTHROPIC_API_KEY", "SSH_AUTH_SOCK", "npm_config_registry_AUTH"))
+    assert clean["PATH"] == "ok" and clean["HOME"] == "ok" and clean["CORPUS_STUDIO_MODE"] == "ok"
+
+
+def test_the_default_tool_policy_is_read_only() -> None:
+    # the version-sensitive propose policy: read/grep/glob allowed; edit/write/bash/nested-agents/net denied.
+    argv = sa._READONLY_TOOL_ARGV
+    assert argv[0] == "claude" and "--output-format" in argv and "json" in argv
+    allowed = argv[argv.index("--allowedTools") + 1]
+    denied = argv[argv.index("--disallowedTools") + 1]
+    assert set(allowed.split(",")) == {"Read", "Grep", "Glob"}
+    for tool in ("Edit", "Write", "Bash", "Task", "WebFetch", "WebSearch", "NotebookEdit"):
+        assert tool in denied.split(",")
+
+
+def test_the_subprocess_client_runs_with_a_sanitized_env_and_the_confined_cwd(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "should-not-leak")
+    captured: dict[str, object] = {}
+
+    def fake_run(*a: object, **k: object) -> _FakeProc:
+        captured.update(k)
+        return _FakeProc(0, json.dumps({"unified_diff": "d", "rationale": "r"}))
+
+    monkeypatch.setattr(sa.subprocess, "run", fake_run)
+    sa.ClaudeSubprocessClient().propose({"goal": "g", "_cwd": str(tmp_path)})
+    assert captured["cwd"] == str(tmp_path)                    # confined to the injected worktree
+    assert "GITHUB_TOKEN" not in captured["env"]               # secret-free env
+
+
+def test_the_subprocess_client_fails_closed_on_oversized_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    huge = json.dumps({"unified_diff": "x" * 64, "rationale": "r"})
+    monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: _FakeProc(0, huge))
+    client = sa.ClaudeSubprocessClient(max_output_bytes=8)  # cap below the output size
+    with pytest.raises(sa.AgentError, match="oversized"):
+        client.propose({"goal": "g"})
