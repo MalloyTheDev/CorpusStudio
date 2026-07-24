@@ -1,13 +1,16 @@
 """Read-only Git plumbing for the assurance change-set kernel (Phase 1).
 
 Every git call is a fixed ``argv`` list run with ``git -C <root>`` - never a shell string. These
-calls READ repository state: none mutates the object database, the refs, the committed tree, or the
-working tree, so the committed content the repository represents - and the computed change set - are
-never altered. (One content-neutral exception is honest to state: a read such as ``git diff`` may
-refresh the index's cached stat metadata - mtime/size - to reflect the current working tree; this
-changes no tracked bytes, no tree, and no change-set result. ``GIT_OPTIONAL_LOCKS=0`` is set to
-avoid the optional-lock, status-style refreshes; a plumbing ``diff`` still refreshes the stat-cache,
-which is why the promise here is "never mutates committed state", not "never touches .git/index".)
+calls do not change any REF, the committed tree, or the working tree, so the committed content the
+repository represents - and the computed change set - are never altered.
+
+Two honest exceptions, both of which change nothing the repository *represents*:
+  * The ``merge_candidate`` scope's ``git merge-tree --write-tree`` writes UNREFERENCED, gc-able
+    tree/blob objects into the object database. No ref points at them, so no committed content changes.
+  * A read such as ``git diff`` may refresh the index's cached stat metadata (mtime/size) to reflect
+    the working tree - no tracked bytes, no tree, and no change-set result change. ``GIT_OPTIONAL_LOCKS=0``
+    avoids the optional-lock status-style refreshes, but a plumbing ``diff`` still touches the stat-cache
+    (why the promise is "never mutates committed state", not "never touches .git/index").
 All name-bearing output is requested in the NUL-delimited ``-z`` form so paths are never quoted or
 ambiguous; a path that is not valid UTF-8 fails closed (assurance records require UTF-8 POSIX paths).
 

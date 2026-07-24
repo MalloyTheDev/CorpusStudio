@@ -96,6 +96,14 @@ def module_to_path(module: str, read: ReadBytes, *, package_root: str = DEFAULT_
     return None
 
 
+def _module_and_ancestors(module: str) -> "list[str]":
+    """``module`` followed by each ancestor PACKAGE dotted name, most-specific first. For
+    ``corpus_studio.platform.worker`` -> ``[corpus_studio.platform.worker, corpus_studio.platform,
+    corpus_studio]`` - so a reachable module drags in the __init__.py of every package that runs to import it."""
+    parts = module.split(".")
+    return [".".join(parts[:i]) for i in range(len(parts), 0, -1)]
+
+
 def _resolve_relative(current: str, is_package: bool, level: int, module: str | None) -> str | None:
     """Resolve a relative import (``from . / .. import``) to an absolute dotted module. ``current`` is the
     importing module; ``level`` is the number of leading dots. Returns None if it escapes the top package."""
@@ -103,9 +111,10 @@ def _resolve_relative(current: str, is_package: bool, level: int, module: str | 
     base = current.split(".")
     if not is_package:
         base = base[:-1]
-    # Each extra dot beyond the first climbs one more package level.
+    # Each extra dot beyond the first climbs one more package level. climb == len(base) already empties the
+    # anchor (i.e. climbs ABOVE the top package), so it is an escape too - use >=, not > (off-by-one).
     climb = level - 1
-    if climb > len(base):
+    if climb >= len(base):
         return None  # escapes above the top package -> unresolvable (recorded by the caller)
     anchor = base[: len(base) - climb] if climb else base
     parts = [*anchor, *(module.split(".") if module else [])]
@@ -156,10 +165,12 @@ def _import_targets(source: bytes, current: str, is_package: bool, top_package: 
 
 
 def _dynamic_import_target(node: ast.Call) -> tuple[str | None, str] | None:
-    """If ``node`` is a dynamic import (``importlib.import_module(...)`` / ``__import__(...)``), return
-    ``(literal_module_or_None, raw_repr)``; a literal string arg is resolvable, anything else is not."""
+    """If ``node`` is a dynamic import (``importlib.import_module(...)`` / a bare ``import_module(...)`` from
+    ``from importlib import import_module`` / ``__import__(...)``), return ``(literal_module_or_None,
+    raw_repr)``; a literal string arg is resolvable, anything else is not."""
     func = node.func
-    is_import_module = isinstance(func, ast.Attribute) and func.attr == "import_module"
+    is_import_module = ((isinstance(func, ast.Attribute) and func.attr == "import_module")
+                        or (isinstance(func, ast.Name) and func.id == "import_module"))
     is_dunder = isinstance(func, ast.Name) and func.id == "__import__"
     if not (is_import_module or is_dunder) or not node.args:
         return None
@@ -181,16 +192,27 @@ def reachable_from(roots: tuple[str, ...], read: ReadBytes, *,
     seen_paths: set[str] = set()
     dynamic: list[dict[str, str]] = []
     unreadable: list[dict[str, str]] = []
-    # Seed the worklist with the roots that resolve in this view (a root absent here is handled by the delta).
     stack: list[tuple[str, str, bool]] = []  # (module, path, is_package)
-    for root in roots:
+
+    def _enqueue(module: str) -> None:
+        # Enqueue ``module`` AND every ANCESTOR PACKAGE: Python executes each parent package's __init__.py
+        # when a submodule is imported, so a change to an ancestor __init__ IS worker-reachable even though
+        # no explicit import edge names it. Add each that resolves to a file in this view and is unseen.
+        for name in _module_and_ancestors(module):
+            resolved = module_to_path(name, read, package_root=package_root)
+            if resolved is None:
+                continue
+            path, is_pkg = resolved
+            if path not in seen_paths:
+                seen_paths.add(path)
+                stack.append((name, path, is_pkg))
+
+    for root in roots:  # a root absent in this view is handled by the delta on the other side
         resolved = path_to_module(root, package_root=package_root)
         if resolved is None:
             raise WorkerReachabilityError(f"worker root {root!r} is not a module under {package_root!r}")
-        module, is_package = resolved
-        if read(root) is not None and root not in seen_paths:
-            seen_paths.add(root)
-            stack.append((module, root, is_package))
+        if read(root) is not None:
+            _enqueue(resolved[0])
 
     while stack:
         module, path, is_package = stack.pop()
@@ -200,18 +222,12 @@ def reachable_from(roots: tuple[str, ...], read: ReadBytes, *,
             continue
         try:
             targets, dyn = _import_targets(source, module, is_package, top_package)
-        except SyntaxError as exc:
+        except (SyntaxError, ValueError) as exc:  # ValueError e.g. a NUL byte in source -> record, do not abort
             unreadable.append({"path": path, "detail": f"unparseable: {exc}"})
             continue
         dynamic.extend(dyn)
         for target in targets:
-            resolved = module_to_path(target, read, package_root=package_root)
-            if resolved is None:
-                continue  # an intra-package name that is a symbol, not a module file -> nothing to follow
-            target_path, target_is_pkg = resolved
-            if target_path not in seen_paths:
-                seen_paths.add(target_path)
-                stack.append((target, target_path, target_is_pkg))
+            _enqueue(target)
 
     # De-duplicate dynamic records deterministically (same target imported from many sites -> one entry).
     dyn_unique = sorted({(d["kind"], d["detail"]): d for d in dynamic}.values(),
