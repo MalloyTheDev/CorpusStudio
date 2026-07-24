@@ -89,10 +89,18 @@ may *do*:
   applied. It declares `capabilities=frozenset()` (read-only, so the capability gate runs it with no
   opt-in), makes **no writes**, and ends `ESCALATED` (a human decides whether to apply the proposal). See
   [`docs/PRODUCTION_SINGLE_AGENT_RUNTIME.md`](PRODUCTION_SINGLE_AGENT_RUNTIME.md).
-- A **write-capable** adapter (Phase 7.1+: the agent edits/commits/opens a PR in an isolated worktree; the
-  autonomous merge path) is a later, review-gated step needing explicit human authorization; its seams
-  (`capabilities` + `--allow-capabilities`, `verify_paths`, `expected_head`, `required_checks`,
-  `context_for`) already exist, and adapter code is under the `loop-controller-self-modify` obligation.
+- **`single_agent_write.py` (Phase 7.1: write-capable single agent, GATED).** The agent still PROPOSES a
+  sealed diff (7.0 behaviour); 7.1 then APPLIES that exact diff in an **isolated, disposable `git worktree`**
+  (never the developer's tree), verifies the applied change matches the sealed proposal, commits it on a
+  fresh branch, pushes, and opens a PR. It declares **`capabilities={"write"}`** (so `cs_loop run` REFUSES
+  it without `--allow-capabilities write`) and **never merges**: `write_gh` allows `pr create` + reads but
+  refuses `pr merge` (and every other mutation), and `dangerous=True` escalates the merge gate - a human
+  reviews + merges the PR. Any failure (a diff that won't apply, a drifted apply, a failed PR-create) fails
+  closed and the worktree is disposed; the main tree is left pristine.
+- The **autonomous merge** path (Phase 7.2) - evidence-bound `merge_gate` + the obligation-resolution
+  producer - remains future, review-gated, and needs its own explicit authorization; its seams
+  (`expected_head`, `required_checks`, the head-scope impact) already exist. All adapter code is under the
+  `loop-controller-self-modify` obligation. See [`docs/PRODUCTION_SINGLE_AGENT_RUNTIME.md`](PRODUCTION_SINGLE_AGENT_RUNTIME.md).
 - **Capability gate (machine-checkable).** An adapter's `LoopContext` DECLARES its effect
   `capabilities` (empty = read-only / propose-only, the default). `cs_loop run` / `campaign` **refuse**
   (exit 2, fail-closed) to run a context that declares a capability the operator did not permit via
