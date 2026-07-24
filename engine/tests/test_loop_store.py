@@ -17,7 +17,18 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from loop.controller import LoopState, Observation, Phase, apply  # noqa: E402
-from loop.store import LoopStateError, dumps, from_dict, load, loads, save, to_dict  # noqa: E402
+from loop.store import (  # noqa: E402
+    ConcurrentStateWrite,
+    LoopStateError,
+    dumps,
+    from_dict,
+    load,
+    loads,
+    save,
+    save_cas,
+    state_revision,
+    to_dict,
+)
 
 
 def _mid_loop_state() -> LoopState:
@@ -112,3 +123,37 @@ def test_from_dict_rejects_a_future_or_non_int_schema_version() -> None:
         from_dict({"schema_version": 999, "current_phase": "EXECUTE"})  # newer than this build
     with pytest.raises(LoopStateError, match="schema_version"):
         from_dict({"schema_version": "x", "current_phase": "EXECUTE"})  # not an int
+
+
+# --------------------------------------------------------------------------- optimistic concurrency (#12)
+
+
+def test_save_cas_increments_the_revision_and_records_metadata(tmp_path: Path) -> None:
+    p = tmp_path / "loop.json"
+    assert state_revision(p) == 0  # absent -> 0
+    r1 = save_cas(_mid_loop_state(), p, expected_revision=0, writer_id="w1")
+    assert r1 == 1 and state_revision(p) == 1
+    import json
+    doc = json.loads(p.read_text())
+    assert doc["state_revision"] == 1 and doc["writer_id"] == "w1"
+    assert doc["state_digest"].startswith("sha256:") and doc["previous_state_digest"] is None
+    # a second write from the up-to-date writer chains the previous digest
+    r2 = save_cas(_mid_loop_state(), p, expected_revision=1, writer_id="w1")
+    assert r2 == 2 and json.loads(p.read_text())["previous_state_digest"] == doc["state_digest"]
+
+
+def test_save_cas_rejects_a_stale_writer(tmp_path: Path) -> None:
+    p = tmp_path / "loop.json"
+    save_cas(_mid_loop_state(), p, expected_revision=0)          # -> revision 1
+    with pytest.raises(ConcurrentStateWrite, match="not the expected"):
+        save_cas(_mid_loop_state(), p, expected_revision=0)      # a writer that still thinks it is 0
+    assert state_revision(p) == 1                                # the on-disk state was NOT clobbered
+
+
+def test_load_ignores_cas_metadata(tmp_path: Path) -> None:
+    p = tmp_path / "loop.json"
+    s = _mid_loop_state()
+    save_cas(s, p, expected_revision=0, writer_id="w1")
+    restored = load(p)  # the metadata keys are not LoopState content
+    assert restored.goal == s.goal and restored.current_phase is s.current_phase
+    assert restored.observations == s.observations

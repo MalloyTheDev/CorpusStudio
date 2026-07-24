@@ -24,6 +24,7 @@ is broken; a backward clock jump yields a negative age and is treated as NOT sta
 from __future__ import annotations
 
 import os
+import secrets
 import time
 from pathlib import Path
 from types import TracebackType
@@ -51,6 +52,7 @@ class FileLock:
         self.poll = poll
         self.stale_after = stale_after
         self._fd: int | None = None
+        self._token: str | None = None  # a per-acquisition owner token, so release removes only OUR lock
 
     def acquire(self) -> "FileLock":
         deadline = time.monotonic() + self.timeout
@@ -65,10 +67,12 @@ class FileLock:
                         f"could not acquire {self.lock_path} within {self.timeout}s (held by another process)")
                 time.sleep(self.poll)
                 continue
+            token = secrets.token_hex(16)  # unforgeable owner id for this acquisition
             try:
-                os.write(fd, f"{os.getpid()} {time.time()}\n".encode("ascii"))
+                os.write(fd, f"{os.getpid()} {time.time()} {token}\n".encode("ascii"))
             finally:
                 self._fd = fd  # own it even if the diagnostic write fails, so release() cleans up
+                self._token = token
             return self
 
     def _break_if_stale(self) -> None:
@@ -90,10 +94,22 @@ class FileLock:
         if self._fd is not None:
             os.close(self._fd)
             self._fd = None
+        token, self._token = self._token, None
+        if token is None:
+            return
+        # Remove the lockfile ONLY if we still OWN it. If another process broke our stale lock and
+        # re-created its own, the lockfile now carries THAT owner's token - our late release must not
+        # delete it. (Best-effort advisory: the read+unlink window is tiny and the token match makes a
+        # wrong-delete practically impossible.)
         try:
-            self.lock_path.unlink()
-        except FileNotFoundError:
-            pass  # already released / broken as stale - releasing is idempotent
+            content = self.lock_path.read_text("ascii")
+        except (FileNotFoundError, OSError):
+            return  # already gone / unreadable - nothing of ours to remove
+        if token in content:
+            try:
+                self.lock_path.unlink()
+            except FileNotFoundError:
+                pass  # already released / broken as stale - releasing is idempotent
 
     def __enter__(self) -> "FileLock":
         return self.acquire()
