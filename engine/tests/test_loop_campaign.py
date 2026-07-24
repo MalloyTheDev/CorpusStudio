@@ -25,8 +25,9 @@ from loop.orchestrate import LoopContext  # noqa: E402
 
 def _cs():
     steps = [{"name": n, "passed": True, "exit_code": 0, "timed_out": False} for n in ("ruff", "mypy", "pytest")]
-    rec = {"verify": {"record_digest": "sha256:v", "payload": {
-        "gate_passed": True, "gate_steps": steps, "fired_obligations": [], "change_set_fingerprint": "cs:x"}},
+    rec = {"verify": {"record_type": "workspace_verification", "schema_version": 2, "record_digest": "sha256:v",
+        "payload": {"gate_passed": True, "gate_steps": steps, "fired_obligations": [], "workspace_stable": True,
+                    "change_set_fingerprint": "cs:x"}},
         "changeset": {"payload": {"changed_paths": []}}, "impact": {"payload": {"fired_obligations": []}},
         "doclint": {"finding_count": 0}}
     return lambda _r, *a: (0, json.dumps(rec.get(a[0] if a else "", {})), "")

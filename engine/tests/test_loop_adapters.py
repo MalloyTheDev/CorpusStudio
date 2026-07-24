@@ -27,7 +27,8 @@ from loop_adapters.dry_run import (  # noqa: E402
 def _green_cs_assure():
     """A fast, green cs_assure stand-in (so the dry-run test does not run the real ~1min gate)."""
     steps = [{"name": n, "passed": True, "exit_code": 0, "timed_out": False} for n in ("ruff", "mypy", "pytest")]
-    rec = {"verify": {"record_digest": "sha256:v", "payload": {"gate_passed": True, "gate_steps": steps,
+    rec = {"verify": {"record_type": "workspace_verification", "schema_version": 2, "record_digest": "sha256:v",
+           "payload": {"gate_passed": True, "gate_steps": steps, "workspace_stable": True,
            "fired_obligations": [], "change_set_fingerprint": "cs:x"}},
            "changeset": {"payload": {"changed_paths": []}}, "impact": {"payload": {"fired_obligations": []}},
            "doclint": {"finding_count": 0}}
