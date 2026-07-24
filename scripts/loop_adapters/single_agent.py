@@ -66,11 +66,18 @@ def _sanitized_env() -> dict[str, str]:
 
 
 def _git(cwd: Path, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
-    """Run ``git -C <cwd> <args>`` (fixed argv, no shell, bounded). Raises :class:`AgentError` on a non-zero
-    exit / un-runnable git - shared by the read (propose) and write adapters."""
+    """Run ``git -C <cwd> <args>`` (fixed argv, no shell, bounded) with HOOKS AND FSMONITOR PINNED OFF.
+    Raises :class:`AgentError` on a non-zero exit / un-runnable git - shared by the read (propose) and
+    write adapters.
+
+    ``core.hooksPath=/dev/null`` stops repository hooks; ``core.fsmonitor=`` is ALSO required because
+    fsmonitor is a SEPARATE config-driven hook that ``hooksPath`` does not suppress (measured: a
+    ``core.fsmonitor`` script still executed under ``git -c core.hooksPath=/dev/null status``). Both run
+    with the operator's full environment, so both are disabled on every invocation."""
     try:
-        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell.
-            ["git", "-C", str(cwd), *args], input=stdin, capture_output=True, text=True, timeout=_GIT_TIMEOUT_S)
+        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell, hooks + fsmonitor disabled.
+            ["git", "-C", str(cwd), "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=",
+             *args], input=stdin, capture_output=True, text=True, timeout=_GIT_TIMEOUT_S)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise AgentError(f"git {' '.join(args[:2])} could not run: {exc}") from exc
     if proc.returncode != 0:
@@ -98,17 +105,25 @@ def _detached_worktree(repo_root: Path, base_oid: str, worktrees_dir: Path) -> I
 
 
 def default_worktrees_dir(repo_root: Path) -> Path:
-    """``<git-dir>/corpusstudio-loop/worktrees`` (OUTSIDE the working tree), or a fallback when not in a repo."""
-    try:
-        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell.
-            ["git", "-C", str(repo_root), "rev-parse", "--git-path", "corpusstudio-loop/worktrees"],
-            capture_output=True, text=True, timeout=_GIT_TIMEOUT_S)
-    except (OSError, subprocess.TimeoutExpired):
-        return repo_root / ".corpusstudio-loop-worktrees"
-    if proc.returncode != 0:
-        return repo_root / ".corpusstudio-loop-worktrees"
-    rel = proc.stdout.strip()
-    return Path(rel) if Path(rel).is_absolute() else repo_root / rel
+    """A disposable-worktree root OUTSIDE the repository entirely: ``<cache>/corpusstudio-loop/worktrees/
+    <repo-name>-<hash of the absolute repo path>``.
+
+    NOT under ``<git-dir>`` (which is where this used to live) and not under the working tree. The agent's
+    confined cwd is a directory inside here, so a naive ``../../..`` from it must NOT land in the
+    repository's ``.git``: an agent that can append to ``.git/config`` gets PERSISTENT ARBITRARY CODE
+    EXECUTION as the operator with the full un-sanitized environment - measured, via ``core.fsmonitor``,
+    which ``core.hooksPath=/dev/null`` does not suppress - and could also plant ``.git/hooks/*``.
+
+    HONEST LIMIT: a cwd is NOT a sandbox. Nothing here stops a determined process from walking to an
+    absolute path; the load-bearing restrictions on the agent are the read-only TOOL POLICY (no
+    Write/Edit/Bash) and the sanitized environment, and real isolation (container / namespace) is the
+    7.1.5 sandbox work. What this function guarantees is only that the operator's own git directory is not
+    sitting three levels above the untrusted process's working directory."""
+    root = repo_root.resolve()
+    key = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:12]
+    cache = os.environ.get("XDG_CACHE_HOME") or ""
+    base = Path(cache) if cache else Path.home() / ".cache"
+    return base / "corpusstudio-loop" / "worktrees" / f"{root.name}-{key}"
 
 
 class AgentClient(Protocol):

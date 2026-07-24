@@ -471,14 +471,14 @@ def _git(cwd: Path, *args: str, stdin: str | None = None) -> subprocess.Complete
     """Run ``git -C <cwd> <args>`` (fixed argv, no shell, bounded) with HOOKS PINNED OFF. Raises
     :class:`WriteAdapterError` on a non-zero exit or an un-runnable git.
 
-    ``-c core.hooksPath=/dev/null`` on EVERY invocation: a linked worktree shares the main repo's hooks, and
-    it was measured that ``git worktree add`` runs ``post-checkout`` and ``git commit`` runs ``pre-commit``.
-    Whether a hook exists (and whether ``core.hooksPath`` points at an in-tree directory like husky's
-    ``.husky/``) is operator config the adapter must not depend on - so no hook ever runs over untrusted
-    candidate content with the operator's environment."""
+    ``-c core.hooksPath=/dev/null -c core.fsmonitor=`` on EVERY invocation: a linked worktree shares the
+    main repo's hooks, and it was measured that ``git worktree add`` runs ``post-checkout`` and
+    ``git commit`` runs ``pre-commit``. ``core.fsmonitor`` is a SEPARATE config-driven hook that
+    ``hooksPath`` does NOT suppress (measured), so it is disabled too. Both would run with the operator's
+    full environment, and whether either is configured is operator state the adapter must not depend on."""
     try:
-        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell, hooks disabled.
-            ["git", "-C", str(cwd), "-c", "core.hooksPath=/dev/null", *args],
+        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell, hooks + fsmonitor disabled.
+            ["git", "-C", str(cwd), "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=", *args],
             input=stdin, capture_output=True, text=True, timeout=_GIT_TIMEOUT_S)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise WriteAdapterError(f"git {' '.join(args[:2])} could not run: {exc}") from exc
@@ -519,13 +519,17 @@ def _worker_reachable_paths(wt: Path, base: str, run_cs_assure: Any) -> frozense
         raise WriteAdapterError(f"candidate worker-reachability produced no usable JSON: {exc}") from exc
     if not isinstance(payload, dict):
         raise WriteAdapterError("candidate worker-reachability record has no payload object")
+    # FAIL CLOSED on shape: a payload missing / renaming / nulling these keys previously yielded an EMPTY
+    # closure, so the worker gate silently passed (measured: {} -> SUCCESS -> published). A record we
+    # cannot read is an UNCOMPUTABLE closure, never "no worker code touched".
     paths: set[str] = set()
-    for key in ("undeclared_reachable", "worker_roots", "added_reachable", "distribution_impacting_paths"):
+    required = ("undeclared_reachable", "worker_roots", "added_reachable", "distribution_impacting_paths")
+    for key in required:
         entries = payload.get(key)
-        if entries is None:
-            continue
         if not isinstance(entries, list):
-            raise WriteAdapterError(f"worker-reachability {key!r} is not a list (malformed record)")
+            raise WriteAdapterError(
+                f"worker-reachability record has no usable {key!r} list (got {type(entries).__name__}); "
+                "refusing to treat an uncomputable worker closure as empty")
         paths.update(e for e in entries if isinstance(e, str))
     return frozenset(paths)
 

@@ -395,15 +395,32 @@ class _FakeProc:
         self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
 
 
-def test_default_worktrees_dir_resolves_the_git_path_and_falls_back(tmp_path, monkeypatch) -> None:
-    # the worktrees-dir resolver is now the SHARED helper in single_agent (write reuses it); it internally
-    # calls single_agent.subprocess, so patch THAT module. inside a repo: under the git dir (outside the tree)...
-    monkeypatch.setattr(sa.subprocess, "run",
-                        lambda *a, **k: _FakeProc(0, "/abs/git/corpusstudio-loop/worktrees\n"))
-    assert saw.default_worktrees_dir(tmp_path) == Path("/abs/git/corpusstudio-loop/worktrees")
-    # ...and outside a repo it falls back to a worktree-local path (never inside the working tree implicitly).
-    monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: _FakeProc(128, "", "not a git repo"))
-    assert saw.default_worktrees_dir(tmp_path) == tmp_path / ".corpusstudio-loop-worktrees"
+def test_the_confined_worktree_is_outside_the_repository_and_its_git_dir(tmp_path) -> None:
+    # HIGH (5th adversarial pass): this dir used to be <git-dir>/corpusstudio-loop/worktrees, so the
+    # untrusted agent's cwd sat THREE levels under the repo's own .git. Appending to .git/config
+    # (e.g. core.fsmonitor=/tmp/pwn.sh) gave persistent code execution as the operator with the full
+    # un-sanitized environment - measured. The confined checkout must live outside the repo entirely.
+    d = saw.default_worktrees_dir(tmp_path)
+    repo = tmp_path.resolve()
+    assert repo not in d.parents and d != repo          # not inside the working tree...
+    assert (repo / ".git") not in d.parents              # ...and emphatically not inside .git
+    # a naive walk up from the agent's cwd must not reach the repo or its git dir
+    escaped = (d / "propose-x" / ".." / ".." / "..").resolve()
+    assert repo not in escaped.parents and escaped != repo and escaped != repo / ".git"
+    # distinct repos get distinct roots (no cross-repo collision)
+    assert saw.default_worktrees_dir(tmp_path) != saw.default_worktrees_dir(tmp_path / "other")
+
+
+def test_adapter_git_pins_hooks_and_fsmonitor_off(tmp_path, monkeypatch) -> None:
+    # core.hooksPath=/dev/null does NOT suppress core.fsmonitor (measured), and BOTH run with the
+    # operator's full environment - so both must be disabled on every invocation, in BOTH adapters.
+    seen: list = []
+    monkeypatch.setattr(sa.subprocess, "run", lambda a, **k: seen.append(a) or _FakeProc(0, ""))
+    sa._git(tmp_path, "status")
+    assert "core.hooksPath=/dev/null" in seen[-1] and "core.fsmonitor=" in seen[-1]
+    monkeypatch.setattr(saw.subprocess, "run", lambda a, **k: seen.append(a) or _FakeProc(0, ""))
+    saw._git(tmp_path, "status")
+    assert "core.hooksPath=/dev/null" in seen[-1] and "core.fsmonitor=" in seen[-1]
 
 
 def test_git_helper_fails_closed_on_a_nonzero_exit(tmp_path) -> None:
