@@ -37,12 +37,13 @@ from loop.orchestrate import run_loop  # noqa: E402
 # The writable surface (7.1.2) is MODIFY-ONLY under engine/corpus_studio/**/*.py, so the "legit" change
 # every happy-path test drives is an in-place edit of a product module.
 _TARGET = "engine/corpus_studio/mod.py"
+_FILES = {_TARGET: "new = 2\n"}      # the agent returns WHOLE FILES; git computes the diff
 _DIFF = f"--- a/{_TARGET}\n+++ b/{_TARGET}\n@@ -1 +1 @@\n-old = 1\n+new = 2\n"
 
 
 class _StubAgent:
     def __init__(self, response: dict | None = None) -> None:
-        self.response = response if response is not None else {"unified_diff": _DIFF, "rationale": "make it new"}
+        self.response = response if response is not None else {"files": _FILES, "rationale": "make it new"}
         self.seen_cwd: str | None = None
         self.cwd_was_dir: bool | None = None
 
