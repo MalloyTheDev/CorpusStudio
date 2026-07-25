@@ -57,7 +57,7 @@ jobs:
       # The coverage report is handed to a SEPARATE job to be uploaded. The token must never live in a
       # job that has executed repository code (see the coverage-upload job below).
       - name: Upload coverage report as an artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: engine-coverage
           path: engine/coverage.xml
