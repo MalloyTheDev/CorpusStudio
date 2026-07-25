@@ -15,14 +15,14 @@
   "dependencies": {
     "@phosphor-icons/react": "^2.1.7",
     "@tauri-apps/api": "^2.1.1",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.1.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.3",
+    "@vitejs/plugin-react": "^6.0.4",
     "json-schema-to-typescript": "^15.0.3",
     "typescript": "^7.0.2",
     "vite": "^8.1.5"
