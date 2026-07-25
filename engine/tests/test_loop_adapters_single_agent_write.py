@@ -804,3 +804,75 @@ def test_default_ignorable_lookup_matches_the_declared_ranges() -> None:
                 a <= lo - 1 <= b for a, b in saw._DEFAULT_IGNORABLE_RANGES)
     for ordinary in ("a", "—", "日", " ", "\t", "\n"):
         assert not saw._is_default_ignorable(ordinary)
+
+
+# ------------------------------------------------- closure of the independent review's remaining tail
+
+
+def test_an_unreadable_blob_fails_closed_rather_than_scanning_empty_content(tmp_path: Path) -> None:
+    """`_read_blob` ignored `git cat-file`'s exit status, so an unreadable blob yielded EMPTY content -
+    and an empty string passes EVERY content check (secret scan, line bound, character check) on a blob
+    that was never actually read. That is fail-OPEN in the middle of the security core."""
+    root, _remote = _repo_with_remote(tmp_path)
+    # an absent oid fails closed at the SIZE probe...
+    with pytest.raises(saw.WriteAdapterError):
+        saw._read_blob(root, "0" * 40, "engine/corpus_studio/mod.py")
+
+    # ...and a blob that sizes fine but whose READ fails must also fail closed, not scan "" as clean.
+    real = saw.subprocess.run
+
+    def flaky(argv, **kw):
+        if "blob" in argv:
+            return type("P", (), {"returncode": 128, "stdout": b"", "stderr": b"unreadable"})()
+        return real(argv, **kw)
+    oid = _g(root, "rev-parse", f"HEAD:{_TARGET}").stdout.strip()
+    import unittest.mock as _m
+    with _m.patch.object(saw.subprocess, "run", flaky), \
+            pytest.raises(saw.WriteAdapterError, match="cannot read blob"):
+        saw._read_blob(root, oid, _TARGET)
+
+
+def test_the_pr_body_declares_it_is_machine_authored() -> None:
+    body = saw._pr_body("Tidy a docstring.")
+    assert "NOT yet human-reviewed" in body and "Machine-authored" in body
+    assert "Tidy a docstring." in body
+    # an agent that supplies no rationale still gets the disclosure
+    assert "NOT yet human-reviewed" in saw._pr_body("")
+
+
+def test_the_proposal_is_referenced_even_when_pr_create_fails(tmp_path: Path) -> None:
+    """A `gh pr create` failure used to leave a pushed branch on the remote with NO record on the loop
+    state, so the human triaging the escalation could not find what had been published."""
+    root, remote = _repo_with_remote(tmp_path)
+
+    def gh_fails(*argv: str) -> tuple[int, str, str]:
+        return (1, "", "boom") if argv[:2] == ("pr", "create") else (0, "", "")
+    ctx = saw.build_context(root, "main", agent_client=_StubAgent(), proposals_dir=tmp_path / "p",
+                            worktrees_dir=tmp_path / "wt", gh_runner=gh_fails,
+                            run_cs_assure=_cs_assure_green(), ci_attested_safe=True)
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, ctx, max_steps=25)
+    assert state.current_phase is Phase.ESCALATED
+    refs = state.review_state.get("agent_proposals") or []
+    assert refs and refs[0]["branch"].startswith("cs-agent/g1-")     # the live branch IS discoverable
+    assert refs[0]["pr"] == ""                                       # ...and honestly has no PR
+    # the ref must IDENTIFY the sealed proposal, not just note that something happened
+    sealed = json.loads(Path(refs[0]["path"]).read_text())
+    assert refs[0]["record_digest"] == sealed["record_digest"]
+    assert refs[0]["changed_paths"] == sealed["payload"]["changed_paths"]
+    assert _g(remote, "branch", "--list", "cs-agent/g1-*").stdout.strip()
+
+
+def test_the_candidate_branches_from_the_remote_base_not_the_local_one(tmp_path: Path) -> None:
+    """The base was resolved from the LOCAL ref, so an operator whose `main` is ahead of `origin/main` -
+    an ordinary state - would have their unpushed commits pushed and PR'd as though the agent wrote them,
+    and the PR diff would not be the candidate."""
+    root, remote = _repo_with_remote(tmp_path)
+    (root / "operator-only.txt").write_text("not pushed\n")           # a local commit NOT on the remote
+    _g(root, "add", "-A")
+    _g(root, "commit", "-q", "-m", "operator local work")
+    run_loop(LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL),
+             _build(tmp_path, root, _StubAgent(), []), max_steps=25)
+    branch = [b.strip("* ") for b in _g(remote, "branch", "--list").stdout.splitlines() if "cs-agent" in b][0]
+    files = _g(remote, "ls-tree", "-r", "--name-only", branch).stdout.split()
+    assert "operator-only.txt" not in files, "the operator's unpushed commit was published as the agent's"

@@ -106,7 +106,6 @@ def _sanitize_branch_suffix(goal_id: str) -> str:
 _GIT_TIMEOUT_S = 120
 _GH_TIMEOUT_S = 60
 _CS_ASSURE_TIMEOUT_S = 1800  # a bounded cs_assure call (impact is fast; the dev-tree gate can take minutes)
-_MAX_CANDIDATE_FILES = 50  # a single autonomous change touching more than this is refused (review-by-human)
 
 
 def _sanitized_cs_assure(root: Path | str, *argv: str) -> tuple[int, str, str]:
@@ -164,8 +163,10 @@ def _trusted_cs_assure(repo_root: Path, run_cs_assure: Any):  # noqa: ANN202
 # `engine/corpus_studio/**` file runs at collection. That is the SAME pre-review execution exposure the
 # comment previously cited to exclude `engine/tests/**`; it applies to the allowed surface too, and
 # "a human merges only on green" does not undo code that already ran. So the exposure is now a
-# MACHINE-ENFORCED PRECONDITION, not a caveat: `_ci_executes_candidates_with_credentials` refuses to
-# publish until every workflow checks out with `persist-credentials: false`.
+# OPERATOR ATTESTATION, not a machine check: an earlier version tried to VERIFY this by text-scanning
+# `.github/workflows/*.yml` and was measured failing OPEN five ways (and it read the dev tree while GitHub
+# runs the workflows at `base`). This adapter cannot verify another system's CI, so the operator asserts
+# it via `ci_attested_safe` (default False -> never publishes). See `_publish_precondition_unmet`.
 _WRITABLE_GLOBS: tuple[str, ...] = (
     "engine/corpus_studio/**/*.py",
 )
@@ -426,9 +427,17 @@ def _read_blob(wt: Path, oid: str, path: str) -> str | None:
         raise WriteAdapterError(f"cannot size blob for {path}: {size_out!r}") from exc
     if size > _MAX_BLOB_BYTES:
         raise WriteAdapterError(f"{path} is {size} bytes (> {_MAX_BLOB_BYTES}); refusing an oversized blob")
-    raw = subprocess.run(  # noqa: S603 - fixed argv, no shell; bytes because the blob is untrusted.
-        ["git", "-C", str(wt), "-c", "core.hooksPath=/dev/null", "cat-file", "blob", oid],
-        capture_output=True, timeout=_GIT_TIMEOUT_S).stdout
+    proc = subprocess.run(  # noqa: S603 - fixed argv, no shell; bytes because the blob is untrusted.
+        ["git", "-C", str(wt), "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=",
+         "cat-file", "blob", oid], capture_output=True, timeout=_GIT_TIMEOUT_S)
+    if proc.returncode != 0:
+        # FAIL CLOSED. Ignoring this exit status meant an unreadable blob produced EMPTY content, and an
+        # empty string passes every content check - the secret scan, the line bound and the character
+        # check all silently succeed on a blob we never actually read.
+        raise WriteAdapterError(
+            f"cannot read blob for {path} (git cat-file exit {proc.returncode}): "
+            f"{proc.stderr.decode('utf-8', 'replace').strip()[:160]}")
+    raw = proc.stdout
     if b"\0" in raw:
         return None  # binary (NUL test - immune to a candidate-supplied .gitattributes)
     try:
@@ -723,6 +732,18 @@ def _record_candidate_assurance(state: LoopState, record: dict[str, Any], branch
     }
 
 
+_PR_DISCLOSURE = (
+    "> **Machine-authored, NOT yet human-reviewed.** Opened autonomously by the CorpusStudio "
+    "single-agent write runtime (7.1). Only STATIC candidate assurance has run; the dynamic gate runs in "
+    "CI on this PR, and a human reviews and merges. Read the diff on that basis.\n\n")
+
+
+def _pr_body(rationale: str) -> str:
+    """The PR body, led by the machine-authored disclosure. The commit message alone was not enough: the
+    PR is what a reviewer reads first, and an autonomously-opened PR must SAY so where it is seen."""
+    return _PR_DISCLOSURE + (rationale or "_No rationale supplied by the agent._")
+
+
 def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, proposals_dir: Path,
                          worktrees_dir: Path, gh_runner: Callable[..., "tuple[int, str, str]"],
                          branch_prefix: str, run_cs_assure: Any, ci_attested_safe: bool):  # noqa: ANN202
@@ -744,9 +765,16 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
         if state.current_phase is not Phase.EXECUTE:
             return Observation.SUCCESS
 
-        base_oid = _resolve_base_oid(repo_root, base)
+        # Branch from the REMOTE base, not the local one. `_resolve_base_oid(repo_root, base)` resolves
+        # the LOCAL ref, so if the operator's `main` is ahead of `origin/main` (an ordinary state - local
+        # commits, a rebase in progress), the pushed branch and the opened PR would carry the operator's
+        # unpushed commits as though the agent had authored them, and the PR diff would not be the
+        # candidate. Prefer `origin/<base>`; fall back to the local ref only when there is no
+        # remote-tracking ref at all (a repo with no remote - nothing can be published there anyway).
+        base_oid = _resolve_base_oid(repo_root, f"origin/{base}") or _resolve_base_oid(repo_root, base)
         if not base_oid:
-            raise WriteAdapterError(f"cannot resolve base {base!r} to a commit to branch from")
+            raise WriteAdapterError(
+                f"cannot resolve base {base!r} (tried origin/{base} then {base}) to a commit to branch from")
         # 1) PROPOSE - run the UNTRUSTED agent CONFINED: cwd inside a disposable, detached worktree at base
         #    (never the developer's tree AND never the apply worktree) with a secret-free env. Whatever it
         #    writes into that throwaway checkout is discarded on exit; only the diff it RETURNS is used.
@@ -806,6 +834,15 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
             # detached HEAD - no local branch was ever created) and open a PR. NEVER merges. CI runs the
             # dynamic gate on the PR in its sandbox; a human merges only on green.
             _git(wt, "push", "-u", "origin", f"HEAD:refs/heads/{branch}")
+            # Reference the sealed proposal AS SOON AS the branch is live, not after `gh pr create`: a gh
+            # failure used to leave a pushed branch on the remote with NO record of it on the loop state,
+            # so the human triaging the escalation could not find what had been published.
+            refs = state.review_state.get("agent_proposals")
+            if not isinstance(refs, list):
+                refs = state.review_state["agent_proposals"] = []
+            refs.append({"record_digest": record["record_digest"], "branch": branch,
+                         "path": str(proposal_path),
+                         "changed_paths": record["payload"]["changed_paths"], "pr": ""})
             # Record the PUSH immediately: the branch is now live on the remote (and CI may already be
             # running on it). If `gh pr create` fails below we raise, and the human triaging that escalation
             # must be able to SEE the orphaned branch rather than find an empty review_state.
@@ -814,17 +851,12 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
                                         published=True)
             code, pr_out, err = gh_runner("pr", "create", "--head", branch, "--base", base,
                                           "--title", (state.goal or "agent change")[:120],
-                                          "--body", rationale or "Opened by the single-agent write runtime (7.1).")
+                                          "--body", _pr_body(rationale))
             if code != 0:
                 raise WriteAdapterError(f"gh pr create failed (exit {code}): {err.strip()[:200]}")
             _record_candidate_assurance(state, record, branch, observation, reason, impact_digest,
                                         published=True)
-
-        refs = state.review_state.get("agent_proposals")
-        if not isinstance(refs, list):
-            refs = state.review_state["agent_proposals"] = []
-        refs.append({"record_digest": record["record_digest"], "branch": branch, "path": str(proposal_path),
-                     "changed_paths": record["payload"]["changed_paths"], "pr": pr_out.strip()})
+            refs[-1]["pr"] = pr_out.strip()
         return Observation.SUCCESS
 
     return execute
