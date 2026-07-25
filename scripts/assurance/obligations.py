@@ -23,6 +23,7 @@ four-field envelope + ``record_digest``). Malformed policy fails closed as :clas
 from __future__ import annotations
 
 import fnmatch
+import unicodedata
 import json
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -257,22 +258,49 @@ def load_effective_policy(ctx: GitContext, base_ref: str,
     return union_policy(candidate, base), True
 
 
+def _fold(text: str) -> str:
+    """Canonical form for matching: Unicode NFC, then case-folded.
+
+    CASE-INSENSITIVE ON PURPOSE. Every branch of this matcher was byte-exact, so a one-letter case
+    variant of a protected path fired ZERO obligations - measured: ``Scripts/loop/x.py``,
+    ``.GitHub/workflows/e.yml`` and ``Research/ieee-linux-training/x.md`` all matched nothing, so a
+    self-modify / CI / sealed-research change could land with the gate silent and the impact record
+    honestly reporting "no obligations fired".
+
+    That is not hypothetical here: this repo carries ``core.ignorecase=true`` (Windows-era), and on any
+    case-insensitive checkout (macOS, Windows) ``Scripts/loop/x.py`` IS ``scripts/loop/x.py`` - the same
+    file, judged by a different name. NFC normalization closes the same fail-open for composed vs
+    decomposed forms, which are also the same file on APFS/HFS+.
+
+    Matching MORE is the FAIL-SAFE direction for an obligation matcher: a spurious match fires an extra
+    human gate, while a missed match silently removes one. Verified against this repo: zero tracked paths
+    collide when case-folded, so this cannot over-match real content.
+
+    BOTH sides are folded - the shipped policy contains ``docs/AUTONOMOUS_LOOP.md``, so folding only the
+    path would have broken that glob."""
+    return unicodedata.normalize("NFC", text).casefold()
+
+
 def glob_matches(glob: str, path: str) -> bool:
-    """Boundary-correct match of a repo-relative POSIX ``path`` against a policy ``glob``.
+    """Boundary-correct, CASE-INSENSITIVE match of a repo-relative POSIX ``path`` against a policy
+    ``glob`` (see :func:`_fold` for why insensitivity is the fail-safe direction).
 
     ``dir/**`` matches the directory itself or anything strictly under it (never a sibling that
-    merely shares the prefix). Other wildcards use case-sensitive ``fnmatchcase`` - note this means a
+    merely shares the prefix). Other wildcards use ``fnmatchcase`` ON FOLDED INPUT - note this means a
     ``*`` DOES cross ``/`` (fnmatch semantics), so a bare ``*``-glob would over-match; the shipped
     policy therefore uses only literal paths, ``dir/**``, and precise ``file_*.py``-style globs where
     over-crossing has no real target. A literal glob is exact-path equality, so a delete of that exact
     path still matches.
     """
+    folded_glob, folded_path = _fold(glob), _fold(path)
     if glob.endswith("/**"):
-        prefix = glob[:-3]
-        return path == prefix or path.startswith(prefix + "/")
+        prefix = folded_glob[:-3]
+        return folded_path == prefix or folded_path.startswith(prefix + "/")
     if any(ch in glob for ch in "*?["):
-        return fnmatch.fnmatchcase(path, glob)
-    return path == glob
+        # fnmatchcase on already-folded input: fnmatch's own case handling is platform-dependent, so we
+        # normalize ourselves rather than relying on fnmatch() to do it.
+        return fnmatch.fnmatchcase(folded_path, folded_glob)
+    return folded_path == folded_glob
 
 
 def match_obligations(

@@ -157,8 +157,19 @@ def test_glob_matches_dir_star_star_is_boundary_correct() -> None:
     assert not glob_matches(g, "docs")  # the parent
 
 
-def test_glob_matches_is_case_sensitive() -> None:
-    assert not glob_matches("engine/corpus_studio/cli.py", "Engine/corpus_studio/cli.py")
+def test_glob_matches_is_case_INsensitive() -> None:
+    """DELIBERATE REVERSAL of the original `test_glob_matches_is_case_sensitive`, which arrived with the
+    feature commit (#643) pinning `fnmatchcase`'s behaviour rather than a stated security rationale.
+
+    Byte-exact matching was measured to FAIL OPEN: `Scripts/loop/x.py`, `.GitHub/workflows/e.yml` and
+    `Research/ieee-linux-training/x.md` fired ZERO obligations, so a self-modify / CI / sealed-research
+    change could land with the gate silent and the impact record reporting "no obligations fired". This
+    repo carries core.ignorecase=true, and on any case-insensitive checkout the variant IS the same file.
+
+    Matching MORE is the fail-SAFE direction here: a spurious match fires an extra human gate; a missed
+    match silently removes one. Verified: zero tracked paths collide when case-folded, so nothing real
+    is over-matched (see test_glob_matches_still_respects_the_directory_boundary for the limits)."""
+    assert glob_matches("engine/corpus_studio/cli.py", "Engine/corpus_studio/cli.py")
 
 
 # --------------------------------------------------------------------------- policy load (fail-closed)
@@ -388,3 +399,49 @@ def test_advisory_hook_covers_every_policy_glob() -> None:
                 f"obligation {obligation.id!r} glob {glob!r} (e.g. {example!r}) has no advisory-hook "
                 "coverage; add a fragment to advisory_classify._SENSITIVE or narrow the policy glob"
             )
+
+
+# ------------------------------------------------------- case / unicode insensitivity (measured hole)
+
+
+def test_glob_matches_is_case_insensitive_on_both_sides() -> None:
+    """Every branch of the matcher was byte-exact, so a one-letter case variant of a protected path fired
+    ZERO obligations and the impact record honestly reported "no obligations fired". This repo carries
+    core.ignorecase=true, and on any case-insensitive checkout the variant IS the same file."""
+    # dir/** branch
+    assert glob_matches("scripts/loop/**", "Scripts/loop/x.py")
+    assert glob_matches("scripts/loop/**", "SCRIPTS/LOOP/x.py")
+    assert glob_matches("scripts/loop/**", "scripts/loop")          # the directory itself
+    # literal branch - and BOTH sides fold (the shipped policy contains docs/AUTONOMOUS_LOOP.md)
+    assert glob_matches("docs/AUTONOMOUS_LOOP.md", "docs/autonomous_loop.md")
+    assert glob_matches("docs/autonomous_loop.md", "docs/AUTONOMOUS_LOOP.md")
+    # wildcard branch
+    assert glob_matches("engine/tests/test_loop_*.py", "engine/tests/TEST_LOOP_x.py")
+
+
+def test_glob_matches_still_respects_the_directory_boundary() -> None:
+    # insensitivity must not blunt the boundary: a SIBLING sharing the prefix is still not a match
+    assert not glob_matches("scripts/loop/**", "scripts/loopx/y.py")
+    assert not glob_matches("scripts/loop/**", "Scripts/loopx/y.py")
+    assert not glob_matches("scripts/assurance/**", "scripts/assurance-notes.md")
+
+
+def test_glob_matches_normalizes_unicode_composition() -> None:
+    # NFC vs NFD are the same file on APFS/HFS+; a byte-exact matcher would miss one of them
+    assert glob_matches("docs/café.md", "docs/café.md")
+    assert glob_matches("docs/café.md", "docs/café.md")
+
+
+def test_case_variants_fire_the_same_obligations_against_the_shipped_policy() -> None:
+    """End-to-end against the REAL policy bundle: the exact paths measured as firing nothing."""
+    policy = load_policy(Path(__file__).resolve().parents[2])
+    for real, variant in ((".github/workflows/e.yml", ".GitHub/workflows/e.yml"),
+                          ("scripts/assurance/z.py", "SCRIPTS/assurance/z.py"),
+                          ("research/ieee-linux-training/a.md", "Research/ieee-linux-training/a.md")):
+        fired_real, _ = match_obligations([real], policy.obligations)
+        fired_var, _ = match_obligations([variant], policy.obligations)
+        ids_real = sorted(o["id"] for o in fired_real)
+        assert ids_real, f"{real} should fire something"
+        assert sorted(o["id"] for o in fired_var) == ids_real, variant
+    # and an ordinary product path still fires nothing (no over-matching)
+    assert match_obligations(["engine/corpus_studio/cli.py"], policy.obligations)[0] == []
