@@ -115,7 +115,8 @@ def _fake_gh(calls: list):
 def _build(tmp_path: Path, root: Path, agent: _StubAgent, calls: list, assure=None):
     return saw.build_context(root, "main", agent_client=agent, proposals_dir=tmp_path / "prop",
                              worktrees_dir=tmp_path / "wt", gh_runner=_fake_gh(calls),
-                             run_cs_assure=assure or _cs_assure_green())
+                             run_cs_assure=assure or _cs_assure_green(),
+                             ci_attested_safe=True)  # the operator's explicit CI attestation
 
 
 # --------------------------------------------------------------------------- the write path + isolation
@@ -336,24 +337,21 @@ def test_a_secret_in_the_rationale_blocks_the_publish(tmp_path: Path) -> None:
     assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
 
 
-def test_ci_that_would_execute_the_candidate_with_credentials_blocks_the_publish(tmp_path: Path) -> None:
-    # Pushing hands the candidate to CI, which EXECUTES it. If CI checks out with credentials, that
-    # happens BEFORE review and merging later cannot undo it - so publishing is refused, fail-closed.
+def test_publishing_requires_an_explicit_operator_ci_attestation(tmp_path: Path) -> None:
+    """Pushing EXECUTES the candidate in CI before review, and this adapter cannot verify someone else's
+    CI by parsing it (the previous text-scan failed open five measured ways, and read the dev tree rather
+    than the workflows at base). So the operator attests, and the DEFAULT is refuse."""
     root, remote = _repo_with_remote(tmp_path)
-    wf = root / ".github" / "workflows"
-    wf.mkdir(parents=True, exist_ok=True)
-    (wf / "ci.yml").write_text("on:\n  push:\njobs:\n  t:\n    steps:\n      - uses: actions/checkout@v4\n")
-    _g(root, "add", "-A")
-    _g(root, "commit", "-q", "-m", "ci")
     calls: list = []
+    ctx = saw.build_context(root, "main", agent_client=_StubAgent(), proposals_dir=tmp_path / "p",
+                            worktrees_dir=tmp_path / "wt", gh_runner=_fake_gh(calls),
+                            run_cs_assure=_cs_assure_green())      # <- no attestation
     state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
-    run_loop(state, _build(tmp_path, root, _StubAgent(), calls), max_steps=25)
-    assert ("pr", "create") not in [c[:2] for c in calls]
+    run_loop(state, ctx, max_steps=25)
+    assert ("pr", "create") not in [c[:2] for c in calls]           # nothing published by default
     assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
-    # ...and the same repo WITH the hardening publishes fine
-    (wf / "ci.yml").write_text("on:\n  push:\njobs:\n  t:\n    steps:\n      - uses: actions/checkout@v4\n"
-                               "        with:\n          persist-credentials: false\n")
-    assert saw._ci_executes_candidates_with_credentials(root) is None
+    assert saw._publish_precondition_unmet(False) is not None
+    assert saw._publish_precondition_unmet(True) is None
 
 
 def test_the_writable_surface_is_matched_case_folded_and_path_aware() -> None:
@@ -487,7 +485,7 @@ def test_a_gh_failure_after_the_push_still_records_the_live_branch(tmp_path: Pat
         return (1, "", "boom") if argv[:2] == ("pr", "create") else (0, "", "")
     ctx = saw.build_context(root, "main", agent_client=_StubAgent(), proposals_dir=tmp_path / "p",
                             worktrees_dir=tmp_path / "wt", gh_runner=gh_fails,
-                            run_cs_assure=_cs_assure_green())
+                            run_cs_assure=_cs_assure_green(), ci_attested_safe=True)
     state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
     run_loop(state, ctx, max_steps=25)
     assert state.current_phase is Phase.ESCALATED

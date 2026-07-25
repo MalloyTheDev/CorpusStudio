@@ -55,6 +55,7 @@ import os
 import re
 import subprocess  # noqa: S404 - fixed-argv git / gh / cs_assure only; never a shell string.
 import sys
+import unicodedata
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -157,7 +158,7 @@ _WRITABLE_GLOBS: tuple[str, ...] = (
 )
 
 # Every changed path's basename must be an ordinary, importable, non-shadowing module name.
-_SAFE_BASENAME = re.compile(r"[a-z0-9][a-z0-9_]*\.py\Z")
+_SAFE_BASENAME = re.compile(r"(?:__[a-z0-9_]+__|[a-z0-9][a-z0-9_]*)\.py\Z")
 
 # git's raw mode for an ordinary file. A symlink (120000), a gitlink/submodule (160000) and an
 # executable (100755) are refused STRUCTURALLY rather than by sniffing the diff text.
@@ -174,24 +175,51 @@ _MAX_LINE_BYTES = 400           # no single line may hide a payload
 _MAX_BLOB_BYTES = 1 << 20       # never slurp an untrusted blob larger than 1 MiB into memory
 _MAX_RATIONALE_BYTES = 4096     # agent prose reaches the commit message + PR body; bound it
 
-# Control characters that must never appear in candidate content or agent prose: bidi overrides can make
-# the rendered diff differ from the executed source, and a lone CR fakes line counts in a review UI.
-_FORBIDDEN_CONTROLS = re.compile(
-    "[‪-‮⁦-⁩​-‏﻿\r\x00-\x08\x0b\x0c\x0e-\x1f]")
+# Characters that must never appear in candidate content or agent prose. Classified BY UNICODE CATEGORY,
+# not by an enumerated codepoint list: an enumeration is unbounded (the first version missed the whole TAG
+# block U+E0000-E007F, U+2028/U+2029/U+0085 line separators, U+00AD, U+061C, U+2060, U+180E, U+FFF9 - all
+# invisible in a diff view), and this is the same lesson the path ALLOWLIST taught.
+#   Cc control, Cf format (bidi overrides, zero-width, TAG), Co private-use, Cs surrogate,
+#   Zl/Zp line+paragraph separators.
+# TAB and LF are the only control characters source code legitimately needs.
+_FORBIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Co", "Cs", "Zl", "Zp"})
+_ALLOWED_CONTROLS = frozenset({"\t", "\n"})
+
+
+def _forbidden_char(text: str) -> str | None:
+    """The first invisible / format / separator character in ``text`` (as ``U+XXXX``), else None. These make
+    the RENDERED text differ from the EXECUTED bytes, so a reviewer cannot see what they are approving."""
+    for ch in text:
+        if ch in _ALLOWED_CONTROLS:
+            continue
+        if unicodedata.category(ch) in _FORBIDDEN_CATEGORIES:
+            return f"U+{ord(ch):04X}"
+    return None
 
 # Credential SHAPES scanned in the candidate's REALIZED BLOB CONTENT (never the diff's `+` lines: a
 # `copy from secrets/deploy.pem` delivers the bytes with zero `+` lines, and `.gitattributes` eol
 # normalization means the staged blob can differ from the diff text anyway). CI gitleaks is the backstop.
 _SECRET_PATTERNS: tuple[tuple["re.Pattern[str]", str], ...] = (
     (re.compile(r"AKIA[0-9A-Z]{16}"), "an AWS access key id"),
-    (re.compile(r"ghp_[A-Za-z0-9]{36}"), "a GitHub token"),
+    # gh[p|o|s|u|r]_ - `gho_` is what the local `gh` CLI actually stores in ~/.config/gh/hosts.yml, and
+    # it grants write access to this repo; matching only `ghp_` missed the one that matters most.
+    (re.compile(r"gh[posur]_[A-Za-z0-9]{36}"), "a GitHub token"),
     (re.compile(r"github_pat_[A-Za-z0-9_]{50,}"), "a GitHub fine-grained PAT"),
+    (re.compile(r"AIza[A-Za-z0-9_-]{35}"), "a Google API key"),
+    (re.compile(r"\bASIA[0-9A-Z]{16}\b"), "an AWS temporary access key id"),
+    (re.compile(r"sk-(?:proj-)?[A-Za-z0-9_-]{20,}"), "an OpenAI API key"),
+    (re.compile(r"glpat-[A-Za-z0-9_-]{20,}"), "a GitLab token"),
+    (re.compile(r"pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{10,}"), "a PyPI token"),
+    (re.compile(r"(?m)^\s*machine\s+\S+.*\n?\s*(?:login|password)\s+\S+"), "a .netrc credential"),
     (re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}"), "a Slack token"),
     (re.compile(r"hf_[A-Za-z0-9]{34}"), "a HuggingFace token"),
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"), "an Anthropic API key"),
     (re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"), "a private key block"),
     (re.compile(r"(?i)aws_secret_access_key\s*[=:]\s*[A-Za-z0-9/+]{40}"), "an AWS secret access key"),
-    (re.compile(r"""(?i)(?:secret|password|passwd|api[_-]?key|access[_-]?token)\s*[=:]\s*['"][^'"]{12,}['"]"""),
+    # quoted (code) OR bare (YAML/env/ini) - a quotes-only regex missed `oauth_token: gho_...` verbatim
+    # out of ~/.config/gh/hosts.yml, which is exactly the shape an agent can read off disk.
+    (re.compile(r"""(?i)(?:secret|password|passwd|api[_-]?key|access[_-]?token|oauth_token)"""
+                r"""\s*[=:]\s*(?:['"][^'"]{12,}['"]|\S{12,})"""),
      "a hardcoded credential"),
 )
 
@@ -207,8 +235,9 @@ def _scan_text(text: str, what: str) -> list[str]:
     reasons: list[str] = []
     if len(text.encode("utf-8", "replace")) > _MAX_RATIONALE_BYTES:
         reasons.append(f"{what} exceeds {_MAX_RATIONALE_BYTES} bytes")
-    if _FORBIDDEN_CONTROLS.search(text):
-        reasons.append(f"{what} contains bidi/control characters")
+    bad = _forbidden_char(text)
+    if bad:
+        reasons.append(f"{what} contains an invisible/format character ({bad})")
     for pat, label in _SECRET_PATTERNS:
         if pat.search(text):
             reasons.append(f"{what} contains {label}")
@@ -216,34 +245,32 @@ def _scan_text(text: str, what: str) -> list[str]:
     return reasons
 
 
-def _ci_executes_candidates_with_credentials(repo_root: Path) -> str | None:
-    """A REFUSAL REASON if this repo's CI would execute an agent-authored change with credentials before a
-    human reviews it, else None. Read from the TRUSTED dev tree.
+def _publish_precondition_unmet(ci_attested_safe: bool) -> str | None:
+    """A REFUSAL REASON unless the OPERATOR has explicitly attested that CI can safely execute an
+    agent-authored candidate, else None. Default (no attestation) = REFUSE.
 
-    Why this is a gate and not a caveat: the whole "delegate the dynamic gate to CI's isolated sandbox"
-    story assumes CI runs the candidate *safely*. Measured on this repo, it does not - ``engine-tests.yml``
-    triggers on a bare ``push:`` (no branch filter), runs ``pytest --cov=corpus_studio`` (and the tests
-    import the product modules, so a candidate's code executes at collection), checks out with
-    ``actions/checkout`` and NO ``persist-credentials: false`` (leaving the token in ``.git/config``), and
-    the same job holds ``secrets.CODECOV_TOKEN``. So pushing runs untrusted code in a secret-bearing
-    environment STRICTLY BEFORE review, and declining to merge does not undo it.
+    Why an attestation and NOT a check: pushing hands the candidate to CI, which EXECUTES it before any
+    human reviews it (on this repo ``engine-tests.yml`` triggers on a bare ``push:`` and runs
+    ``pytest --cov=corpus_studio``, and the suite imports the product modules), so "a human merges only on
+    green" cannot undo code that already ran. The previous version tried to VERIFY that property by
+    text-scanning ``.github/workflows/*.yml``. An adversarial pass measured it failing OPEN five ways -
+    a ``persist-credentials: false`` under a different step, one in a COMMENT, a local composite action
+    doing the checkout, a quoted ``'actions/checkout@v7'``, a reusable workflow - and, worse, it read the
+    operator's dev WORKING TREE while GitHub runs the workflows at ``base``, so the normal
+    dev-branch-ahead-of-main state made it pass exactly when it should refuse.
 
-    Rather than document that as a known gap, the adapter REFUSES TO PUBLISH until the repo is hardened -
-    the prerequisite becomes machine-enforced and fail-closed. stdlib-only, so this is a conservative text
-    scan (no YAML parser): every checkout step must opt out of credential persistence."""
-    wf_dir = repo_root / ".github" / "workflows"
-    if not wf_dir.is_dir():
-        return None  # no CI at all -> nothing auto-executes the candidate
-    for wf in sorted(wf_dir.glob("*.yml")) + sorted(wf_dir.glob("*.yaml")):
-        try:
-            text = wf.read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
-            return f"cannot read {wf.name} to verify CI safety: {exc}"  # fail closed
-        if "uses: actions/checkout" not in text:
-            continue
-        if text.count("uses: actions/checkout") > text.count("persist-credentials: false"):
-            return (f".github/workflows/{wf.name} checks out without 'persist-credentials: false', so a "
-                    "pushed candidate would execute with a credential-bearing checkout before review")
+    That whole approach is wrong in kind: this adapter cannot verify a property of an execution environment
+    it does not control by parsing text, and every such attempt fails open. Worse, the property is not even
+    expressible as "persist-credentials: false" - a workflow satisfying that STILL runs the candidate in a
+    job that later hands ``secrets.CODECOV_TOKEN`` to another step.
+
+    So the human asserts it, once, explicitly, and it is recorded. That is honest about who actually knows,
+    it fails closed by default, and it puts the decision with the person who can change the CI."""
+    if not ci_attested_safe:
+        return ("publishing hands the candidate to CI, which EXECUTES it before review; the operator has "
+                "not attested that CI is safe for agent-authored code (pass ci_attested_safe=True after "
+                "hardening: no credential-persisting checkout, and no secret-bearing step in a job that "
+                "runs candidate code)")
     return None
 
 
@@ -401,12 +428,15 @@ def _classify_candidate_changes(wt: Path, base_oid: str) -> list[str]:
             continue
         # A single enormous line is how a ~1 MiB payload hides behind "1 insertion(+)", and bidi /
         # control characters make the RENDERED diff differ from the EXECUTED source.
-        longest = max((len(line.encode("utf-8", "replace")) for line in content.splitlines()), default=0)
+        # split on "\n" ONLY - str.splitlines() also breaks on U+2028/U+2029/U+0085, which git, the diff
+        # renderer and the Python tokenizer do NOT, so it under-measured a physical line by ~19x (measured).
+        longest = max((len(line.encode("utf-8", "replace")) for line in content.split("\n")), default=0)
         if longest > _MAX_LINE_BYTES:
             reasons.append(f"{rec.path} has a {longest}-byte line (> {_MAX_LINE_BYTES})")
             continue
-        if _FORBIDDEN_CONTROLS.search(content):
-            reasons.append(f"{rec.path} contains bidi/control characters")
+        bad = _forbidden_char(content)
+        if bad:
+            reasons.append(f"{rec.path} contains an invisible/format character ({bad})")
             continue
         for pat, label in _SECRET_PATTERNS:
             if pat.search(content):
@@ -614,7 +644,7 @@ def _record_candidate_assurance(state: LoopState, record: dict[str, Any], branch
 
 def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, proposals_dir: Path,
                          worktrees_dir: Path, gh_runner: Callable[..., "tuple[int, str, str]"],
-                         branch_prefix: str, run_cs_assure: Any):  # noqa: ANN202
+                         branch_prefix: str, run_cs_assure: Any, ci_attested_safe: bool):  # noqa: ANN202
     """The write executor. At EXECUTE: PROPOSE (agent, CONFINED to a disposable detached worktree) -> seal
     -> APPLY the exact diff in a SEPARATE, pristine detached worktree -> CLASSIFY WHAT GIT REALIZED against
     the writable ALLOWLIST (status/mode/path/basename/bounds + a secret scan over blob content) -> commit ->
@@ -684,9 +714,9 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
             # PREFLIGHT: pushing hands the candidate to CI, which EXECUTES it. Refuse if this repo's CI
             # would run it with a credential-bearing checkout before a human reviews it - fail closed
             # rather than rely on "a human merges only on green" (merging later does not un-run the code).
-            unsafe_ci = _ci_executes_candidates_with_credentials(repo_root)
-            if unsafe_ci:
-                raise WriteAdapterError(f"refusing to publish: {unsafe_ci}")
+            unmet = _publish_precondition_unmet(ci_attested_safe)
+            if unmet:
+                raise WriteAdapterError(f"refusing to publish: {unmet}")
             # CLEAR candidate -> PUBLISH: push the committed candidate to the branch (by refspec, from the
             # detached HEAD - no local branch was ever created) and open a PR. NEVER merges. CI runs the
             # dynamic gate on the PR in its sandbox; a human merges only on green.
@@ -718,12 +748,18 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
 def build_context(repo_root: Path | str, base: str = "main", *, agent_client: AgentClient | None = None,
                   proposals_dir: Path | str | None = None, worktrees_dir: Path | str | None = None,
                   gh_runner: Any = None, branch_prefix: str = "cs-agent/", run_cs_assure: Any = None,
-                  pr_ref: str | None = None) -> LoopContext:
+                  pr_ref: str | None = None, ci_attested_safe: bool = False) -> LoopContext:
     """A WRITE-CAPABLE, single-agent :class:`LoopContext` (Phase 7.1). ``capabilities={CAP_WRITE}`` - the
     capability gate REFUSES to run it without ``--allow-capabilities write``. It applies the agent's sealed
     diff in an isolated worktree, commits, pushes a branch, and opens a PR; it NEVER merges (``write_gh``
     refuses ``pr merge`` and ``dangerous=True`` escalates the merge gate). Inject a stub ``agent_client`` +
-    dirs + ``gh_runner`` in tests."""
+    dirs + ``gh_runner`` in tests.
+
+    ``ci_attested_safe`` (default FALSE -> never publishes) is the OPERATOR'S EXPLICIT ATTESTATION that CI
+    can safely execute an agent-authored candidate: no credential-persisting checkout, and no secret-bearing
+    step in a job that runs candidate code. Pushing EXECUTES the candidate in CI before any human reviews
+    it, and this adapter cannot verify someone else's CI by parsing it (every attempt failed open), so the
+    person who can actually change the workflows asserts it."""
     root = Path(repo_root)
     client = agent_client if agent_client is not None else ClaudeSubprocessClient()
     pdir = Path(proposals_dir) if proposals_dir is not None else _default_proposals_dir(root)
@@ -736,7 +772,8 @@ def build_context(repo_root: Path | str, base: str = "main", *, agent_client: Ag
     assure = _trusted_cs_assure(root, run_cs_assure if run_cs_assure is not None else _sanitized_cs_assure)
     kwargs: dict[str, Any] = {
         "repo_root": root, "base": base,
-        "executor": _make_write_executor(client, root, base, pdir, wdir, gh, branch_prefix, assure),
+        "executor": _make_write_executor(client, root, base, pdir, wdir, gh, branch_prefix, assure,
+                                         ci_attested_safe),
         "reviewer": lambda _state: [],
         "critic": _signoff_critic,
         "multi_agent": False,               # single-agent: no delegated wave (verify_paths is a 7.3 concern)
