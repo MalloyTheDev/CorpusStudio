@@ -139,12 +139,13 @@ def test_write_run_applies_in_a_worktree_pushes_a_branch_opens_a_pr_and_leaves_m
     assert state.current_phase is Phase.ESCALATED
     assert ("pr", "create") in [c[:2] for c in calls] and ("pr", "merge") not in [c[:2] for c in calls]
     ref = state.review_state["agent_proposals"][0]
-    assert ref["branch"] == "cs-agent/g1" and ref["pr"] == "https://example/pull/1"
+    assert ref["branch"].startswith("cs-agent/g1-") and ref["pr"] == "https://example/pull/1"
     assert ref["changed_paths"] == [_TARGET]
 
     # the write landed on a PUSHED branch in the remote, carrying the applied change...
-    assert "cs-agent/g1" in _g(remote, "branch", "--list", "cs-agent/g1").stdout
-    assert _g(remote, "show", f"cs-agent/g1:{_TARGET}").stdout == "new = 2\n"
+    assert "cs-agent/g1" in _g(remote, "branch", "--list", "cs-agent/g1-*").stdout
+    br = [b.strip("* ") for b in _g(remote, "branch", "--list").stdout.splitlines() if "cs-agent" in b][0]
+    assert _g(remote, "show", f"{br}:{_TARGET}").stdout == "new = 2\n"
     # ...but the developer's MAIN working tree is pristine, and no worktree is left behind
     assert _g(root, "status", "--porcelain").stdout == ""
     assert (root / _TARGET).read_text() == "old = 1\n"
@@ -173,7 +174,7 @@ def test_a_diff_that_does_not_apply_fails_closed_and_writes_nothing(tmp_path: Pa
     run_loop(state, _build(tmp_path, root, bad, []))
     # git apply rejects the bogus hunk -> WriteAdapterError -> escalate; nothing pushed, main pristine, no leftover wt
     assert state.current_phase is Phase.ESCALATED
-    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
+    assert _g(remote, "branch", "--list", "cs-agent/g1-*").stdout == ""
     assert _g(root, "status", "--porcelain").stdout == "" and "cs-agent" not in _g(root, "worktree", "list").stdout
 
 
@@ -208,7 +209,7 @@ def test_a_human_gated_candidate_escalates_and_publishes_nothing(tmp_path: Path)
     run_loop(state, ctx, max_steps=25)
     assert state.current_phase is Phase.ESCALATED
     assert ("pr", "create") not in [c[:2] for c in calls]
-    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
+    assert _g(remote, "branch", "--list", "cs-agent/g1-*").stdout == ""
     ca = state.review_state["candidate_assurance"]
     assert ca["published"] is False and ca["observation"] == "AUTHORIZATION_REQUIRED"
 
@@ -221,7 +222,7 @@ def test_a_worker_touching_candidate_escalates_and_publishes_nothing(tmp_path: P
     state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
     run_loop(state, ctx, max_steps=25)
     assert ("pr", "create") not in [c[:2] for c in calls]
-    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
+    assert _g(remote, "branch", "--list", "cs-agent/g1-*").stdout == ""
     ca = state.review_state["candidate_assurance"]
     assert ca["published"] is False and ca["observation"] == "WORKER_LINEAGE_IMPACT"
 
@@ -232,7 +233,8 @@ def test_a_clear_candidate_publishes_and_records_the_assurance(tmp_path: Path) -
     state = LoopState(goal="tidy", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
     run_loop(state, _build(tmp_path, root, _StubAgent(), calls))
     # a clear candidate publishes (branch pushed by refspec from a DETACHED apply worktree) + records it
-    assert _g(remote, "show", f"cs-agent/g1:{_TARGET}").stdout == "new = 2\n"
+    br = [b.strip("* ") for b in _g(remote, "branch", "--list").stdout.splitlines() if "cs-agent" in b][0]
+    assert _g(remote, "show", f"{br}:{_TARGET}").stdout == "new = 2\n"
     ca = state.review_state["candidate_assurance"]
     assert ca["published"] is True and ca["observation"] == "SUCCESS"
     # the candidate impact digest is an AUDIT field only - deliberately NOT in assurance_records, which
@@ -312,7 +314,7 @@ def test_the_attack_matrix_publishes_nothing(name: str, tmp_path: Path) -> None:
     state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
     run_loop(state, _build(tmp_path, root, agent, calls), max_steps=25)
     assert ("pr", "create") not in [c[:2] for c in calls], name
-    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == "", name
+    assert _g(remote, "branch", "--list", "cs-agent/g1-*").stdout == "", name
     assert _g(root, "status", "--porcelain").stdout == "", name
     assert "apply-" not in _g(root, "worktree", "list").stdout, name
 
@@ -335,7 +337,7 @@ def test_a_secret_in_the_rationale_blocks_the_publish(tmp_path: Path) -> None:
     state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
     run_loop(state, _build(tmp_path, root, agent, calls), max_steps=25)
     assert ("pr", "create") not in [c[:2] for c in calls]
-    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
+    assert _g(remote, "branch", "--list", "cs-agent/g1-*").stdout == ""
 
 
 def test_publishing_requires_an_explicit_operator_ci_attestation(tmp_path: Path) -> None:
@@ -350,7 +352,7 @@ def test_publishing_requires_an_explicit_operator_ci_attestation(tmp_path: Path)
     state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
     run_loop(state, ctx, max_steps=25)
     assert ("pr", "create") not in [c[:2] for c in calls]           # nothing published by default
-    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
+    assert _g(remote, "branch", "--list", "cs-agent/g1-*").stdout == ""
     assert saw._publish_precondition_unmet(False) is not None
     assert saw._publish_precondition_unmet(True) is None
 
@@ -430,10 +432,11 @@ def test_git_helper_fails_closed_on_a_nonzero_exit(tmp_path) -> None:
 
 def test_branch_suffix_is_sanitized_to_a_safe_ref() -> None:
     # a messy goal id can never yield an invalid git ref (spaces / punctuation / '..' / case / length).
-    assert saw._sanitize_branch_suffix("Fix bug #5 (README)!") == "fix-bug-5-readme"
-    assert saw._sanitize_branch_suffix("a..b") == "a-b" and ".." not in saw._sanitize_branch_suffix("a..b")
-    assert saw._sanitize_branch_suffix("") == "goal" and saw._sanitize_branch_suffix("...--__") == "goal"
-    assert len(saw._sanitize_branch_suffix("x" * 100)) <= 40
+    assert saw._sanitize_branch_suffix("Fix bug #5 (README)!").startswith("fix-bug-5-readme-")
+    assert ".." not in saw._sanitize_branch_suffix("a..b")
+    assert saw._sanitize_branch_suffix("").startswith("goal-")
+    assert saw._sanitize_branch_suffix("...--__").startswith("goal-")
+    assert len(saw._sanitize_branch_suffix("x" * 100)) <= 50   # 40-char slug + "-" + 8-hex digest
 
 
 def test_the_worker_import_closure_blocks_the_publish(tmp_path: Path) -> None:
@@ -446,7 +449,7 @@ def test_the_worker_import_closure_blocks_the_publish(tmp_path: Path) -> None:
     state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
     run_loop(state, _build(tmp_path, root, _StubAgent(), calls, assure=assure), max_steps=25)
     assert ("pr", "create") not in [c[:2] for c in calls]
-    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
+    assert _g(remote, "branch", "--list", "cs-agent/g1-*").stdout == ""
     assert state.review_state["candidate_assurance"]["observation"] == "WORKER_LINEAGE_IMPACT"
 
 
@@ -490,7 +493,7 @@ def test_a_gh_failure_after_the_push_still_records_the_live_branch(tmp_path: Pat
     state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
     run_loop(state, ctx, max_steps=25)
     assert state.current_phase is Phase.ESCALATED
-    assert "cs-agent/g1" in _g(remote, "branch", "--list", "cs-agent/g1").stdout   # the branch IS live...
+    assert _g(remote, "branch", "--list", "cs-agent/g1-*").stdout.strip()   # the branch IS live...
     ca = state.review_state["candidate_assurance"]                                  # ...and it is recorded
     assert ca["published"] is True and "PR not yet opened" in ca["reason"]
 
@@ -542,3 +545,177 @@ def test_the_cache_dir_must_be_absolute(tmp_path, monkeypatch) -> None:
     assert d.is_absolute() and tmp_path.resolve() in d.parents or d.is_absolute()
     monkeypatch.setenv("XDG_CACHE_HOME", "")
     assert sa.default_worktrees_dir(tmp_path).is_absolute()
+
+
+# ------------------------------------------------------- per-rule isolation (mutation-resistant, 7th pass)
+# A 7th adversarial pass MUTATION-TESTED the suite: disabling the ALLOWLIST gate (`if False:`) left all 36
+# tests green, because the only out-of-surface attack case (README.md) is also caught by the basename rule.
+# Eleven other guards likewise survived deletion. End-to-end "nothing was published" assertions cannot see
+# WHICH rule fired, so each guard now has a case that trips ONLY it.
+
+
+_CLASSIFY_SEQ = [0]
+
+
+def _classify_one(tmp_path: Path, path: str, body: str = "x = 1\n",
+                  base_body: str = "x = 0\n") -> list[str]:
+    """Apply a minimal in-place MODIFY of `path` in a real worktree and return the classifier's reasons."""
+    _CLASSIFY_SEQ[0] += 1
+    tmp_path = tmp_path / f"c{_CLASSIFY_SEQ[0]}"
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    root, _remote = _repo_with_remote(tmp_path)
+    f = root / path
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(base_body)
+    _g(root, "add", "-A")
+    _g(root, "commit", "-q", "-m", "seed")
+    base = _g(root, "rev-parse", "HEAD").stdout.strip()
+    n_old, n_new = len(base_body.splitlines()), len(body.splitlines())
+    diff = (f"--- a/{path}\n+++ b/{path}\n@@ -1,{n_old} +1,{n_new} @@\n"
+            + "".join(f"-{ln}\n" for ln in base_body.splitlines())
+            + "".join(f"+{ln}\n" for ln in body.splitlines()))
+    with saw._apply_worktree(root, base, tmp_path / "wt") as wt:
+        saw._git(wt, "apply", "--index", "-", stdin=diff)
+        return saw._classify_candidate_changes(wt, base)
+
+
+def test_rule_allowlist_is_the_only_thing_blocking_an_out_of_surface_path(tmp_path: Path) -> None:
+    # `engine/other/mod.py` has a SAFE basename, status M and mode 100644 - every other rule passes - so
+    # only the allowlist can refuse it. Disabling the allowlist makes this test fail (the surviving mutant).
+    reasons = _classify_one(tmp_path, "engine/other/mod.py")
+    assert reasons == ["engine/other/mod.py (outside the writable surface)"]
+    assert _classify_one(tmp_path, _TARGET) == []          # the in-surface control publishes
+
+
+def test_rule_basename_is_the_only_thing_blocking_a_bad_module_name(tmp_path: Path) -> None:
+    # inside the allowlist, so only _SAFE_BASENAME can refuse it
+    reasons = _classify_one(tmp_path, "engine/corpus_studio/Evil.py")
+    assert reasons and "unsafe module basename" in reasons[0]
+
+
+def test_rule_line_bound_is_the_only_thing_blocking_a_long_line(tmp_path: Path) -> None:
+    reasons = _classify_one(tmp_path, _TARGET, body="y = '" + "a" * 500 + "'\n")
+    assert reasons and "-byte line" in reasons[0]
+
+
+def test_rule_invisible_characters_are_the_only_thing_blocking(tmp_path: Path) -> None:
+    reasons = _classify_one(tmp_path, _TARGET, body="x = 1  # ​\n")
+    assert reasons and "invisible/format character" in reasons[0]
+
+
+def test_rule_added_line_secret_scan_is_the_only_thing_blocking(tmp_path: Path) -> None:
+    reasons = _classify_one(tmp_path, _TARGET, body='password = "hunter2hunter2hunter2"\n')
+    assert reasons and "apparent hardcoded credential" in reasons[0]
+
+
+def test_rule_added_line_scan_sees_content_that_looks_like_a_diff_header(tmp_path: Path) -> None:
+    # MEASURED bypass (7th pass): a content line beginning with "++" renders as "+++..." in the diff and
+    # was skipped as if it were the `+++ b/<path>` file header, publishing a real credential.
+    reasons = _classify_one(tmp_path, _TARGET,
+                            body='"""doc\n++password = "hunter2hunter2hunter2"\n"""\n')
+    assert reasons and "apparent hardcoded credential" in reasons[0]
+
+
+def test_rule_high_confidence_blob_scan_is_the_only_thing_blocking(tmp_path: Path) -> None:
+    reasons = _classify_one(tmp_path, _TARGET, body='K = "gho_' + "a" * 36 + '"\n')
+    assert reasons and "GitHub token" in reasons[0]
+
+
+def test_branch_names_are_unique_per_goal_even_when_slugs_collide() -> None:
+    # MEASURED (7th pass): two goal ids agreeing in the first 40 slug chars mapped to ONE branch, so the
+    # second goal could never publish (non-fast-forward) - and a retry after a transient gh failure stuck.
+    a = saw._sanitize_branch_suffix("g-engine-corpus-studio-platform-environment_manager.py")
+    b = saw._sanitize_branch_suffix("g-engine-corpus-studio-platform-environments.py")
+    assert a != b
+    assert saw._sanitize_branch_suffix("x") == saw._sanitize_branch_suffix("x")   # deterministic
+
+
+def test_the_commit_message_does_not_claim_a_human_review_that_has_not_happened(tmp_path: Path) -> None:
+    # MEASURED (7th pass): the commit asserted "[single-agent proposal, human-reviewed]" while publishing
+    # autonomously - a false provenance claim baked into the artefact a human later merges.
+    root, remote = _repo_with_remote(tmp_path)
+    run_loop(LoopState(goal="tidy", goal_id="g1", current_phase=Phase.RECEIVE_GOAL),
+             _build(tmp_path, root, _StubAgent(), []))
+    branch = [b.strip("* ") for b in _g(remote, "branch", "--list").stdout.splitlines() if "cs-agent" in b][0]
+    msg = _g(remote, "log", "-1", "--format=%B", branch).stdout
+    assert "human-reviewed]" not in msg
+    assert "NOT yet human-reviewed" in msg
+
+
+def _seed(tmp_path: Path, files: dict) -> tuple[Path, str]:
+    """A fresh repo containing `files`; returns (root, base_oid)."""
+    _CLASSIFY_SEQ[0] += 1
+    d = tmp_path / f"s{_CLASSIFY_SEQ[0]}"
+    d.mkdir(parents=True, exist_ok=True)
+    root, _remote = _repo_with_remote(d)
+    for rel, content in files.items():
+        f = root / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(content if isinstance(content, bytes) else content.encode())
+    _g(root, "add", "-A")
+    _g(root, "commit", "-q", "-m", "seed")
+    return root, _g(root, "rev-parse", "HEAD").stdout.strip()
+
+
+def _classify_staged(tmp_path: Path, root: Path, base: str, mutate) -> list[str]:
+    """Stage a change directly in a candidate worktree and classify it. The classifier reads the INDEX
+    (via git plumbing), not a diff, so staging is the faithful way to isolate ONE rule - hand-written
+    hunks are brittle and test the patch format rather than the guard."""
+    with saw._apply_worktree(root, base, tmp_path / "wtx") as wt:
+        mutate(wt)
+        saw._git(wt, "add", "-A")
+        return saw._classify_candidate_changes(wt, base)
+
+
+def _write(wt: Path, rel: str, content) -> None:
+    f = wt / rel
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_bytes(content if isinstance(content, bytes) else content.encode())
+
+
+def test_rule_status_must_be_modify_is_the_only_thing_blocking_a_create(tmp_path: Path) -> None:
+    # a CREATE inside the allowlist with a safe basename: allowlist/basename/mode/content all pass, so
+    # only the status!=M rule can refuse it. Creates are how conftest injection + stdlib shadowing land.
+    root, base = _seed(tmp_path, {_TARGET: "x = 0\n"})
+    reasons = _classify_staged(tmp_path, root, base,
+                               lambda wt: _write(wt, "engine/corpus_studio/newmod.py", "x = 1\n"))
+    assert reasons and "only in-place modification is allowed" in reasons[0], reasons
+
+
+def test_rule_patch_byte_bound_is_the_only_thing_blocking(tmp_path: Path) -> None:
+    # 30 lines of ~340 B: under the 400 B/line bound and the 60-line bound, but over the 8 KiB patch bound.
+    root, base = _seed(tmp_path, {_TARGET: "x = 0\n"})
+    body = "".join(f"v{i} = '{'a' * 330}'\n" for i in range(30))
+    reasons = _classify_staged(tmp_path, root, base, lambda wt: _write(wt, _TARGET, body))
+    assert reasons and any("bytes (>" in r for r in reasons), reasons
+
+
+def test_rule_max_changed_paths_is_the_only_thing_blocking(tmp_path: Path) -> None:
+    # three tiny in-surface modifies: every per-file rule passes, so only the path-count bound refuses.
+    files = {f"engine/corpus_studio/m{i}.py": "x = 0\n" for i in range(3)}
+    root, base = _seed(tmp_path, files)
+
+    def mutate(wt: Path) -> None:
+        for rel in files:
+            _write(wt, rel, "x = 1\n")
+    reasons = _classify_staged(tmp_path, root, base, mutate)
+    assert reasons and any("paths (>" in r for r in reasons), reasons
+
+
+def test_rule_blob_size_cap_is_the_only_thing_blocking(tmp_path: Path) -> None:
+    # the RESULTING blob exceeds the 1 MiB read cap while every line stays short; the read-side cap is the
+    # only rule that can see it (the per-line and per-patch bounds are computed elsewhere).
+    root, base = _seed(tmp_path, {_TARGET: "x = 0\n"})
+    big = "".join(f"v{i} = {i}\n" for i in range(140_000))          # ~2 MB, all short lines
+    # this guard RAISES from _read_blob rather than appending a reason - both fail closed, and the raise
+    # escalates the loop (WriteAdapterError is an EXPECTED operational refusal).
+    with pytest.raises(saw.WriteAdapterError, match="oversized blob"):
+        _classify_staged(tmp_path, root, base, lambda wt: _write(wt, _TARGET, big))
+
+
+def test_rule_binary_refusal_is_the_only_thing_blocking(tmp_path: Path) -> None:
+    # bytes that are not valid UTF-8: _read_blob returns None and only that branch refuses.
+    root, base = _seed(tmp_path, {_TARGET: "x = 0\n"})
+    reasons = _classify_staged(tmp_path, root, base,
+                               lambda wt: _write(wt, _TARGET, b"x = 1\n\xff\xfe\x00binary\n"))
+    assert reasons and any("binary or non-UTF-8" in r for r in reasons), reasons

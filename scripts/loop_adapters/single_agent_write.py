@@ -57,6 +57,7 @@ building blocks (the agent client, proposal sealing, diff parsing) and the loop'
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -94,8 +95,11 @@ def _sanitize_branch_suffix(goal_id: str) -> str:
     trailing ``-`` stripped, truncated. So a goal id with spaces / uppercase / punctuation / ``..`` can
     never produce an invalid ref or violate a remote policy; the original goal id stays in the sealed
     proposal record + the PR body for traceability."""
-    slug = re.sub(r"[^a-z0-9]+", "-", (goal_id or "").lower()).strip("-")
-    return slug[:40].strip("-") or "goal"
+    slug = re.sub(r"[^a-z0-9]+", "-", (goal_id or "").lower()).strip("-")[:40].strip("-") or "goal"
+    # A short digest of the FULL goal id keeps distinct goals on distinct branches: truncation alone
+    # collided (measured: environment_manager.py and environments.py both slugged to the same 40 chars,
+    # so the second goal was permanently unpublishable with an opaque non-fast-forward push error).
+    return f"{slug}-{hashlib.sha256((goal_id or '').encode('utf-8')).hexdigest()[:8]}"
 
 _GIT_TIMEOUT_S = 120
 _GH_TIMEOUT_S = 60
@@ -460,8 +464,14 @@ def _classify_candidate_changes(wt: Path, base_oid: str) -> list[str]:
                 break
     # The LOOSE heuristic runs ONLY over the lines the candidate ADDS (git's own -U0 diff output, not our
     # parsing of agent text), so pre-existing content can never make a file unpublishable.
+    prev_was_old_file_header = False
     for line in _git(wt, "diff", "--cached", "-U0", "--no-renames", base_oid).stdout.splitlines():
-        if not line.startswith("+") or line.startswith("+++"):
+        # The FILE HEADER is exactly "+++ <path>" and only ever directly follows "--- <path>". A bare
+        # startswith("+++") also swallowed CONTENT beginning with "++" (git renders it as "+++..."), so
+        # `++password = "..."` inside a docstring was never scanned and published verbatim (measured).
+        is_file_header = prev_was_old_file_header and line.startswith("+++ ")
+        prev_was_old_file_header = line.startswith("--- ")
+        if is_file_header or not line.startswith("+"):
             continue
         for pat, label in _ADDED_LINE_SECRET_PATTERNS:
             if pat.search(line[1:]):
@@ -723,7 +733,9 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
             if violations:
                 raise WriteAdapterError("refusing the candidate: " + "; ".join(violations[:8]))
             _git(wt, "-c", "user.name=corpusstudio-agent", "-c", "user.email=agent@corpusstudio.local",
-                 "commit", "-m", f"{state.goal or 'agent change'}\n\n{rationale}\n\n[single-agent proposal, human-reviewed]")
+                 "commit", "-m", f"{state.goal or 'agent change'}\n\n{rationale}\n\n"
+                 "[autonomous single-agent proposal - NOT yet human-reviewed; static candidate "
+                 "assurance only, the dynamic gate runs in CI and a human reviews + merges the PR]")
             # CANDIDATE ASSURANCE (STATIC): classify the CANDIDATE worktree via `cs_assure impact`
             # (self-modify / sealed-research / worker-closure / policy) - NOT the dev tree, and NOT the
             # code-executing gate (running the untrusted candidate's pytest locally would be arbitrary code
