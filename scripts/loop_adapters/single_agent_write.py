@@ -57,6 +57,7 @@ building blocks (the agent client, proposal sealing, diff parsing) and the loop'
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import os
@@ -212,9 +213,15 @@ _DEFAULT_IGNORABLE_RANGES: tuple[tuple[int, int], ...] = (
 )
 
 
+# Flattened, sorted boundaries for an O(log n) membership test. The linear `any()` over 17 ranges per
+# CHARACTER cost ~0.85 s on a 1 MiB blob, and this runs on every candidate file.
+_DI_BOUNDS: tuple[int, ...] = tuple(
+    b for lo, hi in sorted(_DEFAULT_IGNORABLE_RANGES) for b in (lo, hi + 1))
+
+
 def _is_default_ignorable(ch: str) -> bool:
-    cp = ord(ch)
-    return any(lo <= cp <= hi for lo, hi in _DEFAULT_IGNORABLE_RANGES)
+    """Is ``ch`` a Unicode DEFAULT_IGNORABLE_CODE_POINT (renders as nothing)?"""
+    return bisect.bisect_right(_DI_BOUNDS, ord(ch)) % 2 == 1
 
 
 def _forbidden_char(text: str) -> str | None:
@@ -488,21 +495,25 @@ def _classify_candidate_changes(wt: Path, base_oid: str) -> list[str]:
     # failed too because a REMOVED content line starting "-- " renders as "--- " (both measured, both
     # published a real credential). Comparing objects has no such surface.
     for rec in records:
-        if rec.status != "M" or rec.dst_mode != _MODE_REGULAR:
+        # ADDED files are scanned too, not just modified ones. A create is refused outright by the
+        # modify-only rule above, so this is defense in depth today - but the heuristic must not silently
+        # stop covering new content if that rule is ever relaxed (Sourcery, #707).
+        if rec.status not in ("M", "A") or rec.dst_mode != _MODE_REGULAR:
             continue
         new_text = _read_blob(wt, rec.dst_oid, rec.path)
         if new_text is None:
             continue  # binary/non-UTF-8 was already refused above
-        old_proc = subprocess.run(  # noqa: S603 - fixed argv, no shell; missing/unreadable -> treat as empty
-            ["git", "-C", str(wt), "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=",
-             "cat-file", "blob", f"{base_oid}:{rec.path}"],
-            capture_output=True, timeout=_GIT_TIMEOUT_S)
         old_lines: set[str] = set()
-        if old_proc.returncode == 0:
-            try:
-                old_lines = set(old_proc.stdout.decode("utf-8").split("\n"))
-            except UnicodeDecodeError:
-                old_lines = set()
+        if rec.status == "M":   # an ADDED file has no base version - every line is new
+            old_proc = subprocess.run(  # noqa: S603 - fixed argv, no shell; unreadable -> treat as empty
+                ["git", "-C", str(wt), "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=",
+                 "cat-file", "blob", f"{base_oid}:{rec.path}"],
+                capture_output=True, timeout=_GIT_TIMEOUT_S)
+            if old_proc.returncode == 0:
+                try:
+                    old_lines = set(old_proc.stdout.decode("utf-8").split("\n"))
+                except UnicodeDecodeError:
+                    old_lines = set()
         for line in new_text.split("\n"):
             if line in old_lines:
                 continue                      # unchanged content can never make a file unpublishable

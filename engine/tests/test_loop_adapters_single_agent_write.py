@@ -780,3 +780,27 @@ def test_a_blocking_obligation_that_is_not_human_gated_still_blocks(tmp_path: Pa
                                            "added_reachable": [], "distribution_impacting_paths": []}}), "")
     observation, reason, _d = saw._assure_candidate(tmp_path, "main", assure, ["engine/corpus_studio/x.py"])
     assert observation is saw.Observation.POLICY_BLOCK and "evaluation-honesty" in reason
+
+
+def test_the_added_line_scan_also_covers_newly_added_files(tmp_path: Path) -> None:
+    """Sourcery (#707): the blob-compare scan skipped status 'A', so a brand-new file's credentials were
+    never seen by the loose heuristic. Not exploitable today - a create is refused outright by modify-only
+    - but the heuristic must not silently stop covering new content if that rule is ever relaxed. Asserted
+    against the scan DIRECTLY so it cannot pass merely because another gate fired."""
+    root, base = _seed(tmp_path, {_TARGET: "x = 0\n"})
+    reasons = _classify_staged(
+        tmp_path, root, base,
+        lambda wt: _write(wt, "engine/corpus_studio/newmod.py", 'password = "sup3rsecretvalue123"\n'))
+    assert any("hardcoded credential" in r for r in reasons), reasons   # the scan saw it...
+    assert any("only in-place modification" in r for r in reasons), reasons  # ...and modify-only also fired
+
+
+def test_default_ignorable_lookup_matches_the_declared_ranges() -> None:
+    # the bisect fast path must agree with the spec ranges it replaced (Sourcery perf note, #707)
+    for lo, hi in saw._DEFAULT_IGNORABLE_RANGES:
+        assert saw._is_default_ignorable(chr(lo)) and saw._is_default_ignorable(chr(hi))
+        if lo > 0:
+            assert not saw._is_default_ignorable(chr(lo - 1)) or any(
+                a <= lo - 1 <= b for a, b in saw._DEFAULT_IGNORABLE_RANGES)
+    for ordinary in ("a", "—", "日", " ", "\t", "\n"):
+        assert not saw._is_default_ignorable(ordinary)
