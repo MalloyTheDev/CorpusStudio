@@ -719,3 +719,64 @@ def test_rule_binary_refusal_is_the_only_thing_blocking(tmp_path: Path) -> None:
     reasons = _classify_staged(tmp_path, root, base,
                                lambda wt: _write(wt, _TARGET, b"x = 1\n\xff\xfe\x00binary\n"))
     assert reasons and any("binary or non-UTF-8" in r for r in reasons), reasons
+
+
+# ------------------------------------------------------------- independent-review residuals (post-merge)
+
+
+def test_invisible_characters_in_printable_categories_are_refused() -> None:
+    """Category alone was NOT sufficient: U+FE0F (Mn) and U+3164 (Lo) are invisible yet live in printable
+    categories AND are valid Python identifier characters, so two names that render identically are
+    distinct to the interpreter. The clean exploit is a string literal - a reviewer reads
+    `if mode == "strict"` while the literal carries a VS16, so the branch is silently dead code."""
+    for cp in (0xFE0F, 0x3164, 0x200B, 0xE0041, 0x00AD, 0x202E, 0x2028):
+        assert saw._forbidden_char("x = 1  # a" + chr(cp) + "b"), hex(cp)
+    # ...while ordinary non-ASCII source stays legal (77 of 136 files in the surface use an em dash)
+    assert saw._forbidden_char('x = 1  # an em dash — and CJK 日') is None
+
+
+def test_the_added_line_scan_compares_blobs_not_diff_text(tmp_path: Path) -> None:
+    """Two prefix-sniffing versions of this scan were defeated: a content line starting '++' renders as
+    '+++...' (read as a file header), and anchoring on a preceding '--- ' failed too because a REMOVED
+    content line starting '-- ' also renders as '--- '. Both measured, both published a real credential.
+    Comparing realized BLOBS has no such surface."""
+    root, base = _seed(tmp_path, {_TARGET: '"""doc\n-- note\n"""\n'})
+    for body in ('"""doc\n++ password = "sup3rsecretvalue123"\n"""\n',      # the '-- ' predecessor attack
+                 '"""doc\n-- note\n++password = "sup3rsecretvalue123"\n"""\n',
+                 '"""doc\n-- note\npassword = "sup3rsecretvalue123"\n"""\n'):
+        reasons = _classify_staged(tmp_path, root, base, lambda wt, b=body: _write(wt, _TARGET, b))
+        assert reasons and "hardcoded credential" in reasons[0], body
+    # an unchanged pre-existing line can never block, and a legitimate edit still publishes
+    assert _classify_staged(tmp_path, root, base,
+                            lambda wt: _write(wt, _TARGET, '"""doc tidied\n-- note\n"""\n')) == []
+
+
+def test_a_well_formed_but_keyless_worker_reachability_record_fails_closed(tmp_path: Path) -> None:
+    """SURVIVING MUTANT found by the independent review: the existing test only covered exit!=0 and
+    non-JSON, never a well-formed-JSON payload MISSING the keys - which is the exact shape (schema drift,
+    a renamed key, a null) the guard was written for. With it disabled, an empty closure meant the worker
+    lineage gate went silent while 50 of the 136 files in the writable surface are worker-reachable."""
+    for payload in ({}, {"reachable_undeclared": []}, {"undeclared_reachable": None, "worker_roots": [],
+                                                       "added_reachable": [], "distribution_impacting_paths": []}):
+        with pytest.raises(saw.WriteAdapterError, match="worker-reachability"):
+            saw._worker_reachable_paths(tmp_path, "main",
+                                        lambda _r, *a, p=payload: (0, json.dumps({"payload": p}), ""))
+    # a complete record still resolves
+    good = {"undeclared_reachable": ["a.py"], "worker_roots": [], "added_reachable": [],
+            "distribution_impacting_paths": []}
+    assert saw._worker_reachable_paths(
+        tmp_path, "main", lambda _r, *a: (0, json.dumps({"payload": good}), "")) == frozenset({"a.py"})
+
+
+def test_a_blocking_obligation_that_is_not_human_gated_still_blocks(tmp_path: Path) -> None:
+    """SURVIVING MUTANT: no test ever fired a BLOCKING obligation that was not ALSO human-gated, so the
+    POLICY_BLOCK branch could be deleted with the suite green."""
+    def assure(_r, *a):
+        if a and a[0] == "impact":
+            return (0, json.dumps({"record_digest": "sha256:i", "payload": {
+                "fired_obligations": [{"id": "evaluation-honesty", "severity": "blocking"}],
+                "base_policy_available": True, "change_set_fingerprint": "cs:x"}}), "")
+        return (0, json.dumps({"payload": {"undeclared_reachable": [], "worker_roots": [],
+                                           "added_reachable": [], "distribution_impacting_paths": []}}), "")
+    observation, reason, _d = saw._assure_candidate(tmp_path, "main", assure, ["engine/corpus_studio/x.py"])
+    assert observation is saw.Observation.POLICY_BLOCK and "evaluation-honesty" in reason
