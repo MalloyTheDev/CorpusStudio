@@ -283,6 +283,27 @@ def _all_done(state: LoopState) -> bool:
         isinstance(t, dict) and t.get("status") == TaskStatus.DONE.value for t in state.task_graph)
 
 
+def _run_task_executor(state: LoopState, ctx: LoopContext, task_id: str) -> Observation:
+    """Run the executor FOR a specific task: mark it ACTIVE, run, and map the result via ``status_for``.
+
+    A RAISING executor must not strand the task at ACTIVE. ACTIVE is neither PENDING (so ``ready_tasks()``
+    skips it) nor DONE (so ``_all_done`` is False), so the agent could never be re-invoked and the goal
+    became permanently unexecutable - measured: the FIRST time any write-adapter guard fired (a denied
+    path, a transient `gh` failure), every later EXECUTE returned CHANGES_REQUESTED without calling the
+    executor at all. A refusal has to leave the task RE-DISPATCHABLE so the loop can diagnose and retry.
+
+    Single source of this transition for BOTH the single-agent and multi-agent self-owned paths, so the
+    two can never drift apart."""
+    set_status(state, task_id, TaskStatus.ACTIVE)
+    try:
+        observation = ctx.executor(state, next_directive(state))
+    except Exception:
+        set_status(state, task_id, TaskStatus.PENDING)
+        raise
+    set_status(state, task_id, status_for(observation))
+    return observation
+
+
 def _execute(state: LoopState, ctx: LoopContext, directive: Directive) -> PhaseResult:
     if ctx.multi_agent and ctx.agent_runner is not None and state.task_graph:
         # A ready task with NO declared ownership lane (empty allowed_paths) - e.g. an L8 completeness
@@ -294,14 +315,8 @@ def _execute(state: LoopState, ctx: LoopContext, directive: Directive) -> PhaseR
             # ACTIVE and recompute the directive so the executor is explicitly given the task it is run for;
             # then map its result via the shared status_for (SUCCESS->DONE, PROGRESS->PENDING, else FAILED).
             task = unbounded_ready[0]
-            set_status(state, task.id, TaskStatus.ACTIVE)
-            try:  # a raising executor must leave the task RE-DISPATCHABLE, not stranded at ACTIVE
-                observation = ctx.executor(state, next_directive(state))
-            except Exception:
-                set_status(state, task.id, TaskStatus.PENDING)
-                raise
+            observation = _run_task_executor(state, ctx, task.id)
             status = status_for(observation)
-            set_status(state, task.id, status)
             if status is TaskStatus.FAILED:
                 return PhaseResult(observation, f"self-owned task {task.id!r} failed")
             # SYMMETRIC with the single-agent path: re-enter EXECUTE (CHANGES_REQUESTED) while ANY task
@@ -334,20 +349,8 @@ def _execute(state: LoopState, ctx: LoopContext, directive: Directive) -> PhaseR
         # still-in-PROGRESS tasks are handled on the next EXECUTE cycle (CHANGES_REQUESTED -> re-assign),
         # so the loop NEVER advances / finalizes with a task left PENDING (external review #4).
         for task in ready_tasks(parse_tasks(state.task_graph)):
-            set_status(state, task.id, TaskStatus.ACTIVE)
-            # A RAISING executor must not strand the task at ACTIVE. ACTIVE is neither PENDING (so
-            # ready_tasks() skips it) nor DONE (so _all_done is False), so the agent could never be
-            # re-invoked and the goal became permanently unexecutable - measured: the FIRST time any
-            # write-adapter guard fired (a denied path, a transient `gh` failure), every later EXECUTE
-            # returned CHANGES_REQUESTED without calling the executor at all. A refusal has to leave the
-            # task RE-DISPATCHABLE so the loop can diagnose and try again.
-            try:
-                observation = ctx.executor(state, next_directive(state))
-            except Exception:
-                set_status(state, task.id, TaskStatus.PENDING)
-                raise
+            observation = _run_task_executor(state, ctx, task.id)
             status = status_for(observation)
-            set_status(state, task.id, status)
             if status is TaskStatus.FAILED:
                 return PhaseResult(observation, f"task {task.id!r} failed")
         if _all_done(state):
