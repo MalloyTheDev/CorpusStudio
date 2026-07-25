@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -106,6 +107,7 @@ def test_observe_refuses_on_a_terminal_loop(tmp_path: Path) -> None:
 
 _ADAPTER = """
 import json
+import os
 from loop.orchestrate import LoopContext
 from loop.controller import Observation
 from loop.completeness import Criterion, CriterionKind
@@ -315,8 +317,34 @@ def test_run_refuses_a_write_capable_adapter_without_explicit_opt_in(tmp_path: P
     refused = _run(state, "run", "--adapters", str(adapter), "--repo-root", str(REPO_ROOT))
     assert refused.returncode == 2 and "capabilities" in refused.stderr  # fail closed, nothing run
     ok = _run(state, "run", "--adapters", str(adapter), "--repo-root", str(REPO_ROOT),
-              "--allow-capabilities", "write")
+              "--allow-capabilities", "write", "--sandbox", "none")
     assert ok.returncode == 0, ok.stderr  # with the explicit opt-in it runs (finalizes)
+
+
+def test_run_refuses_a_write_capable_adapter_without_an_explicit_sandbox_choice(tmp_path: Path) -> None:
+    # The sandbox seam, its verification and the confined HOME all existed and were UNREACHABLE from this
+    # entrypoint: build_context() was called without a sandbox, so an operator driving the shipped CLI got
+    # an UNSANDBOXED agent and no diagnostic said so. Opting into `write` is therefore NOT enough - the
+    # confinement the untrusted agent gets has to be stated, so the weaker choice can never be the default.
+    state = tmp_path / "loop.json"
+    _run(state, "init", "--goal", "g")
+    adapter = tmp_path / "w.py"
+    adapter.write_text(_WRITE_ADAPTER)
+    refused = _run(state, "run", "--adapters", str(adapter), "--repo-root", str(REPO_ROOT),
+                   "--allow-capabilities", "write")
+    assert refused.returncode == 2 and "--sandbox" in refused.stderr
+    # A read-only adapter is unaffected: it has no agent to confine, so demanding the flag would be noise.
+    ro = tmp_path / "ro.py"
+    ro.write_text(_ADAPTER)
+    assert _run(state, "run", "--adapters", str(ro), "--repo-root", str(REPO_ROOT)).returncode == 0
+
+
+def test_sandbox_flag_builds_a_runner_and_refuses_an_unknown_name() -> None:
+    from loop_adapters.single_agent import BubblewrapSandbox
+    assert isinstance(cs_loop._sandbox_from("bubblewrap"), BubblewrapSandbox)
+    assert cs_loop._sandbox_from("none") is None and cs_loop._sandbox_from(None) is None
+    with pytest.raises(cs_loop.LoopStateError):
+        cs_loop._sandbox_from("chroot")  # never silently degrade an unknown sandbox to "no sandbox"
 
 
 def test_run_exit_codes_distinguish_the_outcome(tmp_path: Path) -> None:
@@ -350,3 +378,105 @@ def test_terminal_exit_map_covers_every_terminal_phase() -> None:
     # fail-closed default; adding a terminal phase without a code is caught here, not silently masked.
     from loop.controller import TERMINAL
     assert set(cs_loop._TERMINAL_EXIT) == set(TERMINAL)
+
+
+# ------------------------------------------------- sandbox wiring: the gate must bind to the WIRING (#721)
+#
+# An un-primed independent review found the first version of this gate was false in four ways at once:
+# `campaign` never called it; `--sandbox` was silently DROPPED when the adapter could not receive it (so
+# the flag reported success while wiring nothing - worse than no flag); it keyed off write capability
+# while the shipped PROPOSE-ONLY adapter launches a real agent as the operator's UID; and the adapter's
+# own `require_sandbox` demand was never passed. Each finding below is pinned by the case that found it.
+
+# Declares write capability, takes NO sandbox parameter - i.e. it cannot receive one.
+_WRITE_NO_SANDBOX = _WRITE_ADAPTER
+# Accepts a sandbox and records what it was handed, so a test can prove DELIVERY, not just acceptance.
+_SANDBOX_ADAPTER = _ADAPTER.replace(
+    "def build_context(repo_root, base):",
+    "def build_context(repo_root, base, sandbox=None, require_sandbox=False):\n"
+    "    import os, json as _j\n"
+    "    p = os.environ.get('SANDBOX_PROBE')\n"
+    "    if p: open(p, 'w').write(_j.dumps({'sandbox': type(sandbox).__name__,\n"
+    "                                       'require_sandbox': require_sandbox}))")
+
+
+def test_campaign_also_refuses_a_write_capable_adapter_without_a_sandbox_choice(tmp_path: Path) -> None:
+    # F1, reproduced by the reviewer: `run` refused and `campaign` FINALIZED, exit 0, with no sandbox
+    # choice ever made. A gate reachable from one of two entrypoints is not a gate.
+    adapter = tmp_path / "w.py"
+    adapter.write_text(_WRITE_NO_SANDBOX)
+    goals = tmp_path / "goals.json"
+    goals.write_text(json.dumps([{"goal": "g", "goal_id": "g1"}]))
+    out = _run(tmp_path / "unused.json", "campaign", "--adapters", str(adapter), "--goals", str(goals),
+               "--repo-root", str(REPO_ROOT), "--allow-capabilities", "write")
+    assert out.returncode == 2 and "--sandbox" in out.stderr
+
+
+def test_campaign_factory_path_is_gated_too(tmp_path: Path) -> None:
+    # F3: the per-goal factory took only positionals, so a write-capable MULTI-goal campaign - where an
+    # unisolated agent does the most damage - could never be sandboxed, while the flag reported success.
+    adapter = tmp_path / "f.py"
+    adapter.write_text(_FACTORY_ADAPTER.replace('pr_ref="1",', 'pr_ref="1", capabilities=frozenset({"write"}),'))
+    goals = tmp_path / "goals.json"
+    goals.write_text(json.dumps([{"goal": "g", "goal_id": "g1"}]))
+    out = _run(tmp_path / "unused.json", "campaign", "--adapters", str(adapter), "--goals", str(goals),
+               "--repo-root", str(REPO_ROOT), "--allow-capabilities", "write")
+    assert out.returncode == 2 and "--sandbox" in out.stderr
+
+
+def test_a_requested_sandbox_that_cannot_be_delivered_is_refused_not_dropped(tmp_path: Path) -> None:
+    # F2, the worst of the set: `--sandbox bubblewrap` on an adapter whose build_context has no `sandbox`
+    # parameter was filtered out by signature inspection and the run proceeded UNISOLATED, exit 0. A
+    # dropped kwarg is only acceptable when dropping it is the SAFE direction; for sandbox it inverts.
+    adapter = tmp_path / "w.py"
+    adapter.write_text(_WRITE_NO_SANDBOX)
+    state = tmp_path / "s.json"
+    _run(state, "init", "--goal", "g")
+    out = _run(state, "run", "--adapters", str(adapter), "--repo-root", str(REPO_ROOT),
+               "--allow-capabilities", "write", "--sandbox", "bubblewrap")
+    assert out.returncode == 2 and "silently dropped" in out.stderr
+
+
+def test_an_adapter_that_runs_an_agent_needs_a_choice_even_with_no_capabilities(tmp_path: Path) -> None:
+    # F4: keying the gate on WRITE capability left the shipped propose-only adapter unguarded - it
+    # declares no capabilities and still launches a real `claude` subprocess as the operator's UID. The
+    # sandbox exists for a READ-side threat (prompt-injected exfiltration / RCE), so accepting a sandbox
+    # parameter - not declaring write - is what makes the choice mandatory.
+    adapter = tmp_path / "ro.py"
+    adapter.write_text(_SANDBOX_ADAPTER)
+    state = tmp_path / "s.json"
+    _run(state, "init", "--goal", "g")
+    refused = _run(state, "run", "--adapters", str(adapter), "--repo-root", str(REPO_ROOT))
+    assert refused.returncode == 2 and "--sandbox" in refused.stderr
+    assert _run(state, "run", "--adapters", str(adapter), "--repo-root", str(REPO_ROOT),
+                "--sandbox", "none").returncode == 0
+
+
+def test_choosing_a_real_sandbox_delivers_it_and_demands_isolation(tmp_path: Path, monkeypatch) -> None:
+    # F6: `require_sandbox=True` existed, was tested, and was never passed by the CLI - "a control that
+    # exists and cannot be turned on", the exact phrase in this gate's own docstring, surviving inside the
+    # fix. Choosing a REAL sandbox is a demand for isolation, so the adapter must refuse if it cannot
+    # verify one. Proves DELIVERY (what the adapter received), not merely that the flag was accepted.
+    adapter = tmp_path / "s.py"
+    adapter.write_text(_SANDBOX_ADAPTER)
+    probe = tmp_path / "probe.json"
+    state = tmp_path / "s.json"
+    _run(state, "init", "--goal", "g")
+    env = {**os.environ, "SANDBOX_PROBE": str(probe)}
+    subprocess.run([sys.executable, str(CS_LOOP), "--state", str(state), "run", "--adapters", str(adapter),
+                    "--repo-root", str(REPO_ROOT), "--sandbox", "bubblewrap"], capture_output=True,
+                   text=True, env=env)
+    got = json.loads(probe.read_text())
+    assert got["sandbox"] == "BubblewrapSandbox" and got["require_sandbox"] is True
+
+
+def test_an_un_introspectable_adapter_cannot_swallow_a_requested_sandbox() -> None:
+    # F7: the un-introspectable fallback dropped every optional kwarg, reasoning that the adapter "keeps
+    # its fail-closed defaults". True for ci_attested_safe (default False = refuse to publish); INVERTED
+    # for sandbox (default None = no isolation). If delivery cannot be PROVEN it must not be presumed.
+    import functools
+    opaque = functools.partial(min)  # inspect.signature() raises ValueError on this
+    with pytest.raises(cs_loop.LoopStateError, match="introspect"):
+        cs_loop._sandbox_kwargs(opaque, _argv(sandbox="bubblewrap"))
+    # Without a sandbox request there is nothing to lose, so it still degrades quietly to no kwargs.
+    assert cs_loop._sandbox_kwargs(opaque, _argv(sandbox=None)) == ({}, frozenset())
