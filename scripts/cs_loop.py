@@ -345,11 +345,18 @@ def _build_context(module, args: argparse.Namespace):  # noqa: ANN001,ANN202 - a
     adapter without the parameter is unaffected."""
     import inspect
     kwargs = {}
+    optional = {
+        "ci_attested_safe": bool(getattr(args, "ci_attested_safe", False)),
+        "profile": getattr(args, "target_profile", None),
+        "assurance_root": getattr(args, "assurance_root", None),
+    }
     try:
-        if "ci_attested_safe" in inspect.signature(module.build_context).parameters:
-            kwargs["ci_attested_safe"] = bool(getattr(args, "ci_attested_safe", False))
+        params = inspect.signature(module.build_context).parameters
+        kwargs = {k: v for k, v in optional.items() if k in params and v is not None}
+        if "ci_attested_safe" in params:
+            kwargs["ci_attested_safe"] = optional["ci_attested_safe"]
     except (TypeError, ValueError):
-        pass  # un-introspectable callable: pass nothing, so the adapter keeps its fail-closed default
+        pass  # un-introspectable callable: pass nothing, so the adapter keeps its fail-closed defaults
     return module.build_context(Path(args.repo_root), args.base, **kwargs)
 
 
@@ -483,6 +490,13 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--ledger", default="",
                        help="cross-goal learning ledger JSON (default: <git-dir>/corpusstudio-loop/ledger.json)")
         p.add_argument("--max-steps", type=int, default=200)
+        p.add_argument("--target-profile", metavar="NAME_OR_PATH",
+                       help="the TARGET PROFILE naming what the loop may change in this repository "
+                            "(a name under scripts/loop/profiles/, or a path). Operator-owned and read "
+                            "from OUTSIDE the target, so a candidate can never widen its own surface.")
+        p.add_argument("--assurance-root", metavar="DIR",
+                       help="where the TRUSTED cs_assure lives, when it is not inside the target "
+                            "repository (i.e. whenever the loop is pointed at another repo).")
         p.add_argument("--ci-attested-safe", action="store_true",
                        help="operator attestation that CI can safely execute an agent-authored candidate "
                             "(no credential-persisting checkout; no secret-bearing step in a job that runs "
