@@ -22,6 +22,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          # Do NOT leave the job token in .git/config: this job checks out
+          # and RUNS repository code, including from an unreviewed branch.
+          persist-credentials: false
           # Full history so cs_assure can resolve merge-base(HEAD, base) for the change set.
           fetch-depth: 0
 
