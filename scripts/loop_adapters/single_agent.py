@@ -54,16 +54,61 @@ _SECRET_ENV_PREFIXES = ("GITHUB_", "GH_", "AWS_", "GOOGLE_", "GCP_", "AZURE_", "
                         "HF_", "HUGGINGFACE_", "NPM_", "PYPI_", "TWINE_", "DOCKER_", "SSH_", "GPG_")
 
 
-def _sanitized_env() -> dict[str, str]:
+# The ONLY things linked into the agent's confined HOME: what the transport needs to authenticate ITSELF.
+# Everything else in the real home stays unreachable by `~` expansion - notably ~/.config/gh/hosts.yml (a
+# token with write access to this repo), ~/.ssh, ~/.aws, ~/.netrc, and ~/.claude's 284 MB of sessions,
+# history and OTHER PROJECTS' transcripts.
+_AGENT_HOME_PASSTHROUGH: tuple[str, ...] = (".claude.json", ".claude/settings.json")
+
+
+def _sanitized_env(home: Path | None = None) -> dict[str, str]:
     """A copy of the environment with credential-shaped variables STRIPPED, so the untrusted agent
-    subprocess never inherits GitHub / cloud / release / registry secrets."""
+    subprocess never inherits GitHub / cloud / release / registry secrets.
+
+    When ``home`` is given, HOME and every XDG base directory are REPOINTED at it, so `~` expansion and
+    XDG lookups resolve inside a throwaway directory instead of the operator's real home. That is what
+    turns "the agent could read ~/.config/gh/hosts.yml" from reachable into not-at-that-path.
+
+    HONEST LIMIT: this is NOT a sandbox. The subprocess runs as the operator's UID and can still read any
+    ABSOLUTE path it can guess. What this buys is that the obvious, `~`-shaped route is gone and the blast
+    radius is bounded to what :func:`_confined_home` deliberately links in - the transport's own
+    credential. Real isolation (container / user namespace) is the 7.1.5 sandbox."""
     clean: dict[str, str] = {}
     for key, value in os.environ.items():
         upper = key.upper()
         if any(s in upper for s in _SECRET_ENV_SUBSTRINGS) or any(upper.startswith(p) for p in _SECRET_ENV_PREFIXES):
             continue
         clean[key] = value
+    if home is not None:
+        clean["HOME"] = str(home)
+        clean["XDG_CONFIG_HOME"] = str(home / ".config")
+        clean["XDG_CACHE_HOME"] = str(home / ".cache")
+        clean["XDG_DATA_HOME"] = str(home / ".local" / "share")
+        clean["XDG_STATE_HOME"] = str(home / ".local" / "state")
     return clean
+
+
+@contextmanager
+def _confined_home(parent: Path) -> Iterator[Path]:
+    """A throwaway HOME for the untrusted agent, containing ONLY symlinks to what the transport needs to
+    authenticate itself (:data:`_AGENT_HOME_PASSTHROUGH`). Removed on exit.
+
+    Symlinked rather than copied: ~/.claude alone is ~284 MB, and copying credentials is worse than
+    linking the two the transport actually reads. A missing passthrough is skipped, not fatal - an
+    operator whose transport authenticates differently still gets the confinement."""
+    home = parent / f"home-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    try:
+        for rel in _AGENT_HOME_PASSTHROUGH:
+            src = Path.home() / rel
+            if not src.exists():
+                continue
+            dst = home / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.symlink_to(src)
+        (home / ".config").mkdir(parents=True, exist_ok=True)
+        yield home
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
 
 
 def _git(cwd: Path, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
@@ -146,7 +191,8 @@ class AgentClient(Protocol):
     """The one seam through which the loop reaches the (untrusted) agent. ``propose`` returns a proposed
     edit for the current goal; it RAISES on any transport / output failure (the caller fails closed)."""
 
-    def propose(self, request: dict[str, Any]) -> dict[str, Any]:
+    def propose(self, request: dict[str, Any]) -> dict[str, Any]:  # noqa: C901 - linear validation
+
         """Given ``{goal, goal_id, base_oid, directive, repo_root}`` return ``{"unified_diff": str,
         "rationale": str}``. Must raise (not return a partial/garbage dict) on failure."""
         ...
@@ -205,7 +251,8 @@ class ClaudeSubprocessClient:
         self.timeout = timeout
         self.max_output_bytes = max_output_bytes
 
-    def propose(self, request: dict[str, Any]) -> dict[str, Any]:
+    def propose(self, request: dict[str, Any]) -> dict[str, Any]:  # noqa: C901 - linear validation
+
         # Confinement is MANDATORY at the transport, not merely a convention the executor follows: a
         # missing / non-directory `_cwd` would run the agent in the process's OWN cwd (the developer's
         # tree) with no isolation. Refuse it - fail closed rather than silently run UNCONFINED.
@@ -215,7 +262,8 @@ class ClaudeSubprocessClient:
         try:
             proc = subprocess.run(  # noqa: S603 - fixed argv, no shell, bounded timeout, confined cwd+env.
                 list(self.argv), input=json.dumps(request), text=True, capture_output=True,
-                timeout=self.timeout, cwd=cwd, env=_sanitized_env())
+                timeout=self.timeout, cwd=cwd,
+                env=_sanitized_env(Path(request["_home"]) if request.get("_home") else None))
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise AgentError(f"claude could not run / timed out: {type(exc).__name__}: {exc}") from exc
         if len(proc.stdout.encode("utf-8", "replace")) > self.max_output_bytes:
@@ -292,9 +340,10 @@ def _make_executor(agent_client: AgentClient, repo_root: Path, base: str, propos
         # CONFINE the agent: run it with cwd inside a disposable, detached worktree at base (never the
         # developer's tree) + a secret-free env. Anything it writes there is discarded; we use only its
         # returned diff. So even a mis-behaving agent cannot edit the working tree while "proposing".
-        with _detached_worktree(repo_root, base_oid, worktrees_dir) as wt:
+        with _detached_worktree(repo_root, base_oid, worktrees_dir) as wt, \
+                _confined_home(worktrees_dir) as home:
             request = {"goal": state.goal, "goal_id": state.goal_id, "base_oid": base_oid,
-                       "repo_root": str(repo_root), "_cwd": str(wt),
+                       "repo_root": str(repo_root), "_cwd": str(wt), "_home": str(home),
                        "directive": {"phase": directive.phase, "action": directive.action,
                                      "allowed_paths": list(directive.allowed_paths)}}
             result = agent_client.propose(request)  # RAISES on failure -> step escalates (fail-closed)
