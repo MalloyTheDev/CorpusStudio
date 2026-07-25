@@ -38,7 +38,7 @@ PROFILE_DIR = Path(__file__).resolve().parent.parent / "loop" / "profiles"
 _ALLOWED_KEYS = frozenset({
     "name", "description", "writable_globs", "safe_basename", "max_changed_paths", "max_changed_lines",
     "max_changed_bytes", "max_line_bytes", "max_blob_bytes", "max_rationale_bytes",
-    "require_worker_reachability", "obligations_policy",
+    "require_worker_reachability", "obligations_policy", "gate_spec",
 })
 
 
@@ -71,6 +71,10 @@ class TargetProfile:
     # A repo-relative obligations policy for cs_assure. None -> the target's own default location, which
     # is correct for CorpusStudio and absent for most other repos (see _assure_candidate's handling).
     obligations_policy: str | None = None
+    # The gate spec (ruff/mypy/pytest steps) the LOOP's own OBSERVE/VERIFY runs. None means this target
+    # has no local gate the loop can run - which is the normal case for any repo that does not carry
+    # CorpusStudio's assurance tooling. The loop then ESCALATES rather than inventing a green signal.
+    gate_spec: str | None = None
     description: str = ""
     _basename_re: re.Pattern[str] = field(init=False, repr=False, compare=False)
 
@@ -83,6 +87,13 @@ class TargetProfile:
 
     def basename_ok(self, basename: str) -> bool:
         return bool(self._basename_re.match(basename))
+
+    def resolved_gate(self) -> Path | None:
+        """The gate spec as an ABSOLUTE path (resolved against the profile directory), or None."""
+        if not self.gate_spec:
+            return None
+        path = Path(self.gate_spec)
+        return path if path.is_absolute() else (PROFILE_DIR / path).resolve()
 
     def resolved_policy(self) -> Path | None:
         """The obligations policy as an ABSOLUTE path, resolved against the profile directory unless it is
