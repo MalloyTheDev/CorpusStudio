@@ -23,6 +23,14 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import loop_adapters.single_agent as sa  # noqa: E402
 import loop_adapters.single_agent_write as saw  # noqa: E402
+from loop_adapters.target_profile import load_profile  # noqa: E402
+
+_PROFILE = load_profile("corpusstudio")
+
+
+def _path_is_writable_p(path: str) -> bool:
+    """`_path_is_writable` under the CorpusStudio profile (the surface these tests assert)."""
+    return saw._path_is_writable(path, _PROFILE)
 from loop.controller import LoopState, Phase  # noqa: E402
 from loop.orchestrate import run_loop  # noqa: E402
 
@@ -381,14 +389,14 @@ def test_the_writable_surface_is_matched_case_folded_and_path_aware() -> None:
     # fnmatch is UNUSABLE here: fnmatch('engine/tests/test_x/conftest.py','engine/tests/test_*.py') is True
     # (it would admit an auto-executed conftest) and it REJECTS engine/corpus_studio/cli.py. Our compiled
     # matcher gets both right: '*' never crosses '/', '**/' spans directories.
-    assert saw._path_is_writable("engine/corpus_studio/cli.py")
-    assert saw._path_is_writable("engine/corpus_studio/deep/nested/mod.py")
+    assert _path_is_writable_p("engine/corpus_studio/cli.py")
+    assert _path_is_writable_p("engine/corpus_studio/deep/nested/mod.py")
     for outside in ("README.md", "scripts/loop/x.py", "engine/tests/test_a.py",
                     "engine/corpus_studio/notes.md", "engine/corpus_studio/sub/x.txt"):
-        assert not saw._path_is_writable(outside), outside
+        assert not _path_is_writable_p(outside), outside
     # case variants can only SHRINK the surface, never widen it (repo carries core.ignorecase=true)
-    assert not saw._path_is_writable("Scripts/argparse.py")
-    assert saw._path_is_writable("ENGINE/CORPUS_STUDIO/MOD.PY")  # folds INTO the allowed surface, still gated
+    assert not _path_is_writable_p("Scripts/argparse.py")
+    assert _path_is_writable_p("ENGINE/CORPUS_STUDIO/MOD.PY")  # folds INTO the allowed surface, still gated
 
 
 def test_compile_pathglob_never_crosses_a_slash() -> None:
@@ -534,14 +542,14 @@ def test_a_pre_existing_credential_shaped_line_does_not_brick_a_file(tmp_path: P
     with saw._apply_worktree(root, base, tmp_path / "wt") as wt:
         saw._git(wt, "apply", "--index", "-", stdin=diff)
         tree = saw._git(wt, "write-tree").stdout.strip()
-        assert saw._classify_candidate_changes(wt, base, tree) == []   # the innocent edit is PUBLISHABLE
+        assert saw._classify_candidate_changes(wt, base, tree, _PROFILE) == []   # the innocent edit is PUBLISHABLE
     # ...but a real token the candidate ADDS is still refused
     bad = (f"--- a/{_TARGET}\n+++ b/{_TARGET}\n@@ -1,2 +1,3 @@\n"
            " api_key: Optional[str] = option(\n+K = \"gho_" + "a" * 36 + "\"\n old = 1\n")
     with saw._apply_worktree(root, base, tmp_path / "wt") as wt:
         saw._git(wt, "apply", "--index", "-", stdin=bad)
         tree = saw._git(wt, "write-tree").stdout.strip()
-        assert saw._classify_candidate_changes(wt, base, tree)
+        assert saw._classify_candidate_changes(wt, base, tree, _PROFILE)
 
 
 def test_ordinary_prose_and_code_are_not_flagged_as_secrets() -> None:
@@ -599,7 +607,7 @@ def _classify_one(tmp_path: Path, path: str, body: str = "x = 1\n",
     with saw._apply_worktree(root, base, tmp_path / "wt") as wt:
         saw._git(wt, "apply", "--index", "-", stdin=diff)
         tree = saw._git(wt, "write-tree").stdout.strip()
-        return saw._classify_candidate_changes(wt, base, tree)
+        return saw._classify_candidate_changes(wt, base, tree, _PROFILE)
 
 
 def test_rule_allowlist_is_the_only_thing_blocking_an_out_of_surface_path(tmp_path: Path) -> None:
@@ -688,7 +696,7 @@ def _classify_staged(tmp_path: Path, root: Path, base: str, mutate) -> list[str]
         mutate(wt)
         saw._git(wt, "add", "-A")
         tree = saw._git(wt, "write-tree").stdout.strip()
-        return saw._classify_candidate_changes(wt, base, tree)
+        return saw._classify_candidate_changes(wt, base, tree, _PROFILE)
 
 
 def _write(wt: Path, rel: str, content) -> None:
@@ -805,7 +813,8 @@ def test_a_blocking_obligation_that_is_not_human_gated_still_blocks(tmp_path: Pa
         return (0, json.dumps({"payload": {"undeclared_reachable": [], "worker_roots": [],
                                            "added_reachable": [], "distribution_impacting_paths": []}}), "")
     observation, reason, _d = saw._assure_candidate(tmp_path, "b" * 40, assure,
-                                                    ["engine/corpus_studio/x.py"], "c" * 40)
+                                                    ["engine/corpus_studio/x.py"], "c" * 40,
+                                                    _PROFILE)
     assert observation is saw.Observation.POLICY_BLOCK and "evaluation-honesty" in reason
 
 
@@ -957,7 +966,7 @@ def test_assurance_that_assessed_a_different_object_is_refused(tmp_path: Path) -
         return (0, json.dumps({"payload": {"undeclared_reachable": [], "worker_roots": [],
                                            "added_reachable": [], "distribution_impacting_paths": []}}), "")
     with pytest.raises(saw.WriteAdapterError, match="scope"):
-        saw._assure_candidate(tmp_path, "b" * 40, wrong_scope, [], "c" * 40)
+        saw._assure_candidate(tmp_path, "b" * 40, wrong_scope, [], "c" * 40, _PROFILE)
 
     # ...and so is a record about a DIFFERENT commit
     def wrong_head(_r, *a):
@@ -969,7 +978,7 @@ def test_assurance_that_assessed_a_different_object_is_refused(tmp_path: Path) -
         return (0, json.dumps({"payload": {"undeclared_reachable": [], "worker_roots": [],
                                            "added_reachable": [], "distribution_impacting_paths": []}}), "")
     with pytest.raises(saw.WriteAdapterError, match="different object"):
-        saw._assure_candidate(tmp_path, "b" * 40, wrong_head, [], "c" * 40)
+        saw._assure_candidate(tmp_path, "b" * 40, wrong_head, [], "c" * 40, _PROFILE)
 
 
 def test_the_remote_ref_check_requires_an_exact_single_match(tmp_path: Path) -> None:
