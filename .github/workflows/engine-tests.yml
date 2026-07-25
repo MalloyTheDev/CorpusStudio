@@ -4,7 +4,7 @@ on:
   push:
   pull_request:
 
-# Least privilege: this job only reads code and hands a separate CODECOV_TOKEN to codecov.
+# Least privilege: no job here needs write access.
 permissions:
   contents: read
 
@@ -14,6 +14,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Do NOT leave the job token in .git/config: this job checks out
+          # and RUNS repository code, including from an unreviewed branch.
+          persist-credentials: false
 
       - name: Reject unresolved merge markers
         run: |
@@ -50,16 +54,43 @@ jobs:
           cd engine
           pytest --cov=corpus_studio --cov-report=term-missing --cov-report=xml
 
-      # Upload coverage to Codecov. Soft-fail: this is best-effort reporting and must never
-      # break the gate — it no-ops until a CODECOV_TOKEN secret is configured for the repo.
+      # The coverage report is handed to a SEPARATE job to be uploaded. The token must never live in a
+      # job that has executed repository code (see the coverage-upload job below).
+      - name: Upload coverage report as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-coverage
+          path: engine/coverage.xml
+          if-no-files-found: warn
+          retention-days: 1
+
+  # Codecov receives CODECOV_TOKEN, so it runs in its OWN job that NEVER executes repository code: it
+  # only downloads the coverage artifact. Previously this step lived in `python-engine`, where `pytest`
+  # had already run the checked-out code earlier in the SAME job - so a change on an unreviewed branch
+  # could influence the token-bearing step (via $GITHUB_ENV, $GITHUB_PATH, or a binary on PATH) before
+  # any human saw it. That matters because this workflow triggers on a bare `push:`.
+  coverage-upload:
+    runs-on: ubuntu-latest
+    needs: python-engine
+    if: always() && needs.python-engine.result == 'success'
+    steps:
+      - name: Download coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: engine-coverage
+        continue-on-error: true
+
+      # Soft-fail: best-effort reporting that must never break the gate - it no-ops until a
+      # CODECOV_TOKEN secret is configured for the repo.
+      #
+      # Pinned to an immutable commit SHA (not the mutable @v7 tag) because this third-party action
+      # receives CODECOV_TOKEN: a moved/retagged upstream release must not run with the secret.
+      # SHA is codecov/codecov-action tag v7 (fb8b3582 = v7 head at time of pinning); bump deliberately
+      # with a re-review. See issue #426.
       - name: Upload coverage to Codecov
-        # Pinned to an immutable commit SHA (not the mutable @v7 tag) because this third-party
-        # action receives CODECOV_TOKEN: a moved/retagged upstream release must not run with the
-        # secret. SHA is codecov/codecov-action tag v7 (fb8b3582 = v7 head at time of pinning);
-        # bump deliberately with a re-review. See issue #426.
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
         with:
-          files: ./engine/coverage.xml
+          files: ./coverage.xml
           flags: engine
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false

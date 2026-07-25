@@ -20,6 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Do NOT leave the job token in .git/config: this job checks out
+          # and RUNS repository code, including from an unreviewed branch.
+          persist-credentials: false
       - name: Install gitleaks
         # Pinned release binary (linux x64), verified by content hash - not just the version string.
         # A GitHub release asset can be deleted and re-uploaded, so pin the SHA256 (from the release's
@@ -42,6 +46,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Do NOT leave the job token in .git/config: this job checks out
+          # and RUNS repository code, including from an unreviewed branch.
+          persist-credentials: false
       - name: Trivy filesystem scan
         # SHA-pinned (a security workflow pins its third-party actions to an immutable commit).
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -59,6 +67,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Do NOT leave the job token in .git/config: this job checks out
+          # and RUNS repository code, including from an unreviewed branch.
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"

@@ -26,6 +26,10 @@ jobs:
         language: [python, javascript-typescript]
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Do NOT leave the job token in .git/config: this job checks out
+          # and RUNS repository code, including from an unreviewed branch.
+          persist-credentials: false
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4

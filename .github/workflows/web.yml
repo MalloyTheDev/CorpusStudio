@@ -32,6 +32,10 @@ jobs:
         working-directory: apps/web
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Do NOT leave the job token in .git/config: this job checks out
+          # and RUNS repository code, including from an unreviewed branch.
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: "20"
